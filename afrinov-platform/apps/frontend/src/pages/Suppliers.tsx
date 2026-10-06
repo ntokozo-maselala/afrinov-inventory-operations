@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { api, type ApiError } from '../api/client';
 import { Alert } from '../components/Alert';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface Supplier {
   id: string; name: string; contactName?: string;
@@ -36,7 +37,7 @@ export function Suppliers() {
     <div>
       <PageHeader
         title="Suppliers"
-        description="Vendor master. Used to populate purchase orders and goods receipts."
+        description={PROCUREMENT_ENABLED ? 'Vendor master. Used to populate purchase orders and goods receipts.' : 'Vendor master. The companies your stock is bought from.'}
         actions={<Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setAdding(true)}>Add supplier</Button>}
       />
 
@@ -59,7 +60,7 @@ export function Suppliers() {
           rowKey={(s) => s.id}
           rows={filtered}
           columns={columns()}
-          emptyState={<EmptyState title={q ? 'No suppliers match your search' : 'No suppliers yet'} description={q ? 'Try a different search term.' : 'Add a supplier to start creating purchase orders.'} action={!q && <Button variant="primary" onClick={() => setAdding(true)}>Add your first supplier</Button>} />}
+          emptyState={<EmptyState title={q ? 'No suppliers match your search' : 'No suppliers yet'} description={q ? 'Try a different search term.' : (PROCUREMENT_ENABLED ? 'Add a supplier to start creating purchase orders.' : 'Add a supplier to record where your stock comes from.')} action={!q && <Button variant="primary" onClick={() => setAdding(true)}>Add your first supplier</Button>} />}
         />
       )}
 

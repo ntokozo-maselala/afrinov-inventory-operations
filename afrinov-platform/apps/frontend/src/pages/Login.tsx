@@ -13,6 +13,7 @@ import { Field, Input } from '../components/Field';
 import { Alert } from '../components/Alert';
 import { Icon } from '../components/Icon';
 import { Logo } from '../components/Logo';
+import { PROCUREMENT_ENABLED } from '../config/features';
 import {
   DEMO_AUTH_ENABLED,
   DEMO_CREDENTIALS,
@@ -141,12 +142,12 @@ export function Login() {
             <h1 className="text-h1 font-semibold leading-tight">{SIGN_IN_TAGLINE}</h1>
             <p className="text-white/85 text-base leading-relaxed">
               Afrinov IMS is an enterprise inventory &amp; operations platform built for industrial
-              workshops, storerooms, and project teams. Sign in to manage materials, locations, purchase
-              orders, and reporting from a single workspace.
+              workshops, storerooms, and project teams. Sign in to manage materials, locations, stock
+              movements, and reporting from a single workspace.
             </p>
             <ul className="text-sm text-white/80 space-y-2 pt-2">
               <li className="flex items-center gap-2"><Icon.Check size={14} /> Real-time stock balances and movements</li>
-              <li className="flex items-center gap-2"><Icon.Check size={14} /> Procurement, goods receipts, and approvals</li>
+              {PROCUREMENT_ENABLED && <li className="flex items-center gap-2"><Icon.Check size={14} /> Procurement, goods receipts, and approvals</li>}
               <li className="flex items-center gap-2"><Icon.Check size={14} /> Rack and location management</li>
               <li className="flex items-center gap-2"><Icon.Check size={14} /> Reports, audit trail, and policy controls</li>
             </ul>

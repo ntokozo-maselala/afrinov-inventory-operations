@@ -10,6 +10,7 @@ import { Drawer } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { TransactionDrawer } from '../components/TransactionDrawer';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface Material {
   id: string; sku: string; name: string; description?: string;
@@ -113,7 +114,7 @@ export function MaterialDetail() {
                   { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
                   { key: 'status', header: 'Status', render: (r) => Number(r.quantity) <= 0 ? <Badge tone="danger" dot>Out</Badge> : r.belowThreshold ? <Badge tone="warning" dot>Low</Badge> : <Badge tone="success" dot>OK</Badge> },
                 ]}
-                emptyState={<EmptyState title="No stock recorded" description="Record a goods receipt to add stock for this material." />}
+                emptyState={<EmptyState title="No stock recorded" description={PROCUREMENT_ENABLED ? 'Record a goods receipt to add stock for this material.' : 'Record a stock adjustment to add stock for this material.'} />}
               />
             </section>
 

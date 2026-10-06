@@ -6,6 +6,7 @@ import { PurchaseOrderStatusBadge, Badge } from '../components/Badge';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { formatDate, formatNumber } from '../lib/format';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface Supplier {
   id: string; name: string; contactName?: string;
@@ -23,7 +24,7 @@ export function SupplierDetail() {
   // Reuse the suppliers list endpoint to find the supplier; lightweight.
   const suppliers = useApi<Supplier[]>('/suppliers');
   const supplier = suppliers.data?.find((s) => s.id === id);
-  const pos = useApi<PO[]>('/purchase-orders');
+  const pos = useApi<PO[]>(PROCUREMENT_ENABLED ? '/purchase-orders' : null);
 
   // Filter POs by the supplier's stable id. Filtering by name is
   // unreliable (case/whitespace variations, duplicate names).
@@ -53,7 +54,7 @@ export function SupplierDetail() {
             </dl>
           </aside>
 
-          <div className="lg:col-span-2 space-y-6">
+          {PROCUREMENT_ENABLED && <div className="lg:col-span-2 space-y-6">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="surface-card p-3"><div className="text-eyebrow">POs</div><div className="text-2xl font-semibold text-num">{formatNumber(supplierPOs.length)}</div></div>
               <div className="surface-card p-3"><div className="text-eyebrow">Ordered</div><div className="text-2xl font-semibold text-num">{formatNumber(totalOrdered)}</div></div>
@@ -71,7 +72,7 @@ export function SupplierDetail() {
                 emptyState={<EmptyState title="No purchase history" description="This supplier has no recorded purchase orders yet." action={<Link to="/purchase-orders" className="btn-secondary btn-sm">View all POs</Link>} />}
               />
             </section>
-          </div>
+          </div>}
         </div>
       )}
 

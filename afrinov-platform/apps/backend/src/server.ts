@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import { ApiError, Errors } from './shared/errors.js';
-import { loadConfig, ConfigError, resolveCorsOrigin, isKnownInsecureSecret, type AppConfig } from './shared/config.js';
+import { loadConfig, ConfigError, resolveCorsOrigin, isKnownInsecureSecret, isProcurementEnabled, type AppConfig } from './shared/config.js';
 import { prisma } from './shared/db.js';
 import { isActiveInDb } from './shared/authorization.js';
 import { serviceName, serviceVersion } from './shared/version.js';
@@ -25,6 +25,8 @@ declare module '@fastify/jwt' {
 
 export interface BuildServerOptions {
   skipConfigValidation?: boolean;
+  /** Overrides the PROCUREMENT_ENABLED environment variable (used by tests). */
+  procurementEnabled?: boolean;
 }
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -207,7 +209,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const { stockItemRoutes } = await import('./modules/inventory/stock-item.routes.js');
     const { rackRoutes } = await import('./modules/inventory/rack.routes.js');
     const { inventoryRoutes } = await import('./modules/inventory/inventory.routes.js');
-    const { procurementRoutes } = await import('./modules/procurement/procurement.routes.js');
+    const { supplierRoutes, procurementRoutes } = await import('./modules/procurement/procurement.routes.js');
     const { projectRoutes } = await import('./modules/operations/project.routes.js');
     const { reportingRoutes } = await import('./modules/reporting/reporting.routes.js');
     const { settingsRoutes } = await import('./modules/settings/settings.routes.js');
@@ -221,7 +223,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     await stockItemRoutes(instance);
     await rackRoutes(instance);
     await inventoryRoutes(instance);
-    await procurementRoutes(instance);
+    await supplierRoutes(instance);
+    if (opts.procurementEnabled ?? isProcurementEnabled()) {
+      await procurementRoutes(instance);
+    }
     await projectRoutes(instance);
     await reportingRoutes(instance);
     await settingsRoutes(instance);
