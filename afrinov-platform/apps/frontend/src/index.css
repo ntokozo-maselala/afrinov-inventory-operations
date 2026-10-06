@@ -14,9 +14,6 @@
   --content-padding-base: 1rem; /* 16px */
   --content-padding-lg: 1.5rem; /* 24px */
 
-  /* Sidebar offset for main content (set via JS) */
-  --sidebar-offset: 0px;
-
   --color-brand-50: 253 236 239;
   --color-brand-100: 251 213 218;
   --color-brand-200: 247 171 182;

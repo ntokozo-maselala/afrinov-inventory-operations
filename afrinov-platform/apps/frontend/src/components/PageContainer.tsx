@@ -18,11 +18,7 @@ export function PageContainer({ children, className = '', maxWidth = 'lg' }: Pag
 
   return (
     <main
-      className={`flex-1 min-w-0 py-6 ${maxWidthClasses[maxWidth]} w-full mx-auto ${className}`}
-      style={{
-        paddingLeft: 'calc(var(--content-padding-base) + var(--sidebar-offset, 0px))',
-        paddingRight: 'var(--content-padding-base)',
-      } as React.CSSProperties}
+      className={`flex-1 min-w-0 py-6 px-4 sm:px-6 lg:px-8 ${maxWidthClasses[maxWidth]} w-full mx-auto ${className}`}
     >
       {children}
     </main>

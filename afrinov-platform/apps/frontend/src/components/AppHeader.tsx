@@ -16,13 +16,7 @@ export function AppHeader({ user, onLogout }: AppHeaderProps) {
 
   return (
     <header className="sticky top-0 z-[40] bg-surface-0/95 backdrop-blur border-b border-surface-200 dark:bg-surface-0/95 dark:border-surface-200">
-      <div 
-        className="h-14 flex items-center gap-3"
-        style={{
-          paddingLeft: 'calc(var(--content-padding-base) + var(--sidebar-offset, 0px))',
-          paddingRight: 'var(--content-padding-base)',
-        } as React.CSSProperties}
-      >
+      <div className="h-14 flex items-center gap-3 px-4 sm:px-6 lg:px-8">
         {showMobileMenu && (
           <button
             onClick={openMobile}

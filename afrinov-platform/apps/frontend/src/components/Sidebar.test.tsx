@@ -124,22 +124,6 @@ describe('Sidebar width calculations', () => {
     expect(collapsedWidth).toBe(68);
     expect(mobileWidth).toBe(288);
   });
-
-  it('calculates sidebar offset correctly', () => {
-    const getSidebarOffset = (mode: string, isMobile: boolean) => {
-      if (isMobile) return 0;
-      if (mode === 'expanded') return 220;
-      if (mode === 'collapsed') return 68;
-      return 0;
-    };
-    
-    expect(getSidebarOffset('expanded', false)).toBe(220);
-    expect(getSidebarOffset('collapsed', false)).toBe(68);
-    expect(getSidebarOffset('expanded', true)).toBe(0);
-    expect(getSidebarOffset('collapsed', true)).toBe(0);
-    expect(getSidebarOffset('mobile-open', true)).toBe(0);
-    expect(getSidebarOffset('mobile-closed', true)).toBe(0);
-  });
 });
 
 describe('Responsive breakpoints', () => {
