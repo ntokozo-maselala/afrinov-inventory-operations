@@ -69,8 +69,11 @@ function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
 
-export async function procurementRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/suppliers', { preHandler: [app.authenticate] }, async (req) => {
+// Suppliers are shared with inventory (stock items, reports), so they are
+// always registered; purchase order and goods receipt routes are gated by
+// PROCUREMENT_ENABLED in server.ts.
+export async function supplierRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/suppliers',{ preHandler: [app.authenticate] }, async (req) => {
     const q = (req.query as Record<string, string | undefined>).q;
     return SupplierService.list(q);
   });
@@ -86,8 +89,10 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     const created = await SupplierService.create(parsed.data, actorId(req));
     return reply.code(201).send(created);
   });
+}
 
-  app.get('/purchase-orders', { preHandler: [app.authenticate] }, async (req) => {
+export async function procurementRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/purchase-orders',{ preHandler: [app.authenticate] }, async (req) => {
     // The list exposes PO numbers, statuses, and line quantities — the same
     // data the detail endpoint guards. Requiring the permission here closes
     // the enumeration gap (K6); VIEWER/APPROVER cannot list POs, matching

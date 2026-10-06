@@ -9,6 +9,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
 import { ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface Section { to: string; label: string; description: string; adminOnly?: boolean; category?: SettingCategory }
 
@@ -77,7 +78,7 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
     // Non-admins can still see Appearance (per-user preference). Hide admin sections.
   }
 
-  const sections = SECTIONS.filter((s) => !s.adminOnly || isAdmin);
+  const sections = SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && (PROCUREMENT_ENABLED || s.category !== 'purchase_orders'));
 
   return (
     <div>

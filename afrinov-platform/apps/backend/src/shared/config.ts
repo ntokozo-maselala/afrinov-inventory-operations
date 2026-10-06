@@ -76,6 +76,15 @@ export function loadConfig(): AppConfig {
   };
 }
 
+/**
+ * Whether the procurement module (purchase orders and goods receipts) is
+ * enabled. Off unless `PROCUREMENT_ENABLED=true`; when off, its API routes are
+ * not registered and respond 404. Supplier routes are unaffected.
+ */
+export function isProcurementEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.PROCUREMENT_ENABLED ?? '').toLowerCase() === 'true';
+}
+
 // Origins the local Vite dev server and common SPA dev hosts are served from.
 // These are the only origins permitted when CORS_ORIGIN is not configured
 // during development. Reflection of arbitrary origins is never the default.

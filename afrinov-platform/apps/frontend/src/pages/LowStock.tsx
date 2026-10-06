@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -82,8 +83,10 @@ export function LowStock() {
     <div>
       <PageHeader
         title="Low stock"
-        description="Materials at or below their reorder threshold. Plan purchase orders from this list."
-        actions={(
+        description={PROCUREMENT_ENABLED
+          ? 'Materials at or below their reorder threshold. Plan purchase orders from this list.'
+          : 'Materials at or below their reorder threshold.'}
+        actions={PROCUREMENT_ENABLED && (
           <Link to="/purchase-orders" className="btn-primary btn-sm inline-flex items-center gap-1.5">
             <Icon.Cart size={14} /> Create purchase order
           </Link>

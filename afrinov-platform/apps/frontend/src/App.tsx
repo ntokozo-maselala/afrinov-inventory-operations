@@ -4,6 +4,7 @@ import { useAuth } from './auth';
 import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
 import { GlobalPreferencesApplier } from './components/GlobalPreferencesApplier';
+import { PROCUREMENT_ENABLED } from './config/features';
 
 function importPage(
   importFn: () => Promise<{ default: React.ComponentType<unknown> }>,
@@ -123,9 +124,18 @@ export function App() {
         <Route path="/movements" element={<Suspense fallback={<PageSkeleton />}><Movements /></Suspense>} />
         <Route path="/suppliers" element={<Suspense fallback={<PageSkeleton />}><Suppliers /></Suspense>} />
         <Route path="/suppliers/:id" element={<Suspense fallback={<PageSkeleton />}><SupplierDetail /></Suspense>} />
-        <Route path="/purchase-orders" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrders /></Suspense>} />
-        <Route path="/purchase-orders/:id" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrderDetail /></Suspense>} />
-        <Route path="/goods-receipts" element={<Suspense fallback={<PageSkeleton />}><GoodsReceipts /></Suspense>} />
+        {PROCUREMENT_ENABLED ? (
+          <>
+            <Route path="/purchase-orders" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrders /></Suspense>} />
+            <Route path="/purchase-orders/:id" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrderDetail /></Suspense>} />
+            <Route path="/goods-receipts" element={<Suspense fallback={<PageSkeleton />}><GoodsReceipts /></Suspense>} />
+          </>
+        ) : (
+          <>
+            <Route path="/purchase-orders/*" element={<Navigate to="/" replace />} />
+            <Route path="/goods-receipts/*" element={<Navigate to="/" replace />} />
+          </>
+        )}
         <Route path="/reports/low-stock" element={<Suspense fallback={<PageSkeleton />}><LowStock /></Suspense>} />
         <Route path="/reports/inventory" element={<Suspense fallback={<PageSkeleton />}><InventoryReportPage /></Suspense>} />
         <Route path="/racks" element={<Suspense fallback={<PageSkeleton />}><Racks /></Suspense>} />
@@ -135,7 +145,9 @@ export function App() {
           <Route index element={<Suspense fallback={<PageSkeleton />}><SettingsGeneral /></Suspense>} />
           <Route path="notifications" element={<Suspense fallback={<PageSkeleton />}><SettingsNotifications /></Suspense>} />
           <Route path="inventory" element={<Suspense fallback={<PageSkeleton />}><SettingsInventory /></Suspense>} />
-          <Route path="purchase-orders" element={<Suspense fallback={<PageSkeleton />}><SettingsPurchaseOrders /></Suspense>} />
+          {PROCUREMENT_ENABLED
+            ? <Route path="purchase-orders" element={<Suspense fallback={<PageSkeleton />}><SettingsPurchaseOrders /></Suspense>} />
+            : <Route path="purchase-orders" element={<Navigate to="/settings" replace />} />}
           <Route path="appearance" element={<Suspense fallback={<PageSkeleton />}><SettingsAppearance /></Suspense>} />
           <Route path="users" element={<Suspense fallback={<PageSkeleton />}><SettingsUsers /></Suspense>} />
           <Route path="security" element={<Suspense fallback={<PageSkeleton />}><SettingsSecurity /></Suspense>} />

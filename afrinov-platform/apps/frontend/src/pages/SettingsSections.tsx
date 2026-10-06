@@ -3,7 +3,7 @@
 // controls. Save / reset is handled by the layout (parent) — sections only
 // update the local draft.
 import { useEffect, useState, type ReactNode } from 'react';
-import { useSettings } from '../hooks/useSettings';
+import { useSettings, type SettingValue } from '../hooks/useSettings';
 import { useApi } from '../hooks/useApi';
 import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField } from './Settings';
 import { useToast } from '../components/Toast';
@@ -19,6 +19,15 @@ import { api, FRONTEND_ONLY, type ApiError } from '../api/client';
 import type { ReportResult } from '../mock/mockReport';
 import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
+import { PROCUREMENT_ENABLED } from '../config/features';
+
+// Hide "Purchase orders" as a landing page while procurement is off, unless it
+// is the value already saved (so the select still shows what is stored).
+function landingPageDef(def: SettingValue, current: unknown): SettingValue {
+  if (PROCUREMENT_ENABLED) return def;
+  const enumOptions = (def.enumOptions ?? []).filter((o) => o !== 'purchase-orders' || o === current);
+  return { ...def, enumOptions };
+}
 
 // ── General ────────────────────────────────────────────────────────────
 export function SettingsGeneral() {
@@ -58,7 +67,7 @@ export function SettingsGeneral() {
         <EnumField def={dateFormat} value={(draft['general.dateFormat'] as string) ?? ''} onChange={(v) => setDraft('general.dateFormat', v)} error={errors['general.dateFormat'] ?? null} />
         <EnumField def={timeFormat} value={(draft['general.timeFormat'] as string) ?? ''} onChange={(v) => setDraft('general.timeFormat', v)} error={errors['general.timeFormat'] ?? null} />
         <EnumField def={defaultLanguage} value={(draft['general.defaultLanguage'] as string) ?? ''} onChange={(v) => setDraft('general.defaultLanguage', v)} error={errors['general.defaultLanguage'] ?? null} />
-        <EnumField def={defaultLandingPage} value={(draft['general.defaultLandingPage'] as string) ?? ''} onChange={(v) => setDraft('general.defaultLandingPage', v)} error={errors['general.defaultLandingPage'] ?? null} />
+        <EnumField def={landingPageDef(defaultLandingPage, draft['general.defaultLandingPage'])} value={(draft['general.defaultLandingPage'] as string) ?? ''} onChange={(v) => setDraft('general.defaultLandingPage', v)} error={errors['general.defaultLandingPage'] ?? null} />
       </div>
       <NumberField
         def={defaultPageSize}
@@ -159,8 +168,12 @@ export function SettingsNotifications() {
       <SectionPanel title="Notifications" description="Operational alerts. Disabling a category silences that alert type across the application.">
         <BooleanField def={inApp} value={Boolean(draft['notifications.enableInAppNotifications'])} onChange={(v) => setDraft('notifications.enableInAppNotifications', v)} />
         <BooleanField def={lowStock} value={Boolean(draft['notifications.enableLowStockNotifications'])} onChange={(v) => setDraft('notifications.enableLowStockNotifications', v)} />
-        <BooleanField def={po} value={Boolean(draft['notifications.enablePurchaseOrderNotifications'])} onChange={(v) => setDraft('notifications.enablePurchaseOrderNotifications', v)} />
-        <BooleanField def={delivery} value={Boolean(draft['notifications.enableDeliveryNotifications'])} onChange={(v) => setDraft('notifications.enableDeliveryNotifications', v)} />
+        {PROCUREMENT_ENABLED && (
+          <>
+            <BooleanField def={po} value={Boolean(draft['notifications.enablePurchaseOrderNotifications'])} onChange={(v) => setDraft('notifications.enablePurchaseOrderNotifications', v)} />
+            <BooleanField def={delivery} value={Boolean(draft['notifications.enableDeliveryNotifications'])} onChange={(v) => setDraft('notifications.enableDeliveryNotifications', v)} />
+          </>
+        )}
         <SaveBar items={items} onSave={async () => {
           try {
             const r = await save();

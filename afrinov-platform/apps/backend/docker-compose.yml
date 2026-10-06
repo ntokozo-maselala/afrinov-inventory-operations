@@ -42,6 +42,8 @@ services:
       # Comma-separated allow-list. Required in production; CORS is disabled
       # when unset.
       CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Purchase orders and goods receipts are off unless this is "true".
+      PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-false}
       PORT: 4000
     depends_on:
       db:

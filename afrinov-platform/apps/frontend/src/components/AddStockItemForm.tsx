@@ -257,7 +257,7 @@ export function AddStockItemForm({ onCancel, onSaved, onError }: Props) {
               {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </Select>
           </Field>
-          <Field label="Supplier" htmlFor="asi-sup" help="Optional. Recorded for future purchase orders.">
+          <Field label="Supplier" htmlFor="asi-sup" help="Optional. The supplier this item is usually bought from.">
             <Select
               id="asi-sup"
               value={form.supplierId}

@@ -114,7 +114,7 @@ export function Signup() {
           <div className="space-y-4 max-w-md">
             <h1 className="text-h1 font-semibold leading-tight">{SIGN_IN_TAGLINE}</h1>
             <p className="text-white/85 text-base leading-relaxed">
-              Create a workspace account to manage your inventory, locations, purchase orders, and
+              Create a workspace account to manage your inventory, locations, stock movements, and
               reporting. Your profile is provisioned instantly in this demo environment.
             </p>
             <ul className="text-sm text-white/80 space-y-2 pt-2">

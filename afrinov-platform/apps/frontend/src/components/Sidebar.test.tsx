@@ -1,7 +1,7 @@
 // Sidebar system tests using vitest only (no @testing-library/react)
 // Tests the core logic and behavior of the sidebar navigation system
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { useNavGroups } from '../hooks/useNavGroups';
 
 // Mock usePermissions
@@ -9,7 +9,15 @@ vi.mock('../hooks/usePermissions', () => ({
   usePermissions: () => ({ hasPermission: () => true }),
 }));
 
+// The procurement switch is read at build time; a getter lets each test flip it.
+const features = vi.hoisted(() => ({ procurement: true }));
+vi.mock('../config/features', () => ({
+  get PROCUREMENT_ENABLED() { return features.procurement; },
+}));
+
 describe('useNavGroups', () => {
+  afterEach(() => { features.procurement = true; });
+
   it('returns navigation groups with correct structure', () => {
     const groups = useNavGroups();
     
@@ -36,7 +44,6 @@ describe('useNavGroups', () => {
     
     expect(titles).toContain('Overview');
     expect(titles).toContain('Operations');
-    expect(titles).toContain('Procurement');
     expect(titles).toContain('Catalogue');
     expect(titles).toContain('Insights');
     expect(titles).toContain('Account');
@@ -56,7 +63,8 @@ describe('useNavGroups', () => {
     expect(itemLabels).toContain('Suppliers');
   });
 
-  it('includes expected navigation items in Procurement group', () => {
+  it('includes the Procurement group when procurement is enabled', () => {
+    features.procurement = true;
     const groups = useNavGroups();
     const procurement = groups.find(g => g.title === 'Procurement');
     
@@ -64,6 +72,17 @@ describe('useNavGroups', () => {
     const itemLabels = procurement!.items.map(i => i.label);
     expect(itemLabels).toContain('Purchase orders');
     expect(itemLabels).toContain('Goods receipts');
+  });
+
+  it('omits the Procurement group but keeps Suppliers when procurement is disabled', () => {
+    features.procurement = false;
+    const groups = useNavGroups();
+
+    expect(groups.map(g => g.title)).not.toContain('Procurement');
+    const links = groups.flatMap(g => g.items.map(i => i.to));
+    expect(links).not.toContain('/purchase-orders');
+    expect(links).not.toContain('/goods-receipts');
+    expect(links).toContain('/suppliers');
   });
 
   it('handles nested navigation items correctly', () => {

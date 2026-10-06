@@ -1,6 +1,7 @@
 import { Icon } from '../components/Icon';
 import type { ReactNode } from 'react';
 import { usePermissions } from './usePermissions';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 export interface NavItem {
   to: string;
@@ -40,13 +41,13 @@ export function useNavGroups(): NavGroup[] {
         { to: '/suppliers', label: 'Suppliers', icon: <Icon.Users /> },
       ],
     },
-    {
+    ...(PROCUREMENT_ENABLED ? [{
       title: 'Procurement',
       items: [
         { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart /> },
         { to: '/goods-receipts', label: 'Goods receipts', icon: <Icon.Truck /> },
       ],
-    },
+    }] : []),
     {
       title: 'Catalogue',
       items: [

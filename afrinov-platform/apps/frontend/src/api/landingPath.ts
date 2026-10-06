@@ -4,6 +4,8 @@
 //
 // `general.defaultLandingPage` is a server-side setting; the supported
 // values are mirrored here. Unknown values fall back to the dashboard.
+import { PROCUREMENT_ENABLED } from '../config/features';
+
 const LANDING_PATHS: Record<string, string> = {
   dashboard: '/',
   inventory: '/stock',
@@ -13,5 +15,6 @@ const LANDING_PATHS: Record<string, string> = {
 };
 
 export function landingPathFor(key: string): string {
+  if (key === 'purchase-orders' && !PROCUREMENT_ENABLED) return LANDING_PATHS['dashboard']!;
   return LANDING_PATHS[key] ?? LANDING_PATHS['dashboard']!;
 }
