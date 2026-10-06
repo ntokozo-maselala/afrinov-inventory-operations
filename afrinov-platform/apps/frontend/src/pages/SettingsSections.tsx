@@ -2,7 +2,7 @@
 // receives the settings context via `useSettings()` and renders the relevant
 // controls. Save / reset is handled by the layout (parent) — sections only
 // update the local draft.
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSettings } from '../hooks/useSettings';
 import { useApi } from '../hooks/useApi';
 import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField } from './Settings';
@@ -355,25 +355,24 @@ export function SettingsUsers() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | null>(null);
   const [pendingToggle, setPendingToggle] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
 
-  const reload = useCallback(() => {
+  function reload() {
     setLoading(true);
     setError(null);
+    setReloadKey((key) => key + 1);
+  }
+
+  useEffect(() => {
     api.get<AdminUser[]>('/users')
       .then(setUsers)
       .catch((e: ApiError) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
-
-  // eslint-disable react-hooks/set-state-in-effect
-  useEffect(() => {
-    reload();
-  }, [reload]);
-  // eslint-enable react-hooks/set-state-in-effect
+  }, [reloadKey]);
 
   async function performToggle() {
     if (!pendingToggle) return;
