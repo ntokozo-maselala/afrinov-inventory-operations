@@ -40,12 +40,14 @@ function AppShellInner({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-surface-50 text-surface-800 dark:bg-surface-50 dark:text-surface-800">
+    // The shell is pinned to the viewport and only the content column scrolls,
+    // so the sidebar never moves when the page is scrolled.
+    <div className="h-[100dvh] flex flex-col overflow-hidden bg-surface-50 text-surface-800 dark:bg-surface-50 dark:text-surface-800">
       <DevModeBanner />
-      <div className="flex min-h-screen">
+      <div className="flex flex-1 min-h-0">
         <DesktopSidebar />
         <MobileDrawer />
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div id="app-scroll-container" className="flex-1 min-w-0 flex flex-col overflow-y-auto">
           <AppHeader user={user} onLogout={logout} />
           <PageContainer>{children}</PageContainer>
           <footer className="px-4 sm:px-6 lg:px-8 py-4 text-center text-xs text-surface-400 border-t border-surface-200 dark:text-surface-400 dark:border-surface-200">
@@ -65,7 +67,7 @@ function DesktopSidebar() {
 
   if (isDesktop && sidebarMode === 'expanded') {
     return (
-      <aside className="hidden lg:flex shrink-0 sticky top-0 h-[100dvh] border-r border-surface-200 dark:border-surface-200" style={{ width: 'var(--sidebar-width-expanded)', transition: `width ${transitionDuration} ease-out` }}>
+      <aside className="hidden lg:flex shrink-0 h-full border-r border-surface-200 dark:border-surface-200" style={{ width: 'var(--sidebar-width-expanded)', transition: `width ${transitionDuration} ease-out` }}>
         <Sidebar groups={groups} />
       </aside>
     );
@@ -73,7 +75,7 @@ function DesktopSidebar() {
 
   if ((isDesktop || isTablet) && sidebarMode === 'collapsed') {
     return (
-      <aside className="hidden md:flex shrink-0 sticky top-0 h-[100dvh] border-r border-surface-200 dark:border-surface-200" style={{ width: 'var(--sidebar-width-collapsed)', transition: `width ${transitionDuration} ease-out` }}>
+      <aside className="hidden md:flex shrink-0 h-full border-r border-surface-200 dark:border-surface-200" style={{ width: 'var(--sidebar-width-collapsed)', transition: `width ${transitionDuration} ease-out` }}>
         <CollapsedSidebar groups={groups} />
       </aside>
     );
