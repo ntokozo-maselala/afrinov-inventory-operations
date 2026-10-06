@@ -42,13 +42,6 @@ function getSidebarWidthFromCSS(mode: SidebarMode): number {
   }
 }
 
-function getSidebarOffset(mode: SidebarMode, isMobile: boolean): number {
-  if (isMobile) return 0;
-  if (mode === 'expanded') return 220;
-  if (mode === 'collapsed') return 68;
-  return 0;
-}
-
 export function AppShellProvider({ children }: { children: ReactNode }) {
   const { hasPermission } = usePermissions();
 
@@ -98,13 +91,6 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
     }
     // Tablet: no auto-switch. User controls collapse/expand.
   }, [isMobile, isDesktop, sidebarMode]);
-
-  // Update CSS custom property for sidebar offset (used by PageContainer)
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const offset = getSidebarOffset(sidebarMode, isMobile);
-    document.documentElement.style.setProperty('--sidebar-offset', `${offset}px`);
-  }, [sidebarMode, isMobile]);
 
   const setSidebarMode = useCallback((mode: SidebarMode) => {
     setSidebarModeState(mode);
