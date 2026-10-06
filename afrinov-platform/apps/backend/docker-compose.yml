@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      # Local/demo credentials only. Supply POSTGRES_USER / POSTGRES_PASSWORD /
+      # POSTGRES_DB from the environment (or a secret manager) for any
+      # deployment that is reachable beyond this machine.
+      POSTGRES_USER: ${POSTGRES_USER:-afrinov}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+      POSTGRES_DB: ${POSTGRES_DB:-afrinov}
+    ports:
+      - "5432:5432"
+    volumes:
+      - afrinov_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      # The Dockerfile is written against the monorepo root: its first COPY
+      # pulls the root package.json and the second pulls
+      # apps/backend/package.json. Building with `context: .` (this directory)
+      # fails immediately with "file not found in build context" for
+      # apps/backend/package.json, so the context must be the repo root.
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      # Assembled from injected parts so the database credential is never
+      # written into this file.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-afrinov}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-afrinov}?schema=public
+      # loadConfig() rejects known-insecure secrets when NODE_ENV=production.
+      # Generate with:
+      #   node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the environment}
+      # Fail-closed: this defaults to production, not development. The previous
+      # default of "development" disabled the insecure-secret guard and enabled
+      # development CORS defaults inside the container.
+      NODE_ENV: ${NODE_ENV:-production}
+      # Comma-separated allow-list. Required in production; CORS is disabled
+      # when unset.
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      PORT: 4000
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    # Seed is idempotent. Run the compiled seed (node dist/db/seed.js) rather
+    # than `npm run db:seed`, which needs tsx — a dev dependency that is
+    # pruned from the production image. SEED_ADMIN_PASSWORD is only consumed
+    # the first time the admin account is created; supply it from the
+    # environment, otherwise the seed generates a random password it does not
+    # print.
+    command: sh -c "npx prisma migrate deploy && node dist/db/seed.js && node dist/index.js"
+
+volumes:
+  afrinov_pg:

@@ -1,0 +1,372 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens (CSS custom properties) ─────────────────────────── */
+:root {
+  /* Sidebar layout tokens */
+  --sidebar-width-expanded: 220px;
+  --sidebar-width-collapsed: 68px;
+  --sidebar-width-mobile: 288px;
+  --header-height: 56px;
+
+  /* Content padding tokens */
+  --content-padding-base: 1rem; /* 16px */
+  --content-padding-lg: 1.5rem; /* 24px */
+
+  /* Sidebar offset for main content (set via JS) */
+  --sidebar-offset: 0px;
+
+  --color-brand-50: 253 236 239;
+  --color-brand-100: 251 213 218;
+  --color-brand-200: 247 171 182;
+  --color-brand-300: 241 129 145;
+  --color-brand-400: 236 87 109;
+  --color-brand-500: 227 0 27;
+  --color-brand-600: 179 0 22;
+  --color-brand-700: 140 0 18;
+  --color-brand-800: 102 0 13;
+  --color-brand-900: 64 0 9;
+
+  /* Z-index scale */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-header: 300;
+  --z-overlay: 400;
+  --z-modal: 500;
+  --z-popover: 600;
+  --z-tooltip: 700;
+  --z-toast: 800;
+
+  --color-surface-0: 255 255 255;
+  --color-surface-50: 247 248 250;
+  --color-surface-100: 238 240 244;
+  --color-surface-200: 221 225 232;
+  --color-surface-300: 197 203 214;
+  --color-surface-400: 154 163 178;
+  --color-surface-500: 107 116 132;
+  --color-surface-600: 74 82 96;
+  --color-surface-700: 52 58 69;
+  --color-surface-800: 33 38 46;
+  --color-surface-900: 17 21 27;
+
+  --color-success-50: 236 250 242;
+  --color-success-100: 212 241 222;
+  --color-success-500: 30 132 73;
+  --color-success-600: 25 109 60;
+  --color-success-700: 19 84 45;
+
+  --color-warning-50: 254 246 230;
+  --color-warning-100: 251 232 184;
+  --color-warning-500: 214 137 16;
+  --color-warning-600: 163 105 12;
+  --color-warning-700: 122 77 9;
+
+  --color-danger-50: 253 233 231;
+  --color-danger-100: 247 197 192;
+  --color-danger-500: 192 57 43;
+  --color-danger-600: 155 45 34;
+  --color-danger-700: 115 33 26;
+
+  --color-info-50: 232 240 251;
+  --color-info-100: 201 219 243;
+  --color-info-500: 30 111 217;
+  --color-info-600: 24 89 179;
+  --color-info-700: 19 70 144;
+}
+
+.dark {
+  --color-brand-50: 253 236 239;
+  --color-brand-100: 251 213 218;
+  --color-brand-200: 247 171 182;
+  --color-brand-300: 241 129 145;
+  --color-brand-400: 236 87 109;
+  --color-brand-500: 227 0 27;
+  --color-brand-600: 179 0 22;
+  --color-brand-700: 140 0 18;
+  --color-brand-800: 102 0 13;
+  --color-brand-900: 64 0 9;
+
+  --color-surface-0: 26 29 35;
+  --color-surface-50: 15 17 21;
+  --color-surface-100: 37 41 50;
+  --color-surface-200: 45 50 59;
+  --color-surface-300: 61 67 78;
+  --color-surface-400: 90 99 112;
+  --color-surface-500: 154 163 178;
+  --color-surface-600: 74 82 96;
+  --color-surface-700: 52 58 69;
+  --color-surface-800: 232 234 237;
+  --color-surface-900: 247 248 250;
+
+  --color-success-50: 15 42 24;
+  --color-success-100: 26 61 36;
+  --color-success-500: 34 197 94;
+  --color-success-600: 22 163 74;
+  --color-success-700: 21 128 61;
+
+  --color-warning-50: 42 32 8;
+  --color-warning-100: 61 48 16;
+  --color-warning-500: 245 158 11;
+  --color-warning-600: 217 119 6;
+  --color-warning-700: 180 83 9;
+
+  --color-danger-50: 42 18 20;
+  --color-danger-100: 61 26 29;
+  --color-danger-500: 239 68 68;
+  --color-danger-600: 220 38 38;
+  --color-danger-700: 185 28 28;
+
+  --color-info-50: 15 31 61;
+  --color-info-100: 26 45 92;
+  --color-info-500: 59 130 246;
+  --color-info-600: 37 99 235;
+  --color-info-700: 29 78 216;
+
+  --chart-in-stock: #16a34a;
+  --chart-low-stock: #f59e0b;
+  --chart-out-of-stock: #dc2626;
+  --chart-track: #e2e8f0;
+  --chart-fallback: #94a3b8;
+
+  /* Status-based chart colors */
+  --chart-success-500: rgb(var(--color-success-500));
+  --chart-warning-500: rgb(var(--color-warning-500));
+  --chart-danger-500: rgb(var(--color-danger-500));
+  --chart-info-500: rgb(var(--color-info-500));
+  --chart-brand-500: rgb(var(--color-brand-500));
+
+  /* Chart palette (semantic, theme-aware) */
+  --chart-1: rgb(var(--color-info-500) / <alpha-value>);
+  --chart-2: rgb(var(--color-brand-500) / <alpha-value>);
+  --chart-3: rgb(var(--color-warning-500) / <alpha-value>);
+  --chart-4: rgb(var(--color-success-500) / <alpha-value>);
+  --chart-5: rgb(var(--color-danger-500) / <alpha-value>);
+}
+
+.dark {
+  --chart-in-stock: #22c55e;
+  --chart-low-stock: #f59e0b;
+  --chart-out-of-stock: #ef4444;
+  --chart-track: #2d323b;
+  --chart-fallback: #6b7484;
+
+  /* Status-based chart colors */
+  --chart-success-500: rgb(var(--color-success-500));
+  --chart-warning-500: rgb(var(--color-warning-500));
+  --chart-danger-500: rgb(var(--color-danger-500));
+  --chart-info-500: rgb(var(--color-info-500));
+  --chart-brand-500: rgb(var(--color-brand-500));
+
+  /* Chart palette (semantic, theme-aware) */
+  --chart-1: rgb(var(--color-info-500) / <alpha-value>);
+  --chart-2: rgb(var(--color-brand-500) / <alpha-value>);
+  --chart-3: rgb(var(--color-warning-500) / <alpha-value>);
+  --chart-4: rgb(var(--color-success-500) / <alpha-value>);
+  --chart-5: rgb(var(--color-danger-500) / <alpha-value>);
+}
+
+/* ── Base layer ─────────────────────────────────────────────────────── */
+@layer base {
+  html { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; color: #21262e; overflow-x: hidden; }
+  body { font-size: 0.875rem; line-height: 1.5; background: #f7f8fa; overflow-x: hidden; }
+  *:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(227,0,27,0.25); border-radius: 4px; }
+  ::selection { background: #fbd5da; color: #8C0012; }
+  h1 { font-size: 1.375rem; font-weight: 600; line-height: 1.3; }
+  h2 { font-size: 1.125rem; font-weight: 600; line-height: 1.35; }
+  h3 { font-size: 0.9375rem; font-weight: 600; line-height: 1.4; }
+  label { font-size: 0.8125rem; }
+  table { font-size: 0.8125rem; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    [style*="--sidebar-width-expanded"], [style*="--sidebar-width-collapsed"] { transition-duration: 0.01ms !important; }
+  }
+}
+
+.dark {
+  color-scheme: dark;
+}
+.dark html { color: #e8eaed; }
+.dark body { background: #0f1115; color: #e8eaed; }
+.dark ::selection { background: #8C0012; color: #fbd5da; }
+
+/* ── Components ─────────────────────────────────────────────────────── */
+@layer components {
+  /* Surfaces */
+  .surface-card { @apply rounded-md border border-surface-200 bg-surface-0 shadow-card; }
+  .dark .surface-card { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .surface-panel { @apply rounded-md border border-surface-200 bg-surface-0; }
+  .dark .surface-panel { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .surface-muted { @apply rounded-md border border-surface-200 bg-surface-100; }
+  .dark .surface-muted { background-color: rgb(var(--color-surface-100) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+
+  /* Typography */
+  .text-meta    { @apply text-xs text-surface-500; }
+  .text-eyebrow { @apply text-xs font-semibold uppercase tracking-wider text-surface-500; }
+  .text-mono    { @apply font-mono tabular-nums; }
+  .text-num     { @apply tabular-nums; }
+
+  /* Buttons */
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded font-medium text-sm leading-5 px-3 py-1.5 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed select-none; }
+  .btn-primary { @apply btn bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700; }
+  .btn-secondary { @apply btn bg-surface-0 text-surface-800 border border-surface-200 hover:bg-surface-50 active:bg-surface-100; }
+  .dark .btn-secondary { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); color: rgb(var(--color-surface-800) / <alpha-value>); }
+  .dark .btn-secondary:hover { background-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .dark .btn-secondary:active { background-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .btn-ghost { @apply btn text-surface-700 hover:bg-surface-100; }
+  .dark .btn-ghost { color: rgb(var(--color-surface-700) / <alpha-value>); }
+  .dark .btn-ghost:hover { background-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .btn-danger { @apply btn bg-danger-500 text-white hover:bg-danger-600 active:bg-danger-700; }
+  .btn-link { @apply inline-flex items-center text-brand-600 hover:text-brand-700 hover:underline text-sm font-medium; }
+  .btn-sm { @apply px-2 py-1 text-xs; }
+  .btn-icon { @apply p-1.5 rounded text-surface-500 hover:bg-surface-100 hover:text-surface-800; }
+  .dark .btn-icon { color: rgb(var(--color-surface-500) / <alpha-value>); }
+  .dark .btn-icon:hover { background-color: rgb(var(--color-surface-100) / <alpha-value>); color: rgb(var(--color-surface-800) / <alpha-value>); }
+
+  /* Inputs */
+  .input { @apply block w-full rounded border border-surface-200 bg-surface-0 px-2.5 py-1.5 text-sm text-surface-800 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-surface-100 disabled:text-surface-500; }
+  .dark .input { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); color: rgb(var(--color-surface-800) / <alpha-value>); }
+  .dark .input::placeholder { color: rgb(var(--color-surface-400) / <alpha-value>); }
+  .dark .input:disabled { background-color: rgb(var(--color-surface-100) / <alpha-value>); color: rgb(var(--color-surface-500) / <alpha-value>); }
+  .input-error { @apply border-danger-500 focus:border-danger-500 focus:ring-danger-100; }
+  .select { @apply input pr-8 appearance-none; }
+  .dark .select { background-color: rgb(var(--color-surface-0) / <alpha-value>); }
+  .textarea { @apply input min-h-[80px] resize-y; }
+  .checkbox { @apply h-4 w-4 rounded border-surface-300 text-brand-500 focus:ring-brand-100; }
+
+  /* Badges */
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
+  .badge-neutral  { @apply badge bg-surface-100 text-surface-700; }
+  .dark .badge-neutral { background-color: rgb(var(--color-surface-100) / <alpha-value>); color: rgb(var(--color-surface-700) / <alpha-value>); }
+  .badge-success  { @apply badge bg-success-50 text-success-700; }
+  .dark .badge-success { background-color: rgb(var(--color-success-50) / <alpha-value>); color: rgb(var(--color-success-700) / <alpha-value>); }
+  .badge-warning  { @apply badge bg-warning-50 text-warning-700; }
+  .dark .badge-warning { background-color: rgb(var(--color-warning-50) / <alpha-value>); color: rgb(var(--color-warning-700) / <alpha-value>); }
+  .badge-danger   { @apply badge bg-danger-50  text-danger-700; }
+  .dark .badge-danger { background-color: rgb(var(--color-danger-50) / <alpha-value>); color: rgb(var(--color-danger-700) / <alpha-value>); }
+  .badge-info     { @apply badge bg-info-50    text-info-700; }
+  .dark .badge-info { background-color: rgb(var(--color-info-50) / <alpha-value>); color: rgb(var(--color-info-700) / <alpha-value>); }
+  .badge-brand    { @apply badge bg-brand-50   text-brand-700; }
+  .dark .badge-brand { background-color: rgb(var(--color-brand-50) / <alpha-value>); color: rgb(var(--color-brand-700) / <alpha-value>); }
+
+  .dot { @apply inline-block h-1.5 w-1.5 rounded-full; }
+
+  /* Tables */
+  .table { @apply min-w-full text-sm; }
+  .table th { @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-surface-500 bg-surface-50 border-b border-surface-200; }
+  .dark .table th { background-color: rgb(var(--color-surface-50) / <alpha-value>); color: rgb(var(--color-surface-500) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .table td { @apply px-3 py-2 text-surface-800 border-b border-surface-100; }
+  .dark .table td { color: rgb(var(--color-surface-800) / <alpha-value>); border-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .table tr:hover td { @apply bg-surface-50; }
+  .dark .table tr:hover td { background-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .table-compact th { @apply py-1.5; }
+  .table-compact td { @apply py-1.5; }
+
+  /* Form fields */
+  .field { @apply space-y-1; }
+  .field-label { @apply block text-sm font-medium text-surface-800; }
+  .dark .field-label { color: rgb(var(--color-surface-800) / <alpha-value>); }
+  .field-required::after { content: ' *'; @apply text-brand-500; }
+  .field-help { @apply text-xs text-surface-500; }
+  .dark .field-help { color: rgb(var(--color-surface-500) / <alpha-value>); }
+  .field-error { @apply text-xs text-danger-600; }
+
+  /* Misc */
+  .divider { @apply h-px bg-surface-200; }
+  .dark .divider { background-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .kbd { @apply inline-flex items-center px-1.5 py-0.5 rounded border border-surface-200 bg-surface-50 text-[0.6875rem] text-surface-600 font-mono; }
+  .dark .kbd { background-color: rgb(var(--color-surface-50) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); color: rgb(var(--color-surface-600) / <alpha-value>); }
+
+  /* Dark mode shadow overrides — light-mode shadows are too subtle on dark surfaces. */
+  .dark .shadow-card { box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2); }
+  .dark .shadow-popover { box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.2); }
+  .dark .shadow-focus { box-shadow: 0 0 0 3px rgba(227,0,27,0.4); }
+}
+
+/* ── Print stylesheet ───────────────────────────────────────────────── */
+@media print {
+  body { background: white !important; font-size: 11pt; }
+  .no-print { display: none !important; }
+  /* Hide the sidebar / app shell chrome on print so the report is clean. */
+  nav[aria-label='Main'], header.app-header { display: none !important; }
+  .surface-card { box-shadow: none !important; border-color: #d1d5db !important; }
+  .table th { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .table tr { page-break-inside: avoid; }
+  h1 { font-size: 18pt; }
+  h2 { font-size: 14pt; }
+  .print-area { padding: 0 !important; }
+  /* Avoid breaking across pages when possible */
+  section { page-break-inside: avoid; }
+}
+
+/* ── Responsive utilities ─────────────────────────────────────── */
+@media (max-width: 639px) {
+  .surface-card.p-4 { padding: 1rem; }
+  .surface-card.p-5 { padding: 1rem; }
+  .surface-card.p-6 { padding: 1rem; }
+  .surface-card.p-3 { padding: 0.75rem; }
+  .btn { min-height: 2.25rem; }
+  .btn-sm { min-height: 2rem; min-height: 32px; }
+}
+
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Animations ──────────────────────────────────────────────────────── */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.2s ease-out;
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.2s ease-out;
+}
+
+/* ── Safe area utilities ─────────────────────────────────────────────── */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.pt-safe {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+
+.pl-safe {
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+
+.pr-safe {
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* ── Radix Tooltip override ──────────────────────────────────────────── */
+[data-radix-tooltip-content] {
+  @apply bg-surface-900 text-surface-50 text-xs px-2 py-1 rounded shadow-popover;
+}
+
+.dark [data-radix-tooltip-content] {
+  @apply bg-surface-50 text-surface-900;
+}

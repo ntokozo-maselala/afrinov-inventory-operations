@@ -1,0 +1,488 @@
+// Afrinov Platform — Prisma schema
+// Source of truth for the data model, derived from the docs in
+// afrinov-docs/docs/03-domain/entity-catalog.md, aggregate-model.md,
+// domain-model.md, state-machines.md, and 02-business-analysis/functional-requirements.md.
+// ADR-002: inventory_transactions is the ledger; inventory_balances is a derived
+// materialized view that is never written by application code.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Identity & Access ────────────────────────────────────────────────────
+
+enum RoleName {
+  ADMIN
+  STORE_CONTROLLER
+  PROCUREMENT
+  APPROVER
+  TECHNICIAN
+  VIEWER
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  name         String
+  passwordHash String        @map("password_hash")
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  roles                UserRole[]
+  settingsUpdated      Setting[]            @relation("SettingUpdatedBy")
+  purchaseOrders       PurchaseOrder[]   @relation("PO_CreatedBy")
+  approvedPurchaseOrders PurchaseOrder[] @relation("PO_ApprovedBy")
+  shippedPurchaseOrders PurchaseOrder[]  @relation("PO_ShippedBy")
+  deliveredPurchaseOrders PurchaseOrder[] @relation("PO_DeliveredBy")
+  cancelledPurchaseOrders PurchaseOrder[] @relation("PO_CancelledBy")
+  goodsReceipts        GoodsReceipt[]    @relation("GR_ReceivedBy")
+  inventoryTransactions InventoryTransaction[]
+  managedProjects      Project[]         @relation("ProjectManager")
+
+  @@map("users")
+}
+
+model UserRole {
+  userId String   @map("user_id")
+  roleId String   @map("role_id")
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Role {
+  id          String     @id @default(uuid())
+  name        RoleName   @unique
+  description String?
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  // Format: "action:resource", e.g. "create:purchase_order", "issue:inventory"
+  code        String           @unique
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── Master Data ──────────────────────────────────────────────────────────
+
+enum MaterialCategory {
+  FASTENERS_SLUGS_INSULATION
+  TOOLING_PPE_ELECTRICAL
+  PROJECT_MATERIAL
+  CONSUMABLES
+  TOOLS
+}
+
+model Material {
+  id            String              @id @default(uuid())
+  sku           String              @unique
+  name          String
+  description   String?
+  category      MaterialCategory
+  unitOfMeasure String              @map("unit_of_measure")
+  requiredStock Decimal             @default(0) @map("required_stock") @db.Decimal(18, 4)
+  unitCost      Decimal?            @map("unit_cost") @db.Decimal(18, 4)
+  active        Boolean             @default(true)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  poLines              PurchaseOrderLine[]
+  goodsReceiptLines    GoodsReceiptLine[]
+  inventoryTransactions InventoryTransaction[]
+  inventoryBalances    InventoryBalance[]
+
+  @@index([category])
+  @@index([active])
+  @@map("materials")
+}
+
+enum LocationType {
+  RACK
+  STOREROOM
+  SHOP_FLOOR_AREA
+  CONTAINER
+  OFF_SITE
+}
+
+model Location {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  // Short, human-friendly identifier (e.g. "WH-A1"). Unique across the
+  // catalogue. Falls back to null for legacy rows that pre-date this field;
+  // application code treats null code as the existing `name`.
+  code        String?      @unique
+  type        LocationType
+  active      Boolean      @default(true)
+  // Extended master-data fields (added with the Location Management feature).
+  address        String?
+  description    String?
+  contactPerson  String?  @map("contact_person")
+  contactPhone   String?  @map("contact_phone")
+  contactEmail   String?  @map("contact_email")
+  notes          String?
+  createdById    String?  @map("created_by_id")
+  updatedById    String?  @map("updated_by_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  goodsReceiptLines    GoodsReceiptLine[]
+  inventoryTransactions InventoryTransaction[]
+  inventoryBalances    InventoryBalance[]
+  racks                Rack[]
+
+  @@index([type])
+  @@index([active])
+  @@map("locations")
+}
+
+model Supplier {
+  id            String         @id @default(uuid())
+  name          String
+  contactName  String?         @map("contact_name")
+  contactEmail String?         @map("contact_email")
+  contactPhone String?         @map("contact_phone")
+  notes        String?
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+
+  // Case-insensitive name uniqueness is enforced at the database
+  // level via a citext unique index (migration
+  // 20260101000002_supplier_name_uniqueness). The plain index
+  // below remains for case-sensitive lookups; the app-layer
+  // check in SupplierService.create produces the friendly 409.
+  @@index([name])
+  @@map("suppliers")
+}
+
+model Project {
+  projectNumber String   @id @map("project_number")
+  // Extended project master fields (added with the Projects feature).
+  // projectNumber remains the canonical identifier so existing transactions,
+  // movement references, and migration data keep working unchanged.
+  name          String?
+  code          String?  @unique
+  status        String   @default("PLANNING")
+  managerId     String?  @map("manager_id")
+  client        String?
+  startDate     DateTime? @map("start_date") @db.Date
+  endDate       DateTime? @map("end_date") @db.Date
+  notes         String?
+  active        Boolean  @default(true)
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  manager             User?     @relation("ProjectManager", fields: [managerId], references: [id])
+  inventoryTransactions InventoryTransaction[]
+  racks               Rack[]
+
+  @@index([status])
+  @@index([active])
+  @@map("projects")
+}
+
+enum RackStatus {
+  ACTIVE
+  INACTIVE
+  FULL
+}
+
+model Rack {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  name        String
+  description String?
+  // Optional FK to Location. ADR-003 normalises locations; a rack lives at
+  // a single physical location. Racks without a location are allowed (the
+  // master data may exist before physical placement).
+  locationId  String?       @map("location_id")
+  // Optional project association. Racks may be project-allocated or shared.
+  projectNumber String?    @map("project_number")
+  capacity    Int?         // nullable; capacity is meaningful when present
+  status      RackStatus   @default(ACTIVE)
+  notes       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  location Location? @relation(fields: [locationId], references: [id])
+  project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
+
+  @@index([locationId])
+  @@index([projectNumber])
+  @@index([status])
+  @@map("racks")
+}
+
+// ─── Procurement ──────────────────────────────────────────────────────────
+
+enum PurchaseOrderStatus {
+  DRAFT
+  // Legacy / transitional statuses kept for backward compatibility with
+  // pre-existing records. The canonical lifecycle now flows through
+  // PENDING_APPROVAL → APPROVED → SHIPPED → DELIVERED.
+  SUBMITTED
+  APPROVED
+  PENDING_APPROVAL
+  SHIPPED
+  DELIVERED
+  SENT
+  PARTIALLY_RECEIVED
+  FULLY_RECEIVED
+  CLOSED
+  CANCELLED
+  REJECTED
+}
+
+model PurchaseOrder {
+  id         String              @id @default(uuid())
+  number     String              @unique
+  supplierId String              @map("supplier_id")
+  status     PurchaseOrderStatus @default(DRAFT)
+  notes      String?
+  createdById String             @map("created_by_id")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+  // ── Lifecycle audit fields (added with the PO workflow enhancement) ───────
+  // All populated transactionally by the procurement service. Never overwritten
+  // once set; only updated when the corresponding transition occurs.
+  expectedDeliveryDate DateTime? @map("expected_delivery_date") @db.Date
+  approvedAt           DateTime? @map("approved_at")
+  approvedById         String?   @map("approved_by_id")
+  shippedAt            DateTime? @map("shipped_at")
+  shippedById          String?   @map("shipped_by_id")
+  trackingNumber       String?   @map("tracking_number")
+  carrier              String?
+  shipmentNotes        String?   @map("shipment_notes")
+  deliveredAt          DateTime? @map("delivered_at")
+  deliveredById        String?   @map("delivered_by_id")
+  deliveryNotes        String?   @map("delivery_notes")
+  cancelledAt          DateTime? @map("cancelled_at")
+  cancelledById        String?   @map("cancelled_by_id")
+  cancellationReason   String?   @map("cancellation_reason")
+
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy    User                @relation("PO_CreatedBy", fields: [createdById], references: [id])
+  approvedBy   User?               @relation("PO_ApprovedBy", fields: [approvedById], references: [id])
+  shippedBy    User?               @relation("PO_ShippedBy", fields: [shippedById], references: [id])
+  deliveredBy  User?               @relation("PO_DeliveredBy", fields: [deliveredById], references: [id])
+  cancelledBy  User?               @relation("PO_CancelledBy", fields: [cancelledById], references: [id])
+  lines        PurchaseOrderLine[]
+  goodsReceipts GoodsReceipt[]
+
+  @@index([status])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id              String        @id @default(uuid())
+  purchaseOrderId String        @map("purchase_order_id")
+  materialId      String        @map("material_id")
+  orderedQty      Decimal       @map("ordered_qty") @db.Decimal(18, 4)
+  receivedQty     Decimal       @default(0) @map("received_qty") @db.Decimal(18, 4)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  material      Material      @relation(fields: [materialId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_lines")
+}
+
+enum GoodsReceiptStatus {
+  DRAFT
+  SUBMITTED
+  POSTED
+}
+
+model GoodsReceipt {
+  id             String              @id @default(uuid())
+  number         String              @unique
+  purchaseOrderId String?            @map("purchase_order_id")
+  supplierId     String              @map("supplier_id")
+  deliveryRef    String?             @map("delivery_ref")
+  status         GoodsReceiptStatus  @default(DRAFT)
+  receivedById   String              @map("received_by_id")
+  receivedAt     DateTime            @default(now()) @map("received_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  purchaseOrder PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id])
+  supplier      Supplier           @relation(fields: [supplierId], references: [id])
+  receivedBy    User               @relation("GR_ReceivedBy", fields: [receivedById], references: [id])
+  lines         GoodsReceiptLine[]
+
+  @@index([status])
+  @@index([purchaseOrderId])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+  id             String       @id @default(uuid())
+  goodsReceiptId String       @map("goods_receipt_id")
+  materialId     String       @map("material_id")
+  locationId     String       @map("location_id")
+  quantity       Decimal      @db.Decimal(18, 4)
+  purchaseOrderLineId String? @map("purchase_order_line_id")
+
+  goodsReceipt GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  material     Material     @relation(fields: [materialId], references: [id])
+  location     Location     @relation(fields: [locationId], references: [id])
+
+  @@index([goodsReceiptId])
+  @@map("goods_receipt_lines")
+}
+
+// ─── Inventory (the ledger) ───────────────────────────────────────────────
+
+enum InventoryTransactionType {
+  RECEIPT
+  ISSUE
+  TRANSFER_OUT
+  TRANSFER_IN
+  ADJUSTMENT
+}
+
+enum AdjustmentReasonCode {
+  COUNT_VARIANCE
+  DAMAGE
+  LOSS
+  SCRAP
+  OTHER
+}
+
+model InventoryTransaction {
+  id           String                    @id @default(uuid())
+  materialId   String                    @map("material_id")
+  locationId   String                    @map("location_id")
+  type         InventoryTransactionType
+  // Signed: RECEIPT/TRANSFER_IN are positive; ISSUE/TRANSFER_OUT negative;
+  // ADJUSTMENT may be either. Stored as Decimal so transactions are atomic and exact.
+  quantity     Decimal                   @db.Decimal(18, 4)
+  // Polymorphic reference to the document that caused the transaction.
+  referenceType String?                  @map("reference_type")
+  referenceId   String?                  @map("reference_id")
+  // Tool tracking (FR-INV-008): for tools, recipient / holder may be set.
+  recipientId   String?                  @map("recipient_id")
+  // Adjustment reason (mandatory for type=ADJUSTMENT).
+  reasonCode    AdjustmentReasonCode?    @map("reason_code")
+  reasonNote    String?                  @map("reason_note")
+  // Project linkage (FR-REP-004).
+  projectNumber String?                  @map("project_number")
+  // Audit fields
+  actorId       String                   @map("actor_id")
+  postedAt      DateTime                 @default(now()) @map("posted_at")
+  // For transfers: the linked partner transaction id so both legs are tied.
+  pairedWithId  String?                  @unique @map("paired_with_id")
+
+  material Material  @relation(fields: [materialId], references: [id])
+  location Location  @relation(fields: [locationId], references: [id])
+  actor    User      @relation(fields: [actorId], references: [id])
+  project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
+  pairedWith InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
+  pairedBy   InventoryTransaction? @relation("TransferPair")
+
+  @@index([materialId, locationId, postedAt])
+  @@index([referenceType, referenceId])
+  @@index([postedAt])
+  @@index([type])
+  @@map("inventory_transactions")
+}
+
+// ADR-002: derived/materialized view. Application code never writes to this
+// table; it's recomputed by the recomputeBalances job / refresh trigger.
+model InventoryBalance {
+  materialId String   @map("material_id")
+  locationId String   @map("location_id")
+  quantity   Decimal  @db.Decimal(18, 4)
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@id([materialId, locationId])
+  @@index([locationId])
+  @@map("inventory_balances")
+}
+
+// ─── System Settings (typed key/value configuration) ────────────────────
+
+enum SettingType {
+  string
+  number
+  boolean
+  enum
+}
+
+enum SettingCategory {
+  general
+  inventory
+  purchase_orders
+  notifications
+  users
+  appearance
+  security
+  system
+  data
+}
+
+model Setting {
+  key         String          @id
+  value       Json
+  type        SettingType
+  category    SettingCategory
+  description String
+  isEditable  Boolean         @default(true) @map("is_editable")
+  // Allowed enum values (only when type = enum). Null for other types.
+  enumOptions Json?           @map("enum_options")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  updatedById String?         @map("updated_by_id")
+
+  updatedBy User? @relation("SettingUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([category])
+  @@map("settings")
+}
+
+// ─── Audit (append-only) ──────────────────────────────────────────────────
+
+model AuditLogEntry {
+  id         String   @id @default(uuid())
+  actorId    String?  @map("actor_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_log_entries")
+}

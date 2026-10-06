@@ -1,0 +1,6 @@
+-- migration_lock.toml placeholder for the location_management migration.
+-- In a real environment run `prisma migrate dev` which generates this file
+-- alongside the migration. We commit the directory so the schema/migration
+-- pair is reproducible from source.
+
+provider = "postgresql"

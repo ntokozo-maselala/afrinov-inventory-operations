@@ -1,0 +1,604 @@
+// Unit tests for InventoryService — the heart of the system.
+// We exercise the service by mocking @prisma/client with an in-memory fake
+// that implements only the methods the service uses. This verifies ADR-002
+// invariants end-to-end without needing a real database:
+//   - receipts add to balance,
+//   - issues check & decrement,
+//   - transfers are atomic (both legs land, balance moves between locations),
+//   - adjustments post signed quantities,
+//   - balances are NEVER mutated directly by the service — only via the
+//     recompute-balance helper inside the transaction.
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
+
+// ─── In-memory fake ────────────────────────────────────────────────────────
+
+type TxRow = {
+  id: string;
+  materialId: string;
+  locationId: string;
+  type: string;
+  quantity: Prisma.Decimal;
+  actorId: string;
+  postedAt: Date;
+  pairedWithId?: string | null;
+  reasonCode?: string | null;
+  reasonNote?: string | null;
+  projectNumber?: string | null;
+  recipientId?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  actor?: { id: string; name: string };
+  material?: { sku: string; name: string };
+  location?: { name: string };
+};
+
+let trxRows: TxRow[] = [];
+let balances = new Map<string, { materialId: string; locationId: string; quantity: Prisma.Decimal }>();
+let idSeq = 0;
+const users = new Map<string, { id: string; name: string; active: boolean }>([
+  ['user-1', { id: 'user-1', name: 'Alice', active: true }],
+  ['user-2', { id: 'user-2', name: 'Bob', active: true }],
+  ['user-3', { id: 'user-3', name: 'Charlie', active: false }],
+]);
+const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
+
+function balKey(materialId: string, locationId: string) { return `${materialId}|${locationId}`; }
+
+type GRStatus = 'DRAFT' | 'SUBMITTED' | 'POSTED';
+
+interface GREntry {
+  id: string;
+  status: GRStatus;
+  purchaseOrderId: string | null;
+  lines: { materialId: string; locationId: string; quantity: Prisma.Decimal; purchaseOrderLineId: string | null }[];
+}
+
+interface POLineEntry {
+  id: string;
+  purchaseOrderId: string;
+  materialId: string;
+  orderedQty: Prisma.Decimal;
+  receivedQty: Prisma.Decimal;
+}
+
+interface POEntry {
+  id: string;
+  status: string;
+}
+
+const goodsReceipts = new Map<string, GREntry>();
+const purchaseOrderLines = new Map<string, POLineEntry>();
+const purchaseOrders = new Map<string, POEntry>();
+
+const fakeTx = {
+  inventoryTransaction: {
+    create: async ({ data }: { data: Omit<TxRow, 'id'> }) => {
+      const row: TxRow = { id: `trx-${++idSeq}`, ...data, postedAt: data.postedAt ?? new Date() };
+      trxRows.push(row);
+      return row;
+    },
+    update: async ({ where, data, include }: { where: { id: string }; data: Partial<TxRow>; include?: { actor: { select: { id: boolean; name: boolean } }; material?: boolean; location?: boolean } }) => {
+      const row = trxRows.find((r) => r.id === where.id);
+      if (!row) throw new Error('not found');
+      Object.assign(row, data);
+      if (include?.actor && data.actorId) {
+        const u = users.get(data.actorId);
+        row.actor = u ? { id: u.id, name: u.name } : undefined;
+      }
+      if (include?.material) {
+        row.material = { sku: 'SKU', name: 'Material' } as TxRow['material'];
+      }
+      if (include?.location) {
+        row.location = { name: 'Location' } as TxRow['location'];
+      }
+      return row;
+    },
+    findUnique: async ({ where, include }: { 
+      where: { id: string }; 
+      include?: { 
+        actor: { select: { id: boolean; name: boolean } };
+        material?: boolean;
+        location?: boolean;
+      } 
+    }): Promise<TxRow | null> => {
+      const row = trxRows.find((r) => r.id === where.id) ?? null;
+      if (!row) return null;
+      const out: TxRow & { actor?: { id: string; name: string }; material?: { sku: string; name: string }; location?: { name: string } } = { ...row };
+      if (include?.actor) {
+        const u = users.get(row.actorId);
+        out.actor = u ? { id: u.id, name: u.name } : undefined;
+      }
+      if (include?.material) {
+        out.material = { sku: 'SKU', name: 'Material' };
+      }
+      if (include?.location) {
+        out.location = { name: 'Location' };
+      }
+      return out as TxRow;
+    },
+    aggregate: async ({ where }: { where: { materialId: string; locationId: string } }) => {
+      const total = trxRows
+        .filter((r) => r.materialId === where.materialId && r.locationId === where.locationId)
+        .reduce((acc, r) => acc.plus(r.quantity), new Prisma.Decimal(0));
+      return { _sum: { quantity: total } };
+    },
+  },
+  inventoryBalance: {
+    findUnique: async ({ where }: { where: { materialId_locationId: { materialId: string; locationId: string } } }) => {
+      const key = balKey(where.materialId_locationId.materialId, where.materialId_locationId.locationId);
+      return balances.get(key) ?? null;
+    },
+    upsert: async ({ where, update, create }: { where: { materialId_locationId: { materialId: string; locationId: string } }; update: { quantity: Prisma.Decimal }; create: { materialId: string; locationId: string; quantity: Prisma.Decimal } }) => {
+      const key = balKey(where.materialId_locationId.materialId, where.materialId_locationId.locationId);
+      const existing = balances.get(key);
+      if (existing) existing.quantity = update.quantity;
+      else balances.set(key, { materialId: create.materialId, locationId: create.locationId, quantity: create.quantity });
+      return existing ?? balances.get(key);
+    },
+  },
+  material: {
+    findUnique: async () => ({ id: 'mat-1', requiredStock: new Prisma.Decimal(5), active: true }),
+  },
+  location: {
+    findUnique: async () => ({ id: 'loc-1', active: true }),
+  },
+  user: {
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      const u = users.get(where.id);
+      if (!u) return null;
+      return { id: u.id, name: u.name, active: u.active };
+    },
+  },
+  auditLogEntry: {
+    create: async ({ data }: { data: { actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown } }) => {
+      auditLog.push(data);
+      return data;
+    },
+  },
+  setting: {
+    findUnique: async ({ where }: { where: { key: string } }) => mockSettings.get(where.key) ?? null,
+  },
+  goodsReceipt: {
+    findUnique: async ({ where, include }: { where: { id: string }; include?: { lines?: boolean } }) => {
+      const gr = goodsReceipts.get(where.id);
+      if (!gr) return null;
+      if (include?.lines) return gr;
+      return { id: gr.id, status: gr.status, purchaseOrderId: gr.purchaseOrderId } as GREntry;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Partial<GREntry> }) => {
+      const gr = goodsReceipts.get(where.id);
+      if (!gr) throw new Error('not found');
+      Object.assign(gr, data);
+      return gr;
+    },
+  },
+  purchaseOrderLine: {
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      return purchaseOrderLines.get(where.id) ?? null;
+    },
+    update: async ({ where, data }: { where: { id: string }; data: { receivedQty: { increment: Prisma.Decimal } } }) => {
+      const existing = purchaseOrderLines.get(where.id);
+      if (!existing) throw new Error('not found');
+      existing.receivedQty = existing.receivedQty.plus(data.receivedQty.increment);
+      return existing;
+    },
+    findMany: async ({ where }: { where: { purchaseOrderId: string } }) => {
+      return [...purchaseOrderLines.values()].filter((l) => l.purchaseOrderId === where.purchaseOrderId);
+    },
+  },
+  purchaseOrder: {
+    update: async ({ where, data }: { where: { id: string }; data: Partial<POEntry> }) => {
+      const po = purchaseOrders.get(where.id);
+      if (!po) throw new Error('not found');
+      Object.assign(po, data);
+      return po;
+    },
+  },
+};
+
+// Mutable per-test settings override. Production code reads from the
+// settings table; tests set values here to assert that toggles flow through.
+const mockSettings = new Map<string, { value: unknown }>();
+function setMockSetting(key: string, value: unknown) {
+  mockSettings.set(key, { value });
+}
+function clearMockSettings() { mockSettings.clear(); }
+
+vi.mock('../../shared/db.js', () => ({
+  prisma: {
+    $transaction: async (fn: (tx: typeof fakeTx) => Promise<unknown>) => fn(fakeTx),
+    setting: fakeTx.setting,
+    user: fakeTx.user,
+    inventoryTransaction: fakeTx.inventoryTransaction,
+    auditLogEntry: fakeTx.auditLogEntry,
+  },
+}));
+
+vi.mock('../../shared/events.js', () => ({
+  dispatchDomainEvents: async () => undefined,
+}));
+
+const { InventoryService } = await import('./inventory.service.js');
+
+function getBalance(materialId: string, locationId: string): Prisma.Decimal {
+  return balances.get(balKey(materialId, locationId))?.quantity ?? new Prisma.Decimal(0);
+}
+
+describe('InventoryService — ADR-002 invariants', () => {
+  beforeEach(() => {
+    trxRows = [];
+    balances = new Map();
+    clearMockSettings();
+    idSeq = 0;
+    auditLog.length = 0;
+    goodsReceipts.clear();
+    purchaseOrderLines.clear();
+    purchaseOrders.clear();
+  });
+
+  it('a positive adjustment increases the balance', async () => {
+    await InventoryService.adjust({
+      materialId: 'mat-1',
+      locationId: 'loc-1',
+      quantity: 10,
+      reasonCode: 'COUNT_VARIANCE',
+      actorId: 'user-1',
+    });
+    expect(getBalance('mat-1', 'loc-1').toString()).toBe('10');
+    expect(trxRows).toHaveLength(1);
+    expect(trxRows[0]?.type).toBe('ADJUSTMENT');
+  });
+
+  it('a negative adjustment decreases the balance', async () => {
+    await InventoryService.adjust({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: 12, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+    });
+    await InventoryService.adjust({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: -3, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+    });
+    expect(getBalance('mat-1', 'loc-1').toString()).toBe('9');
+  });
+
+  it('issue reduces balance and refuses to over-issue', async () => {
+    await InventoryService.adjust({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+    });
+    await InventoryService.issue({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: 3, actorId: 'u',
+    });
+    expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
+    await expect(
+      InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 100, actorId: 'u' }),
+    ).rejects.toThrow(/available/);
+  });
+
+  it('transfer moves stock atomically: out & in both land, paired together', async () => {
+    await InventoryService.adjust({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+    });
+    await InventoryService.transfer({
+      materialId: 'mat-1',
+      fromLocationId: 'loc-1',
+      toLocationId: 'loc-2',
+      quantity: 4,
+      actorId: 'u',
+    });
+    expect(getBalance('mat-1', 'loc-1').toString()).toBe('6');
+    expect(getBalance('mat-1', 'loc-2').toString()).toBe('4');
+
+    const out = trxRows.find((r) => r.type === 'TRANSFER_OUT');
+    const inn = trxRows.find((r) => r.type === 'TRANSFER_IN');
+    expect(out).toBeDefined();
+    expect(inn).toBeDefined();
+    expect(out!.pairedWithId).toBe(inn!.id);
+    expect(inn!.pairedWithId).toBe(out!.id);
+  });
+
+  it('transfer refuses to over-transfer', async () => {
+    await InventoryService.adjust({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: 3, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+    });
+    await expect(
+      InventoryService.transfer({
+        materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 10, actorId: 'u',
+      }),
+    ).rejects.toThrow(/available/);
+  });
+
+  it('transfer refuses same source and destination', async () => {
+    await expect(
+      InventoryService.transfer({
+        materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-1', quantity: 1, actorId: 'u',
+      }),
+    ).rejects.toThrow(/differ/);
+  });
+
+  it('rejects zero-quantity issues and adjustments', async () => {
+    await expect(
+      InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 0, actorId: 'u' }),
+    ).rejects.toThrow();
+    await expect(
+      InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 0, reasonCode: 'OTHER', actorId: 'u' }),
+    ).rejects.toThrow();
+  });
+
+  // ── Settings integration ─────────────────────────────────────────────
+  // These tests prove that toggles in the settings table actually flow
+  // through to the inventory business logic — settings are not just a UI
+  // decoration.
+  describe('settings integration', () => {
+    it('issue allows going negative when enableNegativeStockPrevention is off', async () => {
+      setMockSetting('inventory.enableNegativeStockPrevention', false);
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await InventoryService.issue({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u',
+      });
+      // Balance ends at -3 because the toggle disabled the check
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('-3');
+    });
+
+    it('issue still blocks over-issue when enableNegativeStockPrevention is on', async () => {
+      setMockSetting('inventory.enableNegativeStockPrevention', true);
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await expect(
+        InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u' }),
+      ).rejects.toThrow(/available/);
+    });
+  });
+
+  // ── Actor update ──────────────────────────────────────────────────────
+  describe('updateActor', () => {
+    it('updates the actor and returns the new name', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const tx = trxRows[0]!;
+      const result = await InventoryService.updateActor({
+        transactionId: tx.id,
+        newActorId: 'user-2',
+        changedBy: 'admin-1',
+      });
+      expect(result.actorId).toBe('user-2');
+      expect(result.actorName).toBe('Bob');
+      expect(tx.actorId).toBe('user-2');
+    });
+
+    it('rejects nonexistent transaction', async () => {
+      await expect(
+        InventoryService.updateActor({ transactionId: 'missing', newActorId: 'user-2', changedBy: 'admin-1' }),
+      ).rejects.toThrow(/InventoryTransaction not found/);
+    });
+
+    it('rejects nonexistent new actor', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const tx = trxRows[0]!;
+      await expect(
+        InventoryService.updateActor({ transactionId: tx.id, newActorId: 'missing-user', changedBy: 'admin-1' }),
+      ).rejects.toThrow(/User not found/);
+    });
+
+    it('rejects inactive new actor', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const tx = trxRows[0]!;
+      await expect(
+        InventoryService.updateActor({ transactionId: tx.id, newActorId: 'user-3', changedBy: 'admin-1' }),
+      ).rejects.toThrow(/inactive/);
+    });
+
+    it('returns same result when actor is unchanged', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const tx = trxRows[0]!;
+      const result = await InventoryService.updateActor({
+        transactionId: tx.id,
+        newActorId: 'user-1',
+        changedBy: 'admin-1',
+      });
+      expect(result.actorId).toBe('user-1');
+      expect(auditLog).toHaveLength(0);
+    });
+
+    it('creates an audit log entry on change', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const tx = trxRows[0]!;
+      await InventoryService.updateActor({
+        transactionId: tx.id,
+        newActorId: 'user-2',
+        changedBy: 'admin-1',
+      });
+      expect(auditLog).toHaveLength(1);
+      expect(auditLog[0]).toMatchObject({
+        action: 'UPDATE_ACTOR',
+        entityType: 'InventoryTransaction',
+        entityId: tx.id,
+        actorId: 'admin-1',
+        before: { actorId: 'user-1', actorName: 'Alice' },
+        after: { actorId: 'user-2', actorName: 'Bob' },
+      });
+    });
+  });
+
+  // ── postGoodsReceipt ───────────────────────────────────────────────────
+  describe('postGoodsReceipt', () => {
+    beforeEach(() => {
+      goodsReceipts.clear();
+      purchaseOrderLines.clear();
+      purchaseOrders.clear();
+    });
+
+    it('posts a SUBMITTED receipt, creates RECEIPT transactions, and sets status to POSTED', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1',
+        status: 'SUBMITTED',
+        purchaseOrderId: null,
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(10), purchaseOrderLineId: null }],
+      });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      const receipt = trxRows.find((r) => r.type === 'RECEIPT');
+      expect(receipt).toBeDefined();
+      expect(receipt!.materialId).toBe('m-1');
+      expect(receipt!.locationId).toBe('l-1');
+      expect(receipt!.quantity.toString()).toBe('10');
+      expect(receipt!.referenceType).toBe('GoodsReceipt');
+      expect(receipt!.referenceId).toBe('gr-1');
+      expect(receipt!.actorId).toBe('user-1');
+
+      const gr = goodsReceipts.get('gr-1');
+      expect(gr?.status).toBe('POSTED');
+    });
+
+    it('throws when goods receipt is not found', async () => {
+      await expect(
+        InventoryService.postGoodsReceipt({ goodsReceiptId: 'missing', actorId: 'user-1' }),
+      ).rejects.toThrow(/GoodsReceipt not found/);
+    });
+
+    it('throws when status is DRAFT', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'DRAFT', purchaseOrderId: null, lines: [],
+      });
+      await expect(
+        InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }),
+      ).rejects.toThrow(/SUBMITTED before posting/);
+    });
+
+    it('throws when status is already POSTED', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'POSTED', purchaseOrderId: null, lines: [],
+      });
+      await expect(
+        InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }),
+      ).rejects.toThrow(/already posted/);
+    });
+
+    it('updates linked PO line receivedQty when PO line is referenced', async () => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(10), receivedQty: new Prisma.Decimal(2),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-1' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      const poLine = purchaseOrderLines.get('pol-1');
+      expect(poLine?.receivedQty.toString()).toBe('5');
+    });
+
+    it('throws when receiving more than the ordered quantity on a PO line', async () => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(3), receivedQty: new Prisma.Decimal(2),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(5), purchaseOrderLineId: 'pol-1' }],
+      });
+
+      await expect(
+        InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }),
+      ).rejects.toThrow(/exceed the ordered quantity/);
+    });
+
+    it('skips PO line check when purchaseOrderLineId is null but line is valid', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: null,
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(10), purchaseOrderLineId: null }],
+      });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(1);
+      expect(goodsReceipts.get('gr-1')?.status).toBe('POSTED');
+    });
+
+    it('skips PO line check gracefully when the PO line is missing from DB', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-missing' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(1);
+    });
+
+    it('transitions PO to FULLY_RECEIVED when all lines are fully received', async () => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(3), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-1' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(purchaseOrders.get('po-1')?.status).toBe('FULLY_RECEIVED');
+    });
+
+    it('transitions PO to PARTIALLY_RECEIVED when not all lines are fully received', async () => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(10), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(5), purchaseOrderLineId: 'pol-1' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      const poLine = purchaseOrderLines.get('pol-1');
+      expect(poLine?.receivedQty.toString()).toBe('5');
+      expect(purchaseOrders.get('po-1')?.status).toBe('PARTIALLY_RECEIVED');
+    });
+
+    it('does not transition PO status when purchaseOrderId is null', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: null,
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(5), purchaseOrderLineId: null }],
+      });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(goodsReceipts.get('gr-1')?.status).toBe('POSTED');
+    });
+
+    it('posts multiple lines in a single receipt', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: null,
+        lines: [
+          { materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(10), purchaseOrderLineId: null },
+          { materialId: 'm-2', locationId: 'l-2', quantity: new Prisma.Decimal(20), purchaseOrderLineId: null },
+        ],
+      });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(2);
+    });
+  });
+});

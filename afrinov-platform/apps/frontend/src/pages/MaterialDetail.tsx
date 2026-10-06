@@ -1,0 +1,180 @@
+import { useParams, Link } from 'react-router-dom';
+import { useState } from 'react';
+import { useApi } from '../hooks/useApi';
+import { PageHeader, SectionHeader } from '../components/PageHeader';
+import { DataTable, type DataTableColumn } from '../components/DataTable';
+import { MovementBadge, Badge } from '../components/Badge';
+import { EmptyState, ErrorState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
+import { Drawer } from '../components/Modal';
+import { useToast } from '../components/Toast';
+import { formatDateTime, formatNumber } from '../lib/format';
+import { TransactionDrawer } from '../components/TransactionDrawer';
+
+interface Material {
+  id: string; sku: string; name: string; description?: string;
+  category: string; unitOfMeasure: string; requiredStock: string;
+  unitCost?: string; active: boolean;
+}
+interface StockRow {
+  materialId: string; materialSku: string; materialName: string;
+  category: string; unitOfMeasure: string; requiredStock: string;
+  locationId: string; locationName: string; locationType: string;
+  quantity: string; belowThreshold: boolean;
+}
+interface MovementRow {
+  id: string; postedAt: string; type: string;
+  materialId: string; materialSku: string; materialName: string;
+  locationId: string; locationName: string;
+  quantity: string; actorId: string; actorName: string; projectNumber?: string | null;
+  reasonCode?: string | null; reasonNote?: string | null;
+  referenceType?: string | null; referenceId?: string | null;
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  FASTENERS_SLUGS_INSULATION: 'Fasteners, slugs, insulation',
+  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE, electrical',
+  PROJECT_MATERIAL: 'Project material',
+  CONSUMABLES: 'Consumables',
+  TOOLS: 'Tools',
+};
+
+export function MaterialDetail() {
+  const { id } = useParams<{ id: string }>();
+  const material = useApi<Material>(id ? `/materials/${id}` : null);
+  const stock = useApi<StockRow[]>(id ? `/reports/current-stock?materialId=${id}` : null);
+  const moves = useApi<MovementRow[]>(id ? `/inventory-transactions?materialId=${id}&limit=50` : null);
+  const [selected, setSelected] = useState<MovementRow | null>(null);
+  const toast = useToast();
+
+  const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
+  const below = (stock.data ?? []).filter((r) => r.belowThreshold).length;
+
+  return (
+    <div>
+      <PageHeader
+        title={material.data?.name ?? (material.loading ? 'Loading…' : 'Material')}
+        description={material.data ? `${material.data.sku} · ${CATEGORY_LABELS[material.data.category] ?? material.data.category}` : ''}
+        breadcrumb={[
+          { label: 'Catalogue', to: '/materials' },
+          { label: material.data?.sku ?? 'Material' },
+        ]}
+        actions={material.data && (
+          <>
+            {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
+            <Link to="/stock" className="btn-secondary btn-sm">View in stock</Link>
+          </>
+        )}
+      />
+
+      {material.error && <ErrorState message={material.error.message} onRetry={material.reload} />}
+
+      {material.data && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <aside className="lg:col-span-1 space-y-4">
+            <section className="surface-card p-4 space-y-3">
+              <h2 className="text-h3 text-surface-900">Identity</h2>
+              <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
+                <dt className="text-surface-500">SKU</dt><dd className="col-span-2 text-mono">{material.data.sku}</dd>
+                <dt className="text-surface-500">Category</dt><dd className="col-span-2">{CATEGORY_LABELS[material.data.category] ?? material.data.category}</dd>
+                <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
+                <dt className="text-surface-500">Reorder at</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd>
+                {material.data.unitCost && (<><dt className="text-surface-500">Unit cost</dt><dd className="col-span-2 text-num">R {formatNumber(Number(material.data.unitCost), { fixed: true })}</dd></>)}
+                {material.data.description && (<><dt className="text-surface-500">Description</dt><dd className="col-span-2">{material.data.description}</dd></>)}
+              </dl>
+            </section>
+            <section className="surface-card p-4">
+              <h2 className="text-h3 text-surface-900 mb-3">Stock summary</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-eyebrow">Total on hand</div>
+                  <div className="text-h2 text-num font-semibold">{formatNumber(total)}</div>
+                </div>
+                <div>
+                  <div className="text-eyebrow">Below threshold</div>
+                  <div className={`text-h2 text-num font-semibold ${below > 0 ? 'text-warning-700' : ''}`}>{below}</div>
+                </div>
+              </div>
+            </section>
+          </aside>
+
+          <div className="lg:col-span-2 space-y-6">
+            <section>
+              <SectionHeader title="Stock by location" description="Current balance for this material at each location." />
+              <DataTable
+                ariaLabel="Stock by location"
+                isLoading={stock.loading}
+                rowKey={(r) => r.locationId}
+                rows={stock.data ?? []}
+                columns={[
+                  { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                  { key: 'type', header: 'Type', render: (r) => <span className="text-meta">{r.locationType}</span> },
+                  { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
+                  { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
+                  { key: 'status', header: 'Status', render: (r) => Number(r.quantity) <= 0 ? <Badge tone="danger" dot>Out</Badge> : r.belowThreshold ? <Badge tone="warning" dot>Low</Badge> : <Badge tone="success" dot>OK</Badge> },
+                ]}
+                emptyState={<EmptyState title="No stock recorded" description="Record a goods receipt to add stock for this material." />}
+              />
+            </section>
+
+            <section>
+              <SectionHeader title="Movement history" description="Last 50 transactions for this material." />
+              <DataTable
+                ariaLabel="Material movement history"
+                isLoading={moves.loading}
+                rowKey={(m) => m.id}
+                rows={moves.data ?? []}
+                columns={movementColumns({ onSelect: (m) => setSelected(m) })}
+                emptyState={<EmptyState title="No movements yet" description="Once stock is received, issued, or adjusted, it will show up here." />}
+              />
+            </section>
+          </div>
+        </div>
+      )}
+
+      {!material.data && !material.loading && !material.error && (
+        <EmptyState title="Material not found" description="It may have been deleted or the link is incorrect." />
+      )}
+
+      {material.loading && !material.data && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="surface-card p-4 h-48"><Skeleton h={120} /></div>
+          <div className="lg:col-span-2 surface-card p-4 h-72"><Skeleton h={240} /></div>
+        </div>
+      )}
+
+      {selected && (
+        <Drawer
+          open
+          onClose={() => setSelected(null)}
+          title="Transaction detail"
+          description={`${selected.materialSku} — ${selected.materialName}`}
+          width="md"
+        >
+          <TransactionDrawer
+            transaction={selected}
+            onClose={() => setSelected(null)}
+            onUpdated={(updated) => {
+              setSelected(updated);
+              moves.reload();
+              toast.success('Issuing person updated successfully');
+            }}
+            onError={(err) => toast.error('Update failed', err.message)}
+          />
+        </Drawer>
+      )}
+    </div>
+  );
+}
+
+function movementColumns({ onSelect }: { onSelect: (m: MovementRow) => void }): DataTableColumn<MovementRow>[] {
+  return [
+    { key: 'when', header: 'When', render: (m) => <button className="text-left btn-link text-meta whitespace-nowrap" onClick={() => onSelect(m)}>{formatDateTime(m.postedAt)}</button> },
+    { key: 'type', header: 'Type', render: (m) => <MovementBadge type={m.type} /> },
+    { key: 'loc', header: 'Location', render: (m) => m.locationName },
+    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{m.quantity}</span> },
+    { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace('_', ' ').toLowerCase()}</span> : <span className="text-surface-300">—</span> },
+    { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : <span className="text-surface-300">—</span> },
+    { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span> },
+  ];
+}

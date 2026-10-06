@@ -1,0 +1,19 @@
+# Build context for the backend image. The Dockerfile is built from the
+# repository root and only needs the manifests, the backend sources and the
+# lockfile. Excluding the installed dependency trees keeps the context small
+# and stops host-specific node_modules (including platform-native binaries
+# built for the developer's OS) from leaking into the image.
+**/node_modules
+**/dist
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.test.example
+**/coverage
+**/*.log
+**/.vscode
+**/.idea
+docs
+**/audit-out.json
+**/*-out.txt

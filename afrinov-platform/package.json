@@ -1,0 +1,28 @@
+{
+  "name": "afrinov-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Afrinov Inventory & Operations Platform — modular monolith",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:migrate": "npm run db:migrate --workspace=@afrinov/backend",
+    "db:seed": "npm run db:seed --workspace=@afrinov/backend",
+    "dev:backend": "npm run dev --workspace=@afrinov/backend",
+    "dev:frontend": "npm run dev --workspace=@afrinov/frontend"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  }
+}
