@@ -189,6 +189,29 @@ describe('F-03: authentication endpoints are rate limited', () => {
     expect(statuses[2]).toBe(429);
     await app.close();
   });
+
+  it('does not let ordinary API traffic use up the login budget', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.RATE_LIMIT_AUTH = '3';
+    process.env.RATE_LIMIT_GLOBAL = '1000';
+    process.env.DATABASE_URL = 'postgresql://u:p@localhost:5432/db';
+    process.env.JWT_SECRET = 'a-very-long-and-random-production-secret-1234567890';
+    const app = await buildServer();
+
+    // Everyone behind one office IP shares a key. Page loads from that IP must
+    // not lock the next person out of logging in.
+    for (let i = 0; i < 10; i += 1) {
+      const res = await app.inject({ method: 'GET', url: '/health' });
+      expect(res.statusCode).toBe(200);
+    }
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'a@b.c', password: 'nope' },
+    });
+    expect(res.statusCode).not.toBe(429);
+    await app.close();
+  });
 });
 
 describe('F-05: account status is database-authoritative', () => {

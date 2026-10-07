@@ -108,7 +108,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // far more permissive global budget. Compare on the path only.
     max: (req) => (STRICT_AUTH_PATHS.has(pathnameOf(req.url)) ? authLimit : globalLimit),
     timeWindow: '1 minute',
-    keyGenerator: (req) => req.ip,
+    // The limiter keeps one counter per key, so auth requests get a key of
+    // their own. With a shared key, ordinary API calls from an IP counted
+    // against the 5-per-minute login budget, and a few page loads from a
+    // shared office IP locked everyone there out of logging in.
+    keyGenerator: (req) => (STRICT_AUTH_PATHS.has(pathnameOf(req.url)) ? `auth:${req.ip}` : req.ip),
     addHeaders: { 'x-ratelimit-remaining': true, 'x-ratelimit-reset': true, 'retry-after': true },
     // @fastify/rate-limit *throws* whatever this returns, and a thrown plain
     // object is not an Error, so it used to fall through the error handler to a
