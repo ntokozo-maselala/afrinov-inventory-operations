@@ -1,4 +1,4 @@
-import { buildServer } from './server.js';
+import { buildServer } from '../src/server.js';
 
 async function main() {
   // This tool is compiled into the production image, so it must refuse to run

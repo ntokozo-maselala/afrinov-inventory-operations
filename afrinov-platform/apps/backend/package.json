@@ -8,13 +8,15 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch --env-file=.env src/index.ts",
     "start": "node dist/index.js",
-    "lint": "eslint src --ext .ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src integration scripts --ext .ts",
+    "typecheck": "tsc -p tsconfig.tools.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "diag:login": "tsx --env-file=.env scripts/diag-login.ts",
+    "diag:admin": "tsx --env-file=.env scripts/diagnostic.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

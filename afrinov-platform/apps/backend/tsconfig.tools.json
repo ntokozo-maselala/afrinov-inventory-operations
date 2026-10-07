@@ -1,0 +1,10 @@
+{
+  // Type-checks the code that is not part of the build: integration tests and
+  // developer scripts. Never emits; tsconfig.json alone produces dist/.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "integration/**/*.ts", "scripts/**/*.ts"]
+}
