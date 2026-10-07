@@ -4,7 +4,7 @@ import { InventoryService } from './inventory.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
-const issueSchema = z.object({
+export const issueSchema = z.object({
   materialId: z.string().uuid(),
   locationId: z.string().uuid(),
   quantity: z.number().positive(),
@@ -12,14 +12,14 @@ const issueSchema = z.object({
   projectNumber: z.string().optional(),
 });
 
-const transferSchema = z.object({
+export const transferSchema = z.object({
   materialId: z.string().uuid(),
   fromLocationId: z.string().uuid(),
   toLocationId: z.string().uuid(),
   quantity: z.number().positive(),
 });
 
-const adjustmentSchema = z.object({
+export const adjustmentSchema = z.object({
   materialId: z.string().uuid(),
   locationId: z.string().uuid(),
   quantity: z.number(),

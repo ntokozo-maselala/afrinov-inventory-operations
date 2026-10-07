@@ -85,6 +85,18 @@ export function isProcurementEnabled(env: NodeJS.ProcessEnv = process.env): bool
   return String(env.PROCUREMENT_ENABLED ?? '').toLowerCase() === 'true';
 }
 
+/**
+ * Whether to serve the API docs at /api/docs. `API_DOCS_ENABLED=true|false`
+ * decides when set; otherwise they are on everywhere except production, where
+ * publishing the full API surface should be a deliberate choice.
+ */
+export function isApiDocsEnabled(nodeEnv: AppConfig['nodeEnv'], env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = String(env.API_DOCS_ENABLED ?? '').toLowerCase();
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return nodeEnv !== 'production';
+}
+
 // Origins the local Vite dev server and common SPA dev hosts are served from.
 // These are the only origins permitted when CORS_ORIGIN is not configured
 // during development. Reflection of arbitrary origins is never the default.

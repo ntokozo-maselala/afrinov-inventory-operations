@@ -6,7 +6,7 @@ import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
 
-const createSupplierSchema = z.object({
+export const createSupplierSchema = z.object({
   name: z.string().min(1),
   contactName: z.string().optional(),
   contactEmail: z.string().email().optional(),
@@ -14,7 +14,7 @@ const createSupplierSchema = z.object({
   notes: z.string().optional(),
 });
 
-const createPOSchema = z.object({
+export const createPOSchema = z.object({
   supplierId: z.string().uuid(),
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().optional(),
@@ -29,27 +29,27 @@ const createPOSchema = z.object({
     .min(1),
 });
 
-const updatePOSchema = z.object({
+export const updatePOSchema = z.object({
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().nullable().optional(),
 });
 
-const shipSchema = z.object({
+export const shipSchema = z.object({
   trackingNumber: z.string().max(120).optional(),
   carrier: z.string().max(120).optional(),
   shipmentNotes: z.string().max(2000).optional(),
 });
 
-const deliverSchema = z.object({
+export const deliverSchema = z.object({
   locationId: z.string().uuid(),
   deliveryNotes: z.string().max(2000).optional(),
 });
 
-const cancelSchema = z.object({
+export const cancelSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
-const createGRSchema = z.object({
+export const createGRSchema = z.object({
   purchaseOrderId: z.string().uuid().optional(),
   supplierId: z.string().uuid(),
   deliveryRef: z.string().optional(),

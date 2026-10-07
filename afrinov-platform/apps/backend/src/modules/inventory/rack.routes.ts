@@ -6,7 +6,7 @@ import { requirePermission } from '../../shared/authorization.js';
 
 const rackStatusEnum = z.enum(['ACTIVE', 'INACTIVE', 'FULL']);
 
-const createRackSchema = z.object({
+export const createRackSchema = z.object({
   code: z.string().min(1).max(64),
   name: z.string().min(1).max(120),
   description: z.string().max(1000).optional(),
@@ -17,7 +17,7 @@ const createRackSchema = z.object({
   notes: z.string().max(1000).optional(),
 });
 
-const updateRackSchema = z.object({
+export const updateRackSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(1000).nullable().optional(),
   locationId: z.string().uuid().nullable().optional(),

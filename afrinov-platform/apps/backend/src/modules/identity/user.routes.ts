@@ -4,14 +4,14 @@ import { UserService } from './identity.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
-const createUserSchema = z.object({
+export const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   password: z.string().min(8),
   roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1),
 });
 
-const updateUserSchema = z.object({
+export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
   active: z.boolean().optional(),
   roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1).optional(),
