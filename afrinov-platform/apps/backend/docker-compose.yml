@@ -44,6 +44,10 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-}
       # Purchase orders and goods receipts are off unless this is "true".
       PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-false}
+      # Password for the admin account the seed creates on first start. The
+      # seed refuses to run in production without it, so it is required the
+      # first time against an empty database and ignored once the admin exists.
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       PORT: 4000
     depends_on:
       db:
@@ -53,9 +57,7 @@ services:
     # Seed is idempotent. Run the compiled seed (node dist/db/seed.js) rather
     # than `npm run db:seed`, which needs tsx — a dev dependency that is
     # pruned from the production image. SEED_ADMIN_PASSWORD is only consumed
-    # the first time the admin account is created; supply it from the
-    # environment, otherwise the seed generates a random password it does not
-    # print.
+    # the first time the admin account is created (see above).
     command: sh -c "npx prisma migrate deploy && node dist/db/seed.js && node dist/index.js"
 
 volumes:
