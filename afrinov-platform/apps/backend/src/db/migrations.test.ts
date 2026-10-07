@@ -155,7 +155,7 @@ describe('Prisma migrations baseline', () => {
   });
 
   it('the location_management migration is idempotent so it composes with the baseline', () => {
-    const sql = readMigration('20260101000000_location_management');
+    const sql = readMigration('20260101000001_location_management');
     // Every ALTER TABLE / CREATE INDEX in this migration must be a
     // no-op on a fresh install whose `locations` table was created by
     // the baseline migration (which already includes these columns).
