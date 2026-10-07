@@ -6,7 +6,7 @@ import { requirePermission } from '../../shared/authorization.js';
 
 const projectStatusEnum = z.enum(PROJECT_STATUSES as [ProjectStatus, ...ProjectStatus[]]);
 
-const createProjectSchema = z.object({
+export const createProjectSchema = z.object({
   projectNumber: z.string().min(1).max(64),
   name: z.string().min(1).max(200),
   code: z.string().max(64).optional(),
@@ -20,7 +20,7 @@ const createProjectSchema = z.object({
   active: z.boolean().optional(),
 });
 
-const updateProjectSchema = z.object({
+export const updateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   code: z.string().max(64).nullable().optional(),
   description: z.string().max(2000).nullable().optional(),

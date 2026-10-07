@@ -6,7 +6,7 @@ import { requirePermission } from '../../shared/authorization.js';
 
 // Zod schema mirrors the existing material create schema but additionally
 // accepts the initial stock position. Validation runs at the API boundary.
-const createStockItemSchema = z
+export const createStockItemSchema = z
   .object({
     sku: z.string().min(1).max(64),
     name: z.string().min(1).max(200),

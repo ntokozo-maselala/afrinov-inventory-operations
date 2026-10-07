@@ -44,6 +44,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-}
       # Purchase orders and goods receipts are off unless this is "true".
       PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-false}
+      # API docs at /api/docs. Off in production unless this is "true".
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
       # Password for the admin account the seed creates on first start. The
       # seed refuses to run in production without it, so it is required the
       # first time against an empty database and ignored once the admin exists.

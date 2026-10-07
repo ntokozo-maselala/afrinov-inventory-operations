@@ -8,7 +8,7 @@ import { prisma } from '../../shared/db.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 
-const querySchema = z.object({
+export const auditQuerySchema = z.object({
   entityType: z.string().optional(),
   entityId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
@@ -21,7 +21,7 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'You do not have permission to view the audit log.' } });
     }
-    const parsed = querySchema.safeParse(req.query);
+    const parsed = auditQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid query', details: parsed.error.flatten() } });
     }

@@ -5,9 +5,9 @@ import { requirePermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { Errors } from '../../shared/errors.js';
 
-const setOneSchema = z.object({ value: z.unknown() });
+export const setOneSchema = z.object({ value: z.unknown() });
 
-const setManySchema = z.object({
+export const setManySchema = z.object({
   updates: z.record(z.string().min(1), z.unknown()),
 });
 

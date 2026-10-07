@@ -1,11 +1,20 @@
-import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply, type RouteOptions } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
+import type { StaticDocumentSpec } from '@fastify/swagger';
 import { ApiError, Errors } from './shared/errors.js';
-import { loadConfig, ConfigError, resolveCorsOrigin, isKnownInsecureSecret, isProcurementEnabled, type AppConfig } from './shared/config.js';
+import {
+  loadConfig,
+  ConfigError,
+  resolveCorsOrigin,
+  isKnownInsecureSecret,
+  isProcurementEnabled,
+  isApiDocsEnabled,
+  type AppConfig,
+} from './shared/config.js';
 import { prisma } from './shared/db.js';
 import { isActiveInDb } from './shared/authorization.js';
 import { serviceName, serviceVersion } from './shared/version.js';
@@ -27,6 +36,10 @@ export interface BuildServerOptions {
   skipConfigValidation?: boolean;
   /** Overrides the PROCUREMENT_ENABLED environment variable (used by tests). */
   procurementEnabled?: boolean;
+  /** Overrides the API_DOCS_ENABLED environment variable (used by tests). */
+  apiDocsEnabled?: boolean;
+  /** Called for every route as it is registered (used by tests). */
+  onRoute?: (route: RouteOptions) => void;
 }
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -41,6 +54,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     requestTimeout: 30_000,
     pluginTimeout: config.nodeEnv === 'test' ? 60_000 : 10_000,
   });
+
+  if (opts.onRoute) app.addHook('onRoute', opts.onRoute);
 
   // Per-request correlation ID so logs can be traced through async boundaries.
   //
@@ -206,6 +221,28 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     }
   });
 
+  const procurementEnabled = opts.procurementEnabled ?? isProcurementEnabled();
+
+  // API docs: Swagger UI at /api/docs, the OpenAPI document at /api/docs/json.
+  if (opts.apiDocsEnabled ?? isApiDocsEnabled(config.nodeEnv)) {
+    const { default: swagger } = await import('@fastify/swagger');
+    const { default: swaggerUi } = await import('@fastify/swagger-ui');
+    const { buildOpenApiDocument } = await import('./openapi/document.js');
+    // zod-to-openapi and @fastify/swagger describe the same OpenAPI 3 document
+    // with different type packages.
+    const document = buildOpenApiDocument({ procurementEnabled }) as unknown as StaticDocumentSpec['document'];
+    await app.register(swagger, { mode: 'static', specification: { document } });
+    await app.register(swaggerUi, {
+      routePrefix: '/api/docs',
+      // The plugin's own CSP for its pages replaces the API-wide
+      // `default-src 'none'`, which would block the UI's scripts and styles.
+      // `upgrade-insecure-requests` is dropped so the page still loads when the
+      // API is served over plain HTTP.
+      staticCSP: true,
+      transformStaticCSP: (header) => header.replace(/\s*upgrade-insecure-requests;?/, ''),
+    });
+  }
+
   await app.register(async (instance) => {
     const { authRoutes } = await import('./modules/identity/auth.routes.js');
     const { userRoutes } = await import('./modules/identity/user.routes.js');
@@ -228,7 +265,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     await rackRoutes(instance);
     await inventoryRoutes(instance);
     await supplierRoutes(instance);
-    if (opts.procurementEnabled ?? isProcurementEnabled()) {
+    if (procurementEnabled) {
       await procurementRoutes(instance);
     }
     await projectRoutes(instance);

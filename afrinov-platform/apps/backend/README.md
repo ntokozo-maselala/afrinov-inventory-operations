@@ -56,7 +56,8 @@ variable for one command with `$env:NAME = "value"; <command>`.
 
    It listens on <http://localhost:4000>. Check
    <http://localhost:4000/health/ready>: it returns `"database": "connected"`
-   when the API can reach PostgreSQL.
+   when the API can reach PostgreSQL. The API docs are at
+   <http://localhost:4000/api/docs>.
 
 ## Running it with Docker
 
@@ -74,7 +75,8 @@ docker compose up --build
 
 The container runs with `NODE_ENV=production`, so the stricter production
 rules apply: `JWT_SECRET` must be a real random value, `SEED_ADMIN_PASSWORD`
-is required on first start, and CORS is disabled unless `CORS_ORIGIN` is set.
+is required on first start, CORS is disabled unless `CORS_ORIGIN` is set, and
+the API docs are off unless `API_DOCS_ENABLED=true`.
 
 ## Environment variables
 
@@ -93,6 +95,7 @@ is required on first start, and CORS is disabled unless `CORS_ORIGIN` is set.
 | `RATE_LIMIT_AUTH` | No | `5` | Login/register requests per minute per IP |
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
 | `PROCUREMENT_ENABLED` | No | `false` | `true` turns on purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
+| `API_DOCS_ENABLED` | No | On, except in production | `true` or `false` to serve the API docs at `/api/docs` |
 | `SEED_ADMIN_PASSWORD` | In production | Random | Admin password the seed sets when it first creates the account |
 | `SEED_ADMIN_EMAIL` | No | `admin@afrinov.local` | Account used by the integration tests and diagnostic scripts |
 | `REPORT_CURRENCY` | No | `ZAR` | Currency code returned with inventory report values |
@@ -106,12 +109,17 @@ Run from `apps/backend`.
 | `npm run dev` | Start the API with hot reload, reading `.env` |
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run the compiled API |
-| `npm run typecheck` | Type-check without emitting files |
-| `npm run lint` | Run ESLint on `src/` |
+| `npm run typecheck` | Type-check `src/`, `integration/` and `scripts/` without emitting files |
+| `npm run lint` | Run ESLint on `src/`, `integration/` and `scripts/` |
 | `npm test` | Run the unit tests |
 | `npm run test:integration` | Run the integration tests against a real database |
 | `npm run db:migrate` | Apply pending Prisma migrations |
 | `npm run db:seed` | Load roles, permissions, the admin account and demo data |
+| `npm run diag:login` | Log in as the seed admin through the full server and print the result. Needs `.env` with `SEED_ADMIN_PASSWORD` |
+| `npm run diag:admin` | Print whether the seed admin exists, is active, its roles, and every user's email and status. Needs `.env` |
+
+The two `diag:` scripts live in `scripts/`, outside the build, and refuse to
+run when `NODE_ENV=production`.
 
 ## Tests
 
@@ -141,10 +149,12 @@ prisma/
   schema.prisma        Database schema
   migrations/          SQL migrations, applied in name order
 integration/           Tests against a real server and database
+scripts/               Developer diagnostics, not part of the build
 src/
   index.ts             Entry point: validates config, then starts the server
   server.ts            Fastify setup: CORS, security headers, JWT, rate limits, routes
   db/                  Migration runner and seed
+  openapi/             The OpenAPI document served at /api/docs
   shared/              Config, errors, permissions, authorization, Prisma client
   modules/
     identity/          Login, registration, users and roles
@@ -164,6 +174,16 @@ Stock balances are never written directly. Every stock change is recorded in
 the inventory transaction ledger, and balances are recalculated from it.
 
 ## API
+
+The full reference is served by the API itself: Swagger UI at `/api/docs`, and
+the OpenAPI 3 document at `/api/docs/json` for generating clients. It lists
+every endpoint with its request body, query parameters, required permission
+and status codes. Response bodies are not described yet.
+
+The request bodies in the docs come from the same Zod schemas the routes
+validate with. When you add an endpoint, add it to `OPERATIONS` in
+`src/openapi/document.ts`; a unit test fails until the docs and the
+registered routes match.
 
 Endpoints are under `/api/v1`; the health checks are also served at the root
 (`/health`, `/health/ready`). Everything except login, registration and the
@@ -186,5 +206,8 @@ Errors use one shape: `{ "error": { "code", "message", "details" } }`.
 
 Permissions are checked on the server. The roles are `ADMIN`,
 `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`, `TECHNICIAN` and `VIEWER`;
-`src/shared/permissions.ts` maps each role to what it may do. New
-self-registered users get `VIEWER`.
+`src/shared/permissions.ts` maps each role to what it may do.
+
+Self-registration (`POST /auth/register`) is off until an admin turns on
+"Allow self-registration" in Settings (`security.allowSelfRegistration`).
+Self-registered users get `VIEWER`.

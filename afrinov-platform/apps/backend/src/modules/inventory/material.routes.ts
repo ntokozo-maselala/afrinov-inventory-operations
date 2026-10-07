@@ -5,7 +5,7 @@ import { LocationService } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
-const createMaterialSchema = z.object({
+export const createMaterialSchema = z.object({
   sku: z.string().min(1),
   name: z.string().min(1),
   category: z.enum(['FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'CONSUMABLES', 'TOOLS']),
@@ -15,7 +15,7 @@ const createMaterialSchema = z.object({
   description: z.string().optional(),
 });
 
-const updateMaterialSchema = z.object({
+export const updateMaterialSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   unitOfMeasure: z.string().min(1).optional(),
@@ -67,7 +67,7 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
 
 const locationTypeEnum = z.enum(['RACK', 'STOREROOM', 'SHOP_FLOOR_AREA', 'CONTAINER', 'OFF_SITE']);
 
-const createLocationSchema = z.object({
+export const createLocationSchema = z.object({
   name: z.string().min(1).max(120),
   code: z.string().min(1).max(32).optional(),
   type: locationTypeEnum,
@@ -80,7 +80,7 @@ const createLocationSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
-const updateLocationSchema = z.object({
+export const updateLocationSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   code: z.string().min(1).max(32).nullable().optional(),
   type: locationTypeEnum.optional(),
@@ -93,7 +93,7 @@ const updateLocationSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
 });
 
-const locationStatusSchema = z.object({
+export const locationStatusSchema = z.object({
   active: z.boolean(),
 });
 

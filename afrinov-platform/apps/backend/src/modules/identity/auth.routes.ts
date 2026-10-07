@@ -4,12 +4,12 @@ import { AuthService } from './identity.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { Errors } from '../../shared/errors.js';
 
-const loginSchema = z.object({
+export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-const registerSchema = z.object({
+export const registerSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email(),
   password: z.string().min(8).max(128),
