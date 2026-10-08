@@ -39,6 +39,7 @@ const STATUS_OPTIONS = [
   { value: 'out', label: 'Out of stock' },
 ];
 
+/** Show filtered stock balances with role-gated stock creation and issue actions. */
 export function Stock() {
   const stock = useApi<StockRow[]>('/reports/current-stock');
   const [q, setQ] = useState('');
@@ -73,9 +74,15 @@ export function Stock() {
         title="Stock"
         description="Current on-hand quantities across all locations. Source of truth is the inventory transaction ledger."
         actions={
+          <div className="flex flex-wrap gap-2">
+          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
+            <Link to="/stock/issue">
+              <Button variant="primary" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
+            </Link>
+          </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
             <Button
-              variant="primary"
+              variant="secondary"
               leadingIcon={<Icon.Plus size={14} />}
               onClick={() => setAdding(true)}
               aria-label="Add stock item"
@@ -83,6 +90,7 @@ export function Stock() {
               Add stock item
             </Button>
           </RoleGuard>
+          </div>
         }
       />
 

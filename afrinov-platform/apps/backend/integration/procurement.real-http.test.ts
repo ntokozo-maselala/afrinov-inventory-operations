@@ -1,5 +1,5 @@
 // Real-HTTP + real-database tests for receiving stock against purchase
-// orders, by posting goods receipts and by marking an order delivered.
+// orders, by posting goods receipts and by receiving a whole order at once.
 // Receiving must add exactly the received quantity to stock, never twice, and
 // a rejected posting must roll back completely.
 //
@@ -163,40 +163,68 @@ describe('receiving stock over real HTTP', () => {
 
       await expectStock('10');
       const after = await getOrder(order.id);
-      expect(after.status).toBe('FULLY_RECEIVED');
+      expect(after.status).toBe('RECEIVED');
       expect(Number(after.lines[0]!.receivedQty)).toBe(10);
     });
   });
 
-  describe('delivering an order', () => {
-    it('ship then deliver receives the full ordered quantity once', async () => {
+  describe('receiving a whole order and closing', () => {
+    it('receive books everything outstanding once and marks the order RECEIVED', async () => {
       const order = await approvedOrder(8);
 
-      const shipped = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/ship`, { carrier: 'IT Couriers' });
-      expect(shipped.status).toBe(200);
-      expect(shipped.body.status).toBe('SHIPPED');
+      const received = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
+      expect(received.status).toBe(200);
+      expect(received.body.status).toBe('RECEIVED');
 
-      const delivered = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/deliver`, { locationId });
-      expect(delivered.status).toBe(200);
-      expect(delivered.body.status).toBe('DELIVERED');
-
-      await expectStock('18'); // 10 from the goods receipts + 8 delivered
+      await expectStock('18'); // 10 from the goods receipts + 8 received
       const ledger = await prisma.inventoryTransaction.findMany({ where: { referenceId: order.id } });
       expect(ledger).toHaveLength(1);
       expect(ledger[0]!.referenceType).toBe('PurchaseOrder');
       expect(ledger[0]!.quantity.toString()).toBe('8');
 
-      const again = await api('POST', `/purchase-orders/${order.id}/deliver`, { locationId });
+      const again = await api('POST', `/purchase-orders/${order.id}/receive`, { locationId });
       expect(again.status).toBe(409);
       await expectStock('18');
+
+      const closed = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/close`, {});
+      expect(closed.status).toBe(200);
+      expect(closed.body.status).toBe('CLOSED');
     });
 
-    it('cannot deliver an order that has not shipped', async () => {
-      const order = await approvedOrder(3);
-      const res = await api<{ error: { code: string } }>('POST', `/purchase-orders/${order.id}/deliver`, { locationId });
+    it('cannot receive an order that has not been approved', async () => {
+      const draft = await api<PurchaseOrder>('POST', '/purchase-orders', {
+        supplierId,
+        lines: [{ materialId, orderedQty: 3 }],
+      });
+      expect(draft.status).toBe(201);
+      const res = await api<{ error: { code: string } }>('POST', `/purchase-orders/${draft.body.id}/receive`, { locationId });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('INVALID_STATE');
       await expectStock('18');
+    });
+
+    it('closing short needs a reason, and a closed order takes no more receipts', async () => {
+      const order = await approvedOrder(5);
+      const part = await receive(order, 2);
+      expect((await api('POST', `/goods-receipts/${part.id}/post`)).status).toBe(200);
+      expect((await getOrder(order.id)).status).toBe('PARTIALLY_RECEIVED');
+      await expectStock('20');
+
+      const noReason = await api<{ error: { code: string } }>('POST', `/purchase-orders/${order.id}/close`, {});
+      expect(noReason.status).toBe(400);
+
+      const closed = await api<PurchaseOrder>('POST', `/purchase-orders/${order.id}/close`, { reason: 'Supplier cannot supply the rest' });
+      expect(closed.status).toBe(200);
+      expect(closed.body.status).toBe('CLOSED');
+
+      const late = await api<{ error: { code: string } }>('POST', '/goods-receipts', {
+        purchaseOrderId: order.id,
+        supplierId,
+        lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }],
+      });
+      expect(late.status).toBe(409);
+      expect(late.body.error.code).toBe('INVALID_STATE');
+      await expectStock('20');
     });
   });
 });

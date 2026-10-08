@@ -18,6 +18,14 @@ import type { ApiError } from '../api/client';
 
 const api = createMockApi();
 
+/** Issue one line to a recipient ('rcp-1' is Sabelo, active in the seed). */
+async function issue(materialId: string, locationId: string, quantity: number, recipientId = 'rcp-1'): Promise<string> {
+  const { transactionIds } = await api.post<{ transactionIds: string[] }>('/inventory-issues', {
+    recipientId, lines: [{ materialId, locationId, quantity }],
+  });
+  return transactionIds[0]!;
+}
+
 describe('mock API mutation flows', () => {
   beforeEach(() => {
     resetMockState();
@@ -84,7 +92,7 @@ describe('mock API mutation flows', () => {
       const qtyBefore = Number(loc1!.quantity);
       expect(qtyBefore).toBe(30);
 
-      await api.post('/inventory-issues', { materialId: 'mat-1', locationId: 'loc-1', quantity: 10 });
+      await issue('mat-1', 'loc-1', 10);
       const after = await api.get<Array<{ materialId: string; locationId: string; quantity: string }>>(
         '/reports/current-stock?materialId=mat-1',
       );
@@ -96,7 +104,7 @@ describe('mock API mutation flows', () => {
       // mat-1 at loc-1 has 30 after seed. Asking for 100 should fail.
       let caught: ApiError | undefined;
       try {
-        await api.post('/inventory-issues', { materialId: 'mat-1', locationId: 'loc-1', quantity: 100 });
+        await issue('mat-1', 'loc-1', 100);
       } catch (e) {
         if (isApiError(e)) caught = e;
       }
@@ -191,7 +199,7 @@ describe('mock API mutation flows', () => {
       // mat-8 at loc-1: seed receipt 25 - issue 5 = 20
       const before = Number(beforeRows.find((r) => r.locationId === 'loc-1')?.quantity ?? 0);
 
-      await api.post('/inventory-issues', { materialId: 'mat-8', locationId: 'loc-1', quantity: 10 });
+      await issue('mat-8', 'loc-1', 10);
       const afterRows = await api.get<Array<{ materialId: string; locationId: string; quantity: string }>>(
         '/reports/current-stock?materialId=mat-8',
       );
@@ -227,30 +235,52 @@ describe('mock API mutation flows', () => {
       expect(result.status).toBe('PENDING_APPROVAL');
     });
 
-    it('rejects shipping from DRAFT (not APPROVED)', async () => {
-      const draft = await makeDraftPO();
-      let caught: ApiError | undefined;
+    /** Return an API rejection code, UNKNOWN for other errors, or undefined on success. */
+    async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
       try {
-        await api.post<{ status: string }>(`/purchase-orders/${draft.id}/ship`, { trackingNumber: 'TRK-1' });
+        await p;
+        return undefined;
       } catch (e) {
-        if (isApiError(e)) caught = e;
+        return isApiError(e) ? e.code : 'UNKNOWN';
       }
-      expect(caught).toBeDefined();
-      expect(caught!.code).toBe('INVALID_STATE');
+    }
+
+    /** Create and approve a mock purchase order, returning its original draft response for its ID. */
+    async function approvedPO() {
+      const draft = await makeDraftPO();
+      await api.post(`/purchase-orders/${draft.id}/submit`, {});
+      await api.post(`/purchase-orders/${draft.id}/approve`, {});
+      return draft;
+    }
+
+    it('has no shipping stage', async () => {
+      const draft = await makeDraftPO();
+      expect(await codeOf(api.post(`/purchase-orders/${draft.id}/ship`, { trackingNumber: 'TRK-1' }))).not.toBeUndefined();
     });
 
-    it('rejects delivering from PENDING_APPROVAL (not SHIPPED)', async () => {
+    it('rejects receiving a PO that is not approved yet', async () => {
       const draft = await makeDraftPO();
-      await api.post<{ status: string }>(`/purchase-orders/${draft.id}/submit`, {});
-      // Now in PENDING_APPROVAL; delivering should fail.
-      let caught: ApiError | undefined;
-      try {
-        await api.post<{ status: string }>(`/purchase-orders/${draft.id}/deliver`, { locationId: 'loc-1' });
-      } catch (e) {
-        if (isApiError(e)) caught = e;
-      }
-      expect(caught).toBeDefined();
-      expect(caught!.code).toBe('INVALID_STATE');
+      await api.post(`/purchase-orders/${draft.id}/submit`, {});
+      expect(await codeOf(api.post(`/purchase-orders/${draft.id}/receive`, { locationId: 'loc-1' }))).toBe('INVALID_STATE');
+    });
+
+    it('receives everything outstanding, then closes', async () => {
+      const po = await approvedPO();
+      const received = await api.post<{ status: string }>(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+      expect(received.status).toBe('RECEIVED');
+      expect(await codeOf(api.post(`/purchase-orders/${po.id}/cancel`, { reason: 'Too late' }))).toBe('INVALID_STATE');
+      const closed = await api.post<{ status: string }>(`/purchase-orders/${po.id}/close`, {});
+      expect(closed.status).toBe('CLOSED');
+    });
+
+    it('refuses goods receipts against a PO that is not approved', async () => {
+      const draft = await makeDraftPO();
+      const code = await codeOf(api.post('/goods-receipts', {
+        purchaseOrderId: draft.id,
+        supplierId: 'sup-1',
+        lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }],
+      }));
+      expect(code).toBe('INVALID_STATE');
     });
 
     it('cancelling a DRAFT PO requires a reason', async () => {
@@ -271,7 +301,7 @@ describe('mock API mutation flows', () => {
       const transfer = await api.post<{ outTransactionId: string; inTransactionId: string }>('/inventory-transfers', {
         materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-3', quantity: 5,
       });
-      await api.post('/inventory-issues', { materialId: 'mat-1', locationId: 'loc-3', quantity: 21 });
+      await issue('mat-1', 'loc-3', 21);
       const before = await api.get('/inventory-transactions?materialId=mat-1');
       await expect(api.post(`/inventory-transactions/${transfer[selectedLeg]}/reversal`, { reason: 'Wrong rack' }))
         .rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
@@ -281,9 +311,7 @@ describe('mock API mutation flows', () => {
     });
 
     it('refuses to reverse a reversal without changing the restored stock', async () => {
-      const { transactionId } = await api.post<{ transactionId: string }>('/inventory-issues', {
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5,
-      });
+      const transactionId = await issue('mat-1', 'loc-1', 5);
       const { reversalIds } = await api.post<{ reversalIds: string[] }>(`/inventory-transactions/${transactionId}/reversal`, { reason: 'Wrong item' });
       const before = await api.get('/inventory-transactions?materialId=mat-1');
       await expect(api.post(`/inventory-transactions/${reversalIds[0]}/reversal`, { reason: 'Undo reversal' }))
@@ -355,6 +383,55 @@ describe('mock API mutation flows', () => {
         materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE',
       });
       expect(await codeOf(api.patch(`/inventory-transactions/${transactionId}`, { actorId: 'user-2' }))).not.toBeUndefined();
+    });
+  });
+
+  describe('recipients ("Issued To")', () => {
+    /** Return an API rejection code, UNKNOWN for other errors, or undefined on success. */
+    async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
+      try {
+        await p;
+        return undefined;
+      } catch (e) {
+        return isApiError(e) ? e.code : 'UNKNOWN';
+      }
+    }
+
+    it('adds a recipient and refuses a duplicate name, ignoring case', async () => {
+      const created = await api.post<{ id: string; name: string; active: boolean }>('/recipients', { name: ' Bukho ', type: 'WORKER' });
+      expect(created).toMatchObject({ name: 'Bukho', active: true });
+      expect(await codeOf(api.post('/recipients', { name: 'BUKHO', type: 'CONTRACTOR' }))).toBe('CONFLICT');
+    });
+
+    it('records the recipient on an issue and refuses an inactive one', async () => {
+      const transactionId = await issue('mat-1', 'loc-1', 1, 'rcp-1');
+      const history = await api.get<Array<{ id: string; recipientName?: string | null }>>('/inventory-transactions?materialId=mat-1');
+      expect(history.find((t) => t.id === transactionId)?.recipientName).toBe('Sabelo');
+
+      await api.patch('/recipients/rcp-1', { active: false });
+      expect(await codeOf(issue('mat-1', 'loc-1', 1, 'rcp-1'))).toBe('VALIDATION_ERROR');
+    });
+  });
+
+  describe('issuing several items at once', () => {
+    it('books every line, and nothing when one line is short', async () => {
+      const ids = await api.post<{ transactionIds: string[] }>('/inventory-issues', {
+        recipientId: 'rcp-3', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }, { materialId: 'mat-2', locationId: 'loc-1', quantity: 1 }],
+      });
+      expect(ids.transactionIds).toHaveLength(2);
+
+      const before = (await api.get<unknown[]>('/inventory-transactions')).length;
+      await expect(api.post('/inventory-issues', {
+        recipientId: 'rcp-3', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }, { materialId: 'mat-1', locationId: 'loc-1', quantity: 10000 }],
+      })).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
+      expect((await api.get<unknown[]>('/inventory-transactions')).length).toBe(before);
+    });
+
+    it('requires a recipient and refuses an unknown project', async () => {
+      await expect(api.post('/inventory-issues', { lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(api.post('/inventory-issues', { recipientId: 'rcp-1', projectNumber: 'NOPE', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
 });

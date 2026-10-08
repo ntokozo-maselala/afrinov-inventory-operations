@@ -36,6 +36,7 @@ export function useCanManageUsers(): boolean {
   return useHasRole(['ADMIN']);
 }
 
+/** Expose role-derived permission checks for gating frontend controls. */
 export function usePermissions(): { hasPermission: (permission: string) => boolean } {
   const isAdmin = useIsAdmin();
   const canManageMaterials = useCanManageMaterials();
@@ -43,12 +44,14 @@ export function usePermissions(): { hasPermission: (permission: string) => boole
   const canApprove = useCanApprove();
   const canManageUsers = useCanManageUsers();
 
+  /** Check a UI permission, granting admins access and denying unknown keys for other users. */
   const hasPermission = (permission: string): boolean => {
     if (isAdmin) return true;
 
     switch (permission) {
       case 'materials:manage':
       case 'inventory:reverse':
+      case 'recipients:manage':
         return canManageMaterials;
       case 'procurement:manage':
         return canManageProcurement;

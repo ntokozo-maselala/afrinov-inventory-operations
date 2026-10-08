@@ -1,12 +1,16 @@
 // Purchase order service — full lifecycle.
 //
-// State machine (canonical):
-//   DRAFT → PENDING_APPROVAL → APPROVED → SHIPPED → DELIVERED
-// with cancellation allowed from DRAFT / PENDING_APPROVAL / APPROVED.
-// Legacy statuses (SUBMITTED, SENT, PARTIALLY_RECEIVED, FULLY_RECEIVED,
-// CLOSED, REJECTED) are accepted on input and read on output for
-// backward-compatibility, but new transitions route through the new enum
-// members.
+// State machine:
+//   DRAFT → PENDING_APPROVAL → APPROVED → PARTIALLY_RECEIVED → RECEIVED → CLOSED
+// - submit: DRAFT → PENDING_APPROVAL, or straight to APPROVED when approval
+//   is turned off in settings.
+// - Receiving (goods receipts, or receive() for everything outstanding) moves
+//   APPROVED / PARTIALLY_RECEIVED on to PARTIALLY_RECEIVED or RECEIVED.
+// - close: PARTIALLY_RECEIVED or RECEIVED → CLOSED. Closing short (lines not
+//   fully received) needs a reason.
+// - cancel: DRAFT / PENDING_APPROVAL / APPROVED → CANCELLED, before anything
+//   is received.
+// There is no shipping stage: local suppliers deliver with an invoice.
 //
 // Concurrency: every transition uses an optimistic WHERE status = expected
 // guard inside the Prisma transaction. Two concurrent transitions on the
@@ -78,18 +82,19 @@ export interface UpdatePOInput {
   expectedDeliveryDate?: string | null;
 }
 
-export interface ShipInput {
-  id: string;
-  trackingNumber?: string;
-  carrier?: string;
-  shipmentNotes?: string;
-}
-
-export interface DeliverInput {
+export interface ReceiveInput {
   id: string;
   locationId: string;
   deliveryNotes?: string;
 }
+
+export interface CloseInput {
+  id: string;
+  reason?: string;
+}
+
+/** Statuses a purchase order can be received against. */
+export const RECEIVABLE_STATUSES: PurchaseOrderStatus[] = ['APPROVED', 'PARTIALLY_RECEIVED'];
 
 export interface CancelInput {
   id: string;
@@ -112,6 +117,7 @@ export const PurchaseOrderService = {
     });
   },
 
+  /** Return an order with its supplier, lines, receipts, and lifecycle actors, or throw if absent. */
   async getById(id: string) {
     const po = await prisma.purchaseOrder.findUnique({
       where: { id },
@@ -119,9 +125,9 @@ export const PurchaseOrderService = {
         supplier: true,
         createdBy: { select: { id: true, name: true, email: true } },
         approvedBy: { select: { id: true, name: true, email: true } },
-        shippedBy: { select: { id: true, name: true, email: true } },
         deliveredBy: { select: { id: true, name: true, email: true } },
         cancelledBy: { select: { id: true, name: true, email: true } },
+        closedBy: { select: { id: true, name: true, email: true } },
         lines: { include: { material: true } },
         goodsReceipts: { include: { lines: true } },
       },
@@ -192,13 +198,17 @@ export const PurchaseOrderService = {
     });
   },
 
+  /**
+   * Submit a nonempty draft and audit the transition, auto-approving when settings allow it.
+   * Reject a concurrent status change through the transactional update guard.
+   */
   async submit(id: string, actorId: string) {
     const requireApproval = await SettingsService.getValue<boolean>('purchaseOrders.requireApprovalBeforeProcessing');
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (po.lines.length === 0) throw Errors.validation('Cannot submit an empty purchase order');
-      const allowed: PurchaseOrderStatus[] = ['DRAFT', 'SUBMITTED'];
+      const allowed: PurchaseOrderStatus[] = ['DRAFT'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot submit a PO in status ${po.status}`, { status: po.status });
       }
@@ -246,11 +256,15 @@ export const PurchaseOrderService = {
     });
   },
 
+  /**
+   * Approve a pending order and record its approver and audit entry atomically.
+   * Reject orders in other states or a concurrent status change.
+   */
   async approve(id: string, actorId: string) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({ where: { id } });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL', 'SUBMITTED'];
+      const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot approve a PO in status ${po.status}`, { status: po.status });
       }
@@ -276,56 +290,21 @@ export const PurchaseOrderService = {
     });
   },
 
-  async ship(input: ShipInput, actorId: string) {
-    return prisma.$transaction(async (tx) => {
-      const po = await tx.purchaseOrder.findUnique({ where: { id: input.id } });
-      if (!po) throw Errors.notFound('PurchaseOrder');
-      if (po.status !== 'APPROVED') {
-        throw Errors.invalidState(`Only an APPROVED purchase order can be marked as shipped`, { status: po.status });
-      }
-      const now = new Date();
-      const result = await tx.purchaseOrder.updateMany({
-        where: { id: input.id, status: 'APPROVED' },
-        data: {
-          status: 'SHIPPED',
-          shippedAt: now,
-          shippedById: actorId,
-          trackingNumber: input.trackingNumber ?? null,
-          carrier: input.carrier ?? null,
-          shipmentNotes: input.shipmentNotes ?? null,
-        },
-      });
-      if (result.count === 0) {
-        throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
-      }
-      await tx.auditLogEntry.create({
-        data: {
-          actorId,
-          action: 'PO_SHIP',
-          entityType: 'PurchaseOrder',
-          entityId: input.id,
-          before: { status: 'APPROVED' },
-          after: { status: 'SHIPPED', shippedAt: now.toISOString(), shippedById: actorId, trackingNumber: input.trackingNumber ?? null, carrier: input.carrier ?? null },
-        },
-      });
-      return tx.purchaseOrder.findUnique({ where: { id: input.id } });
-    });
-  },
-
-  // Deliver the entire PO: every ordered line becomes a RECEIPT inventory
-  // transaction at the chosen location. The action is idempotent — calling
-  // it twice on the same PO is rejected by the status guard. Reuses the
-  // existing inventory posting logic to keep the ledger the source of
-  // truth (ADR-002).
-  async deliver(input: DeliverInput, actorId: string) {
+  /**
+   * Receive every outstanding line into an active location and mark the order RECEIVED.
+   * Write receipt ledger entries, balances, and audit data in one transaction;
+   * only APPROVED or PARTIALLY_RECEIVED orders are eligible.
+   * Partial deliveries use goods receipts; the status guard rejects repeat receiving.
+   */
+  async receive(input: ReceiveInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({
         where: { id: input.id },
         include: { lines: true },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      if (po.status !== 'SHIPPED') {
-        throw Errors.invalidState(`Only a SHIPPED purchase order can be marked as delivered`, { status: po.status });
+      if (!RECEIVABLE_STATUSES.includes(po.status)) {
+        throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });
       }
       const location = await tx.location.findUnique({ where: { id: input.locationId } });
       if (!location) throw Errors.notFound('Location');
@@ -333,9 +312,9 @@ export const PurchaseOrderService = {
 
       const now = new Date();
       const claimed = await tx.purchaseOrder.updateMany({
-        where: { id: input.id, status: 'SHIPPED' },
+        where: { id: input.id, status: po.status },
         data: {
-          status: 'DELIVERED',
+          status: 'RECEIVED',
           deliveredAt: now,
           deliveredById: actorId,
           deliveryNotes: input.deliveryNotes ?? null,
@@ -375,17 +354,21 @@ export const PurchaseOrderService = {
       await tx.auditLogEntry.create({
         data: {
           actorId,
-          action: 'PO_DELIVER',
+          action: 'PO_RECEIVE',
           entityType: 'PurchaseOrder',
           entityId: input.id,
-          before: { status: 'SHIPPED' },
-          after: { status: 'DELIVERED', deliveredAt: now.toISOString(), deliveredById: actorId, locationId: input.locationId, notes: input.deliveryNotes ?? null },
+          before: { status: po.status },
+          after: { status: 'RECEIVED', deliveredAt: now.toISOString(), deliveredById: actorId, locationId: input.locationId, notes: input.deliveryNotes ?? null },
         },
       });
       return tx.purchaseOrder.findUnique({ where: { id: input.id } });
     });
   },
 
+  /**
+   * Cancel a draft, pending, or approved order with a reason and audit entry.
+   * Reject cancellation when disabled in settings or when the status guard fails.
+   */
   async cancel(input: CancelInput, actorId: string) {
     const allowCancellation = await SettingsService.getValue<boolean>('purchaseOrders.allowCancellation');
     if (!allowCancellation) {
@@ -394,7 +377,7 @@ export const PurchaseOrderService = {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id } });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      const allowed: PurchaseOrderStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'SUBMITTED', 'APPROVED'];
+      const allowed: PurchaseOrderStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Purchase order in status ${po.status} cannot be cancelled`, { status: po.status });
       }
@@ -422,6 +405,45 @@ export const PurchaseOrderService = {
     });
   },
 
+  /**
+   * Close a partly or fully received order and audit the transition atomically.
+   * Require a reason when any line remains short and reject concurrent status changes.
+   */
+  async close(input: CloseInput, actorId: string) {
+    return prisma.$transaction(async (tx) => {
+      const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
+      if (!po) throw Errors.notFound('PurchaseOrder');
+      const allowed: PurchaseOrderStatus[] = ['PARTIALLY_RECEIVED', 'RECEIVED'];
+      if (!allowed.includes(po.status)) {
+        throw Errors.invalidState(`Purchase order in status ${po.status} cannot be closed`, { status: po.status });
+      }
+      const reason = input.reason?.trim() || null;
+      const short = po.lines.some((l) => toDecimal(l.receivedQty).lt(toDecimal(l.orderedQty)));
+      if (short && !reason) {
+        throw Errors.validation('A reason is required to close an order that has not been fully received');
+      }
+      const now = new Date();
+      const result = await tx.purchaseOrder.updateMany({
+        where: { id: input.id, status: po.status },
+        data: { status: 'CLOSED', closedAt: now, closedById: actorId, closeReason: reason },
+      });
+      if (result.count === 0) {
+        throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
+      }
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'PO_CLOSE',
+          entityType: 'PurchaseOrder',
+          entityId: input.id,
+          before: { status: po.status },
+          after: { status: 'CLOSED', closedAt: now.toISOString(), closedById: actorId, reason, closedShort: short },
+        },
+      });
+      return tx.purchaseOrder.findUnique({ where: { id: input.id } });
+    });
+  },
+
   // Returns the audit log entries relevant to a PO so the UI can render
   // an activity feed. Ordered most-recent first.
   async history(id: string) {
@@ -433,11 +455,12 @@ export const PurchaseOrderService = {
   },
 };
 
+/** Check whether the status allows editing under the post-approval editing setting. */
 function isEditable(status: PurchaseOrderStatus, allowEditAfterApproval = true): boolean {
   if (allowEditAfterApproval) {
-    return status === 'DRAFT' || status === 'PENDING_APPROVAL' || status === 'SUBMITTED' || status === 'APPROVED';
+    return status === 'DRAFT' || status === 'PENDING_APPROVAL' || status === 'APPROVED';
   }
-  return status === 'DRAFT' || status === 'PENDING_APPROVAL' || status === 'SUBMITTED';
+  return status === 'DRAFT' || status === 'PENDING_APPROVAL';
 }
 
 async function generatePONumber(tx: Prisma.TransactionClient): Promise<string> {

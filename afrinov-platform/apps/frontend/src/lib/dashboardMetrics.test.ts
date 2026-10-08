@@ -57,7 +57,7 @@ const purchaseOrders: PurchaseOrderSummary[] = [
     ],
   },
   {
-    id: 'po-2', number: 'PO-002', status: 'FULLY_RECEIVED', supplierId: 'sup-2',
+    id: 'po-2', number: 'PO-002', status: 'RECEIVED', supplierId: 'sup-2',
     supplier: { name: 'Beta Ltd' }, createdAt: '2026-09-02T00:00:00Z',
     lines: [
       { id: 'l-2', material: { sku: 'SKU-002', unitCost: '10', name: 'Cable 1mm' }, orderedQty: '50', receivedQty: '50' },
@@ -69,7 +69,7 @@ const purchaseOrders: PurchaseOrderSummary[] = [
     lines: [],
   },
   {
-    id: 'po-4', number: 'PO-004', status: 'SUBMITTED', supplierId: 'sup-3',
+    id: 'po-4', number: 'PO-004', status: 'PENDING_APPROVAL', supplierId: 'sup-3',
     supplier: { name: 'Gamma Supplies' }, createdAt: '2026-09-04T00:00:00Z',
     lines: [
       { id: 'l-3', material: { sku: 'SKU-003', unitCost: '20', name: 'Paint Red' }, orderedQty: '10', receivedQty: '0' },
@@ -119,7 +119,7 @@ describe('computePOStatusDistribution', () => {
 
   it('groups POs by status with count, value, and share', () => {
     const result = computePOStatusDistribution(purchaseOrders);
-    // DRAFT, FULLY_RECEIVED, CANCELLED, SUBMITTED — 4 distinct statuses
+    // DRAFT, RECEIVED, CANCELLED, PENDING_APPROVAL — 4 distinct statuses
     expect(result).toHaveLength(4);
 
     const draft = result.find((r) => r.status === 'DRAFT');

@@ -175,6 +175,7 @@ export function computePOSupplierDistribution(
   return Array.from(supplierMap.values()).sort((a, b) => b.totalValue - a.totalValue);
 }
 
+/** Summarize order counts and values for dashboard cards, formatting amounts in the given currency. */
 export function computePOKpis(purchaseOrders: PurchaseOrderSummary[], currency = DEFAULT_CURRENCY): POKpi[] {
   if (!purchaseOrders || purchaseOrders.length === 0) {
     return [
@@ -185,17 +186,11 @@ export function computePOKpis(purchaseOrders: PurchaseOrderSummary[], currency =
     ];
   }
 
-  const openStatuses = ['DRAFT', 'PENDING_APPROVAL', 'SUBMITTED', 'APPROVED', 'SENT', 'PARTIALLY_RECEIVED'];
+  const openStatuses = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'];
   const openPOs = purchaseOrders.filter((po) => openStatuses.includes(po.status));
-  const pendingApproval = purchaseOrders.filter((po) =>
-    ['PENDING_APPROVAL', 'SUBMITTED'].includes(po.status),
-  );
-  const completed = purchaseOrders.filter((po) =>
-    ['FULLY_RECEIVED', 'DELIVERED', 'CLOSED'].includes(po.status),
-  );
-  const cancelled = purchaseOrders.filter((po) =>
-    ['CANCELLED', 'REJECTED'].includes(po.status),
-  );
+  const pendingApproval = purchaseOrders.filter((po) => po.status === 'PENDING_APPROVAL');
+  const completed = purchaseOrders.filter((po) => ['RECEIVED', 'CLOSED'].includes(po.status));
+  const cancelled = purchaseOrders.filter((po) => po.status === 'CANCELLED');
 
   const totalValue = computeTotalPOValue(purchaseOrders);
   const receivedValue = purchaseOrders.reduce((acc, po) => acc + computeReceivedValue(po), 0);
@@ -262,20 +257,16 @@ function computeTotalPOValue(purchaseOrders: PurchaseOrderSummary[]): number {
   return purchaseOrders.reduce((acc, po) => acc + computePOValue(po), 0);
 }
 
+/** Return a readable purchase-order status label, preserving unknown status values. */
 function poStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     DRAFT: 'Draft',
     PENDING_APPROVAL: 'Pending approval',
-    SUBMITTED: 'Submitted',
     APPROVED: 'Approved',
-    SENT: 'Sent',
-    SHIPPED: 'Shipped',
-    PARTIALLY_RECEIVED: 'Partially received',
-    FULLY_RECEIVED: 'Fully received',
-    DELIVERED: 'Delivered',
+    PARTIALLY_RECEIVED: 'Partly received',
+    RECEIVED: 'Received',
     CLOSED: 'Closed',
     CANCELLED: 'Cancelled',
-    REJECTED: 'Rejected',
   };
   return labels[status] ?? status;
 }

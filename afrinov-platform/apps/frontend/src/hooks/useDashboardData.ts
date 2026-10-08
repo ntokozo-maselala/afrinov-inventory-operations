@@ -11,7 +11,6 @@ export interface PurchaseOrderSummary {
   createdAt: string;
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
-  shippedAt?: string | null;
   deliveredAt?: string | null;
   lines: Array<{
     id: string;

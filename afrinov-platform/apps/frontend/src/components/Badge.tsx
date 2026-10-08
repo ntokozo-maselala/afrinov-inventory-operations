@@ -58,32 +58,22 @@ export function MovementBadge({ type }: MovementBadgeProps) {
 
 const poTone: Record<string, Tone> = {
   DRAFT: 'neutral',
-  SUBMITTED: 'info',
   PENDING_APPROVAL: 'info',
   APPROVED: 'info',
-  SHIPPED: 'brand',
-  DELIVERED: 'success',
-  SENT: 'brand',
   PARTIALLY_RECEIVED: 'warning',
-  FULLY_RECEIVED: 'success',
+  RECEIVED: 'success',
   CLOSED: 'neutral',
   CANCELLED: 'danger',
-  REJECTED: 'danger',
 };
 
 const poLabel: Record<string, string> = {
   DRAFT: 'Draft',
-  SUBMITTED: 'Submitted',
   PENDING_APPROVAL: 'Pending approval',
   APPROVED: 'Approved',
-  SHIPPED: 'Shipped',
-  DELIVERED: 'Delivered',
-  SENT: 'Sent',
-  PARTIALLY_RECEIVED: 'Partially received',
-  FULLY_RECEIVED: 'Received',
+  PARTIALLY_RECEIVED: 'Partly received',
+  RECEIVED: 'Received',
   CLOSED: 'Closed',
   CANCELLED: 'Cancelled',
-  REJECTED: 'Rejected',
 };
 
 export function PurchaseOrderStatusBadge({ status }: { status: string }) {

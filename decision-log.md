@@ -123,3 +123,48 @@ and assigns roles under Settings → Users.
 
 **Consequences:** One fewer unauthenticated endpoint. Onboarding a storeman
 needs an administrator, which matches how access is controlled today.
+
+---
+
+### ADR-007 — Purchase orders: no shipping stage, receive then close
+**Date:** 2026-10-08 · **Status:** Accepted
+
+**Context:** The purchase-order lifecycle modelled courier shipments
+(APPROVED → SHIPPED with carrier and tracking → DELIVERED) and carried six
+leftover statuses (SUBMITTED, SENT, PARTIALLY_RECEIVED, FULLY_RECEIVED,
+CLOSED, REJECTED) with overlapping meanings. Afrinov's suppliers are local
+and deliver with an invoice. Partly delivered orders also had no way to be
+finished, and goods could be received against any order.
+
+**Decision:** Seven statuses: DRAFT → PENDING_APPROVAL → APPROVED →
+PARTIALLY_RECEIVED → RECEIVED → CLOSED, or CANCELLED before anything is
+received. Receiving happens through goods receipts, or "receive all
+outstanding" in one step; only APPROVED and PARTIALLY_RECEIVED orders can be
+received against. Closing short needs a reason. Removed statuses are mapped
+by migration 20260101000004; the shipping columns stay, unused, so history is
+kept.
+
+**Consequences:** Fewer states to explain and test. A rejected order is
+recorded as cancelled with a reason. Approvers cannot yet reject an order
+themselves (they lack the cancel permission); revisit if procurement is used.
+
+---
+
+### ADR-008 — "Issued To" is a typed recipients list, required on every issue
+**Date:** 2026-10-08 · **Status:** Accepted
+
+**Context:** The workbook's "Issued To" column was free text backed by an
+Employees sheet that mixed workers with machines (Forklift, Generator),
+client sites (Northam, Samancor) and contractors (KTS, Kenflex). In the
+platform, `recipientId` had to be a user who logs in, and the issue form did
+not ask for it, so nobody was recorded as receiving stock.
+
+**Decision:** A `Recipient` list with a type on each entry: WORKER, MACHINE,
+SITE or CONTRACTOR. Names are unique ignoring case. Recipients are
+deactivated, never deleted. Every issue must name an active recipient
+(enforced on the issue form in Phase 1, step 2). Admins and store
+controllers manage the list; anyone signed in can read it.
+
+**Consequences:** Every issue says who received the stock, which gives the
+per-worker accountability the Consumable Box sheet was attempting, and
+reports can filter by recipient type.

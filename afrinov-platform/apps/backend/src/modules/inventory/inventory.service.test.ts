@@ -43,6 +43,16 @@ const users = new Map<string, { id: string; name: string; active: boolean }>([
   ['user-2', { id: 'user-2', name: 'Bob', active: true }],
   ['user-3', { id: 'user-3', name: 'Charlie', active: false }],
 ]);
+// Recipients ("Issued To"); 'user-3' is the id older tests already used.
+const recipients = new Map<string, { id: string; name: string; active: boolean }>([
+  ['user-3', { id: 'user-3', name: 'Sabelo', active: true }],
+  ['rcp-inactive', { id: 'rcp-inactive', name: 'Old forklift', active: false }],
+]);
+const projects = new Map<string, { projectNumber: string; active: boolean }>([
+  ['AFRI-1325', { projectNumber: 'AFRI-1325', active: true }],
+  ['P-42', { projectNumber: 'P-42', active: true }],
+  ['OLD-1', { projectNumber: 'OLD-1', active: false }],
+]);
 const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
 
 function balKey(materialId: string, locationId: string) { return `${materialId}|${locationId}`; }
@@ -150,6 +160,12 @@ const fakeTx = {
   location: {
     findUnique: async () => ({ id: 'loc-1', active: true }),
   },
+  recipient: {
+    findUnique: async ({ where }: { where: { id: string } }) => recipients.get(where.id) ?? null,
+  },
+  project: {
+    findUnique: async ({ where }: { where: { projectNumber: string } }) => projects.get(where.projectNumber) ?? null,
+  },
   user: {
     findUnique: async ({ where }: { where: { id: string } }) => {
       const u = users.get(where.id);
@@ -195,6 +211,7 @@ const fakeTx = {
     },
   },
   purchaseOrder: {
+    findUnique: async ({ where }: { where: { id: string } }) => purchaseOrders.get(where.id) ?? null,
     update: async ({ where, data }: { where: { id: string }; data: Partial<POEntry> }) => {
       const po = purchaseOrders.get(where.id);
       if (!po) throw new Error('not found');
@@ -227,6 +244,20 @@ vi.mock('../../shared/events.js', () => ({
 }));
 
 const { InventoryService } = await import('./inventory.service.js');
+
+// Most tests issue one line; this keeps them short. 'user-3' is an active recipient.
+/** Issue one test line with a default recipient and return its transaction ID. */
+async function issueOne(input: {
+  materialId: string; locationId: string; quantity: number | string; actorId: string; recipientId?: string; projectNumber?: string;
+}): Promise<{ transactionId: string }> {
+  const { transactionIds } = await InventoryService.issue({
+    recipientId: input.recipientId ?? 'user-3',
+    projectNumber: input.projectNumber,
+    actorId: input.actorId,
+    lines: [{ materialId: input.materialId, locationId: input.locationId, quantity: input.quantity }],
+  });
+  return { transactionId: transactionIds[0]! };
+}
 
 function getBalance(materialId: string, locationId: string): Prisma.Decimal {
   return balances.get(balKey(materialId, locationId))?.quantity ?? new Prisma.Decimal(0);
@@ -271,12 +302,12 @@ describe('InventoryService — ADR-002 invariants', () => {
     await InventoryService.adjust({
       materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
     });
-    await InventoryService.issue({
+    await issueOne({
       materialId: 'mat-1', locationId: 'loc-1', quantity: 3, actorId: 'u',
     });
     expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
     await expect(
-      InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 100, actorId: 'u' }),
+      issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 100, actorId: 'u' }),
     ).rejects.toThrow(/available/);
   });
 
@@ -323,7 +354,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
   it('rejects zero-quantity issues and adjustments', async () => {
     await expect(
-      InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 0, actorId: 'u' }),
+      issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 0, actorId: 'u' }),
     ).rejects.toThrow();
     await expect(
       InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 0, reasonCode: 'OTHER', actorId: 'u' }),
@@ -343,7 +374,7 @@ describe('InventoryService — ADR-002 invariants', () => {
         materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
       await expect(
-        InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u' }),
+        issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u' }),
       ).rejects.toThrow(/only 2 available/);
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
     });
@@ -362,8 +393,9 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
+      /** Remove stock using the operation under test to exercise the shared balance constraint. */
       const take = (quantity: string) => operation === 'issue'
-        ? InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity, actorId: 'u' })
+        ? issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity, actorId: 'u' })
         : InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: `-${quantity}`, reasonCode: 'LOSS', actorId: 'u' });
       await expect(take('0.126')).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
       expect(trxRows).toHaveLength(1);
@@ -378,8 +410,87 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
-      await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' });
+      await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' });
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
+    });
+  });
+
+  // ── Issued To ─────────────────────────────────────────────────────────
+  describe('issue recipient', () => {
+    it('records who received the stock', async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u', recipientId: 'user-3' });
+      expect(trxRows.at(-1)).toMatchObject({ type: 'ISSUE', recipientId: 'user-3' });
+    });
+
+    it('refuses an unknown recipient', async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await expect(
+        issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u', recipientId: 'nobody' }),
+      ).rejects.toThrow(/Recipient not found/);
+      expect(trxRows).toHaveLength(1);
+    });
+
+    it('refuses an inactive recipient', async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await expect(
+        issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u', recipientId: 'rcp-inactive' }),
+      ).rejects.toThrow(/inactive/);
+    });
+  });
+
+  // ── Issuing several items at once ─────────────────────────────────────
+  describe('issue with several lines', () => {
+    /** Add test stock at the selected location through a count-variance adjustment. */
+    async function stock(qty: number, locationId = 'loc-1') {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId, quantity: qty, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    }
+
+    it('books every line for one recipient and project', async () => {
+      await stock(10);
+      await stock(4, 'loc-2');
+      const { transactionIds } = await InventoryService.issue({
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
+        lines: [
+          { materialId: 'mat-1', locationId: 'loc-1', quantity: 3 },
+          { materialId: 'mat-1', locationId: 'loc-2', quantity: 4 },
+        ],
+      });
+      expect(transactionIds).toHaveLength(2);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('7');
+      expect(getBalance('mat-1', 'loc-2').toString()).toBe('0');
+      for (const id of transactionIds) {
+        expect(trxRows.find((r) => r.id === id)).toMatchObject({ type: 'ISSUE', recipientId: 'user-3', projectNumber: 'AFRI-1325' });
+      }
+    });
+
+    it('checks two lines for the same item as one total, and books nothing if it is short', async () => {
+      await stock(5);
+      await expect(InventoryService.issue({
+        recipientId: 'user-3', actorId: 'u',
+        lines: [
+          { materialId: 'mat-1', locationId: 'loc-1', quantity: 3 },
+          { materialId: 'mat-1', locationId: 'loc-1', quantity: 3 },
+        ],
+      })).rejects.toThrow(/Cannot issue 6 .*only 5 available/);
+      expect(trxRows).toHaveLength(1);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('5');
+    });
+
+    it('requires a recipient and at least one line', async () => {
+      await expect(InventoryService.issue({ recipientId: '', actorId: 'u', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toThrow(/Choose who the stock is issued to/);
+      await expect(InventoryService.issue({ recipientId: 'user-3', actorId: 'u', lines: [] }))
+        .rejects.toThrow(/at least one item/);
+    });
+
+    it('refuses an unknown or inactive project', async () => {
+      await stock(5);
+      await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'NOPE' }))
+        .rejects.toThrow(/Project not found/);
+      await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'OLD-1' }))
+        .rejects.toThrow(/Project is inactive/);
+      expect(trxRows).toHaveLength(1);
     });
   });
 
@@ -395,7 +506,7 @@ describe('InventoryService — ADR-002 invariants', () => {
         const transfer = await InventoryService.transfer({
           materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 6, actorId: 'u',
         });
-        await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-2', quantity: 1, actorId: 'u' });
+        await issueOne({ materialId: 'mat-1', locationId: 'loc-2', quantity: 1, actorId: 'u' });
         const rowsBefore = trxRows.map((row) => ({ ...row }));
         const auditBefore = [...auditLog];
 
@@ -449,7 +560,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
       });
-      const { transactionId } = await InventoryService.issue({
+      const { transactionId } = await issueOne({
         materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', actorId: 'user-1',
         recipientId: 'user-3', projectNumber: 'P-42',
       });
@@ -492,7 +603,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
       });
-      const { transactionId } = await InventoryService.issue({
+      const { transactionId } = await issueOne({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 4, actorId: 'user-1', projectNumber: 'AFRI-1325',
       });
 
@@ -578,7 +689,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       const { transactionId } = await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
-      await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 8, actorId: 'u' });
+      await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 8, actorId: 'u' });
       await expect(
         InventoryService.reverse({ transactionId, reason: 'Counted twice', actorId: 'u' }),
       ).rejects.toThrow(/still in stock/);
@@ -712,7 +823,25 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(1);
     });
 
-    it('transitions PO to FULLY_RECEIVED when all lines are fully received', async () => {
+    it.each(['CANCELLED', 'CLOSED', 'DRAFT'])('refuses to post against a purchase order that is now %s', async (status) => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(3), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-1' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status });
+
+      await expect(
+        InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }),
+      ).rejects.toThrow(new RegExp(`status ${status}`));
+      expect(trxRows).toHaveLength(0);
+      expect(goodsReceipts.get('gr-1')?.status).toBe('SUBMITTED');
+    });
+
+    it('transitions PO to RECEIVED when all lines are fully received', async () => {
       purchaseOrderLines.set('pol-1', {
         id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
         orderedQty: new Prisma.Decimal(3), receivedQty: new Prisma.Decimal(0),
@@ -725,7 +854,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
       await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
 
-      expect(purchaseOrders.get('po-1')?.status).toBe('FULLY_RECEIVED');
+      expect(purchaseOrders.get('po-1')?.status).toBe('RECEIVED');
     });
 
     it('transitions PO to PARTIALLY_RECEIVED when not all lines are fully received', async () => {

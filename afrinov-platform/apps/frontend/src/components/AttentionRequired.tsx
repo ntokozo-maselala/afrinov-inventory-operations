@@ -35,6 +35,7 @@ function severityIcon(severity: 'critical' | 'warning' | 'info') {
   return <Icon.Info size={16} aria-hidden="true" />;
 }
 
+/** Show up to six stock and purchase-order alerts, ordered by severity. */
 export function AttentionRequired({ report, loading, lowStockItems, purchaseOrders }: AttentionRequiredProps) {
   const items: AttentionItem[] = [];
 
@@ -70,7 +71,7 @@ export function AttentionRequired({ report, loading, lowStockItems, purchaseOrde
   // eslint-disable-next-line react-hooks/purity
   const now = useMemo(() => Date.now(), []);
   for (const po of pos) {
-    if (['DRAFT', 'PENDING_APPROVAL', 'SUBMITTED', 'APPROVED', 'SENT'].includes(po.status)) {
+    if (['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) {
       items.push({
         id: `po-${po.id}`,
         type: 'pending-po',

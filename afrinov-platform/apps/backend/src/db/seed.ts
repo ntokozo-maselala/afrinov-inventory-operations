@@ -210,6 +210,24 @@ async function ensureSuppliers(): Promise<Map<string, string>> {
   return byName;
 }
 
+// Sample "Issued To" entries, one or two of each type, based on the kinds of
+// names in the workbook's Employees sheet.
+const DEMO_RECIPIENTS: Array<{ name: string; type: 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR' }> = [
+  { name: 'Sabelo', type: 'WORKER' },
+  { name: 'Khodani', type: 'WORKER' },
+  { name: 'Forklift', type: 'MACHINE' },
+  { name: 'Northam Platinum', type: 'SITE' },
+  { name: 'KTS', type: 'CONTRACTOR' },
+];
+
+/** Create missing demo recipients, matching existing names without regard to case. */
+async function ensureRecipients(): Promise<void> {
+  for (const r of DEMO_RECIPIENTS) {
+    const existing = await prisma.recipient.findFirst({ where: { name: { equals: r.name, mode: 'insensitive' } } });
+    if (!existing) await prisma.recipient.create({ data: r });
+  }
+}
+
 async function ensureProjects(managerId: string): Promise<Map<string, string>> {
   const byNumber = new Map<string, string>();
   const projects = [
@@ -480,6 +498,7 @@ async function ensureTransactions(
   }
 }
 
+/** Seed permissions, reference data, demo operations, and settings in dependency order. */
 async function main(): Promise<void> {
   await ensurePermissions();
   await ensureRoles();
@@ -488,6 +507,7 @@ async function main(): Promise<void> {
   const suppliers = await ensureSuppliers();
   const materials = await ensureMaterials();
   await ensureProjects(adminId);
+  await ensureRecipients();
   await ensureRacks(locations);
   await ensurePurchaseOrders(suppliers, materials, adminId);
   await ensureGoodsReceipt(suppliers, materials, locations, adminId);

@@ -22,6 +22,7 @@ interface Transaction {
   referenceType?: string | null;
   reversesId?: string | null;
   reversedById?: string | null;
+  recipientName?: string | null;
 }
 
 interface Props {
@@ -33,6 +34,7 @@ interface Props {
 
 // The ledger is never edited. A mistaken movement is corrected by posting a
 // reversing entry (POST /inventory-transactions/:id/reversal).
+/** Show movement attribution and details, with a reversal form for eligible transactions. */
 export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onError }: Props) {
   const { hasPermission } = usePermissions();
   const [reversing, setReversing] = useState(false);
@@ -105,6 +107,12 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           <dd className="col-span-2 text-num">{transaction.quantity}</dd>
           <dt className="text-surface-500">Recorded by</dt>
           <dd className="col-span-2">{transaction.actorName || '—'}</dd>
+          {transaction.recipientName && (
+            <>
+              <dt className="text-surface-500">Issued to</dt>
+              <dd className="col-span-2">{transaction.recipientName}</dd>
+            </>
+          )}
           {transaction.projectNumber && (
             <>
               <dt className="text-surface-500">Project</dt>

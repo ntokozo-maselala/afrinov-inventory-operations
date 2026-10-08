@@ -41,6 +41,7 @@ model User {
   shippedPurchaseOrders PurchaseOrder[]  @relation("PO_ShippedBy")
   deliveredPurchaseOrders PurchaseOrder[] @relation("PO_DeliveredBy")
   cancelledPurchaseOrders PurchaseOrder[] @relation("PO_CancelledBy")
+  closedPurchaseOrders PurchaseOrder[]   @relation("PO_ClosedBy")
   goodsReceipts        GoodsReceipt[]    @relation("GR_ReceivedBy")
   inventoryTransactions InventoryTransaction[]
   managedProjects      Project[]         @relation("ProjectManager")
@@ -209,6 +210,34 @@ model Project {
   @@map("projects")
 }
 
+// Who stock is issued to. The workbook's "Issued To" list mixed workers with
+// machines, client sites and contractors, so each entry carries its type.
+enum RecipientType {
+  WORKER
+  MACHINE
+  SITE
+  CONTRACTOR
+}
+
+// People and places stock is issued to. Most are not users who log in.
+// Names are unique ignoring case (index in migration 20260101000005).
+// Deactivate instead of deleting, so issue history keeps its recipient.
+model Recipient {
+  id        String        @id @default(uuid())
+  name      String
+  type      RecipientType
+  notes     String?
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([type])
+  @@index([active])
+  @@map("recipients")
+}
+
 enum RackStatus {
   ACTIVE
   INACTIVE
@@ -243,22 +272,17 @@ model Rack {
 
 // ─── Procurement ──────────────────────────────────────────────────────────
 
+// DRAFT → PENDING_APPROVAL → APPROVED → PARTIALLY_RECEIVED → RECEIVED → CLOSED,
+// or CANCELLED before anything is received. Local suppliers deliver with an
+// invoice, so there is no shipping stage (migration 20260101000004).
 enum PurchaseOrderStatus {
   DRAFT
-  // Legacy / transitional statuses kept for backward compatibility with
-  // pre-existing records. The canonical lifecycle now flows through
-  // PENDING_APPROVAL → APPROVED → SHIPPED → DELIVERED.
-  SUBMITTED
-  APPROVED
   PENDING_APPROVAL
-  SHIPPED
-  DELIVERED
-  SENT
+  APPROVED
   PARTIALLY_RECEIVED
-  FULLY_RECEIVED
+  RECEIVED
   CLOSED
   CANCELLED
-  REJECTED
 }
 
 model PurchaseOrder {
@@ -281,12 +305,18 @@ model PurchaseOrder {
   trackingNumber       String?   @map("tracking_number")
   carrier              String?
   shipmentNotes        String?   @map("shipment_notes")
+  // The shipped_* columns above are no longer written (there is no shipping
+  // stage); they are kept so older records keep their history.
+  // delivered_* records when the order became fully RECEIVED.
   deliveredAt          DateTime? @map("delivered_at")
   deliveredById        String?   @map("delivered_by_id")
   deliveryNotes        String?   @map("delivery_notes")
   cancelledAt          DateTime? @map("cancelled_at")
   cancelledById        String?   @map("cancelled_by_id")
   cancellationReason   String?   @map("cancellation_reason")
+  closedAt             DateTime? @map("closed_at")
+  closedById           String?   @map("closed_by_id")
+  closeReason          String?   @map("close_reason")
 
   supplier     Supplier            @relation(fields: [supplierId], references: [id])
   createdBy    User                @relation("PO_CreatedBy", fields: [createdById], references: [id])
@@ -294,6 +324,7 @@ model PurchaseOrder {
   shippedBy    User?               @relation("PO_ShippedBy", fields: [shippedById], references: [id])
   deliveredBy  User?               @relation("PO_DeliveredBy", fields: [deliveredById], references: [id])
   cancelledBy  User?               @relation("PO_CancelledBy", fields: [cancelledById], references: [id])
+  closedBy     User?               @relation("PO_ClosedBy", fields: [closedById], references: [id])
   lines        PurchaseOrderLine[]
   goodsReceipts GoodsReceipt[]
 
@@ -388,7 +419,7 @@ model InventoryTransaction {
   // Polymorphic reference to the document that caused the transaction.
   referenceType String?                  @map("reference_type")
   referenceId   String?                  @map("reference_id")
-  // Tool tracking (FR-INV-008): for tools, recipient / holder may be set.
+  // Who received the stock (issues; copied onto their reversals).
   recipientId   String?                  @map("recipient_id")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")
@@ -410,6 +441,7 @@ model InventoryTransaction {
   location Location  @relation(fields: [locationId], references: [id])
   actor    User      @relation(fields: [actorId], references: [id])
   project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
+  recipient Recipient? @relation(fields: [recipientId], references: [id])
   pairedWith InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
   pairedBy   InventoryTransaction? @relation("TransferPair")
   reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
@@ -419,6 +451,7 @@ model InventoryTransaction {
   @@index([referenceType, referenceId])
   @@index([postedAt])
   @@index([type])
+  @@index([recipientId])
   @@map("inventory_transactions")
 }
 

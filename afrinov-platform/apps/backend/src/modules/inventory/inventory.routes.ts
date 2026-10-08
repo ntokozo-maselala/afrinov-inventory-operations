@@ -5,11 +5,13 @@ import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
 export const issueSchema = z.object({
-  materialId: z.string().uuid(),
-  locationId: z.string().uuid(),
-  quantity: z.number().positive(),
-  recipientId: z.string().uuid().optional(),
-  projectNumber: z.string().optional(),
+  recipientId: z.string().uuid(),
+  projectNumber: z.string().trim().min(1).max(64).optional(),
+  lines: z.array(z.object({
+    materialId: z.string().uuid(),
+    locationId: z.string().uuid(),
+    quantity: z.number().positive(),
+  })).min(1).max(50),
 });
 
 export const transferSchema = z.object({

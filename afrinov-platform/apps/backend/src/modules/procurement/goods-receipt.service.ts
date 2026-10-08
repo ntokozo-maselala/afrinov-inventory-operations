@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 
 export interface CreateGoodsReceiptInput {
@@ -32,6 +33,11 @@ export const GoodsReceiptService = {
     return gr;
   },
 
+  /**
+   * Create a submitted receipt with lines for an active supplier.
+   * Reject empty receipts and linked orders outside APPROVED/PARTIALLY_RECEIVED;
+   * stock is added separately when the receipt is posted.
+   */
   async create(input: CreateGoodsReceiptInput, actorId: string) {
     if (input.lines.length === 0) throw Errors.validation('Goods receipt must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
@@ -40,6 +46,9 @@ export const GoodsReceiptService = {
     if (input.purchaseOrderId) {
       const po = await prisma.purchaseOrder.findUnique({ where: { id: input.purchaseOrderId } });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      if (!RECEIVABLE_STATUSES.includes(po.status)) {
+        throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
+      }
     }
 
     return prisma.$transaction(async (tx) => {

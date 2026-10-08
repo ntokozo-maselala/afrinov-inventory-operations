@@ -127,6 +127,7 @@ interface CreateGRProps {
   onError: (e: ApiError) => void; onSuccess: () => void;
 }
 
+/** Render the receipt form with eligible orders and create then post the submitted receipt. */
 function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const materials = useApi<Material[]>('/materials');
@@ -143,7 +144,7 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   // Match by stable supplierId; names can collide across suppliers.
   const eligiblePOs = (pos.data ?? [])
     .filter((p) => !supplierId || p.supplierId === supplierId)
-    .filter((p) => ['APPROVED', 'SENT', 'PARTIALLY_RECEIVED'].includes(p.status));
+    .filter((p) => ['APPROVED', 'PARTIALLY_RECEIVED'].includes(p.status));
 
   function addLine() { setLines((l) => [...l, { materialId: '', locationId: '', quantity: '' }]); }
   function updateLine(i: number, patch: Partial<{ materialId: string; locationId: string; quantity: string }>) {

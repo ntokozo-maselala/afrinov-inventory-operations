@@ -15,13 +15,19 @@ import { SettingsService } from '../settings/settings.service.js';
 
 type Decimal = Prisma.Decimal;
 
-export interface IssueInput {
+export interface IssueLine {
   materialId: string;
   locationId: string;
   quantity: number | string | Decimal;
-  actorId: string;
-  recipientId?: string;
+}
+
+// One entry at the store counter: one recipient, optionally one project, and
+// any number of items. Booked all-or-nothing.
+export interface IssueInput {
+  recipientId: string;
   projectNumber?: string;
+  lines: IssueLine[];
+  actorId: string;
 }
 
 export interface TransferInput {
@@ -46,10 +52,26 @@ export interface GoodsReceiptPostInput {
   actorId: string;
 }
 
-async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient): Promise<void> {
+/** Return the material within the transaction, rejecting missing or inactive records. */
+async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
   if (!m.active) throw Errors.validation('Material is inactive');
+  return m;
+}
+
+/** Reject a project number that does not identify an active project in the transaction. */
+async function checkProjectActive(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+  const p = await tx.project.findUnique({ where: { projectNumber } });
+  if (!p) throw Errors.notFound('Project');
+  if (!p.active) throw Errors.validation('Project is inactive');
+}
+
+/** Reject a recipient ID that does not identify an active recipient in the transaction. */
+async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
+  const r = await tx.recipient.findUnique({ where: { id: recipientId } });
+  if (!r) throw Errors.notFound('Recipient');
+  if (!r.active) throw Errors.validation('Recipient is inactive');
 }
 
 async function checkLocationActive(locationId: string, tx: Prisma.TransactionClient): Promise<void> {
@@ -65,6 +87,7 @@ export interface ReverseInput {
 }
 
 export const InventoryService = {
+   /** Return filtered movements newest first, including actor, recipient, and reversal details. */
    async queryHistory(filter: { materialId?: string; type?: string; from?: string; to?: string; projectNumber?: string; limit?: number }) {
     const where: Prisma.InventoryTransactionWhereInput = {};
     if (filter.materialId) where.materialId = filter.materialId;
@@ -84,6 +107,7 @@ export const InventoryService = {
         location: true,
         actor: { select: { id: true, name: true, email: true } },
         reversedBy: { select: { id: true } },
+        recipient: { select: { name: true, type: true } },
       },
       orderBy: { postedAt: 'desc' },
       take,
@@ -101,6 +125,8 @@ export const InventoryService = {
       actorId: t.actorId,
       actorName: t.actor.name,
       recipientId: t.recipientId,
+      recipientName: t.recipient?.name ?? null,
+      recipientType: t.recipient?.type ?? null,
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
@@ -216,53 +242,80 @@ export const InventoryService = {
     }
   },
 
-  async issue(input: IssueInput): Promise<{ transactionId: string }> {
-    const qty = toDecimal(input.quantity);
-    if (!gtZero(qty)) throw Errors.validation('Issue quantity must be positive');
+  /**
+   * Issue all lines to an active recipient in one database transaction.
+   * Repeated material/location pairs are checked as a combined quantity before posting;
+   * any supplied project must be active. Returns the created ledger transaction IDs.
+   */
+  async issue(input: IssueInput): Promise<{ transactionIds: string[] }> {
+    if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
+    if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
+    const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, qty: toDecimal(l.quantity) }));
+    if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Issue quantity must be positive');
+
+    // The same item from the same location on two lines is checked as one total.
+    const totals = new Map<string, { materialId: string; locationId: string; qty: Decimal }>();
+    for (const l of lines) {
+      const key = `${l.materialId}|${l.locationId}`;
+      const t = totals.get(key);
+      if (t) t.qty = t.qty.plus(l.qty);
+      else totals.set(key, { materialId: l.materialId, locationId: l.locationId, qty: l.qty });
+    }
 
     return prisma.$transaction(async (tx) => {
-      await checkMaterialActive(input.materialId, tx);
-      await checkLocationActive(input.locationId, tx);
+      await checkRecipientActive(input.recipientId, tx);
+      if (input.projectNumber) await checkProjectActive(input.projectNumber, tx);
 
-      // Stock can never go below zero. This is a fixed rule, not a setting:
-      // a negative balance means the ledger no longer matches the shelf.
-      const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
-      if (balance.lt(qty)) {
-        throw Errors.insufficientBalance(
-          `Cannot issue ${qty.toString()} units: only ${balance.toString()} available.`,
-          { materialId: input.materialId, locationId: input.locationId, requested: qty.toString(), available: balance.toString() },
-        );
+      const materials = new Map<string, Awaited<ReturnType<typeof checkMaterialActive>>>();
+      for (const t of totals.values()) {
+        const material = await checkMaterialActive(t.materialId, tx);
+        materials.set(t.materialId, material);
+        await checkLocationActive(t.locationId, tx);
+
+        // Stock can never go below zero. This is a fixed rule, not a setting:
+        // a negative balance means the ledger no longer matches the shelf.
+        const balance = await getCurrentBalance(t.materialId, t.locationId, tx);
+        if (balance.lt(t.qty)) {
+          throw Errors.insufficientBalance(
+            `Cannot issue ${t.qty.toString()} × ${material.sku}: only ${balance.toString()} available.`,
+            { materialId: t.materialId, locationId: t.locationId, requested: t.qty.toString(), available: balance.toString() },
+          );
+        }
       }
 
-      const trx = await tx.inventoryTransaction.create({
-        data: {
-          materialId: input.materialId,
-          locationId: input.locationId,
-          type: InventoryTransactionType.ISSUE,
-          quantity: qty.negated(),
-          actorId: input.actorId,
-          recipientId: input.recipientId ?? null,
-          projectNumber: input.projectNumber ?? null,
-          referenceType: input.projectNumber ? 'Project' : null,
-          referenceId: input.projectNumber ?? null,
-        },
-      });
+      const transactionIds: string[] = [];
+      for (const l of lines) {
+        const trx = await tx.inventoryTransaction.create({
+          data: {
+            materialId: l.materialId,
+            locationId: l.locationId,
+            type: InventoryTransactionType.ISSUE,
+            quantity: l.qty.negated(),
+            actorId: input.actorId,
+            recipientId: input.recipientId,
+            projectNumber: input.projectNumber ?? null,
+            referenceType: input.projectNumber ? 'Project' : null,
+            referenceId: input.projectNumber ?? null,
+          },
+        });
+        transactionIds.push(trx.id);
+      }
 
-      await recomputeBalance(input.materialId, input.locationId, tx);
-
-      const material = await tx.material.findUnique({ where: { id: input.materialId } });
-      const updatedBalance = await getCurrentBalance(input.materialId, input.locationId, tx);
-
-      const events: DomainEvent[] = [
-        { type: 'InventoryIssued', materialId: input.materialId, locationId: input.locationId, quantity: qty.toNumber() },
-      ];
+      const events: DomainEvent[] = lines.map((l) => ({
+        type: 'InventoryIssued', materialId: l.materialId, locationId: l.locationId, quantity: l.qty.toNumber(),
+      }));
       const alertsOn = await SettingsService.getValue<boolean>('inventory.enableStockAlerts', tx);
-      if (alertsOn && material && updatedBalance.lte(material.requiredStock)) {
-        events.push({ type: 'StockThresholdReached', materialId: input.materialId });
+      for (const t of totals.values()) {
+        await recomputeBalance(t.materialId, t.locationId, tx);
+        const material = materials.get(t.materialId);
+        const updatedBalance = await getCurrentBalance(t.materialId, t.locationId, tx);
+        if (alertsOn && material && updatedBalance.lte(material.requiredStock)) {
+          events.push({ type: 'StockThresholdReached', materialId: t.materialId });
+        }
       }
 
       await dispatchDomainEvents(events);
-      return { transactionId: trx.id };
+      return { transactionIds };
     });
   },
 
@@ -383,6 +436,13 @@ export const InventoryService = {
       if (!gr) throw Errors.notFound('GoodsReceipt');
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
+      // The order may have been cancelled or closed since the receipt was recorded.
+      if (gr.purchaseOrderId) {
+        const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
+        if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
+          throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
+        }
+      }
 
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);
@@ -435,11 +495,14 @@ export const InventoryService = {
         });
         const allFully = lines.every((l) => toDecimal(l.receivedQty).gte(toDecimal(l.orderedQty)));
         const anyReceived = lines.some((l) => gtZero(toDecimal(l.receivedQty)));
-        const newStatus = allFully ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : 'APPROVED';
-        await tx.purchaseOrder.update({
-          where: { id: gr.purchaseOrderId },
-          data: { status: newStatus },
-        });
+        if (allFully || anyReceived) {
+          await tx.purchaseOrder.update({
+            where: { id: gr.purchaseOrderId },
+            data: allFully
+              ? { status: 'RECEIVED', deliveredAt: new Date(), deliveredById: input.actorId }
+              : { status: 'PARTIALLY_RECEIVED' },
+          });
+        }
       }
 
       await dispatchDomainEvents([

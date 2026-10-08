@@ -22,15 +22,10 @@ export type PurchaseOrderStatus =
   | 'DRAFT'
   | 'PENDING_APPROVAL'
   | 'APPROVED'
-  | 'SHIPPED'
-  | 'DELIVERED'
-  | 'CANCELLED'
-  | 'SUBMITTED'
-  | 'SENT'
   | 'PARTIALLY_RECEIVED'
-  | 'FULLY_RECEIVED'
+  | 'RECEIVED'
   | 'CLOSED'
-  | 'REJECTED';
+  | 'CANCELLED';
 
 export type GoodsReceiptStatus = 'DRAFT' | 'SUBMITTED' | 'POSTED';
 
@@ -99,17 +94,15 @@ export interface MockPurchaseOrder {
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
   approvedBy?: MockUser | null;
-  shippedAt?: string | null;
-  shippedBy?: MockUser | null;
-  trackingNumber?: string | null;
-  carrier?: string | null;
-  shipmentNotes?: string | null;
   deliveredAt?: string | null;
   deliveredBy?: MockUser | null;
   deliveryNotes?: string | null;
   cancelledAt?: string | null;
   cancelledBy?: MockUser | null;
   cancellationReason?: string | null;
+  closedAt?: string | null;
+  closedBy?: MockUser | null;
+  closeReason?: string | null;
   createdBy?: MockUser | null;
   lines: MockPurchaseOrderLine[];
   history?: Array<{ id: string; action: string; actorId: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; createdAt: string }>;
@@ -133,6 +126,14 @@ export interface MockGoodsReceipt {
   status: GoodsReceiptStatus;
   receivedAt: string;
   lines: MockGoodsReceiptLine[];
+}
+
+export interface MockRecipient {
+  id: string;
+  name: string;
+  type: 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR';
+  notes?: string | null;
+  active: boolean;
 }
 
 export interface MockInventoryTransaction {
@@ -187,6 +188,8 @@ export interface MockMovementRow {
   referenceId?: string;
   reversesId?: string;
   reversedById?: string;
+  recipientName?: string | null;
+  recipientType?: string | null;
 }
 
 export type MockRackStatus = 'ACTIVE' | 'INACTIVE' | 'FULL';
