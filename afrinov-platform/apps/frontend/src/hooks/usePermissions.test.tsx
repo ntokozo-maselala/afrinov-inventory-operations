@@ -62,15 +62,23 @@ describe('hooks/usePermissions.ts — role-based permissions', () => {
       expect(result.current).toBe(true);
     });
 
-    it('required roles are NOT uppercased — lowercase comparison fails (known bug)', () => {
-      // userRoles are uppercased, but required is not
-      // so useHasRole('admin') does not match user with role 'ADMIN'
-      const { result } = renderWithUser(() => useHasRole('admin' as RoleName), { roles: ['ADMIN'] });
-      expect(result.current).toBe(false);
+    it('required roles are compared case-insensitively too', () => {
+      const { result } = renderWithUser(() => useHasRole('store_controller' as RoleName), { roles: ['STORE_CONTROLLER'] });
+      expect(result.current).toBe(true);
     });
 
     it('ADMIN user passes when ADMIN is in required list', () => {
       const { result } = renderWithUser(() => useHasRole(['ADMIN', 'STORE_CONTROLLER']), { roles: ['ADMIN'] });
+      expect(result.current).toBe(true);
+    });
+
+    it('a listed non-admin role passes even when ADMIN is also listed', () => {
+      const { result } = renderWithUser(() => useHasRole(['ADMIN', 'STORE_CONTROLLER']), { roles: ['STORE_CONTROLLER'] });
+      expect(result.current).toBe(true);
+    });
+
+    it('ADMIN passes a check that does not list ADMIN', () => {
+      const { result } = renderWithUser(() => useHasRole(['STORE_CONTROLLER']), { roles: ['ADMIN'] });
       expect(result.current).toBe(true);
     });
   });
@@ -146,5 +154,20 @@ describe('hooks/usePermissions.ts — role-based permissions', () => {
       const { result } = renderWithUser(() => usePermissions(), { roles: ['VIEWER'] });
       expect(result.current.hasPermission('unknown:permission')).toBe(false);
     });
+  });
+});
+
+describe('inventory reversal permission', () => {
+  it.each([
+    ['ADMIN', true], ['STORE_CONTROLLER', true], ['PROCUREMENT', false],
+    ['APPROVER', false], ['TECHNICIAN', false], ['VIEWER', false],
+  ])('grants inventory:reverse to %s: %s', (role, allowed) => {
+    const { result } = renderWithUser(usePermissions, { roles: [role as string] });
+    expect(result.current.hasPermission('inventory:reverse')).toBe(allowed);
+  });
+
+  it('denies reversal when signed out', () => {
+    const { result } = renderWithUser(usePermissions, null);
+    expect(result.current.hasPermission('inventory:reverse')).toBe(false);
   });
 });
