@@ -33,9 +33,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24, not the backend's 20: vitest 5, jsdom 30 and jest-dom 7 need
+      # Node 22 or later, and on Node 20 every test fails to start.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: afrinov-platform/package-lock.json
 
