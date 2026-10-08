@@ -37,7 +37,6 @@ const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'ACTIVE', label: 'Active' },
   { value: 'INACTIVE', label: 'Inactive' },
-  { value: 'FULL', label: 'Full' },
 ];
 
 const STATUS_TONE: Record<Rack['status'], 'success' | 'neutral' | 'warning'> = {
@@ -59,7 +58,6 @@ function RackForm({ initial, onCancel, onSaved, onError }: RackFormProps) {
   const [description, setDescription] = useState(initial?.description ?? '');
   const [locationId, setLocationId] = useState(initial?.locationId ?? '');
   const [projectNumber, setProjectNumber] = useState(initial?.projectNumber ?? '');
-  const [capacity, setCapacity] = useState(initial?.capacity !== undefined && initial?.capacity !== null ? String(initial.capacity) : '');
   const [status, setStatus] = useState<Rack['status']>(initial?.status ?? 'ACTIVE');
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
@@ -81,8 +79,6 @@ function RackForm({ initial, onCancel, onSaved, onError }: RackFormProps) {
     const errs: Record<string, string> = {};
     if (!code.trim()) errs.code = 'Rack code is required.';
     if (!name.trim()) errs.name = 'Rack name is required.';
-    const capNum = capacity.trim() === '' ? null : Number(capacity);
-    if (capNum !== null && (!Number.isFinite(capNum) || capNum < 0)) errs.capacity = 'Capacity must be 0 or positive.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       setValidation('Please correct the highlighted fields.');
@@ -96,7 +92,6 @@ function RackForm({ initial, onCancel, onSaved, onError }: RackFormProps) {
         description: description.trim() || undefined,
         locationId: locationId || undefined,
         projectNumber: projectNumber || undefined,
-        capacity: capNum ?? undefined,
         status,
         notes: notes.trim() || undefined,
       };
@@ -160,13 +155,11 @@ function RackForm({ initial, onCancel, onSaved, onError }: RackFormProps) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Field label="Capacity" htmlFor="rk-cap" help="Optional. Informational only." error={fieldErrors.capacity}>
-          <Input id="rk-cap" type="number" min="0" step="1" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="e.g. 50" invalid={!!fieldErrors.capacity} />
-        </Field>
         <Field label="Status" htmlFor="rk-status">
           <Select id="rk-status" value={status} onChange={(e) => setStatus(e.target.value as Rack['status'])}>
             <option value="ACTIVE">Active</option>
-            <option value="FULL">Full</option>
+            {/* FULL is no longer offered; kept only so a rack already marked full keeps its status on save. */}
+            {initial?.status === 'FULL' && <option value="FULL">Full</option>}
             <option value="INACTIVE">Inactive</option>
           </Select>
         </Field>
@@ -312,7 +305,6 @@ function columns({ onEdit, onArchive }: { onEdit: (r: Rack) => void; onArchive: 
     { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'loc', header: 'Location', render: (r) => r.location?.name ?? <span className="text-surface-300">—</span>, width: '12rem' },
     { key: 'prj', header: 'Project', render: (r) => r.projectNumber ?? <span className="text-surface-300">—</span>, width: '10rem' },
-    { key: 'cap', header: 'Capacity', align: 'right', render: (r) => r.capacity !== null && r.capacity !== undefined ? <span className="font-mono">{r.capacity}</span> : <span className="text-surface-300">—</span>, width: '7rem' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status]} dot>{r.status}</Badge>, width: '9rem' },
     {
       key: 'actions', header: '', align: 'right', width: '12rem',

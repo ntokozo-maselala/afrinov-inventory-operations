@@ -72,11 +72,6 @@ function statusFor(loc: Location): LocationStatus {
   return loc.active ? 'ACTIVE' : 'INACTIVE';
 }
 
-function isValidEmail(value: string): boolean {
-  if (!value) return true;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 interface LocationFormProps {
   initial?: Partial<Location>;
   onCancel: () => void;
@@ -89,11 +84,9 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
   const [code, setCode] = useState(initial?.code ?? '');
   const [type, setType] = useState<LocationType>((initial?.type as LocationType) ?? 'STOREROOM');
   const [active, setActive] = useState(initial?.active ?? true);
-  const [address, setAddress] = useState(initial?.address ?? '');
+  // Address and contact fields still exist on the API but are not shown: the
+  // store's locations are racks and rooms on one site, not addresses.
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [contactPerson, setContactPerson] = useState(initial?.contactPerson ?? '');
-  const [contactPhone, setContactPhone] = useState(initial?.contactPhone ?? '');
-  const [contactEmail, setContactEmail] = useState(initial?.contactEmail ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
@@ -106,9 +99,6 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = 'Location name is required.';
     if (!type) errs.type = 'Location type is required.';
-    if (contactEmail && !isValidEmail(contactEmail)) {
-      errs.contactEmail = 'Enter a valid email address.';
-    }
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       setValidation('Please correct the highlighted fields.');
@@ -121,11 +111,7 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
         code: code.trim() || undefined,
         type,
         active,
-        address: address.trim() || undefined,
         description: description.trim() || undefined,
-        contactPerson: contactPerson.trim() || undefined,
-        contactPhone: contactPhone.trim() || undefined,
-        contactEmail: contactEmail.trim() || undefined,
         notes: notes.trim() || undefined,
       };
       if (initial?.id) {
@@ -189,25 +175,8 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
         </Field>
       </div>
 
-      <Field label="Address" htmlFor="loc-address" help="Physical or postal address. Optional.">
-        <Input id="loc-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="e.g. 12 Industrial Rd, Jet Park" autoComplete="off" />
-      </Field>
-
       <Field label="Description" htmlFor="loc-desc">
         <Textarea id="loc-desc" rows={2} value={description ?? ''} onChange={(e) => setDescription(e.target.value)} placeholder="Optional. Helps identify the location in lists." />
-      </Field>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Contact person" htmlFor="loc-contact">
-          <Input id="loc-contact" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} autoComplete="off" />
-        </Field>
-        <Field label="Contact phone" htmlFor="loc-phone">
-          <Input id="loc-phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} autoComplete="off" />
-        </Field>
-      </div>
-
-      <Field label="Contact email" htmlFor="loc-email" error={fieldErrors.contactEmail}>
-        <Input id="loc-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} invalid={!!fieldErrors.contactEmail} autoComplete="off" />
       </Field>
 
       <Field label="Notes" htmlFor="loc-notes">
@@ -248,24 +217,8 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
           <dd className="text-surface-900">{location.inventoryCount ?? 0} item(s)</dd>
         </div>
         <div className="sm:col-span-2">
-          <dt className="text-eyebrow text-surface-500">Address</dt>
-          <dd className="text-surface-900">{location.address || <span className="text-surface-300">—</span>}</dd>
-        </div>
-        <div className="sm:col-span-2">
           <dt className="text-eyebrow text-surface-500">Description</dt>
           <dd className="text-surface-900">{location.description || <span className="text-surface-300">—</span>}</dd>
-        </div>
-        <div>
-          <dt className="text-eyebrow text-surface-500">Contact person</dt>
-          <dd className="text-surface-900">{location.contactPerson || <span className="text-surface-300">—</span>}</dd>
-        </div>
-        <div>
-          <dt className="text-eyebrow text-surface-500">Contact phone</dt>
-          <dd className="text-surface-900">{location.contactPhone || <span className="text-surface-300">—</span>}</dd>
-        </div>
-        <div>
-          <dt className="text-eyebrow text-surface-500">Contact email</dt>
-          <dd className="text-surface-900">{location.contactEmail ? <a href={`mailto:${location.contactEmail}`} className="text-meta hover:text-brand-600">{location.contactEmail}</a> : <span className="text-surface-300">—</span>}</dd>
         </div>
         <div>
           <dt className="text-eyebrow text-surface-500">Notes</dt>
@@ -314,7 +267,7 @@ export function Locations() {
       if (typeFilter && l.type !== typeFilter) return false;
       if (statusFilter && statusFor(l) !== statusFilter) return false;
       if (needle) {
-        const hay = `${l.name} ${l.code ?? ''} ${l.address ?? ''} ${l.description ?? ''}`.toLowerCase();
+        const hay = `${l.name} ${l.code ?? ''} ${l.description ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -399,7 +352,7 @@ export function Locations() {
           <>
             <div className="relative w-full sm:w-64">
               <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search name, code, address…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search locations" />
+              <Input className="pl-8" placeholder="Search name, code, description…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search locations" />
             </div>
             <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type">
               {TYPE_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -508,7 +461,6 @@ function columns({
       key: 'name', header: 'Location', render: (l) => (
         <button type="button" className="btn-link text-left" onClick={() => onView(l)}>
           <span className="font-medium">{l.name}</span>
-          {l.address && <div className="text-meta">{l.address}</div>}
         </button>
       ),
     },
