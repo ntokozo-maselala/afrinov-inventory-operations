@@ -8,6 +8,7 @@ import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
 import { Field, Input, Select } from '../components/Field';
+import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { Alert } from '../components/Alert';
 import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
@@ -17,6 +18,7 @@ import { api, type ApiError } from '../api/client';
 interface Supplier { id: string; name: string; active: boolean }
 interface Material { id: string; sku: string; name: string; unitOfMeasure: string; active: boolean }
 interface Location { id: string; name: string; active: boolean }
+interface StockRow { materialId: string; locationId: string; locationName: string; quantity: string }
 
 interface Line { key: number; materialId: string; locationId: string; quantity: string }
 
@@ -24,14 +26,22 @@ let nextKey = 1;
 const emptyLine = (locationId = ''): Line => ({ key: nextKey++, materialId: '', locationId, quantity: '' });
 const today = () => new Date().toISOString().slice(0, 10);
 
+function stockText(m: Material, rows: StockRow[] | undefined): string {
+  if (!rows || rows.length === 0) return 'None in stock';
+  const total = rows.reduce((a, r) => a + Number(r.quantity), 0);
+  return `${total} ${m.unitOfMeasure} in stock · ${rows.map((r) => `${r.locationName} (${r.quantity})`).join(', ')}`;
+}
+
 export function ReceiveStock() {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const materials = useApi<Material[]>('/materials');
   const locations = useApi<Location[]>('/locations');
+  const stock = useApi<StockRow[]>('/reports/current-stock');
   const [supplierId, setSupplierId] = useState('');
   const [deliveryRef, setDeliveryRef] = useState('');
   const [receivedAt, setReceivedAt] = useState(today());
   const [lines, setLines] = useState<Line[]>([emptyLine()]);
+  const [focusKey, setFocusKey] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
@@ -40,11 +50,33 @@ export function ReceiveStock() {
   const activeMaterials = useMemo(() => (materials.data ?? []).filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name)), [materials.data]);
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
   const materialById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
+  // Where each item is kept now, most first. If this fails to load, only the hint is lost.
+  const heldAt = useMemo(() => {
+    const map = new Map<string, StockRow[]>();
+    for (const r of stock.data ?? []) {
+      if (Number(r.quantity) <= 0) continue;
+      map.set(r.materialId, [...(map.get(r.materialId) ?? []), r]);
+    }
+    for (const rows of map.values()) rows.sort((a, b) => Number(b.quantity) - Number(a.quantity));
+    return map;
+  }, [stock.data]);
+  const itemOptions = useMemo<SearchOption[]>(() => activeMaterials.map((m) => ({
+    value: m.id,
+    label: `${m.name} (${m.sku})`,
+    detail: stockText(m, heldAt.get(m.id)),
+  })), [activeMaterials, heldAt]);
   const loadError = suppliers.error ?? materials.error ?? locations.error;
   const loading = suppliers.loading || materials.loading || locations.loading;
 
   function update(key: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  // Picking an item fills in where most of it is already kept, if no location is set yet.
+  function pickItem(line: Line, materialId: string) {
+    const home = heldAt.get(materialId)?.[0]?.locationId;
+    const homeActive = !!home && activeLocations.some((l) => l.id === home);
+    update(line.key, { materialId, ...(!line.locationId && homeActive ? { locationId: home } : {}) });
   }
 
   async function submit(e: React.FormEvent) {
@@ -70,6 +102,7 @@ export function ReceiveStock() {
       toast.success(`Received ${filled.length} item${filled.length === 1 ? '' : 's'} as ${result.number}`);
       setDeliveryRef('');
       setLines([emptyLine(filled[filled.length - 1]!.locationId)]);
+      stock.reload();
     } catch (err) {
       setError((err as ApiError).message);
     } finally {
@@ -112,12 +145,22 @@ export function ReceiveStock() {
           <fieldset className="space-y-3">
             <legend className="text-h3 text-surface-900 mb-2">Items received</legend>
             {lines.map((l, i) => (
-              <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_12rem_8rem_auto] gap-2 items-end">
-                <Field label={`Item ${i + 1}`} htmlFor={`rcv-item-${l.key}`}>
-                  <Select id={`rcv-item-${l.key}`} value={l.materialId} onChange={(e) => update(l.key, { materialId: e.target.value })} disabled={loading}>
-                    <option value="">— choose an item —</option>
-                    {activeMaterials.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sku})</option>)}
-                  </Select>
+              <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_12rem_8rem_auto] gap-2 items-start">
+                <Field
+                  label={`Item ${i + 1}`}
+                  htmlFor={`rcv-item-${l.key}`}
+                  help={materialById.has(l.materialId) ? stockText(materialById.get(l.materialId)!, heldAt.get(l.materialId)) : undefined}
+                >
+                  <SearchSelect
+                    id={`rcv-item-${l.key}`}
+                    value={l.materialId}
+                    onChange={(v) => pickItem(l, v)}
+                    options={itemOptions}
+                    placeholder={loading ? 'Loading…' : 'Search by name or code'}
+                    noMatchText="No item matches. Add it under Stock first."
+                    disabled={loading}
+                    autoFocus={focusKey === l.key}
+                  />
                 </Field>
                 <Field label="Into location" htmlFor={`rcv-loc-${l.key}`}>
                   <Select id={`rcv-loc-${l.key}`} value={l.locationId} onChange={(e) => update(l.key, { locationId: e.target.value })} disabled={loading}>
@@ -132,6 +175,7 @@ export function ReceiveStock() {
                   type="button"
                   variant="ghost"
                   aria-label={`Remove item ${i + 1}`}
+                  className="sm:mt-6"
                   onClick={() => setLines((ls) => (ls.length === 1 ? [emptyLine()] : ls.filter((x) => x.key !== l.key)))}
                 >
                   <Icon.Trash size={14} />
@@ -142,7 +186,11 @@ export function ReceiveStock() {
               type="button"
               variant="secondary"
               leadingIcon={<Icon.Plus size={14} />}
-              onClick={() => setLines((ls) => [...ls, emptyLine(ls[ls.length - 1]?.locationId ?? '')])}
+              onClick={() => {
+                const line = emptyLine(lines[lines.length - 1]?.locationId ?? '');
+                setFocusKey(line.key);
+                setLines((ls) => [...ls, line]);
+              }}
               disabled={lines.length >= 50}
             >
               Add another item
@@ -154,7 +202,7 @@ export function ReceiveStock() {
 
           {error && <Alert tone="danger" title="Cannot receive">{error}</Alert>}
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-surface-200">
+          <div className="entry-actions flex justify-end gap-2 py-3 border-t border-surface-200">
             <Link to="/stock"><Button type="button" variant="ghost" disabled={busy}>Back to stock</Button></Link>
             <Button type="submit" variant="primary" loading={busy}>Receive stock</Button>
           </div>

@@ -194,9 +194,9 @@ The goal is that a storeman can do every daily entry from the sheet's IN and OUT
 - [x] Receive stock: supplier, delivery/invoice number, date, location, and several item lines in one entry; posts RECEIPT transactions through goods receipts with no purchase order, and works with procurement off
 - [x] Issue stock: recipient and project as searchable dropdowns, and several item lines in one entry (one person often takes several items)
 - [x] Return to stock: unused material back from a project, posted as a RETURN that references the original issue
-- [ ] Item search by name, ID or location on every entry screen, as the sheet's lookup does
-- [ ] Show current stock and location next to each line while entering, as the sheet does
-- [ ] Tablet-friendly entry screens for the store counter
+- [x] Item search by name, ID or location on every entry screen, as the sheet's lookup does
+- [x] Show current stock and location next to each line while entering, as the sheet does
+- [x] Tablet-friendly entry screens for the store counter
 
 **Exit criteria:** every row type in the four Issued sheets can be entered in the app; the integration tests cover receive, issue and return.
 

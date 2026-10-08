@@ -311,6 +311,23 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Touch screens (the store counter tablet): finger-sized controls, and 16px
+   text so iPads and Android tablets do not zoom into a field on focus. */
+@media (pointer: coarse) {
+  .input, .select, .textarea { min-height: 44px; font-size: 16px; }
+  .btn { min-height: 44px; }
+  .btn-sm { min-height: 36px; }
+  .search-option { min-height: 44px; }
+}
+
+/* Save bar on the entry screens: stays in view while a long list of lines scrolls. */
+.entry-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background-color: rgb(var(--color-surface-0));
+}
+
 /* ── Animations ──────────────────────────────────────────────────────── */
 @keyframes slide-in-right {
   from {

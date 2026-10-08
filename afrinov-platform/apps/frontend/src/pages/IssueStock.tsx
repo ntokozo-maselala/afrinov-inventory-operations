@@ -5,7 +5,8 @@ import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
-import { Field, Input, Select } from '../components/Field';
+import { Field, Input } from '../components/Field';
+import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { Alert } from '../components/Alert';
 import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
@@ -32,6 +33,8 @@ export function IssueStock() {
   const [recipientId, setRecipientId] = useState('');
   const [projectNumber, setProjectNumber] = useState('');
   const [lines, setLines] = useState<Line[]>([emptyLine()]);
+  // The line just added with "Add another item", so its search box gets focus.
+  const [focusKey, setFocusKey] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
@@ -43,6 +46,11 @@ export function IssueStock() {
     [stock.data],
   );
   const byKey = useMemo(() => new Map(available.map((r) => [stockKey(r), r])), [available]);
+  const itemOptions = useMemo<SearchOption[]>(() => available.map((r) => ({
+    value: stockKey(r),
+    label: `${r.materialName} (${r.materialSku}) · ${r.locationName}`,
+    detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
+  })), [available]);
 
   // Requested per item and location, across lines, to warn before submitting.
   const requested = new Map<string, number>();
@@ -114,16 +122,18 @@ export function IssueStock() {
               const row = byKey.get(l.stockKey);
               const over = overIssued.has(l.stockKey);
               return (
-                <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_auto] gap-2 items-end">
+                <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_auto] gap-2 items-start">
                   <Field label={`Item ${i + 1}`} htmlFor={`issue-item-${l.key}`} help={row ? `On hand at ${row.locationName}: ${row.quantity} ${row.unitOfMeasure}` : undefined}>
-                    <Select id={`issue-item-${l.key}`} value={l.stockKey} onChange={(e) => update(l.key, { stockKey: e.target.value })} disabled={stock.loading}>
-                      <option value="">{stock.loading ? 'Loading stock…' : '— choose an item —'}</option>
-                      {available.map((r) => (
-                        <option key={stockKey(r)} value={stockKey(r)}>
-                          {r.materialName} ({r.materialSku}) · {r.locationName} · {r.quantity} {r.unitOfMeasure}
-                        </option>
-                      ))}
-                    </Select>
+                    <SearchSelect
+                      id={`issue-item-${l.key}`}
+                      value={l.stockKey}
+                      onChange={(v) => update(l.key, { stockKey: v })}
+                      options={itemOptions}
+                      placeholder={stock.loading ? 'Loading stock…' : 'Search by name, code or location'}
+                      noMatchText="No item in stock matches"
+                      disabled={stock.loading}
+                      autoFocus={focusKey === l.key}
+                    />
                   </Field>
                   <Field label="Quantity" htmlFor={`issue-qty-${l.key}`} error={over ? 'More than on hand' : null}>
                     <Input id={`issue-qty-${l.key}`} type="number" inputMode="decimal" min="0" step="any" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} invalid={over} />
@@ -132,6 +142,7 @@ export function IssueStock() {
                     type="button"
                     variant="ghost"
                     aria-label={`Remove item ${i + 1}`}
+                    className="sm:mt-6"
                     onClick={() => setLines((ls) => (ls.length === 1 ? [emptyLine()] : ls.filter((x) => x.key !== l.key)))}
                   >
                     <Icon.Trash size={14} />
@@ -139,14 +150,14 @@ export function IssueStock() {
                 </div>
               );
             })}
-            <Button type="button" variant="secondary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setLines((ls) => [...ls, emptyLine()])} disabled={lines.length >= 50}>
+            <Button type="button" variant="secondary" leadingIcon={<Icon.Plus size={14} />} onClick={() => { const line = emptyLine(); setFocusKey(line.key); setLines((ls) => [...ls, line]); }} disabled={lines.length >= 50}>
               Add another item
             </Button>
           </fieldset>
 
           {error && <Alert tone="danger" title="Cannot issue">{error}</Alert>}
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-surface-200">
+          <div className="entry-actions flex justify-end gap-2 py-3 border-t border-surface-200">
             <Link to="/stock"><Button type="button" variant="ghost" disabled={busy}>Back to stock</Button></Link>
             <Button type="submit" variant="primary" loading={busy}>Issue stock</Button>
           </div>

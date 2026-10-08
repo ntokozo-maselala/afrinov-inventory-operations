@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }));
@@ -30,7 +30,15 @@ function renderPage() {
 
 async function ready() {
   await waitFor(() => expect(screen.getByRole('option', { name: /Sabelo/ })).toBeInTheDocument());
-  await waitFor(() => expect(screen.getByRole('option', { name: /Cutting disc/ })).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByLabelText('Item 1')).toBeEnabled());
+}
+
+/** Type into an item search box and pick the first match. */
+function choose(label: string, query: string) {
+  const input = screen.getByLabelText(label);
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: query } });
+  fireEvent.mouseDown(within(screen.getByRole('listbox')).getAllByRole('option')[0]!);
 }
 
 describe('IssueStock page', () => {
@@ -42,6 +50,8 @@ describe('IssueStock page', () => {
   it('offers only items that are in stock', async () => {
     renderPage();
     await ready();
+    fireEvent.focus(screen.getByLabelText('Item 1'));
+    expect(screen.getAllByRole('option', { name: /on hand/ })).toHaveLength(2);
     expect(screen.queryByRole('option', { name: /Out of stock item/ })).not.toBeInTheDocument();
   });
 
@@ -50,10 +60,10 @@ describe('IssueStock page', () => {
     await ready();
     fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
     fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'AFRI-1325' } });
-    fireEvent.change(screen.getByLabelText('Item 1'), { target: { value: 'm-1|l-1' } });
+    choose('Item 1', 'DISC');
     fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
-    fireEvent.change(screen.getByLabelText('Item 2'), { target: { value: 'm-2|l-1' } });
+    choose('Item 2', 'GLOVE');
     fireEvent.change(screen.getAllByLabelText('Quantity')[1]!, { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
 
@@ -70,7 +80,7 @@ describe('IssueStock page', () => {
   it('asks for a recipient before sending anything', async () => {
     renderPage();
     await ready();
-    fireEvent.change(screen.getByLabelText('Item 1'), { target: { value: 'm-1|l-1' } });
+    choose('Item 1', 'DISC');
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
     expect(await screen.findByText('Choose who the stock is issued to.')).toBeInTheDocument();
@@ -81,10 +91,10 @@ describe('IssueStock page', () => {
     renderPage();
     await ready();
     fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-2' } });
-    fireEvent.change(screen.getByLabelText('Item 1'), { target: { value: 'm-2|l-1' } });
+    choose('Item 1', 'GLOVE');
     fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
-    fireEvent.change(screen.getByLabelText('Item 2'), { target: { value: 'm-2|l-1' } });
+    choose('Item 2', 'GLOVE');
     fireEvent.change(screen.getAllByLabelText('Quantity')[1]!, { target: { value: '2' } });
     expect(screen.getAllByText('More than on hand')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
@@ -97,9 +107,40 @@ describe('IssueStock page', () => {
     renderPage();
     await ready();
     fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
-    fireEvent.change(screen.getByLabelText('Item 1'), { target: { value: 'm-1|l-1' } });
+    choose('Item 1', 'DISC');
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
     expect(await screen.findByText(/only 2 available/)).toBeInTheDocument();
+  });
+
+  it('finds items by any mix of name, code and location', async () => {
+    renderPage();
+    await ready();
+    const input = screen.getByLabelText('Item 1');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'a-1 glove' } });
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Welding gloves (GLOVE-L) · A-14 pair on hand']);
+    fireEvent.change(input, { target: { value: 'b-9' } });
+    expect(screen.getByText('No item in stock matches')).toBeInTheDocument();
+  });
+
+  it('picks the highlighted item with the keyboard without submitting the form', async () => {
+    renderPage();
+    await ready();
+    const input = screen.getByLabelText('Item 1');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'a-1' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input).toHaveValue('Welding gloves (GLOVE-L) · A-1');
+    expect(screen.getByText('On hand at A-1: 4 pair')).toBeInTheDocument();
+    expect(screen.queryByText('Choose who the stock is issued to.')).not.toBeInTheDocument();
+  });
+
+  it('puts the cursor in the new line when another item is added', async () => {
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
+    expect(screen.getByLabelText('Item 2')).toHaveFocus();
   });
 });
