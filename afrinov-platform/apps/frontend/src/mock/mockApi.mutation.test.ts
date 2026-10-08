@@ -431,4 +431,30 @@ describe('mock API mutation flows', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
+
+  describe('receiving stock at the counter', () => {
+    it('books every line, shows the supplier on the movement, and can be reversed', async () => {
+      const before = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
+      const onHand = Number(before.find((s) => s.locationId === 'loc-1')?.quantity ?? 0);
+      const receipt = await api.post<{ number: string; transactionIds: string[] }>('/stock-receipts', {
+        supplierId: 'sup-1', deliveryRef: 'INV-77', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 12 }],
+      });
+      const after = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
+      expect(Number(after.find((s) => s.locationId === 'loc-1')!.quantity)).toBe(onHand + 12);
+
+      const history = await api.get<Array<{ id: string; deliveryRef?: string | null; supplierName?: string | null; receiptNumber?: string | null }>>('/inventory-transactions?materialId=mat-1');
+      expect(history.find((t) => t.id === receipt.transactionIds[0])).toMatchObject({ deliveryRef: 'INV-77', receiptNumber: receipt.number });
+
+      await api.post(`/inventory-transactions/${receipt.transactionIds[0]}/reversal`, { reason: 'Booked twice' });
+      const reversed = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
+      expect(Number(reversed.find((s) => s.locationId === 'loc-1')!.quantity)).toBe(onHand);
+    });
+
+    it('requires the invoice number and a known supplier', async () => {
+      await expect(api.post('/stock-receipts', { supplierId: 'sup-1', deliveryRef: ' ', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(api.post('/stock-receipts', { supplierId: 'nope', deliveryRef: 'X', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
 });

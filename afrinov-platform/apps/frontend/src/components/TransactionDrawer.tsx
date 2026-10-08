@@ -23,6 +23,9 @@ interface Transaction {
   reversesId?: string | null;
   reversedById?: string | null;
   recipientName?: string | null;
+  receiptNumber?: string | null;
+  supplierName?: string | null;
+  deliveryRef?: string | null;
 }
 
 interface Props {
@@ -106,6 +109,18 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           <dd className="col-span-2 text-num">{transaction.quantity}</dd>
           <dt className="text-surface-500">Recorded by</dt>
           <dd className="col-span-2">{transaction.actorName || '—'}</dd>
+          {transaction.supplierName && (
+            <>
+              <dt className="text-surface-500">Supplier</dt>
+              <dd className="col-span-2">{transaction.supplierName}</dd>
+            </>
+          )}
+          {transaction.deliveryRef && (
+            <>
+              <dt className="text-surface-500">Invoice / delivery</dt>
+              <dd className="col-span-2">{transaction.deliveryRef}{transaction.receiptNumber ? <span className="text-surface-400"> · {transaction.receiptNumber}</span> : null}</dd>
+            </>
+          )}
           {transaction.recipientName && (
             <>
               <dt className="text-surface-500">Issued to</dt>

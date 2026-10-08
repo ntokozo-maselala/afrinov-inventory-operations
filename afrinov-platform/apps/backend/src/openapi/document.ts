@@ -16,7 +16,7 @@ import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema, reversalSchema } from '../modules/inventory/inventory.routes.js';
+import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema } from '../modules/inventory/inventory.routes.js';
 import {
   createMaterialSchema,
   updateMaterialSchema,
@@ -221,6 +221,13 @@ export const OPERATIONS: Operation[] = [
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
       + 'material or location, and 400 for an inactive one.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'post', path: '/stock-receipts', tag: 'Stock movements', summary: 'Receive stock from a supplier',
+    description: 'The supplier, delivery/invoice number, delivery date (defaults to now) and up to 50 lines, booked '
+      + 'all-or-nothing as a goods receipt with no purchase order. Works with procurement switched off. '
+      + 'Refused with 404 for an unknown supplier, material or location, and 400 for an inactive one.',
+    permissions: [P.ReceiveInventory], body: stockReceiptSchema, success: 201, errors: [404],
   },
   {
     method: 'post', path: '/inventory-transfers', tag: 'Stock movements', summary: 'Move stock between two locations',

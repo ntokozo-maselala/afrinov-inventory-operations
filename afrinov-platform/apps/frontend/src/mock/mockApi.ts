@@ -621,6 +621,41 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
+  // Mirrors StockReceiptService.receive: a posted goods receipt with no
+  // purchase order, all-or-nothing.
+  if (method === 'POST' && p === '/stock-receipts') {
+    const b = (body as { supplierId?: string; deliveryRef?: string; receivedAt?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }) ?? {};
+    const deliveryRef = b.deliveryRef?.trim();
+    if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');
+    const lines = b.lines ?? [];
+    if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
+    if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');
+    const supplier = b.supplierId ? findSupplier(b.supplierId) : undefined;
+    if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
+    if (!supplier.active) throw err('VALIDATION_ERROR', 'Supplier is inactive');
+    for (const l of lines) {
+      if (!findMaterial(l.materialId)) throw err('NOT_FOUND', 'Material not found');
+      if (!findLocation(l.locationId)) throw err('NOT_FOUND', 'Location not found');
+    }
+    const gr: MockGoodsReceipt = {
+      id: nextId('gr'),
+      number: `GR-2026-${String(state.goodsReceipts.length + 1).padStart(4, '0')}`,
+      supplierId: supplier.id,
+      deliveryRef,
+      status: 'POSTED',
+      receivedAt: b.receivedAt ? new Date(b.receivedAt).toISOString() : new Date().toISOString(),
+      lines: lines.map((l) => ({ id: nextId('grl'), materialId: l.materialId, locationId: l.locationId, quantity: String(l.quantity) })),
+    };
+    state.goodsReceipts.push(gr);
+    const postedAt = new Date().toISOString();
+    const transactionIds = lines.map((l) => {
+      const id = nextId('t');
+      state.transactions.push({ id, postedAt, type: 'RECEIPT', materialId: l.materialId, locationId: l.locationId, quantity: String(l.quantity), actorId: 'user-1', referenceType: 'GoodsReceipt', referenceId: gr.id });
+      return id;
+    });
+    return { goodsReceiptId: gr.id, number: gr.number, transactionIds };
+  }
+
   if (method === 'POST' && p === '/inventory-issues') {
     return handleIssue((body as IssueBody) ?? {});
   }
@@ -1223,7 +1258,9 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   const original = state.transactions.find((t) => t.id === id);
   if (!original) throw err('NOT_FOUND', 'InventoryTransaction not found');
   if (original.reversesId) throw err('INVALID_STATE', 'A reversal cannot itself be reversed. Record the movement again instead.');
-  if (original.referenceType === 'GoodsReceipt') throw err('INVALID_STATE', 'Stock received against a goods receipt cannot be reversed here.');
+  if (original.referenceType === 'GoodsReceipt' && state.goodsReceipts.find((g) => g.id === original.referenceId)?.purchaseOrderId) {
+    throw err('INVALID_STATE', 'Stock received against a purchase order cannot be reversed here.');
+  }
   const partner = original.pairedWithId ? state.transactions.find((t) => t.id === original.pairedWithId) : undefined;
   const legs = partner ? (partner.type === 'TRANSFER_OUT' ? [partner, original] : [original, partner]) : [original];
   if (legs.some((leg) => state.transactions.some((t) => t.reversesId === leg.id))) {
@@ -1409,6 +1446,10 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientId: t.recipientId,
     recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
+    ...(() => {
+      const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
+      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
+    })(),
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,
     projectNumber: t.projectNumber,

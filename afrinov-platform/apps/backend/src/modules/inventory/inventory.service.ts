@@ -108,6 +108,14 @@ export const InventoryService = {
       orderBy: { postedAt: 'desc' },
       take,
     });
+    // Receipts point at their goods receipt; show its number, supplier and
+    // delivery/invoice number alongside the movement.
+    const receiptIds = [...new Set(rows.filter((t) => t.referenceType === 'GoodsReceipt' && t.referenceId).map((t) => t.referenceId!))];
+    const receipts = receiptIds.length === 0 ? [] : await prisma.goodsReceipt.findMany({
+      where: { id: { in: receiptIds } },
+      select: { id: true, number: true, deliveryRef: true, supplier: { select: { name: true } } },
+    });
+    const receiptById = new Map(receipts.map((r) => [r.id, r]));
     return rows.map((t) => ({
       id: t.id,
       postedAt: t.postedAt.toISOString(),
@@ -130,6 +138,10 @@ export const InventoryService = {
       referenceId: t.referenceId,
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
+      ...(() => {
+        const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
+        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null };
+      })(),
     }));
   },
   /**
@@ -153,8 +165,14 @@ export const InventoryService = {
         if (original.reversesId) {
           throw Errors.invalidState('A reversal cannot itself be reversed. Record the movement again instead.');
         }
-        if (original.referenceType === 'GoodsReceipt') {
-          throw Errors.invalidState('Stock received against a goods receipt cannot be reversed here.');
+        // Receipts against a purchase order also moved the order's received
+        // quantities, so they cannot be reversed here. Counter receipts
+        // (no purchase order) can.
+        if (original.referenceType === 'GoodsReceipt' && original.referenceId) {
+          const gr = await tx.goodsReceipt.findUnique({ where: { id: original.referenceId } });
+          if (gr?.purchaseOrderId) {
+            throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
+          }
         }
 
         const legs = [original];

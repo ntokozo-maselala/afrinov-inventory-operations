@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { supplierIdSchema } from '../../shared/ids.js';
 import { PurchaseOrderService, SupplierService } from './procurement.service.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
@@ -15,7 +16,7 @@ export const createSupplierSchema = z.object({
 });
 
 export const createPOSchema = z.object({
-  supplierId: z.string().uuid(),
+  supplierId: supplierIdSchema,
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().optional(),
   lines: z
@@ -53,7 +54,7 @@ export const closeSchema = z.object({
 
 export const createGRSchema = z.object({
   purchaseOrderId: z.string().uuid().optional(),
-  supplierId: z.string().uuid(),
+  supplierId: supplierIdSchema,
   deliveryRef: z.string().optional(),
   lines: z
     .array(

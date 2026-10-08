@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { supplierIdSchema } from '../../shared/ids.js';
 import { InventoryService } from './inventory.service.js';
+import { StockReceiptService } from './stock-receipt.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
@@ -27,6 +29,17 @@ export const adjustmentSchema = z.object({
   quantity: z.number(),
   reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER']),
   reasonNote: z.string().optional(),
+});
+
+export const stockReceiptSchema = z.object({
+  supplierId: supplierIdSchema,
+  deliveryRef: z.string().trim().min(1).max(120),
+  receivedAt: z.string().optional(),
+  lines: z.array(z.object({
+    materialId: z.string().uuid(),
+    locationId: z.string().uuid(),
+    quantity: z.number().positive(),
+  })).min(1).max(50),
 });
 
 export const reversalSchema = z.object({
@@ -83,6 +96,19 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const result = await InventoryService.adjust({ ...parsed.data, actorId: actorId(req) });
+    return reply.code(201).send(result);
+  });
+
+  // Counter receipts work whether or not procurement is switched on.
+  app.post('/stock-receipts', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ReceiveInventory);
+    const parsed = stockReceiptSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid receipt payload', details: parsed.error.flatten() },
+      });
+    }
+    const result = await StockReceiptService.receive({ ...parsed.data, actorId: actorId(req) });
     return reply.code(201).send(result);
   });
 

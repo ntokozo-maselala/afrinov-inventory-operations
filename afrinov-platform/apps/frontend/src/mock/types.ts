@@ -190,6 +190,9 @@ export interface MockMovementRow {
   reversedById?: string;
   recipientName?: string | null;
   recipientType?: string | null;
+  receiptNumber?: string | null;
+  supplierName?: string | null;
+  deliveryRef?: string | null;
 }
 
 export type MockRackStatus = 'ACTIVE' | 'INACTIVE' | 'FULL';

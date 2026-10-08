@@ -32,6 +32,7 @@ interface MovementRow {
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
   recipientName?: string | null;
+  receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {

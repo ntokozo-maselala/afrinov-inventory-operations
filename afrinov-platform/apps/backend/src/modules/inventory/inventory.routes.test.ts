@@ -23,6 +23,9 @@ const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedRev
   mockedReverse: vi.fn(),
 }));
 
+const { mockedReceive } = vi.hoisted(() => ({ mockedReceive: vi.fn() }));
+vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive } }));
+
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
     return {
@@ -144,6 +147,44 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ transactionIds: ['tx-1'] });
       expect(mockedIssue).toHaveBeenCalledWith({ ...payload, actorId: 'user-admin' });
+    });
+  });
+
+  describe('POST /api/v1/stock-receipts', () => {
+    const receipt = {
+      supplierId: VALID_UUID,
+      deliveryRef: 'INV-2041',
+      lines: [{ materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 20 }],
+    };
+
+    it('returns 403 without the receive:inventory permission', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/stock-receipts', headers: authed('user-tech', ['issue:inventory']), payload: receipt });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it.each([
+      ['the supplier is missing', { ...receipt, supplierId: undefined }],
+      ['the delivery/invoice number is blank', { ...receipt, deliveryRef: '  ' }],
+      ['there are no lines', { ...receipt, lines: [] }],
+      ['a quantity is not positive', { ...receipt, lines: [{ materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 0 }] }],
+    ])('returns 400 when %s', async (_case, payload) => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/stock-receipts', headers: authed('user-store', ['receive:inventory']), payload });
+      expect(res.statusCode).toBe(400);
+      expect(mockedReceive).not.toHaveBeenCalled();
+    });
+
+    it('accepts a supplier id that is not a UUID, like the demo suppliers from the seed', async () => {
+      mockedReceive.mockResolvedValue({ goodsReceiptId: 'gr-1', number: 'GR-2026-0001', transactionIds: ['t-1'] });
+      const res = await app.inject({ method: 'POST', url: '/api/v1/stock-receipts', headers: authed('user-store', ['receive:inventory']), payload: { ...receipt, supplierId: 'seed-sup-hydroscand' } });
+      expect(res.statusCode).toBe(201);
+    });
+
+    it('returns 201 and records the caller as the receiver', async () => {
+      mockedReceive.mockResolvedValue({ goodsReceiptId: 'gr-1', number: 'GR-2026-0001', transactionIds: ['t-1'] });
+      const res = await app.inject({ method: 'POST', url: '/api/v1/stock-receipts', headers: authed('user-store', ['receive:inventory']), payload: { ...receipt, receivedAt: '2026-10-01' } });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ goodsReceiptId: 'gr-1', number: 'GR-2026-0001', transactionIds: ['t-1'] });
+      expect(mockedReceive).toHaveBeenCalledWith({ ...receipt, receivedAt: '2026-10-01', actorId: 'user-store' });
     });
   });
 

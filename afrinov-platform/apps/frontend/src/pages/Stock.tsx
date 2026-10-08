@@ -74,6 +74,11 @@ export function Stock() {
         description="Current on-hand quantities across all locations. Source of truth is the inventory transaction ledger."
         actions={
           <div className="flex flex-wrap gap-2">
+          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']}>
+            <Link to="/stock/receive">
+              <Button variant="primary" leadingIcon={<Icon.ArrowDown size={14} />}>Receive stock</Button>
+            </Link>
+          </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
             <Link to="/stock/issue">
               <Button variant="primary" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>

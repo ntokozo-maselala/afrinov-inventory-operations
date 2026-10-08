@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { supplierIdSchema } from '../../shared/ids.js';
 import { StockItemService } from './stock-item.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
@@ -23,7 +24,7 @@ export const createStockItemSchema = z
     unitCost: z.number().nonnegative().optional(),
     initialQuantity: z.number().nonnegative().optional(),
     locationId: z.string().uuid().optional(),
-    supplierId: z.string().uuid().optional(),
+    supplierId: supplierIdSchema.optional(),
   })
   .refine(
     (v) => v.initialQuantity === undefined || v.initialQuantity === 0 || !!v.locationId,

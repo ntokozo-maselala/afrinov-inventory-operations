@@ -672,14 +672,27 @@ describe('InventoryService — ADR-002 invariants', () => {
       ).rejects.toThrow(/cannot itself be reversed/);
     });
 
-    it('refuses to reverse stock received against a goods receipt', async () => {
+    it('refuses to reverse stock received against a purchase order', async () => {
+      goodsReceipts.set('gr-1', { id: 'gr-1', status: 'POSTED', purchaseOrderId: 'po-1', lines: [] });
       trxRows.push({
         id: 'gr-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
         actorId: 'u', postedAt: new Date(), referenceType: 'GoodsReceipt', referenceId: 'gr-1',
       });
       await expect(
         InventoryService.reverse({ transactionId: 'gr-trx', reason: 'Wrong supplier', actorId: 'u' }),
-      ).rejects.toThrow(/goods receipt/);
+      ).rejects.toThrow(/purchase order/);
+    });
+
+    it('reverses stock received at the counter (no purchase order)', async () => {
+      goodsReceipts.set('gr-2', { id: 'gr-2', status: 'POSTED', purchaseOrderId: null, lines: [] });
+      trxRows.push({
+        id: 'counter-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
+        actorId: 'u', postedAt: new Date(), referenceType: 'GoodsReceipt', referenceId: 'gr-2',
+      });
+      balances.set('mat-1|loc-1', { materialId: 'mat-1', locationId: 'loc-1', quantity: new Prisma.Decimal(5) });
+      const { reversalIds } = await InventoryService.reverse({ transactionId: 'counter-trx', reason: 'Booked twice', actorId: 'u' });
+      expect(trxRows.find((r) => r.id === reversalIds[0])).toMatchObject({ type: 'RECEIPT', referenceId: 'gr-2', reversesId: 'counter-trx' });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
     });
 
     it('refuses when the stock has already been used', async () => {

@@ -79,7 +79,7 @@ export const GoodsReceiptService = {
   },
 };
 
-async function generateGRNumber(tx: Prisma.TransactionClient): Promise<string> {
+export async function generateGRNumber(tx: Prisma.TransactionClient): Promise<string> {
   const year = new Date().getFullYear();
   const count = await tx.goodsReceipt.count({
     where: { createdAt: { gte: new Date(`${year}-01-01T00:00:00Z`) } },
