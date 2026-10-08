@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 interface Sup { id: string; name: string; active: boolean }
-interface PO { id: string; number: string }
+interface PO { id: string; number: string; status: string }
 interface GRL { id: string; goodsReceiptId: string; materialId: string; locationId: string; quantity: number; purchaseOrderLineId: string | null }
 interface GR { id: string; number: string; purchaseOrderId: string | null; supplierId: string; deliveryRef: string | null; status: 'DRAFT' | 'SUBMITTED' | 'POSTED'; receivedById: string; lines: GRL[]; receivedAt: Date }
 
@@ -97,7 +97,7 @@ beforeEach(() => {
   grCounter = 0;
   db.suppliers.set('sup-1', { id: 'sup-1', name: 'Hydroscand', active: true });
   db.suppliers.set('sup-inactive', { id: 'sup-inactive', name: 'Closed Supplier', active: false });
-  db.purchaseOrders.set('po-1', { id: 'po-1', number: 'PO-2026-0001' });
+  db.purchaseOrders.set('po-1', { id: 'po-1', number: 'PO-2026-0001', status: 'APPROVED' });
   db.materials.set('mat-1', { id: 'mat-1', sku: 'M16X40-88-HEX', name: 'M16 x 40 8.8 BLACK HEX SET SCREW' });
   db.locations.set('loc-1', { id: 'loc-1', name: 'Main Storeroom' });
 });
@@ -136,6 +136,21 @@ describe('GoodsReceiptService', () => {
       expect(result.purchaseOrderId).toBe('po-1');
       expect(result.deliveryRef).toBe('INVOICE-123');
     });
+
+    it.each(['DRAFT', 'PENDING_APPROVAL', 'RECEIVED', 'CLOSED', 'CANCELLED'])(
+      'refuses to receive against a purchase order that is %s',
+      async (status) => {
+        db.purchaseOrders.set('po-1', { id: 'po-1', number: 'PO-2026-0001', status });
+        const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+        await expect(
+          GoodsReceiptService.create(
+            { supplierId: 'sup-1', purchaseOrderId: 'po-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] },
+            'user-1',
+          ),
+        ).rejects.toThrow(new RegExp(`status ${status}`));
+        expect(db.goodsReceipts).toHaveLength(0);
+      },
+    );
 
     it('rejects empty lines', async () => {
       const { GoodsReceiptService } = await import('./goods-receipt.service.js');

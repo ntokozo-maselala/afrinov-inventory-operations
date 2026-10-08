@@ -41,6 +41,7 @@ model User {
   shippedPurchaseOrders PurchaseOrder[]  @relation("PO_ShippedBy")
   deliveredPurchaseOrders PurchaseOrder[] @relation("PO_DeliveredBy")
   cancelledPurchaseOrders PurchaseOrder[] @relation("PO_CancelledBy")
+  closedPurchaseOrders PurchaseOrder[]   @relation("PO_ClosedBy")
   goodsReceipts        GoodsReceipt[]    @relation("GR_ReceivedBy")
   inventoryTransactions InventoryTransaction[]
   managedProjects      Project[]         @relation("ProjectManager")
@@ -243,22 +244,17 @@ model Rack {
 
 // ─── Procurement ──────────────────────────────────────────────────────────
 
+// DRAFT → PENDING_APPROVAL → APPROVED → PARTIALLY_RECEIVED → RECEIVED → CLOSED,
+// or CANCELLED before anything is received. Local suppliers deliver with an
+// invoice, so there is no shipping stage (migration 20260101000004).
 enum PurchaseOrderStatus {
   DRAFT
-  // Legacy / transitional statuses kept for backward compatibility with
-  // pre-existing records. The canonical lifecycle now flows through
-  // PENDING_APPROVAL → APPROVED → SHIPPED → DELIVERED.
-  SUBMITTED
-  APPROVED
   PENDING_APPROVAL
-  SHIPPED
-  DELIVERED
-  SENT
+  APPROVED
   PARTIALLY_RECEIVED
-  FULLY_RECEIVED
+  RECEIVED
   CLOSED
   CANCELLED
-  REJECTED
 }
 
 model PurchaseOrder {
@@ -281,12 +277,18 @@ model PurchaseOrder {
   trackingNumber       String?   @map("tracking_number")
   carrier              String?
   shipmentNotes        String?   @map("shipment_notes")
+  // The shipped_* columns above are no longer written (there is no shipping
+  // stage); they are kept so older records keep their history.
+  // delivered_* records when the order became fully RECEIVED.
   deliveredAt          DateTime? @map("delivered_at")
   deliveredById        String?   @map("delivered_by_id")
   deliveryNotes        String?   @map("delivery_notes")
   cancelledAt          DateTime? @map("cancelled_at")
   cancelledById        String?   @map("cancelled_by_id")
   cancellationReason   String?   @map("cancellation_reason")
+  closedAt             DateTime? @map("closed_at")
+  closedById           String?   @map("closed_by_id")
+  closeReason          String?   @map("close_reason")
 
   supplier     Supplier            @relation(fields: [supplierId], references: [id])
   createdBy    User                @relation("PO_CreatedBy", fields: [createdById], references: [id])
@@ -294,6 +296,7 @@ model PurchaseOrder {
   shippedBy    User?               @relation("PO_ShippedBy", fields: [shippedById], references: [id])
   deliveredBy  User?               @relation("PO_DeliveredBy", fields: [deliveredById], references: [id])
   cancelledBy  User?               @relation("PO_CancelledBy", fields: [cancelledById], references: [id])
+  closedBy     User?               @relation("PO_ClosedBy", fields: [closedById], references: [id])
   lines        PurchaseOrderLine[]
   goodsReceipts GoodsReceipt[]
 

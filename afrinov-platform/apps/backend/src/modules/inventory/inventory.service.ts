@@ -383,6 +383,13 @@ export const InventoryService = {
       if (!gr) throw Errors.notFound('GoodsReceipt');
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
+      // The order may have been cancelled or closed since the receipt was recorded.
+      if (gr.purchaseOrderId) {
+        const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
+        if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
+          throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
+        }
+      }
 
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);
@@ -435,11 +442,14 @@ export const InventoryService = {
         });
         const allFully = lines.every((l) => toDecimal(l.receivedQty).gte(toDecimal(l.orderedQty)));
         const anyReceived = lines.some((l) => gtZero(toDecimal(l.receivedQty)));
-        const newStatus = allFully ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : 'APPROVED';
-        await tx.purchaseOrder.update({
-          where: { id: gr.purchaseOrderId },
-          data: { status: newStatus },
-        });
+        if (allFully || anyReceived) {
+          await tx.purchaseOrder.update({
+            where: { id: gr.purchaseOrderId },
+            data: allFully
+              ? { status: 'RECEIVED', deliveredAt: new Date(), deliveredById: input.actorId }
+              : { status: 'PARTIALLY_RECEIVED' },
+          });
+        }
       }
 
       await dispatchDomainEvents([

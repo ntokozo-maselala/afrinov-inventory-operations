@@ -195,6 +195,7 @@ const fakeTx = {
     },
   },
   purchaseOrder: {
+    findUnique: async ({ where }: { where: { id: string } }) => purchaseOrders.get(where.id) ?? null,
     update: async ({ where, data }: { where: { id: string }; data: Partial<POEntry> }) => {
       const po = purchaseOrders.get(where.id);
       if (!po) throw new Error('not found');
@@ -712,7 +713,25 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(1);
     });
 
-    it('transitions PO to FULLY_RECEIVED when all lines are fully received', async () => {
+    it.each(['CANCELLED', 'CLOSED', 'DRAFT'])('refuses to post against a purchase order that is now %s', async (status) => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(3), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-1' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status });
+
+      await expect(
+        InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }),
+      ).rejects.toThrow(new RegExp(`status ${status}`));
+      expect(trxRows).toHaveLength(0);
+      expect(goodsReceipts.get('gr-1')?.status).toBe('SUBMITTED');
+    });
+
+    it('transitions PO to RECEIVED when all lines are fully received', async () => {
       purchaseOrderLines.set('pol-1', {
         id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
         orderedQty: new Prisma.Decimal(3), receivedQty: new Prisma.Decimal(0),
@@ -725,7 +744,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
       await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
 
-      expect(purchaseOrders.get('po-1')?.status).toBe('FULLY_RECEIVED');
+      expect(purchaseOrders.get('po-1')?.status).toBe('RECEIVED');
     });
 
     it('transitions PO to PARTIALLY_RECEIVED when not all lines are fully received', async () => {

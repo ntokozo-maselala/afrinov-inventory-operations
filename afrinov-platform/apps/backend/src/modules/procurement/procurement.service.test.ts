@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
-type POStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'SUBMITTED' | 'SENT' | 'PARTIALLY_RECEIVED' | 'FULLY_RECEIVED' | 'CLOSED' | 'REJECTED';
+type POStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
 type TxType = 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT';
 
 interface PO {
@@ -22,6 +22,7 @@ interface PO {
   trackingNumber: string | null; carrier: string | null; shipmentNotes: string | null;
   deliveredAt: Date | null; deliveredById: string | null; deliveryNotes: string | null;
   cancelledAt: Date | null; cancelledById: string | null; cancellationReason: string | null;
+  closedAt?: Date | null; closedById?: string | null; closeReason?: string | null;
   lines: POL[];
 }
 interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal }
@@ -72,7 +73,8 @@ function makePrisma(): unknown {
         const po = db.pos.get(where.id);
         if (!po) return null;
         if (include?.lines) {
-          return { ...po, lines: po.lines.map((l) => ({ ...l, material: db.materials.get(l.materialId) })) };
+          const lines = [...db.lines.values()].filter((l) => l.purchaseOrderId === po.id);
+          return { ...po, lines: lines.map((l) => ({ ...l, material: db.materials.get(l.materialId) })) };
         }
         return po;
       },
@@ -232,48 +234,58 @@ describe('PurchaseOrderService lifecycle', () => {
     await expect(PurchaseOrderService.approve(po.id, 'user-2')).rejects.toThrow(/approve/i);
   });
 
-  it('ship from APPROVED stores tracking and carrier', async () => {
+  async function approvedPO(orderedQty = 7) {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 2 }] }, 'user-1');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty }] }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
     await PurchaseOrderService.approve(po.id, 'user-2');
-    const shipped = await PurchaseOrderService.ship({ id: po.id, trackingNumber: 'TRK-1', carrier: 'DHL' }, 'user-3');
-    expect(shipped?.status).toBe('SHIPPED');
-    expect(shipped?.trackingNumber).toBe('TRK-1');
-    expect(shipped?.carrier).toBe('DHL');
+    return po;
+  }
+
+  it('has no shipping stage', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    expect('ship' in PurchaseOrderService).toBe(false);
+    expect('deliver' in PurchaseOrderService).toBe(false);
   });
 
-  it('rejects ship from DRAFT', async () => {
+  it('receive from APPROVED books every outstanding line into stock and marks the order RECEIVED', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
-    await expect(PurchaseOrderService.ship({ id: po.id }, 'user-1')).rejects.toThrow(/shipped/i);
-  });
-
-  it('deliver from SHIPPED creates RECEIPT inventory transactions and updates balance', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 7 }] }, 'user-1');
-    await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'user-2');
-    await PurchaseOrderService.ship({ id: po.id }, 'user-3');
-    const delivered = await PurchaseOrderService.deliver({ id: po.id, locationId: 'loc-1' }, 'user-4');
-    expect(delivered?.status).toBe('DELIVERED');
-    expect(delivered?.deliveredById).toBe('user-4');
+    const po = await approvedPO(7);
+    const received = await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    expect(received?.status).toBe('RECEIVED');
+    expect(received?.deliveredById).toBe('user-4');
     expect(db.transactions.length).toBe(1);
     expect(db.transactions[0]).toMatchObject({ materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', referenceType: 'PurchaseOrder' });
     expect(db.transactions[0]!.quantity.toString()).toBe('7');
-    const bal = db.balances.get(balKey('mat-1', 'loc-1'));
-    expect(bal?.quantity.toString()).toBe('7');
+    expect(db.balances.get(balKey('mat-1', 'loc-1'))?.quantity.toString()).toBe('7');
+    expect(db.audit.find((a) => a.action === 'PO_RECEIVE')).toBeDefined();
   });
 
-  it('rejects double-deliver via status guard', async () => {
+  it('receive from PARTIALLY_RECEIVED books only the shortfall', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await approvedPO(7);
+    const line = [...db.lines.values()].find((l) => l.purchaseOrderId === po.id)!;
+    db.lines.set(line.id, { ...line, receivedQty: new Prisma.Decimal(3) });
+    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' });
+    const received = await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    expect(received?.status).toBe('RECEIVED');
+    expect(db.transactions.map((t) => t.quantity.toString())).toEqual(['4']);
+  });
+
+  it('refuses to receive a draft or pending order', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
+    await expect(PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow(/approved or partly received/i);
     await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'user-2');
-    await PurchaseOrderService.ship({ id: po.id }, 'user-3');
-    await PurchaseOrderService.deliver({ id: po.id, locationId: 'loc-1' }, 'user-4');
-    await expect(PurchaseOrderService.deliver({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow();
-    // exactly one receipt was recorded
+    await expect(PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow(/approved or partly received/i);
+    expect(db.transactions.length).toBe(0);
+  });
+
+  it('rejects receiving twice via the status guard', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await approvedPO(1);
+    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    await expect(PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4')).rejects.toThrow();
     expect(db.transactions.length).toBe(1);
   });
 
@@ -286,24 +298,47 @@ describe('PurchaseOrderService lifecycle', () => {
     expect(cancelled?.cancelledById).toBe('user-1');
   });
 
-  it('rejects cancel from DELIVERED', async () => {
+  it('rejects cancel once anything has been received', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
-    await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'user-2');
-    await PurchaseOrderService.ship({ id: po.id }, 'user-3');
-    await PurchaseOrderService.deliver({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    const po = await approvedPO(1);
+    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
     await expect(PurchaseOrderService.cancel({ id: po.id, reason: 'x' }, 'user-1')).rejects.toThrow(/cancel/i);
   });
 
-  it('update is blocked once DELIVERED', async () => {
+  it('update is blocked once RECEIVED', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
-    await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'user-2');
-    await PurchaseOrderService.ship({ id: po.id }, 'user-3');
-    await PurchaseOrderService.deliver({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    const po = await approvedPO(1);
+    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
     await expect(PurchaseOrderService.update({ id: po.id, notes: 'late edit' }, 'user-1')).rejects.toThrow(/editable/i);
+  });
+
+  it('closes a fully received order without a reason', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await approvedPO(2);
+    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    const closed = await PurchaseOrderService.close({ id: po.id }, 'user-1');
+    expect(closed?.status).toBe('CLOSED');
+    expect(closed?.closedById).toBe('user-1');
+    expect(closed?.closeReason).toBeNull();
+    expect(db.audit.find((a) => a.action === 'PO_CLOSE')).toBeDefined();
+  });
+
+  it('closing short needs a reason', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await approvedPO(5);
+    const line = [...db.lines.values()].find((l) => l.purchaseOrderId === po.id)!;
+    db.lines.set(line.id, { ...line, receivedQty: new Prisma.Decimal(3) });
+    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' });
+    await expect(PurchaseOrderService.close({ id: po.id, reason: '  ' }, 'user-1')).rejects.toThrow(/reason is required/i);
+    const closed = await PurchaseOrderService.close({ id: po.id, reason: 'Supplier discontinued the last 2' }, 'user-1');
+    expect(closed?.status).toBe('CLOSED');
+    expect(closed?.closeReason).toBe('Supplier discontinued the last 2');
+  });
+
+  it('refuses to close an order before anything is received', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await approvedPO(1);
+    await expect(PurchaseOrderService.close({ id: po.id, reason: 'x' }, 'user-1')).rejects.toThrow(/cannot be closed/i);
   });
 
   it('history returns lifecycle events in order', async () => {

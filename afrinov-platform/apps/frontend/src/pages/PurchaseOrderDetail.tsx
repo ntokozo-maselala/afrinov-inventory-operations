@@ -17,10 +17,9 @@ import { Field, Input, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 
 type POStatus =
-  | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED'
-  | 'SUBMITTED' | 'SENT' | 'PARTIALLY_RECEIVED' | 'FULLY_RECEIVED' | 'CLOSED' | 'REJECTED';
+  | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
 
-const LIFECYCLE_ORDER: POStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SHIPPED', 'DELIVERED'];
+const LIFECYCLE_ORDER: POStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED'];
 
 interface POUser { id: string; name: string; email: string }
 interface POLine {
@@ -42,17 +41,15 @@ interface PO {
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
   approvedBy?: POUser | null;
-  shippedAt?: string | null;
-  shippedBy?: POUser | null;
-  trackingNumber?: string | null;
-  carrier?: string | null;
-  shipmentNotes?: string | null;
   deliveredAt?: string | null;
   deliveredBy?: POUser | null;
   deliveryNotes?: string | null;
   cancelledAt?: string | null;
   cancelledBy?: POUser | null;
   cancellationReason?: string | null;
+  closedAt?: string | null;
+  closedBy?: POUser | null;
+  closeReason?: string | null;
   createdBy?: POUser | null;
   lines: POLine[];
   goodsReceipts?: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }>;
@@ -71,44 +68,34 @@ interface HistoryEntry {
 
 interface LocationOpt { id: string; name: string }
 
-interface ShipDraft { trackingNumber: string; carrier: string; shipmentNotes: string }
-interface DeliverDraft { locationId: string; deliveryNotes: string }
-interface CancelDraft { reason: string }
+interface ReceiveDraft { locationId: string; deliveryNotes: string }
+interface ReasonDraft { reason: string }
 
 type ActionDraft =
   | { kind: 'approve' }
-  | { kind: 'ship'; draft: ShipDraft }
-  | { kind: 'deliver'; draft: DeliverDraft }
-  | { kind: 'cancel'; draft: CancelDraft };
+  | { kind: 'receive'; draft: ReceiveDraft }
+  | { kind: 'close'; draft: ReasonDraft }
+  | { kind: 'cancel'; draft: ReasonDraft };
 
 function statusLabel(s: POStatus): string {
   return ({
     DRAFT: 'Draft',
     PENDING_APPROVAL: 'Pending approval',
     APPROVED: 'Approved',
-    SHIPPED: 'Shipped',
-    DELIVERED: 'Delivered',
-    CANCELLED: 'Cancelled',
-    SUBMITTED: 'Submitted',
-    SENT: 'Sent',
-    PARTIALLY_RECEIVED: 'Partially received',
-    FULLY_RECEIVED: 'Fully received',
+    PARTIALLY_RECEIVED: 'Partly received',
+    RECEIVED: 'Received',
     CLOSED: 'Closed',
-    REJECTED: 'Rejected',
+    CANCELLED: 'Cancelled',
   } as Record<string, string>)[s] ?? s;
 }
 
-function isCancellable(s: POStatus): boolean {
-  return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'SUBMITTED' || s === 'APPROVED';
-}
-function isEditable(s: POStatus): boolean {
-  return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'SUBMITTED' || s === 'APPROVED';
-}
-function isDeliverable(s: POStatus): boolean { return s === 'SHIPPED'; }
-function isShippable(s: POStatus): boolean { return s === 'APPROVED'; }
-function isApprovable(s: POStatus): boolean { return s === 'PENDING_APPROVAL' || s === 'SUBMITTED'; }
+function isCancellable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
+function isEditable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
+function isApprovable(s: POStatus): boolean { return s === 'PENDING_APPROVAL'; }
+function isReceivable(s: POStatus): boolean { return s === 'APPROVED' || s === 'PARTIALLY_RECEIVED'; }
+function isClosable(s: POStatus): boolean { return s === 'PARTIALLY_RECEIVED' || s === 'RECEIVED'; }
+function isShort(po: PO): boolean { return po.lines.some((l) => Number(l.receivedQty) < Number(l.orderedQty)); }
 
-function emptyCancel(): CancelDraft { return { reason: '' }; }
 
 export function PurchaseOrderDetail() {
   const { id } = useParams<{ id: string }>();
@@ -127,12 +114,12 @@ export function PurchaseOrderDetail() {
     setBusy(true);
     try {
       let payload: Record<string, unknown> = {};
-      if (draft.kind === 'ship') payload = filterUndefined(draft.draft as unknown as Record<string, unknown>);
-      else if (draft.kind === 'deliver') {
+      if (draft.kind === 'receive') {
         if (!draft.draft.locationId) { toast.error('Select a receive-into location'); setBusy(false); return; }
         payload = { locationId: draft.draft.locationId, deliveryNotes: draft.draft.deliveryNotes || undefined };
-      }
-      else if (draft.kind === 'cancel') {
+      } else if (draft.kind === 'close') {
+        payload = draft.draft.reason.trim() ? { reason: draft.draft.reason.trim() } : {};
+      } else if (draft.kind === 'cancel') {
         if (!draft.draft.reason.trim()) { toast.error('A cancellation reason is required'); setBusy(false); return; }
         payload = { reason: draft.draft.reason.trim() };
       }
@@ -150,13 +137,17 @@ export function PurchaseOrderDetail() {
   const fresh = po.data;
   const cancellable = fresh ? isCancellable(fresh.status) : false;
   const editable = fresh ? isEditable(fresh.status) : false;
-  const primary: { kind: 'approve' | 'ship' | 'deliver'; label: string } | null = useMemo(() => {
+  const closable = fresh ? isClosable(fresh.status) : false;
+  const primary: { kind: 'approve' | 'receive'; label: string } | null = useMemo(() => {
     if (!fresh) return null;
     if (isApprovable(fresh.status)) return { kind: 'approve', label: 'Approve' };
-    if (isShippable(fresh.status)) return { kind: 'ship', label: 'Mark as shipped' };
-    if (isDeliverable(fresh.status)) return { kind: 'deliver', label: 'Mark as delivered' };
+    if (isReceivable(fresh.status)) return { kind: 'receive', label: 'Receive all outstanding' };
     return null;
   }, [fresh]);
+
+  function openPrimary(kind: 'approve' | 'receive') {
+    setDraft(kind === 'approve' ? { kind } : { kind, draft: { locationId: '', deliveryNotes: '' } });
+  }
 
   return (
     <div>
@@ -168,15 +159,18 @@ export function PurchaseOrderDetail() {
           <div className="flex flex-wrap items-center gap-2">
             <PurchaseOrderStatusBadge status={fresh.status} />
             {primary && (
-              <Button variant="primary" leadingIcon={primaryIcon(primary.kind)} onClick={() => setDraft({ kind: primary.kind } as ActionDraft)}>
+              <Button variant="primary" leadingIcon={primaryIcon(primary.kind)} onClick={() => openPrimary(primary.kind)}>
                 {primary.label}
               </Button>
             )}
             {editable && (
               <Button variant="secondary" leadingIcon={<Icon.Edit size={14} />} onClick={() => setEditing(true)}>Edit</Button>
             )}
+            {closable && (
+              <Button variant="secondary" onClick={() => setDraft({ kind: 'close', draft: { reason: '' } })}>Close PO</Button>
+            )}
             {cancellable && (
-              <Button variant="ghost" onClick={() => setDraft({ kind: 'cancel', draft: emptyCancel() })}>Cancel PO</Button>
+              <Button variant="ghost" onClick={() => setDraft({ kind: 'cancel', draft: { reason: '' } })}>Cancel PO</Button>
             )}
           </div>
         )}
@@ -200,11 +194,11 @@ export function PurchaseOrderDetail() {
                 {fresh.approvedAt && (
                   <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {fresh.approvedBy?.name ?? '—'}</span></dd></>
                 )}
-                {fresh.shippedAt && (
-                  <><dt className="text-surface-500">Shipped</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.shippedAt)}{fresh.carrier ? <><br /><span className="text-surface-400">{fresh.carrier}{fresh.trackingNumber ? ` · ${fresh.trackingNumber}` : ''}</span></> : null}</dd></>
-                )}
                 {fresh.deliveredAt && (
-                  <><dt className="text-surface-500">Delivered</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
+                  <><dt className="text-surface-500">Received</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
+                )}
+                {fresh.closedAt && (
+                  <><dt className="text-surface-500">Closed</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.closedAt)}<br /><span className="text-surface-400">{fresh.closeReason ?? `by ${fresh.closedBy?.name ?? '—'}`}</span></dd></>
                 )}
                 {fresh.cancelledAt && (
                   <><dt className="text-surface-500">Cancelled</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.cancelledAt)}<br /><span className="text-surface-400">{fresh.cancellationReason}</span></dd></>
@@ -284,7 +278,7 @@ function LifecycleTracker({ status }: { status: POStatus }) {
   const currentIndex = LIFECYCLE_ORDER.indexOf(status);
   return (
     <div className="surface-card p-4">
-      <ol className="grid grid-cols-5 gap-1 sm:gap-3" aria-label="Purchase order lifecycle">
+      <ol className="grid grid-cols-6 gap-1 sm:gap-3" aria-label="Purchase order lifecycle">
         {LIFECYCLE_ORDER.map((s, i) => {
           const reached = i <= currentIndex;
           const isCurrent = i === currentIndex;
@@ -297,7 +291,7 @@ function LifecycleTracker({ status }: { status: POStatus }) {
                 </span>
                 <div className={`h-0.5 flex-1 ${i === LIFECYCLE_ORDER.length - 1 ? 'invisible' : reached && i < currentIndex ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />
               </div>
-              <span className="mt-1 text-[10px] sm:text-sm truncate max-w-[72px] sm:max-w-none ${isCurrent ? 'font-semibold text-brand-700' : reached ? 'text-surface-700' : 'text-surface-400'}">
+              <span className={`mt-1 text-[10px] sm:text-sm truncate max-w-[72px] sm:max-w-none ${isCurrent ? 'font-semibold text-brand-700' : reached ? 'text-surface-700' : 'text-surface-400'}`}>
                 {statusLabel(s)}
               </span>
             </li>
@@ -347,9 +341,13 @@ function labelForAction(action: string): string {
     UPDATE: 'Details updated',
     PO_SUBMIT: 'Submitted for approval',
     PO_APPROVE: 'Approved',
+    PO_SUBMIT_AUTO_APPROVE: 'Submitted and approved',
+    PO_RECEIVE: 'Received all outstanding',
+    PO_CLOSE: 'Closed',
+    PO_CANCEL: 'Cancelled',
+    // From the earlier shipping flow; kept so older history still reads well.
     PO_SHIP: 'Marked as shipped',
     PO_DELIVER: 'Marked as delivered',
-    PO_CANCEL: 'Cancelled',
   } as Record<string, string>)[action] ?? action;
 }
 
@@ -415,7 +413,7 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   const [locations, setLocations] = useState<LocationOpt[]>([]);
 
   useEffect(() => {
-    if (draft.kind === 'deliver') {
+    if (draft.kind === 'receive') {
       api.get<LocationOpt[]>('/locations').then(setLocations).catch(() => undefined);
     }
   }, [draft.kind]);
@@ -434,43 +432,16 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
     );
   }
 
-  if (draft.kind === 'ship') {
+  if (draft.kind === 'receive') {
     const d = draft.draft;
-    const upd = (patch: Partial<ShipDraft>) => onChangeDraft({ kind: 'ship', draft: { ...d, ...patch } });
-    return (
-      <Modal open onClose={onClose} title="Mark as shipped?" description={po ? `Mark ${po.number} as shipped. The supplier has dispatched the goods.` : ''} size="md"
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button variant="primary" onClick={onConfirm} loading={busy}>Mark as shipped</Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <Field label="Carrier" htmlFor="po-ship-carrier">
-            <Input id="po-ship-carrier" value={d.carrier} onChange={(e) => upd({ carrier: e.target.value })} placeholder="e.g. DHL" />
-          </Field>
-          <Field label="Tracking number" htmlFor="po-ship-track">
-            <Input id="po-ship-track" value={d.trackingNumber} onChange={(e) => upd({ trackingNumber: e.target.value })} placeholder="e.g. 1Z999..." />
-          </Field>
-          <Field label="Shipment notes" htmlFor="po-ship-notes">
-            <Textarea id="po-ship-notes" rows={2} value={d.shipmentNotes} onChange={(e) => upd({ shipmentNotes: e.target.value })} placeholder="Optional" />
-          </Field>
-        </div>
-      </Modal>
-    );
-  }
-
-  if (draft.kind === 'deliver') {
-    const d = draft.draft;
-    const upd = (patch: Partial<DeliverDraft>) => onChangeDraft({ kind: 'deliver', draft: { ...d, ...patch } });
+    const upd = (patch: Partial<ReceiveDraft>) => onChangeDraft({ kind: 'receive', draft: { ...d, ...patch } });
     const ready = d.locationId.trim().length > 0;
     return (
-      <Modal open onClose={onClose} title="Mark as delivered?" description={po ? `Mark ${po.number} as delivered. All ordered quantities will be received into the chosen location.` : ''} size="md"
+      <Modal open onClose={onClose} title="Receive all outstanding?" description={po ? `Everything still outstanding on ${po.number} is received into the chosen location. For a partial delivery, record a goods receipt instead.` : ''} size="md"
         footer={
           <>
             <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button variant="primary" onClick={onConfirm} loading={busy} disabled={!ready}>Mark as delivered</Button>
+            <Button variant="primary" onClick={onConfirm} loading={busy} disabled={!ready}>Receive</Button>
           </>
         }
       >
@@ -489,9 +460,29 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
     );
   }
 
+  if (draft.kind === 'close') {
+    const d = draft.draft;
+    const short = po ? isShort(po) : false;
+    const ready = !short || d.reason.trim().length > 0;
+    return (
+      <Modal open onClose={onClose} title="Close purchase order?" description={po ? (short ? `${po.number} has not been fully received. Closing it means the rest will not be delivered.` : `${po.number} has been fully received.`) : ''} size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={busy}>Keep open</Button>
+            <Button variant="primary" onClick={onConfirm} loading={busy} disabled={!ready}>Close PO</Button>
+          </>
+        }
+      >
+        <Field label="Reason" htmlFor="po-close-reason" required={short} help={short ? 'Required: say why the rest will not be delivered.' : 'Optional.'}>
+          <Textarea id="po-close-reason" rows={3} value={d.reason} onChange={(e) => onChangeDraft({ kind: 'close', draft: { reason: e.target.value } })} placeholder="e.g. Supplier discontinued the item" />
+        </Field>
+      </Modal>
+    );
+  }
+
   // cancel
   const d = draft.draft;
-  const upd = (patch: Partial<CancelDraft>) => onChangeDraft({ kind: 'cancel', draft: { ...d, ...patch } });
+  const upd = (patch: Partial<ReasonDraft>) => onChangeDraft({ kind: 'cancel', draft: { ...d, ...patch } });
   const ready = d.reason.trim().length > 0;
   return (
     <Modal open onClose={onClose} title="Cancel purchase order?" description={po ? `${po.number} will be marked as cancelled. Existing receipts remain recorded.` : ''} size="md"
@@ -509,22 +500,13 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   );
 }
 
-function filterUndefined<T extends Record<string, unknown>>(o: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const k of Object.keys(o) as Array<keyof T>) {
-    if (o[k] !== undefined && o[k] !== '') out[k] = o[k];
-  }
-  return out;
-}
-
-function primaryIcon(kind: 'approve' | 'ship' | 'deliver'): React.ReactNode {
+function primaryIcon(kind: 'approve' | 'receive'): React.ReactNode {
   if (kind === 'approve') return <Icon.Check size={14} />;
-  if (kind === 'ship') return <Icon.Truck size={14} />;
   return <Icon.Box size={14} />;
 }
 
-function kindLabel(kind: 'approve' | 'ship' | 'deliver' | 'cancel'): string {
-  return ({ approve: 'approved', ship: 'shipped', deliver: 'delivered', cancel: 'cancelled' } as const)[kind];
+function kindLabel(kind: ActionDraft['kind']): string {
+  return ({ approve: 'approved', receive: 'received', close: 'closed', cancel: 'cancelled' } as const)[kind];
 }
 
 function lineColumns(): DataTableColumn<POLine>[] {

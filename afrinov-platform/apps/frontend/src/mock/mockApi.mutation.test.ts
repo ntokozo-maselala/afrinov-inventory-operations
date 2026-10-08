@@ -227,30 +227,50 @@ describe('mock API mutation flows', () => {
       expect(result.status).toBe('PENDING_APPROVAL');
     });
 
-    it('rejects shipping from DRAFT (not APPROVED)', async () => {
-      const draft = await makeDraftPO();
-      let caught: ApiError | undefined;
+    async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
       try {
-        await api.post<{ status: string }>(`/purchase-orders/${draft.id}/ship`, { trackingNumber: 'TRK-1' });
+        await p;
+        return undefined;
       } catch (e) {
-        if (isApiError(e)) caught = e;
+        return isApiError(e) ? e.code : 'UNKNOWN';
       }
-      expect(caught).toBeDefined();
-      expect(caught!.code).toBe('INVALID_STATE');
+    }
+
+    async function approvedPO() {
+      const draft = await makeDraftPO();
+      await api.post(`/purchase-orders/${draft.id}/submit`, {});
+      await api.post(`/purchase-orders/${draft.id}/approve`, {});
+      return draft;
+    }
+
+    it('has no shipping stage', async () => {
+      const draft = await makeDraftPO();
+      expect(await codeOf(api.post(`/purchase-orders/${draft.id}/ship`, { trackingNumber: 'TRK-1' }))).not.toBeUndefined();
     });
 
-    it('rejects delivering from PENDING_APPROVAL (not SHIPPED)', async () => {
+    it('rejects receiving a PO that is not approved yet', async () => {
       const draft = await makeDraftPO();
-      await api.post<{ status: string }>(`/purchase-orders/${draft.id}/submit`, {});
-      // Now in PENDING_APPROVAL; delivering should fail.
-      let caught: ApiError | undefined;
-      try {
-        await api.post<{ status: string }>(`/purchase-orders/${draft.id}/deliver`, { locationId: 'loc-1' });
-      } catch (e) {
-        if (isApiError(e)) caught = e;
-      }
-      expect(caught).toBeDefined();
-      expect(caught!.code).toBe('INVALID_STATE');
+      await api.post(`/purchase-orders/${draft.id}/submit`, {});
+      expect(await codeOf(api.post(`/purchase-orders/${draft.id}/receive`, { locationId: 'loc-1' }))).toBe('INVALID_STATE');
+    });
+
+    it('receives everything outstanding, then closes', async () => {
+      const po = await approvedPO();
+      const received = await api.post<{ status: string }>(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+      expect(received.status).toBe('RECEIVED');
+      expect(await codeOf(api.post(`/purchase-orders/${po.id}/cancel`, { reason: 'Too late' }))).toBe('INVALID_STATE');
+      const closed = await api.post<{ status: string }>(`/purchase-orders/${po.id}/close`, {});
+      expect(closed.status).toBe('CLOSED');
+    });
+
+    it('refuses goods receipts against a PO that is not approved', async () => {
+      const draft = await makeDraftPO();
+      const code = await codeOf(api.post('/goods-receipts', {
+        purchaseOrderId: draft.id,
+        supplierId: 'sup-1',
+        lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }],
+      }));
+      expect(code).toBe('INVALID_STATE');
     });
 
     it('cancelling a DRAFT PO requires a reason', async () => {

@@ -31,8 +31,9 @@ import {
   createSupplierSchema,
   createPOSchema,
   updatePOSchema,
-  shipSchema,
-  deliverSchema,
+  listPOQuerySchema,
+  receiveSchema,
+  closeSchema,
   cancelSchema,
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
@@ -272,7 +273,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/purchase-orders', tag: 'Purchase orders', summary: 'List purchase orders', procurement: true,
     permissions: [P.ViewPurchaseOrder],
-    query: z.object({ status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SHIPPED', 'DELIVERED', 'CANCELLED']).optional() }),
+    query: listPOQuerySchema, errors: [400],
   },
   {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
@@ -300,14 +301,16 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.ApprovePurchaseOrder], errors: [404, 409],
   },
   {
-    method: 'post', path: '/purchase-orders/:id/ship', tag: 'Purchase orders', summary: 'Mark an approved order shipped',
-    procurement: true, permissions: [P.ShipPurchaseOrder], body: shipSchema, errors: [404, 409],
+    method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',
+    summary: 'Receive everything still outstanding',
+    description: 'Receives each line\'s outstanding quantity into the given location and marks the order RECEIVED. '
+      + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts.',
+    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [404, 409],
   },
   {
-    method: 'post', path: '/purchase-orders/:id/deliver', tag: 'Purchase orders',
-    summary: 'Mark a shipped order delivered and receive its stock',
-    description: 'Receives each line\'s outstanding quantity into the given location.',
-    procurement: true, permissions: [P.DeliverPurchaseOrder], body: deliverSchema, errors: [404, 409],
+    method: 'post', path: '/purchase-orders/:id/close', tag: 'Purchase orders', summary: 'Close an order that will receive nothing more',
+    description: 'Allowed when PARTIALLY_RECEIVED or RECEIVED. Closing an order that is not fully received needs a reason.',
+    procurement: true, permissions: [P.ClosePurchaseOrder], body: closeSchema, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/cancel', tag: 'Purchase orders', summary: 'Cancel an order with a reason',

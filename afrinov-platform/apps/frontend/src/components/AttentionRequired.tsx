@@ -70,7 +70,7 @@ export function AttentionRequired({ report, loading, lowStockItems, purchaseOrde
   // eslint-disable-next-line react-hooks/purity
   const now = useMemo(() => Date.now(), []);
   for (const po of pos) {
-    if (['DRAFT', 'PENDING_APPROVAL', 'SUBMITTED', 'APPROVED', 'SENT'].includes(po.status)) {
+    if (['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) {
       items.push({
         id: `po-${po.id}`,
         type: 'pending-po',

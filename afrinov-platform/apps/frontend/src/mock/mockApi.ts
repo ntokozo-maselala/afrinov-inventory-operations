@@ -405,7 +405,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/approve'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'PENDING_APPROVAL' && po.status !== 'SUBMITTED') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
+    if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
     const before = { status: po.status };
     po.status = 'APPROVED';
     po.approvedAt = new Date().toISOString();
@@ -414,33 +414,16 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
-  if (method === 'POST' && p.endsWith('/ship')) {
-    const id = p.slice('/purchase-orders/'.length, -'/ship'.length);
+  if (method === 'POST' && p.endsWith('/receive')) {
+    const id = p.slice('/purchase-orders/'.length, -'/receive'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'APPROVED') throw err('INVALID_STATE', `Cannot ship from ${po.status}`);
-    const b = (body as { trackingNumber?: string; carrier?: string; shipmentNotes?: string }) ?? {};
-    const before = { status: po.status };
-    po.status = 'SHIPPED';
-    po.shippedAt = new Date().toISOString();
-    po.shippedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
-    po.trackingNumber = b.trackingNumber ?? null;
-    po.carrier = b.carrier ?? null;
-    po.shipmentNotes = b.shipmentNotes ?? null;
-    po.history = po.history ?? [];
-    po.history.push({ id: nextId('audit'), action: 'PO_SHIP', actorId: 'u-admin', before, after: { status: po.status, trackingNumber: po.trackingNumber, carrier: po.carrier }, createdAt: new Date().toISOString() });
-    return po;
-  }
-  if (method === 'POST' && p.endsWith('/deliver')) {
-    const id = p.slice('/purchase-orders/'.length, -'/deliver'.length);
-    const po = state.purchaseOrders.find((x) => x.id === id);
-    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'SHIPPED') throw err('INVALID_STATE', `Cannot deliver from ${po.status}`);
+    if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive from ${po.status}`);
     const b = (body as { locationId?: string; deliveryNotes?: string }) ?? {};
     if (!b.locationId) throw err('VALIDATION_ERROR', 'locationId is required');
     if (!state.locations.find((l) => l.id === b.locationId)) throw err('NOT_FOUND', 'Location not found');
     const before = { status: po.status };
-    po.status = 'DELIVERED';
+    po.status = 'RECEIVED';
     po.deliveredAt = new Date().toISOString();
     po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
     po.deliveryNotes = b.deliveryNotes ?? null;
@@ -465,14 +448,31 @@ function route(method: string, path: string, body?: unknown): unknown {
       }
     }
     po.history = po.history ?? [];
-    po.history.push({ id: nextId('audit'), action: 'PO_DELIVER', actorId: 'u-admin', before, after: { status: po.status, locationId: b.locationId }, createdAt: new Date().toISOString() });
+    po.history.push({ id: nextId('audit'), action: 'PO_RECEIVE', actorId: 'u-admin', before, after: { status: po.status, locationId: b.locationId }, createdAt: new Date().toISOString() });
+    return po;
+  }
+  if (method === 'POST' && p.endsWith('/close')) {
+    const id = p.slice('/purchase-orders/'.length, -'/close'.length);
+    const po = state.purchaseOrders.find((x) => x.id === id);
+    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    if (po.status !== 'PARTIALLY_RECEIVED' && po.status !== 'RECEIVED') throw err('INVALID_STATE', `Cannot close from ${po.status}`);
+    const reason = ((body as { reason?: string }) ?? {}).reason?.trim() || null;
+    const short = po.lines.some((l) => Number(l.receivedQty) < Number(l.orderedQty));
+    if (short && !reason) throw err('VALIDATION_ERROR', 'A reason is required to close an order that has not been fully received');
+    const before = { status: po.status };
+    po.status = 'CLOSED';
+    po.closedAt = new Date().toISOString();
+    po.closedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
+    po.closeReason = reason;
+    po.history = po.history ?? [];
+    po.history.push({ id: nextId('audit'), action: 'PO_CLOSE', actorId: 'u-admin', before, after: { status: po.status, reason }, createdAt: new Date().toISOString() });
     return po;
   }
   if (method === 'POST' && p.endsWith('/cancel')) {
     const id = p.slice('/purchase-orders/'.length, -'/cancel'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (!['DRAFT', 'PENDING_APPROVAL', 'SUBMITTED', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', `Cannot cancel from ${po.status}`);
+    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', `Cannot cancel from ${po.status}`);
     const b = (body as { reason?: string }) ?? {};
     if (!b.reason || !b.reason.trim()) throw err('VALIDATION_ERROR', 'Cancellation reason is required');
     const before = { status: po.status };
@@ -488,7 +488,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status === 'DELIVERED' || po.status === 'CANCELLED') throw err('INVALID_STATE', 'This purchase order is no longer editable.');
+    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
     const b = (body as { notes?: string | null; expectedDeliveryDate?: string | null }) ?? {};
     if (b.notes !== undefined) po.notes = b.notes ?? undefined;
     if (b.expectedDeliveryDate !== undefined) po.expectedDeliveryDate = b.expectedDeliveryDate ?? null;
@@ -527,7 +527,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     };
     if (!b.supplierId || !b.lines?.length) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     if (!state.suppliers.find((s) => s.id === b.supplierId)) throw err('NOT_FOUND', 'Supplier not found');
-    if (b.purchaseOrderId && !state.purchaseOrders.find((p) => p.id === b.purchaseOrderId)) throw err('NOT_FOUND', 'Purchase order not found');
+    if (b.purchaseOrderId) {
+      const po = state.purchaseOrders.find((p) => p.id === b.purchaseOrderId);
+      if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+      if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive against a purchase order in status ${po.status}`);
+    }
     const gr: MockGoodsReceipt = {
       id: nextId('gr'),
       number: `GR-2026-${String(state.goodsReceipts.length + 1).padStart(4, '0')}`,
@@ -587,7 +591,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       if (po) {
         const allFully = po.lines.every((l) => Number(l.receivedQty) >= Number(l.orderedQty));
         const anyReceived = po.lines.some((l) => Number(l.receivedQty) > 0);
-        po.status = allFully ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : 'APPROVED';
+        if (allFully || anyReceived) po.status = allFully ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
       }
     }
     return {
