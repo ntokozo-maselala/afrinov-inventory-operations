@@ -5,6 +5,14 @@ import { describe, it, expect } from 'vitest';
 import { ALL_PERMISSION_CODES, PermissionCode, RolePermissions } from '../shared/permissions.js';
 
 describe('RolePermissions', () => {
+  it('allows only admins and store controllers to reverse inventory transactions', () => {
+    const authorized = Object.entries(RolePermissions)
+      .filter(([, permissions]) => permissions.includes(PermissionCode.ReverseInventoryTransaction))
+      .map(([role]) => role).sort();
+    expect(authorized).toEqual(['ADMIN', 'STORE_CONTROLLER']);
+    expect(ALL_PERMISSION_CODES).not.toContain('update:inventory_transaction');
+  });
+
   it('only references known permission codes', () => {
     const valid = new Set<string>(ALL_PERMISSION_CODES);
     for (const [role, perms] of Object.entries(RolePermissions)) {

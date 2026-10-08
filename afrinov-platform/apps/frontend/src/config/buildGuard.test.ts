@@ -24,3 +24,18 @@ describe('demo flags in builds', () => {
     expect(demoBuildRefusal('demo', { VITE_FRONTEND_ONLY: 'true' })).toBeNull();
   });
 });
+
+
+describe('production guard boundaries', () => {
+  it.each(['', 'false', ' FALSE ', '1', 'yes', 'trueish'])('does not enable demo mode for %j', (value) => {
+    const env = { VITE_FRONTEND_ONLY: value, VITE_DEMO_AUTH_ENABLED: value, UNRELATED_FLAG: 'true' };
+    expect(enabledDemoFlags(env)).toEqual([]);
+    expect(demoBuildRefusal('production', env)).toBeNull();
+  });
+
+  it('reports both enabled flags and the explicit demo build command', () => {
+    const message = demoBuildRefusal('production', { VITE_FRONTEND_ONLY: ' True ', VITE_DEMO_AUTH_ENABLED: 'TRUE' });
+    expect(message).toContain('VITE_FRONTEND_ONLY=true and VITE_DEMO_AUTH_ENABLED=true');
+    expect(message).toContain('npm run build:frontend-only');
+  });
+});

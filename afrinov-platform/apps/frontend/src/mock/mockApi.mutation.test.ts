@@ -267,6 +267,46 @@ describe('mock API mutation flows', () => {
   });
 
   describe('reversing a movement', () => {
+    it.each(['outTransactionId', 'inTransactionId'] as const)('leaves both balances and history untouched if %s cannot be reversed', async (selectedLeg) => {
+      const transfer = await api.post<{ outTransactionId: string; inTransactionId: string }>('/inventory-transfers', {
+        materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-3', quantity: 5,
+      });
+      await api.post('/inventory-issues', { materialId: 'mat-1', locationId: 'loc-3', quantity: 21 });
+      const before = await api.get('/inventory-transactions?materialId=mat-1');
+      await expect(api.post(`/inventory-transactions/${transfer[selectedLeg]}/reversal`, { reason: 'Wrong rack' }))
+        .rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
+      expect(await stockAt('loc-1')).toBe(25);
+      expect(await stockAt('loc-3')).toBe(4);
+      expect(await api.get('/inventory-transactions?materialId=mat-1')).toEqual(before);
+    });
+
+    it('refuses to reverse a reversal without changing the restored stock', async () => {
+      const { transactionId } = await api.post<{ transactionId: string }>('/inventory-issues', {
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 5,
+      });
+      const { reversalIds } = await api.post<{ reversalIds: string[] }>(`/inventory-transactions/${transactionId}/reversal`, { reason: 'Wrong item' });
+      const before = await api.get('/inventory-transactions?materialId=mat-1');
+      await expect(api.post(`/inventory-transactions/${reversalIds[0]}/reversal`, { reason: 'Undo reversal' }))
+        .rejects.toMatchObject({ code: 'INVALID_STATE' });
+      expect(await stockAt('loc-1')).toBe(30);
+      expect(await api.get('/inventory-transactions?materialId=mat-1')).toEqual(before);
+    });
+
+    it('restores a negative adjustment with its reason code and a trimmed reversal note', async () => {
+      const { transactionId } = await api.post<{ transactionId: string }>('/inventory-adjustments', {
+        materialId: 'mat-1', locationId: 'loc-1', quantity: -5, reasonCode: 'LOSS', reasonNote: 'Missing stock',
+      });
+      const { reversalIds } = await api.post<{ reversalIds: string[] }>(`/inventory-transactions/${transactionId}/reversal`, { reason: '  Stock found  ' });
+      const history = await api.get<Array<{ id: string }>>('/inventory-transactions?materialId=mat-1');
+      expect(history.find((row) => row.id === transactionId)).toMatchObject({
+        quantity: '-5', reasonCode: 'LOSS', reasonNote: 'Missing stock', reversedById: reversalIds[0],
+      });
+      expect(history.find((row) => row.id === reversalIds[0])).toMatchObject({
+        type: 'ADJUSTMENT', quantity: '5', reasonCode: 'LOSS', reasonNote: 'Stock found', reversesId: transactionId,
+      });
+      expect(await stockAt('loc-1')).toBe(30);
+    });
+
     async function stockAt(locationId: string): Promise<number> {
       const stock = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
       return Number(stock.find((s) => s.locationId === locationId)?.quantity ?? 0);

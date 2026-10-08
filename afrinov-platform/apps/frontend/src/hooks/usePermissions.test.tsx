@@ -148,3 +148,18 @@ describe('hooks/usePermissions.ts — role-based permissions', () => {
     });
   });
 });
+
+describe('inventory reversal permission', () => {
+  it.each([
+    ['ADMIN', true], ['STORE_CONTROLLER', true], ['PROCUREMENT', false],
+    ['APPROVER', false], ['TECHNICIAN', false], ['VIEWER', false],
+  ])('grants inventory:reverse to %s: %s', (role, allowed) => {
+    const { result } = renderWithUser(usePermissions, { roles: [role as string] });
+    expect(result.current.hasPermission('inventory:reverse')).toBe(allowed);
+  });
+
+  it('denies reversal when signed out', () => {
+    const { result } = renderWithUser(usePermissions, null);
+    expect(result.current.hasPermission('inventory:reverse')).toBe(false);
+  });
+});
