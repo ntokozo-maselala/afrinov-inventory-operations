@@ -37,10 +37,8 @@ export function SettingsGeneral() {
   const companyName = useSetting('general.companyName');
   const systemDescription = useSetting('general.systemDescription');
   const defaultCurrency = useSetting('general.defaultCurrency');
-  const defaultTimezone = useSetting('general.defaultTimezone');
   const dateFormat = useSetting('general.dateFormat');
   const timeFormat = useSetting('general.timeFormat');
-  const defaultLanguage = useSetting('general.defaultLanguage');
   const defaultLandingPage = useSetting('general.defaultLandingPage');
   const defaultPageSize = useSetting('general.defaultPageSize');
 
@@ -63,10 +61,8 @@ export function SettingsGeneral() {
       />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <EnumField def={defaultCurrency} value={(draft['general.defaultCurrency'] as string) ?? ''} onChange={(v) => setDraft('general.defaultCurrency', v)} error={errors['general.defaultCurrency'] ?? null} />
-        <EnumField def={defaultTimezone} value={(draft['general.defaultTimezone'] as string) ?? ''} onChange={(v) => setDraft('general.defaultTimezone', v)} error={errors['general.defaultTimezone'] ?? null} />
         <EnumField def={dateFormat} value={(draft['general.dateFormat'] as string) ?? ''} onChange={(v) => setDraft('general.dateFormat', v)} error={errors['general.dateFormat'] ?? null} />
         <EnumField def={timeFormat} value={(draft['general.timeFormat'] as string) ?? ''} onChange={(v) => setDraft('general.timeFormat', v)} error={errors['general.timeFormat'] ?? null} />
-        <EnumField def={defaultLanguage} value={(draft['general.defaultLanguage'] as string) ?? ''} onChange={(v) => setDraft('general.defaultLanguage', v)} error={errors['general.defaultLanguage'] ?? null} />
         <EnumField def={landingPageDef(defaultLandingPage, draft['general.defaultLandingPage'])} value={(draft['general.defaultLandingPage'] as string) ?? ''} onChange={(v) => setDraft('general.defaultLandingPage', v)} error={errors['general.defaultLandingPage'] ?? null} />
       </div>
       <NumberField
@@ -93,8 +89,6 @@ export function SettingsInventory() {
   const lowStockMultiplier = useSetting('inventory.lowStockMultiplier');
   const defaultUnitOfMeasure = useSetting('inventory.defaultUnitOfMeasure');
   const enableStockAlerts = useSetting('inventory.enableStockAlerts');
-  const requireReasonForAdjustments = useSetting('inventory.requireReasonForAdjustments');
-  const requireApprovalForSensitiveChanges = useSetting('inventory.requireApprovalForSensitiveChanges');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
@@ -112,8 +106,6 @@ export function SettingsInventory() {
         error={errors['inventory.defaultUnitOfMeasure'] ?? null}
       />
       <BooleanField def={enableStockAlerts} value={Boolean(draft['inventory.enableStockAlerts'])} onChange={(v) => setDraft('inventory.enableStockAlerts', v)} />
-      <BooleanField def={requireReasonForAdjustments} value={Boolean(draft['inventory.requireReasonForAdjustments'])} onChange={(v) => setDraft('inventory.requireReasonForAdjustments', v)} />
-      <BooleanField def={requireApprovalForSensitiveChanges} value={Boolean(draft['inventory.requireApprovalForSensitiveChanges'])} onChange={(v) => setDraft('inventory.requireApprovalForSensitiveChanges', v)} />
       <SaveBar items={items} onSave={async () => {
         try {
           const r = await save();
@@ -132,7 +124,6 @@ export function SettingsPurchaseOrders() {
   const requireApproval = useSetting('purchaseOrders.requireApprovalBeforeProcessing');
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
-  const numberingFormat = useSetting('purchaseOrders.numberingFormat');
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
@@ -140,7 +131,6 @@ export function SettingsPurchaseOrders() {
       <p className="text-xs text-surface-500 -mt-2 pl-11">When on, submitting a PO routes it through <code>PENDING_APPROVAL</code>. When off, submission auto-approves.</p>
       <BooleanField def={allowCancellation} value={Boolean(draft['purchaseOrders.allowCancellation'])} onChange={(v) => setDraft('purchaseOrders.allowCancellation', v)} />
       <BooleanField def={allowEditAfterApproval} value={Boolean(draft['purchaseOrders.allowEditAfterApproval'])} onChange={(v) => setDraft('purchaseOrders.allowEditAfterApproval', v)} />
-      <EnumField def={numberingFormat} value={(draft['purchaseOrders.numberingFormat'] as string) ?? ''} onChange={(v) => setDraft('purchaseOrders.numberingFormat', v)} />
       <SaveBar items={items} onSave={async () => {
         try {
           const r = await save();
@@ -159,7 +149,6 @@ export function SettingsNotifications() {
   const inApp = useSetting('notifications.enableInAppNotifications');
   const lowStock = useSetting('notifications.enableLowStockNotifications');
   const po = useSetting('notifications.enablePurchaseOrderNotifications');
-  const delivery = useSetting('notifications.enableDeliveryNotifications');
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <>
@@ -167,10 +156,7 @@ export function SettingsNotifications() {
         <BooleanField def={inApp} value={Boolean(draft['notifications.enableInAppNotifications'])} onChange={(v) => setDraft('notifications.enableInAppNotifications', v)} />
         <BooleanField def={lowStock} value={Boolean(draft['notifications.enableLowStockNotifications'])} onChange={(v) => setDraft('notifications.enableLowStockNotifications', v)} />
         {PROCUREMENT_ENABLED && (
-          <>
-            <BooleanField def={po} value={Boolean(draft['notifications.enablePurchaseOrderNotifications'])} onChange={(v) => setDraft('notifications.enablePurchaseOrderNotifications', v)} />
-            <BooleanField def={delivery} value={Boolean(draft['notifications.enableDeliveryNotifications'])} onChange={(v) => setDraft('notifications.enableDeliveryNotifications', v)} />
-          </>
+          <BooleanField def={po} value={Boolean(draft['notifications.enablePurchaseOrderNotifications'])} onChange={(v) => setDraft('notifications.enablePurchaseOrderNotifications', v)} />
         )}
         <SaveBar items={items} onSave={async () => {
           try {
@@ -483,18 +469,16 @@ export function SettingsSecurity() {
   const toast = useToast();
   const items = useCategorySettings('security');
   const session = useSetting('security.sessionTimeoutMinutes');
-  const audit = useSetting('security.enableAuditLogging');
   const selfRegistration = useSetting('security.allowSelfRegistration');
   if (items.length === 0) return <PanelSkeleton />;
   return (
-    <SectionPanel title="Security" description="Session and audit policy. Sign-in is currently fixed at email + password; advanced controls are noted below.">
+    <SectionPanel title="Security" description="Session policy. Every administrative action is always recorded in the audit log. Sign-in is currently fixed at email + password; advanced controls are noted below.">
       <NumberField
         def={session}
         value={Number(draft['security.sessionTimeoutMinutes'] ?? 0)}
         onChange={(v) => setDraft('security.sessionTimeoutMinutes', v)}
         error={errors['security.sessionTimeoutMinutes'] ?? null}
       />
-      <BooleanField def={audit} value={Boolean(draft['security.enableAuditLogging'])} onChange={(v) => setDraft('security.enableAuditLogging', v)} />
       <BooleanField
         def={selfRegistration}
         value={Boolean(draft['security.allowSelfRegistration'])}

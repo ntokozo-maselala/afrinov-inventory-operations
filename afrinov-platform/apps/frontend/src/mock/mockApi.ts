@@ -941,34 +941,27 @@ function buildMockSettings(): Record<string, MockSetting> {
     'general.companyName': row('general.companyName', 'Afrinov', 'string', 'general', 'Company or organisation name shown across the application.'),
     'general.systemDescription': row('general.systemDescription', 'Inventory & operations management', 'string', 'general', 'Short description of the system.'),
     'general.defaultCurrency': row('general.defaultCurrency', 'ZAR', 'enum', 'general', 'Default currency for monetary values.', ['ZAR', 'USD', 'EUR', 'GBP']),
-    'general.defaultTimezone': row('general.defaultTimezone', 'Africa/Johannesburg', 'enum', 'general', 'Default timezone for new records and reports.', ['Africa/Johannesburg', 'UTC', 'Europe/London', 'America/New_York']),
     'general.dateFormat': row('general.dateFormat', 'YYYY-MM-DD', 'enum', 'general', 'Date display format.', ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY']),
     'general.timeFormat': row('general.timeFormat', '24h', 'enum', 'general', 'Time display format.', ['24h', '12h']),
-    'general.defaultLanguage': row('general.defaultLanguage', 'en-ZA', 'enum', 'general', 'Default application language.', ['en-ZA', 'en-US']),
     'general.defaultPageSize': row('general.defaultPageSize', 25, 'number', 'general', 'Default rows per page in tables.'),
     'general.defaultLandingPage': row('general.defaultLandingPage', 'dashboard', 'enum', 'general', 'Where to go after sign-in.', ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders']),
 
     'inventory.lowStockMultiplier': row('inventory.lowStockMultiplier', 1, 'number', 'inventory', 'Multiplier applied to per-material reorder thresholds.'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Highlight materials at or below their reorder threshold.'),
-    'inventory.requireReasonForAdjustments': row('inventory.requireReasonForAdjustments', true, 'boolean', 'inventory', 'Require a reason code for every inventory adjustment.'),
-    'inventory.requireApprovalForSensitiveChanges': row('inventory.requireApprovalForSensitiveChanges', false, 'boolean', 'inventory', 'Require approval before completing large transfers or write-offs.'),
 
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
     'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
     'purchaseOrders.allowEditAfterApproval': row('purchaseOrders.allowEditAfterApproval', true, 'boolean', 'purchase_orders', 'Allow editing a purchase order once it has been approved.'),
-    'purchaseOrders.numberingFormat': row('purchaseOrders.numberingFormat', 'PO-YYYY-NNNN', 'enum', 'purchase_orders', 'Template used when generating PO numbers.', ['PO-YYYY-NNNN', 'PO-{YYYY}-N']),
 
     'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),
     'notifications.enableLowStockNotifications': row('notifications.enableLowStockNotifications', true, 'boolean', 'notifications', 'Generate alerts when materials fall below their reorder threshold.'),
     'notifications.enablePurchaseOrderNotifications': row('notifications.enablePurchaseOrderNotifications', true, 'boolean', 'notifications', 'Alert when purchase orders need approval or reach a new state.'),
-    'notifications.enableDeliveryNotifications': row('notifications.enableDeliveryNotifications', true, 'boolean', 'notifications', 'Alert when purchase orders are delivered.'),
 
     'appearance.theme': row('appearance.theme', 'system', 'enum', 'appearance', 'Default visual theme.', ['system', 'light', 'dark']),
     'appearance.density': row('appearance.density', 'comfortable', 'enum', 'appearance', 'Default table density.', ['comfortable', 'compact']),
 
     'security.sessionTimeoutMinutes': row('security.sessionTimeoutMinutes', 60, 'number', 'security', 'Inactivity time before a session is signed out.'),
-    'security.enableAuditLogging': row('security.enableAuditLogging', true, 'boolean', 'security', 'Record administrative actions to the audit log.'),
   };
 }
 
