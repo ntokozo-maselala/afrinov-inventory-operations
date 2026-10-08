@@ -41,12 +41,11 @@ VITE_FRONTEND_ONLY=true npm run dev
 Then open <http://localhost:5173>. The amber banner at the top of every page
 makes it visually obvious you are in mock mode.
 
-> **Default sign-in (no env vars)** — `VITE_DEMO_AUTH_ENABLED` defaults to
-> `true` for the prototype, so the documented demo pair
-> `Vusi@afrinov.co.za` / `Afrinov2026` is accepted even when running plain
-> `npm run dev` (no backend required). Set `VITE_DEMO_AUTH_ENABLED=false`
-> to switch the auth service to live mode and forward to `POST /auth/login`
-> on the real backend.
+> **Demo login is off by default.** `VITE_DEMO_AUTH_ENABLED` is `false`
+> unless you set it, so plain `npm run dev` signs in through
+> `POST /auth/login` on the real backend. Set it to `true`, with
+> `VITE_DEMO_AUTH_EMAIL` and `VITE_DEMO_AUTH_PASSWORD`, to accept only that
+> one demo pair.
 
 ## How to disable
 
@@ -109,13 +108,16 @@ email + password combination. Entering `admin@afrinov.local` (with any
 password) signs you in as the dev user above; any other email is treated as
 a local user and synthesises a profile from the local part of the address.
 
-A `/signup` page is also available. Submitting the form with a valid name,
-email and password (≥ 8 characters) creates an in-memory account that can
-immediately be used to sign in again. Duplicate emails in the same session
-are rejected with a `CONFLICT` error. **All created accounts are cleared on
-a full page reload** — the store is module-scope only.
-
 ## Production safety
+
+- **A production build refuses to run with either demo flag on.** If
+  `VITE_FRONTEND_ONLY` or `VITE_DEMO_AUTH_ENABLED` is `true`, in the shell or
+  in any `.env` file, `npm run build` fails with an error naming the flag
+  (`src/config/buildGuard.ts`, wired in `vite.config.ts`). The dev server is
+  unaffected.
+- To build a demo bundle on purpose, for example to host a clickable preview,
+  run `npm run build:frontend-only`. It builds in `demo` mode, which the check
+  allows.
 
 - The flag is read from `import.meta.env.VITE_FRONTEND_ONLY`. Vite **only
   exposes variables prefixed with `VITE_` to the client bundle** and **only

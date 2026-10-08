@@ -178,7 +178,7 @@ This phase is small and best done before real data exists.
 - [x] Delete the seven settings that do nothing (listed in Remove), or wire up any the business wants
 - [x] Remove `/auth/register`, the Signup page and `security.allowSelfRegistration`
 - [ ] Cut purchase-order statuses down to Draft, Pending approval, Approved, Partly received, Received, Closed, Cancelled; drop the SHIPPED stage fields from the UI
-- [ ] Make production builds fail if `VITE_FRONTEND_ONLY` or `VITE_DEMO_AUTH_ENABLED` is set
+- [x] Make production builds fail if `VITE_FRONTEND_ONLY` or `VITE_DEMO_AUTH_ENABLED` is set
 - [ ] Hide location address and contact fields and rack capacity and FULL status from forms
 - [ ] Archive the old audit and report markdown files; update `task_context.md`
 - [x] Add the workbook to `.gitignore`
