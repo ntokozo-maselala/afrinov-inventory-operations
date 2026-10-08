@@ -1,5 +1,6 @@
-// Real-database tests for the workbook import's final step: items, locations
-// and dated opening-balance receipts, all or nothing, and never twice.
+// Real-database tests for the workbook import's final step: projects,
+// recipients and suppliers, items, locations and dated opening-balance
+// receipts, all or nothing, and never twice.
 //
 // Opening balances can be imported once per database, so the happy path needs
 // the fresh database the integration recipe creates; on a database that has
@@ -43,21 +44,27 @@ describe('opening balance import against a real database', () => {
     expect(loc.status).toBe(201);
     existingLocationId = loc.body.id;
     alreadyImported = (await previousImport()) !== null;
+    // Already in the platform, under another case: the import leaves them alone.
+    expect((await api('POST', '/projects', { projectNumber: `it-obp-old-${run}`, name: 'Existing project' })).status).toBe(201);
+    expect((await api('POST', '/recipients', { name: `IT OB Fitter ${run}`, type: 'WORKER' })).status).toBe(201);
+    expect((await api('POST', '/suppliers', { name: `IT OB Supplier ${run}` })).status).toBe(201);
   });
 
   afterAll(async () => {
     await server?.close();
   });
 
-  it('refuses SKUs that already exist, and writes nothing', async () => {
+  it('refuses SKUs that already exist, and writes nothing, not even the projects', async () => {
     const taken = await api<{ sku: string }>('POST', '/materials', { sku: `IT-OB-TAKEN-${run}`, name: 'Taken', category: 'CONSUMABLES', unitOfMeasure: 'each' });
     expect(taken.status).toBe(200);
     await expect(OpeningBalanceService.import({
       plan: plan([material(`it-ob-taken-${run}`, balances()), material(`IT-OB-NEW-${run}`, balances())]),
+      masterData: { projects: [{ projectNumber: `IT-OBP-ROLLBACK-${run}`, name: null }], recipients: [], suppliers: [] },
       openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
     })).rejects.toMatchObject({ code: alreadyImported ? 'INVALID_STATE' : 'CONFLICT' });
     expect(await prisma.material.findUnique({ where: { sku: `IT-OB-NEW-${run}` } })).toBeNull();
     expect(await prisma.location.findFirst({ where: { name: rackName } })).toBeNull();
+    expect(await prisma.project.findUnique({ where: { projectNumber: `IT-OBP-ROLLBACK-${run}` } })).toBeNull();
   });
 
   it('refuses an opening date in the future', async () => {
@@ -74,9 +81,26 @@ describe('opening balance import against a real database', () => {
         material(`IT-OB-1-${run}`, balances()),
         material(`IT-OB-2-${run}`, [{ location: rackName, quantity: 0 }], { unitCost: null, oldProductIds: [] }),
       ]),
+      masterData: {
+        projects: [{ projectNumber: `IT-OBP-NEW-${run}`, name: 'Pump overhaul' }, { projectNumber: `IT-OBP-OLD-${run}`, name: null }],
+        recipients: [{ name: `IT OB Forklift ${run}`, type: 'MACHINE' }, { name: `it ob fitter ${run}`, type: 'WORKER' }],
+        suppliers: [
+          { name: `IT OB New Supplier ${run}`, contactName: 'Jo', contactEmail: 'jo@example.com', contactPhone: null },
+          { name: `it ob supplier ${run}`, contactName: null, contactEmail: null, contactPhone: null },
+        ],
+      },
       openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'workbook.xlsm',
     });
-    expect(result).toMatchObject({ materialsCreated: 2, locationsCreated: 1, locationsReused: 1, balancesPosted: 2, zeroBalances: 1 });
+    expect(result).toMatchObject({
+      materialsCreated: 2, locationsCreated: 1, locationsReused: 1, balancesPosted: 2, zeroBalances: 1,
+      projects: { created: 1, existing: 1 }, recipients: { created: 1, existing: 1 }, suppliers: { created: 1, existing: 1 },
+    });
+    expect(await prisma.project.findUnique({ where: { projectNumber: `IT-OBP-NEW-${run}` } })).toMatchObject({ name: 'Pump overhaul', status: 'ACTIVE', active: true });
+    expect(await prisma.project.findUnique({ where: { projectNumber: `it-obp-old-${run}` } })).toMatchObject({ name: 'Existing project' });
+    expect(await prisma.recipient.findFirst({ where: { name: `IT OB Forklift ${run}` } })).toMatchObject({ type: 'MACHINE', active: true });
+    expect(await prisma.recipient.count({ where: { name: { equals: `IT OB Fitter ${run}`, mode: 'insensitive' } } })).toBe(1);
+    expect(await prisma.supplier.findFirst({ where: { name: `IT OB New Supplier ${run}` } })).toMatchObject({ contactName: 'Jo', contactEmail: 'jo@example.com' });
+    expect(await prisma.supplier.count({ where: { name: { equals: `IT OB Supplier ${run}`, mode: 'insensitive' } } })).toBe(1);
 
     const first = await prisma.material.findUniqueOrThrow({ where: { sku: `IT-OB-1-${run}` } });
     expect(first).toMatchObject({ category: 'CONSUMABLES', unitOfMeasure: 'each', description: 'Workbook Product ID: P-001' });

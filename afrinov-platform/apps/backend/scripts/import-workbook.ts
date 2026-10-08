@@ -20,6 +20,7 @@ import { parseArgs } from 'node:util';
 import { readWorkbookFile } from '../src/modules/migration/workbook-reader.js';
 import { analyseWorkbook, PROBLEM_TEXT, RESOLVED_BY_MAPPING, type Problem } from '../src/modules/migration/workbook-analysis.js';
 import { applyMapping, readMappingFile, suggestMapping, writeMappingFile, type MappedImport } from '../src/modules/migration/mapping.js';
+import { applyMasterData, readMasterDataFile, suggestMasterData, writeMasterDataFile, type MasterDataPlan } from '../src/modules/migration/master-data.js';
 import { problemCounts, renderReport } from '../src/modules/migration/workbook-report.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
@@ -33,7 +34,7 @@ function databaseName(url: string | undefined): string | null {
   }
 }
 
-async function apply(file: string, result: MappedImport, values: { database?: string; date?: string; actor?: string }) {
+async function apply(file: string, result: MappedImport, masterData: MasterDataPlan, values: { database?: string; date?: string; actor?: string }) {
   const dbName = databaseName(process.env.DATABASE_URL);
   if (!dbName) throw new Error('DATABASE_URL is not set (put it in apps/backend/.env).');
   if (values.database !== dbName) {
@@ -50,12 +51,15 @@ async function apply(file: string, result: MappedImport, values: { database?: st
     if (!actor) throw new Error(`No user with the email ${values.actor}.`);
     console.log(`Importing into "${dbName}", dated ${values.date}, as ${actor.email}…`);
     const done = await OpeningBalanceService.import({
-      plan: result, openingDate: new Date(`${values.date}T00:00:00Z`), actorId: actor.id, sourceFile: basename(file),
+      plan: result, masterData, openingDate: new Date(`${values.date}T00:00:00Z`), actorId: actor.id, sourceFile: basename(file),
     });
     console.log(`Done. Import ${done.importId}:`);
     console.log(`  ${done.materialsCreated} items created`);
     console.log(`  ${done.locationsCreated} locations created, ${done.locationsReused} already there`);
     console.log(`  ${done.balancesPosted} opening balances posted, ${done.zeroBalances} items with nothing on hand`);
+    for (const [label, c] of [['projects', done.projects], ['recipients', done.recipients], ['suppliers', done.suppliers]] as const) {
+      console.log(`  ${c.created} ${label} created, ${c.existing} already there`);
+    }
   } finally {
     await prisma.$disconnect();
   }
@@ -82,10 +86,12 @@ async function main() {
   const file = resolve(values.file);
   const outDir = values.out!;
   const mappingPath = values.mapping ?? join(outDir, 'mapping.xlsx');
+  const masterPath = join(outDir, 'master-data.xlsx');
   await mkdir(outDir, { recursive: true });
 
   console.log(`Reading ${basename(file)}…`);
-  const analysis = analyseWorkbook(await readWorkbookFile(file));
+  const workbook = await readWorkbookFile(file);
+  const analysis = analyseWorkbook(workbook);
 
   let problems: Problem[] = analysis.problems;
   let created = false;
@@ -100,22 +106,39 @@ async function main() {
     created = true;
   }
 
+  let masterCreated = false;
+  let masterPlan: MasterDataPlan | null = null;
+  if (await exists(masterPath)) {
+    console.log(`Reading ${masterPath}…`);
+    const read = await readMasterDataFile(masterPath);
+    const checked = applyMasterData(workbook.lists, read.data);
+    masterPlan = checked.plan;
+    problems = [...problems, ...read.problems, ...checked.problems];
+  } else {
+    await writeMasterDataFile(masterPath, suggestMasterData(workbook.lists ?? { projects: [], employees: [], missingSheets: [] }));
+    masterCreated = true;
+  }
+
   const generatedAt = new Date();
   const reportPath = join(outDir, `workbook-dry-run-${generatedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.md`);
   await writeFile(reportPath, renderReport(analysis, {
-    file: basename(file), generatedAt, problems, mapping: { file: basename(mappingPath), created, result },
+    file: basename(file), generatedAt, problems,
+    mapping: { file: basename(mappingPath), created, result },
+    masterData: { file: basename(masterPath), created: masterCreated, plan: masterPlan },
   }), 'utf8');
 
   for (const c of analysis.categories) {
     console.log(`  ${c.category.padEnd(28)} ${String(c.rows).padStart(5)} items  R ${c.value.toFixed(2).padStart(12)}  (workbook rows R ${c.workbookRowsTotal?.toFixed(2) ?? '?'})`);
   }
   if (result) console.log(`With the mapping: ${result.materials.length} items and ${result.locations.length} locations to create.`);
+  if (masterPlan) console.log(`From master-data.xlsx: ${masterPlan.projects.length} projects, ${masterPlan.recipients.length} recipients, ${masterPlan.suppliers.length} suppliers.`);
   console.log('Problems:');
   for (const { code, count } of problemCounts(problems)) {
     console.log(`  ${PROBLEM_TEXT[code].severity === 'error' ? 'BLOCKING' : 'review  '} ${String(count).padStart(4)}  ${PROBLEM_TEXT[code].title}`);
   }
   console.log(`Report: ${reportPath}`);
   if (created) console.log(`Mapping file created: ${mappingPath}. Review it, save it, and run this again.`);
+  if (masterCreated) console.log(`Projects, recipients and suppliers file created: ${masterPath}. Review it, save it, and run this again.`);
   const blocking = problems.filter((p) => PROBLEM_TEXT[p.code].severity === 'error').length;
   console.log(blocking === 0
     ? 'No blocking problems.'
@@ -125,9 +148,9 @@ async function main() {
     console.log('Dry run only: nothing was written to the database.');
     return;
   }
-  if (!result) throw new Error('The import needs a reviewed mapping file; one was only just created.');
+  if (!result || !masterPlan) throw new Error('The import needs reviewed mapping and master-data files; one was only just created.');
   if (blocking > 0) throw new Error('Not imported: fix the blocking problems first. Nothing was written to the database.');
-  await apply(file, result, values);
+  await apply(file, result, masterPlan, values);
 }
 
 main().catch((e) => {

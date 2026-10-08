@@ -1,6 +1,7 @@
-// Loads the checked workbook plan into the platform: the locations, the items
-// and one dated "Opening balance" receipt per item and location. All or
-// nothing, in one database transaction.
+// Loads the checked workbook plan into the platform: projects, recipients and
+// suppliers, the locations, the items and one dated "Opening balance" receipt
+// per item and location. All or nothing, in one database transaction.
+// Projects, recipients and suppliers that already exist are left as they are.
 //
 // It runs once. It refuses when opening balances have been imported before
 // (a second run would count the stock twice) or when any planned SKU already
@@ -13,11 +14,14 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
 import { recomputeBalance } from '../../shared/inventory/balances.js';
 import type { MappedImport } from './mapping.js';
+import type { MasterDataPlan } from './master-data.js';
 
 export const OPENING_BALANCE_REFERENCE = 'OpeningBalance';
 
 export interface OpeningBalanceInput {
   plan: MappedImport;
+  /** Projects, recipients and suppliers from master-data.xlsx. */
+  masterData?: MasterDataPlan;
   /** The date the balances are true on (the stock count). Not in the future. */
   openingDate: Date;
   actorId: string;
@@ -33,6 +37,9 @@ export interface OpeningBalanceResult {
   balancesPosted: number;
   /** Rows with nothing on hand: the item is created, no receipt is posted. */
   zeroBalances: number;
+  projects: { created: number; existing: number };
+  recipients: { created: number; existing: number };
+  suppliers: { created: number; existing: number };
 }
 
 export async function previousImport(): Promise<{ importId: string; postedAt: Date } | null> {
@@ -71,6 +78,29 @@ export const OpeningBalanceService = {
       const taken = await tx.material.findMany({ where: { sku: { in: skus, mode: 'insensitive' } }, select: { sku: true } });
       if (taken.length > 0) {
         throw Errors.conflict(`${taken.length} SKUs already exist, e.g. ${taken.slice(0, 5).map((t) => t.sku).join(', ')}. Change them in the mapping file.`);
+      }
+
+      const master = input.masterData ?? { projects: [], recipients: [], suppliers: [] };
+      const projects = { created: 0, existing: 0 };
+      for (const p of master.projects) {
+        const existing = await tx.project.findFirst({ where: { projectNumber: { equals: p.projectNumber, mode: 'insensitive' } }, select: { projectNumber: true } });
+        if (existing) { projects.existing++; continue; }
+        await tx.project.create({ data: { projectNumber: p.projectNumber, name: p.name, status: 'ACTIVE' } });
+        projects.created++;
+      }
+      const recipients = { created: 0, existing: 0 };
+      for (const r of master.recipients) {
+        const existing = await tx.recipient.findFirst({ where: { name: { equals: r.name, mode: 'insensitive' } }, select: { id: true } });
+        if (existing) { recipients.existing++; continue; }
+        await tx.recipient.create({ data: { name: r.name, type: r.type } });
+        recipients.created++;
+      }
+      const suppliers = { created: 0, existing: 0 };
+      for (const s of master.suppliers) {
+        const existing = await tx.supplier.findFirst({ where: { name: { equals: s.name, mode: 'insensitive' } }, select: { id: true } });
+        if (existing) { suppliers.existing++; continue; }
+        await tx.supplier.create({ data: s });
+        suppliers.created++;
       }
 
       // Locations: reuse one with the same name (any case), otherwise create it.
@@ -136,6 +166,9 @@ export const OpeningBalanceService = {
             materials: materials.length,
             locationsCreated,
             balances: receipts.length,
+            projectsCreated: projects.created,
+            recipientsCreated: recipients.created,
+            suppliersCreated: suppliers.created,
           } as Prisma.InputJsonValue,
         },
       });
@@ -147,6 +180,9 @@ export const OpeningBalanceService = {
         materialsCreated: materials.length,
         balancesPosted: receipts.length,
         zeroBalances,
+        projects,
+        recipients,
+        suppliers,
       };
     }, { timeout: 5 * 60_000, maxWait: 30_000 });
   },

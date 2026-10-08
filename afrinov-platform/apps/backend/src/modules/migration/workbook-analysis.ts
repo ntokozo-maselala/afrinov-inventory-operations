@@ -32,7 +32,10 @@ export type ProblemCode =
   | 'MAPPING_LOCATION_INVALID'
   | 'SKU_CONFLICT'
   | 'UNUSED_MAPPING_ROW'
-  | 'SKU_JOINS_DIFFERENT_NAMES';
+  | 'SKU_JOINS_DIFFERENT_NAMES'
+  // Projects, recipients and suppliers (see master-data.ts).
+  | 'MASTER_DATA_INVALID'
+  | 'MASTER_DATA_NOT_LISTED';
 
 export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; title: string; resolution: string }> = {
   MISSING_SHEET: { severity: 'error', title: 'Sheet not found', resolution: 'Use the right workbook, or check the sheet was not renamed.' },
@@ -58,6 +61,8 @@ export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; t
   SKU_CONFLICT: { severity: 'error', title: 'SKU given to rows that cannot be one item', resolution: 'Give the rows different SKUs, or fix the category, unit or duplicate row.' },
   UNUSED_MAPPING_ROW: { severity: 'review', title: 'Mapping row with no workbook row', resolution: 'Delete the row from the mapping file if the workbook row was merged or removed.' },
   SKU_JOINS_DIFFERENT_NAMES: { severity: 'review', title: 'One SKU joins different names or prices', resolution: 'Check these really are the same item.' },
+  MASTER_DATA_INVALID: { severity: 'error', title: 'Project, recipient or supplier row incomplete or wrong', resolution: 'Correct the row in master-data.xlsx, or set Import to No.' },
+  MASTER_DATA_NOT_LISTED: { severity: 'review', title: 'Project or name not in master-data.xlsx', resolution: 'Add a row for it if it should be imported.' },
 };
 
 /** Workbook problems a mapping file settles: new SKUs replace the old IDs, and spellings are mapped. */
