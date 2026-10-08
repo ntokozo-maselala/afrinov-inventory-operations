@@ -115,6 +115,7 @@ Run from `apps/backend`.
 | `npm run test:integration` | Run the integration tests against a real database |
 | `npm run db:migrate` | Apply pending Prisma migrations |
 | `npm run db:seed` | Load roles, permissions, the admin account and demo data |
+| `npm run import:workbook -- --file <workbook.xlsm>` | Dry run of the stock workbook import: checks the four Main and four Summary sheets and writes a problem report to `import-reports/` (git-ignored). Never touches the database |
 | `npm run diag:login` | Log in as the seed admin through the full server and print the result. Needs `.env` with `SEED_ADMIN_PASSWORD` |
 | `npm run diag:admin` | Print whether the seed admin exists, is active, its roles, and every user's email and status. Needs `.env` |
 
@@ -149,7 +150,7 @@ prisma/
   schema.prisma        Database schema
   migrations/          SQL migrations, applied in name order
 integration/           Tests against a real server and database
-scripts/               Developer diagnostics, not part of the build
+scripts/               Developer diagnostics and the workbook import, not part of the build
 src/
   index.ts             Entry point: validates config, then starts the server
   server.ts            Fastify setup: CORS, security headers, JWT, rate limits, routes
@@ -161,6 +162,7 @@ src/
     inventory/         Materials, locations, racks, stock items, stock movements, balances
     procurement/       Suppliers, purchase orders, goods receipts
     operations/        Projects
+    migration/         Reading and checking the stock workbook for the data import
     reporting/         Stock, movement, low-stock and project reports; Excel/PDF export
     settings/          Typed application settings
     audit/             Audit log
