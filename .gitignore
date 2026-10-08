@@ -7,3 +7,5 @@
 *.csv
 # Excel lock files
 ~$*
+# Workbook import reports and mapping files: item names, prices and locations.
+import-reports/
