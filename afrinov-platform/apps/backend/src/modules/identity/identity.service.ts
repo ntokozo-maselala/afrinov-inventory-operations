@@ -31,42 +31,6 @@ export const AuthService = {
       roles: user.roles.map((r) => r.role.name),
     };
   },
-
-  /**
-   * Self-registration (ADR-005). Only reachable when the
-   * `security.allowSelfRegistration` setting is on — the route
-   * checks the setting before calling this. New accounts receive
-   * the least-privilege VIEWER role; role elevation is an
-   * administrator action (POST /users requires manage:users).
-   */
-  async register(input: { name: string; email: string; password: string }, actorId: string) {
-    const email = input.email.toLowerCase();
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw Errors.conflict('Email already in use');
-
-    const viewer = await prisma.role.findUnique({ where: { name: 'VIEWER' } });
-    const hash = await this.hashPassword(input.password);
-    const created = await prisma.user.create({
-      data: {
-        email,
-        name: input.name,
-        passwordHash: hash,
-        roles: viewer ? { create: [{ roleId: viewer.id }] } : undefined,
-      },
-    });
-
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'SELF_REGISTER',
-        entityType: 'User',
-        entityId: created.id,
-        after: { email: created.email, name: created.name, roles: ['VIEWER'] } as Prisma.InputJsonValue,
-      },
-    });
-
-    return { id: created.id, email: created.email, name: created.name, roles: ['VIEWER'] as string[] };
-  },
 };
 
 export interface CreateUserInput {

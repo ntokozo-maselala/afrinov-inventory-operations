@@ -6,7 +6,7 @@
 // storage, redirect path) happen in the service — this file only owns the
 // form UX and presentation.
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { Button } from '../components/Button';
 import { Field, Input } from '../components/Field';
@@ -269,11 +269,7 @@ export function Login() {
               )}
 
               <p className="text-xs text-surface-500 text-center pt-2">
-                New to Afrinov IMS?{' '}
-                <Link to="/signup" className="text-brand-600 hover:text-brand-700 font-medium">
-                  Create an account
-                </Link>
-                .
+                Need an account? Ask an administrator to create one for you.
               </p>
 
               <p className="text-xs text-surface-500 text-center pt-2">

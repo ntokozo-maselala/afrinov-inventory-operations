@@ -4,7 +4,7 @@
 //   - the AuthUser state (single source of truth),
 //   - the initial-session restore from `sessionStorage` (or the backend
 //     `/auth/me` endpoint when a JWT is present),
-//   - the `login`, `signup`, and `logout` actions consumed by the UI.
+//   - the `login` and `logout` actions consumed by the UI.
 //
 // The provider is mounted at the root of the app in `main.tsx` so that
 // route guards, the AppShell header, the sidebar, and the auth pages all
@@ -20,7 +20,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api, FRONTEND_ONLY, getToken, setToken } from './api/client';
-import { login as serviceLogin, signup as serviceSignup, type AuthUser } from './api/authService';
+import { login as serviceLogin, type AuthUser } from './api/authService';
 
 export type { AuthUser } from './api/authService';
 export { landingPathFor } from './api/landingPath';
@@ -68,7 +68,6 @@ export interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ user: AuthUser; landingPath: string }>;
-  signup: (name: string, email: string, password: string) => Promise<{ user: AuthUser; landingPath: string }>;
   logout: () => void;
 }
 
@@ -134,13 +133,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return result;
   }, []);
 
-  const signup = useCallback(async (name: string, email: string, password: string) => {
-    const result = await serviceSignup(name, email, password);
-    setUser(result.user);
-    writePersistedSession(result.user);
-    return result;
-  }, []);
-
   const logout = useCallback(() => {
     setToken(null);
     clearPersistedSession();
@@ -148,8 +140,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, login, signup, logout }),
-    [user, loading, login, signup, logout],
+    () => ({ user, loading, login, logout }),
+    [user, loading, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

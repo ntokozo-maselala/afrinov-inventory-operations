@@ -194,4 +194,13 @@ describe('auth routes', () => {
       expect('password' in body).toBe(false);
     });
   });
+
+  it('offers no self-registration: accounts are created by an administrator', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { name: 'Someone', email: 'someone@example.com', password: 'longenough' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
 });

@@ -176,7 +176,7 @@ This phase is small and best done before real data exists.
 - [x] Remove `PATCH /inventory-transactions/:id`, `InventoryService.updateActor` and the edit option in `TransactionDrawer.tsx`; add a reversing-entry action for mistakes
 - [x] Make "no negative stock" a fixed rule for issues, transfers and adjustments; delete `inventory.enableNegativeStockPrevention`
 - [x] Delete the seven settings that do nothing (listed in Remove), or wire up any the business wants
-- [ ] Remove `/auth/register`, the Signup page and `security.allowSelfRegistration`
+- [x] Remove `/auth/register`, the Signup page and `security.allowSelfRegistration`
 - [ ] Cut purchase-order statuses down to Draft, Pending approval, Approved, Partly received, Received, Closed, Cancelled; drop the SHIPPED stage fields from the UI
 - [ ] Make production builds fail if `VITE_FRONTEND_ONLY` or `VITE_DEMO_AUTH_ENABLED` is set
 - [ ] Hide location address and contact fields and rack capacity and FULL status from forms

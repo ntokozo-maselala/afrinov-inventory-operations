@@ -116,7 +116,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const envGlobal = Number(process.env.RATE_LIMIT_GLOBAL);
   const authLimit = envAuth > 0 ? envAuth : isTest ? 1000 : 5;
   const globalLimit = envGlobal > 0 ? envGlobal : isTest ? 10000 : 1000;
-  const STRICT_AUTH_PATHS = new Set(['/api/v1/auth/login', '/api/v1/auth/register']);
+  const STRICT_AUTH_PATHS = new Set(['/api/v1/auth/login']);
   await app.register(rateLimit, {
     // `req.url` is the raw request target and includes the query string, so an
     // exact-match test would let `/api/v1/auth/login?x=1` fall through to the

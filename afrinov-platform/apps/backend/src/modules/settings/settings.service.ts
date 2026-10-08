@@ -189,11 +189,6 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
 
   // ── Security ──────────────────────────────────────────────────────────
   { key: 'security.sessionTimeoutMinutes', type: 'number', category: 'security', description: 'Inactivity time before a session is signed out.', default: 60, validate: POS_INT(5, 720) },
-  // Opt-in self-registration (ADR-005). Off by default: the signup
-  // page is wired to POST /auth/register, but the route refuses with
-  // REGISTRATION_DISABLED until an operator enables it. Newly
-  // self-registered accounts receive the least-privilege VIEWER role.
-  { key: 'security.allowSelfRegistration', type: 'boolean', category: 'security', description: 'Allow new users to create their own account via the sign-up page (assigned the VIEWER role).', default: false },
 ] as const;
 
 const CATALOG_BY_KEY: Map<string, SettingDefinition> = new Map(SETTING_CATALOG.map((s) => [s.key, s]));

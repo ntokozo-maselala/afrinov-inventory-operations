@@ -156,15 +156,6 @@ function route(method: string, path: string, body?: unknown): unknown {
     // service (rare). It still returns the dev user for consistency.
     return { token: 'mock-token', user: devUser() };
   }
-  if (method === 'POST' && p === '/auth/signup') {
-    const b = body as { name?: string; email?: string; password?: string } | undefined;
-    if (!b?.name || !b?.email || !b?.password) throw err('VALIDATION_ERROR', 'Name, email, and password are required');
-    if (b.password.length < 8) throw err('VALIDATION_ERROR', 'Password must be at least 8 characters');
-    return {
-      token: 'mock-token',
-      user: { ...devUser(), id: `signup-${Date.now()}`, email: b.email.toLowerCase(), name: b.name },
-    };
-  }
 
   // Materials
   if (method === 'GET' && p === '/materials') {

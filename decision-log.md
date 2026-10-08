@@ -87,3 +87,39 @@ forked tables.
 ---
 
 *(Add new ADRs below this line as decisions are made. Do not renumber or delete prior entries.)*
+
+---
+
+### ADR-005 — Correct ledger mistakes by reversal, never by editing
+**Date:** 2026-10-08 · **Status:** Accepted
+
+**Context:** ADR-002 makes the transaction ledger append-only, but an
+endpoint (`PATCH /inventory-transactions/:id`) still let a store controller
+change who posted a movement. People make entry mistakes; the ledger needs a
+way to correct them that keeps the record trustworthy.
+
+**Decision:** Posted transactions are never updated. A mistake is corrected
+by a reversing entry: the original's type with the opposite sign, linked to
+it through a unique `reverses_id`, with a mandatory reason. Both legs of a
+transfer are reversed together; a reversal cannot be reversed, and cannot
+take stock below zero.
+
+**Consequences:** Every correction stays visible in the history with who
+made it and why. Signed totals net reversals out on their own; summaries
+that add absolute quantities by type must leave reversed pairs out.
+
+---
+
+### ADR-006 — Accounts are created by an administrator; no self-registration
+**Date:** 2026-10-08 · **Status:** Accepted
+
+**Context:** The platform had a sign-up page and an opt-in
+`POST /auth/register` route that created read-only accounts. The system is
+internal to Afrinov: everyone who uses it is known to the business.
+
+**Decision:** Remove self-registration (route, page and the
+`security.allowSelfRegistration` setting). An administrator creates accounts
+and assigns roles under Settings → Users.
+
+**Consequences:** One fewer unauthenticated endpoint. Onboarding a storeman
+needs an administrator, which matches how access is controlled today.

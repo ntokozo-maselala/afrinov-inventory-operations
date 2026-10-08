@@ -99,61 +99,11 @@ describe('authService.login (frontend-only mode)', () => {
     expect(r.user.name).toBe('System Administrator (dev)');
   });
 
-  it('recognises a previously-signed-up account', async () => {
-    const auth = await import('../api/authService');
-    const created = await auth.signup('Aisha Tester', 'Aisha@Example.com', 'longpassword');
-    expect(created.user.email).toBe('aisha@example.com');
-    const r = await auth.login('Aisha@Example.com', 'longpassword');
-    expect(r.user.email).toBe('aisha@example.com');
-    expect(r.user.name).toBe('Aisha Tester');
-  });
-
   it('rejects empty fields with VALIDATION_ERROR', async () => {
     const { login } = await import('../api/authService');
     await expect(login('', '')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     await expect(login('a@b.c', '')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     await expect(login('', 'pw')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-  });
-});
-
-describe('authService.signup (frontend-only mode)', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    process.env['VITE_DEMO_AUTH_ENABLED'] = 'false';
-    process.env['VITE_FRONTEND_ONLY'] = 'true';
-    (import.meta as { env: Record<string, string | undefined> }).env['VITE_DEMO_AUTH_ENABLED'] = 'false';
-    (import.meta as { env: Record<string, string | undefined> }).env['VITE_FRONTEND_ONLY'] = 'true';
-  });
-
-  it('creates an account and returns a session', async () => {
-    const { signup } = await import('../api/authService');
-    const r = await signup('Sam Veld', 'sam@example.com', 'longerpassword');
-    expect(r.user.email).toBe('sam@example.com');
-    expect(r.user.name).toBe('Sam Veld');
-    expect(r.landingPath).toBe('/');
-  });
-
-  it('rejects duplicate emails in the same session', async () => {
-    const { signup } = await import('../api/authService');
-    await signup('Sam Veld', 'sam@example.com', 'longerpassword');
-    await expect(signup('Sam Veld', 'sam@example.com', 'longerpassword')).rejects.toMatchObject({ code: 'CONFLICT' });
-  });
-
-  it('rejects passwords shorter than 8 characters', async () => {
-    const { signup } = await import('../api/authService');
-    await expect(signup('Sam', 'sam@example.com', 'short')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-  });
-
-  it('rejects missing fields with VALIDATION_ERROR', async () => {
-    const { signup } = await import('../api/authService');
-    await expect(signup('', 'a@b.c', 'longerpassword')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(signup('Sam', '', 'longerpassword')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(signup('Sam', 'a@b.c', '')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-  });
-
-  it('rejects an invalid email format', async () => {
-    const { signup } = await import('../api/authService');
-    await expect(signup('Sam', 'not-an-email', 'longerpassword')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 });
 

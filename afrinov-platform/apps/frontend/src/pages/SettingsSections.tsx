@@ -469,7 +469,6 @@ export function SettingsSecurity() {
   const toast = useToast();
   const items = useCategorySettings('security');
   const session = useSetting('security.sessionTimeoutMinutes');
-  const selfRegistration = useSetting('security.allowSelfRegistration');
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Security" description="Session policy. Every administrative action is always recorded in the audit log. Sign-in is currently fixed at email + password; advanced controls are noted below.">
@@ -479,17 +478,11 @@ export function SettingsSecurity() {
         onChange={(v) => setDraft('security.sessionTimeoutMinutes', v)}
         error={errors['security.sessionTimeoutMinutes'] ?? null}
       />
-      <BooleanField
-        def={selfRegistration}
-        value={Boolean(draft['security.allowSelfRegistration'])}
-        onChange={(v) => setDraft('security.allowSelfRegistration', v)}
-      />
       <Alert tone="info" title="Notes">
         The current authentication module supports email + password and a 12-hour JWT lifetime. Adjusting
         the session timeout below is the only setting the existing backend can enforce; more granular controls
         (account lockout, password complexity) are not yet wired and would require backend changes.
-        When self-registration is enabled, new accounts sign themselves up with the least-privilege
-        VIEWER role; an administrator can then assign further roles.
+        Accounts are created by an administrator under Settings → Users.
       </Alert>
       <SaveBar items={items} onSave={async () => {
         try {
