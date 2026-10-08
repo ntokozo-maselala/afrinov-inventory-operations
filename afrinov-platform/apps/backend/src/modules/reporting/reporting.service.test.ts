@@ -300,6 +300,29 @@ describe('ReportingService', () => {
   });
 
   describe('projectConsumption', () => {
+    it('nets fractional reversals only within the requested project', async () => {
+      seedMaterials();
+      const base: Tx = {
+        id: 'original', postedAt: new Date('2026-09-01'), type: 'ISSUE', materialId: 'm-1',
+        locationId: 'l-1', quantity: DEC(-0.375), actorId: 'u-1', recipientId: null,
+        reasonCode: null, reasonNote: null, projectNumber: 'P-1', referenceType: null, referenceId: null,
+      };
+      db.transactions = [
+        base,
+        { ...base, id: 'reversal', quantity: DEC(0.375) },
+        { ...base, id: 'remaining', quantity: DEC(-0.125) },
+        { ...base, id: 'other-project', quantity: DEC(-10), projectNumber: 'P-2' },
+        { ...base, id: 'receipt', quantity: DEC(100), type: 'RECEIPT' },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      expect(await ReportingService.projectConsumption('P-1')).toEqual([
+        expect.objectContaining({ materialId: 'm-1', total: 0.125 }),
+      ]);
+      expect(await ReportingService.projectConsumption('P-2')).toEqual([
+        expect.objectContaining({ materialId: 'm-1', total: 10 }),
+      ]);
+    });
+
     it('aggregates issued quantities per material', async () => {
       seedMaterials();
       db.transactions = [
