@@ -330,31 +330,40 @@ describe('InventoryService — ADR-002 invariants', () => {
     ).rejects.toThrow();
   });
 
-  // ── Settings integration ─────────────────────────────────────────────
-  // These tests prove that toggles in the settings table actually flow
-  // through to the inventory business logic — settings are not just a UI
-  // decoration.
-  describe('settings integration', () => {
-    it('issue allows going negative when enableNegativeStockPrevention is off', async () => {
+  // ── No negative stock ────────────────────────────────────────────────
+  // A fixed rule, not a setting. A leftover row from the retired
+  // inventory.enableNegativeStockPrevention setting must not switch it off.
+  describe('no negative stock', () => {
+    beforeEach(() => {
       setMockSetting('inventory.enableNegativeStockPrevention', false);
-      await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
-      });
-      await InventoryService.issue({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u',
-      });
-      // Balance ends at -3 because the toggle disabled the check
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('-3');
     });
 
-    it('issue still blocks over-issue when enableNegativeStockPrevention is on', async () => {
-      setMockSetting('inventory.enableNegativeStockPrevention', true);
+    it('refuses an issue larger than the balance', async () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
       await expect(
         InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u' }),
-      ).rejects.toThrow(/available/);
+      ).rejects.toThrow(/only 2 available/);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
+    });
+
+    it('refuses a negative adjustment larger than the balance', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await expect(
+        InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: -3, reasonCode: 'LOSS', actorId: 'u' }),
+      ).rejects.toThrow(/only 2 available/);
+      expect(trxRows).toHaveLength(1);
+    });
+
+    it('allows taking the balance to exactly zero', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
     });
   });
 

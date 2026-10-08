@@ -140,6 +140,23 @@ describe('stock movements over real HTTP', () => {
     await expectLedgerMatches(storeB, '20');
   });
 
+  it('never lets an issue or a write-off take stock below zero', async () => {
+    const before = await transactionCount();
+    const issue = await api<{ error: { code: string } }>('POST', '/inventory-issues', { materialId, locationId: storeB, quantity: 21 });
+    expect(issue.status).toBe(422);
+    expect(issue.body.error.code).toBe('INSUFFICIENT_BALANCE');
+    const writeOff = await api<{ error: { code: string } }>('POST', '/inventory-adjustments', {
+      materialId,
+      locationId: storeB,
+      quantity: -21,
+      reasonCode: 'LOSS',
+    });
+    expect(writeOff.status).toBe(422);
+    expect(writeOff.body.error.code).toBe('INSUFFICIENT_BALANCE');
+    expect(await transactionCount()).toBe(before);
+    await expectLedgerMatches(storeB, '20');
+  });
+
   it('rejects invalid movements with 400 and records nothing', async () => {
     const before = await transactionCount();
 

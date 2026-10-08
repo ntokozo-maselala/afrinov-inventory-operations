@@ -174,7 +174,7 @@ Phases 1 and 2 run side by side after the clean-up; reports follow Phase 1; noth
 This phase is small and best done before real data exists.
 
 - [x] Remove `PATCH /inventory-transactions/:id`, `InventoryService.updateActor` and the edit option in `TransactionDrawer.tsx`; add a reversing-entry action for mistakes
-- [ ] Make "no negative stock" a fixed rule for issues, transfers and adjustments; delete `inventory.enableNegativeStockPrevention`
+- [x] Make "no negative stock" a fixed rule for issues, transfers and adjustments; delete `inventory.enableNegativeStockPrevention`
 - [ ] Delete the seven settings that do nothing (listed in Remove), or wire up any the business wants
 - [ ] Remove `/auth/register`, the Signup page and `security.allowSelfRegistration`
 - [ ] Cut purchase-order statuses down to Draft, Pending approval, Approved, Partly received, Received, Closed, Cancelled; drop the SHIPPED stage fields from the UI

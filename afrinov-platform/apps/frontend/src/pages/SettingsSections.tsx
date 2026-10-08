@@ -93,13 +93,12 @@ export function SettingsInventory() {
   const lowStockMultiplier = useSetting('inventory.lowStockMultiplier');
   const defaultUnitOfMeasure = useSetting('inventory.defaultUnitOfMeasure');
   const enableStockAlerts = useSetting('inventory.enableStockAlerts');
-  const enableNegativeStockPrevention = useSetting('inventory.enableNegativeStockPrevention');
   const requireReasonForAdjustments = useSetting('inventory.requireReasonForAdjustments');
   const requireApprovalForSensitiveChanges = useSetting('inventory.requireApprovalForSensitiveChanges');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
-    <SectionPanel title="Inventory" description="These settings directly control inventory business logic — including low-stock alerts and issue-prevention rules.">
+    <SectionPanel title="Inventory" description="These settings directly control inventory business logic, including low-stock alerts. Stock can never go below zero; that rule is fixed.">
       <NumberField
         def={lowStockMultiplier}
         value={Number(draft['inventory.lowStockMultiplier'] ?? 0)}
@@ -113,7 +112,6 @@ export function SettingsInventory() {
         error={errors['inventory.defaultUnitOfMeasure'] ?? null}
       />
       <BooleanField def={enableStockAlerts} value={Boolean(draft['inventory.enableStockAlerts'])} onChange={(v) => setDraft('inventory.enableStockAlerts', v)} />
-      <BooleanField def={enableNegativeStockPrevention} value={Boolean(draft['inventory.enableNegativeStockPrevention'])} onChange={(v) => setDraft('inventory.enableNegativeStockPrevention', v)} />
       <BooleanField def={requireReasonForAdjustments} value={Boolean(draft['inventory.requireReasonForAdjustments'])} onChange={(v) => setDraft('inventory.requireReasonForAdjustments', v)} />
       <BooleanField def={requireApprovalForSensitiveChanges} value={Boolean(draft['inventory.requireApprovalForSensitiveChanges'])} onChange={(v) => setDraft('inventory.requireApprovalForSensitiveChanges', v)} />
       <SaveBar items={items} onSave={async () => {

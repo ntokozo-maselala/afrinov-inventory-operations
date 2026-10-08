@@ -177,7 +177,6 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.lowStockMultiplier', type: 'number', category: 'inventory', description: 'Multiplier applied to per-material reorder thresholds (e.g. 0.5 = warn at half the threshold; 2 = only at double).', default: 1, validate: NON_NEG(5) },
   { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'Default unit of measure suggested for new materials.', default: 'each', validate: isLength(1, 20) },
   { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Highlight materials at or below their reorder threshold.', default: true },
-  { key: 'inventory.enableNegativeStockPrevention', type: 'boolean', category: 'inventory', description: 'Prevent stock issues that would drive the balance below zero.', default: true },
   { key: 'inventory.requireReasonForAdjustments', type: 'boolean', category: 'inventory', description: 'Require a reason code for every inventory adjustment.', default: true },
   { key: 'inventory.requireApprovalForSensitiveChanges', type: 'boolean', category: 'inventory', description: 'Require approval before completing large transfers or write-offs.', default: false },
 
@@ -275,8 +274,12 @@ function rowToValue(row: {
 }
 
 export const SettingsService = {
-  /** Idempotent: ensures every catalog key has a row. */
+  /**
+   * Idempotent: ensures every catalog key has a row, and deletes rows for
+   * keys that have been retired from the catalog.
+   */
   async ensureSeeded(): Promise<void> {
+    await prisma.setting.deleteMany({ where: { key: { notIn: SETTING_CATALOG.map((s) => s.key) } } });
     for (const def of SETTING_CATALOG) {
       await prisma.setting.upsert({
         where: { key: def.key },
@@ -298,14 +301,19 @@ export const SettingsService = {
   },
 
   async list(filter?: { category?: SettingCategoryLiteral }): Promise<SettingValue[]> {
+    // Only catalog keys: a retired setting's row may linger until the next seed.
     const rows = await prisma.setting.findMany({
-      where: filter?.category ? { category: filter.category } : {},
+      where: {
+        key: { in: SETTING_CATALOG.map((s) => s.key) },
+        ...(filter?.category ? { category: filter.category } : {}),
+      },
       orderBy: [{ category: 'asc' }, { key: 'asc' }],
     });
     return rows.map(rowToValue);
   },
 
   async get(key: string): Promise<SettingValue> {
+    if (!getDefinition(key)) throw Errors.notFound('Setting');
     const row = await prisma.setting.findUnique({ where: { key } });
     if (!row) throw Errors.notFound('Setting');
     return rowToValue(row);

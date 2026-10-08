@@ -951,7 +951,6 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.lowStockMultiplier': row('inventory.lowStockMultiplier', 1, 'number', 'inventory', 'Multiplier applied to per-material reorder thresholds.'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Highlight materials at or below their reorder threshold.'),
-    'inventory.enableNegativeStockPrevention': row('inventory.enableNegativeStockPrevention', true, 'boolean', 'inventory', 'Prevent stock issues that would drive the balance below zero.'),
     'inventory.requireReasonForAdjustments': row('inventory.requireReasonForAdjustments', true, 'boolean', 'inventory', 'Require a reason code for every inventory adjustment.'),
     'inventory.requireApprovalForSensitiveChanges': row('inventory.requireApprovalForSensitiveChanges', false, 'boolean', 'inventory', 'Require approval before completing large transfers or write-offs.'),
 
@@ -1199,6 +1198,10 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
 function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string }): { transactionId: string } {
   if (!b.materialId || !b.locationId || !b.reasonCode) throw err('VALIDATION_ERROR', 'Invalid adjustment payload');
   if (b.quantity === 0) throw err('VALIDATION_ERROR', 'Quantity must be non-zero');
+  const balance = getBalance(b.materialId, b.locationId);
+  if (b.quantity < 0 && balance < -b.quantity) {
+    throw err('INSUFFICIENT_BALANCE', `Cannot adjust ${b.quantity} units: only ${balance} available.`);
+  }
   const id = nextId('t');
   state.transactions.push({
     id,

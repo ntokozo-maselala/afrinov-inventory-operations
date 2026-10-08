@@ -170,6 +170,16 @@ describe('mock API mutation flows', () => {
       );
       expect(Number(stock.find((s) => s.locationId === 'loc-1')!.quantity)).toBe(25);
     });
+
+    it('rejects a negative adjustment larger than the balance with INSUFFICIENT_BALANCE', async () => {
+      let caught: ApiError | undefined;
+      try {
+        await api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: -31, reasonCode: 'LOSS' });
+      } catch (e) {
+        if (isApiError(e)) caught = e;
+      }
+      expect(caught?.code).toBe('INSUFFICIENT_BALANCE');
+    });
   });
 
   // ── ADR-002: balances derived from transactions ─────────────────────────

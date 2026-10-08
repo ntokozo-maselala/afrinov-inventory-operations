@@ -221,18 +221,13 @@ export const InventoryService = {
     if (!gtZero(qty)) throw Errors.validation('Issue quantity must be positive');
 
     return prisma.$transaction(async (tx) => {
-      // Read the toggle inside the transaction (K13): the
-      // invariant must hold for the whole operation, not just at
-      // validation time. A toggle flipped between a pre-transaction
-      // read and the commit could otherwise let a negative-balance
-      // write through.
-      const preventNegative = await SettingsService.getValue<boolean>('inventory.enableNegativeStockPrevention', tx);
-
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
 
+      // Stock can never go below zero. This is a fixed rule, not a setting:
+      // a negative balance means the ledger no longer matches the shelf.
       const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
-      if (preventNegative && balance.lt(qty)) {
+      if (balance.lt(qty)) {
         throw Errors.insufficientBalance(
           `Cannot issue ${qty.toString()} units: only ${balance.toString()} available.`,
           { materialId: input.materialId, locationId: input.locationId, requested: qty.toString(), available: balance.toString() },
@@ -339,13 +334,11 @@ export const InventoryService = {
     if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
 
     return prisma.$transaction(async (tx) => {
-      // See issue(): the toggle is read inside the transaction (K13).
-      const preventNegative = await SettingsService.getValue<boolean>('inventory.enableNegativeStockPrevention', tx);
-
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
 
-      if (preventNegative && qty.isNegative()) {
+      // See issue(): stock can never go below zero.
+      if (qty.isNegative()) {
         const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
         if (balance.lt(qty.negated())) {
           throw Errors.insufficientBalance(
