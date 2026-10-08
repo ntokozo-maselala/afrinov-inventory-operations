@@ -622,8 +622,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
   if (method === 'POST' && p === '/inventory-issues') {
-    const b = body as { materialId: string; locationId: string; quantity: number; projectNumber?: string; recipientId?: string };
-    return handleIssue(b);
+    return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'POST' && p === '/inventory-transfers') {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
@@ -1133,37 +1132,65 @@ function handleStockItemCreate(b: {
   return { material: created, initialTransactionId };
 }
 
-function handleIssue(b: { materialId: string; locationId: string; quantity: number; projectNumber?: string; recipientId?: string }): { transactionId: string } {
-  if (!b.materialId || !b.locationId || !(b.quantity > 0)) throw err('VALIDATION_ERROR', 'Invalid issue payload');
-  if (b.recipientId) {
-    const r = state.recipients.find((x) => x.id === b.recipientId);
-    if (!r) throw err('NOT_FOUND', 'Recipient not found');
-    if (!r.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+// Mirrors InventoryService.issue: one recipient (required), an optional
+// project, several lines; all-or-nothing, with repeated items checked as one total.
+interface IssueBody {
+  recipientId?: string;
+  projectNumber?: string;
+  lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
+}
+function handleIssue(b: IssueBody): { transactionIds: string[] } {
+  if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the stock is issued to');
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to issue');
+  if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  const recipient = state.recipients.find((x) => x.id === b.recipientId);
+  if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
+  if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  if (b.projectNumber) {
+    const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
+    if (!project) throw err('NOT_FOUND', 'Project not found');
+    if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
   }
-  if (!findMaterial(b.materialId)) throw err('NOT_FOUND', 'Material not found');
-  if (!findLocation(b.locationId)) throw err('NOT_FOUND', 'Location not found');
-  const balance = getBalance(b.materialId, b.locationId);
-  if (balance < b.quantity) {
-    throw err('INSUFFICIENT_BALANCE', `Cannot issue ${b.quantity} units: only ${balance} available.`, {
-      requested: b.quantity,
-      available: balance,
-    });
+  const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+  for (const l of lines) {
+    const key = `${l.materialId}|${l.locationId}`;
+    const t = totals.get(key);
+    if (t) t.quantity += l.quantity;
+    else totals.set(key, { ...l });
   }
-  const id = nextId('t');
-  state.transactions.push({
-    id,
-    postedAt: new Date().toISOString(),
-    type: 'ISSUE',
-    materialId: b.materialId,
-    locationId: b.locationId,
-    quantity: String(-b.quantity),
-    actorId: 'user-1',
-    recipientId: b.recipientId,
-    projectNumber: b.projectNumber,
-    referenceType: b.projectNumber ? 'Project' : undefined,
-    referenceId: b.projectNumber,
-  });
-  return { transactionId: id };
+  for (const t of totals.values()) {
+    const material = findMaterial(t.materialId);
+    if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (!findLocation(t.locationId)) throw err('NOT_FOUND', 'Location not found');
+    const balance = getBalance(t.materialId, t.locationId);
+    if (balance < t.quantity) {
+      throw err('INSUFFICIENT_BALANCE', `Cannot issue ${t.quantity} × ${material.sku}: only ${balance} available.`, {
+        requested: t.quantity,
+        available: balance,
+      });
+    }
+  }
+  const postedAt = new Date().toISOString();
+  return {
+    transactionIds: lines.map((l) => {
+      const id = nextId('t');
+      state.transactions.push({
+        id,
+        postedAt,
+        type: 'ISSUE',
+        materialId: l.materialId,
+        locationId: l.locationId,
+        quantity: String(-l.quantity),
+        actorId: 'user-1',
+        recipientId: b.recipientId,
+        projectNumber: b.projectNumber,
+        referenceType: b.projectNumber ? 'Project' : undefined,
+        referenceId: b.projectNumber,
+      });
+      return id;
+    }),
+  };
 }
 
 function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number }): { outTransactionId: string; inTransactionId: string } {

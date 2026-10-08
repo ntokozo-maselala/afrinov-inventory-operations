@@ -53,13 +53,13 @@ describe('recipients over real HTTP', () => {
   });
 
   it('records the recipient on an issue and shows the name in the history', async () => {
-    const issued = await api<{ transactionId: string }>('POST', '/inventory-issues', {
-      materialId, locationId, quantity: 3, recipientId: worker.id,
+    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+      recipientId: worker.id, lines: [{ materialId, locationId, quantity: 3 }],
     });
     expect(issued.status).toBe(201);
 
     const history = await api<HistoryRow[]>('GET', `/inventory-transactions?materialId=${materialId}`);
-    const row = history.body.find((t) => t.id === issued.body.transactionId)!;
+    const row = history.body.find((t) => t.id === issued.body.transactionIds[0])!;
     expect(row).toMatchObject({ type: 'ISSUE', recipientId: worker.id, recipientName: `Worker ${run}` });
   });
 
@@ -69,7 +69,7 @@ describe('recipients over real HTTP', () => {
     expect(deactivated.body.active).toBe(false);
 
     const before = await prisma.inventoryTransaction.count({ where: { materialId } });
-    const refused = await api('POST', '/inventory-issues', { materialId, locationId, quantity: 1, recipientId: worker.id });
+    const refused = await api('POST', '/inventory-issues', { recipientId: worker.id, lines: [{ materialId, locationId, quantity: 1 }] });
     expect(refused.status).toBe(400);
     expect(await prisma.inventoryTransaction.count({ where: { materialId } })).toBe(before);
 

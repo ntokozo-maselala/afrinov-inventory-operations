@@ -51,6 +51,7 @@ vi.mock('./inventory.service.js', () => ({
 
 const VALID_UUID = '00000000-0000-0000-0000-000000000001';
 const OTHER_UUID = '00000000-0000-0000-0000-000000000002';
+const RECIPIENT_UUID = '00000000-0000-0000-0000-000000000003';
 
 const ALL_INVENTORY_PERMS = [
   'issue:inventory',
@@ -64,7 +65,7 @@ describe('inventory routes', () => {
 
   beforeEach(async () => {
     app = await buildServer({ skipConfigValidation: true });
-    mockedIssue.mockResolvedValue({ transactionId: 'tx-1' });
+    mockedIssue.mockResolvedValue({ transactionIds: ['tx-1'] });
     mockedTransfer.mockResolvedValue({ outTransactionId: 'tx-out-1', inTransactionId: 'tx-in-1' });
     mockedAdjust.mockResolvedValue({ transactionId: 'tx-1' });
     mockedQueryHistory.mockResolvedValue([]);
@@ -102,67 +103,47 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
+    function issueBody(overrides: Record<string, unknown> = {}, line: Record<string, unknown> = {}) {
+      return {
+        recipientId: RECIPIENT_UUID,
+        lines: [{ materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 1, ...line }],
+        ...overrides,
+      };
+    }
+
     it('returns 403 when the user lacks the issue:inventory permission', async () => {
       const headers = authed('user-tech', ['view:reports']);
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/v1/inventory-issues',
-        headers,
-        payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 1 },
-      });
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-issues', headers, payload: issueBody() });
       expect(res.statusCode).toBe(403);
     });
 
-    it('returns 400 when the payload has an invalid UUID', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/v1/inventory-issues',
-        headers: authed(),
-        payload: { materialId: 'not-a-uuid', locationId: OTHER_UUID, quantity: 1 },
-      });
+    it.each([
+      ['the recipient is missing', issueBody({ recipientId: undefined })],
+      ['there are no lines', issueBody({ lines: [] })],
+      ['a line has an invalid UUID', issueBody({}, { materialId: 'not-a-uuid' })],
+      ['a quantity is not positive', issueBody({}, { quantity: -5 })],
+      ['a quantity is missing', issueBody({}, { quantity: undefined })],
+      ['there are more than 50 lines', issueBody({ lines: Array.from({ length: 51 }, () => ({ materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 1 })) })],
+    ])('returns 400 when %s', async (_case, payload) => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-issues', headers: authed(), payload });
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe('VALIDATION_ERROR');
+      expect(mockedIssue).not.toHaveBeenCalled();
     });
 
-    it('returns 400 when quantity is not positive', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/v1/inventory-issues',
-        headers: authed(),
-        payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: -5 },
-      });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error.code).toBe('VALIDATION_ERROR');
-    });
-
-    it('returns 400 when quantity is missing', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/v1/inventory-issues',
-        headers: authed(),
-        payload: { materialId: VALID_UUID, locationId: OTHER_UUID },
-      });
-      expect(res.statusCode).toBe(400);
-    });
-
-    it('returns 201 and forwards the service result on valid input', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/v1/inventory-issues',
-        headers: authed(),
-        payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 3, projectNumber: 'AFRI-1325' },
-      });
+    it('returns 201 and forwards every line with the recipient, project and caller', async () => {
+      const payload = {
+        recipientId: RECIPIENT_UUID,
+        projectNumber: 'AFRI-1325',
+        lines: [
+          { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 3 },
+          { materialId: OTHER_UUID, locationId: VALID_UUID, quantity: 1.5 },
+        ],
+      };
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-issues', headers: authed(), payload });
       expect(res.statusCode).toBe(201);
-      expect(res.json()).toEqual({ transactionId: 'tx-1' });
-      expect(mockedIssue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          materialId: VALID_UUID,
-          locationId: OTHER_UUID,
-          quantity: 3,
-          actorId: 'user-admin',
-          projectNumber: 'AFRI-1325',
-        }),
-      );
+      expect(res.json()).toEqual({ transactionIds: ['tx-1'] });
+      expect(mockedIssue).toHaveBeenCalledWith({ ...payload, actorId: 'user-admin' });
     });
   });
 

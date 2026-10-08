@@ -192,7 +192,7 @@ The goal is that a storeman can do every daily entry from the sheet's IN and OUT
 - [x] Recipients list: name, type (worker, machine, site, contractor), active flag; admin screens to manage it
 - [x] Point `InventoryTransaction.recipientId` at recipients instead of users
 - [ ] Receive stock: supplier, delivery/invoice number, date, location, and several item lines in one entry; posts RECEIPT transactions through goods receipts with no purchase order, and works with procurement off
-- [ ] Issue stock: recipient and project as searchable dropdowns, and several item lines in one entry (one person often takes several items)
+- [x] Issue stock: recipient and project as searchable dropdowns, and several item lines in one entry (one person often takes several items)
 - [ ] Return to stock: unused material back from a project, posted as a receipt that references the original issue
 - [ ] Item search by name, ID or location on every entry screen, as the sheet's lookup does
 - [ ] Show current stock and location next to each line while entering, as the sheet does

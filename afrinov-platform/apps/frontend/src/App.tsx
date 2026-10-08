@@ -27,6 +27,7 @@ const LowStock = importPage(() => import('./pages/LowStock').then(m => ({ defaul
 const InventoryReportPage = importPage(() => import('./pages/InventoryReport').then(m => ({ default: m.InventoryReportPage })));
 const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.Racks })));
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
+const IssueStock = importPage(() => import('./pages/IssueStock').then(m => ({ default: m.IssueStock })));
 const Recipients = importPage(() => import('./pages/Recipients').then(m => ({ default: m.Recipients })));
 const Locations = importPage(() => import('./pages/Locations').then(m => ({ default: m.Locations })));
 const Settings = importPage(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
@@ -109,6 +110,7 @@ export function App() {
       <Route element={<Protected />}>
         <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Dashboard /></Suspense>} />
         <Route path="/stock" element={<Suspense fallback={<PageSkeleton />}><Stock /></Suspense>} />
+        <Route path="/stock/issue" element={<Suspense fallback={<PageSkeleton />}><IssueStock /></Suspense>} />
         <Route path="/materials" element={<Suspense fallback={<PageSkeleton />}><Materials /></Suspense>} />
         <Route path="/materials/:id" element={<Suspense fallback={<PageSkeleton />}><MaterialDetail /></Suspense>} />
         <Route path="/movements" element={<Suspense fallback={<PageSkeleton />}><Movements /></Suspense>} />

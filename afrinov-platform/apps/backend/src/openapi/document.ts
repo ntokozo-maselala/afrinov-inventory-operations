@@ -215,8 +215,11 @@ export const OPERATIONS: Operation[] = [
     query: movementQuery,
   },
   {
-    method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock out of a location',
-    description: 'Refused with 422 INSUFFICIENT_BALANCE when it would make the balance negative (setting-controlled).',
+    method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock to a recipient',
+    description: 'One recipient (required), an optional project, and up to 50 lines, booked all-or-nothing. '
+      + 'Lines for the same item and location are checked against stock as one total. '
+      + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
+      + 'material or location, and 400 for an inactive one.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
   },
   {
