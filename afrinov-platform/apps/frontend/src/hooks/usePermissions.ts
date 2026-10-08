@@ -6,8 +6,12 @@ export function useHasRole(requiredRoles: RoleName | RoleName[]): boolean {
   const { user } = useAuth();
   if (!user?.roles?.length) return false;
   const userRoles = user.roles.map((r) => r.toUpperCase() as RoleName);
-  const required = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles];
-  if (required.includes('ADMIN')) return userRoles.includes('ADMIN');
+  const required = (Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles]).map((r) => r.toUpperCase() as RoleName);
+  // ADMIN holds every permission on the server, so it passes any role check.
+  // Everyone else needs one of the listed roles. (Previously a list containing
+  // ADMIN admitted only ADMIN, hiding store-controller, procurement and
+  // approver actions from the people allowed to do them.)
+  if (userRoles.includes('ADMIN')) return true;
   return required.some((r) => userRoles.includes(r));
 }
 

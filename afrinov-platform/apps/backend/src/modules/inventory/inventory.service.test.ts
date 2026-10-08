@@ -9,7 +9,7 @@
 //   - balances are NEVER mutated directly by the service — only via the
 //     recompute-balance helper inside the transaction.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
 // ─── In-memory fake ────────────────────────────────────────────────────────
@@ -358,6 +358,22 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(trxRows).toHaveLength(1);
     });
 
+    it.each(['issue', 'adjust'] as const)('%s enforces fractional stock boundaries with the retired toggle disabled', async (operation) => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      const take = (quantity: string) => operation === 'issue'
+        ? InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity, actorId: 'u' })
+        : InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: `-${quantity}`, reasonCode: 'LOSS', actorId: 'u' });
+      await expect(take('0.126')).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
+      expect(trxRows).toHaveLength(1);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0.125');
+      await take('0.125');
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
+      await expect(take('0.001')).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
+      expect(trxRows).toHaveLength(2);
+    });
+
     it('allows taking the balance to exactly zero', async () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
@@ -369,6 +385,109 @@ describe('InventoryService — ADR-002 invariants', () => {
 
   // ── Reversal ──────────────────────────────────────────────────────────
   describe('reverse', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it.each(['outTransactionId', 'inTransactionId'] as const)(
+      'checks destination stock before writing either leg when reversing %s', async (selectedLeg) => {
+        await InventoryService.adjust({
+          materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+        });
+        const transfer = await InventoryService.transfer({
+          materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 6, actorId: 'u',
+        });
+        await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-2', quantity: 1, actorId: 'u' });
+        const rowsBefore = trxRows.map((row) => ({ ...row }));
+        const auditBefore = [...auditLog];
+
+        await expect(InventoryService.reverse({
+          transactionId: transfer[selectedLeg], reason: 'Wrong destination', actorId: 'user-2',
+        })).rejects.toMatchObject({
+          code: 'INSUFFICIENT_BALANCE',
+          details: { materialId: 'mat-1', locationId: 'loc-2', requested: '6', available: '5' },
+        });
+
+        expect(trxRows).toEqual(rowsBefore);
+        expect(auditLog).toEqual(auditBefore);
+        expect(getBalance('mat-1', 'loc-1').toString()).toBe('4');
+        expect(getBalance('mat-1', 'loc-2').toString()).toBe('5');
+      },
+    );
+
+    it('rejects a transfer with a missing partner before recording a reversal', async () => {
+      trxRows.push({
+        id: 'out', materialId: 'mat-1', locationId: 'loc-1', type: 'TRANSFER_OUT',
+        quantity: new Prisma.Decimal(-2), actorId: 'u', postedAt: new Date(), pairedWithId: 'missing',
+      });
+      await expect(InventoryService.reverse({
+        transactionId: 'out', reason: 'Wrong destination', actorId: 'user-2',
+      })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(trxRows).toHaveLength(1);
+      expect(auditLog).toEqual([]);
+    });
+
+    it('rejects a transfer when only its partner has already been reversed', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      const { outTransactionId, inTransactionId } = await InventoryService.transfer({
+        materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 6, actorId: 'u',
+      });
+      trxRows.push({
+        ...trxRows.find((row) => row.id === inTransactionId)!,
+        id: 'existing-reversal', reversesId: inTransactionId, quantity: new Prisma.Decimal(-6),
+      });
+      const rowsBefore = trxRows.map((row) => ({ ...row }));
+      const auditBefore = [...auditLog];
+      await expect(InventoryService.reverse({
+        transactionId: outTransactionId, reason: 'Wrong destination', actorId: 'user-2',
+      })).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(trxRows).toEqual(rowsBefore);
+      expect(auditLog).toEqual(auditBefore);
+    });
+
+    it('preserves issue metadata and records a trimmed reason in the ledger and audit', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const { transactionId } = await InventoryService.issue({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', actorId: 'user-1',
+        recipientId: 'user-3', projectNumber: 'P-42',
+      });
+      const original = { ...trxRows.find((row) => row.id === transactionId)! };
+      const { reversalIds } = await InventoryService.reverse({
+        transactionId, reason: '  Wrong project  ', actorId: 'user-2',
+      });
+      expect(reversalIds).toHaveLength(1);
+      expect(trxRows.find((row) => row.id === reversalIds[0])).toMatchObject({
+        type: 'ISSUE', materialId: 'mat-1', locationId: 'loc-1', actorId: 'user-2',
+        recipientId: 'user-3', projectNumber: 'P-42', reasonNote: 'Wrong project', reversesId: transactionId,
+      });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0.125');
+      expect(trxRows.find((row) => row.id === transactionId)).toEqual(original);
+      expect(auditLog.at(-1)).toMatchObject({
+        action: 'REVERSE', entityType: 'InventoryTransaction', entityId: transactionId,
+        actorId: 'user-2', after: { reversalIds, reason: 'Wrong project' },
+      });
+    });
+
+    it.each(['P2002', 'P2028'])( 'handles database error %s without writing a reversal', async (code) => {
+      const { transactionId } = await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      const failure = new Prisma.PrismaClientKnownRequestError('Database failure', { code, clientVersion: '5.22.0' });
+      vi.spyOn(fakeTx.inventoryTransaction, 'create').mockRejectedValueOnce(failure);
+      const auditBefore = [...auditLog];
+      const result = InventoryService.reverse({ transactionId, reason: 'Duplicate count', actorId: 'user-2' });
+      if (code === 'P2002') {
+        await expect(result).rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
+      } else {
+        await expect(result).rejects.toBe(failure);
+      }
+      expect(trxRows).toHaveLength(1);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
+      expect(auditLog).toEqual(auditBefore);
+    });
+
     it('posts an opposite entry of the same type and restores the balance', async () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
@@ -401,15 +520,15 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(trxRows.find((r) => r.id === transactionId)).toEqual(before);
     });
 
-    it('reverses both legs of a transfer, starting from either leg', async () => {
+    it.each(['outTransactionId', 'inTransactionId'] as const)('reverses both transfer legs starting from %s', async (selectedLeg) => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
-      const { inTransactionId } = await InventoryService.transfer({
+      const transfer = await InventoryService.transfer({
         materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 6, actorId: 'u',
       });
 
-      const { reversalIds } = await InventoryService.reverse({ transactionId: inTransactionId, reason: 'Wrong rack', actorId: 'u' });
+      const { reversalIds } = await InventoryService.reverse({ transactionId: transfer[selectedLeg], reason: 'Wrong rack', actorId: 'u' });
 
       expect(reversalIds).toHaveLength(2);
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('10');
@@ -419,6 +538,10 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(inn!.type).toBe('TRANSFER_IN');
       expect(out!.pairedWithId).toBe(inn!.id);
       expect(inn!.pairedWithId).toBe(out!.id);
+      expect(out!.reversesId).toBe(transfer.outTransactionId);
+      expect(inn!.reversesId).toBe(transfer.inTransactionId);
+      expect(out!.quantity.toString()).toBe('6');
+      expect(inn!.quantity.toString()).toBe('-6');
     });
 
     it('refuses to reverse a movement twice', async () => {

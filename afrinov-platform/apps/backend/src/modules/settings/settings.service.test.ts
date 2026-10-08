@@ -109,6 +109,34 @@ beforeEach(() => {
 });
 
 describe('SettingsService', () => {
+  it('prunes retired settings on repeated seeding without resetting saved catalog values', async () => {
+    const { SettingsService, SETTING_CATALOG } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('general.companyName', 'Saved company', 'admin');
+    const saved = { ...db.settings.get('general.companyName')! };
+    const auditBefore = [...db.audit];
+    const retiredKeys = ['inventory.enableNegativeStockPrevention', 'security.allowSelfRegistration', 'security.enableAuditLogging'];
+    for (const key of retiredKeys) {
+      db.settings.set(key, {
+        key, value: true, type: 'boolean', category: key.startsWith('security.') ? 'security' : 'inventory',
+        description: 'Retired', isEditable: true, enumOptions: null, updatedAt: new Date(), updatedById: null,
+      });
+    }
+    for (const category of ['inventory', 'security'] as const) {
+      const listed = await SettingsService.list({ category });
+      expect(listed.length).toBeGreaterThan(0);
+      expect(listed.every((row) => row.category === category && !retiredKeys.includes(row.key))).toBe(true);
+    }
+    for (const key of retiredKeys) {
+      await expect(SettingsService.get(key)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+    await SettingsService.ensureSeeded();
+    await SettingsService.ensureSeeded();
+    expect([...db.settings.keys()].sort()).toEqual(SETTING_CATALOG.map((def) => def.key).sort());
+    expect(db.settings.get('general.companyName')).toEqual(saved);
+    expect(db.audit).toEqual(auditBefore);
+  });
+
   it('seeds every catalog key with its default', async () => {
     const { SettingsService, SETTING_CATALOG } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();
