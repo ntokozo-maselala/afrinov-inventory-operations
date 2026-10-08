@@ -49,8 +49,8 @@ export function ActivityFeed({ movements, loading = false, empty = false, limit 
     <ul className="divide-y divide-surface-100">
       {items.map((m) => {
         const cfg = typeConfig[m.type] ?? { tone: 'neutral', icon: null, label: m.type };
-        const isPositive = m.type === 'RECEIPT' || m.type === 'TRANSFER_IN';
-        const isNegative = m.type === 'ISSUE' || m.type === 'TRANSFER_OUT';
+        const isPositive = m.quantity > 0;
+        const isNegative = m.quantity < 0;
         const qtyPrefix = isPositive ? '+' : isNegative ? '−' : '';
         return (
           <li key={m.id} className="flex items-start gap-3 py-2.5">

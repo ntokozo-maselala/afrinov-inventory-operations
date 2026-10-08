@@ -92,7 +92,7 @@ const movements: ReportMovementRow[] = [
   },
   { id: 't-2', postedAt: '2026-09-02T08:00:00Z', type: 'ISSUE', materialId: 'm-1',
     materialSku: 'SKU-001', materialName: 'Bolt M8', category: 'FASTENERS_SLUGS_INSULATION',
-    locationId: 'l-1', locationName: 'Rack A', quantity: 5, actorName: 'Jane', reasonCode: null, reasonNote: null,
+    locationId: 'l-1', locationName: 'Rack A', quantity: -5, actorName: 'Jane', reasonCode: null, reasonNote: null,
     projectNumber: null, referenceType: null, referenceId: null,
   },
   { id: 't-3', postedAt: '2026-09-03T08:00:00Z', type: 'RECEIPT', materialId: 'm-2',

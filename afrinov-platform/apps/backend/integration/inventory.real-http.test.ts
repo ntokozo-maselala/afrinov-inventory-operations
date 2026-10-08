@@ -188,6 +188,44 @@ describe('stock movements over real HTTP', () => {
     );
   });
 
+  it('corrects mistakes by reversing, never by editing the ledger', async () => {
+    const damage = await prisma.inventoryTransaction.findFirstOrThrow({ where: { materialId, reasonCode: 'DAMAGE' } });
+    const transferIn = await prisma.inventoryTransaction.findFirstOrThrow({ where: { materialId, type: 'TRANSFER_IN' } });
+
+    // Store B holds 20 of the 25 transferred in, so the transfer cannot be undone yet.
+    const tooEarly = await api<{ error: { code: string } }>('POST', `/inventory-transactions/${transferIn.id}/reversal`, {
+      reason: 'Moved to the wrong store',
+    });
+    expect(tooEarly.status).toBe(422);
+    expect(tooEarly.body.error.code).toBe('INSUFFICIENT_BALANCE');
+
+    const undoDamage = await api<{ reversalIds: string[] }>('POST', `/inventory-transactions/${damage.id}/reversal`, {
+      reason: 'Box was not damaged',
+    });
+    expect(undoDamage.status).toBe(201);
+    await expectLedgerMatches(storeB, '25');
+
+    const undoTransfer = await api<{ reversalIds: string[] }>('POST', `/inventory-transactions/${transferIn.id}/reversal`, {
+      reason: 'Moved to the wrong store',
+    });
+    expect(undoTransfer.status).toBe(201);
+    expect(undoTransfer.body.reversalIds).toHaveLength(2);
+    await expectLedgerMatches(storeA, '70');
+    await expectLedgerMatches(storeB, '0');
+
+    // The originals are untouched; each reversal points back at its original.
+    expect(await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: damage.id } })).toEqual(damage);
+    const reversals = await prisma.inventoryTransaction.findMany({ where: { id: { in: undoTransfer.body.reversalIds } } });
+    expect(reversals.map((r) => r.reversesId)).toContain(transferIn.id);
+    expect(reversals.every((r) => r.reasonNote === 'Moved to the wrong store')).toBe(true);
+
+    const again = await api('POST', `/inventory-transactions/${damage.id}/reversal`, { reason: 'Twice' });
+    expect(again.status).toBe(409);
+
+    const edit = await api('PATCH', `/inventory-transactions/${damage.id}`, { actorId: damage.actorId });
+    expect(edit.status).toBe(404);
+  });
+
   it('forbids a read-only user from moving stock', async () => {
     const email = `it-viewer-${run}@example.com`;
     const password = `viewer-${run}-pass`;

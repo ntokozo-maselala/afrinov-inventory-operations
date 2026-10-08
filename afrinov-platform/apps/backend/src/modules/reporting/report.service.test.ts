@@ -59,7 +59,7 @@ interface Loc { id: string; name: string; type: string; active: boolean }
 interface Sup { id: string; name: string; active: boolean }
 interface PO { id: string; number: string; supplierId: string; status: string; createdById: string; createdAt: Date; updatedAt: Date; notes?: string | null }
 interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: FakeDecimal; receivedQty: FakeDecimal }
-interface Tx { id: string; postedAt: Date; type: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT'; materialId: string; locationId: string; quantity: FakeDecimal; referenceType?: string | null; referenceId?: string | null; recipientId?: string | null; reasonCode?: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | null; reasonNote?: string | null; projectNumber?: string | null; actorId: string; pairedWithId?: string | null }
+interface Tx { id: string; postedAt: Date; type: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT'; materialId: string; locationId: string; quantity: FakeDecimal; referenceType?: string | null; referenceId?: string | null; recipientId?: string | null; reasonCode?: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | null; reasonNote?: string | null; projectNumber?: string | null; actorId: string; pairedWithId?: string | null; reversesId?: string | null }
 
 interface State {
   materials: Mat[];
@@ -136,6 +136,7 @@ function makePrismaStub(s: State) {
             material: { sku: m.sku, name: m.name, category: m.category },
             location: { id: l.id, name: l.name },
             actor: { name: 'Test User' },
+            reversedBy: s.transactions.find((r) => r.reversesId === t.id) ?? null,
           };
         });
       },
@@ -375,6 +376,30 @@ describe('ReportService.inventory', () => {
     expect(r.movementSummary.issues.count).toBe(1);
     expect(r.movementSummary.adjustments.count).toBe(1);
     expect(r.movementSummary.total.count).toBe(3);
+  });
+
+  it('leaves a reversed movement and its reversal out of the summary, but lists both', async () => {
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1)],
+      balances: [makeBal('m-1', 'l-1', 50)],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [],
+      purchaseOrders: [],
+      purchaseOrderLines: [],
+      transactions: [
+        { id: 't-1', postedAt: new Date('2026-09-01'), type: 'RECEIPT', materialId: 'm-1', locationId: 'l-1', quantity: dec(50), actorId: 'u-1' },
+        { id: 't-2', postedAt: new Date('2026-09-01'), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: dec(-10), actorId: 'u-1' },
+        { id: 't-3', postedAt: new Date('2026-09-02'), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: dec(10), actorId: 'u-1', reversesId: 't-2' },
+      ],
+      users: [],
+    };
+    const r = await ReportService.inventory(baseQuery);
+    expect(r.movementSummary.issues.count).toBe(0);
+    expect(r.movementSummary.issues.quantity).toBe(0);
+    expect(r.movementSummary.total.count).toBe(1);
+    expect(r.movements).toHaveLength(3);
+    expect(r.movements.find((m) => m.id === 't-2')!.reversedById).toBe('t-3');
+    expect(r.movements.find((m) => m.id === 't-3')!.reversesId).toBe('t-2');
   });
 });
 

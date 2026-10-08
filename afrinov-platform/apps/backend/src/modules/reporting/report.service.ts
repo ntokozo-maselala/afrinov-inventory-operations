@@ -87,6 +87,10 @@ export interface ReportMovementRow {
   projectNumber: string | null;
   referenceType: string | null;
   referenceId: string | null;
+  // Set on a reversal (the movement it cancels) and on a reversed movement
+  // (the reversal that cancels it).
+  reversesId: string | null;
+  reversedById: string | null;
 }
 
 export interface ReportMovementSummary {
@@ -393,6 +397,7 @@ export const ReportService = {
         material: { select: { sku: true, name: true, category: true } },
         location: { select: { id: true, name: true } },
         actor: { select: { name: true } },
+        reversedBy: { select: { id: true } },
       },
       orderBy: { postedAt: 'desc' },
       take: 1000,
@@ -415,16 +420,21 @@ export const ReportService = {
       projectNumber: t.projectNumber ?? null,
       referenceType: t.referenceType ?? null,
       referenceId: t.referenceId ?? null,
+      reversesId: t.reversesId ?? null,
+      reversedById: t.reversedBy?.id ?? null,
     }));
 
+    // A reversed movement and its reversal cancel out, so the summary
+    // leaves both out; they stay in the movements list.
+    const effective = movements.filter((m) => !m.reversesId && !m.reversedById);
     const movementSummary: ReportMovementSummary = {
       receipts: { count: 0, quantity: 0 },
       issues: { count: 0, quantity: 0 },
       transfers: { count: 0, quantity: 0 },
       adjustments: { count: 0, quantity: 0 },
-      total: { count: movements.length, quantity: movements.reduce((a, m) => a + Math.abs(m.quantity), 0) },
+      total: { count: effective.length, quantity: effective.reduce((a, m) => a + Math.abs(m.quantity), 0) },
     };
-    for (const m of movements) {
+    for (const m of effective) {
       switch (m.type) {
         case 'RECEIPT':
           movementSummary.receipts.count++;

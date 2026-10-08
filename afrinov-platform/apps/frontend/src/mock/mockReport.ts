@@ -91,6 +91,16 @@ export interface ReportMovementRow {
   projectNumber: string | null;
   referenceType: string | null;
   referenceId: string | null;
+  // Set on a reversal (the movement it cancels) and on a reversed movement
+  // (the reversal that cancels it). Optional: older payloads omit them.
+  reversesId?: string | null;
+  reversedById?: string | null;
+}
+
+// A reversed movement and its reversal cancel out. Totals and charts leave
+// both out; movement lists still show them.
+export function isReversedPair(m: Pick<ReportMovementRow, 'reversesId' | 'reversedById'>): boolean {
+  return !!(m.reversesId || m.reversedById);
 }
 export interface ReportMovementSummary {
   receipts: { count: number; quantity: number };
@@ -362,17 +372,20 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
       projectNumber: t.projectNumber ?? null,
       referenceType: t.referenceType ?? null,
       referenceId: t.referenceId ?? null,
+      reversesId: t.reversesId ?? null,
+      reversedById: input.transactions.find((r) => r.reversesId === t.id)?.id ?? null,
     };
   });
+  const effective = movements.filter((m) => !isReversedPair(m));
 
   const movementSummary: ReportMovementSummary = {
     receipts: { count: 0, quantity: 0 },
     issues: { count: 0, quantity: 0 },
     transfers: { count: 0, quantity: 0 },
     adjustments: { count: 0, quantity: 0 },
-    total: { count: movements.length, quantity: movements.reduce((a, m) => a + Math.abs(m.quantity), 0) },
+    total: { count: effective.length, quantity: effective.reduce((a, m) => a + Math.abs(m.quantity), 0) },
   };
-  for (const m of movements) {
+  for (const m of effective) {
     if (m.type === 'RECEIPT') { movementSummary.receipts.count++; movementSummary.receipts.quantity += m.quantity; }
     else if (m.type === 'ISSUE') { movementSummary.issues.count++; movementSummary.issues.quantity += Math.abs(m.quantity); }
     else if (m.type === 'TRANSFER_IN' || m.type === 'TRANSFER_OUT') { movementSummary.transfers.count++; movementSummary.transfers.quantity += Math.abs(m.quantity); }

@@ -1,5 +1,5 @@
 import { BarChart, type BarChartDatum } from './charts/BarChart';
-import type { ReportResult } from '../mock/mockReport';
+import { isReversedPair, type ReportResult } from '../mock/mockReport';
 
 interface MovementChartProps {
   report: ReportResult | null;
@@ -33,6 +33,7 @@ export function MovementChart({ report, loading }: MovementChartProps) {
   const groupedData: BarChartDatum[] = (() => {
     const byDate = new Map<string, { receipts: number; issues: number }>();
     for (const m of movements) {
+      if (isReversedPair(m)) continue;
       const day = m.postedAt.slice(0, 10);
       const entry = byDate.get(day) ?? { receipts: 0, issues: 0 };
       if (m.type === 'RECEIPT' || m.type === 'TRANSFER_IN') entry.receipts += Math.abs(m.quantity);

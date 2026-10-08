@@ -149,6 +149,8 @@ export interface MockInventoryTransaction {
   projectNumber?: string;
   referenceType?: string;
   referenceId?: string;
+  pairedWithId?: string;
+  reversesId?: string;
 }
 
 export interface MockStockRow {
@@ -183,6 +185,8 @@ export interface MockMovementRow {
   projectNumber?: string;
   referenceType?: string;
   referenceId?: string;
+  reversesId?: string;
+  reversedById?: string;
 }
 
 export type MockRackStatus = 'ACTIVE' | 'INACTIVE' | 'FULL';

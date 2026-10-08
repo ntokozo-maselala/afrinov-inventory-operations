@@ -21,6 +21,7 @@ interface MovementRow {
   quantity: string; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
+  reversesId?: string | null; reversedById?: string | null;
 }
 
 const TYPE_OPTIONS = [
@@ -122,12 +123,12 @@ export function Movements() {
           <TransactionDrawer
             transaction={selected}
             onClose={() => setSelected(null)}
-            onUpdated={(updated) => {
-              setSelected(updated);
+            onReversed={() => {
+              setSelected(null);
               moves.reload();
-              toast.success('Issuing person updated successfully');
+              toast.success('Movement reversed');
             }}
-            onError={(err) => toast.error('Update failed', err.message)}
+            onError={(err) => toast.error('Reversal failed', err.message)}
           />
         </Drawer>
       )}

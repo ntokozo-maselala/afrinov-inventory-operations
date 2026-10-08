@@ -629,20 +629,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
     return handleAdjustment(b);
   }
-  if (method === 'PATCH' && p.startsWith('/inventory-transactions/')) {
-    const id = p.slice('/inventory-transactions/'.length);
-    const t = state.transactions.find((x) => x.id === id);
-    if (!t) throw err('NOT_FOUND', 'Inventory transaction not found');
-    const b = body as { actorId?: string } | undefined;
-    if (!b?.actorId) throw err('VALIDATION_ERROR', 'Please select a valid issuing person.');
-    const user = mockUsers.find((u) => u.id === b.actorId);
-    if (!user) throw err('NOT_FOUND', 'Selected user not found');
-    if (!user.active) throw err('VALIDATION_ERROR', 'Selected user is inactive');
-    const before = { actorId: t.actorId, actorName: enrichMovement(t).actorName };
-    t.actorId = b.actorId;
-    const after = { actorId: t.actorId, actorName: user.name };
-    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'UPDATE_ACTOR', entityType: 'InventoryTransaction', entityId: t.id, before, after, createdAt: new Date().toISOString(), actorId: 'u-admin' });
-    return { ...enrichMovement(t), actorName: user.name };
+  const reversalMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/reversal$/.exec(p) : null;
+  if (reversalMatch) {
+    return handleReversal(reversalMatch[1]!, body as { reason?: string } | undefined);
   }
 
   if (method === 'POST' && p === '/stock-items') {
@@ -1158,12 +1147,53 @@ function handleTransfer(b: { materialId: string; fromLocationId: string; toLocat
   const inId = nextId('t');
   const postedAt = new Date().toISOString();
   state.transactions.push({
-    id: outId, postedAt, type: 'TRANSFER_OUT', materialId: b.materialId, locationId: b.fromLocationId, quantity: String(-b.quantity), actorId: 'user-1',
+    id: outId, postedAt, type: 'TRANSFER_OUT', materialId: b.materialId, locationId: b.fromLocationId, quantity: String(-b.quantity), actorId: 'user-1', pairedWithId: inId,
   });
   state.transactions.push({
-    id: inId, postedAt, type: 'TRANSFER_IN', materialId: b.materialId, locationId: b.toLocationId, quantity: String(b.quantity), actorId: 'user-1',
+    id: inId, postedAt, type: 'TRANSFER_IN', materialId: b.materialId, locationId: b.toLocationId, quantity: String(b.quantity), actorId: 'user-1', pairedWithId: outId,
   });
   return { outTransactionId: outId, inTransactionId: inId };
+}
+
+// Mirrors InventoryService.reverse: an opposite entry of the same type,
+// linked to the original; both legs of a transfer reversed together.
+function handleReversal(id: string, b: { reason?: string } | undefined): { reversalIds: string[] } {
+  const reason = b?.reason?.trim() ?? '';
+  if (reason.length < 3) throw err('VALIDATION_ERROR', 'A reason is required to reverse a movement');
+  const original = state.transactions.find((t) => t.id === id);
+  if (!original) throw err('NOT_FOUND', 'InventoryTransaction not found');
+  if (original.reversesId) throw err('INVALID_STATE', 'A reversal cannot itself be reversed. Record the movement again instead.');
+  if (original.referenceType === 'GoodsReceipt') throw err('INVALID_STATE', 'Stock received against a goods receipt cannot be reversed here.');
+  const partner = original.pairedWithId ? state.transactions.find((t) => t.id === original.pairedWithId) : undefined;
+  const legs = partner ? (partner.type === 'TRANSFER_OUT' ? [partner, original] : [original, partner]) : [original];
+  if (legs.some((leg) => state.transactions.some((t) => t.reversesId === leg.id))) {
+    throw err('CONFLICT', 'This movement has already been reversed.');
+  }
+  for (const leg of legs) {
+    const qty = Number(leg.quantity);
+    const balance = getBalance(leg.materialId, leg.locationId);
+    if (qty > 0 && balance < qty) {
+      throw err('INSUFFICIENT_BALANCE', `Cannot reverse: only ${balance} of the ${qty} units are still in stock.`);
+    }
+  }
+  const postedAt = new Date().toISOString();
+  const reversals = legs.map((leg) => ({
+    ...leg,
+    id: nextId('t'),
+    postedAt,
+    quantity: String(-Number(leg.quantity)),
+    actorId: 'user-1',
+    reasonNote: reason,
+    reversesId: leg.id,
+    pairedWithId: undefined as string | undefined,
+  }));
+  if (reversals.length === 2) {
+    reversals[0]!.pairedWithId = reversals[1]!.id;
+    reversals[1]!.pairedWithId = reversals[0]!.id;
+  }
+  state.transactions.push(...reversals);
+  MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'REVERSE', entityType: 'InventoryTransaction', entityId: original.id, before: null, after: { reversalIds: reversals.map((r) => r.id), reason }, createdAt: postedAt, actorId: 'u-admin' });
+  return { reversalIds: reversals.map((r) => r.id) };
 }
 
 function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string }): { transactionId: string } {
@@ -1318,5 +1348,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     projectNumber: t.projectNumber,
     referenceType: t.referenceType,
     referenceId: t.referenceId,
+    reversesId: t.reversesId,
+    reversedById: state.transactions.find((r) => r.reversesId === t.id)?.id,
   };
 }

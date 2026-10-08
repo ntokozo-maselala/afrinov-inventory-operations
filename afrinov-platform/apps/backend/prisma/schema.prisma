@@ -400,6 +400,11 @@ model InventoryTransaction {
   postedAt      DateTime                 @default(now()) @map("posted_at")
   // For transfers: the linked partner transaction id so both legs are tied.
   pairedWithId  String?                  @unique @map("paired_with_id")
+  // For reversals: the transaction this one cancels. A reversal keeps the
+  // original's type with the opposite sign, so signed totals net to zero.
+  // Unique, so a transaction can be reversed at most once. The ledger has no
+  // update path; mistakes are corrected only by reversing.
+  reversesId    String?                  @unique @map("reverses_id")
 
   material Material  @relation(fields: [materialId], references: [id])
   location Location  @relation(fields: [locationId], references: [id])
@@ -407,6 +412,8 @@ model InventoryTransaction {
   project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
   pairedWith InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
   pairedBy   InventoryTransaction? @relation("TransferPair")
+  reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy InventoryTransaction? @relation("Reversal")
 
   @@index([materialId, locationId, postedAt])
   @@index([referenceType, referenceId])

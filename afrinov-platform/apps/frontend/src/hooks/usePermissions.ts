@@ -44,6 +44,7 @@ export function usePermissions(): { hasPermission: (permission: string) => boole
 
     switch (permission) {
       case 'materials:manage':
+      case 'inventory:reverse':
         return canManageMaterials;
       case 'procurement:manage':
         return canManageProcurement;

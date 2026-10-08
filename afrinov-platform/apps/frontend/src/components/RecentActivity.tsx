@@ -47,8 +47,8 @@ export function RecentActivity({
         icon: <Icon.Activity size={10} />,
         label: m.type,
       };
-      const isPositive = m.type === 'RECEIPT' || m.type === 'TRANSFER_IN';
-      const isNegative = m.type === 'ISSUE' || m.type === 'TRANSFER_OUT';
+      const isPositive = m.quantity > 0;
+      const isNegative = m.quantity < 0;
       const qtyPrefix = isPositive ? '+' : isNegative ? '\u2212' : '';
       all.push({
         id: `mov-${m.id}`,
