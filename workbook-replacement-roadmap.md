@@ -207,7 +207,7 @@ The goal is to load the workbook's items, prices, locations and opening balances
 - [x] Importer that reads the four Main sheets and the four Summary sheets
 - [x] Mapping file: old Product ID to new SKU, location spelling to location, unit of measure per item
 - [x] Dry-run mode with a report of every problem (duplicates, blanks, unmapped values) before anything is written
-- [ ] Opening balances posted as one dated "Opening balance" receipt per item and location
+- [x] Opening balances posted as one dated "Opening balance" receipt per item and location
 - [ ] Projects, recipients and suppliers loaded from the Project No. and Employees sheets and the supplier names
 - [ ] Reconciliation report: item count and rand value per category, platform against workbook
 - [ ] Stock count screen: count sheet by location, with variances posted as adjustments

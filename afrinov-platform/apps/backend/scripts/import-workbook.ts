@@ -1,6 +1,6 @@
-// Dry run of the workbook import: reads the stock workbook, checks it against
-// the mapping file and writes a report of what would be loaded and every
-// problem found. It never touches the database.
+// The workbook import. By default a dry run: reads the stock workbook, checks
+// it against the mapping file and writes a report of what would be loaded and
+// every problem found, without touching the database.
 //
 //   npm run import:workbook -- --file "../../../AFRI-03A-08-IAM-02 - Stock Inventory1.xlsm"
 //
@@ -8,6 +8,12 @@
 // and locations for the storeman to review; later runs read it back. It never
 // overwrites an existing mapping file. Reports and the mapping file stay out
 // of git (import-reports/ is ignored): they hold business data.
+//
+// With --apply it loads the items, locations and opening balances, once,
+// into the database in DATABASE_URL (read from .env). It needs no blocking
+// problems, the database's name typed back, the opening date and the user:
+//
+//   npm run import:workbook -- --file <workbook> --apply --database afrinov --date 2026-11-02 --actor storeman@afrinov.local
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -18,16 +24,58 @@ import { problemCounts, renderReport } from '../src/modules/migration/workbook-r
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 
+function databaseName(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return decodeURIComponent(new URL(url).pathname.replace(/^\//, '')) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function apply(file: string, result: MappedImport, values: { database?: string; date?: string; actor?: string }) {
+  const dbName = databaseName(process.env.DATABASE_URL);
+  if (!dbName) throw new Error('DATABASE_URL is not set (put it in apps/backend/.env).');
+  if (values.database !== dbName) {
+    throw new Error(`--apply writes to the database "${dbName}". Add --database ${dbName} to confirm that is the right one.`);
+  }
+  if (!values.date || !/^\d{4}-\d{2}-\d{2}$/.test(values.date)) throw new Error('--date is required with --apply: the date the balances are true on, as YYYY-MM-DD.');
+  if (!values.actor) throw new Error('--actor is required with --apply: the email of the user doing the import.');
+
+  // Loaded only now, so a dry run never needs a database.
+  const { prisma } = await import('../src/shared/db.js');
+  const { OpeningBalanceService } = await import('../src/modules/migration/opening-balance.service.js');
+  try {
+    const actor = await prisma.user.findUnique({ where: { email: values.actor.toLowerCase() } });
+    if (!actor) throw new Error(`No user with the email ${values.actor}.`);
+    console.log(`Importing into "${dbName}", dated ${values.date}, as ${actor.email}…`);
+    const done = await OpeningBalanceService.import({
+      plan: result, openingDate: new Date(`${values.date}T00:00:00Z`), actorId: actor.id, sourceFile: basename(file),
+    });
+    console.log(`Done. Import ${done.importId}:`);
+    console.log(`  ${done.materialsCreated} items created`);
+    console.log(`  ${done.locationsCreated} locations created, ${done.locationsReused} already there`);
+    console.log(`  ${done.balancesPosted} opening balances posted, ${done.zeroBalances} items with nothing on hand`);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
       file: { type: 'string' },
       out: { type: 'string', default: 'import-reports' },
       mapping: { type: 'string' },
+      apply: { type: 'boolean', default: false },
+      database: { type: 'string' },
+      date: { type: 'string' },
+      actor: { type: 'string' },
     },
   });
   if (!values.file) {
     console.error('Usage: npm run import:workbook -- --file <workbook.xlsm> [--mapping <mapping.xlsx>] [--out <folder>]');
+    console.error('       add --apply --database <name> --date <YYYY-MM-DD> --actor <email> to import');
     process.exit(2);
   }
 
@@ -72,10 +120,17 @@ async function main() {
   console.log(blocking === 0
     ? 'No blocking problems.'
     : `${blocking} blocking problem${blocking === 1 ? '' : 's'}: fix these before the real import.`);
-  console.log('Dry run only: nothing was written to the database.');
+
+  if (!values.apply) {
+    console.log('Dry run only: nothing was written to the database.');
+    return;
+  }
+  if (!result) throw new Error('The import needs a reviewed mapping file; one was only just created.');
+  if (blocking > 0) throw new Error('Not imported: fix the blocking problems first. Nothing was written to the database.');
+  await apply(file, result, values);
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 });

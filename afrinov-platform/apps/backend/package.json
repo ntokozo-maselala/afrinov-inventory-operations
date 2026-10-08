@@ -15,7 +15,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
-    "import:workbook": "tsx scripts/import-workbook.ts",
+    "import:workbook": "tsx --env-file-if-exists=.env scripts/import-workbook.ts",
     "diag:login": "tsx --env-file=.env scripts/diag-login.ts",
     "diag:admin": "tsx --env-file=.env scripts/diagnostic.ts"
   },
