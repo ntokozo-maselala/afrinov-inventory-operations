@@ -115,7 +115,7 @@ Run from `apps/backend`.
 | `npm run test:integration` | Run the integration tests against a real database |
 | `npm run db:migrate` | Apply pending Prisma migrations |
 | `npm run db:seed` | Load roles, permissions, the admin account and demo data |
-| `npm run import:workbook -- --file <workbook.xlsm>` | Dry run of the stock workbook import: checks the four Main and four Summary sheets and writes a problem report to `import-reports/` (git-ignored). Never touches the database |
+| `npm run import:workbook -- --file <workbook.xlsm>` | Dry run of the stock workbook import: checks the four Main and four Summary sheets against the mapping file and writes a problem report to `import-reports/` (git-ignored). The first run creates `import-reports/mapping.xlsx` (new SKUs, units, locations) for the storeman to review; later runs read it. Never touches the database |
 | `npm run diag:login` | Log in as the seed admin through the full server and print the result. Needs `.env` with `SEED_ADMIN_PASSWORD` |
 | `npm run diag:admin` | Print whether the seed admin exists, is active, its roles, and every user's email and status. Needs `.env` |
 

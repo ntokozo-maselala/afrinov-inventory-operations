@@ -205,7 +205,7 @@ The goal is that a storeman can do every daily entry from the sheet's IN and OUT
 The goal is to load the workbook's items, prices, locations and opening balances in a way that can be repeated and checked. See Data migration below for the method.
 
 - [x] Importer that reads the four Main sheets and the four Summary sheets
-- [ ] Mapping file: old Product ID to new SKU, location spelling to location, unit of measure per item
+- [x] Mapping file: old Product ID to new SKU, location spelling to location, unit of measure per item
 - [x] Dry-run mode with a report of every problem (duplicates, blanks, unmapped values) before anything is written
 - [ ] Opening balances posted as one dated "Opening balance" receipt per item and location
 - [ ] Projects, recipients and suppliers loaded from the Project No. and Employees sheets and the supplier names

@@ -23,7 +23,16 @@ export type ProblemCode =
   | 'MISSING_UNIT_PRICE'
   | 'PRICE_CONFLICT'
   | 'BLANK_LOCATION'
-  | 'LOCATION_SPELLINGS';
+  | 'LOCATION_SPELLINGS'
+  // Mapping file checks (see mapping.ts).
+  | 'MAPPING_SHEET_MISSING'
+  | 'MAPPING_ROW_INVALID'
+  | 'UNMAPPED_ITEM'
+  | 'UNMAPPED_LOCATION'
+  | 'MAPPING_LOCATION_INVALID'
+  | 'SKU_CONFLICT'
+  | 'UNUSED_MAPPING_ROW'
+  | 'SKU_JOINS_DIFFERENT_NAMES';
 
 export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; title: string; resolution: string }> = {
   MISSING_SHEET: { severity: 'error', title: 'Sheet not found', resolution: 'Use the right workbook, or check the sheet was not renamed.' },
@@ -41,7 +50,20 @@ export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; t
   PRICE_CONFLICT: { severity: 'review', title: 'Different prices for the same item', resolution: 'The price on the row with the same Product ID and location is used; the buyer confirms.' },
   BLANK_LOCATION: { severity: 'review', title: 'No location', resolution: 'Choose the location in the mapping file.' },
   LOCATION_SPELLINGS: { severity: 'review', title: 'One location spelt several ways', resolution: 'Map every spelling to one location in the mapping file.' },
+  MAPPING_SHEET_MISSING: { severity: 'error', title: 'Mapping file sheet missing', resolution: 'Delete the mapping file and run the dry run again to get a fresh one.' },
+  MAPPING_ROW_INVALID: { severity: 'error', title: 'Mapping row incomplete or wrong', resolution: 'Correct the row in the mapping file.' },
+  UNMAPPED_ITEM: { severity: 'error', title: 'Workbook row not in the mapping file', resolution: 'Add a row for it on the Items sheet, copying the grey columns exactly.' },
+  UNMAPPED_LOCATION: { severity: 'error', title: 'Location with no platform location', resolution: 'On the Locations sheet, fill in its platform location and type (add the row if it is missing).' },
+  MAPPING_LOCATION_INVALID: { severity: 'error', title: 'Location type missing or wrong', resolution: 'Choose a type from the list on the Locations sheet.' },
+  SKU_CONFLICT: { severity: 'error', title: 'SKU given to rows that cannot be one item', resolution: 'Give the rows different SKUs, or fix the category, unit or duplicate row.' },
+  UNUSED_MAPPING_ROW: { severity: 'review', title: 'Mapping row with no workbook row', resolution: 'Delete the row from the mapping file if the workbook row was merged or removed.' },
+  SKU_JOINS_DIFFERENT_NAMES: { severity: 'review', title: 'One SKU joins different names or prices', resolution: 'Check these really are the same item.' },
 };
+
+/** Workbook problems a mapping file settles: new SKUs replace the old IDs, and spellings are mapped. */
+export const RESOLVED_BY_MAPPING: ReadonlySet<ProblemCode> = new Set<ProblemCode>([
+  'MISSING_PRODUCT_ID', 'DUPLICATE_PRODUCT_ID', 'PRODUCT_ID_IN_SEVERAL_CATEGORIES', 'BLANK_LOCATION', 'LOCATION_SPELLINGS',
+]);
 
 export interface Problem {
   code: ProblemCode;
