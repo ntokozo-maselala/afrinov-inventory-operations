@@ -65,7 +65,22 @@ export interface WorkbookRead {
   /** The Summary sheet's "Stock Value VAT Exl" column added up over every item row. */
   summaryRowTotals: Partial<Record<MaterialCategory, number>>;
   missingSheets: string[];
+  /** The Project No. and Employees lists, when read from a file. */
+  lists?: WorkbookLists;
 }
+
+/** One entry of a single-column list sheet, as written. */
+export interface ListEntry { row: number; text: string }
+
+export interface WorkbookLists {
+  /** "Project No." sheet: project numbers and names, written several ways. */
+  projects: ListEntry[];
+  /** "Employees" sheet: who stock is issued to. */
+  employees: ListEntry[];
+  missingSheets: string[];
+}
+
+export const LIST_SHEETS = { projects: 'Project No.', employees: 'Employees' } as const;
 
 type CellValue = ExcelJS.CellValue;
 
@@ -212,8 +227,31 @@ export function readWorkbookSheets(wb: ExcelJS.Workbook): WorkbookRead {
   return result;
 }
 
+/** Every non-blank cell of a list sheet, top to bottom and left to right, less a header such as "Names". */
+function readList(ws: ExcelJS.Worksheet, header: RegExp): ListEntry[] {
+  const out: ListEntry[] = [];
+  ws.eachRow((row, r) => {
+    row.eachCell((cell) => {
+      const text = textOf(cell.value);
+      if (text && !header.test(text)) out.push({ row: r, text });
+    });
+  });
+  return out;
+}
+
+export function readWorkbookLists(wb: ExcelJS.Workbook): WorkbookLists {
+  const lists: WorkbookLists = { projects: [], employees: [], missingSheets: [] };
+  const projects = wb.getWorksheet(LIST_SHEETS.projects);
+  if (projects) lists.projects = readList(projects, /^project\s*(no\.?|number|numbers)$/i);
+  else lists.missingSheets.push(LIST_SHEETS.projects);
+  const employees = wb.getWorksheet(LIST_SHEETS.employees);
+  if (employees) lists.employees = readList(employees, /^(names?|employees?)$/i);
+  else lists.missingSheets.push(LIST_SHEETS.employees);
+  return lists;
+}
+
 export async function readWorkbookFile(path: string): Promise<WorkbookRead> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path);
-  return readWorkbookSheets(wb);
+  return { ...readWorkbookSheets(wb), lists: readWorkbookLists(wb) };
 }

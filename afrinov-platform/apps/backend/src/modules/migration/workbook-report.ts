@@ -2,6 +2,7 @@
 // grouped so the storeman and buyer can work through them. Markdown, so it
 // reads in any editor and on GitHub-style viewers.
 import { unitHint, type MappedImport } from './mapping.js';
+import type { MasterDataPlan } from './master-data.js';
 import { CATEGORY_LABEL, PROBLEM_TEXT, type Analysis, type Problem, type ProblemCode } from './workbook-analysis.js';
 
 const rand = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -27,7 +28,16 @@ export interface ReportMapping {
  * `problems` is everything to report: the workbook's own (less those the
  * mapping settles) and the mapping's.
  */
-export function renderReport(analysis: Analysis, meta: { file: string; generatedAt: Date; problems?: Problem[]; mapping?: ReportMapping }): string {
+export interface ReportMasterData {
+  file: string;
+  created: boolean;
+  plan: MasterDataPlan | null;
+}
+
+export function renderReport(
+  analysis: Analysis,
+  meta: { file: string; generatedAt: Date; problems?: Problem[]; mapping?: ReportMapping; masterData?: ReportMasterData },
+): string {
   const { items, categories, locations } = analysis;
   const problems = meta.problems ?? analysis.problems;
   const errors = problems.filter((p) => PROBLEM_TEXT[p.code].severity === 'error').length;
@@ -73,6 +83,22 @@ export function renderReport(analysis: Analysis, meta: { file: string; generated
       const toCheck = r.materials.filter((x) => x.unitOfMeasure.toLowerCase() === 'each' && unitHint(x.name)).length;
       if (toCheck > 0) out.push(`- ${toCheck} items counted as "each" have a word in their name that suggests another unit (the last column of the Items sheet).`);
       out.push('');
+    }
+  }
+
+  if (meta.masterData) {
+    const m = meta.masterData;
+    out.push('## Projects, recipients and suppliers', '');
+    if (m.created) {
+      out.push(`Created \`${m.file}\` from the workbook's "Project No." and "Employees" sheets, with an empty Suppliers sheet for the buyer. Review it (see its "Read me" sheet), then run the dry run again.`, '');
+    } else if (m.plan) {
+      const p = m.plan;
+      out.push(`Read \`${m.file}\`. The import would add these, leaving any that already exist as they are:`, '');
+      out.push(`- **${p.projects.length} projects**: ${p.projects.map((x) => cell(x.name ? `${x.projectNumber} (${x.name})` : x.projectNumber)).join(', ') || 'none'}`);
+      const byType = new Map<string, number>();
+      for (const r of p.recipients) byType.set(r.type, (byType.get(r.type) ?? 0) + 1);
+      out.push(`- **${p.recipients.length} recipients**${byType.size ? `: ${[...byType].map(([t, n]) => `${n} ${t.toLowerCase()}${n === 1 ? '' : 's'}`).join(', ')}` : ''}`);
+      out.push(`- **${p.suppliers.length} suppliers**${p.suppliers.length === 0 ? ' (the buyer has not listed any yet)' : ''}`, '');
     }
   }
 
