@@ -1,0 +1,9 @@
+# Operational spreadsheets (stock workbooks, exports). They hold business data,
+# staff names, asset serials and a sheet password, so they stay out of git.
+*.xlsm
+*.xlsx
+*.xls
+*.xlsb
+*.csv
+# Excel lock files
+~$*
