@@ -1,6 +1,7 @@
 // The dry-run report: what the import would load, and every problem found,
 // grouped so the storeman and buyer can work through them. Markdown, so it
 // reads in any editor and on GitHub-style viewers.
+import { unitHint, type MappedImport } from './mapping.js';
 import { CATEGORY_LABEL, PROBLEM_TEXT, type Analysis, type Problem, type ProblemCode } from './workbook-analysis.js';
 
 const rand = (n: number) => `R ${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -9,11 +10,26 @@ const cell = (s: string | null | undefined) => (s ?? '').replace(/\|/g, '\\|');
 export function problemCounts(problems: Problem[]): Array<{ code: ProblemCode; count: number }> {
   const counts = new Map<ProblemCode, number>();
   for (const p of problems) counts.set(p.code, (counts.get(p.code) ?? 0) + 1);
-  return (Object.keys(PROBLEM_TEXT) as ProblemCode[]).filter((c) => counts.has(c)).map((code) => ({ code, count: counts.get(code)! }));
+  const all = (Object.keys(PROBLEM_TEXT) as ProblemCode[]).filter((c) => counts.has(c));
+  // Blocking problems first, each group in catalogue order.
+  return [...all.filter((c) => PROBLEM_TEXT[c].severity === 'error'), ...all.filter((c) => PROBLEM_TEXT[c].severity !== 'error')]
+    .map((code) => ({ code, count: counts.get(code)! }));
 }
 
-export function renderReport(analysis: Analysis, meta: { file: string; generatedAt: Date }): string {
-  const { items, problems, categories, locations } = analysis;
+export interface ReportMapping {
+  file: string;
+  /** True when this run wrote the mapping file with suggestions. */
+  created: boolean;
+  result: MappedImport | null;
+}
+
+/**
+ * `problems` is everything to report: the workbook's own (less those the
+ * mapping settles) and the mapping's.
+ */
+export function renderReport(analysis: Analysis, meta: { file: string; generatedAt: Date; problems?: Problem[]; mapping?: ReportMapping }): string {
+  const { items, categories, locations } = analysis;
+  const problems = meta.problems ?? analysis.problems;
   const errors = problems.filter((p) => PROBLEM_TEXT[p.code].severity === 'error').length;
   const out: string[] = [];
 
@@ -40,6 +56,25 @@ export function renderReport(analysis: Analysis, meta: { file: string; generated
   out.push("- **Workbook headline total** is the figure at the top of each Summary sheet. Where it is lower, its SUM range stops before the last item row, so it leaves items out: a fault in the workbook, not in the import.");
   out.push(`- ${analysis.unusedRows} unused rows (a Product ID filled in ahead of time, with no item and no stock) were skipped.`);
   out.push(`- ${locations.length} distinct locations after ignoring case, spaces and punctuation.`, '');
+
+  if (meta.mapping) {
+    const m = meta.mapping;
+    out.push('## Mapping file', '');
+    if (m.created) {
+      out.push(`Created \`${m.file}\` with suggested SKUs, units and locations. The storeman and buyer review it (see its "Read me" sheet), then run the dry run again.`, '');
+    } else if (m.result) {
+      const r = m.result;
+      out.push(`Read \`${m.file}\`. With it, the import would create:`, '');
+      out.push(`- **${r.materials.length} items**, with ${r.materials.reduce((a, x) => a + x.balances.length, 0)} opening balances`);
+      out.push(`- **${r.locations.length} locations**: ${r.locations.map((l) => `${cell(l.name)} (${l.type.toLowerCase().replace(/_/g, ' ')})`).join(', ')}`);
+      const units = new Map<string, number>();
+      for (const x of r.materials) units.set(x.unitOfMeasure, (units.get(x.unitOfMeasure) ?? 0) + 1);
+      out.push(`- Units: ${[...units].sort((a, b) => b[1] - a[1]).map(([u, n]) => `${cell(u)} ${n}`).join(', ')}`);
+      const toCheck = r.materials.filter((x) => x.unitOfMeasure.toLowerCase() === 'each' && unitHint(x.name)).length;
+      if (toCheck > 0) out.push(`- ${toCheck} items counted as "each" have a word in their name that suggests another unit (the last column of the Items sheet).`);
+      out.push('');
+    }
+  }
 
   out.push('## Problems', '');
   if (problems.length === 0) out.push('None.', '');
