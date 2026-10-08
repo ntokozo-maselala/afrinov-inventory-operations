@@ -109,6 +109,7 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
   summary.addRow(['Issues', report.movementSummary.issues.count, report.movementSummary.issues.quantity]);
   summary.addRow(['Transfers', report.movementSummary.transfers.count, report.movementSummary.transfers.quantity]);
   summary.addRow(['Adjustments', report.movementSummary.adjustments.count, report.movementSummary.adjustments.quantity]);
+  summary.addRow(['Returns', report.movementSummary.returns.count, report.movementSummary.returns.quantity]);
   summary.addRow(['Total', report.movementSummary.total.count, report.movementSummary.total.quantity]);
   summary.getColumn(3).numFmt = '#,##0.0000';
 

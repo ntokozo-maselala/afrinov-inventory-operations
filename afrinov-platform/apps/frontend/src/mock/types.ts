@@ -16,7 +16,8 @@ export type InventoryTransactionType =
   | 'ISSUE'
   | 'TRANSFER_OUT'
   | 'TRANSFER_IN'
-  | 'ADJUSTMENT';
+  | 'ADJUSTMENT'
+  | 'RETURN';
 
 export type PurchaseOrderStatus =
   | 'DRAFT'
@@ -193,6 +194,7 @@ export interface MockMovementRow {
   receiptNumber?: string | null;
   supplierName?: string | null;
   deliveryRef?: string | null;
+  returnedQuantity?: string | null;
 }
 
 export type MockRackStatus = 'ACTIVE' | 'INACTIVE' | 'FULL';

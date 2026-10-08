@@ -36,7 +36,7 @@ export function MovementChart({ report, loading }: MovementChartProps) {
       if (isReversedPair(m)) continue;
       const day = m.postedAt.slice(0, 10);
       const entry = byDate.get(day) ?? { receipts: 0, issues: 0 };
-      if (m.type === 'RECEIPT' || m.type === 'TRANSFER_IN') entry.receipts += Math.abs(m.quantity);
+      if (m.type === 'RECEIPT' || m.type === 'TRANSFER_IN' || m.type === 'RETURN') entry.receipts += Math.abs(m.quantity);
       else entry.issues += Math.abs(m.quantity);
       byDate.set(day, entry);
     }

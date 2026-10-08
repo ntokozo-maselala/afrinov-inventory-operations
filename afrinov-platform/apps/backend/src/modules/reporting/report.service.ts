@@ -98,6 +98,7 @@ export interface ReportMovementSummary {
   issues: { count: number; quantity: number };
   transfers: { count: number; quantity: number };
   adjustments: { count: number; quantity: number };
+  returns: { count: number; quantity: number };
   total: { count: number; quantity: number };
 }
 
@@ -432,6 +433,7 @@ export const ReportService = {
       issues: { count: 0, quantity: 0 },
       transfers: { count: 0, quantity: 0 },
       adjustments: { count: 0, quantity: 0 },
+      returns: { count: 0, quantity: 0 },
       total: { count: effective.length, quantity: effective.reduce((a, m) => a + Math.abs(m.quantity), 0) },
     };
     for (const m of effective) {
@@ -448,6 +450,10 @@ export const ReportService = {
         case 'TRANSFER_OUT':
           movementSummary.transfers.count++;
           movementSummary.transfers.quantity += Math.abs(m.quantity);
+          break;
+        case 'RETURN':
+          movementSummary.returns.count++;
+          movementSummary.returns.quantity += m.quantity;
           break;
         case 'ADJUSTMENT':
           movementSummary.adjustments.count++;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from './Button';
-import { Field, Textarea } from './Field';
+import { Field, Input, Select, Textarea } from './Field';
 import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -26,18 +26,21 @@ interface Transaction {
   receiptNumber?: string | null;
   supplierName?: string | null;
   deliveryRef?: string | null;
+  returnedQuantity?: string | null;
 }
 
 interface Props {
   transaction: Transaction;
   onClose: () => void;
   onReversed: () => void;
+  /** Called after stock is returned against this issue. */
+  onReturned?: () => void;
   onError: (err: ApiError) => void;
 }
 
 // The ledger is never edited. A mistaken movement is corrected by posting a
 // reversing entry (POST /inventory-transactions/:id/reversal).
-export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onError }: Props) {
+export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onReturned, onError }: Props) {
   const { hasPermission } = usePermissions();
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState('');
@@ -54,7 +57,16 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
 
   const isTransfer = transaction.type === 'TRANSFER_IN' || transaction.type === 'TRANSFER_OUT';
   const isGoodsReceipt = transaction.referenceType === 'GoodsReceipt';
+  const issued = transaction.type === 'ISSUE' ? -Number(transaction.quantity) : 0;
+  const returned = Number(transaction.returnedQuantity ?? 0);
+  const hasReturns = transaction.type === 'ISSUE' && returned > 0;
+  const canReturn = hasPermission('inventory:return')
+    && transaction.type === 'ISSUE'
+    && !transaction.reversesId
+    && !transaction.reversedById
+    && issued - returned > 0;
   const canReverse = hasPermission('inventory:reverse')
+    && !hasReturns
     && !transaction.reversesId
     && !transaction.reversedById
     && !isGoodsReceipt;
@@ -159,6 +171,21 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
         </p>
       )}
 
+      {hasReturns && (
+        <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
+          {returned} of {issued} returned to stock.{!transaction.reversedById && ' To reverse this issue, reverse its returns first.'}
+        </p>
+      )}
+
+      {canReturn && (
+        <ReturnSection
+          transaction={transaction}
+          returnable={issued - returned}
+          onReturned={() => onReturned?.()}
+          onError={onError}
+        />
+      )}
+
       {canReverse && (
         <section className="space-y-3 border-t border-surface-200 pt-4">
           <h3 className="text-h3 text-surface-900">Correct a mistake</h3>
@@ -194,5 +221,84 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
         </section>
       )}
     </div>
+  );
+}
+
+// Unused stock coming back from this issue (POST /inventory-transactions/:id/returns).
+function ReturnSection({ transaction, returnable, onReturned, onError }: {
+  transaction: Transaction;
+  returnable: number;
+  onReturned: () => void;
+  onError: (err: ApiError) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [quantity, setQuantity] = useState('');
+  const [locationId, setLocationId] = useState(transaction.locationId);
+  const [reason, setReason] = useState('');
+  const [locations, setLocations] = useState<Array<{ id: string; name: string; active: boolean }>>([]);
+  const [busy, setBusy] = useState(false);
+  const [validation, setValidation] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    api.get<Array<{ id: string; name: string; active: boolean }>>('/locations').then((l) => setLocations(l.filter((x) => x.active))).catch(() => undefined);
+  }, [open]);
+
+  async function submit() {
+    setValidation(null);
+    const qty = Number(quantity);
+    if (!(qty > 0)) { setValidation('Enter how much is coming back.'); return; }
+    if (qty > returnable) { setValidation(`At most ${returnable} can come back.`); return; }
+    setBusy(true);
+    try {
+      await api.post(`/inventory-transactions/${transaction.id}/returns`, {
+        quantity: qty,
+        locationId: locationId !== transaction.locationId ? locationId : undefined,
+        reason: reason.trim() || undefined,
+      });
+      setOpen(false);
+      setQuantity('');
+      setReason('');
+      onReturned();
+    } catch (err) {
+      const e = err as ApiError;
+      if (['VALIDATION_ERROR', 'INVALID_STATE', 'NOT_FOUND'].includes(e.code)) setValidation(e.message);
+      else if (e.code === 'FORBIDDEN') onError({ code: 'FORBIDDEN', message: 'You do not have permission to return stock.' });
+      else onError({ code: 'NETWORK_ERROR', message: 'Unable to return the stock. Please try again.' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3 border-t border-surface-200 pt-4">
+      <h3 className="text-h3 text-surface-900">Return to stock</h3>
+      <p className="text-sm text-surface-600">Unused stock coming back from this issue. Up to {returnable} can come back.</p>
+      {open ? (
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Field label="Quantity returned" htmlFor="return-qty" required>
+              <Input id="return-qty" type="number" inputMode="decimal" min="0" max={returnable} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
+            </Field>
+            <Field label="Back into" htmlFor="return-loc">
+              <Select id="return-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+                <option value={transaction.locationId}>{transaction.locationName}</option>
+                {locations.filter((l) => l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <Field label="Note" htmlFor="return-reason">
+            <Textarea id="return-reason" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional, e.g. job finished early" />
+          </Field>
+          {validation && <p className="text-sm text-danger-700">{validation}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={() => { setOpen(false); setValidation(null); }} disabled={busy}>Cancel</Button>
+            <Button variant="primary" type="button" onClick={submit} loading={busy}>Return to stock</Button>
+          </div>
+        </div>
+      ) : (
+        <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>Return to stock</Button>
+      )}
+    </section>
   );
 }

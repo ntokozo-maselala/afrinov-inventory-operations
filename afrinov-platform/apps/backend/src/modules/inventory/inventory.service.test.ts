@@ -134,11 +134,13 @@ const fakeTx = {
       }
       return out as TxRow;
     },
-    aggregate: async ({ where }: { where: { materialId: string; locationId: string } }) => {
+    // Sums rows matching every field in `where` (materialId + locationId for
+    // balances; type + referenceType + referenceId for returns).
+    aggregate: async ({ where }: { where: Record<string, unknown> }) => {
       const total = trxRows
-        .filter((r) => r.materialId === where.materialId && r.locationId === where.locationId)
+        .filter((r) => Object.entries(where).every(([k, v]) => (r as Record<string, unknown>)[k] === v))
         .reduce((acc, r) => acc.plus(r.quantity), new Prisma.Decimal(0));
-      return { _sum: { quantity: total } };
+      return { _sum: { quantity: trxRows.length === 0 ? null : total } };
     },
   },
   inventoryBalance: {
@@ -488,6 +490,61 @@ describe('InventoryService — ADR-002 invariants', () => {
       await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'OLD-1' }))
         .rejects.toThrow(/Project is inactive/);
       expect(trxRows).toHaveLength(1);
+    });
+  });
+
+  // ── Returns ───────────────────────────────────────────────────────────
+  describe('return to stock', () => {
+    async function issued(qty = 10) {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 20, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      return (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: qty, actorId: 'u', recipientId: 'user-3', projectNumber: 'AFRI-1325' })).transactionId;
+    }
+
+    it('posts a RETURN that points at the issue and keeps its recipient and project', async () => {
+      const issueId = await issued(10);
+      const result = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 3, reason: 'Job finished early', actorId: 'storeman' });
+      expect(result).toEqual({ transactionId: expect.any(String), returnedQuantity: '3', returnableQuantity: '7' });
+      expect(trxRows.find((r) => r.id === result.transactionId)).toMatchObject({
+        type: 'RETURN', referenceType: 'Return', referenceId: issueId, recipientId: 'user-3', projectNumber: 'AFRI-1325',
+        locationId: 'loc-1', reasonNote: 'Job finished early', actorId: 'storeman',
+      });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('13');
+      expect(auditLog.at(-1)).toMatchObject({ action: 'RETURN', entityId: issueId });
+    });
+
+    it('never returns more than was issued, across several returns', async () => {
+      const issueId = await issued(10);
+      await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 6, actorId: 'u' });
+      await expect(InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 5, actorId: 'u' }))
+        .rejects.toThrow(/only 4 of the 10 issued is still out/);
+      const last = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 4, actorId: 'u' });
+      expect(last.returnableQuantity).toBe('0');
+    });
+
+    it('can put the stock back into a different location', async () => {
+      const issueId = await issued(5);
+      await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 2, locationId: 'loc-2', actorId: 'u' });
+      expect(getBalance('mat-1', 'loc-2').toString()).toBe('2');
+    });
+
+    it('only accepts an unreversed issue', async () => {
+      const { transactionId: adjustment } = await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await expect(InventoryService.returnToStock({ issueTransactionId: adjustment, quantity: 1, actorId: 'u' })).rejects.toThrow(/Only an issue/);
+      const issueId = (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' })).transactionId;
+      await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong item', actorId: 'u' });
+      await expect(InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 1, actorId: 'u' })).rejects.toThrow(/has been reversed/);
+      await expect(InventoryService.returnToStock({ issueTransactionId: 'missing', quantity: 1, actorId: 'u' })).rejects.toThrow(/not found/);
+    });
+
+    it('refuses to reverse an issue with returns until the returns are reversed', async () => {
+      const issueId = await issued(10);
+      const { transactionId: returnId } = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 4, actorId: 'u' });
+      await expect(InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' }))
+        .rejects.toThrow(/Reverse the returns first/);
+
+      await InventoryService.reverse({ transactionId: returnId, reason: 'Return booked twice', actorId: 'u' });
+      await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
     });
   });
 

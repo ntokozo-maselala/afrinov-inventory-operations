@@ -432,6 +432,39 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('returning stock from an issue', () => {
+    async function onHand(): Promise<number> {
+      const stock = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
+      return Number(stock.find((s) => s.locationId === 'loc-1')?.quantity ?? 0);
+    }
+
+    it('puts stock back, shows it on the issue, and refuses more than is still out', async () => {
+      const start = await onHand();
+      const issueId = await issue('mat-1', 'loc-1', 6);
+      const res = await api.post<{ returnedQuantity: string; returnableQuantity: string }>(`/inventory-transactions/${issueId}/returns`, { quantity: 4, reason: 'Spare' });
+      expect(res).toMatchObject({ returnedQuantity: '4', returnableQuantity: '2' });
+      expect(await onHand()).toBe(start - 2);
+      const history = await api.get<Array<{ id: string; type: string; returnedQuantity?: string | null; recipientName?: string | null }>>('/inventory-transactions?materialId=mat-1');
+      expect(history.find((t) => t.id === issueId)?.returnedQuantity).toBe('4');
+      expect(history.find((t) => t.type === 'RETURN')?.recipientName).toBe('Sabelo');
+      await expect(api.post(`/inventory-transactions/${issueId}/returns`, { quantity: 3 }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/only 2 of the 6 issued/) });
+    });
+
+    it('reverses the issue only after its returns are reversed', async () => {
+      const start = await onHand();
+      const issueId = await issue('mat-1', 'loc-1', 5);
+      const { transactionId } = await api.post<{ transactionId: string }>(`/inventory-transactions/${issueId}/returns`, { quantity: 2 });
+      await expect(api.post(`/inventory-transactions/${issueId}/reversal`, { reason: 'Wrong job' }))
+        .rejects.toMatchObject({ code: 'INVALID_STATE' });
+      await api.post(`/inventory-transactions/${transactionId}/reversal`, { reason: 'Booked by mistake' });
+      await api.post(`/inventory-transactions/${issueId}/reversal`, { reason: 'Wrong job' });
+      expect(await onHand()).toBe(start);
+      await expect(api.post(`/inventory-transactions/${issueId}/returns`, { quantity: 1 }))
+        .rejects.toMatchObject({ code: 'INVALID_STATE' });
+    });
+  });
+
   describe('receiving stock at the counter', () => {
     it('books every line, shows the supplier on the movement, and can be reversed', async () => {
       const before = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');

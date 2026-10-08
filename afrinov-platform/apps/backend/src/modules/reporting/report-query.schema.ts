@@ -19,7 +19,7 @@ export const MaterialCategoryValues = [
 ] as const;
 
 export const ReportStatusValues = ['ALL', 'IN_STOCK', 'LOW_STOCK', 'OUT_OF_STOCK'] as const;
-export const ReportMovementTypeValues = ['RECEIPT', 'ISSUE', 'TRANSFER_OUT', 'TRANSFER_IN', 'ADJUSTMENT'] as const;
+export const ReportMovementTypeValues = ['RECEIPT', 'ISSUE', 'TRANSFER_OUT', 'TRANSFER_IN', 'ADJUSTMENT', 'RETURN'] as const;
 export const DateRangePresetValues = [
   'ALL',
   'TODAY',

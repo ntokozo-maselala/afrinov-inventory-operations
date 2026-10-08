@@ -26,6 +26,7 @@ const MOVEMENT_TYPE_CONFIG: Record<string, { tone: ActivityEntry['tone']; icon: 
   TRANSFER_OUT: { tone: 'info', icon: <Icon.Arrows size={10} />, label: 'Stock transferred out' },
   TRANSFER_IN: { tone: 'info', icon: <Icon.Arrows size={10} />, label: 'Stock transferred in' },
   ADJUSTMENT: { tone: 'warning', icon: <Icon.Alert size={10} />, label: 'Stock adjusted' },
+  RETURN: { tone: 'success', icon: <Icon.ArrowUp size={10} />, label: 'Stock returned' },
 };
 
 export function RecentActivity({

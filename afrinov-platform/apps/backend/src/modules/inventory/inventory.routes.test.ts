@@ -15,12 +15,13 @@ import type { FastifyInstance } from 'fastify';
 
 const userPermissions = new Map<string, string[]>();
 
-const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedReverse } = vi.hoisted(() => ({
+const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedReverse, mockedReturn } = vi.hoisted(() => ({
   mockedIssue: vi.fn(),
   mockedTransfer: vi.fn(),
   mockedAdjust: vi.fn(),
   mockedQueryHistory: vi.fn(),
   mockedReverse: vi.fn(),
+  mockedReturn: vi.fn(),
 }));
 
 const { mockedReceive } = vi.hoisted(() => ({ mockedReceive: vi.fn() }));
@@ -49,6 +50,7 @@ vi.mock('./inventory.service.js', () => ({
     adjust: mockedAdjust,
     queryHistory: mockedQueryHistory,
     reverse: mockedReverse,
+    returnToStock: mockedReturn,
   },
 }));
 
@@ -147,6 +149,34 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ transactionIds: ['tx-1'] });
       expect(mockedIssue).toHaveBeenCalledWith({ ...payload, actorId: 'user-admin' });
+    });
+  });
+
+  describe('POST /api/v1/inventory-transactions/:id/returns', () => {
+    it('returns 403 without the issue:inventory permission', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-transactions/tx-1/returns', headers: authed('user-viewer', ['view:reports']), payload: { quantity: 1 } });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it.each([
+      ['the quantity is missing', {}],
+      ['the quantity is not positive', { quantity: 0 }],
+      ['the location is not a UUID', { quantity: 1, locationId: 'A-1' }],
+    ])('returns 400 when %s', async (_case, payload) => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-transactions/tx-1/returns', headers: authed(), payload });
+      expect(res.statusCode).toBe(400);
+      expect(mockedReturn).not.toHaveBeenCalled();
+    });
+
+    it('returns 201 and passes the issue, quantity, location and reason through', async () => {
+      mockedReturn.mockResolvedValue({ transactionId: 'tx-r1', returnedQuantity: '3', returnableQuantity: '7' });
+      const res = await app.inject({
+        method: 'POST', url: '/api/v1/inventory-transactions/tx-1/returns', headers: authed(),
+        payload: { quantity: 3, locationId: OTHER_UUID, reason: ' Job done ' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ transactionId: 'tx-r1', returnedQuantity: '3', returnableQuantity: '7' });
+      expect(mockedReturn).toHaveBeenCalledWith({ issueTransactionId: 'tx-1', quantity: 3, locationId: OTHER_UUID, reason: 'Job done', actorId: 'user-admin' });
     });
   });
 

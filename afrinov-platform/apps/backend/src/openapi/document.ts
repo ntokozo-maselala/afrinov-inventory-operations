@@ -16,7 +16,7 @@ import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema } from '../modules/inventory/inventory.routes.js';
+import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema } from '../modules/inventory/inventory.routes.js';
 import {
   createMaterialSchema,
   updateMaterialSchema,
@@ -237,6 +237,14 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/inventory-adjustments', tag: 'Stock movements', summary: 'Correct stock up or down with a reason',
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',
+    summary: 'Return unused stock from an issue',
+    description: 'Posts a RETURN that points at the issue and keeps its recipient and project, into the given location '
+      + '(default: where it was issued from). At most the issued quantity less earlier returns. '
+      + 'Refused with 400 when that is exceeded and 409 INVALID_STATE for anything but an unreversed issue.',
+    permissions: [P.IssueInventory], body: returnSchema, success: 201, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',

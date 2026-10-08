@@ -398,6 +398,9 @@ enum InventoryTransactionType {
   TRANSFER_OUT
   TRANSFER_IN
   ADJUSTMENT
+  // Unused stock coming back from an issue. referenceType 'Return' and
+  // referenceId = the issue's id; recipient and project are copied from it.
+  RETURN
 }
 
 enum AdjustmentReasonCode {

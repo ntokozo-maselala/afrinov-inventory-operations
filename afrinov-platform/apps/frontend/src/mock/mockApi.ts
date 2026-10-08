@@ -667,6 +667,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
     return handleAdjustment(b);
   }
+  const returnMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/returns$/.exec(p) : null;
+  if (returnMatch) {
+    return handleReturn(returnMatch[1]!, (body as { quantity?: number; locationId?: string; reason?: string }) ?? {});
+  }
   const reversalMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/reversal$/.exec(p) : null;
   if (reversalMatch) {
     return handleReversal(reversalMatch[1]!, body as { reason?: string } | undefined);
@@ -1252,12 +1256,44 @@ function handleTransfer(b: { materialId: string; fromLocationId: string; toLocat
 
 // Mirrors InventoryService.reverse: an opposite entry of the same type,
 // linked to the original; both legs of a transfer reversed together.
+// Mirrors InventoryService.returnToStock.
+function returnedAgainst(issueId: string): number {
+  return state.transactions
+    .filter((t) => t.type === 'RETURN' && t.referenceType === 'Return' && t.referenceId === issueId)
+    .reduce((a, t) => a + Number(t.quantity), 0);
+}
+function handleReturn(id: string, b: { quantity?: number; locationId?: string; reason?: string }) {
+  if (!(Number(b.quantity) > 0)) throw err('VALIDATION_ERROR', 'Return quantity must be positive');
+  const issue = state.transactions.find((t) => t.id === id);
+  if (!issue) throw err('NOT_FOUND', 'InventoryTransaction not found');
+  if (issue.type !== 'ISSUE' || issue.reversesId) throw err('INVALID_STATE', 'Only an issue can have stock returned against it.');
+  if (state.transactions.some((t) => t.reversesId === issue.id)) throw err('INVALID_STATE', 'This issue has been reversed, so there is nothing to return.');
+  const issued = -Number(issue.quantity);
+  const already = returnedAgainst(issue.id);
+  const qty = Number(b.quantity);
+  if (qty > issued - already) {
+    throw err('VALIDATION_ERROR', `Cannot return ${qty}: only ${issued - already} of the ${issued} issued is still out.`);
+  }
+  const locationId = b.locationId ?? issue.locationId;
+  if (!findLocation(locationId)) throw err('NOT_FOUND', 'Location not found');
+  const transactionId = nextId('t');
+  state.transactions.push({
+    id: transactionId, postedAt: new Date().toISOString(), type: 'RETURN', materialId: issue.materialId, locationId,
+    quantity: String(qty), actorId: 'user-1', recipientId: issue.recipientId, projectNumber: issue.projectNumber,
+    reasonNote: b.reason?.trim() || undefined, referenceType: 'Return', referenceId: issue.id,
+  });
+  return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - qty) };
+}
+
 function handleReversal(id: string, b: { reason?: string } | undefined): { reversalIds: string[] } {
   const reason = b?.reason?.trim() ?? '';
   if (reason.length < 3) throw err('VALIDATION_ERROR', 'A reason is required to reverse a movement');
   const original = state.transactions.find((t) => t.id === id);
   if (!original) throw err('NOT_FOUND', 'InventoryTransaction not found');
   if (original.reversesId) throw err('INVALID_STATE', 'A reversal cannot itself be reversed. Record the movement again instead.');
+  if (original.type === 'ISSUE' && returnedAgainst(original.id) > 0) {
+    throw err('INVALID_STATE', 'Part of this issue has been returned. Reverse the returns first.');
+  }
   if (original.referenceType === 'GoodsReceipt' && state.goodsReceipts.find((g) => g.id === original.referenceId)?.purchaseOrderId) {
     throw err('INVALID_STATE', 'Stock received against a purchase order cannot be reversed here.');
   }
@@ -1446,6 +1482,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientId: t.recipientId,
     recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
+    returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
       return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
