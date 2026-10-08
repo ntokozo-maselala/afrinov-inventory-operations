@@ -276,6 +276,50 @@ describe('inventory routes', () => {
   });
 
   describe('POST /api/v1/inventory-transactions/:id/reversal', () => {
+    it.each([null, 42, true, 'ab', '  ab  ', 'x'.repeat(501)])('rejects invalid reason %j before calling the service', async (reason) => {
+      const res = await app.inject({
+        method: 'POST', url: '/api/v1/inventory-transactions/tx-1/reversal',
+        headers: authed(), payload: { reason },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe('VALIDATION_ERROR');
+      expect(mockedReverse).not.toHaveBeenCalled();
+    });
+
+    it.each([3, 500])('accepts a trimmed reason of %i characters and ignores a spoofed actor', async (length) => {
+      const reason = 'x'.repeat(length);
+      const res = await app.inject({
+        method: 'POST', url: '/api/v1/inventory-transactions/tx-1/reversal', headers: authed(),
+        payload: { reason: `  ${reason}  `, actorId: 'someone-else' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(mockedReverse).toHaveBeenCalledExactlyOnceWith({ transactionId: 'tx-1', reason, actorId: 'user-admin' });
+    });
+
+    it('does not accept the retired update permission as authorization to reverse', async () => {
+      const res = await app.inject({
+        method: 'POST', url: '/api/v1/inventory-transactions/tx-1/reversal',
+        headers: authed('legacy-user', ['update:inventory_transaction']), payload: { reason: 'Wrong item' },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(mockedReverse).not.toHaveBeenCalled();
+    });
+
+    it.each(['INVALID_STATE', 'INSUFFICIENT_BALANCE'] as const)('preserves %s errors from the service', async (code) => {
+      const { Errors } = await import('../../shared/errors.js');
+      const error = code === 'INVALID_STATE'
+        ? Errors.invalidState('Goods receipt stock cannot be reversed')
+        : Errors.insufficientBalance('Stock was already used', { available: '0' });
+      mockedReverse.mockRejectedValueOnce(error);
+      const res = await app.inject({
+        method: 'POST', url: '/api/v1/inventory-transactions/tx-1/reversal',
+        headers: authed(), payload: { reason: 'Wrong item' },
+      });
+      expect(res.statusCode).toBe(error.statusCode);
+      expect(res.json().error).toMatchObject({ code, message: error.message });
+      if (error.details) expect(res.json().error.details).toEqual(error.details);
+    });
+
     it('returns 401 without auth', async () => {
       const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-transactions/tx-1/reversal' });
       expect(res.statusCode).toBe(401);

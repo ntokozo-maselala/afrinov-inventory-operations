@@ -228,6 +228,49 @@ describe('resolveDateWindow', () => {
 });
 
 describe('ReportService.inventory', () => {
+  it.each([
+    ['RECEIPT', 4, 'receipts'], ['ISSUE', -4, 'issues'],
+    ['TRANSFER_OUT', -4, 'transfers'], ['TRANSFER_IN', 4, 'transfers'],
+    ['ADJUSTMENT', 4, 'adjustments'], ['ADJUSTMENT', -4, 'adjustments'],
+  ] as const)('excludes reversed %s (%s) from the summary but preserves both history entries', async (type, quantity, bucket) => {
+    const base = { postedAt: new Date('2026-09-01'), type, materialId: 'm-1', locationId: 'l-1', actorId: 'u-1' };
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1)], balances: [makeBal('m-1', 'l-1', 50)],
+      locations: [makeLoc('l-1', 'Main')], suppliers: [], purchaseOrders: [], purchaseOrderLines: [], users: [],
+      transactions: [
+        { ...base, id: 'original', quantity: dec(quantity) },
+        { ...base, id: 'reversal', quantity: dec(-quantity), reversesId: 'original' },
+        { ...base, id: 'effective', quantity: dec(quantity) },
+      ],
+    };
+    const result = await ReportService.inventory(baseQuery);
+    expect(result.movementSummary[bucket]).toEqual({ count: 1, quantity: 4 });
+    expect(result.movementSummary.total).toEqual({ count: 1, quantity: 4 });
+    expect(result.movements).toHaveLength(3);
+    expect(result.movements.find((row) => row.id === 'original')).toMatchObject({ reversesId: null, reversedById: 'reversal' });
+    expect(result.movements.find((row) => row.id === 'reversal')).toMatchObject({ reversesId: 'original', reversedById: null });
+    expect(result.movements.find((row) => row.id === 'effective')).toMatchObject({ reversesId: null, reversedById: null });
+  });
+
+  it.each([
+    ['2026-09-01', '2026-09-02', 'original'],
+    ['2026-09-02', '2026-09-03', 'reversal'],
+  ])('excludes reversed entries when only one falls within %s to %s', async (from, to, visibleId) => {
+    const base = { type: 'ISSUE' as const, materialId: 'm-1', locationId: 'l-1', actorId: 'u-1' };
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1)], balances: [makeBal('m-1', 'l-1', 50)],
+      locations: [makeLoc('l-1', 'Main')], suppliers: [], purchaseOrders: [], purchaseOrderLines: [], users: [],
+      transactions: [
+        { ...base, id: 'original', postedAt: new Date('2026-09-01T08:00:00Z'), quantity: dec(-4) },
+        { ...base, id: 'reversal', postedAt: new Date('2026-09-02T08:00:00Z'), quantity: dec(4), reversesId: 'original' },
+      ],
+    };
+    const result = await ReportService.inventory({ ...baseQuery, range: 'CUSTOM', from, to });
+    expect(result.movements.map((row) => row.id)).toEqual([visibleId]);
+    expect(result.movementSummary.issues).toEqual({ count: 0, quantity: 0 });
+    expect(result.movementSummary.total).toEqual({ count: 0, quantity: 0 });
+  });
+
   it('classifies stock status correctly', async () => {
     __stubState.current = {
       materials: [

@@ -367,3 +367,39 @@ describe('statusTone', () => {
     expect(statusTone('UNKNOWN')).toBe('neutral');
   });
 });
+
+
+describe('inventory value trend with signed reversals', () => {
+  it.each([
+    ['ISSUE', -4], ['RECEIPT', 4], ['ADJUSTMENT', 4], ['ADJUSTMENT', -4],
+    ['TRANSFER_IN', 4], ['TRANSFER_OUT', -4],
+  ])('restores value after a %s of %i is reversed on a later day', (type, quantity) => {
+    const original: ReportMovementRow = {
+      ...movements[0]!, id: 'original', type: String(type), quantity: Number(quantity),
+      postedAt: '2026-09-01T08:00:00Z', reversedById: 'reversal',
+    };
+    const reversal: ReportMovementRow = {
+      ...original, id: 'reversal', postedAt: '2026-09-02T08:00:00Z',
+      quantity: -Number(quantity), reversesId: 'original', reversedById: null,
+    };
+    // m-1 costs 5 per unit; pass newest first as the API does.
+    const input = [reversal, original];
+    const trend = computeInventoryValueTrend(input, inventoryLines, 100);
+    expect(trend.map(({ date, value }) => ({ date, value }))).toEqual([
+      { date: '2026-09-01', value: 100 + Number(quantity) * 5 },
+      { date: '2026-09-02', value: 100 },
+    ]);
+    expect(input).toEqual([reversal, original]);
+  });
+
+  it('nets an issue and its reversal on the same day without hiding a positive adjustment', () => {
+    const base = movements[0]!;
+    const trend = computeInventoryValueTrend([
+      { ...base, id: 'before', postedAt: '2026-09-01T08:00:00Z', quantity: 0 },
+      { ...base, id: 'issue', postedAt: '2026-09-02T08:00:00Z', type: 'ISSUE', quantity: -4, reversedById: 'undo' },
+      { ...base, id: 'undo', postedAt: '2026-09-02T09:00:00Z', type: 'ISSUE', quantity: 4, reversesId: 'issue' },
+      { ...base, id: 'adjust', postedAt: '2026-09-02T10:00:00Z', type: 'ADJUSTMENT', quantity: 2 },
+    ], inventoryLines, 110);
+    expect(trend.map((point) => point.value)).toEqual([100, 110]);
+  });
+});

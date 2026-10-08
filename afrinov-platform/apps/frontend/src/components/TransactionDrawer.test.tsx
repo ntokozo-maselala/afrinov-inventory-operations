@@ -40,6 +40,94 @@ describe('TransactionDrawer', () => {
     mockHasPermission.mockReset().mockReturnValue(true);
   });
 
+  it.each([' ', 'ab', '  ab  '])('rejects a reason shorter than three trimmed characters: %j', (reason) => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: reason } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
+    expect(screen.getByText(/Say why/)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it.each(['CONFLICT', 'INVALID_STATE', 'VALIDATION_ERROR', 'NOT_FOUND'])('shows %s inline and lets the user retry', async (code) => {
+    mockPost.mockRejectedValueOnce({ code, message: 'The movement cannot be reversed.' })
+      .mockResolvedValueOnce({ reversalIds: ['tx-2'] });
+    const { onReversed, onError } = renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Wrong item' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
+    expect(await screen.findByText('The movement cannot be reversed.')).toBeInTheDocument();
+    expect(onReversed).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Reason/)).toHaveValue('Wrong item');
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
+    await waitFor(() => expect(onReversed).toHaveBeenCalledTimes(1));
+    expect(mockPost).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('The movement cannot be reversed.')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['FORBIDDEN', 'FORBIDDEN', 'You do not have permission to reverse movements.'],
+    ['INTERNAL_ERROR', 'NETWORK_ERROR', 'Unable to reverse the movement. Please try again.'],
+  ])('reports %s through onError', async (code, expectedCode, message) => {
+    mockPost.mockRejectedValueOnce({ code, message: 'Server detail' });
+    const { onReversed, onError } = renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Wrong item' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
+    await waitFor(() => expect(onError).toHaveBeenCalledExactlyOnceWith({ code: expectedCode, message }));
+    expect(onReversed).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Reverse movement' })).toBeEnabled();
+  });
+
+  it('disables submission and cancel until the pending reversal completes', async () => {
+    let finish!: (value: { reversalIds: string[] }) => void;
+    mockPost.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const { onReversed } = renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Wrong item' } });
+    const submit = screen.getByRole('button', { name: 'Reverse movement' });
+    fireEvent.click(submit);
+    expect(submit).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    fireEvent.click(submit);
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    finish({ reversalIds: ['tx-2'] });
+    await waitFor(() => expect(onReversed).toHaveBeenCalledTimes(1));
+  });
+
+  it('clears the draft reason and validation when cancelled', () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'ab' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
+    expect(screen.getByText(/Say why/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    expect(screen.getByLabelText(/Reason/)).toHaveValue('');
+    expect(screen.queryByText(/Say why/)).not.toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('clears the draft and validation when a different transaction is selected', () => {
+    const props = { onClose: vi.fn(), onReversed: vi.fn(), onError: vi.fn() };
+    const { rerender } = render(<TransactionDrawer transaction={issue} {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'ab' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
+    rerender(<TransactionDrawer transaction={{ ...issue, id: 'tx-other' }} {...props} />);
+    expect(screen.queryByLabelText(/Reason/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));
+    expect(screen.getByLabelText(/Reason/)).toHaveValue('');
+    expect(screen.queryByText(/Say why/)).not.toBeInTheDocument();
+  });
+
+  it.each(['TRANSFER_IN', 'TRANSFER_OUT'])('explains that reversing %s reverses both transfer legs', (type) => {
+    renderDrawer({ type });
+    expect(screen.getByText(/both legs of the transfer are reversed together/)).toBeInTheDocument();
+  });
+
   it('offers no way to edit who recorded the movement', () => {
     renderDrawer();
     expect(screen.getByText('Vusi')).toBeInTheDocument();
