@@ -377,4 +377,32 @@ describe('mock API mutation flows', () => {
       expect(await codeOf(api.patch(`/inventory-transactions/${transactionId}`, { actorId: 'user-2' }))).not.toBeUndefined();
     });
   });
+
+  describe('recipients ("Issued To")', () => {
+    async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
+      try {
+        await p;
+        return undefined;
+      } catch (e) {
+        return isApiError(e) ? e.code : 'UNKNOWN';
+      }
+    }
+
+    it('adds a recipient and refuses a duplicate name, ignoring case', async () => {
+      const created = await api.post<{ id: string; name: string; active: boolean }>('/recipients', { name: ' Bukho ', type: 'WORKER' });
+      expect(created).toMatchObject({ name: 'Bukho', active: true });
+      expect(await codeOf(api.post('/recipients', { name: 'BUKHO', type: 'CONTRACTOR' }))).toBe('CONFLICT');
+    });
+
+    it('records the recipient on an issue and refuses an inactive one', async () => {
+      const { transactionId } = await api.post<{ transactionId: string }>('/inventory-issues', {
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 1, recipientId: 'rcp-1',
+      });
+      const history = await api.get<Array<{ id: string; recipientName?: string | null }>>('/inventory-transactions?materialId=mat-1');
+      expect(history.find((t) => t.id === transactionId)?.recipientName).toBe('Sabelo');
+
+      await api.patch('/recipients/rcp-1', { active: false });
+      expect(await codeOf(api.post('/inventory-issues', { materialId: 'mat-1', locationId: 'loc-1', quantity: 1, recipientId: 'rcp-1' }))).toBe('VALIDATION_ERROR');
+    });
+  });
 });

@@ -134,6 +134,12 @@ describe('TransactionDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
+  it('shows who the stock was issued to', () => {
+    renderDrawer({ recipientName: 'Sabelo' } as never);
+    expect(screen.getByText('Issued to')).toBeInTheDocument();
+    expect(screen.getByText('Sabelo')).toBeInTheDocument();
+  });
+
   it('posts a reversal with the trimmed reason', async () => {
     mockPost.mockResolvedValue({ reversalIds: ['tx-2'] });
     const { onReversed } = renderDrawer();

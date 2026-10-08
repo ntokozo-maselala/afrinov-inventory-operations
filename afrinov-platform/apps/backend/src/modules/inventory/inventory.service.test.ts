@@ -43,6 +43,11 @@ const users = new Map<string, { id: string; name: string; active: boolean }>([
   ['user-2', { id: 'user-2', name: 'Bob', active: true }],
   ['user-3', { id: 'user-3', name: 'Charlie', active: false }],
 ]);
+// Recipients ("Issued To"); 'user-3' is the id older tests already used.
+const recipients = new Map<string, { id: string; name: string; active: boolean }>([
+  ['user-3', { id: 'user-3', name: 'Sabelo', active: true }],
+  ['rcp-inactive', { id: 'rcp-inactive', name: 'Old forklift', active: false }],
+]);
 const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
 
 function balKey(materialId: string, locationId: string) { return `${materialId}|${locationId}`; }
@@ -149,6 +154,9 @@ const fakeTx = {
   },
   location: {
     findUnique: async () => ({ id: 'loc-1', active: true }),
+  },
+  recipient: {
+    findUnique: async ({ where }: { where: { id: string } }) => recipients.get(where.id) ?? null,
   },
   user: {
     findUnique: async ({ where }: { where: { id: string } }) => {
@@ -381,6 +389,30 @@ describe('InventoryService — ADR-002 invariants', () => {
       });
       await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' });
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
+    });
+  });
+
+  // ── Issued To ─────────────────────────────────────────────────────────
+  describe('issue recipient', () => {
+    it('records who received the stock', async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u', recipientId: 'user-3' });
+      expect(trxRows.at(-1)).toMatchObject({ type: 'ISSUE', recipientId: 'user-3' });
+    });
+
+    it('refuses an unknown recipient', async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await expect(
+        InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u', recipientId: 'nobody' }),
+      ).rejects.toThrow(/Recipient not found/);
+      expect(trxRows).toHaveLength(1);
+    });
+
+    it('refuses an inactive recipient', async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      await expect(
+        InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u', recipientId: 'rcp-inactive' }),
+      ).rejects.toThrow(/inactive/);
     });
   });
 

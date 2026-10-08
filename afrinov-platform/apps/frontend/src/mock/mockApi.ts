@@ -36,6 +36,7 @@ import type {
   MockRackStatus,
   MockProject,
   AdjustmentReasonCode,
+  MockRecipient,
 } from './types';
 import type { ApiError } from '../api/client';
 
@@ -54,6 +55,7 @@ interface State {
   transactions: MockInventoryTransaction[];
   racks: MockRack[];
   projects: MockProject[];
+  recipients: MockRecipient[];
 }
 
 let state: State = freshState();
@@ -68,6 +70,13 @@ function freshState(): State {
     transactions: [...SEED_TRANSACTIONS],
     racks: JSON.parse(JSON.stringify(SEED_RACKS)),
     projects: JSON.parse(JSON.stringify(SEED_PROJECTS)),
+    recipients: [
+      { id: 'rcp-1', name: 'Sabelo', type: 'WORKER', active: true },
+      { id: 'rcp-2', name: 'Khodani', type: 'WORKER', active: true },
+      { id: 'rcp-3', name: 'Forklift', type: 'MACHINE', active: true },
+      { id: 'rcp-4', name: 'Northam Platinum', type: 'SITE', active: true },
+      { id: 'rcp-5', name: 'KTS', type: 'CONTRACTOR', active: true },
+    ],
   };
 }
 
@@ -613,7 +622,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
   if (method === 'POST' && p === '/inventory-issues') {
-    const b = body as { materialId: string; locationId: string; quantity: number; projectNumber?: string };
+    const b = body as { materialId: string; locationId: string; quantity: number; projectNumber?: string; recipientId?: string };
     return handleIssue(b);
   }
   if (method === 'POST' && p === '/inventory-transfers') {
@@ -699,6 +708,37 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!r) throw err('NOT_FOUND', 'Rack not found');
     r.status = 'INACTIVE';
     r.updatedAt = new Date().toISOString();
+    return r;
+  }
+
+  // Recipients ("Issued To")
+  if (method === 'GET' && p === '/recipients') {
+    const q = qs.q?.toLowerCase();
+    return state.recipients
+      .filter((r) => (!qs.type || r.type === qs.type) && (qs.active === undefined || String(r.active) === qs.active) && (!q || r.name.toLowerCase().includes(q)))
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+  }
+  if (method === 'POST' && p === '/recipients') {
+    const b = (body as { name?: string; type?: MockRecipient['type']; notes?: string }) ?? {};
+    const name = b.name?.trim().replace(/\s+/g, ' ');
+    if (!name || !b.type) throw err('VALIDATION_ERROR', 'Name and type are required');
+    if (state.recipients.some((r) => r.name.toLowerCase() === name.toLowerCase())) throw err('CONFLICT', `A recipient named "${name}" already exists`);
+    const created: MockRecipient = { id: nextId('rcp'), name, type: b.type, notes: b.notes?.trim() || null, active: true };
+    state.recipients.push(created);
+    return created;
+  }
+  if (method === 'PATCH' && /^\/recipients\/[^/]+$/.test(p)) {
+    const r = state.recipients.find((x) => x.id === p.slice('/recipients/'.length));
+    if (!r) throw err('NOT_FOUND', 'Recipient not found');
+    const b = (body as Partial<MockRecipient>) ?? {};
+    if (b.name !== undefined) {
+      const name = b.name.trim().replace(/\s+/g, ' ');
+      if (state.recipients.some((x) => x.id !== r.id && x.name.toLowerCase() === name.toLowerCase())) throw err('CONFLICT', `A recipient named "${name}" already exists`);
+      r.name = name;
+    }
+    if (b.type !== undefined) r.type = b.type;
+    if (b.notes !== undefined) r.notes = b.notes?.trim() || null;
+    if (b.active !== undefined) r.active = b.active;
     return r;
   }
 
@@ -1093,8 +1133,13 @@ function handleStockItemCreate(b: {
   return { material: created, initialTransactionId };
 }
 
-function handleIssue(b: { materialId: string; locationId: string; quantity: number; projectNumber?: string }): { transactionId: string } {
+function handleIssue(b: { materialId: string; locationId: string; quantity: number; projectNumber?: string; recipientId?: string }): { transactionId: string } {
   if (!b.materialId || !b.locationId || !(b.quantity > 0)) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  if (b.recipientId) {
+    const r = state.recipients.find((x) => x.id === b.recipientId);
+    if (!r) throw err('NOT_FOUND', 'Recipient not found');
+    if (!r.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  }
   if (!findMaterial(b.materialId)) throw err('NOT_FOUND', 'Material not found');
   if (!findLocation(b.locationId)) throw err('NOT_FOUND', 'Location not found');
   const balance = getBalance(b.materialId, b.locationId);
@@ -1113,6 +1158,7 @@ function handleIssue(b: { materialId: string; locationId: string; quantity: numb
     locationId: b.locationId,
     quantity: String(-b.quantity),
     actorId: 'user-1',
+    recipientId: b.recipientId,
     projectNumber: b.projectNumber,
     referenceType: b.projectNumber ? 'Project' : undefined,
     referenceId: b.projectNumber,
@@ -1334,6 +1380,8 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     actorId: t.actorId,
     actorName: actor?.name ?? 'Unknown',
     recipientId: t.recipientId,
+    recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
+    recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,
     projectNumber: t.projectNumber,

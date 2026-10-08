@@ -31,6 +31,7 @@ interface MovementRow {
   reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
+  recipientName?: string | null;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {

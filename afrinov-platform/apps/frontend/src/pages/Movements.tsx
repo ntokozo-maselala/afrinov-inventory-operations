@@ -22,6 +22,7 @@ interface MovementRow {
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
+  recipientName?: string | null;
 }
 
 const TYPE_OPTIONS = [

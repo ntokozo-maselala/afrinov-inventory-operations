@@ -61,6 +61,9 @@ database; CI runs them on every backend pull request.
   mistakes are corrected with a reversal that points at the original
   (ADR-005, `POST /inventory-transactions/:id/reversal`).
 - **Stock can never go below zero.** This is a fixed rule, not a setting.
+- **Recipients ("Issued To")** are the people and places stock is issued to:
+  workers, machines, client sites and contractors (ADR-008). They are not
+  users; manage them on the Recipients page.
 - **Accounts are created by an administrator.** There is no self-registration
   (ADR-006).
 - **Roles:** `ADMIN`, `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`,

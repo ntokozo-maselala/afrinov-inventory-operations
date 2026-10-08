@@ -27,6 +27,7 @@ const LowStock = importPage(() => import('./pages/LowStock').then(m => ({ defaul
 const InventoryReportPage = importPage(() => import('./pages/InventoryReport').then(m => ({ default: m.InventoryReportPage })));
 const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.Racks })));
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
+const Recipients = importPage(() => import('./pages/Recipients').then(m => ({ default: m.Recipients })));
 const Locations = importPage(() => import('./pages/Locations').then(m => ({ default: m.Locations })));
 const Settings = importPage(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const SettingsGeneral = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsGeneral })));
@@ -130,6 +131,7 @@ export function App() {
         <Route path="/racks" element={<Suspense fallback={<PageSkeleton />}><Racks /></Suspense>} />
         <Route path="/locations" element={<Suspense fallback={<PageSkeleton />}><Locations /></Suspense>} />
         <Route path="/projects" element={<Suspense fallback={<PageSkeleton />}><Projects /></Suspense>} />
+        <Route path="/recipients" element={<Suspense fallback={<PageSkeleton />}><Recipients /></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<PageSkeleton />}><Settings /></Suspense>}>
           <Route index element={<Suspense fallback={<PageSkeleton />}><SettingsGeneral /></Suspense>} />
           <Route path="notifications" element={<Suspense fallback={<PageSkeleton />}><SettingsNotifications /></Suspense>} />

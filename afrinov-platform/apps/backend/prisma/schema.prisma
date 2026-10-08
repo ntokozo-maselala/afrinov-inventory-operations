@@ -210,6 +210,34 @@ model Project {
   @@map("projects")
 }
 
+// Who stock is issued to. The workbook's "Issued To" list mixed workers with
+// machines, client sites and contractors, so each entry carries its type.
+enum RecipientType {
+  WORKER
+  MACHINE
+  SITE
+  CONTRACTOR
+}
+
+// People and places stock is issued to. Most are not users who log in.
+// Names are unique ignoring case (index in migration 20260101000005).
+// Deactivate instead of deleting, so issue history keeps its recipient.
+model Recipient {
+  id        String        @id @default(uuid())
+  name      String
+  type      RecipientType
+  notes     String?
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([type])
+  @@index([active])
+  @@map("recipients")
+}
+
 enum RackStatus {
   ACTIVE
   INACTIVE
@@ -391,7 +419,7 @@ model InventoryTransaction {
   // Polymorphic reference to the document that caused the transaction.
   referenceType String?                  @map("reference_type")
   referenceId   String?                  @map("reference_id")
-  // Tool tracking (FR-INV-008): for tools, recipient / holder may be set.
+  // Who received the stock (issues; copied onto their reversals).
   recipientId   String?                  @map("recipient_id")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")
@@ -413,6 +441,7 @@ model InventoryTransaction {
   location Location  @relation(fields: [locationId], references: [id])
   actor    User      @relation(fields: [actorId], references: [id])
   project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
+  recipient Recipient? @relation(fields: [recipientId], references: [id])
   pairedWith InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
   pairedBy   InventoryTransaction? @relation("TransferPair")
   reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
@@ -422,6 +451,7 @@ model InventoryTransaction {
   @@index([referenceType, referenceId])
   @@index([postedAt])
   @@index([type])
+  @@index([recipientId])
   @@map("inventory_transactions")
 }
 

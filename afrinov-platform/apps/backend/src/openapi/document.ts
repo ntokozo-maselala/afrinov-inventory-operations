@@ -27,6 +27,7 @@ import {
 import { createRackSchema, updateRackSchema } from '../modules/inventory/rack.routes.js';
 import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
 import { createProjectSchema, updateProjectSchema } from '../modules/operations/project.routes.js';
+import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
 import {
   createSupplierSchema,
   createPOSchema,
@@ -257,6 +258,24 @@ export const OPERATIONS: Operation[] = [
     method: 'delete', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Archive a project',
     description: 'Archives rather than deletes, and returns the archived project.',
     permissions: [P.ManageProjects], errors: [404],
+  },
+
+  // Recipients ("Issued To")
+  {
+    method: 'get', path: '/recipients', tag: 'Recipients', summary: 'List the people and places stock is issued to',
+    description: 'Workers, machines, client sites and contractors. Any signed-in user can read the list.',
+    query: listRecipientsQuerySchema, errors: [400],
+  },
+  { method: 'get', path: '/recipients/:id', tag: 'Recipients', summary: 'Get a recipient', errors: [404] },
+  {
+    method: 'post', path: '/recipients', tag: 'Recipients', summary: 'Add a recipient',
+    description: 'Names are unique ignoring case. Refused with 409 when the name is taken.',
+    permissions: [P.ManageRecipients], body: createRecipientSchema, success: 201, errors: [409],
+  },
+  {
+    method: 'patch', path: '/recipients/:id', tag: 'Recipients', summary: 'Update or deactivate a recipient',
+    description: 'Recipients are deactivated, never deleted, so issue history keeps its names.',
+    permissions: [P.ManageRecipients], body: updateRecipientSchema, errors: [404, 409],
   },
 
   // Suppliers (always on)

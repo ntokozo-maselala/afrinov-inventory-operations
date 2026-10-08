@@ -147,3 +147,24 @@ kept.
 **Consequences:** Fewer states to explain and test. A rejected order is
 recorded as cancelled with a reason. Approvers cannot yet reject an order
 themselves (they lack the cancel permission); revisit if procurement is used.
+
+---
+
+### ADR-008 — "Issued To" is a typed recipients list, required on every issue
+**Date:** 2026-10-08 · **Status:** Accepted
+
+**Context:** The workbook's "Issued To" column was free text backed by an
+Employees sheet that mixed workers with machines (Forklift, Generator),
+client sites (Northam, Samancor) and contractors (KTS, Kenflex). In the
+platform, `recipientId` had to be a user who logs in, and the issue form did
+not ask for it, so nobody was recorded as receiving stock.
+
+**Decision:** A `Recipient` list with a type on each entry: WORKER, MACHINE,
+SITE or CONTRACTOR. Names are unique ignoring case. Recipients are
+deactivated, never deleted. Every issue must name an active recipient
+(enforced on the issue form in Phase 1, step 2). Admins and store
+controllers manage the list; anyone signed in can read it.
+
+**Consequences:** Every issue says who received the stock, which gives the
+per-worker accountability the Consumable Box sheet was attempting, and
+reports can filter by recipient type.

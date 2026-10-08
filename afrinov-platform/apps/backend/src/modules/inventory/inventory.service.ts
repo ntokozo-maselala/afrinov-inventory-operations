@@ -52,6 +52,12 @@ async function checkMaterialActive(materialId: string, tx: Prisma.TransactionCli
   if (!m.active) throw Errors.validation('Material is inactive');
 }
 
+async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
+  const r = await tx.recipient.findUnique({ where: { id: recipientId } });
+  if (!r) throw Errors.notFound('Recipient');
+  if (!r.active) throw Errors.validation('Recipient is inactive');
+}
+
 async function checkLocationActive(locationId: string, tx: Prisma.TransactionClient): Promise<void> {
   const l = await tx.location.findUnique({ where: { id: locationId } });
   if (!l) throw Errors.notFound('Location');
@@ -84,6 +90,7 @@ export const InventoryService = {
         location: true,
         actor: { select: { id: true, name: true, email: true } },
         reversedBy: { select: { id: true } },
+        recipient: { select: { name: true, type: true } },
       },
       orderBy: { postedAt: 'desc' },
       take,
@@ -101,6 +108,8 @@ export const InventoryService = {
       actorId: t.actorId,
       actorName: t.actor.name,
       recipientId: t.recipientId,
+      recipientName: t.recipient?.name ?? null,
+      recipientType: t.recipient?.type ?? null,
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
@@ -223,6 +232,7 @@ export const InventoryService = {
     return prisma.$transaction(async (tx) => {
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
+      if (input.recipientId) await checkRecipientActive(input.recipientId, tx);
 
       // Stock can never go below zero. This is a fixed rule, not a setting:
       // a negative balance means the ledger no longer matches the shelf.

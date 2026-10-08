@@ -37,6 +37,7 @@ export function useNavGroups(): NavGroup[] {
         { to: '/racks', label: 'Rack', icon: <Icon.Layers /> },
         { to: '/locations', label: 'Locations', icon: <Icon.Map /> },
         { to: '/projects', label: 'Project', icon: <Icon.Tag /> },
+        { to: '/recipients', label: 'Recipients', icon: <Icon.Users /> },
         { to: '/movements', label: 'Movements', icon: <Icon.Arrows /> },
         { to: '/suppliers', label: 'Suppliers', icon: <Icon.Users /> },
       ],

@@ -30,6 +30,7 @@ export const PermissionCode = {
   ViewAuditLog: 'view:audit_log',
   ManageRacks: 'manage:racks',
   ManageProjects: 'manage:projects',
+  ManageRecipients: 'manage:recipients',
   ManageSettings: 'manage:settings',
   ReverseInventoryTransaction: 'reverse:inventory_transaction',
 } as const;
@@ -57,6 +58,7 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.CheckInTool,
     PermissionCode.ManageRacks,
     PermissionCode.ManageProjects,
+    PermissionCode.ManageRecipients,
     PermissionCode.ViewPurchaseOrder,
     PermissionCode.ReceivePurchaseOrder,
     PermissionCode.ViewGoodsReceipt,

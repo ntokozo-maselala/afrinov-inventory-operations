@@ -128,6 +128,14 @@ export interface MockGoodsReceipt {
   lines: MockGoodsReceiptLine[];
 }
 
+export interface MockRecipient {
+  id: string;
+  name: string;
+  type: 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR';
+  notes?: string | null;
+  active: boolean;
+}
+
 export interface MockInventoryTransaction {
   id: string;
   postedAt: string;
@@ -180,6 +188,8 @@ export interface MockMovementRow {
   referenceId?: string;
   reversesId?: string;
   reversedById?: string;
+  recipientName?: string | null;
+  recipientType?: string | null;
 }
 
 export type MockRackStatus = 'ACTIVE' | 'INACTIVE' | 'FULL';
