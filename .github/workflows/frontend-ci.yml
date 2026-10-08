@@ -1,0 +1,52 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    paths:
+      - 'afrinov-platform/apps/frontend/**'
+      - 'afrinov-platform/package.json'
+      - 'afrinov-platform/package-lock.json'
+      - '.github/workflows/frontend-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'afrinov-platform/apps/frontend/**'
+      - 'afrinov-platform/package.json'
+      - 'afrinov-platform/package-lock.json'
+      - '.github/workflows/frontend-ci.yml'
+
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: afrinov-platform/apps/frontend
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: afrinov-platform/package-lock.json
+
+      # The lockfile lives at the workspace root, so install from there.
+      - name: Install dependencies
+        working-directory: afrinov-platform
+        run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      # A production build: it also fails if VITE_FRONTEND_ONLY or
+      # VITE_DEMO_AUTH_ENABLED is set (src/config/buildGuard.ts).
+      - run: npm run build

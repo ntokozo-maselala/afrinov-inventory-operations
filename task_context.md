@@ -16,7 +16,7 @@ and update this file.
 | `afrinov-platform/` | npm workspaces monorepo; install dependencies here |
 | `afrinov-platform/apps/backend/` | REST API: Fastify 5, Prisma 5, PostgreSQL 16, Zod, Vitest |
 | `afrinov-platform/apps/frontend/` | React 18 + Vite + Tailwind SPA, Vitest and Playwright |
-| `.github/workflows/` | CI (`backend-ci.yml`) |
+| `.github/workflows/` | CI (`backend-ci.yml`, `frontend-ci.yml`) |
 | `gap-analysis.md` | What the platform replaces in the old spreadsheet, and the priorities |
 | `decision-log.md` | Architecture decisions |
 
