@@ -315,6 +315,22 @@ describe('ReportingService', () => {
       expect(result[0]!.total).toBe(15);
     });
 
+    it('nets reversed issues out of the total, dropping fully reversed materials', async () => {
+      seedMaterials();
+      db.transactions = [
+        { id: 't-1', postedAt: new Date(), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-10), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: null, projectNumber: 'P-1', referenceType: null, referenceId: null },
+        { id: 't-2', postedAt: new Date(), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-5), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: null, projectNumber: 'P-1', referenceType: null, referenceId: null },
+        { id: 't-3', postedAt: new Date(), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: DEC(5), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: 'Wrong item', projectNumber: 'P-1', referenceType: null, referenceId: null },
+        { id: 't-4', postedAt: new Date(), type: 'ISSUE', materialId: 'm-2', locationId: 'l-1', quantity: DEC(-3), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: null, projectNumber: 'P-1', referenceType: null, referenceId: null },
+        { id: 't-5', postedAt: new Date(), type: 'ISSUE', materialId: 'm-2', locationId: 'l-1', quantity: DEC(3), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: 'Wrong project', projectNumber: 'P-1', referenceType: null, referenceId: null },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const result = await ReportingService.projectConsumption('P-1');
+      expect(result).toHaveLength(1);
+      expect(result[0]!.materialId).toBe('m-1');
+      expect(result[0]!.total).toBe(10);
+    });
+
     it('returns an empty array when no issues exist for the project', async () => {
       seedMaterials();
       db.transactions = [

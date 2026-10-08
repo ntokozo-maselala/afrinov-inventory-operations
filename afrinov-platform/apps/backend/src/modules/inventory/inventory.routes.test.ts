@@ -15,12 +15,12 @@ import type { FastifyInstance } from 'fastify';
 
 const userPermissions = new Map<string, string[]>();
 
-const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedUpdateActor } = vi.hoisted(() => ({
+const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedReverse } = vi.hoisted(() => ({
   mockedIssue: vi.fn(),
   mockedTransfer: vi.fn(),
   mockedAdjust: vi.fn(),
   mockedQueryHistory: vi.fn(),
-  mockedUpdateActor: vi.fn(),
+  mockedReverse: vi.fn(),
 }));
 
 vi.mock('../../shared/db.js', () => ({
@@ -45,7 +45,7 @@ vi.mock('./inventory.service.js', () => ({
     transfer: mockedTransfer,
     adjust: mockedAdjust,
     queryHistory: mockedQueryHistory,
-    updateActor: mockedUpdateActor,
+    reverse: mockedReverse,
   },
 }));
 
@@ -56,7 +56,7 @@ const ALL_INVENTORY_PERMS = [
   'issue:inventory',
   'transfer:inventory',
   'adjust:inventory',
-  'update:inventory_transaction',
+  'reverse:inventory_transaction',
 ];
 
 describe('inventory routes', () => {
@@ -68,7 +68,7 @@ describe('inventory routes', () => {
     mockedTransfer.mockResolvedValue({ outTransactionId: 'tx-out-1', inTransactionId: 'tx-in-1' });
     mockedAdjust.mockResolvedValue({ transactionId: 'tx-1' });
     mockedQueryHistory.mockResolvedValue([]);
-    mockedUpdateActor.mockResolvedValue({ id: 'tx-1' });
+    mockedReverse.mockResolvedValue({ reversalIds: ['tx-rev-1'] });
   });
 
   afterEach(async () => {
@@ -275,64 +275,86 @@ describe('inventory routes', () => {
     });
   });
 
-  describe('PATCH /api/v1/inventory-transactions/:id', () => {
+  describe('POST /api/v1/inventory-transactions/:id/reversal', () => {
     it('returns 401 without auth', async () => {
-      const res = await app.inject({ method: 'PATCH', url: '/api/v1/inventory-transactions/tx-1' });
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-transactions/tx-1/reversal' });
       expect(res.statusCode).toBe(401);
     });
 
-    it('returns 403 when the user lacks update permission', async () => {
+    it('returns 403 when the user lacks the reverse permission', async () => {
       const headers = authed('user-viewer', ['view:reports']);
       const res = await app.inject({
-        method: 'PATCH',
-        url: '/api/v1/inventory-transactions/tx-1',
+        method: 'POST',
+        url: '/api/v1/inventory-transactions/tx-1/reversal',
         headers,
-        payload: { actorId: 'user-2' },
+        payload: { reason: 'Wrong item' },
       });
       expect(res.statusCode).toBe(403);
     });
 
-    it('returns 400 when actorId is missing in the body', async () => {
-      const res = await app.inject({
-        method: 'PATCH',
-        url: '/api/v1/inventory-transactions/tx-1',
-        headers: authed(),
-        payload: {},
-      });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    it('returns 400 when the reason is missing or blank', async () => {
+      for (const payload of [{}, { reason: '  ' }]) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/v1/inventory-transactions/tx-1/reversal',
+          headers: authed(),
+          payload,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error.code).toBe('VALIDATION_ERROR');
+      }
+      expect(mockedReverse).not.toHaveBeenCalled();
     });
 
     it('returns 404 when the service throws a not-found error', async () => {
       const { Errors } = await import('../../shared/errors.js');
-      mockedUpdateActor.mockRejectedValueOnce(Errors.notFound('InventoryTransaction'));
+      mockedReverse.mockRejectedValueOnce(Errors.notFound('InventoryTransaction'));
       const res = await app.inject({
-        method: 'PATCH',
-        url: '/api/v1/inventory-transactions/tx-1',
+        method: 'POST',
+        url: '/api/v1/inventory-transactions/tx-1/reversal',
         headers: authed(),
-        payload: { actorId: 'user-2' },
+        payload: { reason: 'Wrong item' },
       });
       expect(res.statusCode).toBe(404);
       expect(res.json().error.code).toBe('NOT_FOUND');
     });
 
-    it('returns 200 and the updated transaction on success', async () => {
-      mockedUpdateActor.mockResolvedValue({ id: 'tx-1', postedAt: new Date().toISOString(), type: 'ISSUE' });
+    it('returns 409 when the movement was already reversed', async () => {
+      const { Errors } = await import('../../shared/errors.js');
+      mockedReverse.mockRejectedValueOnce(Errors.conflict('This movement has already been reversed.'));
       const res = await app.inject({
-        method: 'PATCH',
-        url: '/api/v1/inventory-transactions/tx-1',
+        method: 'POST',
+        url: '/api/v1/inventory-transactions/tx-1/reversal',
         headers: authed(),
-        payload: { actorId: 'user-2' },
+        payload: { reason: 'Wrong item' },
       });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ id: 'tx-1', postedAt: expect.any(String), type: 'ISSUE' });
-      expect(mockedUpdateActor).toHaveBeenCalledWith(
-        expect.objectContaining({
-          transactionId: 'tx-1',
-          newActorId: 'user-2',
-          changedBy: 'user-admin',
-        }),
-      );
+      expect(res.statusCode).toBe(409);
     });
+
+    it('returns 201 with the reversal ids, recording the caller as the actor', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/inventory-transactions/tx-1/reversal',
+        headers: authed(),
+        payload: { reason: '  Wrong item  ' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ reversalIds: ['tx-rev-1'] });
+      expect(mockedReverse).toHaveBeenCalledWith({
+        transactionId: 'tx-1',
+        reason: 'Wrong item',
+        actorId: 'user-admin',
+      });
+    });
+  });
+
+  it('no longer accepts edits to a posted transaction', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/inventory-transactions/tx-1',
+      headers: authed(),
+      payload: { actorId: OTHER_UUID },
+    });
+    expect(res.statusCode).toBe(404);
   });
 });

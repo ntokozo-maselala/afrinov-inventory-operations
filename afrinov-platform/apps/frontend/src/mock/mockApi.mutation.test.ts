@@ -170,6 +170,16 @@ describe('mock API mutation flows', () => {
       );
       expect(Number(stock.find((s) => s.locationId === 'loc-1')!.quantity)).toBe(25);
     });
+
+    it('rejects a negative adjustment larger than the balance with INSUFFICIENT_BALANCE', async () => {
+      let caught: ApiError | undefined;
+      try {
+        await api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: -31, reasonCode: 'LOSS' });
+      } catch (e) {
+        if (isApiError(e)) caught = e;
+      }
+      expect(caught?.code).toBe('INSUFFICIENT_BALANCE');
+    });
   });
 
   // ── ADR-002: balances derived from transactions ─────────────────────────
@@ -253,6 +263,58 @@ describe('mock API mutation flows', () => {
       }
       expect(caught).toBeDefined();
       expect(caught!.code).toBe('VALIDATION_ERROR');
+    });
+  });
+
+  describe('reversing a movement', () => {
+    async function stockAt(locationId: string): Promise<number> {
+      const stock = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
+      return Number(stock.find((s) => s.locationId === locationId)?.quantity ?? 0);
+    }
+
+    async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
+      try {
+        await p;
+        return undefined;
+      } catch (e) {
+        return isApiError(e) ? e.code : 'UNKNOWN';
+      }
+    }
+
+    it('reverses both legs of a transfer and marks the pair in the history', async () => {
+      const { inTransactionId } = await api.post<{ inTransactionId: string }>('/inventory-transfers', {
+        materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-3', quantity: 5,
+      });
+
+      const { reversalIds } = await api.post<{ reversalIds: string[] }>(
+        `/inventory-transactions/${inTransactionId}/reversal`, { reason: 'Wrong store' },
+      );
+
+      expect(reversalIds).toHaveLength(2);
+      expect(await stockAt('loc-1')).toBe(30);
+      expect(await stockAt('loc-3')).toBe(20);
+      const history = await api.get<Array<{ id: string; reversesId?: string; reversedById?: string }>>(
+        '/inventory-transactions?materialId=mat-1',
+      );
+      expect(history.find((t) => t.id === inTransactionId)!.reversedById).toBeTruthy();
+      expect(history.filter((t) => t.reversesId)).toHaveLength(2);
+    });
+
+    it('refuses a second reversal, a blank reason and an unknown id', async () => {
+      const { transactionId } = await api.post<{ transactionId: string }>('/inventory-adjustments', {
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE',
+      });
+      expect(await codeOf(api.post(`/inventory-transactions/${transactionId}/reversal`, { reason: ' ' }))).toBe('VALIDATION_ERROR');
+      await api.post(`/inventory-transactions/${transactionId}/reversal`, { reason: 'Counted twice' });
+      expect(await codeOf(api.post(`/inventory-transactions/${transactionId}/reversal`, { reason: 'Again' }))).toBe('CONFLICT');
+      expect(await codeOf(api.post('/inventory-transactions/missing/reversal', { reason: 'Typo' }))).toBe('NOT_FOUND');
+    });
+
+    it('no longer accepts edits to a posted transaction', async () => {
+      const { transactionId } = await api.post<{ transactionId: string }>('/inventory-adjustments', {
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE',
+      });
+      expect(await codeOf(api.patch(`/inventory-transactions/${transactionId}`, { actorId: 'user-2' }))).not.toBeUndefined();
     });
   });
 });

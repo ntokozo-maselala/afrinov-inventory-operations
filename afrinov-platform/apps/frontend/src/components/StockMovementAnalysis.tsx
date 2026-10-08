@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { ReportResult } from '../mock/mockReport';
+import { isReversedPair, type ReportResult } from '../mock/mockReport';
 import { BarChart, type BarChartDatum } from './charts/BarChart';
 import { formatNumber } from '../lib/format';
 import { Skeleton } from './ui/skeleton';
@@ -21,6 +21,7 @@ export function StockMovementAnalysis({ report, loading, error }: StockMovementA
 
     const byDate = new Map<string, { receipts: number; issues: number }>();
     for (const m of movements) {
+      if (isReversedPair(m)) continue;
       const day = m.postedAt.slice(0, 10);
       const entry = byDate.get(day) ?? { receipts: 0, issues: 0 };
       if (m.type === 'RECEIPT' || m.type === 'TRANSFER_IN') entry.receipts += Math.abs(m.quantity);

@@ -13,7 +13,6 @@ function importPage(
 }
 
 const Login = importPage(() => import('./pages/Login').then(m => ({ default: m.Login })));
-const Signup = importPage(() => import('./pages/Signup').then(m => ({ default: m.Signup })));
 const Dashboard = importPage(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const Materials = importPage(() => import('./pages/Materials').then(m => ({ default: m.Materials })));
 const MaterialDetail = importPage(() => import('./pages/MaterialDetail').then(m => ({ default: m.MaterialDetail })));
@@ -70,7 +69,7 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
   if (loading) return <AuthLoading />;
   if (user) {
     const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
-    return <Navigate to={from && from !== '/login' && from !== '/signup' ? from : '/'} replace />;
+    return <Navigate to={from && from !== '/login' ? from : '/'} replace />;
   }
   return <>{children}</>;
 }
@@ -101,16 +100,6 @@ export function App() {
           <PublicOnly>
             <Suspense fallback={<PageSkeleton />}>
               <Login />
-            </Suspense>
-          </PublicOnly>
-        }
-      />
-      <Route
-        path="/signup"
-        element={
-          <PublicOnly>
-            <Suspense fallback={<PageSkeleton />}>
-              <Signup />
             </Suspense>
           </PublicOnly>
         }

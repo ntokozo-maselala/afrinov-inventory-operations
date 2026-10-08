@@ -27,6 +27,10 @@ export const adjustmentSchema = z.object({
   reasonNote: z.string().optional(),
 });
 
+export const reversalSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
@@ -80,29 +84,16 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send(result);
   });
 
-  app.patch('/inventory-transactions/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.UpdateInventoryTransaction);
-    const id = (req.params as { id: string }).id;
-    const body = req.body as { actorId?: string } | undefined;
-    if (!body?.actorId || typeof body.actorId !== 'string') {
+  app.post('/inventory-transactions/:id/reversal', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ReverseInventoryTransaction);
+    const parsed = reversalSchema.safeParse(req.body);
+    if (!parsed.success) {
       return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Please select a valid issuing person.' },
+        error: { code: 'VALIDATION_ERROR', message: 'A reason is required to reverse a movement', details: parsed.error.flatten() },
       });
     }
-    try {
-      const result = await InventoryService.updateActor({
-        transactionId: id,
-        newActorId: body.actorId,
-        changedBy: actorId(req),
-      });
-      return result;
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('not found')) {
-        return reply.code(404).send({
-          error: { code: 'NOT_FOUND', message: 'The inventory transaction could not be found.' },
-        });
-      }
-      throw err;
-    }
+    const { id } = req.params as { id: string };
+    const result = await InventoryService.reverse({ transactionId: id, reason: parsed.data.reason, actorId: actorId(req) });
+    return reply.code(201).send(result);
   });
 }

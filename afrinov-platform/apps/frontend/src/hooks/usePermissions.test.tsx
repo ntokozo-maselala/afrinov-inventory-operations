@@ -21,7 +21,6 @@ function renderWithUser<T>(hook: () => T, user: { roles: string[] } | null) {
     user: user,
     loading: false,
     login: vi.fn(),
-    signup: vi.fn(),
     logout: vi.fn(),
   });
   return renderHook(hook);

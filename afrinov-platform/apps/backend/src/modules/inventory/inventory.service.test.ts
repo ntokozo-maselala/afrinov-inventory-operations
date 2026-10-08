@@ -23,6 +23,7 @@ type TxRow = {
   actorId: string;
   postedAt: Date;
   pairedWithId?: string | null;
+  reversesId?: string | null;
   reasonCode?: string | null;
   reasonNote?: string | null;
   projectNumber?: string | null;
@@ -97,15 +98,20 @@ const fakeTx = {
     },
     findUnique: async ({ where, include }: { 
       where: { id: string }; 
-      include?: { 
-        actor: { select: { id: boolean; name: boolean } };
+      include?: {
+        actor?: { select: { id: boolean; name: boolean } };
         material?: boolean;
         location?: boolean;
-      } 
+        reversedBy?: { select: { id: boolean } };
+      }
     }): Promise<TxRow | null> => {
       const row = trxRows.find((r) => r.id === where.id) ?? null;
       if (!row) return null;
-      const out: TxRow & { actor?: { id: string; name: string }; material?: { sku: string; name: string }; location?: { name: string } } = { ...row };
+      const out: TxRow & { actor?: { id: string; name: string }; material?: { sku: string; name: string }; location?: { name: string }; reversedBy?: { id: string } | null } = { ...row };
+      if (include?.reversedBy) {
+        const rev = trxRows.find((r) => r.reversesId === row.id);
+        out.reversedBy = rev ? { id: rev.id } : null;
+      }
       if (include?.actor) {
         const u = users.get(row.actorId);
         out.actor = u ? { id: u.id, name: u.name } : undefined;
@@ -324,110 +330,151 @@ describe('InventoryService — ADR-002 invariants', () => {
     ).rejects.toThrow();
   });
 
-  // ── Settings integration ─────────────────────────────────────────────
-  // These tests prove that toggles in the settings table actually flow
-  // through to the inventory business logic — settings are not just a UI
-  // decoration.
-  describe('settings integration', () => {
-    it('issue allows going negative when enableNegativeStockPrevention is off', async () => {
+  // ── No negative stock ────────────────────────────────────────────────
+  // A fixed rule, not a setting. A leftover row from the retired
+  // inventory.enableNegativeStockPrevention setting must not switch it off.
+  describe('no negative stock', () => {
+    beforeEach(() => {
       setMockSetting('inventory.enableNegativeStockPrevention', false);
-      await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
-      });
-      await InventoryService.issue({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u',
-      });
-      // Balance ends at -3 because the toggle disabled the check
-      expect(getBalance('mat-1', 'loc-1').toString()).toBe('-3');
     });
 
-    it('issue still blocks over-issue when enableNegativeStockPrevention is on', async () => {
-      setMockSetting('inventory.enableNegativeStockPrevention', true);
+    it('refuses an issue larger than the balance', async () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
       await expect(
         InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, actorId: 'u' }),
-      ).rejects.toThrow(/available/);
+      ).rejects.toThrow(/only 2 available/);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
+    });
+
+    it('refuses a negative adjustment larger than the balance', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await expect(
+        InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: -3, reasonCode: 'LOSS', actorId: 'u' }),
+      ).rejects.toThrow(/only 2 available/);
+      expect(trxRows).toHaveLength(1);
+    });
+
+    it('allows taking the balance to exactly zero', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
     });
   });
 
-  // ── Actor update ──────────────────────────────────────────────────────
-  describe('updateActor', () => {
-    it('updates the actor and returns the new name', async () => {
+  // ── Reversal ──────────────────────────────────────────────────────────
+  describe('reverse', () => {
+    it('posts an opposite entry of the same type and restores the balance', async () => {
       await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
       });
-      const tx = trxRows[0]!;
-      const result = await InventoryService.updateActor({
-        transactionId: tx.id,
-        newActorId: 'user-2',
-        changedBy: 'admin-1',
+      const { transactionId } = await InventoryService.issue({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 4, actorId: 'user-1', projectNumber: 'AFRI-1325',
       });
-      expect(result.actorId).toBe('user-2');
-      expect(result.actorName).toBe('Bob');
-      expect(tx.actorId).toBe('user-2');
+
+      const { reversalIds } = await InventoryService.reverse({ transactionId, reason: 'Wrong item scanned', actorId: 'user-2' });
+
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('10');
+      const reversal = trxRows.find((r) => r.id === reversalIds[0])!;
+      expect(reversal).toMatchObject({
+        type: 'ISSUE',
+        reversesId: transactionId,
+        actorId: 'user-2',
+        reasonNote: 'Wrong item scanned',
+        projectNumber: 'AFRI-1325',
+      });
+      expect(reversal.quantity.toString()).toBe('4');
+      expect(auditLog.at(-1)).toMatchObject({ action: 'REVERSE', entityId: transactionId, actorId: 'user-2' });
     });
 
-    it('rejects nonexistent transaction', async () => {
+    it('never changes the original transaction', async () => {
+      const { transactionId } = await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
+      });
+      const before = { ...trxRows.find((r) => r.id === transactionId)! };
+      await InventoryService.reverse({ transactionId, reason: 'Counted twice', actorId: 'user-2' });
+      expect(trxRows.find((r) => r.id === transactionId)).toEqual(before);
+    });
+
+    it('reverses both legs of a transfer, starting from either leg', async () => {
+      await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      const { inTransactionId } = await InventoryService.transfer({
+        materialId: 'mat-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 6, actorId: 'u',
+      });
+
+      const { reversalIds } = await InventoryService.reverse({ transactionId: inTransactionId, reason: 'Wrong rack', actorId: 'u' });
+
+      expect(reversalIds).toHaveLength(2);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('10');
+      expect(getBalance('mat-1', 'loc-2').toString()).toBe('0');
+      const [out, inn] = reversalIds.map((id) => trxRows.find((r) => r.id === id)!);
+      expect(out!.type).toBe('TRANSFER_OUT');
+      expect(inn!.type).toBe('TRANSFER_IN');
+      expect(out!.pairedWithId).toBe(inn!.id);
+      expect(inn!.pairedWithId).toBe(out!.id);
+    });
+
+    it('refuses to reverse a movement twice', async () => {
+      const { transactionId } = await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await InventoryService.reverse({ transactionId, reason: 'Counted twice', actorId: 'u' });
       await expect(
-        InventoryService.updateActor({ transactionId: 'missing', newActorId: 'user-2', changedBy: 'admin-1' }),
+        InventoryService.reverse({ transactionId, reason: 'Again', actorId: 'u' }),
+      ).rejects.toThrow(/already been reversed/);
+    });
+
+    it('refuses to reverse a reversal', async () => {
+      const { transactionId } = await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      const { reversalIds } = await InventoryService.reverse({ transactionId, reason: 'Counted twice', actorId: 'u' });
+      await expect(
+        InventoryService.reverse({ transactionId: reversalIds[0]!, reason: 'Undo', actorId: 'u' }),
+      ).rejects.toThrow(/cannot itself be reversed/);
+    });
+
+    it('refuses to reverse stock received against a goods receipt', async () => {
+      trxRows.push({
+        id: 'gr-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
+        actorId: 'u', postedAt: new Date(), referenceType: 'GoodsReceipt', referenceId: 'gr-1',
+      });
+      await expect(
+        InventoryService.reverse({ transactionId: 'gr-trx', reason: 'Wrong supplier', actorId: 'u' }),
+      ).rejects.toThrow(/goods receipt/);
+    });
+
+    it('refuses when the stock has already been used', async () => {
+      const { transactionId } = await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await InventoryService.issue({ materialId: 'mat-1', locationId: 'loc-1', quantity: 8, actorId: 'u' });
+      await expect(
+        InventoryService.reverse({ transactionId, reason: 'Counted twice', actorId: 'u' }),
+      ).rejects.toThrow(/still in stock/);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('2');
+    });
+
+    it('requires a reason', async () => {
+      const { transactionId } = await InventoryService.adjust({
+        materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u',
+      });
+      await expect(
+        InventoryService.reverse({ transactionId, reason: '   ', actorId: 'u' }),
+      ).rejects.toThrow(/reason is required/);
+    });
+
+    it('rejects a transaction that does not exist', async () => {
+      await expect(
+        InventoryService.reverse({ transactionId: 'missing', reason: 'Typo', actorId: 'u' }),
       ).rejects.toThrow(/InventoryTransaction not found/);
-    });
-
-    it('rejects nonexistent new actor', async () => {
-      await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
-      });
-      const tx = trxRows[0]!;
-      await expect(
-        InventoryService.updateActor({ transactionId: tx.id, newActorId: 'missing-user', changedBy: 'admin-1' }),
-      ).rejects.toThrow(/User not found/);
-    });
-
-    it('rejects inactive new actor', async () => {
-      await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
-      });
-      const tx = trxRows[0]!;
-      await expect(
-        InventoryService.updateActor({ transactionId: tx.id, newActorId: 'user-3', changedBy: 'admin-1' }),
-      ).rejects.toThrow(/inactive/);
-    });
-
-    it('returns same result when actor is unchanged', async () => {
-      await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
-      });
-      const tx = trxRows[0]!;
-      const result = await InventoryService.updateActor({
-        transactionId: tx.id,
-        newActorId: 'user-1',
-        changedBy: 'admin-1',
-      });
-      expect(result.actorId).toBe('user-1');
-      expect(auditLog).toHaveLength(0);
-    });
-
-    it('creates an audit log entry on change', async () => {
-      await InventoryService.adjust({
-        materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'user-1',
-      });
-      const tx = trxRows[0]!;
-      await InventoryService.updateActor({
-        transactionId: tx.id,
-        newActorId: 'user-2',
-        changedBy: 'admin-1',
-      });
-      expect(auditLog).toHaveLength(1);
-      expect(auditLog[0]).toMatchObject({
-        action: 'UPDATE_ACTOR',
-        entityType: 'InventoryTransaction',
-        entityId: tx.id,
-        actorId: 'admin-1',
-        before: { actorId: 'user-1', actorName: 'Alice' },
-        after: { actorId: 'user-2', actorName: 'Bob' },
-      });
     });
   });
 

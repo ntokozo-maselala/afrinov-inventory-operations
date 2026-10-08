@@ -153,7 +153,8 @@ export const ReportingService = {
     const totals = new Map<string, { materialSku: string; materialName: string; unitOfMeasure: string; total: number }>();
     for (const t of trx) {
       const existing = totals.get(t.materialId);
-      const qty = Math.abs(t.quantity.toNumber());
+      // Signed, so a reversed issue (same type, opposite sign) nets to zero.
+      const qty = -t.quantity.toNumber();
       if (existing) existing.total += qty;
       else
         totals.set(t.materialId, {
@@ -163,6 +164,8 @@ export const ReportingService = {
           total: qty,
         });
     }
-    return Array.from(totals.entries()).map(([materialId, v]) => ({ materialId, ...v }));
+    return Array.from(totals.entries())
+      .filter(([, v]) => v.total !== 0)
+      .map(([materialId, v]) => ({ materialId, ...v }));
   },
 };

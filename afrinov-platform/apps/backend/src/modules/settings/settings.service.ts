@@ -152,24 +152,19 @@ const ENUM = <T extends string>(opts: readonly T[]) => (v: unknown) => {
 };
 
 const CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP'] as const;
-const TIMEZONES = ['Africa/Johannesburg', 'UTC', 'Europe/London', 'America/New_York'] as const;
 const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'] as const;
 const TIME_FORMATS = ['24h', '12h'] as const;
-const LANGUAGES = ['en-ZA', 'en-US'] as const;
 const LANDING_PAGES = ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders'] as const;
 const THEMES = ['system', 'light', 'dark'] as const;
 const DENSITIES = ['comfortable', 'compact'] as const;
-const PO_NUMBER_FORMATS = ['PO-YYYY-NNNN', 'PO-{YYYY}-N'] as const;
 
 export const SETTING_CATALOG: readonly SettingDefinition[] = [
   // ── General ────────────────────────────────────────────────────────────
   { key: 'general.companyName', type: 'string', category: 'general', description: 'Company or organisation name shown across the application.', default: 'Afrinov', validate: isLength(1, 120) },
   { key: 'general.systemDescription', type: 'string', category: 'general', description: 'Short description of the system shown on the dashboard.', default: 'Inventory & operations management', validate: isLength(0, 500) },
   { key: 'general.defaultCurrency', type: 'enum', category: 'general', description: 'Default currency for monetary values.', default: 'ZAR', enumOptions: CURRENCIES, validate: ENUM(CURRENCIES) },
-  { key: 'general.defaultTimezone', type: 'enum', category: 'general', description: 'Default timezone for new records and reports.', default: 'Africa/Johannesburg', enumOptions: TIMEZONES, validate: ENUM(TIMEZONES) },
   { key: 'general.dateFormat', type: 'enum', category: 'general', description: 'Date display format used throughout the application.', default: 'YYYY-MM-DD', enumOptions: DATE_FORMATS, validate: ENUM(DATE_FORMATS) },
   { key: 'general.timeFormat', type: 'enum', category: 'general', description: 'Time display format.', default: '24h', enumOptions: TIME_FORMATS, validate: ENUM(TIME_FORMATS) },
-  { key: 'general.defaultLanguage', type: 'enum', category: 'general', description: 'Default application language.', default: 'en-ZA', enumOptions: LANGUAGES, validate: ENUM(LANGUAGES) },
   { key: 'general.defaultPageSize', type: 'number', category: 'general', description: 'Default rows per page in tables.', default: 25, validate: POS_INT(5, 200) },
   { key: 'general.defaultLandingPage', type: 'enum', category: 'general', description: 'Where to go after sign-in.', default: 'dashboard', enumOptions: LANDING_PAGES, validate: ENUM(LANDING_PAGES) },
 
@@ -177,21 +172,16 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.lowStockMultiplier', type: 'number', category: 'inventory', description: 'Multiplier applied to per-material reorder thresholds (e.g. 0.5 = warn at half the threshold; 2 = only at double).', default: 1, validate: NON_NEG(5) },
   { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'Default unit of measure suggested for new materials.', default: 'each', validate: isLength(1, 20) },
   { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Highlight materials at or below their reorder threshold.', default: true },
-  { key: 'inventory.enableNegativeStockPrevention', type: 'boolean', category: 'inventory', description: 'Prevent stock issues that would drive the balance below zero.', default: true },
-  { key: 'inventory.requireReasonForAdjustments', type: 'boolean', category: 'inventory', description: 'Require a reason code for every inventory adjustment.', default: true },
-  { key: 'inventory.requireApprovalForSensitiveChanges', type: 'boolean', category: 'inventory', description: 'Require approval before completing large transfers or write-offs.', default: false },
 
   // ── Purchase Orders ─────────────────────────────────────────────────────
   { key: 'purchaseOrders.requireApprovalBeforeProcessing', type: 'boolean', category: 'purchase_orders', description: 'When on, submitting a purchase order moves it to PENDING_APPROVAL; when off, submission auto-approves.', default: true },
   { key: 'purchaseOrders.allowCancellation', type: 'boolean', category: 'purchase_orders', description: 'Allow cancelling purchase orders before delivery.', default: true },
   { key: 'purchaseOrders.allowEditAfterApproval', type: 'boolean', category: 'purchase_orders', description: 'Allow editing a purchase order once it has been approved.', default: true },
-  { key: 'purchaseOrders.numberingFormat', type: 'enum', category: 'purchase_orders', description: 'Template used when generating PO numbers.', default: 'PO-YYYY-NNNN', enumOptions: PO_NUMBER_FORMATS, validate: ENUM(PO_NUMBER_FORMATS) },
 
   // ── Notifications ──────────────────────────────────────────────────────
   { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },
   { key: 'notifications.enableLowStockNotifications', type: 'boolean', category: 'notifications', description: 'Generate alerts when materials fall below their reorder threshold.', default: true },
   { key: 'notifications.enablePurchaseOrderNotifications', type: 'boolean', category: 'notifications', description: 'Alert when purchase orders need approval or reach a new state.', default: true },
-  { key: 'notifications.enableDeliveryNotifications', type: 'boolean', category: 'notifications', description: 'Alert when purchase orders are delivered.', default: true },
 
   // ── Appearance ────────────────────────────────────────────────────────
   { key: 'appearance.theme', type: 'enum', category: 'appearance', description: 'Default visual theme. Users may override this in their browser.', default: 'system', enumOptions: THEMES, validate: ENUM(THEMES) },
@@ -199,12 +189,6 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
 
   // ── Security ──────────────────────────────────────────────────────────
   { key: 'security.sessionTimeoutMinutes', type: 'number', category: 'security', description: 'Inactivity time before a session is signed out.', default: 60, validate: POS_INT(5, 720) },
-  { key: 'security.enableAuditLogging', type: 'boolean', category: 'security', description: 'Record administrative actions to the audit log.', default: true },
-  // Opt-in self-registration (ADR-005). Off by default: the signup
-  // page is wired to POST /auth/register, but the route refuses with
-  // REGISTRATION_DISABLED until an operator enables it. Newly
-  // self-registered accounts receive the least-privilege VIEWER role.
-  { key: 'security.allowSelfRegistration', type: 'boolean', category: 'security', description: 'Allow new users to create their own account via the sign-up page (assigned the VIEWER role).', default: false },
 ] as const;
 
 const CATALOG_BY_KEY: Map<string, SettingDefinition> = new Map(SETTING_CATALOG.map((s) => [s.key, s]));
@@ -275,8 +259,12 @@ function rowToValue(row: {
 }
 
 export const SettingsService = {
-  /** Idempotent: ensures every catalog key has a row. */
+  /**
+   * Idempotent: ensures every catalog key has a row, and deletes rows for
+   * keys that have been retired from the catalog.
+   */
   async ensureSeeded(): Promise<void> {
+    await prisma.setting.deleteMany({ where: { key: { notIn: SETTING_CATALOG.map((s) => s.key) } } });
     for (const def of SETTING_CATALOG) {
       await prisma.setting.upsert({
         where: { key: def.key },
@@ -298,14 +286,19 @@ export const SettingsService = {
   },
 
   async list(filter?: { category?: SettingCategoryLiteral }): Promise<SettingValue[]> {
+    // Only catalog keys: a retired setting's row may linger until the next seed.
     const rows = await prisma.setting.findMany({
-      where: filter?.category ? { category: filter.category } : {},
+      where: {
+        key: { in: SETTING_CATALOG.map((s) => s.key) },
+        ...(filter?.category ? { category: filter.category } : {}),
+      },
       orderBy: [{ category: 'asc' }, { key: 'asc' }],
     });
     return rows.map(rowToValue);
   },
 
   async get(key: string): Promise<SettingValue> {
+    if (!getDefinition(key)) throw Errors.notFound('Setting');
     const row = await prisma.setting.findUnique({ where: { key } });
     if (!row) throw Errors.notFound('Setting');
     return rowToValue(row);

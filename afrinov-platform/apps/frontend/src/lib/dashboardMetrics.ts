@@ -49,9 +49,9 @@ export function computeInventoryValueTrend(
   for (const m of sorted) {
     const day = m.postedAt.slice(0, 10);
     const cost = unitCostMap.get(m.materialId) ?? 0;
-    const valueImpact = Math.abs(m.quantity) * cost;
-    const isReceipt = m.type === 'RECEIPT' || m.type === 'TRANSFER_IN';
-    const delta = isReceipt ? valueImpact : -valueImpact;
+    // Signed: receipts and positive adjustments add, issues subtract, and a
+    // reversal cancels its original.
+    const delta = m.quantity * cost;
     dailyDeltas.set(day, (dailyDeltas.get(day) ?? 0) + delta);
   }
 
@@ -64,10 +64,8 @@ export function computeInventoryValueTrend(
   for (let i = sorted.length - 1; i >= 0; i--) {
     const m = sorted[i]!;
     const cost = unitCostMap.get(m.materialId) ?? 0;
-    const valueImpact = Math.abs(m.quantity) * cost;
-    const isReceipt = m.type === 'RECEIPT' || m.type === 'TRANSFER_IN';
-    // Undo the movement: reverse receipt (+→-), reverse issue (-→+)
-    historicalBaseline += isReceipt ? -valueImpact : valueImpact;
+    // Undo the movement.
+    historicalBaseline -= m.quantity * cost;
   }
 
   // Build trend points: for each day, compute the cumulative value

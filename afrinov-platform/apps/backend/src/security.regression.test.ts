@@ -123,6 +123,10 @@ describe('F-04: skipConfigValidation cannot be used to bypass secret validation'
     // servers with no JWT_SECRET must not produce the same signature for the
     // same payload.
     const signature = token.split('.')[2]!;
+    // The first buildServer() lazily imports the route modules, which loads
+    // the Prisma client, and Prisma copies apps/backend/.env into process.env.
+    // On a machine with a local .env that brings JWT_SECRET back; unset it again.
+    delete process.env.JWT_SECRET;
     const other = await buildServer({ skipConfigValidation: true });
     // The ephemeral secret is cached per process, so a token minted by one
     // instance still verifies in another within the same process. The point of

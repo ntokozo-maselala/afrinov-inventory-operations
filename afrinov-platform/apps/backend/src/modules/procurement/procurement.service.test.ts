@@ -160,6 +160,11 @@ function makePrisma(): unknown {
     // a setting persist across operations within the test.
     setting: {
       findUnique: async ({ where }: { where: { key: string } }) => db.settings.get(where.key) ?? null,
+      deleteMany: async ({ where }: { where: { key: { notIn: string[] } } }) => {
+        for (const key of Array.from(db.settings.keys())) {
+          if (!where.key.notIn.includes(key)) db.settings.delete(key);
+        }
+      },
       upsert: async ({ where, create }: { where: { key: string }; create: { value: unknown; type: string; category: string; description: string; isEditable: boolean; enumOptions: unknown }; update: unknown }) => {
         const existing = db.settings.get(where.key);
         if (existing) return existing;

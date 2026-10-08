@@ -31,7 +31,7 @@ export const PermissionCode = {
   ManageRacks: 'manage:racks',
   ManageProjects: 'manage:projects',
   ManageSettings: 'manage:settings',
-  UpdateInventoryTransaction: 'update:inventory_transaction',
+  ReverseInventoryTransaction: 'reverse:inventory_transaction',
 } as const;
 
 export type PermissionCodeValue = (typeof PermissionCode)[keyof typeof PermissionCode];
@@ -63,7 +63,7 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.ViewGoodsReceipt,
     PermissionCode.ViewReports,
     PermissionCode.ViewUsers,
-    PermissionCode.UpdateInventoryTransaction,
+    PermissionCode.ReverseInventoryTransaction,
   ],
   PROCUREMENT: [
     PermissionCode.CreateSupplier,

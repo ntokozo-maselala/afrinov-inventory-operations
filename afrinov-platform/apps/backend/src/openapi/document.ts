@@ -14,9 +14,9 @@ import { z, type ZodTypeAny } from 'zod';
 import { PermissionCode, type PermissionCodeValue } from '../shared/permissions.js';
 import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
-import { loginSchema, registerSchema } from '../modules/identity/auth.routes.js';
+import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema } from '../modules/inventory/inventory.routes.js';
+import { issueSchema, transferSchema, adjustmentSchema, reversalSchema } from '../modules/inventory/inventory.routes.js';
 import {
   createMaterialSchema,
   updateMaterialSchema,
@@ -120,13 +120,6 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/auth/login', tag: 'Auth', summary: 'Log in and receive a bearer token', public: true,
     description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute).',
     body: loginSchema, errors: [401, 429],
-  },
-  {
-    method: 'post', path: '/auth/register', tag: 'Auth', summary: 'Self-register a read-only (VIEWER) account', public: true,
-    description:
-      'Refused with 403 REGISTRATION_DISABLED unless an admin has turned on the ' +
-      '`security.allowSelfRegistration` setting (off by default). Rate limited like login.',
-    body: registerSchema, success: 201, errors: [403, 409, 429],
   },
   { method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user' },
 
@@ -234,9 +227,11 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
   },
   {
-    method: 'patch', path: '/inventory-transactions/:id', tag: 'Stock movements',
-    summary: 'Correct who issued a movement', description: 'Only the actor can change; the change is audited.',
-    permissions: [P.UpdateInventoryTransaction], body: z.object({ actorId: z.string().uuid() }), errors: [404],
+    method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',
+    summary: 'Reverse a movement',
+    description: 'Posts an opposite entry linked to the original; the ledger is never edited. Both legs of a transfer are reversed together. '
+      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal or a goods-receipt receipt, and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
+    permissions: [P.ReverseInventoryTransaction], body: reversalSchema, success: 201, errors: [404, 409, 422],
   },
 
   // Projects

@@ -55,6 +55,13 @@ function makePrisma(): unknown {
         if (where?.category) rows = rows.filter((r) => r.category === where.category);
         return rows;
       },
+      deleteMany: async ({ where }: { where: { key: { notIn: string[] } } }) => {
+        let count = 0;
+        for (const key of Array.from(db.settings.keys())) {
+          if (!where.key.notIn.includes(key)) { db.settings.delete(key); count += 1; }
+        }
+        return { count };
+      },
       upsert: async ({ where, create }: { where: { key: string }; create: Omit<SettingRow, 'updatedAt' | 'updatedById'> }) => {
         const existing = db.settings.get(where.key);
         if (existing) return existing;
@@ -108,6 +115,22 @@ describe('SettingsService', () => {
     expect(db.settings.size).toBe(SETTING_CATALOG.length);
     const company = db.settings.get('general.companyName');
     expect(company?.value).toBe('Afrinov');
+  });
+
+  it('deletes and hides settings that were retired from the catalog', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    const retired: SettingRow = {
+      key: 'inventory.enableNegativeStockPrevention', value: false, type: 'boolean', category: 'inventory',
+      description: 'Retired', isEditable: true, enumOptions: null, updatedAt: new Date(), updatedById: null,
+    };
+    db.settings.set(retired.key, retired);
+
+    // Before the next seed the row still exists, but nothing exposes it.
+    expect((await SettingsService.list()).map((s) => s.key)).not.toContain(retired.key);
+    await expect(SettingsService.get(retired.key)).rejects.toThrow(/not found/);
+
+    await SettingsService.ensureSeeded();
+    expect(db.settings.has(retired.key)).toBe(false);
   });
 
   it('lists settings sorted by category+key', async () => {

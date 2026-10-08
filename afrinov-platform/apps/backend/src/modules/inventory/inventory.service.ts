@@ -58,10 +58,10 @@ async function checkLocationActive(locationId: string, tx: Prisma.TransactionCli
   if (!l.active) throw Errors.validation('Location is inactive');
 }
 
-export interface UpdateActorInput {
+export interface ReverseInput {
   transactionId: string;
-  newActorId: string;
-  changedBy: string;
+  reason: string;
+  actorId: string;
 }
 
 export const InventoryService = {
@@ -83,6 +83,7 @@ export const InventoryService = {
         material: true,
         location: true,
         actor: { select: { id: true, name: true, email: true } },
+        reversedBy: { select: { id: true } },
       },
       orderBy: { postedAt: 'desc' },
       take,
@@ -105,102 +106,114 @@ export const InventoryService = {
       projectNumber: t.projectNumber,
       referenceType: t.referenceType,
       referenceId: t.referenceId,
+      reversesId: t.reversesId,
+      reversedById: t.reversedBy?.id ?? null,
     }));
   },
-  async updateActor(input: UpdateActorInput): Promise<{
-    id: string;
-    postedAt: string;
-    type: string;
-    materialId: string;
-    materialSku: string;
-    materialName: string;
-    locationId: string;
-    locationName: string;
-    quantity: string;
-    actorId: string;
-    actorName: string;
-    recipientId: string | null;
-    reasonCode: string | null;
-    reasonNote: string | null;
-    projectNumber: string | null;
-    referenceType: string | null;
-    referenceId: string | null;
-  }> {
-    const existing = await prisma.inventoryTransaction.findUnique({
-      where: { id: input.transactionId },
-      include: { actor: { select: { id: true, name: true } }, material: true, location: true },
-    });
-    if (!existing) throw Errors.notFound('InventoryTransaction');
+  /**
+   * Reverse a movement by posting an opposite entry that points at it. The
+   * ledger has no update path, so this is the only way to correct a mistake.
+   * A reversal keeps the original's type with the opposite sign, so balances
+   * and signed totals net to zero. Both legs of a transfer are reversed
+   * together. A transaction can be reversed at most once (unique reverses_id).
+   */
+  async reverse(input: ReverseInput): Promise<{ reversalIds: string[] }> {
+    const reason = input.reason.trim();
+    if (!reason) throw Errors.validation('A reason is required to reverse a movement');
 
-    if (existing.actorId === input.newActorId) {
-      return {
-        id: existing.id,
-        postedAt: existing.postedAt.toISOString(),
-        type: existing.type,
-        materialId: existing.materialId,
-        materialSku: existing.material.sku,
-        materialName: existing.material.name,
-        locationId: existing.locationId,
-        locationName: existing.location.name,
-        quantity: existing.quantity.toString(),
-        actorId: existing.actorId,
-        actorName: existing.actor.name,
-        recipientId: existing.recipientId,
-        reasonCode: existing.reasonCode,
-        reasonNote: existing.reasonNote,
-        projectNumber: existing.projectNumber,
-        referenceType: existing.referenceType,
-        referenceId: existing.referenceId,
-      };
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const original = await tx.inventoryTransaction.findUnique({
+          where: { id: input.transactionId },
+          include: { reversedBy: { select: { id: true } } },
+        });
+        if (!original) throw Errors.notFound('InventoryTransaction');
+        if (original.reversesId) {
+          throw Errors.invalidState('A reversal cannot itself be reversed. Record the movement again instead.');
+        }
+        if (original.referenceType === 'GoodsReceipt') {
+          throw Errors.invalidState('Stock received against a goods receipt cannot be reversed here.');
+        }
+
+        const legs = [original];
+        if (original.pairedWithId) {
+          const partner = await tx.inventoryTransaction.findUnique({
+            where: { id: original.pairedWithId },
+            include: { reversedBy: { select: { id: true } } },
+          });
+          if (!partner) throw Errors.notFound('InventoryTransaction');
+          // Keep the outgoing leg first so the reversal legs pair the same way.
+          if (partner.type === InventoryTransactionType.TRANSFER_OUT) legs.unshift(partner);
+          else legs.push(partner);
+        }
+        if (legs.some((leg) => leg.reversedBy)) {
+          throw Errors.conflict('This movement has already been reversed.');
+        }
+
+        // A reversal must not take any balance below zero.
+        for (const leg of legs) {
+          if (!leg.quantity.isPositive()) continue;
+          const balance = await getCurrentBalance(leg.materialId, leg.locationId, tx);
+          if (balance.lt(leg.quantity)) {
+            throw Errors.insufficientBalance(
+              `Cannot reverse: only ${balance.toString()} of the ${leg.quantity.toString()} units are still in stock.`,
+              { materialId: leg.materialId, locationId: leg.locationId, requested: leg.quantity.toString(), available: balance.toString() },
+            );
+          }
+        }
+
+        const reversals = [];
+        for (const leg of legs) {
+          reversals.push(
+            await tx.inventoryTransaction.create({
+              data: {
+                materialId: leg.materialId,
+                locationId: leg.locationId,
+                type: leg.type,
+                quantity: leg.quantity.negated(),
+                actorId: input.actorId,
+                recipientId: leg.recipientId,
+                projectNumber: leg.projectNumber,
+                reasonCode: leg.reasonCode,
+                reasonNote: reason,
+                referenceType: leg.referenceType,
+                referenceId: leg.referenceId,
+                reversesId: leg.id,
+              },
+            }),
+          );
+        }
+        // Tie the two reversal legs of a transfer together, as transfer() does.
+        if (reversals.length === 2) {
+          const [out, inn] = reversals as [typeof reversals[number], typeof reversals[number]];
+          await tx.inventoryTransaction.update({ where: { id: inn.id }, data: { pairedWithId: out.id } });
+          await tx.inventoryTransaction.update({ where: { id: out.id }, data: { pairedWithId: inn.id } });
+        }
+
+        for (const leg of legs) {
+          await recomputeBalance(leg.materialId, leg.locationId, tx);
+        }
+
+        const reversalIds = reversals.map((r) => r.id);
+        await tx.auditLogEntry.create({
+          data: {
+            actorId: input.actorId,
+            action: 'REVERSE',
+            entityType: 'InventoryTransaction',
+            entityId: original.id,
+            after: { reversalIds, reason } as Prisma.InputJsonValue,
+          },
+        });
+
+        return { reversalIds };
+      });
+    } catch (err) {
+      // Two requests reversing the same movement at once: the unique index wins.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw Errors.conflict('This movement has already been reversed.');
+      }
+      throw err;
     }
-
-    const newActor = await prisma.user.findUnique({
-      where: { id: input.newActorId },
-      select: { id: true, name: true, active: true },
-    });
-    if (!newActor) throw Errors.notFound('User');
-    if (!newActor.active) throw Errors.validation('Selected user is inactive');
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const trx = await tx.inventoryTransaction.update({
-        where: { id: input.transactionId },
-        data: { actorId: input.newActorId },
-        include: { actor: { select: { id: true, name: true } }, material: true, location: true },
-      });
-
-      await tx.auditLogEntry.create({
-        data: {
-          actorId: input.changedBy,
-          action: 'UPDATE_ACTOR',
-          entityType: 'InventoryTransaction',
-          entityId: input.transactionId,
-          before: { actorId: existing.actorId, actorName: existing.actor.name } as Prisma.InputJsonValue,
-          after: { actorId: trx.actorId, actorName: trx.actor.name } as Prisma.InputJsonValue,
-        },
-      });
-
-      return trx;
-    });
-
-    return {
-      id: updated.id,
-      postedAt: updated.postedAt.toISOString(),
-      type: updated.type,
-      materialId: updated.materialId,
-      materialSku: updated.material.sku,
-      materialName: updated.material.name,
-      locationId: updated.locationId,
-      locationName: updated.location.name,
-      quantity: updated.quantity.toString(),
-      actorId: updated.actorId,
-      actorName: updated.actor.name,
-      recipientId: updated.recipientId,
-      reasonCode: updated.reasonCode,
-      reasonNote: updated.reasonNote,
-      projectNumber: updated.projectNumber,
-      referenceType: updated.referenceType,
-      referenceId: updated.referenceId,
-    };
   },
 
   async issue(input: IssueInput): Promise<{ transactionId: string }> {
@@ -208,18 +221,13 @@ export const InventoryService = {
     if (!gtZero(qty)) throw Errors.validation('Issue quantity must be positive');
 
     return prisma.$transaction(async (tx) => {
-      // Read the toggle inside the transaction (K13): the
-      // invariant must hold for the whole operation, not just at
-      // validation time. A toggle flipped between a pre-transaction
-      // read and the commit could otherwise let a negative-balance
-      // write through.
-      const preventNegative = await SettingsService.getValue<boolean>('inventory.enableNegativeStockPrevention', tx);
-
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
 
+      // Stock can never go below zero. This is a fixed rule, not a setting:
+      // a negative balance means the ledger no longer matches the shelf.
       const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
-      if (preventNegative && balance.lt(qty)) {
+      if (balance.lt(qty)) {
         throw Errors.insufficientBalance(
           `Cannot issue ${qty.toString()} units: only ${balance.toString()} available.`,
           { materialId: input.materialId, locationId: input.locationId, requested: qty.toString(), available: balance.toString() },
@@ -326,13 +334,11 @@ export const InventoryService = {
     if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
 
     return prisma.$transaction(async (tx) => {
-      // See issue(): the toggle is read inside the transaction (K13).
-      const preventNegative = await SettingsService.getValue<boolean>('inventory.enableNegativeStockPrevention', tx);
-
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
 
-      if (preventNegative && qty.isNegative()) {
+      // See issue(): stock can never go below zero.
+      if (qty.isNegative()) {
         const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
         if (balance.lt(qty.negated())) {
           throw Errors.insufficientBalance(
