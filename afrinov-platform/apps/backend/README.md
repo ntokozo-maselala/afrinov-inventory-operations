@@ -8,7 +8,7 @@ Stack: Node.js 20, Fastify 5, TypeScript, Prisma 5, PostgreSQL 16, Zod, Vitest.
 
 ## Running it locally
 
-Requirements: Node.js 20 or later, npm, and Docker (for PostgreSQL).
+Requirements: Node.js 22 or later (24 recommended; the test tools need 22+), npm, and Docker (for PostgreSQL).
 
 Commands below use Git Bash / macOS / Linux syntax. In PowerShell, set a
 variable for one command with `$env:NAME = "value"; <command>`.
