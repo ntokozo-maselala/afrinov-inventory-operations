@@ -57,6 +57,7 @@ vi.mock('../../shared/db.js', () => ({
   get prisma() { return makePrisma(); },
 }));
 
+/** Build the in-memory Prisma fake for purchase-order, inventory, audit, and settings tests. */
 function makePrisma(): unknown {
   return {
     supplier: {
@@ -234,6 +235,7 @@ describe('PurchaseOrderService lifecycle', () => {
     await expect(PurchaseOrderService.approve(po.id, 'user-2')).rejects.toThrow(/approve/i);
   });
 
+  /** Create, submit, and approve a single-line order with the requested test quantity. */
   async function approvedPO(orderedQty = 7) {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty }] }, 'user-1');

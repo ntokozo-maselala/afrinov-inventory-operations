@@ -21,11 +21,14 @@ interface StockRow {
 
 interface Line { key: number; stockKey: string; quantity: string }
 
+/** Identify a stock balance by its material and location IDs. */
 const stockKey = (r: Pick<StockRow, 'materialId' | 'locationId'>) => `${r.materialId}|${r.locationId}`;
 
 let nextKey = 1;
+/** Create a blank issue line with a unique key for React rendering and updates. */
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
 
+/** Render a multi-line stock issue form with recipient, project, and combined-stock validation. */
 export function IssueStock() {
   const stock = useApi<StockRow[]>('/reports/current-stock');
   const { recipients, projects, loading } = useIssueOptions();
@@ -51,10 +54,15 @@ export function IssueStock() {
   }
   const overIssued = new Set([...requested].filter(([k, q]) => q > Number(byKey.get(k)?.quantity ?? 0)).map(([k]) => k));
 
+  /** Merge changes into the issue line identified by its stable key. */
   function update(key: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
+  /**
+   * Validate filled lines and stock totals, then submit one issue request.
+   * On success, reset lines and project and reload stock while retaining the recipient.
+   */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);

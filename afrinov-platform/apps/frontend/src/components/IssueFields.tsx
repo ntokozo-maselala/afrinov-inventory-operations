@@ -36,6 +36,7 @@ export function useIssueOptions(): { recipients: RecipientOption[]; projects: Pr
   return { recipients, projects, loading };
 }
 
+/** Render the required recipient picker, grouping supplied options by recipient type. */
 export function RecipientSelect({ id, value, onChange, recipients, invalid, disabled }: {
   id: string;
   value: string;
@@ -61,6 +62,7 @@ export function RecipientSelect({ id, value, onChange, recipients, invalid, disa
   );
 }
 
+/** Render an optional project picker whose values are canonical project numbers. */
 export function ProjectSelect({ id, value, onChange, projects, disabled }: {
   id: string;
   value: string;

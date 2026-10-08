@@ -9,6 +9,7 @@ const db = { recipients: new Map<string, Recipient>(), audit: [] as AuditRow[] }
 let seq = 0;
 
 type NameFilter = { equals?: string; contains?: string; mode?: string };
+/** Match a fake recipient name using case-insensitive equality or substring filters. */
 function nameMatches(name: string, f: NameFilter): boolean {
   const n = name.toLowerCase();
   if (f.equals !== undefined) return n === f.equals.toLowerCase();
@@ -16,6 +17,7 @@ function nameMatches(name: string, f: NameFilter): boolean {
   return true;
 }
 
+/** Build the in-memory recipient and audit-log fake used by service tests. */
 function makePrisma(): unknown {
   const tx = {
     recipient: {

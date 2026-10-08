@@ -246,6 +246,7 @@ vi.mock('../../shared/events.js', () => ({
 const { InventoryService } = await import('./inventory.service.js');
 
 // Most tests issue one line; this keeps them short. 'user-3' is an active recipient.
+/** Issue one test line with a default recipient and return its transaction ID. */
 async function issueOne(input: {
   materialId: string; locationId: string; quantity: number | string; actorId: string; recipientId?: string; projectNumber?: string;
 }): Promise<{ transactionId: string }> {
@@ -392,6 +393,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.adjust({
         materialId: 'mat-1', locationId: 'loc-1', quantity: '0.125', reasonCode: 'COUNT_VARIANCE', actorId: 'u',
       });
+      /** Remove stock using the operation under test to exercise the shared balance constraint. */
       const take = (quantity: string) => operation === 'issue'
         ? issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity, actorId: 'u' })
         : InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: `-${quantity}`, reasonCode: 'LOSS', actorId: 'u' });
@@ -439,6 +441,7 @@ describe('InventoryService — ADR-002 invariants', () => {
 
   // ── Issuing several items at once ─────────────────────────────────────
   describe('issue with several lines', () => {
+    /** Add test stock at the selected location through a count-variance adjustment. */
     async function stock(qty: number, locationId = 'loc-1') {
       await InventoryService.adjust({ materialId: 'mat-1', locationId, quantity: qty, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
     }

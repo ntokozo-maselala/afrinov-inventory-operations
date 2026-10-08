@@ -38,7 +38,7 @@ const TYPE_TONE: Record<RecipientType, 'brand' | 'info' | 'warning' | 'neutral'>
   CONTRACTOR: 'warning',
 };
 
-// The people and places stock is issued to ("Issued To").
+/** List and filter stock recipients, exposing management controls to permitted users. */
 export function Recipients() {
   const recipients = useApi<Recipient[]>('/recipients');
   const { hasPermission } = usePermissions();
@@ -57,6 +57,7 @@ export function Recipients() {
     return !needle || r.name.toLowerCase().includes(needle);
   });
 
+  /** Persist a recipient’s active state, then reload the list or show the API error. */
   async function setActive(r: Recipient, active: boolean) {
     try {
       await api.patch(`/recipients/${r.id}`, { active });
@@ -131,6 +132,7 @@ export function Recipients() {
   );
 }
 
+/** Build recipient table columns with optional edit and activation controls. */
 function columns({ canManage, onEdit, onSetActive }: {
   canManage: boolean;
   onEdit: (r: Recipient) => void;
@@ -155,6 +157,7 @@ function columns({ canManage, onEdit, onSetActive }: {
   ];
 }
 
+/** Render a recipient create/edit form with name, type, notes, and API error feedback. */
 function RecipientForm({ initial, onCancel, onSaved }: {
   initial?: Recipient;
   onCancel: () => void;
@@ -166,6 +169,7 @@ function RecipientForm({ initial, onCancel, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** Validate the name, create or patch the recipient, and report the saved name to the parent. */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);

@@ -60,6 +60,7 @@ interface State {
 
 let state: State = freshState();
 
+/** Create fresh demo state from seed data, including the stock-issue recipient list. */
 function freshState(): State {
   return {
     materials: [...SEED_MATERIALS],
@@ -147,7 +148,7 @@ export function createMockApi(): MockApi {
   };
 }
 
-// Tiny path-router. Returns the response payload or throws an ApiError.
+/** Dispatch a mock API request by method and path, returning a payload or throwing an ApiError. */
 function route(method: string, path: string, body?: unknown): unknown {
   const p = path.split('?')[0] ?? '';
   const qs = parseQuery(path);
@@ -1139,6 +1140,10 @@ interface IssueBody {
   projectNumber?: string;
   lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
 }
+/**
+ * Validate recipient, project, and combined stock requirements before mutating mock state.
+ * Append one issue movement per line and return their transaction IDs.
+ */
 function handleIssue(b: IssueBody): { transactionIds: string[] } {
   if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the stock is issued to');
   const lines = b.lines ?? [];
@@ -1390,6 +1395,7 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
   return rows.sort((a, b) => a.materialSku.localeCompare(b.materialSku) || a.locationName.localeCompare(b.locationName));
 }
 
+/** Attach material, location, actor, recipient, and reversal details to a mock ledger entry. */
 function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
   const m = findMaterial(t.materialId);
   const l = findLocation(t.locationId);

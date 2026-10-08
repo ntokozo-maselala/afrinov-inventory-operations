@@ -77,6 +77,7 @@ type ActionDraft =
   | { kind: 'close'; draft: ReasonDraft }
   | { kind: 'cancel'; draft: ReasonDraft };
 
+/** Return a display label for the purchase-order lifecycle status. */
 function statusLabel(s: POStatus): string {
   return ({
     DRAFT: 'Draft',
@@ -89,14 +90,21 @@ function statusLabel(s: POStatus): string {
   } as Record<string, string>)[s] ?? s;
 }
 
+/** Allow the cancel control for draft, pending, and approved orders. */
 function isCancellable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
+/** Allow the edit control while the order is draft, pending, or approved. */
 function isEditable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
+/** Allow the approval control only while the order awaits approval. */
 function isApprovable(s: POStatus): boolean { return s === 'PENDING_APPROVAL'; }
+/** Allow receiving outstanding quantities on approved or partly received orders. */
 function isReceivable(s: POStatus): boolean { return s === 'APPROVED' || s === 'PARTIALLY_RECEIVED'; }
+/** Allow closing orders that are partly or fully received. */
 function isClosable(s: POStatus): boolean { return s === 'PARTIALLY_RECEIVED' || s === 'RECEIVED'; }
+/** Report whether any order line has received less than its ordered quantity. */
 function isShort(po: PO): boolean { return po.lines.some((l) => Number(l.receivedQty) < Number(l.orderedQty)); }
 
 
+/** Display an order’s lines, receipt history, lifecycle, and available actions. */
 export function PurchaseOrderDetail() {
   const { id } = useParams<{ id: string }>();
   const path = id ? `/purchase-orders/${id}` : null;
@@ -109,6 +117,7 @@ export function PurchaseOrderDetail() {
 
   function reload() { po.reload(); history.reload(); }
 
+  /** Validate and submit the selected lifecycle action, then refresh order and history data. */
   async function performAction() {
     if (!po.data || !draft) return;
     setBusy(true);
@@ -145,6 +154,7 @@ export function PurchaseOrderDetail() {
     return null;
   }, [fresh]);
 
+  /** Open approval confirmation or initialize an empty receive-action draft. */
   function openPrimary(kind: 'approve' | 'receive') {
     setDraft(kind === 'approve' ? { kind } : { kind, draft: { locationId: '', deliveryNotes: '' } });
   }
@@ -264,6 +274,7 @@ export function PurchaseOrderDetail() {
 }
 
 // ── Lifecycle tracker ────────────────────────────────────────────────────
+/** Show progress through the purchase-order lifecycle or its cancelled terminal state. */
 function LifecycleTracker({ status }: { status: POStatus }) {
   if (status === 'CANCELLED') {
     return (
@@ -335,6 +346,7 @@ function describeEntry(e: HistoryEntry): string {
   return labelForAction(e.action);
 }
 
+/** Label purchase-order audit actions, including legacy shipping and delivery events. */
 function labelForAction(action: string): string {
   return ({
     CREATE: 'Purchase order created',
@@ -402,6 +414,7 @@ function EditDrawer({ po, onClose, onSaved, onError }: {
 }
 
 // ── Action dialog (lifted state) ─────────────────────────────────────────
+/** Collect approval, receiving, closing, or cancellation inputs in a controlled dialog. */
 function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   draft: ActionDraft;
   po: PO | null;
@@ -434,6 +447,7 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
 
   if (draft.kind === 'receive') {
     const d = draft.draft;
+    /** Merge edited fields into the current action draft and notify the parent. */
     const upd = (patch: Partial<ReceiveDraft>) => onChangeDraft({ kind: 'receive', draft: { ...d, ...patch } });
     const ready = d.locationId.trim().length > 0;
     return (
@@ -482,6 +496,7 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
 
   // cancel
   const d = draft.draft;
+  /** Merge edited fields into the current action draft and notify the parent. */
   const upd = (patch: Partial<ReasonDraft>) => onChangeDraft({ kind: 'cancel', draft: { ...d, ...patch } });
   const ready = d.reason.trim().length > 0;
   return (
@@ -500,11 +515,13 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   );
 }
 
+/** Choose the icon for the primary approval or receiving action. */
 function primaryIcon(kind: 'approve' | 'receive'): React.ReactNode {
   if (kind === 'approve') return <Icon.Check size={14} />;
   return <Icon.Box size={14} />;
 }
 
+/** Return the past-tense action label used in purchase-order notifications. */
 function kindLabel(kind: ActionDraft['kind']): string {
   return ({ approve: 'approved', receive: 'received', close: 'closed', cancel: 'cancelled' } as const)[kind];
 }

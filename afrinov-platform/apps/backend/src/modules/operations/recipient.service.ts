@@ -21,12 +21,14 @@ export interface UpdateRecipientInput {
   active?: boolean;
 }
 
+/** Trim and collapse whitespace in a recipient name, rejecting an empty result. */
 function cleanName(name: string): string {
   const trimmed = name.trim().replace(/\s+/g, ' ');
   if (!trimmed) throw Errors.validation('Name is required');
   return trimmed;
 }
 
+/** Reject a case-insensitive name collision, optionally excluding the recipient being edited. */
 async function assertNameFree(name: string, exceptId?: string): Promise<void> {
   const clash = await prisma.recipient.findFirst({
     where: { name: { equals: name, mode: 'insensitive' }, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
@@ -34,7 +36,7 @@ async function assertNameFree(name: string, exceptId?: string): Promise<void> {
   if (clash) throw Errors.conflict(`A recipient named "${clash.name}" already exists`);
 }
 
-// Two requests creating the same name at once: the unique index wins.
+/** Translate a Prisma unique-constraint failure into a name conflict; rethrow other errors. */
 function rethrowNameClash(err: unknown, name: string): never {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
     throw Errors.conflict(`A recipient named "${name}" already exists`);
@@ -43,6 +45,7 @@ function rethrowNameClash(err: unknown, name: string): never {
 }
 
 export const RecipientService = {
+  /** List recipients by optional name, type, and active filters, with active names first. */
   async list(filter: { q?: string; type?: RecipientType; active?: boolean } = {}) {
     const where: Prisma.RecipientWhereInput = {};
     if (filter.type) where.type = filter.type;
@@ -51,12 +54,14 @@ export const RecipientService = {
     return prisma.recipient.findMany({ where, orderBy: [{ active: 'desc' }, { name: 'asc' }] });
   },
 
+  /** Return the recipient by ID, or throw a not-found error. */
   async getById(id: string) {
     const recipient = await prisma.recipient.findUnique({ where: { id } });
     if (!recipient) throw Errors.notFound('Recipient');
     return recipient;
   },
 
+  /** Create a recipient with a normalized, unique name and its audit entry atomically. */
   async create(input: CreateRecipientInput, actorId: string) {
     const name = cleanName(input.name);
     await assertNameFree(name);
@@ -81,6 +86,10 @@ export const RecipientService = {
     }
   },
 
+  /**
+   * Update supplied recipient fields and audit before/after values in one transaction.
+   * Deactivation preserves the recipient record for existing issue history.
+   */
   async update(input: UpdateRecipientInput, actorId: string) {
     const before = await prisma.recipient.findUnique({ where: { id: input.id } });
     if (!before) throw Errors.notFound('Recipient');

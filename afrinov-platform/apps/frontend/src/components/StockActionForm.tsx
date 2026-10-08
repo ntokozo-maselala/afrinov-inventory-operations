@@ -31,6 +31,7 @@ const REASONS = [
   { value: 'OTHER', label: 'Other' },
 ];
 
+/** Render and submit an issue, transfer, or adjustment for the selected stock row. */
 export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props) {
   const [quantity, setQuantity] = useState('');
   const [project, setProject] = useState('');
@@ -47,8 +48,10 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
     api.get<Location[]>('/locations').then(setLocations).catch(() => undefined);
   }, []);
 
+  /** Clear quantity, issue attribution, notes, and validation after a successful operation. */
   function reset() { setQuantity(''); setProject(''); setRecipientId(''); setNote(''); setValidation(null); }
 
+  /** Validate the selected stock action, post its payload, and notify the parent of the outcome. */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setValidation(null);

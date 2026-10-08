@@ -28,6 +28,7 @@ const MOVEMENT_TYPE_CONFIG: Record<string, { tone: ActivityEntry['tone']; icon: 
   ADJUSTMENT: { tone: 'warning', icon: <Icon.Alert size={10} />, label: 'Stock adjusted' },
 };
 
+/** Merge stock movements and purchase-order summaries into a recent activity list. */
 export function RecentActivity({
   movements,
   purchaseOrders,

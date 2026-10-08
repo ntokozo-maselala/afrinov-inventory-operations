@@ -39,6 +39,7 @@ const STATUS_OPTIONS = [
   { value: 'out', label: 'Out of stock' },
 ];
 
+/** Show filtered stock balances with role-gated stock creation and issue actions. */
 export function Stock() {
   const stock = useApi<StockRow[]>('/reports/current-stock');
   const [q, setQ] = useState('');

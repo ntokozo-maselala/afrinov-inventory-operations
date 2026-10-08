@@ -52,6 +52,7 @@ export interface GoodsReceiptPostInput {
   actorId: string;
 }
 
+/** Return the material within the transaction, rejecting missing or inactive records. */
 async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
@@ -59,12 +60,14 @@ async function checkMaterialActive(materialId: string, tx: Prisma.TransactionCli
   return m;
 }
 
+/** Reject a project number that does not identify an active project in the transaction. */
 async function checkProjectActive(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
   const p = await tx.project.findUnique({ where: { projectNumber } });
   if (!p) throw Errors.notFound('Project');
   if (!p.active) throw Errors.validation('Project is inactive');
 }
 
+/** Reject a recipient ID that does not identify an active recipient in the transaction. */
 async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
   const r = await tx.recipient.findUnique({ where: { id: recipientId } });
   if (!r) throw Errors.notFound('Recipient');
@@ -84,6 +87,7 @@ export interface ReverseInput {
 }
 
 export const InventoryService = {
+   /** Return filtered movements newest first, including actor, recipient, and reversal details. */
    async queryHistory(filter: { materialId?: string; type?: string; from?: string; to?: string; projectNumber?: string; limit?: number }) {
     const where: Prisma.InventoryTransactionWhereInput = {};
     if (filter.materialId) where.materialId = filter.materialId;
@@ -238,6 +242,11 @@ export const InventoryService = {
     }
   },
 
+  /**
+   * Issue all lines to an active recipient in one database transaction.
+   * Repeated material/location pairs are checked as a combined quantity before posting;
+   * any supplied project must be active. Returns the created ledger transaction IDs.
+   */
   async issue(input: IssueInput): Promise<{ transactionIds: string[] }> {
     if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');

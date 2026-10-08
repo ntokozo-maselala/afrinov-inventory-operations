@@ -35,6 +35,7 @@ function severityIcon(severity: 'critical' | 'warning' | 'info') {
   return <Icon.Info size={16} aria-hidden="true" />;
 }
 
+/** Show up to six stock and purchase-order alerts, ordered by severity. */
 export function AttentionRequired({ report, loading, lowStockItems, purchaseOrders }: AttentionRequiredProps) {
   const items: AttentionItem[] = [];
 

@@ -175,6 +175,7 @@ export function computePOSupplierDistribution(
   return Array.from(supplierMap.values()).sort((a, b) => b.totalValue - a.totalValue);
 }
 
+/** Summarize order counts and values for dashboard cards, formatting amounts in the given currency. */
 export function computePOKpis(purchaseOrders: PurchaseOrderSummary[], currency = DEFAULT_CURRENCY): POKpi[] {
   if (!purchaseOrders || purchaseOrders.length === 0) {
     return [
@@ -256,6 +257,7 @@ function computeTotalPOValue(purchaseOrders: PurchaseOrderSummary[]): number {
   return purchaseOrders.reduce((acc, po) => acc + computePOValue(po), 0);
 }
 
+/** Return a readable purchase-order status label, preserving unknown status values. */
 function poStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     DRAFT: 'Draft',

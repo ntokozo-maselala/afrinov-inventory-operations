@@ -20,6 +20,7 @@ export interface NavGroup {
   permissions?: string[];
 }
 
+/** Build navigation groups filtered by enabled features and the current user’s permissions. */
 export function useNavGroups(): NavGroup[] {
   const { hasPermission } = usePermissions();
 

@@ -18,6 +18,7 @@ const STOCK = [
   { materialId: 'm-3', materialSku: 'EMPTY', materialName: 'Out of stock item', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '0' },
 ];
 
+/** Render the issue page with router/toast providers and stock, recipient, and project fixtures. */
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/reports/current-stock')) return STOCK;
@@ -28,6 +29,7 @@ function renderPage() {
   render(<MemoryRouter><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
 }
 
+/** Wait for recipient and stock options to finish loading before interacting with the issue form. */
 async function ready() {
   await waitFor(() => expect(screen.getByRole('option', { name: /Sabelo/ })).toBeInTheDocument());
   await waitFor(() => expect(screen.getByRole('option', { name: /Cutting disc/ })).toBeInTheDocument());

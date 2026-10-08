@@ -42,6 +42,7 @@ export interface BuildServerOptions {
   onRoute?: (route: RouteOptions) => void;
 }
 
+/** Build the Fastify API with security plugins, authentication, error handling, and routes. */
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
   const config = opts.skipConfigValidation ? loadConfigUnsafe() : loadConfigOrThrow();
 

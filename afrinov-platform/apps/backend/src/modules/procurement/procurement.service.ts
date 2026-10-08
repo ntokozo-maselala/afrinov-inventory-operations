@@ -117,6 +117,7 @@ export const PurchaseOrderService = {
     });
   },
 
+  /** Return an order with its supplier, lines, receipts, and lifecycle actors, or throw if absent. */
   async getById(id: string) {
     const po = await prisma.purchaseOrder.findUnique({
       where: { id },
@@ -197,6 +198,10 @@ export const PurchaseOrderService = {
     });
   },
 
+  /**
+   * Submit a nonempty draft and audit the transition, auto-approving when settings allow it.
+   * Reject a concurrent status change through the transactional update guard.
+   */
   async submit(id: string, actorId: string) {
     const requireApproval = await SettingsService.getValue<boolean>('purchaseOrders.requireApprovalBeforeProcessing');
     return prisma.$transaction(async (tx) => {
@@ -251,6 +256,10 @@ export const PurchaseOrderService = {
     });
   },
 
+  /**
+   * Approve a pending order and record its approver and audit entry atomically.
+   * Reject orders in other states or a concurrent status change.
+   */
   async approve(id: string, actorId: string) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({ where: { id } });
@@ -281,11 +290,12 @@ export const PurchaseOrderService = {
     });
   },
 
-  // Receive everything still outstanding: every line's shortfall becomes a
-  // RECEIPT inventory transaction at the chosen location, and the order is
-  // RECEIVED. Partial deliveries go through goods receipts instead. Calling
-  // it twice is rejected by the status guard (ADR-002: the ledger stays the
-  // source of truth).
+  /**
+   * Receive every outstanding line into an active location and mark the order RECEIVED.
+   * Write receipt ledger entries, balances, and audit data in one transaction;
+   * only APPROVED or PARTIALLY_RECEIVED orders are eligible.
+   * Partial deliveries use goods receipts; the status guard rejects repeat receiving.
+   */
   async receive(input: ReceiveInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({
@@ -355,6 +365,10 @@ export const PurchaseOrderService = {
     });
   },
 
+  /**
+   * Cancel a draft, pending, or approved order with a reason and audit entry.
+   * Reject cancellation when disabled in settings or when the status guard fails.
+   */
   async cancel(input: CancelInput, actorId: string) {
     const allowCancellation = await SettingsService.getValue<boolean>('purchaseOrders.allowCancellation');
     if (!allowCancellation) {
@@ -391,8 +405,10 @@ export const PurchaseOrderService = {
     });
   },
 
-  // Close an order that will receive nothing more. Closing short — some lines
-  // not fully received — needs a reason, so the shortfall is explained.
+  /**
+   * Close a partly or fully received order and audit the transition atomically.
+   * Require a reason when any line remains short and reject concurrent status changes.
+   */
   async close(input: CloseInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
@@ -439,6 +455,7 @@ export const PurchaseOrderService = {
   },
 };
 
+/** Check whether the status allows editing under the post-approval editing setting. */
 function isEditable(status: PurchaseOrderStatus, allowEditAfterApproval = true): boolean {
   if (allowEditAfterApproval) {
     return status === 'DRAFT' || status === 'PENDING_APPROVAL' || status === 'APPROVED';

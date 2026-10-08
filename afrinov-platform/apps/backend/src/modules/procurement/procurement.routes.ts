@@ -93,6 +93,7 @@ export async function supplierRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
+/** Register authenticated supplier, purchase-order lifecycle, and goods-receipt routes. */
 export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.get('/purchase-orders', { preHandler: [app.authenticate] }, async (req, reply) => {
     // The list exposes PO numbers, statuses, and line quantities — the same

@@ -93,6 +93,7 @@ function Protected() {
   );
 }
 
+/** Render public and protected application routes with lazy-loaded page fallbacks. */
 export function App() {
   return (
     <Routes>

@@ -33,6 +33,11 @@ export const GoodsReceiptService = {
     return gr;
   },
 
+  /**
+   * Create a submitted receipt with lines for an active supplier.
+   * Reject empty receipts and linked orders outside APPROVED/PARTIALLY_RECEIVED;
+   * stock is added separately when the receipt is posted.
+   */
   async create(input: CreateGoodsReceiptInput, actorId: string) {
     if (input.lines.length === 0) throw Errors.validation('Goods receipt must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });

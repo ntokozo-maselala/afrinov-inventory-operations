@@ -34,6 +34,7 @@ interface Props {
 
 // The ledger is never edited. A mistaken movement is corrected by posting a
 // reversing entry (POST /inventory-transactions/:id/reversal).
+/** Show movement attribution and details, with a reversal form for eligible transactions. */
 export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onError }: Props) {
   const { hasPermission } = usePermissions();
   const [reversing, setReversing] = useState(false);

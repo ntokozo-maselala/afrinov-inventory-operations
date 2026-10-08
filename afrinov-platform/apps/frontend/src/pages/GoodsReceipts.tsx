@@ -127,6 +127,7 @@ interface CreateGRProps {
   onError: (e: ApiError) => void; onSuccess: () => void;
 }
 
+/** Render the receipt form with eligible orders and create then post the submitted receipt. */
 function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const materials = useApi<Material[]>('/materials');

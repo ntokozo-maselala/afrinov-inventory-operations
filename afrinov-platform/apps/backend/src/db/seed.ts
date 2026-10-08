@@ -220,6 +220,7 @@ const DEMO_RECIPIENTS: Array<{ name: string; type: 'WORKER' | 'MACHINE' | 'SITE'
   { name: 'KTS', type: 'CONTRACTOR' },
 ];
 
+/** Create missing demo recipients, matching existing names without regard to case. */
 async function ensureRecipients(): Promise<void> {
   for (const r of DEMO_RECIPIENTS) {
     const existing = await prisma.recipient.findFirst({ where: { name: { equals: r.name, mode: 'insensitive' } } });
@@ -497,6 +498,7 @@ async function ensureTransactions(
   }
 }
 
+/** Seed permissions, reference data, demo operations, and settings in dependency order. */
 async function main(): Promise<void> {
   await ensurePermissions();
   await ensureRoles();

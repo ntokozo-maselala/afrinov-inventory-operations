@@ -25,10 +25,12 @@ export const updateRecipientSchema = z.object({
   active: z.boolean().optional(),
 });
 
+/** Read the actor ID from a request after its authentication pre-handler has succeeded. */
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
 
+/** Register authenticated recipient reads and permission-checked create/update routes. */
 export async function recipientRoutes(app: FastifyInstance): Promise<void> {
   // Any signed-in user can read the list: it fills the "Issued To" dropdown.
   app.get('/recipients', { preHandler: [app.authenticate] }, async (req, reply) => {

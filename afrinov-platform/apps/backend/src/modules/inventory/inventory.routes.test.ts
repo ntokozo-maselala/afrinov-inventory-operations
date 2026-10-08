@@ -103,6 +103,7 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(401);
     });
 
+    /** Build a single-line issue payload with independent request and line overrides. */
     function issueBody(overrides: Record<string, unknown> = {}, line: Record<string, unknown> = {}) {
       return {
         recipientId: RECIPIENT_UUID,

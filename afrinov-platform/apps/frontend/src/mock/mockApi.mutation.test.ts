@@ -235,6 +235,7 @@ describe('mock API mutation flows', () => {
       expect(result.status).toBe('PENDING_APPROVAL');
     });
 
+    /** Return an API rejection code, UNKNOWN for other errors, or undefined on success. */
     async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
       try {
         await p;
@@ -244,6 +245,7 @@ describe('mock API mutation flows', () => {
       }
     }
 
+    /** Create and approve a mock purchase order, returning its original draft response for its ID. */
     async function approvedPO() {
       const draft = await makeDraftPO();
       await api.post(`/purchase-orders/${draft.id}/submit`, {});
@@ -385,6 +387,7 @@ describe('mock API mutation flows', () => {
   });
 
   describe('recipients ("Issued To")', () => {
+    /** Return an API rejection code, UNKNOWN for other errors, or undefined on success. */
     async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
       try {
         await p;
