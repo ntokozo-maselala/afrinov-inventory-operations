@@ -17,6 +17,8 @@ export interface StockStatusRow {
   reorderQuantity: string;
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  /** Who it last came from: the most recent posted goods receipt with this item. */
+  lastSupplier: { name: string; receivedAt: string } | null;
 }
 
 const STATUS_ORDER: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
@@ -29,6 +31,21 @@ async function totalsByMaterial(materialIds?: string[]): Promise<Map<string, Pri
     _sum: { quantity: true },
   });
   return new Map(rows.map((r) => [r.materialId, r._sum.quantity ?? new Prisma.Decimal(0)]));
+}
+
+/** The supplier of each item's most recent posted goods receipt (counter or purchase order). */
+async function lastSuppliers(materialIds: string[]): Promise<Map<string, { name: string; receivedAt: string }>> {
+  const out = new Map<string, { name: string; receivedAt: string }>();
+  if (materialIds.length === 0) return out;
+  const lines = await prisma.goodsReceiptLine.findMany({
+    where: { materialId: { in: materialIds }, goodsReceipt: { status: 'POSTED' } },
+    select: { materialId: true, goodsReceipt: { select: { receivedAt: true, supplier: { select: { name: true } } } } },
+    orderBy: { goodsReceipt: { receivedAt: 'desc' } },
+  });
+  for (const l of lines) {
+    if (!out.has(l.materialId)) out.set(l.materialId, { name: l.goodsReceipt.supplier.name, receivedAt: l.goodsReceipt.receivedAt.toISOString() });
+  }
+  return out;
 }
 
 function statusFor(required: Prisma.Decimal, onHand: Prisma.Decimal | undefined, bands: StatusBands) {
@@ -147,9 +164,10 @@ export const ReportingService = {
       orderBy: { name: 'asc' },
     });
     const ids = materials.map((m) => m.id);
-    const [balances, bands] = await Promise.all([
+    const [balances, bands, lastSupplier] = await Promise.all([
       ids.length ? prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }) : Promise.resolve([]),
       getStatusBands(),
+      lastSuppliers(ids),
     ]);
     const byMaterial = new Map<string, typeof balances>();
     for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
@@ -174,6 +192,7 @@ export const ReportingService = {
           .filter((b) => !b.quantity.isZero())
           .map((b) => ({ locationId: b.locationId, locationName: b.location.name, quantity: b.quantity.toString() }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
+        lastSupplier: lastSupplier.get(m.id) ?? null,
       };
     });
     return rows

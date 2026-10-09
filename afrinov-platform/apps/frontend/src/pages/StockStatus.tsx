@@ -16,6 +16,8 @@ import { Icon } from '../components/Icon';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
+import { useToast } from '../components/Toast';
+import { downloadReorderList } from '../api/exportReorderList';
 
 /** One item, as GET /reports/stock-status returns it. */
 export interface StockStatusItem {
@@ -31,6 +33,8 @@ export interface StockStatusItem {
   reorderQuantity: string;
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  /** The supplier of the latest posted goods receipt with this item. */
+  lastSupplier: { name: string; receivedAt: string } | null;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -55,6 +59,19 @@ export function StockStatus() {
   const [q, setQ] = useState('');
   const [view, setView] = useState('attention');
   const [category, setCategory] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const toast = useToast();
+
+  async function download() {
+    setDownloading(true);
+    try {
+      await downloadReorderList();
+    } catch (e) {
+      toast.error('Download failed', (e as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const counts = useMemo(() => {
     const c: Record<Status, number> = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0 };
@@ -81,10 +98,24 @@ export function StockStatus() {
       <PageHeader
         title="Stock status"
         description="Each item's stock on hand, across all locations, against its Required Stock: urgent below 20%, warning below 40%, as the stock workbook's URGENCY column. The bands are under Settings → Inventory."
-        actions={PROCUREMENT_ENABLED && (
-          <Link to="/purchase-orders" className="btn-primary btn-sm inline-flex items-center gap-1.5">
-            <Icon.Cart size={14} /> Create purchase order
-          </Link>
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              leadingIcon={<Icon.Download size={14} />}
+              onClick={download}
+              loading={downloading}
+              disabled={!items.data || counts.URGENT + counts.WARNING === 0}
+            >
+              Download re-order list
+            </Button>
+            {PROCUREMENT_ENABLED && (
+              <Link to="/purchase-orders" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                <Icon.Cart size={14} /> Create purchase order
+              </Link>
+            )}
+          </div>
         )}
       />
 
@@ -203,6 +234,13 @@ const COLUMNS: DataTableColumn<StockStatusItem>[] = [
     header: 'Status',
     render: (r) => <StockStatusBadge status={r.status} percent={r.percentOfRequired} />,
     width: '7rem',
+  },
+  {
+    key: 'supplier',
+    header: 'Last supplier',
+    render: (r) => r.lastSupplier
+      ? <span className="text-sm text-surface-700" title={`Last delivered ${r.lastSupplier.receivedAt.slice(0, 10)}`}>{r.lastSupplier.name}</span>
+      : <span className="text-surface-400">—</span>,
   },
   {
     key: 'reorder',

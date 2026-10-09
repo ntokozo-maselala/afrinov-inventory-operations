@@ -28,6 +28,7 @@ const db = {
   materials: [] as Mat[],
   locations: [] as Loc[],
   transactions: [] as Tx[],
+  receipts: [] as Array<{ materialId: string; receivedAt: Date; supplier: string; status: string }>,
   settings: new Map<string, { value: unknown }>(),
 };
 
@@ -104,6 +105,12 @@ function makePrisma(): unknown {
     setting: {
       findUnique: async ({ where }: { where: { key: string } }) => db.settings.get(where.key) ?? null,
     },
+    goodsReceiptLine: {
+      findMany: async ({ where }: { where: { materialId: { in: string[] }; goodsReceipt: { status: string } } }) => db.receipts
+        .filter((r) => where.materialId.in.includes(r.materialId) && r.status === where.goodsReceipt.status)
+        .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime())
+        .map((r) => ({ materialId: r.materialId, goodsReceipt: { receivedAt: r.receivedAt, supplier: { name: r.supplier } } })),
+    },
   };
 }
 
@@ -112,6 +119,7 @@ beforeEach(() => {
   db.materials = [];
   db.locations = [];
   db.transactions = [];
+  db.receipts = [];
   db.settings.clear();
 });
 
@@ -261,6 +269,19 @@ describe('ReportingService', () => {
       const { ReportingService } = await import('./reporting.service.js');
       const rows = await ReportingService.stockStatus({ status: ['WARNING'] });
       expect(rows.map((r) => r.sku)).toContain('SKU-001');
+    });
+
+    it('names the supplier of the latest posted goods receipt', async () => {
+      seedMaterials();
+      db.receipts = [
+        { materialId: 'm-1', receivedAt: new Date('2026-08-01'), supplier: 'Old Supplier', status: 'POSTED' },
+        { materialId: 'm-1', receivedAt: new Date('2026-09-18'), supplier: 'Hydroscand', status: 'POSTED' },
+        { materialId: 'm-1', receivedAt: new Date('2026-10-01'), supplier: 'Draft Only', status: 'DRAFT' },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus();
+      expect(rows.find((r) => r.sku === 'SKU-001')?.lastSupplier).toEqual({ name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' });
+      expect(rows.find((r) => r.sku === 'SKU-002')?.lastSupplier).toBeNull();
     });
 
     it('filters by category', async () => {

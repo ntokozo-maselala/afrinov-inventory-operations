@@ -402,6 +402,14 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], errors: [400],
   },
   {
+    method: 'get', path: '/reports/reorder-list/export', tag: 'Reports', summary: 'Download the re-order list',
+    description: 'Every URGENT and WARNING item as an Excel file, grouped by category: re-order quantity (Required Stock '
+      + 'less on hand), unit price, re-order value with subtotals and a total, and the supplier of the latest goods receipt. '
+      + 'Optional ?category= filter.',
+    permissions: [P.ViewReports],
+    produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  },
+  {
     method: 'get', path: '/reports/low-stock', tag: 'Reports', summary: 'Items that need re-ordering (URGENT or WARNING)',
     description: 'The stock status report limited to URGENT and WARNING; empty when inventory.enableStockAlerts is off.',
     permissions: [P.ViewReports],
