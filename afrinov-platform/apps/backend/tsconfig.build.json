@@ -1,0 +1,7 @@
+{
+  // Produces dist/ for `npm run build` and the Docker image. Leaves the unit
+  // tests out so they are not shipped; tsconfig.json still covers them for the
+  // editor and tsconfig.tools.json type-checks them.
+  "extends": "./tsconfig.json",
+  "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
+}
