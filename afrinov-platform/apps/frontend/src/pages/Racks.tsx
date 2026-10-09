@@ -214,7 +214,7 @@ export function Racks() {
   return (
     <div>
       <PageHeader
-        title="Rack"
+        title="Racks"
         description="Manage physical storage racks and their workshop / project associations."
         actions={
           <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>

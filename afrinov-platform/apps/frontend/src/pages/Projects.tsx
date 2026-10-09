@@ -246,7 +246,7 @@ export function Projects() {
   return (
     <div>
       <PageHeader
-        title="Project"
+        title="Projects"
         description="Manage projects and their lifecycle. Inventory consumption is tracked per project number."
         actions={
           <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
