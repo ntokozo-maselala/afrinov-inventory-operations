@@ -18,6 +18,7 @@ import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
 import { useToast } from '../components/Toast';
 import { downloadReorderList } from '../api/exportReorderList';
+import { CATEGORIES } from '../lib/categories';
 
 /** One item, as GET /reports/stock-status returns it. */
 export interface StockStatusItem {
@@ -36,14 +37,6 @@ export interface StockStatusItem {
   /** The supplier of the latest posted goods receipt with this item. */
   lastSupplier: { name: string; receivedAt: string } | null;
 }
-
-const CATEGORY_LABELS: Record<string, string> = {
-  CONSUMABLES: 'Consumables',
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
-  PROJECT_MATERIAL: 'Project Material',
-  TOOLS: 'Tools',
-};
 
 const VIEWS: Array<{ value: string; label: string }> = [
   { value: 'attention', label: 'Needs re-ordering' },
@@ -148,7 +141,7 @@ export function StockStatus() {
             </Select>
             <Select className="sm:w-60" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
               <option value="">All categories</option>
-              {Object.entries(CATEGORY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </Select>
             {(q || view !== 'attention' || category) && (
               <Button variant="ghost" size="sm" onClick={() => { setQ(''); setView('attention'); setCategory(''); }}>Clear</Button>

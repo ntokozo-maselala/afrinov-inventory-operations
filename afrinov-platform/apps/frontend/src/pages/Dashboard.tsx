@@ -9,9 +9,10 @@ import { Icon } from '../components/Icon';
 import { useApi } from '../hooks/useApi';
 import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
-import type { ReportResult, ReportInventoryLine } from '../mock/mockReport';
+import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import { StockStatusBadge } from '../components/StockStatusBadge';
+import { categoryLabel } from '../lib/categories';
 
 /** GET /reports/stock-value: the stock on hand now, valued per category. */
 export interface StockValue {
@@ -20,14 +21,6 @@ export interface StockValue {
   total: { items: number; itemsInStock: number; value: number; unpriced: number };
   status: { URGENT: number; WARNING: number; OK: number; NOT_SET: number; outOfStock: number };
 }
-
-const CATEGORY_LABELS: Record<string, string> = {
-  CONSUMABLES: 'Consumables',
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
-  PROJECT_MATERIAL: 'Project Material',
-  TOOLS: 'Tools',
-};
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   IN_STOCK: 'success',
@@ -203,7 +196,7 @@ export function Dashboard() {
                 {value.categories.map((c) => (
                   <tr key={c.category}>
                     <td className="text-sm font-medium text-surface-900">
-                      {CATEGORY_LABELS[c.category] ?? c.category}
+                      {categoryLabel(c.category)}
                       {c.unpriced > 0 && <span className="block text-xs text-surface-500">{c.unpriced} in stock without a price</span>}
                     </td>
                     <td className="text-right font-mono text-sm">{formatNumber(c.items)}</td>

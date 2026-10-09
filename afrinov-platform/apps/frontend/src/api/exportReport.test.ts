@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildInventoryExportPath, getPdfBlob } from './exportReport';
-import type { ReportResult } from '../mock/mockReport';
+import type { ReportResult } from './reportTypes';
 
 const report = {
   kpis: { rangeLabel: 'This month', generatedAt: '2026-09-16T10:00:00.000Z' },

@@ -21,7 +21,8 @@ import {
   SEED_PROJECTS,
   SEED_RACKS,
 } from './seed';
-import { buildReport, type ReportQuery as MockReportQuery } from './mockReport';
+import { buildReport } from './mockReport';
+import type { ReportQuery as MockReportQuery } from '../api/reportTypes';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
 import { computeConsumption } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';

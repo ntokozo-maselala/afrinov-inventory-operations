@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildReport, isReversedPair, type ReportQuery } from './mockReport';
+import { buildReport, isReversedPair } from './mockReport';
+import type { ReportQuery } from '../api/reportTypes';
 import type { MockInventoryTransaction } from './types';
 
 const query: ReportQuery = {

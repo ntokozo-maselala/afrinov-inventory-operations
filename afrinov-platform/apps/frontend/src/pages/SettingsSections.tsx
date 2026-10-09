@@ -16,7 +16,7 @@ import { Input, Select, Field } from '../components/Field';
 import { Drawer } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { api, FRONTEND_ONLY, type ApiError } from '../api/client';
-import type { ReportResult } from '../mock/mockReport';
+import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
 import { PROCUREMENT_ENABLED } from '../config/features';

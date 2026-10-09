@@ -15,6 +15,7 @@ import { Icon } from '../components/Icon';
 import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
 import { StockActionForm, type StockActionKind } from '../components/StockActionForm';
+import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 interface StockRow {
   materialId: string; materialSku: string; materialName: string;
@@ -23,15 +24,6 @@ interface StockRow {
   quantity: string; belowThreshold: boolean;
   stockStatus?: StockStatusValue | null; percentOfRequired?: number | null;
 }
-
-const CATEGORY_OPTIONS = [
-  { value: '', label: 'All categories' },
-  { value: 'FASTENERS_SLUGS_INSULATION', label: 'Fasteners, slugs, insulation' },
-  { value: 'TOOLING_PPE_ELECTRICAL', label: 'Tooling, PPE, electrical' },
-  { value: 'PROJECT_MATERIAL', label: 'Project material' },
-  { value: 'CONSUMABLES', label: 'Consumables' },
-  { value: 'TOOLS', label: 'Tools' },
-];
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -108,7 +100,8 @@ export function Stock() {
               />
             </div>
             <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-              {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              <option value="">All categories</option>
+              {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
             <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
               {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -201,8 +194,4 @@ function columns({ onAction }: { onAction: (kind: StockActionKind, row: StockRow
 /** The item's status (its total across locations), the same on each of its rows. */
 function statusBadge(r: StockRow) {
   return <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} />;
-}
-
-function categoryLabel(c: string): string {
-  return CATEGORY_OPTIONS.find((o) => o.value === c)?.label ?? c;
 }

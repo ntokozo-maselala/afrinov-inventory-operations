@@ -6,23 +6,16 @@ import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { CATEGORIES } from '../lib/categories';
 
 export interface CreatedMaterial { id: string; sku: string; name: string }
-
-const CATEGORY_OPTIONS = [
-  { value: 'FASTENERS_SLUGS_INSULATION', label: 'Fasteners, slugs, insulation' },
-  { value: 'TOOLING_PPE_ELECTRICAL', label: 'Tooling, PPE, electrical' },
-  { value: 'PROJECT_MATERIAL', label: 'Project material' },
-  { value: 'CONSUMABLES', label: 'Consumables' },
-  { value: 'TOOLS', label: 'Tools' },
-];
 
 export function MaterialForm({ onCancel, onSaved, onError }: {
   onCancel: () => void; onSaved: (material: CreatedMaterial) => void; onError: (e: ApiError) => void;
 }) {
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
-  const [category, setCategory] = useState(CATEGORY_OPTIONS[0]!.value);
+  const [category, setCategory] = useState(CATEGORIES[0]!.value);
   const [unitOfMeasure, setUom] = useState('each');
   const [description, setDescription] = useState('');
   const [requiredStock, setReorder] = useState('0');
@@ -66,7 +59,7 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
       </Field>
       <Field label="Category" htmlFor="m-cat" required>
         <Select id="m-cat" value={category} onChange={(e) => setCategory(e.target.value)}>
-          {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </Select>
       </Field>
       <Field label="Description" htmlFor="m-desc" help="Optional. Helps identify the item in lists and exports.">

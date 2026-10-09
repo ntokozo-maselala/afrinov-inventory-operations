@@ -17,20 +17,13 @@ import { useToast } from '../components/Toast';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { downloadConsumption } from '../api/exportConsumption';
-import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionLine, type ConsumptionReport } from '../mock/mockConsumption';
+import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionLine, type ConsumptionReport } from '../api/reportTypes';
+import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 interface Project { projectNumber: string; name?: string | null }
 interface Recipient { id: string; name: string; type: string; active: boolean }
 
 const typeLabel = (t: string | null) => (t ? t.charAt(0) + t.slice(1).toLowerCase() : '');
-
-const CATEGORY_LABELS: Record<string, string> = {
-  CONSUMABLES: 'Consumables',
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
-  PROJECT_MATERIAL: 'Project Material',
-  TOOLS: 'Tools',
-};
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -189,7 +182,7 @@ export function Consumption() {
             </Select>
             <Select className="sm:w-56" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
               <option value="">All categories</option>
-              {Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </Select>
             {(project || category || recipient) && <Button variant="ghost" size="sm" onClick={() => { setProject(''); setCategory(''); setRecipient(''); }}>Clear</Button>}
           </>
@@ -216,7 +209,7 @@ export function Consumption() {
               <div className="text-eyebrow">By category</div>
               <ul className="text-sm text-surface-700">
                 {report.data.byCategory.length === 0 && <li className="text-surface-400">—</li>}
-                {report.data.byCategory.map((c) => <li key={c.category}>{CATEGORY_LABELS[c.category] ?? c.category}: {formatCurrency(c.value, currency)}</li>)}
+                {report.data.byCategory.map((c) => <li key={c.category}>{categoryLabel(c.category)}: {formatCurrency(c.value, currency)}</li>)}
               </ul>
             </div>
           </div>
@@ -286,7 +279,7 @@ function ITEM_COLUMNS(currency: string): DataTableColumn<ConsumptionItem>[] {
       render: (i) => (
         <div>
           <Link to={`/materials/${i.materialId}`} className="btn-link">{i.name}</Link>
-          <div className="text-xs text-surface-500 font-mono">{i.sku} · {CATEGORY_LABELS[i.category] ?? i.category}</div>
+          <div className="text-xs text-surface-500 font-mono">{i.sku} · {categoryLabel(i.category)}</div>
         </div>
       ),
     },

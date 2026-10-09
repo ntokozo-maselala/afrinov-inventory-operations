@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { TransactionDrawer } from '../components/TransactionDrawer';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { categoryLabel } from '../lib/categories';
 
 interface Material {
   id: string; sku: string; name: string; description?: string;
@@ -39,14 +40,6 @@ interface MovementRow {
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, slugs, insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE, electrical',
-  PROJECT_MATERIAL: 'Project material',
-  CONSUMABLES: 'Consumables',
-  TOOLS: 'Tools',
-};
-
 export function MaterialDetail() {
   const { id } = useParams<{ id: string }>();
   const material = useApi<Material>(id ? `/materials/${id}` : null);
@@ -63,7 +56,7 @@ export function MaterialDetail() {
     <div>
       <PageHeader
         title={material.data?.name ?? (material.loading ? 'Loading…' : 'Material')}
-        description={material.data ? `${material.data.sku} · ${CATEGORY_LABELS[material.data.category] ?? material.data.category}` : ''}
+        description={material.data ? `${material.data.sku} · ${categoryLabel(material.data.category)}` : ''}
         breadcrumb={[
           { label: 'Catalogue', to: '/materials' },
           { label: material.data?.sku ?? 'Material' },
@@ -85,7 +78,7 @@ export function MaterialDetail() {
               <h2 className="text-h3 text-surface-900">Identity</h2>
               <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
                 <dt className="text-surface-500">SKU</dt><dd className="col-span-2 text-mono">{material.data.sku}</dd>
-                <dt className="text-surface-500">Category</dt><dd className="col-span-2">{CATEGORY_LABELS[material.data.category] ?? material.data.category}</dd>
+                <dt className="text-surface-500">Category</dt><dd className="col-span-2">{categoryLabel(material.data.category)}</dd>
                 <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
                 <dt className="text-surface-500">Reorder at</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd>
                 {material.data.unitCost && (<><dt className="text-surface-500">Unit cost</dt><dd className="col-span-2 text-num">R {formatNumber(Number(material.data.unitCost), { fixed: true })}</dd></>)}

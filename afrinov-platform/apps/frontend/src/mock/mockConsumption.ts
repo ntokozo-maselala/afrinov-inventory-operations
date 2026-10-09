@@ -4,34 +4,8 @@
 // reversed issues and returns left out together with their reversals.
 import type { ApiError } from '../api/client';
 import type { MockInventoryTransaction, MockMaterial, MockProject, MockRecipient } from './types';
+import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionLine, type ConsumptionReport } from '../api/reportTypes';
 
-export interface ConsumptionItem {
-  materialId: string; sku: string; name: string; category: string; unitOfMeasure: string;
-  issued: number; returned: number; used: number; unitCost: number | null; value: number | null;
-}
-
-export interface ConsumptionLine {
-  id: string; postedAt: string; type: 'ISSUE' | 'RETURN'; sku: string; name: string; unitOfMeasure: string;
-  /** Positive: issued; negative: returned. */
-  quantity: number;
-  projectNumber: string | null;
-  issuedBy: string;
-}
-
-export interface ConsumptionReport {
-  from: string;
-  to: string;
-  currency: string;
-  items: ConsumptionItem[];
-  byProject: Array<{ projectNumber: string | null; projectName: string | null; value: number; items: number }>;
-  byRecipient: Array<{ recipientId: string | null; name: string | null; type: string | null; value: number; items: number; issues: number }>;
-  lines?: ConsumptionLine[];
-  byCategory: Array<{ category: string; value: number; items: number }>;
-  total: { value: number; items: number; unpriced: number };
-}
-
-export const NO_PROJECT = '__none__';
-export const NO_RECIPIENT = '__none__';
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
