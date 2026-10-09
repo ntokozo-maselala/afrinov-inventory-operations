@@ -1,76 +1,73 @@
 # Afrinov Platform — Implementation
 
-A production-ready prototype implementing the system described in
-`../afrinov-docs/docs/`. The implementation follows the architecture and ADRs
-in that documentation set and is intended to be the runnable counterpart to
-the specification.
+The runnable implementation of the system described in
+`../afrinov-docs/docs/`. Where the code and that documentation disagree,
+the disagreement is logged in
+`../afrinov-docs/docs/13-project-management/technical-debt.md`.
 
-## What's in this prototype
+*Last verified against code: 4e6d76f, 2026-10-09.*
+
+## What's in this platform
 
 | Concern | Implementation |
 |---|---|
-| Architecture | Modular monolith, one deployable, internal bounded contexts (`identity`, `inventory`, `procurement`, `reporting`) |
-| Backend | Node.js 20, Fastify, TypeScript strict, Zod validation |
-| Database | PostgreSQL via Prisma |
-| Frontend | React 18 + Vite + TypeScript + TailwindCSS |
-| Auth | JWT (HS256), bcrypt-hashed passwords |
-| Authorization | Role-based, server-side enforced, deny-by-default |
-| Ledger | ADR-002: `inventory_transactions` is append-only; `inventory_balances` is recomputed |
-| Tests | Vitest unit + API smoke |
-| Container | Docker + docker-compose for local DB |
+| Architecture | Modular monolith, one backend deployable; modules `identity`, `inventory`, `procurement`, `operations`, `reporting`, `settings`, `audit`, `health`, `migration` (boundaries are folder convention, not enforced) |
+| Backend | Node.js, Fastify 5, TypeScript strict, Zod validation |
+| Database | PostgreSQL 16 via Prisma 5 |
+| Frontend | React 18 + Vite + TypeScript + Tailwind CSS |
+| Auth | JWT (HS256, 12 hours), bcrypt-hashed passwords; accounts created by an administrator |
+| Authorization | Role-based, checked on the server by each route |
+| Ledger | ADR-002: `inventory_transactions` is append-only through the API; `inventory_balances` is recomputed from it after every movement; mistakes are reversed (ADR-005) |
+| Tests | Vitest unit tests (both apps), backend integration tests against PostgreSQL, one Playwright E2E test |
+| Container | Dockerfile for the backend; docker-compose with PostgreSQL |
 
-## What's intentionally NOT in this prototype
+## What's intentionally NOT in this platform yet
 
-These are listed explicitly so the boundaries are clear, and not because they
-were forgotten:
-
-- **Operations** bounded context — project consumption reporting is wired
-  (transactions carry a `projectNumber`) but the Projects CRUD UI is omitted.
-- **Document Management** bounded context — delivery-note references are
-  captured as text (`deliveryRef`); binary uploads are not implemented.
-- **Multi-tenancy** — single site only (matches `sap-not-to-copy.md`).
-- **Tool check-out/check-in endpoints** — the Tool aggregate is modelled
-  (Material.category=TOOLS) but the dedicated UI + state machine transitions
-  are deferred. Issuing a tool records an `Issue` transaction; `IN_STORE` /
-  `CHECKED_OUT` semantics can be added on top without schema changes.
-- **Full migration script for the `.xlsm`** — the data model can ingest the
-  workbook but a one-off Excel importer is intentionally not in the prototype.
-- **Observability infra** — structured logging via pino is in place; metrics,
-  tracing, alerting are deployment-layer concerns (see Operations docs).
+- **Tool check-out/check-in** — tools are issued like other material; the
+  check-out state machine is planned.
+- **Document Management** — delivery-note references are text
+  (`deliveryRef`); no file uploads.
+- **Multi-tenancy / multi-site** — single site only (matches
+  `sap-not-to-copy.md`).
+- **Observability infrastructure** — structured logging via pino and health
+  checks are in place; metrics, tracing and alerting are not.
+- **Procurement by default** — purchase orders and goods receipts exist but
+  are switched off unless `PROCUREMENT_ENABLED=true` (backend) and
+  `VITE_PROCUREMENT_ENABLED=true` (frontend).
 
 ## Quick start (local dev)
 
-Prerequisites: Node 20+, Docker, npm 10+.
-
-### Full system (backend + frontend + database)
+Prerequisites: Node 22 or later (24 recommended; the test tools need 22+),
+Docker, npm 10+. The full, current steps are in
+[`apps/backend/README.md`](apps/backend/README.md) ("Running it locally").
+In short:
 
 ```bash
-# 1. Start Postgres
+# from afrinov-platform/
+npm install
+
+# Database and backend
 cd apps/backend
-docker compose up -d db
-
-# 2. Backend
-cp .env.example .env       # adjust if needed
-npm install
+cp .env.example .env          # then set JWT_SECRET (see the backend README)
+POSTGRES_PASSWORD=afrinov docker compose up -d db
+npx prisma generate
 npm run db:migrate
-npm run db:seed
-npm run dev                # http://localhost:4000
+SEED_ADMIN_PASSWORD=<choose one> npm run db:seed
+npm run dev                   # http://localhost:4000 (API docs at /api/docs)
 
-# 3. Frontend (new terminal)
-cd ../frontend
-npm install
-npm run dev                # http://localhost:5173
+# Frontend (new terminal, from afrinov-platform/)
+npm run dev:frontend          # http://localhost:5173
 ```
 
-Default admin (after seed): `admin@afrinov.local` / `ChangeMe!2026` — **change
-on first login**.
+The seed creates `admin@afrinov.local` with the password you set in
+`SEED_ADMIN_PASSWORD`. Without it the seed generates a random password and
+does not print it.
 
 ### Frontend-only (no backend, no DB)
 
 For inspecting the UI without running the backend. Uses an in-memory mock
 store; the real backend is not touched. See
-[`apps/frontend/FRONTEND_ONLY.md`](apps/frontend/FRONTEND_ONLY.md) for the
-full guide.
+[`apps/frontend/FRONTEND_ONLY.md`](apps/frontend/FRONTEND_ONLY.md).
 
 ```bash
 cd apps/frontend
@@ -82,28 +79,29 @@ npm run dev:frontend-only   # http://localhost:5173, mock data only
 ```
 afrinov-platform/
 ├── apps/
-│   ├── backend/             # Fastify API
-│   └── frontend/            # React SPA
-└── (workspace package.json)
+│   ├── backend/             # Fastify API, Prisma schema and migrations, scripts, integration tests
+│   └── frontend/            # React SPA, Vitest tests, Playwright e2e
+└── package.json             # npm workspaces
 ```
 
 ```
 apps/backend/src/
-├── modules/
-│   ├── identity/            # users, roles, auth
-│   ├── inventory/           # materials, locations, transactions, balance
-│   ├── procurement/         # suppliers, POs, goods receipts
-│   └── reporting/           # read-only views (no mutations)
-├── shared/                  # errors, events, db, decimal helpers, permissions
-├── infrastructure/http/     # server bootstrap (in server.ts)
+├── index.ts, server.ts      # entry point and server bootstrap
+├── modules/                 # identity, inventory, procurement, operations, reporting,
+│                            # settings, audit, health, migration
+├── shared/                  # config, db, errors, events, permissions, authorization, inventory helpers
+├── openapi/                 # OpenAPI document for /api/docs
 └── db/                      # migrate, seed
 ```
 
 ```
 apps/frontend/src/
-├── pages/                   # one per workflow
-├── api/                     # fetch client + token storage
-└── App.tsx                  # routes + layout
+├── pages/                   # one per screen
+├── components/, hooks/, lib/
+├── api/                     # fetch client, auth, Excel downloads
+├── config/                  # feature flags and build guard
+├── mock/                    # in-memory API for frontend-only mode
+└── App.tsx                  # routes
 ```
 
 ## Mapping docs → code
@@ -111,10 +109,11 @@ apps/frontend/src/
 | Spec area | Doc | Code |
 |---|---|---|
 | ADRs | `00-governance/decision-log.md` | `apps/backend/prisma/schema.prisma`, `inventory.service.ts` |
-| FR-INV-001…008 | `02-business-analysis/functional-requirements.md` | `modules/inventory/*` |
-| FR-PROC-001…004 | same | `modules/procurement/*` |
-| FR-REP-001…004 | same | `modules/reporting/reporting.service.ts` |
-| FR-SEC-001…003 | same | `shared/authorization.ts`, `server.ts` (auth preHandler) |
+| Data model, migrations, import | `07-data/` | `apps/backend/prisma/`, `src/modules/migration/`, `scripts/import-workbook.ts` |
+| FR-INV-001…008 | `02-business-analysis/functional-requirements.md` | `modules/inventory/*` (FR-INV-008 not built) |
+| FR-PROC-001…004 | same | `modules/procurement/*`, `modules/inventory/stock-receipt.service.ts` |
+| FR-REP-001…004 | same | `modules/reporting/*` |
+| FR-SEC-001…003 | same | `shared/authorization.ts`, `shared/permissions.ts`, `server.ts` (authenticate) |
 | Bounded contexts | `03-domain/bounded-contexts.md` | `modules/<context>/` |
 | State machines | `03-domain/state-machines.md` | `procurement.service.ts`, `inventory.service.ts` |
 | Resource model | `08-api/resource-model.md` | `modules/*/*.routes.ts` |
@@ -122,22 +121,21 @@ apps/frontend/src/
 
 ## Validation
 
-```bash
-# Backend
-cd apps/backend
-npm run typecheck
-npm run test
-npm run build
+From `afrinov-platform/` (covers both apps):
 
-# Frontend
-cd ../frontend
+```bash
+npm run lint
 npm run typecheck
+npm test
 npm run build
 ```
 
+Backend integration tests need a migrated, seeded PostgreSQL database:
+`npm run test:integration` in `apps/backend` (see its README).
+
 ## See also
 
-- `../afrinov-docs/docs/` — the source-of-truth specification.
+- `../afrinov-docs/docs/` — the documentation tree.
 - `../task_context.md` — orientation and how to run the platform locally.
 - `../workbook-replacement-roadmap.md` — the plan for replacing the stock workbook.
 - `../docs/archive/` — earlier audits and reports, including the
