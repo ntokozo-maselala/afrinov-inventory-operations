@@ -17,11 +17,10 @@ import { Drawer } from '../components/Modal';
 import { MaterialForm, type CreatedMaterial } from '../components/MaterialForm';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
+import type { CurrentStockRow, Material } from '../api/types';
 
 interface Supplier { id: string; name: string; active: boolean }
-interface Material { id: string; sku: string; name: string; unitOfMeasure: string; active: boolean }
 interface Location { id: string; name: string; active: boolean }
-interface StockRow { materialId: string; locationId: string; locationName: string; quantity: string }
 
 interface Line { key: number; materialId: string; locationId: string; quantity: string }
 
@@ -29,7 +28,7 @@ let nextKey = 1;
 const emptyLine = (locationId = ''): Line => ({ key: nextKey++, materialId: '', locationId, quantity: '' });
 const today = () => new Date().toISOString().slice(0, 10);
 
-function stockText(m: Material, rows: StockRow[] | undefined): string {
+function stockText(m: Material, rows: CurrentStockRow[] | undefined): string {
   if (!rows || rows.length === 0) return 'None in stock';
   const total = rows.reduce((a, r) => a + Number(r.quantity), 0);
   return `${total} ${m.unitOfMeasure} in stock · ${rows.map((r) => `${r.locationName} (${r.quantity})`).join(', ')}`;
@@ -39,7 +38,7 @@ export function ReceiveStock() {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const materials = useApi<Material[]>('/materials');
   const locations = useApi<Location[]>('/locations');
-  const stock = useApi<StockRow[]>('/reports/current-stock');
+  const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
   const [supplierId, setSupplierId] = useState('');
   const [deliveryRef, setDeliveryRef] = useState('');
   const [receivedAt, setReceivedAt] = useState(today());
@@ -57,7 +56,7 @@ export function ReceiveStock() {
   const materialById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
   // Where each item is kept now, most first. If this fails to load, only the hint is lost.
   const heldAt = useMemo(() => {
-    const map = new Map<string, StockRow[]>();
+    const map = new Map<string, CurrentStockRow[]>();
     for (const r of stock.data ?? []) {
       if (Number(r.quantity) <= 0) continue;
       map.set(r.materialId, [...(map.get(r.materialId) ?? []), r]);

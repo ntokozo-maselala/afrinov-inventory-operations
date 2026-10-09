@@ -4,19 +4,15 @@ import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
+import type { CurrentStockRow } from '../api/types';
 
 // Issuing has its own page (IssueStock), so the row drawer only transfers and adjusts.
 export type StockActionKind = 'transfer' | 'adjust';
 
-interface Row {
-  materialId: string; materialSku: string; materialName: string;
-  locationId: string; locationName: string;
-  unitOfMeasure: string; quantity: string; requiredStock: string;
-}
 
 interface Props {
   kind: StockActionKind;
-  row: Row;
+  row: CurrentStockRow;
   onDone: () => void;
   onError: (err: ApiError) => void;
   onSuccess: (message: string) => void;

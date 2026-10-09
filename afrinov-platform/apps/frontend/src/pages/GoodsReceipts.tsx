@@ -13,6 +13,7 @@ import { Icon } from '../components/Icon';
 import { api, type ApiError } from '../api/client';
 import { formatDate, formatNumber } from '../lib/format';
 import { Alert } from '../components/Alert';
+import type { Material } from '../api/types';
 
 interface GR {
   id: string; number: string; status: string; deliveryRef?: string;
@@ -23,7 +24,6 @@ interface GR {
 }
 interface PO { id: string; number: string; status: string; supplierId?: string; supplier: { name: string }; }
 interface Supplier { id: string; name: string; }
-interface Material { id: string; sku: string; name: string; }
 interface Location { id: string; name: string; }
 
 const STATUS_OPTIONS = [

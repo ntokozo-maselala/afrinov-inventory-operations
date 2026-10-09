@@ -13,22 +13,18 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { RecipientSelect, ProjectSelect, useIssueOptions } from '../components/IssueFields';
 import { api, type ApiError } from '../api/client';
+import type { CurrentStockRow } from '../api/types';
 
-interface StockRow {
-  materialId: string; materialSku: string; materialName: string;
-  locationId: string; locationName: string;
-  unitOfMeasure: string; quantity: string;
-}
 
 interface Line { key: number; stockKey: string; quantity: string }
 
-const stockKey = (r: Pick<StockRow, 'materialId' | 'locationId'>) => `${r.materialId}|${r.locationId}`;
+const stockKey = (r: Pick<CurrentStockRow, 'materialId' | 'locationId'>) => `${r.materialId}|${r.locationId}`;
 
 let nextKey = 1;
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
 
 export function IssueStock() {
-  const stock = useApi<StockRow[]>('/reports/current-stock');
+  const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
   const { recipients, projects, loading, error: optionsError, reload: reloadOptions } = useIssueOptions();
   const [recipientId, setRecipientId] = useState('');
   const [projectNumber, setProjectNumber] = useState('');

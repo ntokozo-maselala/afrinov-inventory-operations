@@ -4,34 +4,11 @@ import { Field, Input, Select, Textarea } from './Field';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
+import type { MovementRow } from '../api/types';
 
-interface Transaction {
-  id: string;
-  postedAt: string;
-  type: string;
-  materialId: string;
-  materialSku: string;
-  materialName: string;
-  locationId: string;
-  locationName: string;
-  quantity: string;
-  actorId: string;
-  actorName: string;
-  projectNumber?: string | null;
-  reasonCode?: string | null;
-  reasonNote?: string | null;
-  referenceType?: string | null;
-  reversesId?: string | null;
-  reversedById?: string | null;
-  recipientName?: string | null;
-  receiptNumber?: string | null;
-  supplierName?: string | null;
-  deliveryRef?: string | null;
-  returnedQuantity?: string | null;
-}
 
 interface Props {
-  transaction: Transaction;
+  transaction: MovementRow;
   onClose: () => void;
   onReversed: () => void;
   /** Called after stock is returned against this issue. */
@@ -227,7 +204,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
 
 // Unused stock coming back from this issue (POST /inventory-transactions/:id/returns).
 function ReturnSection({ transaction, returnable, onReturned, onError }: {
-  transaction: Transaction;
+  transaction: MovementRow;
   returnable: number;
   onReturned: () => void;
   onError: (err: ApiError) => void;
