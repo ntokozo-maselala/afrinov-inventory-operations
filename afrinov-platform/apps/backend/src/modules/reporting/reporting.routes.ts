@@ -4,6 +4,8 @@ import { ReportService } from './report.service.js';
 import { parseReportQuery } from './report-query.schema.js';
 import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
 import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
+import { ConsumptionService, NO_PROJECT, type ConsumptionQuery } from './consumption.service.js';
+import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { requirePermission } from '../../shared/authorization.js';
@@ -51,6 +53,34 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     const allowed = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
     if (status.some((x) => !allowed.includes(x))) throw Errors.validation(`status must be one or more of ${allowed.join(', ')}`);
     return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
+  });
+
+  // Stock used in a date range, by item, project and category, at unit price.
+  const consumptionQuery = (q: Record<string, string | undefined>): ConsumptionQuery => ({
+    from: q['from'] ?? '', to: q['to'] ?? '', projectNumber: q['projectNumber'] || undefined, category: q['category'] || undefined,
+  });
+  app.get('/reports/consumption', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return ConsumptionService.report(consumptionQuery(req.query as Record<string, string | undefined>));
+  });
+  app.get('/reports/consumption/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = consumptionQuery(req.query as Record<string, string | undefined>);
+    const [report, currency] = await Promise.all([
+      ConsumptionService.report(q),
+      SettingsService.getValue<string>('general.defaultCurrency'),
+    ]);
+    const scope = [
+      q.projectNumber === NO_PROJECT ? 'Issues with no project' : q.projectNumber ? `Project ${q.projectNumber}` : 'All projects',
+      q.category ? `category ${q.category}` : null,
+    ].filter(Boolean).join(', ');
+    const buf = await buildConsumptionXlsx(report, { currency, scope });
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${consumptionFilename(report, q.projectNumber === NO_PROJECT ? 'no-project' : q.projectNumber)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
   });
 
   // The items to re-order (URGENT and WARNING) as an Excel file for the buyer.

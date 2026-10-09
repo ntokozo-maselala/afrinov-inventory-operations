@@ -402,6 +402,19 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], errors: [400],
   },
   {
+    method: 'get', path: '/reports/consumption', tag: 'Reports', summary: 'Stock used in a date range',
+    description: 'Issued less returned per item between ?from and ?to (YYYY-MM-DD, both included; default this month), '
+      + 'valued at the unit price, with totals by project and by category. Reversed issues and returns are left out with '
+      + 'their reversals. Optional ?projectNumber= (__none__ for issues with no project) and ?category=.',
+    permissions: [P.ViewReports], errors: [400],
+  },
+  {
+    method: 'get', path: '/reports/consumption/export', tag: 'Reports', summary: 'Download stock used as Excel',
+    description: 'The consumption report, same query, as a By item sheet grouped by category and a By project sheet.',
+    permissions: [P.ViewReports], errors: [400],
+    produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  },
+  {
     method: 'get', path: '/reports/reorder-list/export', tag: 'Reports', summary: 'Download the re-order list',
     description: 'Every URGENT and WARNING item as an Excel file, grouped by category: re-order quantity (Required Stock '
       + 'less on hand), unit price, re-order value with subtotals and a total, and the supplier of the latest goods receipt. '
