@@ -218,7 +218,7 @@ The goal is to load the workbook's items, prices, locations and opening balances
 
 - [x] Stock status per item: % of required, URGENT below 20%, WARNING below 40%, OK otherwise (the bands become settings)
 - [x] Re-order quantity = required − on hand, with a re-order list export
-- [ ] Value consumed by project and by date range (quantity × unit cost), replacing the Stock Report sheets
+- [x] Value consumed by project and by date range (quantity × unit cost), replacing the Stock Report sheets
 - [ ] Stock value per category on the dashboard, matching the Summary totals
 - [ ] Issues by recipient over a date range (replaces the Consumable Box)
 - [ ] Month-end Excel export in the layout management already uses

@@ -23,6 +23,7 @@ import {
 } from './seed';
 import { buildReport, type ReportQuery as MockReportQuery } from './mockReport';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
+import { computeConsumption } from './mockConsumption';
 import type {
   MockMaterial,
   MockLocation,
@@ -864,6 +865,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.type) list = list.filter((t) => t.type === qs.type);
     if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
+  }
+  if (method === 'GET' && p === '/reports/consumption') {
+    return computeConsumption(qs, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR') });
   }
   if (method === 'GET' && p === '/reports/stock-status') {
     const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
