@@ -1,5 +1,7 @@
 # SAP Organizational Model — What Was Studied
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 SAP's hierarchy: **Client → Company Code → Plant → Storage Location**,
 representing legal entity, then physical site, then storage sub-division.
 

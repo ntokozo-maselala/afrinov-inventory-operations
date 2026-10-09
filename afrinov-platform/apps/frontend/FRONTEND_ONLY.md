@@ -1,5 +1,7 @@
 # Frontend-only development mode
 
+*Last verified against code: 4e6d76f, 2026-10-09.*
+
 Use this mode when you want to **inspect the UI without running the backend or
 database**. The frontend starts up, authenticates as a development user, and
 serves all data from an in-memory mock store.
@@ -64,7 +66,7 @@ the value is read by Vite at build/dev-server start, not per request.
 | Concern | Normal mode | Frontend-only mode |
 |---|---|---|
 | `api` client (`src/api/client.ts`) | Real `fetch` to `/api/v1/*` | Proxy → in-memory mock router (`src/mock/mockApi.ts`) |
-| Authentication (`src/auth.ts`) | Calls `POST /auth/login` and `GET /auth/me` against the backend | Resolves immediately to the dev user; login accepts any non-empty credentials |
+| Authentication (`src/api/authService.ts`, `src/auth.tsx`) | Calls `POST /auth/login` and `GET /auth/me` against the backend | Resolves immediately to the dev user; login accepts any non-empty credentials |
 | Dev banner | Hidden | Visible at the top of every page |
 | Data | Backend → PostgreSQL | In-memory store; reset on full page reload |
 | Mutations | Persisted to the DB | Persisted in memory for the current session only |
@@ -83,6 +85,7 @@ something to render immediately:
 - 12 materials spanning all 5 categories
 - 5 locations (storeroom, racks, off-site)
 - 2 purchase orders in different states
+- 2 projects, plus racks and recipients
 - 1 posted goods receipt
 - 20 ledger transactions (receipts, issues, a transfer, an adjustment)
 - Reorder thresholds set so the dashboard shows a few "below threshold" items
@@ -147,7 +150,6 @@ emulated:
 - **File uploads / document attachments** — the Documents bounded context is
   not implemented; the mock returns `NOT_FOUND` for any document-related
   route (none currently called by the UI).
-- **Operations / Projects module** — out of scope; not emulated.
 
 ## Files involved
 
@@ -155,7 +157,7 @@ emulated:
 apps/frontend/
 ├── src/
 │   ├── api/client.ts              ← selects real or mock api based on flag
-│   ├── auth.ts                    ← dev-user bypass when flag is on
+│   ├── api/authService.ts         ← dev-user bypass when flag is on
 │   ├── components/
 │   │   └── DevModeBanner.tsx      ← amber banner (only when flag is on)
 │   └── mock/

@@ -1,5 +1,7 @@
 # SAP Terminology Reference
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 | SAP term | Meaning | Afrinov mapping |
 |---|---|---|
 | Material Master | Central record for anything the company stocks or buys | `Material` |

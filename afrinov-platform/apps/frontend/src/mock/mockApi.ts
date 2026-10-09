@@ -22,6 +22,9 @@ import {
   SEED_RACKS,
 } from './seed';
 import { buildReport, type ReportQuery as MockReportQuery } from './mockReport';
+import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
+import { computeConsumption } from './mockConsumption';
+import { computeMonthEnd } from './mockMonthEnd';
 import type {
   MockMaterial,
   MockLocation,
@@ -864,26 +867,36 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
-  if (method === 'GET' && p === '/reports/low-stock') {
-    // Returned in the same shape as the backend `ReportingService.lowStock()`
-    // (see apps/backend/src/modules/reporting/reporting.service.ts) so the
-    // Low Stock page can consume the same TypeScript interface in both
-    // frontend-only mode and live mode.
-    return computeCurrentStock({})
-      .filter((r) => r.belowThreshold)
-      .map((r) => ({
-        materialId: r.materialId,
-        sku: r.materialSku,
-        name: r.materialName,
-        unitOfMeasure: r.unitOfMeasure,
-        locationId: r.locationId,
-        locationName: r.locationName,
-        quantity: r.quantity,
-        requiredStock: r.requiredStock,
-      }));
+  if (method === 'GET' && p === '/reports/month-end') {
+    const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
+    return computeMonthEnd(qs.month || new Date().toISOString().slice(0, 7), {
+      transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency,
+      consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
+    });
   }
+  if (method === 'GET' && p === '/reports/stock-value') {
+    return computeStockValue();
+  }
+  if (method === 'GET' && p === '/reports/consumption') {
+    return computeConsumption(qs, {
+      transactions: state.transactions, materials: state.materials, projects: state.projects, recipients: state.recipients,
+      currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
+      userName: (id) => mockUsers.find((u) => u.id === id)?.name ?? 'Unknown',
+    });
+  }
+  if (method === 'GET' && p === '/reports/stock-status') {
+    const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+    return computeStockStatus({ status: wanted as StockStatus[], category: qs.category });
+  }
+  if (method === 'GET' && p === '/reports/low-stock') {
+    // Same shape as the backend's ReportingService.lowStock(): the URGENT and WARNING items.
+    if (MOCK_SETTINGS['inventory.enableStockAlerts']?.value === false) return [];
+    return computeStockStatus({ status: ['URGENT', 'WARNING'] });
+  }
+
   if (method === 'GET' && p === '/reports/inventory') {
     return buildReport(parseMockReportQuery(qs), {
+      bands: mockBands(),
       materials: state.materials,
       locations: state.locations,
       suppliers: state.suppliers,
@@ -1022,9 +1035,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'general.defaultPageSize': row('general.defaultPageSize', 25, 'number', 'general', 'Default rows per page in tables.'),
     'general.defaultLandingPage': row('general.defaultLandingPage', 'dashboard', 'enum', 'general', 'Where to go after sign-in.', ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders']),
 
-    'inventory.lowStockMultiplier': row('inventory.lowStockMultiplier', 1, 'number', 'inventory', 'Multiplier applied to per-material reorder thresholds.'),
+    'inventory.urgentBelowPercent': row('inventory.urgentBelowPercent', 20, 'number', 'inventory', 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.'),
+    'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
-    'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Highlight materials at or below their reorder threshold.'),
+    'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
 
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
     'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
@@ -1467,8 +1481,89 @@ const mockUsersApi = {
   },
 };
 
+function mockBands(): StatusBands {
+  return {
+    urgentBelowPercent: Number(MOCK_SETTINGS['inventory.urgentBelowPercent']?.value ?? 20),
+    warningBelowPercent: Number(MOCK_SETTINGS['inventory.warningBelowPercent']?.value ?? 40),
+  };
+}
+
+// The supplier of the latest posted goods receipt with this item, as the backend reports it.
+function lastSupplierOf(materialId: string): { name: string; receivedAt: string } | null {
+  const latest = state.goodsReceipts
+    .filter((g) => g.status === 'POSTED' && g.lines.some((l) => l.materialId === materialId))
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
+  if (!latest) return null;
+  const name = state.suppliers.find((s) => s.id === latest.supplierId)?.name;
+  return name ? { name, receivedAt: new Date(latest.receivedAt).toISOString() } : null;
+}
+
+// Mirrors ReportingService.stockStatus.
+function computeStockStatus(filter: { status?: StockStatus[]; category?: string }) {
+  const balances = computeBalances();
+  const bands = mockBands();
+  const order: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
+  return state.materials
+    .filter((m) => m.active && (!filter.category || m.category === filter.category))
+    .map((m) => {
+      const mine = balances.filter((b) => b.materialId === m.id);
+      const onHand = mine.reduce((a, b) => a + b.quantity, 0);
+      const item = classifyItem(onHand, Number(m.requiredStock), bands);
+      return {
+        materialId: m.id, sku: m.sku, name: m.name, category: m.category, unitOfMeasure: m.unitOfMeasure,
+        requiredStock: String(Number(m.requiredStock)), onHand: String(onHand),
+        percentOfRequired: item.percentOfRequired, status: item.status, reorderQuantity: String(item.reorderQuantity),
+        unitCost: m.unitCost === undefined || m.unitCost === null ? null : String(m.unitCost),
+        locations: mine
+          .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))
+          .sort((a, b) => a.locationName.localeCompare(b.locationName)),
+        lastSupplier: lastSupplierOf(m.id),
+      };
+    })
+    .filter((r) => !filter.status || filter.status.length === 0 || filter.status.includes(r.status))
+    .sort((a, b) => order[a.status] - order[b.status] || (a.percentOfRequired ?? Infinity) - (b.percentOfRequired ?? Infinity) || a.name.localeCompare(b.name));
+}
+
+// Mirrors ReportingService.stockValue: on hand x unit price per category, and items by status.
+function computeStockValue() {
+  const order = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
+  const cats = new Map<string, { items: number; itemsInStock: number; value: number; unpriced: number }>();
+  const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
+  for (const r of computeStockStatus({})) {
+    const onHand = Number(r.onHand);
+    const c = cats.get(r.category) ?? { items: 0, itemsInStock: 0, value: 0, unpriced: 0 };
+    c.items++;
+    if (onHand > 0) {
+      c.itemsInStock++;
+      if (r.unitCost === null) c.unpriced++;
+      else c.value += onHand * Number(r.unitCost);
+    } else {
+      status.outOfStock++;
+    }
+    cats.set(r.category, c);
+    status[r.status]++;
+  }
+  const total = [...cats.values()].reduce(
+    (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
+    { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
+  );
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
+    categories: [...cats]
+      .sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
+      .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
+    total: { ...total, value: round2(total.value) },
+    status,
+  };
+}
+
 function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
   const balances = computeBalances();
+  const bands = mockBands();
+  const alertsOn = MOCK_SETTINGS['inventory.enableStockAlerts']?.value !== false;
+  const totals = new Map<string, number>();
+  for (const b of balances) totals.set(b.materialId, (totals.get(b.materialId) ?? 0) + b.quantity);
   const matMap = new Map(state.materials.map((m) => [m.id, m]));
   const locMap = new Map(state.locations.map((l) => [l.id, l]));
   const rows: MockStockRow[] = [];
@@ -1491,7 +1586,10 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       locationName: l.name,
       locationType: l.type,
       quantity: String(b.quantity),
-      belowThreshold: b.quantity <= required,
+      ...(() => {
+        const item = classifyItem(totals.get(m.id) ?? 0, required, bands);
+        return { belowThreshold: alertsOn && needsAttention(item.status), stockStatus: alertsOn ? item.status : null, percentOfRequired: item.percentOfRequired };
+      })(),
     });
   }
   return rows.sort((a, b) => a.materialSku.localeCompare(b.materialSku) || a.locationName.localeCompare(b.locationName));

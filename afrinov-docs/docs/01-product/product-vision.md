@@ -1,6 +1,6 @@
 # Product Vision
 
-**Status:** DRAFT · **Owner:** Product/Engineering · **Validate with:** Business owner
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09 · **Validate with:** Business owner
 
 ## Problem
 Afrinov currently runs inventory, tooling, PPE, consumables, and project

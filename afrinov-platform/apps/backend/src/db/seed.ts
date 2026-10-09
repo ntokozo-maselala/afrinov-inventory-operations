@@ -78,6 +78,8 @@ interface DemoTransaction {
   projectNumber?: string;
   reasonCode?: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER';
   referenceType?: string;
+  /** Who it was issued to, by name from DEMO_RECIPIENTS; every issue says (ADR-008). */
+  recipient?: string;
 }
 
 const DEMO_TRANSACTIONS: DemoTransaction[] = [
@@ -100,14 +102,14 @@ const DEMO_TRANSACTIONS: DemoTransaction[] = [
   { daysAgo: 6, type: 'TRANSFER_OUT', sku: 'GLASSES-CLR', location: 'Main Storeroom', quantity: '-8' },
   { daysAgo: 6, type: 'TRANSFER_IN', sku: 'GLASSES-CLR', location: 'Boiler Shop', quantity: '8' },
   // Issues (consumption against project AFRI-1325)
-  { daysAgo: 7, type: 'ISSUE', sku: 'M16X40-88-HEX', location: 'Main Storeroom', quantity: '-70', projectNumber: 'AFRI-1325' },
-  { daysAgo: 6, type: 'ISSUE', sku: 'M12-NUT-88', location: 'Main Storeroom', quantity: '-150', projectNumber: 'AFRI-1325' },
-  { daysAgo: 6, type: 'ISSUE', sku: 'WASH-M16-FLAT', location: 'Main Storeroom', quantity: '-300', projectNumber: 'AFRI-1325' },
-  { daysAgo: 5, type: 'ISSUE', sku: 'WELD-ROD-3.2', location: 'Boiler Shop', quantity: '-15' },
-  { daysAgo: 5, type: 'ISSUE', sku: 'GRIND-DISC-125', location: 'Boiler Shop', quantity: '-30' },
-  { daysAgo: 5, type: 'ISSUE', sku: 'GRIND-DISC-125', location: 'Boiler Shop', quantity: '-10' },
-  { daysAgo: 3, type: 'ISSUE', sku: 'GLOVES-WELD-L', location: 'Boiler Shop', quantity: '-4' },
-  { daysAgo: 3, type: 'ISSUE', sku: 'GLASSES-CLR', location: 'Boiler Shop', quantity: '-5' },
+  { daysAgo: 7, type: 'ISSUE', sku: 'M16X40-88-HEX', location: 'Main Storeroom', quantity: '-70', projectNumber: 'AFRI-1325', recipient: 'Sabelo' },
+  { daysAgo: 6, type: 'ISSUE', sku: 'M12-NUT-88', location: 'Main Storeroom', quantity: '-150', projectNumber: 'AFRI-1325', recipient: 'Sabelo' },
+  { daysAgo: 6, type: 'ISSUE', sku: 'WASH-M16-FLAT', location: 'Main Storeroom', quantity: '-300', projectNumber: 'AFRI-1325', recipient: 'Khodani' },
+  { daysAgo: 5, type: 'ISSUE', sku: 'WELD-ROD-3.2', location: 'Boiler Shop', quantity: '-15', recipient: 'Khodani' },
+  { daysAgo: 5, type: 'ISSUE', sku: 'GRIND-DISC-125', location: 'Boiler Shop', quantity: '-30', recipient: 'Sabelo' },
+  { daysAgo: 5, type: 'ISSUE', sku: 'GRIND-DISC-125', location: 'Boiler Shop', quantity: '-10', recipient: 'Sabelo' },
+  { daysAgo: 3, type: 'ISSUE', sku: 'GLOVES-WELD-L', location: 'Boiler Shop', quantity: '-4', recipient: 'KTS' },
+  { daysAgo: 3, type: 'ISSUE', sku: 'GLASSES-CLR', location: 'Boiler Shop', quantity: '-5', recipient: 'KTS' },
   // Transfer out of Main Storeroom into D-1
   { daysAgo: 4, type: 'TRANSFER_OUT', sku: 'M16X40-88-HEX', location: 'Main Storeroom', quantity: '-20' },
   { daysAgo: 4, type: 'TRANSFER_IN', sku: 'M16X40-88-HEX', location: 'D-1', quantity: '20' },
@@ -229,11 +231,13 @@ const DEMO_RECIPIENTS: Array<{ name: string; type: 'WORKER' | 'MACHINE' | 'SITE'
   { name: 'KTS', type: 'CONTRACTOR' },
 ];
 
-async function ensureRecipients(): Promise<void> {
+async function ensureRecipients(): Promise<Map<string, string>> {
+  const ids = new Map<string, string>();
   for (const r of DEMO_RECIPIENTS) {
     const existing = await prisma.recipient.findFirst({ where: { name: { equals: r.name, mode: 'insensitive' } } });
-    if (!existing) await prisma.recipient.create({ data: r });
+    ids.set(r.name, (existing ?? await prisma.recipient.create({ data: r })).id);
   }
+  return ids;
 }
 
 async function ensureProjects(managerId: string): Promise<Map<string, string>> {
@@ -444,6 +448,7 @@ async function ensureGoodsReceipt(
 async function ensureTransactions(
   materials: Map<string, string>,
   locations: Map<string, string>,
+  recipients: Map<string, string>,
   adminId: string,
 ): Promise<void> {
   // Only seed transactions when the ledger is empty. This makes the
@@ -483,6 +488,7 @@ async function ensureTransactions(
           projectNumber: t.projectNumber ?? null,
           reasonCode: t.reasonCode ?? null,
           referenceType: t.referenceType ?? null,
+          recipientId: t.recipient ? recipients.get(t.recipient) ?? null : null,
           actorId: adminId,
         },
       });
@@ -525,11 +531,11 @@ async function main(): Promise<void> {
   const suppliers = await ensureSuppliers();
   const materials = await ensureMaterials();
   await ensureProjects(adminId);
-  await ensureRecipients();
+  const recipients = await ensureRecipients();
   await ensureRacks(locations);
   await ensurePurchaseOrders(suppliers, materials, adminId);
   await ensureGoodsReceipt(suppliers, materials, locations, adminId);
-  await ensureTransactions(materials, locations, adminId);
+  await ensureTransactions(materials, locations, recipients, adminId);
 
   // 5. Settings catalog (idempotent — safe to re-run).
   const { SettingsService } = await import('../modules/settings/settings.service.js');

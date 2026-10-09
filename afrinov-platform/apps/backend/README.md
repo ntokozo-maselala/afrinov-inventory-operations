@@ -4,7 +4,11 @@ REST API for the Afrinov Inventory & Operations Platform: inventory ledger,
 procurement, projects, reporting, settings and audit, behind JWT
 authentication and role-based permissions.
 
-Stack: Node.js 20, Fastify 5, TypeScript, Prisma 5, PostgreSQL 16, Zod, Vitest.
+Stack: Node.js, Fastify 5, TypeScript, Prisma 5, PostgreSQL 16, Zod, Vitest.
+The Docker image and the backend CI use Node 20; local development needs
+Node 22 or later (see below).
+
+*Last verified against code: 4e6d76f, 2026-10-09.*
 
 ## Running it locally
 
@@ -92,13 +96,13 @@ the API docs are off unless `API_DOCS_ENABLED=true`.
 | `LOG_LEVEL` | No | `info` | Pino log level |
 | `CORS_ORIGIN` | In production | Local Vite origins in development | Comma-separated list of allowed browser origins |
 | `CORS_ALLOW_ANY` | No | — | `true` allows any origin. Throwaway demos only |
-| `RATE_LIMIT_AUTH` | No | `5` | Login/register requests per minute per IP |
+| `RATE_LIMIT_AUTH` | No | `5` | Login requests per minute per IP |
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
 | `PROCUREMENT_ENABLED` | No | `false` | `true` turns on purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
 | `API_DOCS_ENABLED` | No | On, except in production | `true` or `false` to serve the API docs at `/api/docs` |
 | `SEED_ADMIN_PASSWORD` | In production | Random | Admin password the seed sets when it first creates the account |
 | `SEED_ADMIN_EMAIL` | No | `admin@afrinov.local` | Account used by the integration tests and diagnostic scripts |
-| `REPORT_CURRENCY` | No | `ZAR` | Currency code returned with inventory report values |
+| `REPORT_CURRENCY` | No | `ZAR` | Currency code returned with the inventory report (`/reports/inventory`) only; the other reports use the `general.defaultCurrency` setting |
 
 ## Scripts
 
@@ -160,12 +164,13 @@ src/
   openapi/             The OpenAPI document served at /api/docs
   shared/              Config, errors, permissions, authorization, Prisma client
   modules/
-    identity/          Login, registration, users and roles
+    identity/          Login, users and roles
     inventory/         Materials, locations, racks, stock items, stock movements, balances
     procurement/       Suppliers, purchase orders, goods receipts
-    operations/        Projects
-    migration/         Reading and checking the stock workbook for the data import
-    reporting/         Stock, movement, low-stock and project reports; Excel/PDF export
+    operations/        Projects and recipients ("Issued To")
+    migration/         Reading and checking the stock workbook; opening-balance import; reconciliation
+    reporting/         Stock, movement, stock-status, stock-value, consumption, month-end and
+                       inventory reports; Excel/PDF export
     settings/          Typed application settings
     audit/             Audit log
     health/            Health checks
@@ -190,18 +195,18 @@ validate with. When you add an endpoint, add it to `OPERATIONS` in
 registered routes match.
 
 Endpoints are under `/api/v1`; the health checks are also served at the root
-(`/health`, `/health/ready`). Everything except login, registration and the
-health checks needs an `Authorization: Bearer <token>` header, using the token
-returned by `POST /api/v1/auth/login`.
+(`/health`, `/health/ready`). Everything except login and the health checks
+needs an `Authorization: Bearer <token>` header, using the token returned by
+`POST /api/v1/auth/login`.
 
 | Area | Endpoints |
 | --- | --- |
-| Auth | `/auth/login`, `/auth/register`, `/auth/me` |
-| Users | `/users` |
-| Inventory | `/materials`, `/locations`, `/racks`, `/stock-items`, `/inventory-transactions`, `/inventory-issues`, `/inventory-transfers`, `/inventory-adjustments` |
+| Auth | `/auth/login`, `/auth/me` |
+| Users | `/users`, `/users/lookup` |
+| Inventory | `/materials`, `/locations`, `/racks`, `/stock-items`, `/inventory-transactions` (with `/:id/returns` and `/:id/reversal`), `/inventory-issues`, `/inventory-transfers`, `/inventory-adjustments`, `/stock-counts`, `/stock-receipts` |
 | Procurement | `/suppliers`; `/purchase-orders` and `/goods-receipts` only when `PROCUREMENT_ENABLED=true` |
-| Projects | `/projects` |
-| Reports | `/reports/current-stock`, `/reports/movement-history`, `/reports/low-stock`, `/reports/project-consumption/:projectNumber`, `/reports/inventory`, `/reports/inventory/export` |
+| Projects and recipients | `/projects`, `/recipients` |
+| Reports | `/reports/current-stock`, `/reports/movement-history`, `/reports/stock-status`, `/reports/stock-value`, `/reports/low-stock`, `/reports/reorder-list/export`, `/reports/project-consumption/:projectNumber`, `/reports/consumption` (+ `/export`), `/reports/month-end` (+ `/export`), `/reports/inventory` (+ `/export`) |
 | Settings | `/settings` |
 | Audit | `/audit` |
 | Health | `/health` (process is up), `/health/ready` (database is reachable) |
@@ -212,6 +217,5 @@ Permissions are checked on the server. The roles are `ADMIN`,
 `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`, `TECHNICIAN` and `VIEWER`;
 `src/shared/permissions.ts` maps each role to what it may do.
 
-Self-registration (`POST /auth/register`) is off until an admin turns on
-"Allow self-registration" in Settings (`security.allowSelfRegistration`).
-Self-registered users get `VIEWER`.
+There is no self-registration: an administrator creates accounts and
+assigns roles under Settings → Users (`POST /users`; ADR-006).

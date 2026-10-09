@@ -1,5 +1,7 @@
 # User Personas
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 ## Store Controller — "Nomvula"
 **Responsible for:** keeping the Main sheets/system accurate; the closest
 role to today's spreadsheet owner.
@@ -26,7 +28,8 @@ so they don't double-order; get goods receipted quickly and accurately.
 **Responsible for:** running a client job (`AFRI-####`).
 **Goals:** know what material and tools have been consumed against their
 project.
-**Needs:** a project-filtered movement report.
+**Needs:** a project-filtered movement report. *Status:* implemented (Stock
+used page by project; the movement-history API filters by project).
 
 ## Administrator
 **Responsible for:** users, roles, categories, locations, suppliers —
@@ -35,9 +38,15 @@ system configuration.
 today, which is how "Store", "Stores", "STOREROOM" all ended up as separate
 locations).
 **Needs:** master-data management screens with merge/dedupe tooling.
+*Status:* master-data screens exist (Materials, Locations, Racks,
+Projects, Recipients, Suppliers, Settings → Users); merge/dedupe tooling is
+**Planned**.
 
 ## Business Owner / Manager
 **Responsible for:** oversight, decisions on scope and investment.
 **Goals:** trust the numbers; see the operation at a glance; understand how
 this system fits the rest of the business.
 **Needs:** dashboard/reporting, not data entry.
+
+*Unverified:* personas and names are illustrative, pending the business
+owner's review.

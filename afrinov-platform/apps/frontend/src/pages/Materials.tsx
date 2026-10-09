@@ -172,7 +172,7 @@ export function MaterialForm({ onCancel, onSaved, onError, onSuccess, initial }:
           {CATEGORY_OPTIONS.filter((o) => o.value).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </Select>
       </Field>
-      <Field label="Reorder threshold" htmlFor="m-reorder" help="Items at or below this level appear in the low-stock report.">
+      <Field label="Reorder threshold" htmlFor="m-reorder" help="Stock status compares stock on hand with this: urgent below 20%, warning below 40%.">
         <Input id="m-reorder" type="number" min="0" step="0.0001" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
       </Field>
       {validation && (sku.trim() && name.trim()) && <Alert tone="danger" title="Cannot save">{validation}</Alert>}

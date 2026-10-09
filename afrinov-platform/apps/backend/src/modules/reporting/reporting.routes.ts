@@ -3,6 +3,13 @@ import { ReportingService } from './reporting.service.js';
 import { ReportService } from './report.service.js';
 import { parseReportQuery } from './report-query.schema.js';
 import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
+import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
+import { ConsumptionService, NO_PROJECT, NO_RECIPIENT, type ConsumptionQuery } from './consumption.service.js';
+import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
+import { MonthEndService } from './month-end.service.js';
+import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
+import { getStatusBands } from '../../shared/inventory/stock-status.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { Errors } from '../../shared/errors.js';
@@ -39,6 +46,90 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
       projectNumber: q['projectNumber'],
       limit: q['limit'] ? Number(q['limit']) : undefined,
     });
+  });
+
+  app.get('/reports/stock-status', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    const status = (q['status'] ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+    const allowed = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
+    if (status.some((x) => !allowed.includes(x))) throw Errors.validation(`status must be one or more of ${allowed.join(', ')}`);
+    return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
+  });
+
+  // The month-end report: the workbook's Summary and Stock Report sheets, as at the end of ?month=YYYY-MM.
+  /** Use the supplied month, or the current UTC month when absent or empty; validation is deferred to the service. */
+  const monthParam = (q: Record<string, string | undefined>) => q['month'] || new Date().toISOString().slice(0, 7);
+  app.get('/reports/month-end', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return MonthEndService.report(monthParam(req.query as Record<string, string | undefined>));
+  });
+  app.get('/reports/month-end/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const report = await MonthEndService.report(monthParam(req.query as Record<string, string | undefined>));
+    const buf = await buildMonthEndXlsx(report);
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${monthEndFilename(report.month)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
+  });
+
+  // The value of the stock on hand now, per category, and items by status.
+  app.get('/reports/stock-value', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return ReportingService.stockValue();
+  });
+
+  // Stock used in a date range, by item, project and category, at unit price.
+  const consumptionQuery = (q: Record<string, string | undefined>): ConsumptionQuery => ({
+    from: q['from'] ?? '', to: q['to'] ?? '', projectNumber: q['projectNumber'] || undefined, category: q['category'] || undefined,
+    recipientId: q['recipientId'] || undefined,
+  });
+  app.get('/reports/consumption', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return ConsumptionService.report(consumptionQuery(req.query as Record<string, string | undefined>));
+  });
+  app.get('/reports/consumption/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = consumptionQuery(req.query as Record<string, string | undefined>);
+    const [report, currency] = await Promise.all([
+      ConsumptionService.report(q),
+      SettingsService.getValue<string>('general.defaultCurrency'),
+    ]);
+    const scope = [
+      q.projectNumber === NO_PROJECT ? 'Issues with no project' : q.projectNumber ? `Project ${q.projectNumber}` : 'All projects',
+      q.category ? `category ${q.category}` : null,
+      q.recipientId === NO_RECIPIENT ? 'issues with no recipient recorded'
+        : q.recipientId ? `issued to ${report.byRecipient[0]?.name ?? 'one recipient'}` : null,
+    ].filter(Boolean).join(', ');
+    const buf = await buildConsumptionXlsx(report, { currency, scope });
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${consumptionFilename(report, q.projectNumber === NO_PROJECT ? 'no-project' : q.projectNumber)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
+  });
+
+  // The items to re-order (URGENT and WARNING) as an Excel file for the buyer.
+  app.get('/reports/reorder-list/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    const [rows, bands, currency] = await Promise.all([
+      ReportingService.stockStatus({ status: ['URGENT', 'WARNING'], category: q['category'] }),
+      getStatusBands(),
+      SettingsService.getValue<string>('general.defaultCurrency'),
+    ]);
+    const generatedAt = new Date();
+    const buf = await buildReorderXlsx(rows, { generatedAt, bands, currency });
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${reorderFilename(generatedAt)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
   });
 
   app.get('/reports/low-stock', { preHandler: [app.authenticate] }, async (req) => {

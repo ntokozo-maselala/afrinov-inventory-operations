@@ -1,7 +1,13 @@
 # Backup & Recovery
 
-Automated daily database backups with point-in-time recovery where the
-hosting platform supports it, given this becomes the sole system of record
-for inventory after cutover (the spreadsheets are frozen, not a live
-fallback). Test restore procedure at least once before go-live, not for the
-first time during an actual incident.
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
+**Planned — nothing in the repository implements backups.** The compose
+stack keeps PostgreSQL data in the named volume `afrinov_pg` with no backup
+job. Intent: automated daily database backups with point-in-time recovery
+where the hosting platform supports it, since this becomes the sole system
+of record after cutover; test the restore procedure at least once before
+go-live.
+
+## Evidence
+- `afrinov-platform/apps/backend/docker-compose.yml` — volume `afrinov_pg`, no backup service

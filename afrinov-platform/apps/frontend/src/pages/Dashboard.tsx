@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -10,7 +10,24 @@ import { useApi } from '../hooks/useApi';
 import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import type { ReportResult, ReportInventoryLine } from '../mock/mockReport';
-import type { LowStockItem } from './LowStock';
+import type { StockStatusItem } from './StockStatus';
+import { StockStatusBadge } from '../components/StockStatusBadge';
+
+/** GET /reports/stock-value: the stock on hand now, valued per category. */
+export interface StockValue {
+  currency: string;
+  categories: Array<{ category: string; items: number; itemsInStock: number; value: number; unpriced: number; share: number }>;
+  total: { items: number; itemsInStock: number; value: number; unpriced: number };
+  status: { URGENT: number; WARNING: number; OK: number; NOT_SET: number; outOfStock: number };
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  CONSUMABLES: 'Consumables',
+  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
+  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
+  PROJECT_MATERIAL: 'Project Material',
+  TOOLS: 'Tools',
+};
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   IN_STOCK: 'success',
@@ -26,32 +43,26 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const [range, setRange] = useState<string>('MONTH');
 
-  const query = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set('range', range);
-    p.set('stockStatus', 'ALL');
-    p.set('itemStatus', 'ACTIVE');
-    p.set('page', '1');
-    p.set('pageSize', '200');
-    return `/reports/inventory?${p.toString()}`;
-  }, [range]);
-
-  const { data: report, loading, error, reload } = useApi<ReportResult>(query);
-  const { data: lowStock, loading: lowStockLoading } = useApi<LowStockItem[]>('/reports/low-stock');
+  // Everything here is stock as it stands now, so there is no date range.
+  const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
+  const { data: lowStock, loading: lowStockLoading, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
+  const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
 
   const kpis = useMemo(() => {
-    if (!report) return null;
-    const k = report.kpis;
+    if (!value) return null;
+    const s = value.status;
     return [
-      { label: 'Total SKUs', value: formatNumber(k.skuCount), tone: 'brand' as const },
-      { label: 'Total Quantity', value: formatNumber(k.totalQuantity), tone: 'info' as const },
-      { label: 'Inventory Value', value: formatCurrency(k.inventoryValue, k.currency), tone: 'success' as const },
-      { label: 'Low Stock', value: formatNumber(k.lowStockCount), tone: k.lowStockCount > 0 ? 'warning' as const : 'neutral' as const },
-      { label: 'Out of Stock', value: formatNumber(k.outOfStockCount), tone: k.outOfStockCount > 0 ? 'danger' as const : 'neutral' as const },
+      {
+        label: 'Stock value', value: formatCurrency(value.total.value, value.currency), tone: 'success' as const,
+        note: value.total.unpriced > 0 ? `${value.total.unpriced} item${value.total.unpriced === 1 ? '' : 's'} in stock without a price` : 'excl. VAT',
+      },
+      { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, to: '/stock' },
+      { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: 'below 20% of required', to: '/reports/stock-status?view=URGENT' },
+      { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: 'below 40% of required', to: '/reports/stock-status?view=WARNING' },
+      { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=all' },
     ];
-  }, [report]);
+  }, [value]);
 
   const attentionItems = useMemo(() => {
     if (!lowStock) return [];
@@ -115,35 +126,24 @@ export function Dashboard() {
 
   const handleRefresh = useCallback(() => {
     reload();
-  }, [reload]);
+    reloadLowStock();
+    reloadValue();
+  }, [reload, reloadLowStock, reloadValue]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Inventory Dashboard"
-        description="Overview of stock levels, inventory value, and item status."
+        description="Stock on hand now: its value per category, and the items that need re-ordering."
         meta={
           report && !loading ? (
             <span className="text-xs text-surface-500">
-              Updated {formatDateTime(report.generatedAt)} · {report.kpis.rangeLabel}
+              Updated {formatDateTime(report.generatedAt)}
             </span>
           ) : null
         }
         actions={
           <div className="flex items-center gap-2">
-            <select
-              value={range}
-              onChange={(e) => setRange(e.target.value)}
-              className="input"
-              aria-label="Time range"
-            >
-              <option value="TODAY">Today</option>
-              <option value="WEEK">This week</option>
-              <option value="MONTH">This month</option>
-              <option value="QUARTER">This quarter</option>
-              <option value="YEAR">This year</option>
-              <option value="ALL">All time</option>
-            </select>
             <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
               Refresh
             </Button>
@@ -154,36 +154,94 @@ export function Dashboard() {
         }
       />
 
-      {error && (
+      {(error ?? valueError) && (
         <div className="surface-card p-4 flex items-center justify-between">
-          <span className="text-sm text-danger-600">{error.message ?? 'Failed to load dashboard data.'}</span>
+          <span className="text-sm text-danger-600">{(error ?? valueError)?.message ?? 'Failed to load dashboard data.'}</span>
           <Button variant="secondary" size="sm" onClick={handleRefresh}>Retry</Button>
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {loading && !kpis
+        {valueLoading && !kpis
           ? Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="surface-card p-4 animate-pulse">
                 <div className="h-3 w-20 bg-surface-100 rounded mb-3" />
                 <div className="h-6 w-24 bg-surface-100 rounded" />
               </div>
             ))
-          : kpis?.map((kpi) => (
-              <div key={kpi.label} className="surface-card p-4 flex flex-col">
-                <span className="text-xs text-surface-500 mb-1">{kpi.label}</span>
-                <span className={`text-xl font-semibold ${kpi.tone === 'brand' ? 'text-brand-700' : kpi.tone === 'success' ? 'text-success-700' : kpi.tone === 'warning' ? 'text-warning-700' : kpi.tone === 'danger' ? 'text-danger-700' : 'text-surface-900'}`}>
-                  {kpi.value}
-                </span>
-              </div>
-            ))}
+          : kpis?.map((kpi) => {
+              const body = (
+                <>
+                  <span className="text-xs text-surface-500 mb-1">{kpi.label}</span>
+                  <span className={`text-xl font-semibold ${kpi.tone === 'brand' ? 'text-brand-700' : kpi.tone === 'success' ? 'text-success-700' : kpi.tone === 'warning' ? 'text-warning-700' : kpi.tone === 'danger' ? 'text-danger-700' : 'text-surface-900'}`}>
+                    {kpi.value}
+                  </span>
+                  {kpi.note && <span className="text-xs text-surface-500 mt-1">{kpi.note}</span>}
+                </>
+              );
+              return kpi.to
+                ? <Link key={kpi.label} to={kpi.to} className="surface-card p-4 flex flex-col hover:border-brand-300">{body}</Link>
+                : <div key={kpi.label} className="surface-card p-4 flex flex-col">{body}</div>;
+            })}
       </div>
+
+      {value && (
+        <section aria-label="Stock value by category">
+          <h2 className="text-h2 text-surface-900 mb-3">Stock value by category</h2>
+          <div className="surface-card overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Category</th>
+                  <th scope="col" className="text-right">Items</th>
+                  <th scope="col" className="text-right">In stock</th>
+                  <th scope="col" className="text-right">Value excl. VAT</th>
+                  <th scope="col" className="w-1/4">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {value.categories.map((c) => (
+                  <tr key={c.category}>
+                    <td className="text-sm font-medium text-surface-900">
+                      {CATEGORY_LABELS[c.category] ?? c.category}
+                      {c.unpriced > 0 && <span className="block text-xs text-surface-500">{c.unpriced} in stock without a price</span>}
+                    </td>
+                    <td className="text-right font-mono text-sm">{formatNumber(c.items)}</td>
+                    <td className="text-right font-mono text-sm">{formatNumber(c.itemsInStock)}</td>
+                    <td className="text-right font-mono text-sm">{formatCurrency(c.value, value.currency)}</td>
+                    <td>
+                      <div className="flex items-center gap-2" title={`${Math.round(c.share * 100)}% of the stock value`}>
+                        <div className="h-2 flex-1 rounded bg-surface-100">
+                          <div className="h-2 rounded bg-brand-500" style={{ width: `${Math.round(c.share * 100)}%` }} />
+                        </div>
+                        <span className="text-xs text-surface-500 w-9 text-right">{Math.round(c.share * 100)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="font-semibold">
+                  <td>All categories</td>
+                  <td className="text-right font-mono text-sm">{formatNumber(value.total.items)}</td>
+                  <td className="text-right font-mono text-sm">{formatNumber(value.total.itemsInStock)}</td>
+                  <td className="text-right font-mono text-sm">{formatCurrency(value.total.value, value.currency)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="text-xs text-surface-500 mt-2">
+            On hand across all locations × unit price, added up row by row as the stock workbook&rsquo;s Summary sheets do.
+          </p>
+        </section>
+      )}
 
       {hasAttention && (
         <section aria-label="Attention required">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-h2 text-surface-900">Attention Required</h2>
-            <Link to="/reports/low-stock">
+            <Link to="/reports/stock-status">
               <Button variant="secondary" size="sm">View all</Button>
             </Link>
           </div>
@@ -193,10 +251,10 @@ export function Dashboard() {
                 <tr>
                   <th scope="col">SKU</th>
                   <th scope="col">Material</th>
-                  <th scope="col">Location</th>
+                  <th scope="col">Where</th>
                   <th scope="col" className="text-right">On Hand</th>
-                  <th scope="col" className="text-right">Reorder At</th>
-                  <th scope="col" className="text-right">Shortfall</th>
+                  <th scope="col" className="text-right">Required</th>
+                  <th scope="col" className="text-right">Re-order qty</th>
                   <th scope="col" className="text-center">Status</th>
                 </tr>
               </thead>
@@ -212,39 +270,36 @@ export function Dashboard() {
                 ) : attentionItems.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-0">
-                      <EmptyState title="No items need attention" description="All inventory items are above their reorder thresholds." />
+                      <EmptyState title="No items need attention" description="Every item with a Required Stock has at least 40% of it on hand." />
                     </td>
                   </tr>
                 ) : (
                   attentionItems.map((item, i) => {
-                    const onHand = Number(item.quantity) || 0;
-                    const reorder = Number(item.requiredStock) || 0;
-                    const shortfall = Math.max(0, reorder - onHand);
-                    const status = onHand <= 0 ? 'OUT_OF_STOCK' : 'LOW_STOCK';
+                    const onHand = Number(item.onHand) || 0;
+                    const required = Number(item.requiredStock) || 0;
+                    const reorder = Number(item.reorderQuantity) || 0;
                     return (
-                      <tr key={`${item.materialId}-${item.locationId}-${i}`} className="cursor-pointer" onClick={() => navigate(`/materials/${item.materialId}`)}>
+                      <tr key={`${item.materialId}-${i}`} className="cursor-pointer" onClick={() => navigate(`/materials/${item.materialId}`)}>
                         <td>
-                          <span className="font-mono text-xs">{item.sku ?? <span className="text-surface-400">—</span>}</span>
+                          <span className="font-mono text-xs">{item.sku}</span>
                         </td>
                         <td>
                           <span className="text-sm font-medium text-surface-900">{item.name}</span>
                         </td>
                         <td>
-                          <span className="text-sm text-surface-600">{item.locationName}</span>
+                          <span className="text-sm text-surface-600">{item.locations.map((l) => l.locationName).join(', ') || '—'}</span>
                         </td>
                         <td className="text-right">
-                          <span className={`font-mono text-sm ${onHand <= 0 ? 'text-danger-700 font-medium' : 'text-surface-900'}`}>{formatNumber(onHand)}</span>
+                          <span className={`font-mono text-sm ${onHand <= 0 ? 'text-danger-600 font-medium' : 'text-surface-900'}`}>{formatNumber(onHand)}</span>
                         </td>
                         <td className="text-right">
-                          <span className="font-mono text-sm text-surface-500">{formatNumber(reorder)}</span>
+                          <span className="font-mono text-sm text-surface-500">{formatNumber(required)}</span>
                         </td>
                         <td className="text-right">
-                          <span className={`font-mono text-sm ${shortfall > 0 ? 'text-danger-700 font-medium' : 'text-surface-400'}`}>{formatNumber(shortfall)}</span>
+                          <span className="font-mono text-sm font-medium">{formatNumber(reorder)}</span>
                         </td>
                         <td className="text-center">
-                          <Badge tone={status === 'OUT_OF_STOCK' ? 'danger' : 'warning'} dot>
-                            {status === 'OUT_OF_STOCK' ? 'Out of stock' : 'Low stock'}
-                          </Badge>
+                          <StockStatusBadge status={item.status} percent={item.percentOfRequired} />
                         </td>
                       </tr>
                     );

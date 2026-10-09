@@ -26,49 +26,50 @@ describe('mock API demo data flow', () => {
     expect(list.every((t) => t.materialSku && t.locationName)).toBe(true);
   });
 
-  it('GET /reports/current-stock returns one row per (material, location) balance', async () => {
-    const rows = await api.get<Array<{ materialSku: string; quantity: string; belowThreshold: boolean }>>('/reports/current-stock');
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.materialSku)).toBe(true);
-    // A material with quantity 0 or below the required threshold should be marked belowThreshold=true.
-    const below = rows.find((r) => r.belowThreshold);
-    expect(below, 'the seeded ledger must produce at least one below-threshold row').toBeTruthy();
-  });
+  interface StatusRow { materialId: string; sku: string; onHand: string; requiredStock: string; percentOfRequired: number | null; status: string; reorderQuantity: string; locations: Array<{ quantity: string }> }
 
-  it('GET /reports/low-stock returns only the below-threshold rows', async () => {
-    const rows = await api.get<Array<{ sku: string; name: string; unitOfMeasure: string; quantity: string; requiredStock: string; materialId: string; locationId: string }>>(
-      '/reports/low-stock',
-    );
+  it('GET /reports/current-stock gives every row its item\'s status, from the total across locations', async () => {
+    const rows = await api.get<Array<{ materialId: string; materialSku: string; quantity: string; requiredStock: string; stockStatus: string; belowThreshold: boolean }>>('/reports/current-stock');
     expect(rows.length).toBeGreaterThan(0);
-    // Backend-aligned shape: every row has the documented columns.
+    const status = new Map((await api.get<StatusRow[]>('/reports/stock-status')).map((r) => [r.materialId, r.status]));
     for (const r of rows) {
-      expect(r.sku).toBeTruthy();
-      expect(r.name).toBeTruthy();
-      expect(r.unitOfMeasure).toBeTruthy();
-      expect(r.materialId).toBeTruthy();
-      expect(typeof r.quantity).toBe('string');
-      expect(typeof r.requiredStock).toBe('string');
-      expect(Number(r.quantity) <= Number(r.requiredStock)).toBe(true);
+      expect(r.stockStatus).toBe(status.get(r.materialId));
+      expect(r.belowThreshold).toBe(r.stockStatus === 'URGENT' || r.stockStatus === 'WARNING');
     }
   });
 
-  it('GET /reports/low-stock returns at least one OUT_OF_STOCK row (quantity 0) for the demo seed', async () => {
-    // The seed issues 10 units of mat-4 welding rod against loc-2 (Boiler Shop)
-    // and the original receipt is 60 - 15 (issue) = 45 - 25 (goods receipt of
-    // a different leg) ... verify the exact seed produces at least one zero
-    // or below-threshold row.
-    const rows = await api.get<Array<{ sku: string; quantity: string; requiredStock: string }>>(
-      '/reports/low-stock',
-    );
-    const outOfStock = rows.filter((r) => Number(r.quantity) === 0);
-    // The seeded ledger has positive balances everywhere; the page should
-    // still return the below-threshold rows that match the documented
-    // scenario (Reorder at > On hand).
+  it('GET /reports/stock-status grades every active item by the 20% / 40% bands, most urgent first', async () => {
+    const rows = await api.get<StatusRow[]>('/reports/stock-status');
     expect(rows.length).toBeGreaterThan(0);
-    // Sanity: at least one below-threshold row has a positive shortfall.
-    const withShortfall = rows.filter((r) => Number(r.requiredStock) - Number(r.quantity) > 0);
-    expect(withShortfall.length).toBeGreaterThan(0);
-    expect(outOfStock.length, 'seed has no zero-balance rows; this test documents the current behaviour').toBe(0);
+    const order = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
+    for (let i = 1; i < rows.length; i++) expect(order.indexOf(rows[i]!.status)).toBeGreaterThanOrEqual(order.indexOf(rows[i - 1]!.status));
+    for (const r of rows) {
+      const onHand = Number(r.onHand);
+      const required = Number(r.requiredStock);
+      expect(onHand).toBeCloseTo(r.locations.reduce((a, l) => a + Number(l.quantity), 0));
+      if (required <= 0) { expect(r.status).toBe('NOT_SET'); continue; }
+      const pct = (onHand / required) * 100;
+      expect(r.status).toBe(pct < 20 ? 'URGENT' : pct < 40 ? 'WARNING' : 'OK');
+      expect(Number(r.reorderQuantity)).toBeCloseTo(Math.max(0, required - onHand));
+    }
+  });
+
+  it('GET /reports/stock-value adds up on hand x unit price per category, matching the stock status', async () => {
+    const v = await api.get<{ categories: Array<{ category: string; items: number; value: number; share: number }>; total: { items: number; value: number }; status: Record<string, number> }>('/reports/stock-value');
+    const rows = await api.get<Array<StatusRow & { category: string; unitCost: string | null }>>('/reports/stock-status');
+    expect(v.total.items).toBe(rows.length);
+    const expected = rows.reduce((a, r) => a + (Number(r.onHand) > 0 && r.unitCost !== null ? Number(r.onHand) * Number(r.unitCost) : 0), 0);
+    expect(v.total.value).toBeCloseTo(expected, 2);
+    expect(v.categories.reduce((a, c) => a + c.value, 0)).toBeCloseTo(v.total.value, 2);
+    expect(v.status.URGENT).toBe(rows.filter((r) => r.status === 'URGENT').length);
+    expect(v.status.outOfStock).toBe(rows.filter((r) => Number(r.onHand) <= 0).length);
+  });
+
+  it('GET /reports/low-stock is the stock status limited to URGENT and WARNING', async () => {
+    const all = await api.get<StatusRow[]>('/reports/stock-status');
+    const low = await api.get<StatusRow[]>('/reports/low-stock');
+    expect(low.map((r) => r.materialId)).toEqual(all.filter((r) => r.status === 'URGENT' || r.status === 'WARNING').map((r) => r.materialId));
+    expect(await api.get<StatusRow[]>('/reports/stock-status?status=OK')).toEqual(all.filter((r) => r.status === 'OK'));
   });
 
   it('GET /reports/inventory with range=ALL&stockStatus=ALL&itemStatus=ACTIVE returns the documented shape', async () => {
