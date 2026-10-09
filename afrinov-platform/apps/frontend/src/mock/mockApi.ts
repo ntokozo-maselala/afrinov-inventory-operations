@@ -870,7 +870,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     return computeStockValue();
   }
   if (method === 'GET' && p === '/reports/consumption') {
-    return computeConsumption(qs, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR') });
+    return computeConsumption(qs, {
+      transactions: state.transactions, materials: state.materials, projects: state.projects, recipients: state.recipients,
+      currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
+      userName: (id) => mockUsers.find((u) => u.id === id)?.name ?? 'Unknown',
+    });
   }
   if (method === 'GET' && p === '/reports/stock-status') {
     const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);

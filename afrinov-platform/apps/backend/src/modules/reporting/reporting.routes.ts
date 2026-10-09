@@ -4,7 +4,7 @@ import { ReportService } from './report.service.js';
 import { parseReportQuery } from './report-query.schema.js';
 import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
 import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
-import { ConsumptionService, NO_PROJECT, type ConsumptionQuery } from './consumption.service.js';
+import { ConsumptionService, NO_PROJECT, NO_RECIPIENT, type ConsumptionQuery } from './consumption.service.js';
 import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -64,6 +64,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
   // Stock used in a date range, by item, project and category, at unit price.
   const consumptionQuery = (q: Record<string, string | undefined>): ConsumptionQuery => ({
     from: q['from'] ?? '', to: q['to'] ?? '', projectNumber: q['projectNumber'] || undefined, category: q['category'] || undefined,
+    recipientId: q['recipientId'] || undefined,
   });
   app.get('/reports/consumption', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
@@ -79,6 +80,8 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     const scope = [
       q.projectNumber === NO_PROJECT ? 'Issues with no project' : q.projectNumber ? `Project ${q.projectNumber}` : 'All projects',
       q.category ? `category ${q.category}` : null,
+      q.recipientId === NO_RECIPIENT ? 'issues with no recipient recorded'
+        : q.recipientId ? `issued to ${report.byRecipient[0]?.name ?? 'one recipient'}` : null,
     ].filter(Boolean).join(', ');
     const buf = await buildConsumptionXlsx(report, { currency, scope });
     return reply
