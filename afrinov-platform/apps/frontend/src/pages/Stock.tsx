@@ -15,7 +15,6 @@ import { Icon } from '../components/Icon';
 import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
 import { StockActionForm, type StockActionKind } from '../components/StockActionForm';
-import { AddStockItemForm } from '../components/AddStockItemForm';
 
 interface StockRow {
   materialId: string; materialSku: string; materialName: string;
@@ -49,7 +48,6 @@ export function Stock() {
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
   const [action, setAction] = useState<{ kind: StockActionKind; row: StockRow } | null>(null);
-  const [adding, setAdding] = useState(false);
   const toast = useToast();
 
   const filtered = useMemo(() => {
@@ -91,16 +89,6 @@ export function Stock() {
             <Link to="/stock/count">
               <Button variant="secondary" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
             </Link>
-          </RoleGuard>
-          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
-            <Button
-              variant="secondary"
-              leadingIcon={<Icon.Plus size={14} />}
-              onClick={() => setAdding(true)}
-              aria-label="Add stock item"
-            >
-              Add stock item
-            </Button>
           </RoleGuard>
           </div>
         }
@@ -175,28 +163,12 @@ export function Stock() {
         </Drawer>
       )}
 
-      {adding && (
-        <Drawer
-          open
-          onClose={() => setAdding(false)}
-          title="Add stock item"
-          description="Catalogue entry plus optional opening stock at a chosen location."
-          width="lg"
-        >
-          <AddStockItemForm
-            onCancel={() => setAdding(false)}
-            onSaved={(_sku, msg) => { setAdding(false); stock.reload(); toast.success(msg); }}
-            onError={(err) => toast.error('Could not add stock item', err.message)}
-          />
-        </Drawer>
-      )}
     </div>
   );
 }
 
 function actionTitle(kind: StockActionKind, row: StockRow): string {
   return {
-    issue: `Issue ${row.materialSku}`,
     transfer: `Transfer ${row.materialSku}`,
     adjust: `Adjust ${row.materialSku}`,
   }[kind];
@@ -217,7 +189,6 @@ function columns({ onAction }: { onAction: (kind: StockActionKind, row: StockRow
       render: (r) => (
         <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
           <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-            <Button size="sm" variant="secondary" onClick={() => onAction('issue', r)}>Issue</Button>
             <Button size="sm" variant="secondary" onClick={() => onAction('transfer', r)}>Transfer</Button>
             <Button size="sm" variant="ghost" onClick={() => onAction('adjust', r)}>Adjust</Button>
           </div>

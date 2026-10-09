@@ -4,7 +4,7 @@ import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
 import { Button } from '../components/Button';
-import { Input, Select, Field } from '../components/Field';
+import { Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
@@ -12,9 +12,8 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { RoleGuard } from '../components/RoleGuard';
-import { api, type ApiError } from '../api/client';
 import { formatNumber } from '../lib/format';
-import { Alert } from '../components/Alert';
+import { MaterialForm } from '../components/MaterialForm';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 
@@ -69,7 +68,7 @@ export function Materials() {
         description="Catalogue of stockable items. Each material has a category, unit of measure, and reorder threshold."
         actions={
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
-            <Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setAdding(true)}>Add material</Button>
+            <Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setAdding(true)}>Add item</Button>
           </RoleGuard>
         }
       />
@@ -99,17 +98,16 @@ export function Materials() {
           rowKey={(m) => m.id}
           rows={filtered}
           columns={columns()}
-          emptyState={<EmptyState title={q || category ? 'No materials match' : 'No materials yet'} description={q || category ? 'Try clearing filters.' : 'Add materials to start tracking inventory.'} action={!q && !category && canManage ? <Button variant="primary" onClick={() => setAdding(true)}>Add your first material</Button> : undefined} />}
+          emptyState={<EmptyState title={q || category ? 'No materials match' : 'No materials yet'} description={q || category ? 'Try clearing filters.' : 'Add materials to start tracking inventory.'} action={!q && !category && canManage ? <Button variant="primary" onClick={() => setAdding(true)}>Add your first item</Button> : undefined} />}
         />
       )}
 
       {adding && canManage && (
-        <Drawer open onClose={() => setAdding(false)} title="Add material" description="Define a new stockable item. The SKU must be unique." width="md">
+        <Drawer open onClose={() => setAdding(false)} title="Add item" description="Add a new item to the catalogue. The SKU must be unique. Receive stock records the quantity." width="md">
           <MaterialForm
             onCancel={() => setAdding(false)}
-            onSaved={() => { setAdding(false); mats.reload(); }}
-            onError={(err) => toast.error('Could not save material', err.message)}
-            onSuccess={() => toast.success('Material added')}
+            onSaved={(m) => { setAdding(false); mats.reload(); toast.success(`${m.sku} added`); }}
+            onError={(err) => toast.error('Could not add item', err.message)}
           />
         </Drawer>
       )}
@@ -126,60 +124,4 @@ function columns(): DataTableColumn<Material>[] {
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },
     { key: 'status', header: 'Status', render: (m) => m.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '7rem' },
   ];
-}
-
-export function MaterialForm({ onCancel, onSaved, onError, onSuccess, initial }: {
-  onCancel: () => void; onSaved: () => void; onError: (e: ApiError) => void; onSuccess: () => void;
-  initial?: Partial<Material>;
-}) {
-  const [sku, setSku] = useState(initial?.sku ?? '');
-  const [name, setName] = useState(initial?.name ?? '');
-  const [category, setCategory] = useState(initial?.category ?? CATEGORY_OPTIONS[1]!.value);
-  const [unitOfMeasure, setUom] = useState(initial?.unitOfMeasure ?? 'each');
-  const [requiredStock, setReorder] = useState(String(initial?.requiredStock ?? '0'));
-  const [busy, setBusy] = useState(false);
-  const [validation, setValidation] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setValidation(null);
-    if (!sku.trim() || !name.trim()) { setValidation('SKU and name are required.'); return; }
-    const reorder = Number(requiredStock);
-    if (!Number.isFinite(reorder) || reorder < 0) { setValidation('Reorder threshold must be 0 or positive.'); return; }
-    setBusy(true);
-    try {
-      await api.post('/materials', { sku: sku.trim(), name: name.trim(), category, unitOfMeasure: unitOfMeasure.trim(), requiredStock: reorder });
-      onSuccess(); onSaved();
-    } catch (err) { onError(err as ApiError); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-4" noValidate>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="SKU" htmlFor="m-sku" required error={validation && !sku.trim() ? validation : null}>
-          <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} required invalid={!!validation && !sku.trim()} />
-        </Field>
-        <Field label="Unit of measure" htmlFor="m-uom" required>
-          <Input id="m-uom" value={unitOfMeasure} onChange={(e) => setUom(e.target.value)} required />
-        </Field>
-      </div>
-      <Field label="Name" htmlFor="m-name" required error={validation && !name.trim() ? 'Name is required.' : null}>
-        <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} required invalid={!!validation && !name.trim()} />
-      </Field>
-      <Field label="Category" htmlFor="m-cat" required>
-        <Select id="m-cat" value={category} onChange={(e) => setCategory(e.target.value as Material['category'])}>
-          {CATEGORY_OPTIONS.filter((o) => o.value).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </Select>
-      </Field>
-      <Field label="Reorder threshold" htmlFor="m-reorder" help="Stock status compares stock on hand with this: urgent below 20%, warning below 40%.">
-        <Input id="m-reorder" type="number" min="0" step="0.0001" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
-      </Field>
-      {validation && (sku.trim() && name.trim()) && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
-      <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
-        <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
-        <Button variant="primary" type="submit" loading={busy}>Save material</Button>
-      </div>
-    </form>
-  );
 }

@@ -2,15 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }));
+const { mockGet, mockPost, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), perms: { canManageMaterials: true } }));
 
 vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
+vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => perms.canManageMaterials }));
 
 const { ReceiveStock } = await import('./ReceiveStock');
 const { ToastProvider } = await import('../components/Toast');
+
+let addedMaterials: Array<{ id: string; sku: string; name: string; unitOfMeasure: string; active: boolean }> = [];
 
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
@@ -22,6 +25,7 @@ function renderPage() {
       { id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', active: true },
       { id: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitOfMeasure: 'pair', active: true },
       { id: 'm-old', sku: 'OLD', name: 'Retired item', unitOfMeasure: 'each', active: false },
+      ...addedMaterials,
     ];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'A-1', active: true }, { id: 'l-2', name: 'B-2', active: true }];
     if (path.startsWith('/reports/current-stock')) return [
@@ -48,6 +52,8 @@ function choose(label: string, query: string) {
 
 describe('ReceiveStock page', () => {
   beforeEach(() => {
+    perms.canManageMaterials = true;
+    addedMaterials = [];
     mockGet.mockReset();
     mockPost.mockReset().mockResolvedValue({ goodsReceiptId: 'gr-1', number: 'GR-2026-0007', transactionIds: ['t-1', 't-2'] });
   });
@@ -112,5 +118,36 @@ describe('ReceiveStock page', () => {
     expect(screen.getByText('None in stock')).toBeInTheDocument();
     // A location already chosen is not overwritten.
     expect(screen.getByLabelText('Into location')).toHaveValue('l-2');
+  });
+
+  it('adds a new item from the page and puts it on the first empty line', async () => {
+    renderPage();
+    await ready();
+    choose('Item 1', 'disc');
+    fireEvent.click(screen.getByRole('button', { name: 'Add another item' }));
+    // The new line's search box takes focus; clicking New item moves it away in a browser.
+    fireEvent.blur(screen.getByLabelText('Item 2'));
+    fireEvent.click(screen.getByRole('button', { name: 'New item' }));
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: 'WSHR-16' } });
+    fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flat washer' } });
+    const created = { id: 'm-new', sku: 'WSHR-16', name: 'Flat washer', unitOfMeasure: 'each', active: true };
+    mockPost.mockResolvedValueOnce(created);
+    addedMaterials = [created];
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
+
+    await waitFor(() => expect(screen.getByLabelText('Item 2')).toHaveValue('Flat washer (WSHR-16)'));
+    expect(mockPost).toHaveBeenCalledWith('/materials', expect.objectContaining({ sku: 'WSHR-16', name: 'Flat washer' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // The line already filled in is left alone.
+    expect(screen.getByLabelText('Item 1')).toHaveValue('Cutting disc (DISC-115)');
+  });
+
+  it('does not offer New item to someone who cannot add items', async () => {
+    perms.canManageMaterials = false;
+    renderPage();
+    await ready();
+    expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
+    expect(screen.getByText('Item not listed? Ask a store controller to add it.')).toBeInTheDocument();
   });
 });
