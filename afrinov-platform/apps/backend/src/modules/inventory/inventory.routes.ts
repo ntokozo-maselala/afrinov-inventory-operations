@@ -67,6 +67,7 @@ function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
 
+/** Register authenticated inventory endpoints with payload validation and mutation permission checks. */
 export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   app.get('/inventory-transactions', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as Record<string, string | undefined>;

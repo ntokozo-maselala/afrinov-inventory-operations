@@ -147,7 +147,7 @@ export function createMockApi(): MockApi {
   };
 }
 
-// Tiny path-router. Returns the response payload or throws an ApiError.
+/** Route a mock API request, returning its response payload or throwing an ApiError. */
 function route(method: string, path: string, body?: unknown): unknown {
   const p = path.split('?')[0] ?? '';
   const qs = parseQuery(path);
@@ -1354,7 +1354,11 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
   return { transactionId: id };
 }
 
-// Mirrors StockCountService.post: all or nothing, refused when stock moved since it was shown.
+/**
+ * Validate a mock count before recording variance adjustments linked to one count ID.
+ * Reject invalid lines, unknown locations or materials, and stale expected stock;
+ * return per-line variances and adjustment IDs, leaving matching quantities alone.
+ */
 function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> }) {
   const lines = b.lines ?? [];
   if (!b.locationId || lines.length === 0) throw err('VALIDATION_ERROR', 'Invalid stock count payload');

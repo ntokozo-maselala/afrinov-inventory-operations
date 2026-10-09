@@ -441,6 +441,7 @@ async function ensureGoodsReceipt(
   });
 }
 
+/** Seed an empty ledger, rejecting negative running stock, then link transfers and rebuild balances. */
 async function ensureTransactions(
   materials: Map<string, string>,
   locations: Map<string, string>,

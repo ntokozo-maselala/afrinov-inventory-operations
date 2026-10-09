@@ -6,6 +6,7 @@ const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi
 
 vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost },
+  /** Recognize mock API errors by their code property. */
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 
@@ -18,6 +19,7 @@ let stockAtA1 = [
   { materialId: 'm-3', materialSku: 'TAPE', materialName: 'Insulation tape', unitOfMeasure: 'roll', quantity: '2' },
 ];
 
+/** Stub stock-count lookups and render the page with router and toast providers. */
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'A-1', active: true }, { id: 'l-old', name: 'Closed', active: false }];
@@ -31,12 +33,14 @@ function renderPage() {
   render(<MemoryRouter><ToastProvider><StockCount /></ToastProvider></MemoryRouter>);
 }
 
+/** Select the A-1 fixture location and wait for its stock rows to load. */
 async function chooseA1() {
   await waitFor(() => expect(screen.getByRole('option', { name: 'A-1' })).toBeInTheDocument());
   fireEvent.change(screen.getByLabelText(/Location/), { target: { value: 'l-1' } });
   await screen.findByText('Cutting disc');
 }
 
+/** Enter a count through the named material's quantity input. */
 const count = (name: string, value: string) => fireEvent.change(screen.getByLabelText(`Counted ${name}`), { target: { value } });
 
 describe('StockCount page', () => {

@@ -23,8 +23,10 @@ interface Row { materialId: string; sku: string; name: string; unit: string; sys
 interface Draft { counts: Record<string, string>; extra: string[]; note: string }
 
 const EMPTY: Draft = { counts: {}, extra: [], note: '' };
+/** Build the browser-storage key for one location's unfinished count. */
 const draftKey = (locationId: string) => `stock-count-draft:${locationId}`;
 
+/** Restore a location draft, falling back to an empty draft if storage or JSON parsing fails. */
 function loadDraft(locationId: string): Draft {
   try {
     const raw = localStorage.getItem(draftKey(locationId));
@@ -36,6 +38,7 @@ function loadDraft(locationId: string): Draft {
   }
 }
 
+/** Persist a location draft or remove it when empty; ignore unavailable browser storage. */
 function saveDraft(locationId: string, draft: Draft) {
   try {
     if (Object.keys(draft.counts).length === 0 && draft.extra.length === 0 && !draft.note) localStorage.removeItem(draftKey(locationId));
@@ -52,8 +55,10 @@ function parseCount(text: string | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? n : NaN;
 }
 
+/** Format a displayed quantity rounded to at most four decimal places. */
 const fmt = (n: number) => String(Math.round(n * 10000) / 10000);
 
+/** Render a location count with saved drafts, blind count sheets, and variance posting. */
 export function StockCount() {
   const locations = useApi<Location[]>('/locations');
   const materials = useApi<Material[]>('/materials');
@@ -106,6 +111,7 @@ export function StockCount() {
   // Stock cannot really be below zero; such a figure comes from a booking mistake, and the count corrects it.
   const belowZero = rows.filter((r) => r.system < 0);
 
+  /** Restore the selected location's draft and reset filtering, confirmation, and errors. */
   function chooseLocation(id: string) {
     setLocationId(id);
     setDraft(id ? loadDraft(id) : EMPTY);
@@ -114,6 +120,7 @@ export function StockCount() {
     setError(null);
   }
 
+  /** Update or clear an item's draft quantity and invalidate the posting confirmation. */
   function setCount(materialId: string, value: string) {
     setDraft((d) => {
       const counts = { ...d.counts };
@@ -124,12 +131,14 @@ export function StockCount() {
     setConfirming(false);
   }
 
+  /** Add a found material to the draft so it appears with zero system stock. */
   function addFound(materialId: string) {
     if (!materialId) return;
     setDraft((d) => ({ ...d, extra: [...d.extra, materialId] }));
     setAdding('');
   }
 
+  /** Require at least one valid count before showing the posting confirmation. */
   function askToPost() {
     setError(null);
     if (counted.length === 0) { setError({ message: 'Type the counted quantity of at least one item.', moved: false }); return; }
@@ -137,6 +146,11 @@ export function StockCount() {
     setConfirming(true);
   }
 
+  /**
+   * Submit counted rows with the displayed system quantities and optional note.
+   * Clear the draft and reload stock on success; retain counts and display the
+   * API error on failure, flagging conflicts so system quantities can be reloaded.
+   */
   async function post() {
     setBusy(true);
     setError(null);

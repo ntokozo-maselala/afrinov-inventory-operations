@@ -95,6 +95,7 @@ function Protected() {
   );
 }
 
+/** Render public login and protected application routes, loading pages on demand. */
 export function App() {
   return (
     <Routes>

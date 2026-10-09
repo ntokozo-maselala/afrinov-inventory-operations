@@ -13,6 +13,7 @@ describe('stock counts over real HTTP', () => {
   let rackId: string;
   const items: Record<'disc' | 'gloves' | 'tape' | 'found', string> = { disc: '', gloves: '', tape: '', found: '' };
 
+  /** Return the rack quantity after asserting that its cached balance matches the ledger. */
   async function onHand(materialId: string): Promise<string> {
     const { ledger, balance } = await ledgerAndBalance(materialId, rackId);
     expect(balance).toBe(ledger);

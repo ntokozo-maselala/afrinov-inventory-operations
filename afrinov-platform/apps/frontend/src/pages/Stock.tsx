@@ -39,6 +39,7 @@ const STATUS_OPTIONS = [
   { value: 'out', label: 'Out of stock' },
 ];
 
+/** Render filterable stock balances and entry points for stock movements and counts. */
 export function Stock() {
   const stock = useApi<StockRow[]>('/reports/current-stock');
   const [q, setQ] = useState('');

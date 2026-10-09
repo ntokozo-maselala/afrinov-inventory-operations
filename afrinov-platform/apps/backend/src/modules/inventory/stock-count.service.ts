@@ -36,6 +36,12 @@ export interface StockCountResult {
 }
 
 export const StockCountService = {
+  /**
+   * Post count variances and an audit entry in one database transaction.
+   * Reject invalid lines, unknown materials, missing or inactive locations, and
+   * quantities that no longer match the expected stock. Matching lines create
+   * no adjustment; the result includes the count ID and each line's variance.
+   */
   async post(input: StockCountInput): Promise<StockCountResult> {
     if (input.lines.length === 0) throw Errors.validation('Count at least one item');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, expected: toDecimal(l.expectedQuantity), counted: toDecimal(l.countedQuantity) }));

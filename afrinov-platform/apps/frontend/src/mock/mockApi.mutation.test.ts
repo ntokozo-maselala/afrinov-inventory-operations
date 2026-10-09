@@ -466,6 +466,7 @@ describe('mock API mutation flows', () => {
   });
 
   describe('counting stock at a location', () => {
+    /** Read the mock stock quantity at loc-1, treating a missing balance as zero. */
     async function onHand(materialId: string): Promise<number> {
       const stock = await api.get<Array<{ locationId: string; quantity: string }>>(`/reports/current-stock?materialId=${materialId}`);
       return Number(stock.find((s) => s.locationId === 'loc-1')?.quantity ?? 0);
