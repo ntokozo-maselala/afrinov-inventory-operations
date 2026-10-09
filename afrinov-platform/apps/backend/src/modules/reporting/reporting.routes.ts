@@ -58,6 +58,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // The month-end report: the workbook's Summary and Stock Report sheets, as at the end of ?month=YYYY-MM.
+  /** Use the supplied month, or the current UTC month when absent or empty; validation is deferred to the service. */
   const monthParam = (q: Record<string, string | undefined>) => q['month'] || new Date().toISOString().slice(0, 7);
   app.get('/reports/month-end', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);

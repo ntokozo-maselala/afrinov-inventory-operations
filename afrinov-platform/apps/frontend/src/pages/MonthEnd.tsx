@@ -24,11 +24,12 @@ const LABEL: Record<string, string> = {
 
 const monthOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-/** The month just ended: the one a month-end report is usually for. */
+/** The month just ended, as YYYY-MM in local time: the usual month-end report default. */
 export function lastMonth(today = new Date()): string {
   return monthOf(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 }
 
+/** Show the selected month's category overview and export action, defaulting to the previous local month. */
 export function MonthEnd() {
   const thisMonth = monthOf(new Date());
   const [month, setMonth] = useState(lastMonth());
@@ -37,6 +38,7 @@ export function MonthEnd() {
   const [downloading, setDownloading] = useState(false);
   const toast = useToast();
 
+  /** Download the selected month, showing failures as toasts and clearing the busy state afterward. */
   async function download() {
     setDownloading(true);
     try {

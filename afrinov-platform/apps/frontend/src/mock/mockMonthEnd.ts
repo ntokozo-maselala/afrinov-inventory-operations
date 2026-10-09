@@ -26,6 +26,21 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 const fail = (message: string): ApiError => ({ code: 'VALIDATION_ERROR', message });
 
+/**
+ * Build the frontend-only report from ledger balances before the next month's
+ * UTC midnight and the supplied consumption report. Includes active items and
+ * inactive items with nonzero location balances; omits empty categories.
+ * Stock values use supplied prices (null when absent, zero toward totals),
+ * ratios are fractions, and reorder quantities may be negative.
+ * @param month - YYYY-MM; the current UTC month is allowed. Years 0000–0099
+ * follow Date.UTC's mapping to 1900–1999.
+ * @param data - Current catalog and settings plus ledger entries with comparable
+ * UTC ISO timestamps. consumption receives inclusive YYYY-MM-DD month bounds;
+ * usage locations reflect month-end holdings, not the issue locations.
+ * @param now - Reference for future-month validation and generatedAt.
+ * @throws A VALIDATION_ERROR ApiError object for malformed or future months.
+ * Errors from consumption propagate; an invalid now causes a RangeError.
+ */
 export function computeMonthEnd(
   month: string,
   data: {

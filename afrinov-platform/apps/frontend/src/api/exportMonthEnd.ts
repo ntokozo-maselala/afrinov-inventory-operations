@@ -7,6 +7,14 @@ import type { MonthEndReport } from '../mock/mockMonthEnd';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+/**
+ * Start an XLSX download for a YYYY-MM month, fetching the live export or
+ * building it locally in frontend-only mode. Resolves after triggering the
+ * browser download, without waiting for the file to be saved.
+ * @throws {Error} For live network failures, non-success responses, or empty files.
+ * Network failures get a connection message; unreadable error responses use the
+ * HTTP status. Report, workbook, response-body, and browser errors propagate.
+ */
 export async function downloadMonthEnd(month: string): Promise<void> {
   const fallback = `afrinov-month-end-${month}.xlsx`;
   if (FRONTEND_ONLY) {
@@ -37,6 +45,11 @@ const SHEET: Record<string, { summary: string; used: string; label: string; titl
 };
 const URGENCY: Record<string, string> = { URGENT: 'URGENT', WARNING: 'WARNING', OK: 'OK', NOT_SET: 'NOT SET' };
 
+/**
+ * Fetch a YYYY-MM month's report and return XLSX bytes with an Overview and
+ * per-category Summary and Used sheets, using the report's values and totals.
+ * @throws Propagates report, ExcelJS loading, and workbook generation errors.
+ */
 async function buildInBrowser(month: string): Promise<ArrayBuffer> {
   const r = await api.get<MonthEndReport>(`/reports/month-end?month=${encodeURIComponent(month)}`);
   const { default: ExcelJS } = await import('exceljs');

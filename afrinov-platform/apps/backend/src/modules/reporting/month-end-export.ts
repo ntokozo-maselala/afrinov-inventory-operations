@@ -20,21 +20,30 @@ const MONEY = '#,##0.00';
 const FILL: Record<string, string> = { URGENT: 'FFF8D7DA', WARNING: 'FFFFF3CD', OK: 'FFD4EDDA' };
 const URGENCY: Record<string, string> = { URGENT: 'URGENT', WARNING: 'WARNING', OK: 'OK', NOT_SET: 'NOT SET' };
 
+/** Build the XLSX download name from a YYYY-MM month without validating it. */
 export function monthEndFilename(month: string): string {
   return `afrinov-month-end-${month}.xlsx`;
 }
 
+/** Format the report's final day in UTC using the en-ZA long date format. */
 function monthLabel(r: MonthEndReport): string {
   const d = new Date(`${r.to}T00:00:00Z`);
   return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
+/** Apply bold, wrapped header styling and gray cell fills to the supplied row. */
 function headerRow(row: ExcelJS.Row) {
   row.font = { bold: true };
   row.alignment = { wrapText: true, vertical: 'middle' };
   row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } }; });
 }
 
+/**
+ * Serialize the supplied report to XLSX bytes: Overview, then Summary and Used
+ * sheets for each category. Uses the supplied values and totals without fetching
+ * or recalculating stock; null item values become blank cells.
+ * @throws Propagates workbook construction and serialization errors.
+ */
 export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Afrinov IMS';

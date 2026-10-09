@@ -59,7 +59,14 @@ const CATEGORY_ORDER: MaterialCategory[] = ['CONSUMABLES', 'FASTENERS_SLUGS_INSU
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
-/** The month's first and last day, and midnight after it. Not a future month. */
+/**
+ * Return inclusive YYYY-MM-DD bounds and the exclusive UTC midnight after a month.
+ * The current month is allowed and still returns the full month's bounds.
+ * Years 0000–0099 follow Date.UTC's mapping to 1900–1999.
+ * @param month - Month in YYYY-MM format.
+ * @param now - Reference date whose UTC month is the latest allowed month.
+ * @throws {ApiError} VALIDATION_ERROR (400) for malformed or future months.
+ */
 export function monthRange(month: string, now = new Date()): { from: string; to: string; end: Date } {
   const m = /^(\d{4})-(\d{2})$/.exec(month);
   if (!m) throw Errors.validation('Month must be YYYY-MM');
@@ -73,6 +80,20 @@ export function monthRange(month: string, now = new Date()): { from: string; to:
 }
 
 export const MonthEndService = {
+  /**
+   * Read stock before the next month's UTC midnight and usage within the month,
+   * grouped by category with totals. Includes active items and inactive items
+   * with a nonzero balance at any location; empty categories are omitted.
+   * Prices, item details, required stock, and status bands are current values.
+   * Usage is issued minus returned, excluding reversed movements and reversals;
+   * its locations describe holdings at month end, not where stock was issued.
+   * Unpriced values are null and contribute zero to totals. Stock ratios are
+   * fractions (0.11 = 11%); reorder quantities may be negative when overstocked.
+   * Settings read failures fall back to catalog defaults.
+   * @param month - YYYY-MM, validated by monthRange, including the current month.
+   * @throws {ApiError} For invalid or future months.
+   * @throws Propagates inventory, material, location, and consumption read failures.
+   */
   async report(month: string): Promise<MonthEndReport> {
     const { from, to, end } = monthRange(month);
     const [balances, materials, bands, currency, consumption] = await Promise.all([
