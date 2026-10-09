@@ -29,7 +29,7 @@ const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
 
 export function IssueStock() {
   const stock = useApi<StockRow[]>('/reports/current-stock');
-  const { recipients, projects, loading } = useIssueOptions();
+  const { recipients, projects, loading, error: optionsError, reload: reloadOptions } = useIssueOptions();
   const [recipientId, setRecipientId] = useState('');
   const [projectNumber, setProjectNumber] = useState('');
   const [lines, setLines] = useState<Line[]>([emptyLine()]);
@@ -110,7 +110,12 @@ export function IssueStock() {
             <RecipientSelect id="issue-recipient" value={recipientId} onChange={setRecipientId} recipients={recipients} disabled={loading} invalid={!!error && !recipientId} />
             <ProjectSelect id="issue-project" value={projectNumber} onChange={setProjectNumber} projects={projects} disabled={loading} />
           </div>
-          {!loading && recipients.length === 0 && (
+          {optionsError && (
+            <Alert tone="danger" title="Couldn't load recipients and projects">
+              {optionsError.message} <button type="button" className="btn-link" onClick={reloadOptions}>Try again</button>
+            </Alert>
+          )}
+          {!loading && !optionsError && recipients.length === 0 && (
             <Alert tone="info" title="No recipients yet">
               Add the people and places stock is issued to on the <Link to="/recipients" className="btn-link">Recipients</Link> page.
             </Alert>

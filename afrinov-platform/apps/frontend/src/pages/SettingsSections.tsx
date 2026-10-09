@@ -2,7 +2,7 @@
 // receives the settings context via `useSettings()` and renders the relevant
 // controls. Save / reset is handled by the layout (parent) — sections only
 // update the local draft.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useSettings, type SettingValue } from '../hooks/useSettings';
 import { useApi } from '../hooks/useApi';
 import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField } from './Settings';
@@ -356,27 +356,13 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
 }
 
 export function SettingsUsers() {
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const usersApi = useApi<AdminUser[]>('/users');
+  const users = usersApi.data ?? [];
+  const reload = usersApi.reload;
   const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | null>(null);
   const [pendingToggle, setPendingToggle] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
-
-  function reload() {
-    setLoading(true);
-    setError(null);
-    setReloadKey((key) => key + 1);
-  }
-
-  useEffect(() => {
-    api.get<AdminUser[]>('/users')
-      .then(setUsers)
-      .catch((e: ApiError) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [reloadKey]);
 
   async function performToggle() {
     if (!pendingToggle) return;
@@ -404,9 +390,9 @@ export function SettingsUsers() {
         </Button>
       </div>
 
-      {error && <Alert tone="danger" title="Couldn't load users">{error}</Alert>}
+      {usersApi.error && <Alert tone="danger" title="Couldn't load users">{usersApi.error.message}</Alert>}
 
-      {loading ? (
+      {usersApi.loading ? (
         <div className="space-y-2"><Skeleton h={32} /><Skeleton h={32} /><Skeleton h={32} /></div>
       ) : users.length === 0 ? (
         <div className="text-sm text-surface-500 py-6 text-center">No users yet.</div>
@@ -504,12 +490,8 @@ export function SettingsSecurity() {
 // ── System ────────────────────────────────────────────────────────────
 export function SettingsSystem() {
   const [version] = useState<string>('0.1.0');
-  const [environment, setEnvironment] = useState<string>('unknown');
-  useEffect(() => {
-    api.get<{ status: string; time: string }>('/health')
-      .then(() => setEnvironment('online'))
-      .catch(() => setEnvironment('offline'));
-  }, []);
+  const health = useApi<{ status: string; time: string }>('/health');
+  const environment = health.error ? 'offline' : health.data ? 'online' : 'unknown';
   const isFrontendOnly = (window as { __FRONTEND_ONLY__?: boolean }).__FRONTEND_ONLY__ === true;
   return (
     <SectionPanel title="System" description="Application version, runtime environment, and current status.">
@@ -657,19 +639,10 @@ export function SettingsData() {
 interface HistoryRow { id: string; action: string; entityId: string; entityType: string; before: unknown; after: unknown; createdAt: string; actorId: string | null }
 
 export function SettingsHistory() {
-  const [rows, setRows] = useState<HistoryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  // eslint-disable react-hooks/set-state-in-effect
-  useEffect(() => {
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    setError(null); // eslint-disable-line react-hooks/set-state-in-effect
-    api.get<HistoryRow[]>('/audit?entityType=Setting&limit=100')
-      .then(setRows) // eslint-disable-line react-hooks/set-state-in-effect
-      .catch((e) => setError((e as ApiError).message)) // eslint-disable-line react-hooks/set-state-in-effect
-      .finally(() => setLoading(false)); // eslint-disable-line react-hooks/set-state-in-effect
-  }, []);
-  // eslint-enable react-hooks/set-state-in-effect
+  const history = useApi<HistoryRow[]>('/audit?entityType=Setting&limit=100');
+  const rows = history.data ?? [];
+  const loading = history.loading;
+  const error = history.error?.message ?? null;
   return (
     <SectionPanel title="Change history" description="Most recent administrative changes. Each row reflects one persisted setting update.">
       {loading && <div className="space-y-2"><Skeleton h={24} /><Skeleton h={24} /><Skeleton h={24} /></div>}

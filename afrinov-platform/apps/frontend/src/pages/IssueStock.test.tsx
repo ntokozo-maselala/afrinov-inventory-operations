@@ -18,13 +18,15 @@ const STOCK = [
   { materialId: 'm-3', materialSku: 'EMPTY', materialName: 'Out of stock item', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '0' },
 ];
 
+async function respond(path: string) {
+  if (path.startsWith('/reports/current-stock')) return STOCK;
+  if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo', type: 'WORKER' }, { id: 'r-2', name: 'Forklift', type: 'MACHINE' }];
+  if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade' }];
+  return [];
+}
+
 function renderPage() {
-  mockGet.mockImplementation(async (path: string) => {
-    if (path.startsWith('/reports/current-stock')) return STOCK;
-    if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo', type: 'WORKER' }, { id: 'r-2', name: 'Forklift', type: 'MACHINE' }];
-    if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade' }];
-    return [];
-  });
+  if (!mockGet.getMockImplementation()) mockGet.mockImplementation(respond);
   render(<MemoryRouter><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
 }
 
@@ -142,5 +144,20 @@ describe('IssueStock page', () => {
     await ready();
     fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
     expect(screen.getByLabelText('Item 2')).toHaveFocus();
+  });
+
+  it('says when recipients cannot be loaded instead of showing an empty list', async () => {
+    let fail = true;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/recipients') && fail) throw { code: 'INTERNAL_ERROR', message: 'Server unavailable' };
+      return respond(path);
+    });
+    renderPage();
+    expect(await screen.findByText("Couldn't load recipients and projects")).toBeInTheDocument();
+    expect(screen.queryByText('No recipients yet')).not.toBeInTheDocument();
+    fail = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByRole('option', { name: /Sabelo/ })).toBeInTheDocument());
+    expect(screen.queryByText("Couldn't load recipients and projects")).not.toBeInTheDocument();
   });
 });

@@ -1,9 +1,9 @@
 // Recipient and project pickers shared by every screen that issues stock.
 // Issued To is required (ADR-008); the project is optional but chosen from the
 // project list, so consumption reports are not split by typing variations.
-import { useEffect, useState } from 'react';
 import { Field, Select } from './Field';
-import { api } from '../api/client';
+import { useApi } from '../hooks/useApi';
+import type { ApiError } from '../api/client';
 
 export interface RecipientOption { id: string; name: string; type: 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR' }
 export interface ProjectOption { projectNumber: string; name?: string | null }
@@ -16,24 +16,18 @@ const TYPE_GROUP: Array<[RecipientOption['type'], string]> = [
 ];
 
 /** Active recipients and projects, loaded once per form. */
-export function useIssueOptions(): { recipients: RecipientOption[]; projects: ProjectOption[]; loading: boolean } {
-  const [recipients, setRecipients] = useState<RecipientOption[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let live = true;
-    Promise.all([
-      api.get<RecipientOption[]>('/recipients?active=true').catch(() => []),
-      api.get<ProjectOption[]>('/projects?active=true').catch(() => []),
-    ]).then(([r, p]) => {
-      if (!live) return;
-      setRecipients(r);
-      setProjects(p);
-      setLoading(false);
-    });
-    return () => { live = false; };
-  }, []);
-  return { recipients, projects, loading };
+export function useIssueOptions(): {
+  recipients: RecipientOption[]; projects: ProjectOption[]; loading: boolean; error: ApiError | null; reload: () => void;
+} {
+  const recipients = useApi<RecipientOption[]>('/recipients?active=true');
+  const projects = useApi<ProjectOption[]>('/projects?active=true');
+  return {
+    recipients: recipients.data ?? [],
+    projects: projects.data ?? [],
+    loading: recipients.loading || projects.loading,
+    error: recipients.error ?? projects.error,
+    reload: () => { recipients.reload(); projects.reload(); },
+  };
 }
 
 export function RecipientSelect({ id, value, onChange, recipients, invalid, disabled }: {

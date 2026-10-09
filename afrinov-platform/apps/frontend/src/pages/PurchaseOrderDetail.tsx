@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
@@ -410,13 +410,7 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   onConfirm: () => void;
   onChangeDraft: (next: ActionDraft) => void;
 }) {
-  const [locations, setLocations] = useState<LocationOpt[]>([]);
-
-  useEffect(() => {
-    if (draft.kind === 'receive') {
-      api.get<LocationOpt[]>('/locations').then(setLocations).catch(() => undefined);
-    }
-  }, [draft.kind]);
+  const locations = useApi<LocationOpt[]>(draft.kind === 'receive' ? '/locations' : null);
 
   if (draft.kind === 'approve') {
     return (
@@ -446,10 +440,10 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
         }
       >
         <div className="space-y-3">
-          <Field label="Receive into location" htmlFor="po-deliver-loc" required help="Inventory is recorded at this location via RECEIPT transactions.">
+          <Field label="Receive into location" htmlFor="po-deliver-loc" required help="Inventory is recorded at this location via RECEIPT transactions." error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
             <Select id="po-deliver-loc" value={d.locationId} onChange={(e) => upd({ locationId: e.target.value })}>
               <option value="">— select location —</option>
-              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </Select>
           </Field>
           <Field label="Delivery notes" htmlFor="po-deliver-notes">
