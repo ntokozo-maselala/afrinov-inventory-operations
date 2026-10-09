@@ -866,6 +866,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
+  if (method === 'GET' && p === '/reports/stock-value') {
+    return computeStockValue();
+  }
   if (method === 'GET' && p === '/reports/consumption') {
     return computeConsumption(qs, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR') });
   }
@@ -1507,6 +1510,40 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string 
     })
     .filter((r) => !filter.status || filter.status.length === 0 || filter.status.includes(r.status))
     .sort((a, b) => order[a.status] - order[b.status] || (a.percentOfRequired ?? Infinity) - (b.percentOfRequired ?? Infinity) || a.name.localeCompare(b.name));
+}
+
+// Mirrors ReportingService.stockValue: on hand x unit price per category, and items by status.
+function computeStockValue() {
+  const order = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
+  const cats = new Map<string, { items: number; itemsInStock: number; value: number; unpriced: number }>();
+  const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
+  for (const r of computeStockStatus({})) {
+    const onHand = Number(r.onHand);
+    const c = cats.get(r.category) ?? { items: 0, itemsInStock: 0, value: 0, unpriced: 0 };
+    c.items++;
+    if (onHand > 0) {
+      c.itemsInStock++;
+      if (r.unitCost === null) c.unpriced++;
+      else c.value += onHand * Number(r.unitCost);
+    } else {
+      status.outOfStock++;
+    }
+    cats.set(r.category, c);
+    status[r.status]++;
+  }
+  const total = [...cats.values()].reduce(
+    (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
+    { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
+  );
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
+    categories: [...cats]
+      .sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
+      .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
+    total: { ...total, value: round2(total.value) },
+    status,
+  };
 }
 
 function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {

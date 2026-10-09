@@ -291,6 +291,30 @@ describe('ReportingService', () => {
     });
   });
 
+  describe('stockValue', () => {
+    it('adds up on hand × unit price per category, as the Summary sheets do, with status counts', async () => {
+      seedMaterials();
+      db.materials.push({ id: 'm-4', sku: 'SKU-004', name: 'Tape', category: 'CONSUMABLES', unitOfMeasure: 'roll', requiredStock: DEC(0), unitCost: null, active: true });
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(4), updatedAt: new Date() },   // FASTENERS 4 × 5 = 20, 40% → OK
+        { materialId: 'm-1', locationId: 'l-2', quantity: DEC(0), updatedAt: new Date() },
+        { materialId: 'm-3', locationId: 'l-1', quantity: DEC(2.5), updatedAt: new Date() }, // CONSUMABLES 2.5 × 20 = 50, 10% → URGENT
+        { materialId: 'm-4', locationId: 'l-1', quantity: DEC(3), updatedAt: new Date() },   // CONSUMABLES, no price, NOT_SET
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const v = await ReportingService.stockValue();
+      expect(v.currency).toBe('ZAR');
+      expect(v.categories).toEqual([
+        { category: 'CONSUMABLES', items: 2, itemsInStock: 2, value: 50, unpriced: 1, share: 0.714 },
+        { category: 'ELECTRICAL', items: 1, itemsInStock: 0, value: 0, unpriced: 0, share: 0 },
+        { category: 'FASTENERS', items: 1, itemsInStock: 1, value: 20, unpriced: 0, share: 0.286 },
+      ]);
+      expect(v.total).toEqual({ items: 4, itemsInStock: 3, value: 70, unpriced: 1 });
+      // Cable (m-2) has nothing anywhere: URGENT and out of stock.
+      expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 1, outOfStock: 1 });
+    });
+  });
+
   describe('lowStock', () => {
     it('returns an empty array when enableStockAlerts is off', async () => {
       seedMaterials();

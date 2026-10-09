@@ -402,6 +402,13 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], errors: [400],
   },
   {
+    method: 'get', path: '/reports/stock-value', tag: 'Reports', summary: 'Value of the stock on hand, per category',
+    description: 'For every active item: on hand across all locations × unit price, added up per category as the stock '
+      + "workbook's Summary sheets do, with item counts, items in stock but without a price, each category's share, and "
+      + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock.',
+    permissions: [P.ViewReports],
+  },
+  {
     method: 'get', path: '/reports/consumption', tag: 'Reports', summary: 'Stock used in a date range',
     description: 'Issued less returned per item between ?from and ?to (YYYY-MM-DD, both included; default this month), '
       + 'valued at the unit price, with totals by project and by category. Reversed issues and returns are left out with '

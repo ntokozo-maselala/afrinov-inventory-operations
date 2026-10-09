@@ -55,6 +55,12 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
   });
 
+  // The value of the stock on hand now, per category, and items by status.
+  app.get('/reports/stock-value', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return ReportingService.stockValue();
+  });
+
   // Stock used in a date range, by item, project and category, at unit price.
   const consumptionQuery = (q: Record<string, string | undefined>): ConsumptionQuery => ({
     from: q['from'] ?? '', to: q['to'] ?? '', projectNumber: q['projectNumber'] || undefined, category: q['category'] || undefined,

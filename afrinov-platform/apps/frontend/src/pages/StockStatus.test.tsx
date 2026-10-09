@@ -80,4 +80,10 @@ describe('StockStatus page', () => {
     await screen.findByText('Nothing needs re-ordering');
     expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled();
   });
+
+  it('opens on the view a link asks for', async () => {
+    render(<MemoryRouter initialEntries={['/reports/stock-status?view=OK']}><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
+    expect(await screen.findByText('Cutting disc')).toBeInTheDocument();
+    expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
+  });
 });
