@@ -465,6 +465,36 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('counting stock at a location', () => {
+    async function onHand(materialId: string): Promise<number> {
+      const stock = await api.get<Array<{ locationId: string; quantity: string }>>(`/reports/current-stock?materialId=${materialId}`);
+      return Number(stock.find((s) => s.locationId === 'loc-1')?.quantity ?? 0);
+    }
+
+    it('posts each difference as a count-variance adjustment and nothing for a match', async () => {
+      const disc = await onHand('mat-1');
+      const other = await onHand('mat-2');
+      const res = await api.post<{ counted: number; adjusted: number }>('/stock-counts', {
+        locationId: 'loc-1', note: 'Go-live',
+        lines: [
+          { materialId: 'mat-1', expectedQuantity: disc, countedQuantity: disc - 2 },
+          { materialId: 'mat-2', expectedQuantity: other, countedQuantity: other },
+        ],
+      });
+      expect(res).toMatchObject({ counted: 2, adjusted: 1 });
+      expect(await onHand('mat-1')).toBe(disc - 2);
+      const history = await api.get<Array<{ type: string; reasonCode?: string; reasonNote?: string; quantity: string }>>('/inventory-transactions?materialId=mat-1');
+      expect(history.find((t) => t.reasonCode === 'COUNT_VARIANCE')).toMatchObject({ type: 'ADJUSTMENT', quantity: '-2', reasonNote: 'Stock count: Go-live' });
+    });
+
+    it('refuses the count when stock moved since it was shown', async () => {
+      const disc = await onHand('mat-1');
+      await expect(api.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: 'mat-1', expectedQuantity: disc + 1, countedQuantity: 0 }] }))
+        .rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(await onHand('mat-1')).toBe(disc);
+    });
+  });
+
   describe('receiving stock at the counter', () => {
     it('books every line, shows the supplier on the movement, and can be reversed', async () => {
       const before = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');

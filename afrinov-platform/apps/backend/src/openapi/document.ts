@@ -16,7 +16,7 @@ import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema } from '../modules/inventory/inventory.routes.js';
+import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
 import {
   createMaterialSchema,
   updateMaterialSchema,
@@ -233,6 +233,14 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-transfers', tag: 'Stock movements', summary: 'Move stock between two locations',
     description: 'Records two linked transactions. Refused with 422 INSUFFICIENT_BALANCE when the source is short.',
     permissions: [P.TransferInventory], body: transferSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'post', path: '/stock-counts', tag: 'Stock movements', summary: 'Post a stock count for one location',
+    description: 'The counted quantity of each item, with the system quantity the counter was shown. Every difference '
+      + 'is posted as a COUNT_VARIANCE adjustment linked to one count id; items that match are recorded as counted only. '
+      + 'All or nothing. Refused with 409 CONFLICT when the stock at the location has changed since it was shown, '
+      + 'and 404 for an unknown location or material.',
+    permissions: [P.AdjustInventory], body: stockCountSchema, success: 201, errors: [404, 409],
   },
   {
     method: 'post', path: '/inventory-adjustments', tag: 'Stock movements', summary: 'Correct stock up or down with a reason',
