@@ -114,15 +114,26 @@ describe('demo seed catalog', () => {
     const m = src.match(/const DEMO_TRANSACTIONS[\s\S]*?\n\];/);
     expect(m, 'DEMO_TRANSACTIONS literal must be present').toBeTruthy();
     const block = m![0]!;
-    // Negative quantities must only appear on ISSUE / TRANSFER_OUT / ADJUSTMENT.
-    const neg = Array.from(block.matchAll(/quantity:\s*'(-[\d.]+)'/g)).map((mm) => mm[1]!);
-    for (const q of neg) {
-      const ctxIdx = block.indexOf(q);
-      const line = block.slice(Math.max(0, ctxIdx - 200), ctxIdx);
-      expect(
-        /type:\s*'(ISSUE|TRANSFER_OUT|ADJUSTMENT)'/.test(line),
-        `negative quantity ${q} must be paired with ISSUE / TRANSFER_OUT / ADJUSTMENT`,
-      ).toBe(true);
+    // Negative quantities only on ISSUE / TRANSFER_OUT / ADJUSTMENT; positive only on RECEIPT / TRANSFER_IN / ADJUSTMENT.
+    const rows = Array.from(block.matchAll(/type:\s*'([A-Z_]+)',\s*sku:\s*'([^']+)',\s*location:\s*'[^']+',\s*quantity:\s*'(-?[\d.]+)'/g));
+    expect(rows.length).toBeGreaterThan(10);
+    for (const [, type, sku, quantity] of rows) {
+      const allowed = Number(quantity) < 0 ? ['ISSUE', 'TRANSFER_OUT', 'ADJUSTMENT'] : ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT'];
+      expect(allowed, `${type} of ${quantity} for ${sku}`).toContain(type);
+    }
+  });
+
+  it('never takes stock below zero at any location, replayed in date order', () => {
+    const block = readSeed().match(/const DEMO_TRANSACTIONS[\s\S]*?\n\];/)![0]!;
+    const rows = Array.from(block.matchAll(/daysAgo:\s*(\d+),\s*type:\s*'([A-Z_]+)',\s*sku:\s*'([^']+)',\s*location:\s*'([^']+)',\s*quantity:\s*'(-?[\d.]+)'/g))
+      .map((m) => ({ daysAgo: Number(m[1]), sku: m[3]!, location: m[4]!, quantity: Number(m[5]) }));
+    expect(rows.length).toBeGreaterThan(10);
+    const running = new Map<string, number>();
+    for (const r of [...rows].sort((a, b) => b.daysAgo - a.daysAgo)) {
+      const key = `${r.sku} @ ${r.location}`;
+      const after = (running.get(key) ?? 0) + r.quantity;
+      expect(after, `${key} goes to ${after}`).toBeGreaterThanOrEqual(0);
+      running.set(key, after);
     }
   });
 });
