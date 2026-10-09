@@ -14,6 +14,9 @@
 // problems, the database's name typed back, the opening date and the user:
 //
 //   npm run import:workbook -- --file <workbook> --apply --database afrinov --date 2026-11-02 --actor storeman@afrinov.local
+//
+// With --reconcile it compares the database with the workbook afterwards, per
+// category and per item, and writes a reconciliation report. Read-only.
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -65,6 +68,30 @@ async function apply(file: string, result: MappedImport, masterData: MasterDataP
   }
 }
 
+async function reconcileWith(file: string, outDir: string, result: MappedImport) {
+  const dbName = databaseName(process.env.DATABASE_URL);
+  if (!dbName) throw new Error('DATABASE_URL is not set (put it in apps/backend/.env).');
+  const { prisma } = await import('../src/shared/db.js');
+  const { loadSnapshot, reconcile, renderReconciliation } = await import('../src/modules/migration/reconciliation.js');
+  try {
+    console.log(`Comparing with the database "${dbName}"…`);
+    const snapshot = await loadSnapshot(result.materials.map((m) => m.sku));
+    const r = reconcile(result, snapshot.items, snapshot.importedOn);
+    const generatedAt = new Date();
+    const path = join(outDir, `reconciliation-${generatedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.md`);
+    await writeFile(path, renderReconciliation(r, { file: basename(file), database: dbName, generatedAt }), 'utf8');
+    for (const c of r.categories) {
+      if (c.items.workbook === 0 && c.items.platform === 0) continue;
+      console.log(`  ${c.category.padEnd(28)} items ${c.items.platform}/${c.items.workbook}  R ${c.value.platform.toFixed(2)} of R ${c.value.workbook.toFixed(2)}`);
+    }
+    console.log(r.importedOn ? `Opening balances dated ${r.importedOn}.` : 'No opening balances have been imported into this database.');
+    console.log(r.differences.length === 0 ? 'Reconciled: every item, unit and rand matches.' : `${r.differences.length} differences; see the report.`);
+    console.log(`Reconciliation report: ${path}`);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -72,6 +99,7 @@ async function main() {
       out: { type: 'string', default: 'import-reports' },
       mapping: { type: 'string' },
       apply: { type: 'boolean', default: false },
+      reconcile: { type: 'boolean', default: false },
       database: { type: 'string' },
       date: { type: 'string' },
       actor: { type: 'string' },
@@ -80,6 +108,7 @@ async function main() {
   if (!values.file) {
     console.error('Usage: npm run import:workbook -- --file <workbook.xlsm> [--mapping <mapping.xlsx>] [--out <folder>]');
     console.error('       add --apply --database <name> --date <YYYY-MM-DD> --actor <email> to import');
+    console.error('       add --reconcile to compare the database with the workbook after the import');
     process.exit(2);
   }
 
@@ -144,6 +173,12 @@ async function main() {
     ? 'No blocking problems.'
     : `${blocking} blocking problem${blocking === 1 ? '' : 's'}: fix these before the real import.`);
 
+  if (values.reconcile) {
+    if (!result) throw new Error('Reconciling needs the mapping file used for the import.');
+    if (blocking > 0) console.log('Note: the dry run has blocking problems, so the plan compared against may not be the one imported.');
+    await reconcileWith(file, outDir, result);
+    return;
+  }
   if (!values.apply) {
     console.log('Dry run only: nothing was written to the database.');
     return;
