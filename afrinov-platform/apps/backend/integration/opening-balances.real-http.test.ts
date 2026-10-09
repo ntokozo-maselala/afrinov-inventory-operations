@@ -11,6 +11,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 import { OpeningBalanceService, OPENING_BALANCE_REFERENCE, previousImport } from '../src/modules/migration/opening-balance.service.js';
 import type { MappedImport, PlannedMaterial } from '../src/modules/migration/mapping.js';
+import { loadSnapshot, reconcile } from '../src/modules/migration/reconciliation.js';
 
 describe('opening balance import against a real database', () => {
   const run = runId();
@@ -130,6 +131,42 @@ describe('opening balance import against a real database', () => {
     // The stock shows through the API like any other receipt.
     const stock = await api<Array<{ locationId: string; quantity: string }>>('GET', `/reports/current-stock?materialId=${first.id}`);
     expect(stock.body.map((s) => [s.locationId, Number(s.quantity)]).sort()).toEqual([[existingLocationId, 3.5], [rack.id, 12]].sort());
+  });
+
+  it('reconciles with the workbook plan, before and after stock is issued', async (ctx) => {
+    if (alreadyImported) ctx.skip();
+    const imported = plan([
+      material(`IT-OB-1-${run}`, balances()),
+      material(`IT-OB-2-${run}`, [{ location: rackName, quantity: 0 }], { unitCost: null, oldProductIds: [] }),
+    ]);
+    const skus = imported.materials.map((m) => m.sku);
+    const before = await loadSnapshot(skus);
+    const r = reconcile(imported, before.items, before.importedOn);
+    expect(r.differences).toEqual([]);
+    expect(r.importedOn).toBe('2026-10-01');
+    expect(r.categories.find((c) => c.category === 'CONSUMABLES')).toEqual({
+      category: 'CONSUMABLES',
+      items: { workbook: 2, platform: 2 },
+      units: { workbook: 15.5, platform: 15.5 },
+      value: { workbook: 651.78, platform: 651.78 },
+      currentValue: 651.78,
+    });
+
+    // Stock issued after go-live changes what is on hand, not the opening balances.
+    const first = await prisma.material.findUniqueOrThrow({ where: { sku: `IT-OB-1-${run}` } });
+    const rack = await prisma.location.findFirstOrThrow({ where: { name: rackName } });
+    const recipient = await prisma.recipient.findFirstOrThrow({ where: { name: `IT OB Forklift ${run}` } });
+    const issued = await api('POST', '/inventory-issues', { recipientId: recipient.id, lines: [{ materialId: first.id, locationId: rack.id, quantity: 2 }] });
+    expect(issued.status).toBe(201);
+    const after = reconcile(imported, (await loadSnapshot(skus)).items);
+    expect(after.differences).toEqual([]);
+    const consumables = after.categories.find((c) => c.category === 'CONSUMABLES')!;
+    expect(consumables.value.platform).toBe(651.78);
+    expect(consumables.currentValue).toBeCloseTo(13.5 * 42.05, 1);
+
+    // A price changed in the platform shows up.
+    await prisma.material.update({ where: { id: first.id }, data: { unitCost: 50 } });
+    expect(reconcile(imported, (await loadSnapshot(skus)).items).differences.map((d) => d.kind)).toEqual(['PRICE']);
   });
 
   it('refuses a second import, which would count the stock twice', async (ctx) => {

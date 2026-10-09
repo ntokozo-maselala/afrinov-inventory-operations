@@ -209,7 +209,7 @@ The goal is to load the workbook's items, prices, locations and opening balances
 - [x] Dry-run mode with a report of every problem (duplicates, blanks, unmapped values) before anything is written
 - [x] Opening balances posted as one dated "Opening balance" receipt per item and location
 - [x] Projects, recipients and suppliers loaded from the Project No. and Employees sheets and the supplier names
-- [ ] Reconciliation report: item count and rand value per category, platform against workbook
+- [x] Reconciliation report: item count and rand value per category, platform against workbook
 - [ ] Stock count screen: count sheet by location, with variances posted as adjustments
 
 **Exit criteria:** the dry run reports no unresolved problems; item counts and value per category match the workbook to the rand, or each difference is explained.
