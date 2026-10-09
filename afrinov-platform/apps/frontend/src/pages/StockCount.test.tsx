@@ -130,4 +130,15 @@ describe('StockCount page', () => {
     fireEvent.click(screen.getByLabelText(/Hide system quantities/));
     expect(screen.getByRole('columnheader', { name: 'System' })).toHaveClass('hidden');
   });
+
+  it('flags system quantities below zero, which a count corrects', async () => {
+    stockAtA1 = [...stockAtA1, { materialId: 'm-4', materialSku: 'ROD', materialName: 'Welding rod', unitOfMeasure: 'kg', quantity: '-15' }];
+    renderPage();
+    await chooseA1();
+    expect(screen.getByText('1 item shows below zero here')).toBeInTheDocument();
+    const rod = screen.getByText('Welding rod').closest('tr')!;
+    expect(within(rod).getByText('Below zero: cannot be right')).toBeInTheDocument();
+    count('Welding rod', '0');
+    expect(within(rod).getByText('+15')).toBeInTheDocument();
+  });
 });

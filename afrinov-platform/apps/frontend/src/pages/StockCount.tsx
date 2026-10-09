@@ -103,6 +103,8 @@ export function StockCount() {
     return c !== null && !Number.isNaN(c) && Math.abs(c - r.system) > 0.00005;
   });
   const up = differences.filter((r) => parseCount(draft.counts[r.materialId])! > r.system).length;
+  // Stock cannot really be below zero; such a figure comes from a booking mistake, and the count corrects it.
+  const belowZero = rows.filter((r) => r.system < 0);
 
   function chooseLocation(id: string) {
     setLocationId(id);
@@ -208,6 +210,13 @@ export function StockCount() {
                   </p>
                 </div>
 
+                {belowZero.length > 0 && !hideSystem && (
+                  <Alert tone="warning" title={`${belowZero.length} item${belowZero.length === 1 ? ' shows' : 's show'} below zero here`}>
+                    Stock can never really be below zero, so these figures come from a booking mistake. Count these items carefully:
+                    posting the count sets them to what is on the shelf.
+                  </Alert>
+                )}
+
                 <div className="overflow-x-auto">
                   <table className="table">
                     <thead>
@@ -230,10 +239,13 @@ export function StockCount() {
                         const diff = c === null || Number.isNaN(c) ? null : c - r.system;
                         return (
                           <tr key={r.materialId}>
-                            <td>{r.name}</td>
+                            <td>
+                              {r.name}
+                              {r.system < 0 && !hideSystem && <span className="block text-xs text-danger-600 print:hidden">Below zero: cannot be right</span>}
+                            </td>
                             <td className="text-surface-600">{r.sku}</td>
                             <td className="text-surface-600">{r.unit}</td>
-                            <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''}`}>{fmt(r.system)}</td>
+                            <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''} ${r.system < 0 ? 'text-danger-600 font-medium' : ''}`}>{fmt(r.system)}</td>
                             <td className="text-right">
                               <span className="hidden print:inline">____________</span>
                               <Input
@@ -246,7 +258,7 @@ export function StockCount() {
                                 invalid={c !== null && Number.isNaN(c)}
                               />
                             </td>
-                            <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''} ${diff && diff < 0 ? 'text-danger-700' : diff && diff > 0 ? 'text-success-700' : 'text-surface-500'}`}>
+                            <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''} ${diff && diff < 0 ? 'text-danger-600' : diff && diff > 0 ? 'text-success-600' : 'text-surface-500'}`}>
                               {diff === null ? '' : Math.abs(diff) < 0.00005 ? '✓' : `${diff > 0 ? '+' : ''}${fmt(diff)}`}
                             </td>
                           </tr>
