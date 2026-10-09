@@ -402,6 +402,19 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], errors: [400],
   },
   {
+    method: 'get', path: '/reports/month-end', tag: 'Reports', summary: 'Month-end stock report',
+    description: 'Stock as at the end of ?month=YYYY-MM (default this month), rebuilt from the ledger, per category in '
+      + "the stock workbook's Summary columns (required, current, value, % of required, re-order quantity, URGENCY), "
+      + 'with the stock used in the month (Stock Report sheets). Refused with 400 for a future month.',
+    permissions: [P.ViewReports], errors: [400],
+  },
+  {
+    method: 'get', path: '/reports/month-end/export', tag: 'Reports', summary: 'Download the month-end report',
+    description: 'The month-end report as Excel in the workbook layout: Overview, then a Summary and a Used sheet per category.',
+    permissions: [P.ViewReports], errors: [400],
+    produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  },
+  {
     method: 'get', path: '/reports/stock-value', tag: 'Reports', summary: 'Value of the stock on hand, per category',
     description: 'For every active item: on hand across all locations × unit price, added up per category as the stock '
       + "workbook's Summary sheets do, with item counts, items in stock but without a price, each category's share, and "
