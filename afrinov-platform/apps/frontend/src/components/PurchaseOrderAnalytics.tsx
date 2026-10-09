@@ -28,16 +28,11 @@ interface PurchaseOrderAnalyticsProps {
 const PO_STATUS_COLORS: Record<string, string> = {
   DRAFT: 'var(--chart-info-500)',
   PENDING_APPROVAL: 'var(--chart-info-500)',
-  SUBMITTED: 'var(--chart-info-500)',
-  APPROVED: 'var(--chart-info-500)',
-  SENT: 'var(--chart-brand-500)',
-  SHIPPED: 'var(--chart-brand-500)',
+  APPROVED: 'var(--chart-brand-500)',
   PARTIALLY_RECEIVED: 'var(--chart-warning-500)',
-  FULLY_RECEIVED: 'var(--chart-success-500)',
-  DELIVERED: 'var(--chart-success-500)',
+  RECEIVED: 'var(--chart-success-500)',
   CLOSED: 'var(--chart-surface-500)',
   CANCELLED: 'var(--chart-danger-500)',
-  REJECTED: 'var(--chart-danger-500)',
 };
 
 export function PurchaseOrderAnalytics({

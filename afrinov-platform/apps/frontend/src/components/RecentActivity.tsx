@@ -9,7 +9,7 @@ import { Link } from 'react-router-dom';
 
 interface ActivityEntry {
   id: string;
-  type: 'movement' | 'po_created' | 'po_approved' | 'po_shipped' | 'po_delivered' | 'po_cancelled';
+  type: 'movement' | 'po_created' | 'po_approved' | 'po_received' | 'po_closed' | 'po_cancelled';
   title: string;
   description: string;
   timestamp: string;
@@ -26,6 +26,7 @@ const MOVEMENT_TYPE_CONFIG: Record<string, { tone: ActivityEntry['tone']; icon: 
   TRANSFER_OUT: { tone: 'info', icon: <Icon.Arrows size={10} />, label: 'Stock transferred out' },
   TRANSFER_IN: { tone: 'info', icon: <Icon.Arrows size={10} />, label: 'Stock transferred in' },
   ADJUSTMENT: { tone: 'warning', icon: <Icon.Alert size={10} />, label: 'Stock adjusted' },
+  RETURN: { tone: 'success', icon: <Icon.ArrowUp size={10} />, label: 'Stock returned' },
 };
 
 export function RecentActivity({
@@ -76,13 +77,14 @@ export function RecentActivity({
         type = 'po_approved';
         label = 'Purchase order approved';
         icon = <Icon.Check size={10} />;
-      } else if (po.status === 'SHIPPED' && po.shippedAt) {
-        type = 'po_shipped';
-        label = 'Purchase order shipped';
-        icon = <Icon.Truck size={10} />;
-      } else if (po.status === 'DELIVERED' || ['FULLY_RECEIVED', 'PARTIALLY_RECEIVED'].includes(po.status)) {
-        type = 'po_delivered';
-        label = 'Purchase order delivered';
+      } else if (po.status === 'RECEIVED' || po.status === 'PARTIALLY_RECEIVED') {
+        type = 'po_received';
+        label = po.status === 'RECEIVED' ? 'Purchase order received' : 'Purchase order partly received';
+        icon = <Icon.Check size={10} />;
+      } else if (po.status === 'CLOSED') {
+        type = 'po_closed';
+        label = 'Purchase order closed';
+        tone = 'neutral';
         icon = <Icon.Check size={10} />;
       } else if (po.status === 'CANCELLED') {
         type = 'po_cancelled';

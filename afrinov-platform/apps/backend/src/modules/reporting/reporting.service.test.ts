@@ -64,9 +64,12 @@ function makePrisma(): unknown {
     inventoryTransaction: {
       findMany: async ({ where, take }: { where?: Record<string, unknown>; take?: number } = {}) => {
         let list = db.transactions.slice();
-        const w = where as { materialId?: string; type?: string; projectNumber?: string; postedAt?: { gte?: Date; lte?: Date } } | undefined;
+        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; postedAt?: { gte?: Date; lte?: Date } } | undefined;
         if (w?.materialId) list = list.filter((t) => t.materialId === w.materialId);
-        if (w?.type) list = list.filter((t) => t.type === w.type);
+        if (w?.type) {
+          const types = typeof w.type === 'string' ? [w.type] : w.type.in;
+          list = list.filter((t) => types.includes(t.type));
+        }
         if (w?.projectNumber) list = list.filter((t) => t.projectNumber === w.projectNumber);
         if (w?.postedAt) {
           if (w.postedAt.gte) list = list.filter((t) => t.postedAt >= w.postedAt!.gte!);
@@ -352,6 +355,18 @@ describe('ReportingService', () => {
       expect(result).toHaveLength(1);
       expect(result[0]!.materialId).toBe('m-1');
       expect(result[0]!.total).toBe(10);
+    });
+
+    it('nets returned stock out of the project total', async () => {
+      seedMaterials();
+      db.transactions = [
+        { id: 't-1', postedAt: new Date(), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-10), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: null, projectNumber: 'P-1', referenceType: 'Project', referenceId: 'P-1' },
+        { id: 't-2', postedAt: new Date(), type: 'RETURN', materialId: 'm-1', locationId: 'l-1', quantity: DEC(4), actorId: 'u-1', recipientId: null, reasonNote: 'Unused', reasonCode: null, projectNumber: 'P-1', referenceType: 'Return', referenceId: 't-1' },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const result = await ReportingService.projectConsumption('P-1');
+      expect(result).toHaveLength(1);
+      expect(result[0]!.total).toBe(6);
     });
 
     it('returns an empty array when no issues exist for the project', async () => {

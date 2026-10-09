@@ -16,7 +16,7 @@ import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema, reversalSchema } from '../modules/inventory/inventory.routes.js';
+import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema } from '../modules/inventory/inventory.routes.js';
 import {
   createMaterialSchema,
   updateMaterialSchema,
@@ -27,12 +27,14 @@ import {
 import { createRackSchema, updateRackSchema } from '../modules/inventory/rack.routes.js';
 import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
 import { createProjectSchema, updateProjectSchema } from '../modules/operations/project.routes.js';
+import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
 import {
   createSupplierSchema,
   createPOSchema,
   updatePOSchema,
-  shipSchema,
-  deliverSchema,
+  listPOQuerySchema,
+  receiveSchema,
+  closeSchema,
   cancelSchema,
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
@@ -213,9 +215,19 @@ export const OPERATIONS: Operation[] = [
     query: movementQuery,
   },
   {
-    method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock out of a location',
-    description: 'Refused with 422 INSUFFICIENT_BALANCE when it would make the balance negative (setting-controlled).',
+    method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock to a recipient',
+    description: 'One recipient (required), an optional project, and up to 50 lines, booked all-or-nothing. '
+      + 'Lines for the same item and location are checked against stock as one total. '
+      + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
+      + 'material or location, and 400 for an inactive one.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'post', path: '/stock-receipts', tag: 'Stock movements', summary: 'Receive stock from a supplier',
+    description: 'The supplier, delivery/invoice number, delivery date (defaults to now) and up to 50 lines, booked '
+      + 'all-or-nothing as a goods receipt with no purchase order. Works with procurement switched off. '
+      + 'Refused with 404 for an unknown supplier, material or location, and 400 for an inactive one.',
+    permissions: [P.ReceiveInventory], body: stockReceiptSchema, success: 201, errors: [404],
   },
   {
     method: 'post', path: '/inventory-transfers', tag: 'Stock movements', summary: 'Move stock between two locations',
@@ -225,6 +237,14 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/inventory-adjustments', tag: 'Stock movements', summary: 'Correct stock up or down with a reason',
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',
+    summary: 'Return unused stock from an issue',
+    description: 'Posts a RETURN that points at the issue and keeps its recipient and project, into the given location '
+      + '(default: where it was issued from). At most the issued quantity less earlier returns. '
+      + 'Refused with 400 when that is exceeded and 409 INVALID_STATE for anything but an unreversed issue.',
+    permissions: [P.IssueInventory], body: returnSchema, success: 201, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',
@@ -258,6 +278,24 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ManageProjects], errors: [404],
   },
 
+  // Recipients ("Issued To")
+  {
+    method: 'get', path: '/recipients', tag: 'Recipients', summary: 'List the people and places stock is issued to',
+    description: 'Workers, machines, client sites and contractors. Any signed-in user can read the list.',
+    query: listRecipientsQuerySchema, errors: [400],
+  },
+  { method: 'get', path: '/recipients/:id', tag: 'Recipients', summary: 'Get a recipient', errors: [404] },
+  {
+    method: 'post', path: '/recipients', tag: 'Recipients', summary: 'Add a recipient',
+    description: 'Names are unique ignoring case. Refused with 409 when the name is taken.',
+    permissions: [P.ManageRecipients], body: createRecipientSchema, success: 201, errors: [409],
+  },
+  {
+    method: 'patch', path: '/recipients/:id', tag: 'Recipients', summary: 'Update or deactivate a recipient',
+    description: 'Recipients are deactivated, never deleted, so issue history keeps its names.',
+    permissions: [P.ManageRecipients], body: updateRecipientSchema, errors: [404, 409],
+  },
+
   // Suppliers (always on)
   {
     method: 'get', path: '/suppliers', tag: 'Suppliers', summary: 'List suppliers',
@@ -272,7 +310,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/purchase-orders', tag: 'Purchase orders', summary: 'List purchase orders', procurement: true,
     permissions: [P.ViewPurchaseOrder],
-    query: z.object({ status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SHIPPED', 'DELIVERED', 'CANCELLED']).optional() }),
+    query: listPOQuerySchema, errors: [400],
   },
   {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
@@ -300,14 +338,16 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.ApprovePurchaseOrder], errors: [404, 409],
   },
   {
-    method: 'post', path: '/purchase-orders/:id/ship', tag: 'Purchase orders', summary: 'Mark an approved order shipped',
-    procurement: true, permissions: [P.ShipPurchaseOrder], body: shipSchema, errors: [404, 409],
+    method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',
+    summary: 'Receive everything still outstanding',
+    description: 'Receives each line\'s outstanding quantity into the given location and marks the order RECEIVED. '
+      + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts.',
+    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [404, 409],
   },
   {
-    method: 'post', path: '/purchase-orders/:id/deliver', tag: 'Purchase orders',
-    summary: 'Mark a shipped order delivered and receive its stock',
-    description: 'Receives each line\'s outstanding quantity into the given location.',
-    procurement: true, permissions: [P.DeliverPurchaseOrder], body: deliverSchema, errors: [404, 409],
+    method: 'post', path: '/purchase-orders/:id/close', tag: 'Purchase orders', summary: 'Close an order that will receive nothing more',
+    description: 'Allowed when PARTIALLY_RECEIVED or RECEIVED. Closing an order that is not fully received needs a reason.',
+    procurement: true, permissions: [P.ClosePurchaseOrder], body: closeSchema, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/cancel', tag: 'Purchase orders', summary: 'Cancel an order with a reason',

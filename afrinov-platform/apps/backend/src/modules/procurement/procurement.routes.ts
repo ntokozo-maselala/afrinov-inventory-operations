@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { supplierIdSchema } from '../../shared/ids.js';
 import { PurchaseOrderService, SupplierService } from './procurement.service.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
@@ -15,7 +16,7 @@ export const createSupplierSchema = z.object({
 });
 
 export const createPOSchema = z.object({
-  supplierId: z.string().uuid(),
+  supplierId: supplierIdSchema,
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().optional(),
   lines: z
@@ -34,13 +35,11 @@ export const updatePOSchema = z.object({
   expectedDeliveryDate: z.string().nullable().optional(),
 });
 
-export const shipSchema = z.object({
-  trackingNumber: z.string().max(120).optional(),
-  carrier: z.string().max(120).optional(),
-  shipmentNotes: z.string().max(2000).optional(),
-});
+export const PO_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED', 'CANCELLED'] as const;
 
-export const deliverSchema = z.object({
+export const listPOQuerySchema = z.object({ status: z.enum(PO_STATUSES).optional() });
+
+export const receiveSchema = z.object({
   locationId: z.string().uuid(),
   deliveryNotes: z.string().max(2000).optional(),
 });
@@ -49,9 +48,13 @@ export const cancelSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+export const closeSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
 export const createGRSchema = z.object({
   purchaseOrderId: z.string().uuid().optional(),
-  supplierId: z.string().uuid(),
+  supplierId: supplierIdSchema,
   deliveryRef: z.string().optional(),
   lines: z
     .array(
@@ -92,14 +95,19 @@ export async function supplierRoutes(app: FastifyInstance): Promise<void> {
 }
 
 export async function procurementRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/purchase-orders',{ preHandler: [app.authenticate] }, async (req) => {
+  app.get('/purchase-orders', { preHandler: [app.authenticate] }, async (req, reply) => {
     // The list exposes PO numbers, statuses, and line quantities — the same
     // data the detail endpoint guards. Requiring the permission here closes
     // the enumeration gap (K6); VIEWER/APPROVER cannot list POs, matching
     // their inability to open a PO detail.
     await requirePermission(req, PermissionCode.ViewPurchaseOrder);
-    const q = (req.query as Record<string, string | undefined>).status;
-    return PurchaseOrderService.list({ status: q as 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | undefined });
+    const parsed = listPOQuerySchema.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Unknown purchase order status', details: parsed.error.flatten() },
+      });
+    }
+    return PurchaseOrderService.list({ status: parsed.data.status });
   });
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewPurchaseOrder);
@@ -149,28 +157,28 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     return PurchaseOrderService.approve(id, actorId(req));
   });
 
-  app.post('/purchase-orders/:id/ship', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.ShipPurchaseOrder);
+  app.post('/purchase-orders/:id/receive', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ReceivePurchaseOrder);
     const id = (req.params as { id: string }).id;
-    const parsed = shipSchema.safeParse(req.body);
+    const parsed = receiveSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid ship payload', details: parsed.error.flatten() },
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid receive payload', details: parsed.error.flatten() },
       });
     }
-    return PurchaseOrderService.ship({ id, ...parsed.data }, actorId(req));
+    return PurchaseOrderService.receive({ id, ...parsed.data }, actorId(req));
   });
 
-  app.post('/purchase-orders/:id/deliver', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.DeliverPurchaseOrder);
+  app.post('/purchase-orders/:id/close', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ClosePurchaseOrder);
     const id = (req.params as { id: string }).id;
-    const parsed = deliverSchema.safeParse(req.body);
+    const parsed = closeSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid deliver payload', details: parsed.error.flatten() },
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid close payload', details: parsed.error.flatten() },
       });
     }
-    return PurchaseOrderService.deliver({ id, ...parsed.data }, actorId(req));
+    return PurchaseOrderService.close({ id, ...parsed.data }, actorId(req));
   });
 
   app.post('/purchase-orders/:id/cancel', { preHandler: [app.authenticate] }, async (req, reply) => {

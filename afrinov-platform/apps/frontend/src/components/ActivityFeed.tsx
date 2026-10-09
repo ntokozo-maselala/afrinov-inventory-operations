@@ -14,6 +14,7 @@ const typeConfig: Record<string, { tone: 'success' | 'danger' | 'info' | 'warnin
   TRANSFER_OUT: { tone: 'info', icon: <Icon.Arrows size={12} />, label: 'Stock transferred out' },
   TRANSFER_IN: { tone: 'info', icon: <Icon.Arrows size={12} />, label: 'Stock transferred in' },
   ADJUSTMENT: { tone: 'warning', icon: <Icon.Alert size={12} />, label: 'Stock adjusted' },
+  RETURN: { tone: 'success', icon: <Icon.ArrowUp size={12} />, label: 'Stock returned' },
 };
 
 export function ActivityFeed({ movements, loading = false, empty = false, limit = 10 }: ActivityFeedProps) {

@@ -15,13 +15,19 @@ import { SettingsService } from '../settings/settings.service.js';
 
 type Decimal = Prisma.Decimal;
 
-export interface IssueInput {
+export interface IssueLine {
   materialId: string;
   locationId: string;
   quantity: number | string | Decimal;
-  actorId: string;
-  recipientId?: string;
+}
+
+// One entry at the store counter: one recipient, optionally one project, and
+// any number of items. Booked all-or-nothing.
+export interface IssueInput {
+  recipientId: string;
   projectNumber?: string;
+  lines: IssueLine[];
+  actorId: string;
 }
 
 export interface TransferInput {
@@ -41,15 +47,45 @@ export interface AdjustmentInput {
   actorId: string;
 }
 
+export interface ReturnInput {
+  issueTransactionId: string;
+  quantity: number | string | Decimal;
+  /** Where the stock goes back to; defaults to the location it was issued from. */
+  locationId?: string;
+  reason?: string;
+  actorId: string;
+}
+
 export interface GoodsReceiptPostInput {
   goodsReceiptId: string;
   actorId: string;
 }
 
-async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient): Promise<void> {
+async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
   if (!m.active) throw Errors.validation('Material is inactive');
+  return m;
+}
+
+async function checkProjectActive(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+  const p = await tx.project.findUnique({ where: { projectNumber } });
+  if (!p) throw Errors.notFound('Project');
+  if (!p.active) throw Errors.validation('Project is inactive');
+}
+
+async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): Promise<Decimal> {
+  const agg = await tx.inventoryTransaction.aggregate({
+    where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: issueId },
+    _sum: { quantity: true },
+  });
+  return agg._sum.quantity ?? toDecimal(0);
+}
+
+async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
+  const r = await tx.recipient.findUnique({ where: { id: recipientId } });
+  if (!r) throw Errors.notFound('Recipient');
+  if (!r.active) throw Errors.validation('Recipient is inactive');
 }
 
 async function checkLocationActive(locationId: string, tx: Prisma.TransactionClient): Promise<void> {
@@ -84,10 +120,26 @@ export const InventoryService = {
         location: true,
         actor: { select: { id: true, name: true, email: true } },
         reversedBy: { select: { id: true } },
+        recipient: { select: { name: true, type: true } },
       },
       orderBy: { postedAt: 'desc' },
       take,
     });
+    // Receipts point at their goods receipt; show its number, supplier and
+    // delivery/invoice number alongside the movement.
+    const receiptIds = [...new Set(rows.filter((t) => t.referenceType === 'GoodsReceipt' && t.referenceId).map((t) => t.referenceId!))];
+    const receipts = receiptIds.length === 0 ? [] : await prisma.goodsReceipt.findMany({
+      where: { id: { in: receiptIds } },
+      select: { id: true, number: true, deliveryRef: true, supplier: { select: { name: true } } },
+    });
+    const receiptById = new Map(receipts.map((r) => [r.id, r]));
+    const issueIds = rows.filter((t) => t.type === InventoryTransactionType.ISSUE).map((t) => t.id);
+    const returnedRows = issueIds.length === 0 ? [] : await prisma.inventoryTransaction.groupBy({
+      by: ['referenceId'],
+      where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: { in: issueIds } },
+      _sum: { quantity: true },
+    });
+    const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity]));
     return rows.map((t) => ({
       id: t.id,
       postedAt: t.postedAt.toISOString(),
@@ -101,6 +153,8 @@ export const InventoryService = {
       actorId: t.actorId,
       actorName: t.actor.name,
       recipientId: t.recipientId,
+      recipientName: t.recipient?.name ?? null,
+      recipientType: t.recipient?.type ?? null,
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
@@ -108,6 +162,11 @@ export const InventoryService = {
       referenceId: t.referenceId,
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
+      returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
+      ...(() => {
+        const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
+        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null };
+      })(),
     }));
   },
   /**
@@ -131,8 +190,18 @@ export const InventoryService = {
         if (original.reversesId) {
           throw Errors.invalidState('A reversal cannot itself be reversed. Record the movement again instead.');
         }
-        if (original.referenceType === 'GoodsReceipt') {
-          throw Errors.invalidState('Stock received against a goods receipt cannot be reversed here.');
+        // Receipts against a purchase order also moved the order's received
+        // quantities, so they cannot be reversed here. Counter receipts
+        // (no purchase order) can.
+        if (original.referenceType === 'GoodsReceipt' && original.referenceId) {
+          const gr = await tx.goodsReceipt.findUnique({ where: { id: original.referenceId } });
+          if (gr?.purchaseOrderId) {
+            throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
+          }
+        }
+
+        if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
+          throw Errors.invalidState('Part of this issue has been returned. Reverse the returns first.');
         }
 
         const legs = [original];
@@ -216,53 +285,143 @@ export const InventoryService = {
     }
   },
 
-  async issue(input: IssueInput): Promise<{ transactionId: string }> {
-    const qty = toDecimal(input.quantity);
-    if (!gtZero(qty)) throw Errors.validation('Issue quantity must be positive');
+  async issue(input: IssueInput): Promise<{ transactionIds: string[] }> {
+    if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
+    if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
+    const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, qty: toDecimal(l.quantity) }));
+    if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Issue quantity must be positive');
+
+    // The same item from the same location on two lines is checked as one total.
+    const totals = new Map<string, { materialId: string; locationId: string; qty: Decimal }>();
+    for (const l of lines) {
+      const key = `${l.materialId}|${l.locationId}`;
+      const t = totals.get(key);
+      if (t) t.qty = t.qty.plus(l.qty);
+      else totals.set(key, { materialId: l.materialId, locationId: l.locationId, qty: l.qty });
+    }
 
     return prisma.$transaction(async (tx) => {
-      await checkMaterialActive(input.materialId, tx);
-      await checkLocationActive(input.locationId, tx);
+      await checkRecipientActive(input.recipientId, tx);
+      if (input.projectNumber) await checkProjectActive(input.projectNumber, tx);
 
-      // Stock can never go below zero. This is a fixed rule, not a setting:
-      // a negative balance means the ledger no longer matches the shelf.
-      const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
-      if (balance.lt(qty)) {
-        throw Errors.insufficientBalance(
-          `Cannot issue ${qty.toString()} units: only ${balance.toString()} available.`,
-          { materialId: input.materialId, locationId: input.locationId, requested: qty.toString(), available: balance.toString() },
-        );
+      const materials = new Map<string, Awaited<ReturnType<typeof checkMaterialActive>>>();
+      for (const t of totals.values()) {
+        const material = await checkMaterialActive(t.materialId, tx);
+        materials.set(t.materialId, material);
+        await checkLocationActive(t.locationId, tx);
+
+        // Stock can never go below zero. This is a fixed rule, not a setting:
+        // a negative balance means the ledger no longer matches the shelf.
+        const balance = await getCurrentBalance(t.materialId, t.locationId, tx);
+        if (balance.lt(t.qty)) {
+          throw Errors.insufficientBalance(
+            `Cannot issue ${t.qty.toString()} × ${material.sku}: only ${balance.toString()} available.`,
+            { materialId: t.materialId, locationId: t.locationId, requested: t.qty.toString(), available: balance.toString() },
+          );
+        }
       }
 
-      const trx = await tx.inventoryTransaction.create({
-        data: {
-          materialId: input.materialId,
-          locationId: input.locationId,
-          type: InventoryTransactionType.ISSUE,
-          quantity: qty.negated(),
-          actorId: input.actorId,
-          recipientId: input.recipientId ?? null,
-          projectNumber: input.projectNumber ?? null,
-          referenceType: input.projectNumber ? 'Project' : null,
-          referenceId: input.projectNumber ?? null,
-        },
-      });
+      const transactionIds: string[] = [];
+      for (const l of lines) {
+        const trx = await tx.inventoryTransaction.create({
+          data: {
+            materialId: l.materialId,
+            locationId: l.locationId,
+            type: InventoryTransactionType.ISSUE,
+            quantity: l.qty.negated(),
+            actorId: input.actorId,
+            recipientId: input.recipientId,
+            projectNumber: input.projectNumber ?? null,
+            referenceType: input.projectNumber ? 'Project' : null,
+            referenceId: input.projectNumber ?? null,
+          },
+        });
+        transactionIds.push(trx.id);
+      }
 
-      await recomputeBalance(input.materialId, input.locationId, tx);
-
-      const material = await tx.material.findUnique({ where: { id: input.materialId } });
-      const updatedBalance = await getCurrentBalance(input.materialId, input.locationId, tx);
-
-      const events: DomainEvent[] = [
-        { type: 'InventoryIssued', materialId: input.materialId, locationId: input.locationId, quantity: qty.toNumber() },
-      ];
+      const events: DomainEvent[] = lines.map((l) => ({
+        type: 'InventoryIssued', materialId: l.materialId, locationId: l.locationId, quantity: l.qty.toNumber(),
+      }));
       const alertsOn = await SettingsService.getValue<boolean>('inventory.enableStockAlerts', tx);
-      if (alertsOn && material && updatedBalance.lte(material.requiredStock)) {
-        events.push({ type: 'StockThresholdReached', materialId: input.materialId });
+      for (const t of totals.values()) {
+        await recomputeBalance(t.materialId, t.locationId, tx);
+        const material = materials.get(t.materialId);
+        const updatedBalance = await getCurrentBalance(t.materialId, t.locationId, tx);
+        if (alertsOn && material && updatedBalance.lte(material.requiredStock)) {
+          events.push({ type: 'StockThresholdReached', materialId: t.materialId });
+        }
       }
 
       await dispatchDomainEvents(events);
-      return { transactionId: trx.id };
+      return { transactionIds };
+    });
+  },
+
+  /**
+   * Return unused stock from an issue. Recorded as a RETURN that points at the
+   * issue and keeps its recipient and project, so project consumption nets the
+   * return out. At most the issued quantity, less what has already come back.
+   */
+  async returnToStock(input: ReturnInput): Promise<{ transactionId: string; returnedQuantity: string; returnableQuantity: string }> {
+    const qty = toDecimal(input.quantity);
+    if (!gtZero(qty)) throw Errors.validation('Return quantity must be positive');
+
+    return prisma.$transaction(async (tx) => {
+      const issue = await tx.inventoryTransaction.findUnique({
+        where: { id: input.issueTransactionId },
+        include: { reversedBy: { select: { id: true } } },
+      });
+      if (!issue) throw Errors.notFound('InventoryTransaction');
+      if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
+        throw Errors.invalidState('Only an issue can have stock returned against it.');
+      }
+      if (issue.reversedBy) throw Errors.invalidState('This issue has been reversed, so there is nothing to return.');
+
+      const issued = issue.quantity.negated();
+      const alreadyReturned = await returnedAgainst(issue.id, tx);
+      const returnable = issued.minus(alreadyReturned);
+      if (qty.gt(returnable)) {
+        throw Errors.validation(
+          `Cannot return ${qty.toString()}: only ${returnable.toString()} of the ${issued.toString()} issued is still out.`,
+          { issued: issued.toString(), returned: alreadyReturned.toString(), returnable: returnable.toString() },
+        );
+      }
+
+      const locationId = input.locationId ?? issue.locationId;
+      await checkLocationActive(locationId, tx);
+
+      const trx = await tx.inventoryTransaction.create({
+        data: {
+          materialId: issue.materialId,
+          locationId,
+          type: InventoryTransactionType.RETURN,
+          quantity: qty,
+          actorId: input.actorId,
+          recipientId: issue.recipientId,
+          projectNumber: issue.projectNumber,
+          reasonNote: input.reason?.trim() || null,
+          referenceType: 'Return',
+          referenceId: issue.id,
+        },
+      });
+      await recomputeBalance(issue.materialId, locationId, tx);
+
+      await tx.auditLogEntry.create({
+        data: {
+          actorId: input.actorId,
+          action: 'RETURN',
+          entityType: 'InventoryTransaction',
+          entityId: issue.id,
+          after: { returnTransactionId: trx.id, quantity: qty.toString(), locationId } as Prisma.InputJsonValue,
+        },
+      });
+
+      await dispatchDomainEvents([
+        { type: 'InventoryIncreased', materialId: issue.materialId, locationId, quantity: qty.toNumber() },
+      ]);
+
+      const returned = alreadyReturned.plus(qty);
+      return { transactionId: trx.id, returnedQuantity: returned.toString(), returnableQuantity: issued.minus(returned).toString() };
     });
   },
 
@@ -383,6 +542,13 @@ export const InventoryService = {
       if (!gr) throw Errors.notFound('GoodsReceipt');
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
+      // The order may have been cancelled or closed since the receipt was recorded.
+      if (gr.purchaseOrderId) {
+        const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
+        if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
+          throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
+        }
+      }
 
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);
@@ -435,11 +601,14 @@ export const InventoryService = {
         });
         const allFully = lines.every((l) => toDecimal(l.receivedQty).gte(toDecimal(l.orderedQty)));
         const anyReceived = lines.some((l) => gtZero(toDecimal(l.receivedQty)));
-        const newStatus = allFully ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : 'APPROVED';
-        await tx.purchaseOrder.update({
-          where: { id: gr.purchaseOrderId },
-          data: { status: newStatus },
-        });
+        if (allFully || anyReceived) {
+          await tx.purchaseOrder.update({
+            where: { id: gr.purchaseOrderId },
+            data: allFully
+              ? { status: 'RECEIVED', deliveredAt: new Date(), deliveredById: input.actorId }
+              : { status: 'PARTIALLY_RECEIVED' },
+          });
+        }
       }
 
       await dispatchDomainEvents([

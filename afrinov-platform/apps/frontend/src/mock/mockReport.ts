@@ -21,7 +21,7 @@ export interface ReportQuery {
   stockStatus: 'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
   itemStatus: 'ALL' | 'ACTIVE' | 'INACTIVE';
   search?: string;
-  movementType?: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT';
+  movementType?: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT' | 'RETURN';
   page: number;
   pageSize: number;
 }
@@ -107,6 +107,7 @@ export interface ReportMovementSummary {
   issues: { count: number; quantity: number };
   transfers: { count: number; quantity: number };
   adjustments: { count: number; quantity: number };
+  returns: { count: number; quantity: number };
   total: { count: number; quantity: number };
 }
 export interface ReportKpis {
@@ -383,12 +384,14 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
     issues: { count: 0, quantity: 0 },
     transfers: { count: 0, quantity: 0 },
     adjustments: { count: 0, quantity: 0 },
+    returns: { count: 0, quantity: 0 },
     total: { count: effective.length, quantity: effective.reduce((a, m) => a + Math.abs(m.quantity), 0) },
   };
   for (const m of effective) {
     if (m.type === 'RECEIPT') { movementSummary.receipts.count++; movementSummary.receipts.quantity += m.quantity; }
     else if (m.type === 'ISSUE') { movementSummary.issues.count++; movementSummary.issues.quantity += Math.abs(m.quantity); }
     else if (m.type === 'TRANSFER_IN' || m.type === 'TRANSFER_OUT') { movementSummary.transfers.count++; movementSummary.transfers.quantity += Math.abs(m.quantity); }
+    else if (m.type === 'RETURN') { movementSummary.returns.count++; movementSummary.returns.quantity += m.quantity; }
     else if (m.type === 'ADJUSTMENT') { movementSummary.adjustments.count++; movementSummary.adjustments.quantity += Math.abs(m.quantity); }
   }
 

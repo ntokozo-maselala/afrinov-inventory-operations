@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 
 export interface CreateGoodsReceiptInput {
@@ -40,6 +41,9 @@ export const GoodsReceiptService = {
     if (input.purchaseOrderId) {
       const po = await prisma.purchaseOrder.findUnique({ where: { id: input.purchaseOrderId } });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      if (!RECEIVABLE_STATUSES.includes(po.status)) {
+        throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
+      }
     }
 
     return prisma.$transaction(async (tx) => {
@@ -75,7 +79,7 @@ export const GoodsReceiptService = {
   },
 };
 
-async function generateGRNumber(tx: Prisma.TransactionClient): Promise<string> {
+export async function generateGRNumber(tx: Prisma.TransactionClient): Promise<string> {
   const year = new Date().getFullYear();
   const count = await tx.goodsReceipt.count({
     where: { createdAt: { gte: new Date(`${year}-01-01T00:00:00Z`) } },

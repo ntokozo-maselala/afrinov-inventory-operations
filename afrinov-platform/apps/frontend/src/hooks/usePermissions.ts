@@ -42,6 +42,8 @@ export function usePermissions(): { hasPermission: (permission: string) => boole
   const canManageProcurement = useCanManageProcurement();
   const canApprove = useCanApprove();
   const canManageUsers = useCanManageUsers();
+  // Same roles that can issue stock.
+  const canReturn = useHasRole(['STORE_CONTROLLER', 'TECHNICIAN']);
 
   const hasPermission = (permission: string): boolean => {
     if (isAdmin) return true;
@@ -49,7 +51,10 @@ export function usePermissions(): { hasPermission: (permission: string) => boole
     switch (permission) {
       case 'materials:manage':
       case 'inventory:reverse':
+      case 'recipients:manage':
         return canManageMaterials;
+      case 'inventory:return':
+        return canReturn;
       case 'procurement:manage':
         return canManageProcurement;
       case 'orders:approve':

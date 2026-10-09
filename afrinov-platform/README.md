@@ -138,5 +138,7 @@ npm run build
 ## See also
 
 - `../afrinov-docs/docs/` — the source-of-truth specification.
-- `IMPLEMENTATION_REPORT.md` — the executive summary delivered with this
-  build, including validation results, known limitations, and next steps.
+- `../task_context.md` — orientation and how to run the platform locally.
+- `../workbook-replacement-roadmap.md` — the plan for replacing the stock workbook.
+- `../docs/archive/` — earlier audits and reports, including the
+  `IMPLEMENTATION_REPORT.md` delivered with the first build.

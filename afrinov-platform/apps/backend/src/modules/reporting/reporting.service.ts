@@ -145,7 +145,8 @@ export const ReportingService = {
 
   async projectConsumption(projectNumber: string) {
     const trx = await prisma.inventoryTransaction.findMany({
-      where: { projectNumber, type: 'ISSUE' },
+      // Returns carry the issue's project; signed totals net them out.
+      where: { projectNumber, type: { in: ['ISSUE', 'RETURN'] } },
       include: { material: true },
       orderBy: { postedAt: 'desc' },
     });

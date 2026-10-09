@@ -22,6 +22,9 @@ interface MovementRow {
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
+  recipientName?: string | null;
+  returnedQuantity?: string | null;
+  receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
 }
 
 const TYPE_OPTIONS = [
@@ -31,6 +34,7 @@ const TYPE_OPTIONS = [
   { value: 'TRANSFER_OUT', label: 'Transfer out' },
   { value: 'TRANSFER_IN', label: 'Transfer in' },
   { value: 'ADJUSTMENT', label: 'Adjustment' },
+  { value: 'RETURN', label: 'Return' },
 ];
 
 export function Movements() {
@@ -127,6 +131,11 @@ export function Movements() {
               setSelected(null);
               moves.reload();
               toast.success('Movement reversed');
+            }}
+            onReturned={() => {
+              setSelected(null);
+              moves.reload();
+              toast.success('Stock returned');
             }}
             onError={(err) => toast.error('Reversal failed', err.message)}
           />

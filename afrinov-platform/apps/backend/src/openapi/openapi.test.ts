@@ -48,7 +48,7 @@ describe('OpenAPI document', () => {
       : undefined;
     expect(schema).toMatchObject({
       type: 'object',
-      required: expect.arrayContaining(['materialId', 'locationId', 'quantity']),
+      required: expect.arrayContaining(['recipientId', 'lines']),
     });
     expect(Object.keys(issue?.responses ?? {})).toEqual(expect.arrayContaining(['201', '401', '403', '422']));
   });

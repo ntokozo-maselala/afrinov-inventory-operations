@@ -177,10 +177,10 @@ This phase is small and best done before real data exists.
 - [x] Make "no negative stock" a fixed rule for issues, transfers and adjustments; delete `inventory.enableNegativeStockPrevention`
 - [x] Delete the seven settings that do nothing (listed in Remove), or wire up any the business wants
 - [x] Remove `/auth/register`, the Signup page and `security.allowSelfRegistration`
-- [ ] Cut purchase-order statuses down to Draft, Pending approval, Approved, Partly received, Received, Closed, Cancelled; drop the SHIPPED stage fields from the UI
+- [x] Cut purchase-order statuses down to Draft, Pending approval, Approved, Partly received, Received, Closed, Cancelled; drop the SHIPPED stage fields from the UI
 - [x] Make production builds fail if `VITE_FRONTEND_ONLY` or `VITE_DEMO_AUTH_ENABLED` is set
 - [x] Hide location address and contact fields and rack capacity and FULL status from forms
-- [ ] Archive the old audit and report markdown files; update `task_context.md`
+- [x] Archive the old audit and report markdown files; update `task_context.md`
 - [x] Add the workbook to `.gitignore`
 
 **Exit criteria:** the ledger has no update path; settings pages only show settings that change behaviour; CI is green.
@@ -189,14 +189,14 @@ This phase is small and best done before real data exists.
 
 The goal is that a storeman can do every daily entry from the sheet's IN and OUT logs in the app, as fast as typing a row in Excel.
 
-- [ ] Recipients list: name, type (worker, machine, site, contractor), active flag; admin screens to manage it
-- [ ] Point `InventoryTransaction.recipientId` at recipients instead of users
-- [ ] Receive stock: supplier, delivery/invoice number, date, location, and several item lines in one entry; posts RECEIPT transactions through goods receipts with no purchase order, and works with procurement off
-- [ ] Issue stock: recipient and project as searchable dropdowns, and several item lines in one entry (one person often takes several items)
-- [ ] Return to stock: unused material back from a project, posted as a receipt that references the original issue
-- [ ] Item search by name, ID or location on every entry screen, as the sheet's lookup does
-- [ ] Show current stock and location next to each line while entering, as the sheet does
-- [ ] Tablet-friendly entry screens for the store counter
+- [x] Recipients list: name, type (worker, machine, site, contractor), active flag; admin screens to manage it
+- [x] Point `InventoryTransaction.recipientId` at recipients instead of users
+- [x] Receive stock: supplier, delivery/invoice number, date, location, and several item lines in one entry; posts RECEIPT transactions through goods receipts with no purchase order, and works with procurement off
+- [x] Issue stock: recipient and project as searchable dropdowns, and several item lines in one entry (one person often takes several items)
+- [x] Return to stock: unused material back from a project, posted as a RETURN that references the original issue
+- [x] Item search by name, ID or location on every entry screen, as the sheet's lookup does
+- [x] Show current stock and location next to each line while entering, as the sheet does
+- [x] Tablet-friendly entry screens for the store counter
 
 **Exit criteria:** every row type in the four Issued sheets can be entered in the app; the integration tests cover receive, issue and return.
 

@@ -3,6 +3,7 @@ import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { RecipientSelect, ProjectSelect, useIssueOptions } from './IssueFields';
 
 export type StockActionKind = 'issue' | 'transfer' | 'adjust';
 
@@ -33,6 +34,8 @@ const REASONS = [
 export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props) {
   const [quantity, setQuantity] = useState('');
   const [project, setProject] = useState('');
+  const [recipientId, setRecipientId] = useState('');
+  const issueOptions = useIssueOptions();
   const [note, setNote] = useState('');
   const [toLocationId, setToLocationId] = useState('');
   const [reasonCode, setReasonCode] = useState(REASONS[0]!.value);
@@ -44,7 +47,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
     api.get<Location[]>('/locations').then(setLocations).catch(() => undefined);
   }, []);
 
-  function reset() { setQuantity(''); setProject(''); setNote(''); setValidation(null); }
+  function reset() { setQuantity(''); setProject(''); setRecipientId(''); setNote(''); setValidation(null); }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,13 +60,15 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
     if (kind === 'transfer' && !toLocationId) { setValidation('Choose a destination location.'); return; }
     if (kind === 'transfer' && toLocationId === row.locationId) { setValidation('Source and destination must differ.'); return; }
     if (kind !== 'adjust' && qty < 0) { setValidation('Enter a positive quantity.'); return; }
+    if (kind === 'issue' && !recipientId) { setValidation('Choose who the stock is issued to.'); return; }
 
     setBusy(true);
     try {
       if (kind === 'issue') {
         await api.post('/inventory-issues', {
-          materialId: row.materialId, locationId: row.locationId, quantity: qty,
+          recipientId,
           projectNumber: project || undefined,
+          lines: [{ materialId: row.materialId, locationId: row.locationId, quantity: qty }],
         });
         onSuccess(`Issued ${qty} × ${row.materialSku}`);
       } else if (kind === 'transfer') {
@@ -109,9 +114,8 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
           <Field label="Quantity to issue" htmlFor="qty" required help={`Available: ${row.quantity} ${row.unitOfMeasure}`}>
             <Input id="qty" type="number" min="0.0001" step="0.0001" required value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
           </Field>
-          <Field label="Project (optional)" htmlFor="proj" help="If the issue is for a specific project, link it here so it shows in consumption reports.">
-            <Input id="proj" value={project} onChange={(e) => setProject(e.target.value)} placeholder="e.g. AFRI-1325" />
-          </Field>
+          <RecipientSelect id="issue-recipient" value={recipientId} onChange={setRecipientId} recipients={issueOptions.recipients} disabled={issueOptions.loading} invalid={!!validation && !recipientId} />
+          <ProjectSelect id="proj" value={project} onChange={setProject} projects={issueOptions.projects} disabled={issueOptions.loading} />
         </>
       )}
 

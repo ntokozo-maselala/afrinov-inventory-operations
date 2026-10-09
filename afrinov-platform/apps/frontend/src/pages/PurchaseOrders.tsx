@@ -30,11 +30,10 @@ const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'DRAFT', label: 'Draft' },
   { value: 'PENDING_APPROVAL', label: 'Pending approval' },
-  { value: 'SUBMITTED', label: 'Submitted' },
   { value: 'APPROVED', label: 'Approved' },
-  { value: 'SENT', label: 'Sent' },
-  { value: 'PARTIALLY_RECEIVED', label: 'Partially received' },
-  { value: 'FULLY_RECEIVED', label: 'Received' },
+  { value: 'PARTIALLY_RECEIVED', label: 'Partly received' },
+  { value: 'RECEIVED', label: 'Received' },
+  { value: 'CLOSED', label: 'Closed' },
   { value: 'CANCELLED', label: 'Cancelled' },
 ];
 

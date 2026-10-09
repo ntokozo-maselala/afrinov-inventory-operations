@@ -31,6 +31,9 @@ interface MovementRow {
   reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
+  recipientName?: string | null;
+  returnedQuantity?: string | null;
+  receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -160,6 +163,11 @@ export function MaterialDetail() {
               setSelected(null);
               moves.reload();
               toast.success('Movement reversed');
+            }}
+            onReturned={() => {
+              setSelected(null);
+              moves.reload();
+              toast.success('Stock returned');
             }}
             onError={(err) => toast.error('Reversal failed', err.message)}
           />

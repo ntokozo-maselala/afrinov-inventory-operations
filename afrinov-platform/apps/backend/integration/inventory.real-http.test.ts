@@ -29,6 +29,12 @@ describe('stock movements over real HTTP', () => {
   let materialId: string;
   let storeA: string;
   let storeB: string;
+  let recipientId: string;
+
+  /** One-line issue to the test recipient. */
+  function issueBody(locationId: string, quantity: number, extra: Record<string, unknown> = {}) {
+    return { recipientId, lines: [{ materialId, locationId, quantity }], ...extra };
+  }
 
   async function stockAt(locationId: string): Promise<string> {
     const res = await api<StockRow[]>('GET', `/reports/current-stock?materialId=${materialId}&locationId=${locationId}`);
@@ -69,6 +75,10 @@ describe('stock movements over real HTTP', () => {
     expect(b.status).toBe(201);
     storeA = a.body.id;
     storeB = b.body.id;
+
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT fitter ${run}`, type: 'WORKER' });
+    expect(recipient.status).toBe(201);
+    recipientId = recipient.body.id;
   });
 
   afterAll(async () => {
@@ -88,7 +98,7 @@ describe('stock movements over real HTTP', () => {
   });
 
   it('an issue takes stock out', async () => {
-    const res = await api('POST', '/inventory-issues', { materialId, locationId: storeA, quantity: 30 });
+    const res = await api('POST', '/inventory-issues', issueBody(storeA, 30));
     expect(res.status).toBe(201);
     await expectLedgerMatches(storeA, '70');
   });
@@ -142,7 +152,7 @@ describe('stock movements over real HTTP', () => {
 
   it('never lets an issue or a write-off take stock below zero', async () => {
     const before = await transactionCount();
-    const issue = await api<{ error: { code: string } }>('POST', '/inventory-issues', { materialId, locationId: storeB, quantity: 21 });
+    const issue = await api<{ error: { code: string } }>('POST', '/inventory-issues', issueBody(storeB, 21));
     expect(issue.status).toBe(422);
     expect(issue.body.error.code).toBe('INSUFFICIENT_BALANCE');
     const writeOff = await api<{ error: { code: string } }>('POST', '/inventory-adjustments', {
@@ -176,8 +186,14 @@ describe('stock movements over real HTTP', () => {
     });
     expect(zeroAdjustment.status).toBe(400);
 
-    const negativeIssue = await api('POST', '/inventory-issues', { materialId, locationId: storeA, quantity: -3 });
+    const negativeIssue = await api('POST', '/inventory-issues', issueBody(storeA, -3));
     expect(negativeIssue.status).toBe(400);
+
+    const noRecipient = await api('POST', '/inventory-issues', { lines: [{ materialId, locationId: storeA, quantity: 1 }] });
+    expect(noRecipient.status).toBe(400);
+
+    const unknownProject = await api('POST', '/inventory-issues', issueBody(storeA, 1, { projectNumber: `NOPE-${run}` }));
+    expect(unknownProject.status).toBe(404);
 
     expect(await transactionCount()).toBe(before);
   });
@@ -186,12 +202,26 @@ describe('stock movements over real HTTP', () => {
     const deactivate = await api('PATCH', `/materials/${materialId}`, { active: false });
     expect(deactivate.status).toBe(200);
     try {
-      const res = await api('POST', '/inventory-issues', { materialId, locationId: storeA, quantity: 1 });
+      const res = await api('POST', '/inventory-issues', issueBody(storeA, 1));
       expect(res.status).toBe(400);
       await expectLedgerMatches(storeA, '45');
     } finally {
       await api('PATCH', `/materials/${materialId}`, { active: true });
     }
+  });
+
+  it('issues several lines in one entry, and books nothing when one line is short', async () => {
+    const before = await transactionCount();
+    const short = await api<{ error: { code: string } }>('POST', '/inventory-issues', {
+      recipientId,
+      lines: [
+        { materialId, locationId: storeA, quantity: 1 },
+        { materialId, locationId: storeB, quantity: 1000 },
+      ],
+    });
+    expect(short.status).toBe(422);
+    expect(await transactionCount()).toBe(before);
+    await expectLedgerMatches(storeA, '45');
   });
 
   it('lists every movement in the history, newest first', async () => {
@@ -251,7 +281,7 @@ describe('stock movements over real HTTP', () => {
 
     const viewer = client(server.port, await login(server.port, email, password));
     const before = await transactionCount();
-    const res = await viewer('POST', '/inventory-issues', { materialId, locationId: storeA, quantity: 1 });
+    const res = await viewer('POST', '/inventory-issues', issueBody(storeA, 1));
     expect(res.status).toBe(403);
     expect(await transactionCount()).toBe(before);
   });

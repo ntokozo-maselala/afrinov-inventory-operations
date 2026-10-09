@@ -36,6 +36,7 @@ import type {
   MockRackStatus,
   MockProject,
   AdjustmentReasonCode,
+  MockRecipient,
 } from './types';
 import type { ApiError } from '../api/client';
 
@@ -54,6 +55,7 @@ interface State {
   transactions: MockInventoryTransaction[];
   racks: MockRack[];
   projects: MockProject[];
+  recipients: MockRecipient[];
 }
 
 let state: State = freshState();
@@ -68,6 +70,13 @@ function freshState(): State {
     transactions: [...SEED_TRANSACTIONS],
     racks: JSON.parse(JSON.stringify(SEED_RACKS)),
     projects: JSON.parse(JSON.stringify(SEED_PROJECTS)),
+    recipients: [
+      { id: 'rcp-1', name: 'Sabelo', type: 'WORKER', active: true },
+      { id: 'rcp-2', name: 'Khodani', type: 'WORKER', active: true },
+      { id: 'rcp-3', name: 'Forklift', type: 'MACHINE', active: true },
+      { id: 'rcp-4', name: 'Northam Platinum', type: 'SITE', active: true },
+      { id: 'rcp-5', name: 'KTS', type: 'CONTRACTOR', active: true },
+    ],
   };
 }
 
@@ -405,7 +414,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/approve'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'PENDING_APPROVAL' && po.status !== 'SUBMITTED') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
+    if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
     const before = { status: po.status };
     po.status = 'APPROVED';
     po.approvedAt = new Date().toISOString();
@@ -414,33 +423,16 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
-  if (method === 'POST' && p.endsWith('/ship')) {
-    const id = p.slice('/purchase-orders/'.length, -'/ship'.length);
+  if (method === 'POST' && p.endsWith('/receive')) {
+    const id = p.slice('/purchase-orders/'.length, -'/receive'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'APPROVED') throw err('INVALID_STATE', `Cannot ship from ${po.status}`);
-    const b = (body as { trackingNumber?: string; carrier?: string; shipmentNotes?: string }) ?? {};
-    const before = { status: po.status };
-    po.status = 'SHIPPED';
-    po.shippedAt = new Date().toISOString();
-    po.shippedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
-    po.trackingNumber = b.trackingNumber ?? null;
-    po.carrier = b.carrier ?? null;
-    po.shipmentNotes = b.shipmentNotes ?? null;
-    po.history = po.history ?? [];
-    po.history.push({ id: nextId('audit'), action: 'PO_SHIP', actorId: 'u-admin', before, after: { status: po.status, trackingNumber: po.trackingNumber, carrier: po.carrier }, createdAt: new Date().toISOString() });
-    return po;
-  }
-  if (method === 'POST' && p.endsWith('/deliver')) {
-    const id = p.slice('/purchase-orders/'.length, -'/deliver'.length);
-    const po = state.purchaseOrders.find((x) => x.id === id);
-    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'SHIPPED') throw err('INVALID_STATE', `Cannot deliver from ${po.status}`);
+    if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive from ${po.status}`);
     const b = (body as { locationId?: string; deliveryNotes?: string }) ?? {};
     if (!b.locationId) throw err('VALIDATION_ERROR', 'locationId is required');
     if (!state.locations.find((l) => l.id === b.locationId)) throw err('NOT_FOUND', 'Location not found');
     const before = { status: po.status };
-    po.status = 'DELIVERED';
+    po.status = 'RECEIVED';
     po.deliveredAt = new Date().toISOString();
     po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
     po.deliveryNotes = b.deliveryNotes ?? null;
@@ -465,14 +457,31 @@ function route(method: string, path: string, body?: unknown): unknown {
       }
     }
     po.history = po.history ?? [];
-    po.history.push({ id: nextId('audit'), action: 'PO_DELIVER', actorId: 'u-admin', before, after: { status: po.status, locationId: b.locationId }, createdAt: new Date().toISOString() });
+    po.history.push({ id: nextId('audit'), action: 'PO_RECEIVE', actorId: 'u-admin', before, after: { status: po.status, locationId: b.locationId }, createdAt: new Date().toISOString() });
+    return po;
+  }
+  if (method === 'POST' && p.endsWith('/close')) {
+    const id = p.slice('/purchase-orders/'.length, -'/close'.length);
+    const po = state.purchaseOrders.find((x) => x.id === id);
+    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    if (po.status !== 'PARTIALLY_RECEIVED' && po.status !== 'RECEIVED') throw err('INVALID_STATE', `Cannot close from ${po.status}`);
+    const reason = ((body as { reason?: string }) ?? {}).reason?.trim() || null;
+    const short = po.lines.some((l) => Number(l.receivedQty) < Number(l.orderedQty));
+    if (short && !reason) throw err('VALIDATION_ERROR', 'A reason is required to close an order that has not been fully received');
+    const before = { status: po.status };
+    po.status = 'CLOSED';
+    po.closedAt = new Date().toISOString();
+    po.closedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
+    po.closeReason = reason;
+    po.history = po.history ?? [];
+    po.history.push({ id: nextId('audit'), action: 'PO_CLOSE', actorId: 'u-admin', before, after: { status: po.status, reason }, createdAt: new Date().toISOString() });
     return po;
   }
   if (method === 'POST' && p.endsWith('/cancel')) {
     const id = p.slice('/purchase-orders/'.length, -'/cancel'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (!['DRAFT', 'PENDING_APPROVAL', 'SUBMITTED', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', `Cannot cancel from ${po.status}`);
+    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', `Cannot cancel from ${po.status}`);
     const b = (body as { reason?: string }) ?? {};
     if (!b.reason || !b.reason.trim()) throw err('VALIDATION_ERROR', 'Cancellation reason is required');
     const before = { status: po.status };
@@ -488,7 +497,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status === 'DELIVERED' || po.status === 'CANCELLED') throw err('INVALID_STATE', 'This purchase order is no longer editable.');
+    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
     const b = (body as { notes?: string | null; expectedDeliveryDate?: string | null }) ?? {};
     if (b.notes !== undefined) po.notes = b.notes ?? undefined;
     if (b.expectedDeliveryDate !== undefined) po.expectedDeliveryDate = b.expectedDeliveryDate ?? null;
@@ -527,7 +536,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     };
     if (!b.supplierId || !b.lines?.length) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     if (!state.suppliers.find((s) => s.id === b.supplierId)) throw err('NOT_FOUND', 'Supplier not found');
-    if (b.purchaseOrderId && !state.purchaseOrders.find((p) => p.id === b.purchaseOrderId)) throw err('NOT_FOUND', 'Purchase order not found');
+    if (b.purchaseOrderId) {
+      const po = state.purchaseOrders.find((p) => p.id === b.purchaseOrderId);
+      if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+      if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive against a purchase order in status ${po.status}`);
+    }
     const gr: MockGoodsReceipt = {
       id: nextId('gr'),
       number: `GR-2026-${String(state.goodsReceipts.length + 1).padStart(4, '0')}`,
@@ -587,7 +600,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       if (po) {
         const allFully = po.lines.every((l) => Number(l.receivedQty) >= Number(l.orderedQty));
         const anyReceived = po.lines.some((l) => Number(l.receivedQty) > 0);
-        po.status = allFully ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : 'APPROVED';
+        if (allFully || anyReceived) po.status = allFully ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
       }
     }
     return {
@@ -608,9 +621,43 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
+  // Mirrors StockReceiptService.receive: a posted goods receipt with no
+  // purchase order, all-or-nothing.
+  if (method === 'POST' && p === '/stock-receipts') {
+    const b = (body as { supplierId?: string; deliveryRef?: string; receivedAt?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }) ?? {};
+    const deliveryRef = b.deliveryRef?.trim();
+    if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');
+    const lines = b.lines ?? [];
+    if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
+    if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');
+    const supplier = b.supplierId ? findSupplier(b.supplierId) : undefined;
+    if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
+    if (!supplier.active) throw err('VALIDATION_ERROR', 'Supplier is inactive');
+    for (const l of lines) {
+      if (!findMaterial(l.materialId)) throw err('NOT_FOUND', 'Material not found');
+      if (!findLocation(l.locationId)) throw err('NOT_FOUND', 'Location not found');
+    }
+    const gr: MockGoodsReceipt = {
+      id: nextId('gr'),
+      number: `GR-2026-${String(state.goodsReceipts.length + 1).padStart(4, '0')}`,
+      supplierId: supplier.id,
+      deliveryRef,
+      status: 'POSTED',
+      receivedAt: b.receivedAt ? new Date(b.receivedAt).toISOString() : new Date().toISOString(),
+      lines: lines.map((l) => ({ id: nextId('grl'), materialId: l.materialId, locationId: l.locationId, quantity: String(l.quantity) })),
+    };
+    state.goodsReceipts.push(gr);
+    const postedAt = new Date().toISOString();
+    const transactionIds = lines.map((l) => {
+      const id = nextId('t');
+      state.transactions.push({ id, postedAt, type: 'RECEIPT', materialId: l.materialId, locationId: l.locationId, quantity: String(l.quantity), actorId: 'user-1', referenceType: 'GoodsReceipt', referenceId: gr.id });
+      return id;
+    });
+    return { goodsReceiptId: gr.id, number: gr.number, transactionIds };
+  }
+
   if (method === 'POST' && p === '/inventory-issues') {
-    const b = body as { materialId: string; locationId: string; quantity: number; projectNumber?: string };
-    return handleIssue(b);
+    return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'POST' && p === '/inventory-transfers') {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
@@ -619,6 +666,10 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'POST' && p === '/inventory-adjustments') {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
     return handleAdjustment(b);
+  }
+  const returnMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/returns$/.exec(p) : null;
+  if (returnMatch) {
+    return handleReturn(returnMatch[1]!, (body as { quantity?: number; locationId?: string; reason?: string }) ?? {});
   }
   const reversalMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/reversal$/.exec(p) : null;
   if (reversalMatch) {
@@ -695,6 +746,37 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!r) throw err('NOT_FOUND', 'Rack not found');
     r.status = 'INACTIVE';
     r.updatedAt = new Date().toISOString();
+    return r;
+  }
+
+  // Recipients ("Issued To")
+  if (method === 'GET' && p === '/recipients') {
+    const q = qs.q?.toLowerCase();
+    return state.recipients
+      .filter((r) => (!qs.type || r.type === qs.type) && (qs.active === undefined || String(r.active) === qs.active) && (!q || r.name.toLowerCase().includes(q)))
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+  }
+  if (method === 'POST' && p === '/recipients') {
+    const b = (body as { name?: string; type?: MockRecipient['type']; notes?: string }) ?? {};
+    const name = b.name?.trim().replace(/\s+/g, ' ');
+    if (!name || !b.type) throw err('VALIDATION_ERROR', 'Name and type are required');
+    if (state.recipients.some((r) => r.name.toLowerCase() === name.toLowerCase())) throw err('CONFLICT', `A recipient named "${name}" already exists`);
+    const created: MockRecipient = { id: nextId('rcp'), name, type: b.type, notes: b.notes?.trim() || null, active: true };
+    state.recipients.push(created);
+    return created;
+  }
+  if (method === 'PATCH' && /^\/recipients\/[^/]+$/.test(p)) {
+    const r = state.recipients.find((x) => x.id === p.slice('/recipients/'.length));
+    if (!r) throw err('NOT_FOUND', 'Recipient not found');
+    const b = (body as Partial<MockRecipient>) ?? {};
+    if (b.name !== undefined) {
+      const name = b.name.trim().replace(/\s+/g, ' ');
+      if (state.recipients.some((x) => x.id !== r.id && x.name.toLowerCase() === name.toLowerCase())) throw err('CONFLICT', `A recipient named "${name}" already exists`);
+      r.name = name;
+    }
+    if (b.type !== undefined) r.type = b.type;
+    if (b.notes !== undefined) r.notes = b.notes?.trim() || null;
+    if (b.active !== undefined) r.active = b.active;
     return r;
   }
 
@@ -1089,31 +1171,65 @@ function handleStockItemCreate(b: {
   return { material: created, initialTransactionId };
 }
 
-function handleIssue(b: { materialId: string; locationId: string; quantity: number; projectNumber?: string }): { transactionId: string } {
-  if (!b.materialId || !b.locationId || !(b.quantity > 0)) throw err('VALIDATION_ERROR', 'Invalid issue payload');
-  if (!findMaterial(b.materialId)) throw err('NOT_FOUND', 'Material not found');
-  if (!findLocation(b.locationId)) throw err('NOT_FOUND', 'Location not found');
-  const balance = getBalance(b.materialId, b.locationId);
-  if (balance < b.quantity) {
-    throw err('INSUFFICIENT_BALANCE', `Cannot issue ${b.quantity} units: only ${balance} available.`, {
-      requested: b.quantity,
-      available: balance,
-    });
+// Mirrors InventoryService.issue: one recipient (required), an optional
+// project, several lines; all-or-nothing, with repeated items checked as one total.
+interface IssueBody {
+  recipientId?: string;
+  projectNumber?: string;
+  lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
+}
+function handleIssue(b: IssueBody): { transactionIds: string[] } {
+  if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the stock is issued to');
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to issue');
+  if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  const recipient = state.recipients.find((x) => x.id === b.recipientId);
+  if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
+  if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  if (b.projectNumber) {
+    const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
+    if (!project) throw err('NOT_FOUND', 'Project not found');
+    if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
   }
-  const id = nextId('t');
-  state.transactions.push({
-    id,
-    postedAt: new Date().toISOString(),
-    type: 'ISSUE',
-    materialId: b.materialId,
-    locationId: b.locationId,
-    quantity: String(-b.quantity),
-    actorId: 'user-1',
-    projectNumber: b.projectNumber,
-    referenceType: b.projectNumber ? 'Project' : undefined,
-    referenceId: b.projectNumber,
-  });
-  return { transactionId: id };
+  const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+  for (const l of lines) {
+    const key = `${l.materialId}|${l.locationId}`;
+    const t = totals.get(key);
+    if (t) t.quantity += l.quantity;
+    else totals.set(key, { ...l });
+  }
+  for (const t of totals.values()) {
+    const material = findMaterial(t.materialId);
+    if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (!findLocation(t.locationId)) throw err('NOT_FOUND', 'Location not found');
+    const balance = getBalance(t.materialId, t.locationId);
+    if (balance < t.quantity) {
+      throw err('INSUFFICIENT_BALANCE', `Cannot issue ${t.quantity} × ${material.sku}: only ${balance} available.`, {
+        requested: t.quantity,
+        available: balance,
+      });
+    }
+  }
+  const postedAt = new Date().toISOString();
+  return {
+    transactionIds: lines.map((l) => {
+      const id = nextId('t');
+      state.transactions.push({
+        id,
+        postedAt,
+        type: 'ISSUE',
+        materialId: l.materialId,
+        locationId: l.locationId,
+        quantity: String(-l.quantity),
+        actorId: 'user-1',
+        recipientId: b.recipientId,
+        projectNumber: b.projectNumber,
+        referenceType: b.projectNumber ? 'Project' : undefined,
+        referenceId: b.projectNumber,
+      });
+      return id;
+    }),
+  };
 }
 
 function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number }): { outTransactionId: string; inTransactionId: string } {
@@ -1140,13 +1256,47 @@ function handleTransfer(b: { materialId: string; fromLocationId: string; toLocat
 
 // Mirrors InventoryService.reverse: an opposite entry of the same type,
 // linked to the original; both legs of a transfer reversed together.
+// Mirrors InventoryService.returnToStock.
+function returnedAgainst(issueId: string): number {
+  return state.transactions
+    .filter((t) => t.type === 'RETURN' && t.referenceType === 'Return' && t.referenceId === issueId)
+    .reduce((a, t) => a + Number(t.quantity), 0);
+}
+function handleReturn(id: string, b: { quantity?: number; locationId?: string; reason?: string }) {
+  if (!(Number(b.quantity) > 0)) throw err('VALIDATION_ERROR', 'Return quantity must be positive');
+  const issue = state.transactions.find((t) => t.id === id);
+  if (!issue) throw err('NOT_FOUND', 'InventoryTransaction not found');
+  if (issue.type !== 'ISSUE' || issue.reversesId) throw err('INVALID_STATE', 'Only an issue can have stock returned against it.');
+  if (state.transactions.some((t) => t.reversesId === issue.id)) throw err('INVALID_STATE', 'This issue has been reversed, so there is nothing to return.');
+  const issued = -Number(issue.quantity);
+  const already = returnedAgainst(issue.id);
+  const qty = Number(b.quantity);
+  if (qty > issued - already) {
+    throw err('VALIDATION_ERROR', `Cannot return ${qty}: only ${issued - already} of the ${issued} issued is still out.`);
+  }
+  const locationId = b.locationId ?? issue.locationId;
+  if (!findLocation(locationId)) throw err('NOT_FOUND', 'Location not found');
+  const transactionId = nextId('t');
+  state.transactions.push({
+    id: transactionId, postedAt: new Date().toISOString(), type: 'RETURN', materialId: issue.materialId, locationId,
+    quantity: String(qty), actorId: 'user-1', recipientId: issue.recipientId, projectNumber: issue.projectNumber,
+    reasonNote: b.reason?.trim() || undefined, referenceType: 'Return', referenceId: issue.id,
+  });
+  return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - qty) };
+}
+
 function handleReversal(id: string, b: { reason?: string } | undefined): { reversalIds: string[] } {
   const reason = b?.reason?.trim() ?? '';
   if (reason.length < 3) throw err('VALIDATION_ERROR', 'A reason is required to reverse a movement');
   const original = state.transactions.find((t) => t.id === id);
   if (!original) throw err('NOT_FOUND', 'InventoryTransaction not found');
   if (original.reversesId) throw err('INVALID_STATE', 'A reversal cannot itself be reversed. Record the movement again instead.');
-  if (original.referenceType === 'GoodsReceipt') throw err('INVALID_STATE', 'Stock received against a goods receipt cannot be reversed here.');
+  if (original.type === 'ISSUE' && returnedAgainst(original.id) > 0) {
+    throw err('INVALID_STATE', 'Part of this issue has been returned. Reverse the returns first.');
+  }
+  if (original.referenceType === 'GoodsReceipt' && state.goodsReceipts.find((g) => g.id === original.referenceId)?.purchaseOrderId) {
+    throw err('INVALID_STATE', 'Stock received against a purchase order cannot be reversed here.');
+  }
   const partner = original.pairedWithId ? state.transactions.find((t) => t.id === original.pairedWithId) : undefined;
   const legs = partner ? (partner.type === 'TRANSFER_OUT' ? [partner, original] : [original, partner]) : [original];
   if (legs.some((leg) => state.transactions.some((t) => t.reversesId === leg.id))) {
@@ -1330,6 +1480,13 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     actorId: t.actorId,
     actorName: actor?.name ?? 'Unknown',
     recipientId: t.recipientId,
+    recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
+    recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
+    returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
+    ...(() => {
+      const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
+      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
+    })(),
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,
     projectNumber: t.projectNumber,

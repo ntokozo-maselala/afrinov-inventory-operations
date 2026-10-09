@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
-const { mockPost, mockHasPermission } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockHasPermission } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockHasPermission: vi.fn(),
 }));
 
-vi.mock('../api/client', () => ({ api: { post: mockPost } }));
+vi.mock('../api/client', () => ({ api: { get: mockGet, post: mockPost } }));
 vi.mock('../hooks/usePermissions', () => ({
   usePermissions: () => ({ hasPermission: mockHasPermission }),
 }));
@@ -37,6 +38,7 @@ function renderDrawer(overrides: Partial<typeof issue & { reversesId: string; re
 describe('TransactionDrawer', () => {
   beforeEach(() => {
     mockPost.mockReset();
+    mockGet.mockReset().mockResolvedValue([{ id: 'l-1', name: 'A-1', active: true }, { id: 'l-2', name: 'B-2', active: true }]);
     mockHasPermission.mockReset().mockReturnValue(true);
   });
 
@@ -134,6 +136,12 @@ describe('TransactionDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
+  it('shows who the stock was issued to', () => {
+    renderDrawer({ recipientName: 'Sabelo' } as never);
+    expect(screen.getByText('Issued to')).toBeInTheDocument();
+    expect(screen.getByText('Sabelo')).toBeInTheDocument();
+  });
+
   it('posts a reversal with the trimmed reason', async () => {
     mockPost.mockResolvedValue({ reversalIds: ['tx-2'] });
     const { onReversed } = renderDrawer();
@@ -178,5 +186,68 @@ describe('TransactionDrawer', () => {
       expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
       cleanup();
     }
+  });
+
+  describe('returning stock', () => {
+    function renderIssue(overrides: Record<string, unknown> = {}) {
+      const onReturned = vi.fn();
+      const onError = vi.fn();
+      render(<TransactionDrawer transaction={{ ...issue, ...overrides }} onClose={() => {}} onReversed={vi.fn()} onReturned={onReturned} onError={onError} />);
+      return { onReturned, onError };
+    }
+
+    it('posts the quantity, the chosen location and a trimmed note', async () => {
+      mockPost.mockResolvedValue({ transactionId: 'tx-9', returnedQuantity: '3', returnableQuantity: '1' });
+      const { onReturned } = renderIssue();
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      fireEvent.change(screen.getByLabelText(/Quantity returned/), { target: { value: '3' } });
+      await screen.findByRole('option', { name: 'B-2' });
+      fireEvent.change(screen.getByLabelText(/Back into/), { target: { value: 'l-2' } });
+      fireEvent.change(screen.getByLabelText(/Note/), { target: { value: '  Job finished early ' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      await waitFor(() => expect(onReturned).toHaveBeenCalledTimes(1));
+      expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/returns', { quantity: 3, locationId: 'l-2', reason: 'Job finished early' });
+    });
+
+    it('refuses more than is still out before posting', () => {
+      renderIssue({ returnedQuantity: '1' });
+      expect(screen.getByText(/1 of 4 returned to stock/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      fireEvent.change(screen.getByLabelText(/Quantity returned/), { target: { value: '4' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      expect(screen.getByText('At most 3 can come back.')).toBeInTheDocument();
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+
+    it('shows a server refusal inline', async () => {
+      mockPost.mockRejectedValue({ code: 'VALIDATION_ERROR', message: 'Cannot return 2: only 1 of the 4 issued is still out.' });
+      const { onReturned, onError } = renderIssue();
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      fireEvent.change(screen.getByLabelText(/Quantity returned/), { target: { value: '2' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      expect(await screen.findByText(/only 1 of the 4 issued/)).toBeInTheDocument();
+      expect(onReturned).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('hides reversal while part of the issue is back, and explains why', () => {
+      renderIssue({ returnedQuantity: '2' });
+      expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+      expect(screen.getByText(/reverse its returns first/)).toBeInTheDocument();
+    });
+
+    it('is not offered for receipts, reversed or fully returned issues, or without permission', () => {
+      const cases: Array<() => void> = [
+        () => renderIssue({ type: 'RECEIPT', quantity: '5' }),
+        () => renderIssue({ reversedById: 'tx-2' }),
+        () => renderIssue({ returnedQuantity: '4' }),
+        () => { mockHasPermission.mockImplementation((code: string) => code !== 'inventory:return'); renderIssue(); },
+      ];
+      for (const renderCase of cases) {
+        renderCase();
+        expect(screen.queryByRole('button', { name: 'Return to stock' })).not.toBeInTheDocument();
+        cleanup();
+      }
+    });
   });
 });
