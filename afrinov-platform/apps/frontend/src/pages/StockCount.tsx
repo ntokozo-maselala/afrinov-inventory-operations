@@ -15,10 +15,9 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { api, type ApiError } from '../api/client';
+import type { CurrentStockRow, Material } from '../api/types';
 
 interface Location { id: string; name: string; active: boolean }
-interface Material { id: string; sku: string; name: string; unitOfMeasure: string; active: boolean }
-interface StockRow { materialId: string; materialSku: string; materialName: string; unitOfMeasure: string; quantity: string }
 interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
 interface Draft { counts: Record<string, string>; extra: string[]; note: string }
 
@@ -58,7 +57,7 @@ export function StockCount() {
   const locations = useApi<Location[]>('/locations');
   const materials = useApi<Material[]>('/materials');
   const [locationId, setLocationId] = useState('');
-  const stock = useApi<StockRow[]>(locationId ? `/reports/current-stock?locationId=${encodeURIComponent(locationId)}` : null);
+  const stock = useApi<CurrentStockRow[]>(locationId ? `/reports/current-stock?locationId=${encodeURIComponent(locationId)}` : null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [filter, setFilter] = useState('');
   const [adding, setAdding] = useState('');

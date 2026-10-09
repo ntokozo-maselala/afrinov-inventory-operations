@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -75,14 +75,10 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [active, setActive] = useState(initial?.active ?? true);
 
-  const [users, setUsers] = useState<UserOpt[]>([]);
+  const users = useApi<UserOpt[]>('/users');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    api.get<UserOpt[]>('/users').then(setUsers).catch(() => undefined);
-  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -168,10 +164,10 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
             {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
         </Field>
-        <Field label="Project manager" htmlFor="pj-mgr" help="Optional. The user responsible for the project.">
+        <Field label="Project manager" htmlFor="pj-mgr" help="Optional. The user responsible for the project." error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
           <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)}>
             <option value="">Unassigned</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {(users.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </Select>
         </Field>
       </div>
@@ -250,7 +246,7 @@ export function Projects() {
   return (
     <div>
       <PageHeader
-        title="Project"
+        title="Projects"
         description="Manage projects and their lifecycle. Inventory consumption is tracked per project number."
         actions={
           <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>

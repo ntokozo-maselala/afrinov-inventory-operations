@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -61,16 +61,11 @@ function RackForm({ initial, onCancel, onSaved, onError }: RackFormProps) {
   const [status, setStatus] = useState<Rack['status']>(initial?.status ?? 'ACTIVE');
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
-  const [locations, setLocations] = useState<LocationOpt[]>([]);
-  const [projects, setProjects] = useState<ProjectOpt[]>([]);
+  const locations = useApi<LocationOpt[]>('/locations');
+  const projects = useApi<ProjectOpt[]>('/projects');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    api.get<LocationOpt[]>('/locations').then(setLocations).catch(() => undefined);
-    api.get<ProjectOpt[]>('/projects').then(setProjects).catch(() => undefined);
-  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -140,16 +135,16 @@ function RackForm({ initial, onCancel, onSaved, onError }: RackFormProps) {
       </Field>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Location" htmlFor="rk-loc" help="Workshop / storeroom this rack belongs to.">
+        <Field label="Location" htmlFor="rk-loc" help="Workshop / storeroom this rack belongs to." error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
           <Select id="rk-loc" value={locationId ?? ''} onChange={(e) => setLocationId(e.target.value)}>
             <option value="">No location</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </Select>
         </Field>
-        <Field label="Project" htmlFor="rk-prj" help="Optional. Project this rack is allocated to.">
+        <Field label="Project" htmlFor="rk-prj" help="Optional. Project this rack is allocated to." error={projects.error ? "Couldn't load projects. Close and reopen to try again." : null}>
           <Select id="rk-prj" value={projectNumber ?? ''} onChange={(e) => setProjectNumber(e.target.value)}>
             <option value="">No project</option>
-            {projects.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` · ${p.name}` : ''}</option>)}
+            {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` · ${p.name}` : ''}</option>)}
           </Select>
         </Field>
       </div>
@@ -219,7 +214,7 @@ export function Racks() {
   return (
     <div>
       <PageHeader
-        title="Rack"
+        title="Racks"
         description="Manage physical storage racks and their workshop / project associations."
         actions={
           <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>

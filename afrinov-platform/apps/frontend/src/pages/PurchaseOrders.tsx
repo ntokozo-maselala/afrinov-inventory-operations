@@ -16,6 +16,7 @@ import { formatDate, formatNumber } from '../lib/format';
 import { Drawer } from '../components/Modal';
 import { Alert } from '../components/Alert';
 import { useCanManageProcurement } from '../hooks/usePermissions';
+import type { Material } from '../api/types';
 
 interface PO {
   id: string; number: string; status: string;
@@ -24,7 +25,6 @@ interface PO {
   lines: Array<{ id: string; material: { sku: string; name: string }; orderedQty: string; receivedQty: string }>;
 }
 interface Supplier { id: string; name: string; }
-interface Material { id: string; sku: string; name: string; }
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },

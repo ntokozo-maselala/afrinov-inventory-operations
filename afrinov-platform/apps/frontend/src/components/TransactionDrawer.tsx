@@ -2,35 +2,13 @@ import { useEffect, useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { api, type ApiError } from '../api/client';
+import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
+import type { MovementRow } from '../api/types';
 
-interface Transaction {
-  id: string;
-  postedAt: string;
-  type: string;
-  materialId: string;
-  materialSku: string;
-  materialName: string;
-  locationId: string;
-  locationName: string;
-  quantity: string;
-  actorId: string;
-  actorName: string;
-  projectNumber?: string | null;
-  reasonCode?: string | null;
-  reasonNote?: string | null;
-  referenceType?: string | null;
-  reversesId?: string | null;
-  reversedById?: string | null;
-  recipientName?: string | null;
-  receiptNumber?: string | null;
-  supplierName?: string | null;
-  deliveryRef?: string | null;
-  returnedQuantity?: string | null;
-}
 
 interface Props {
-  transaction: Transaction;
+  transaction: MovementRow;
   onClose: () => void;
   onReversed: () => void;
   /** Called after stock is returned against this issue. */
@@ -226,7 +204,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
 
 // Unused stock coming back from this issue (POST /inventory-transactions/:id/returns).
 function ReturnSection({ transaction, returnable, onReturned, onError }: {
-  transaction: Transaction;
+  transaction: MovementRow;
   returnable: number;
   onReturned: () => void;
   onError: (err: ApiError) => void;
@@ -235,14 +213,9 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
   const [quantity, setQuantity] = useState('');
   const [locationId, setLocationId] = useState(transaction.locationId);
   const [reason, setReason] = useState('');
-  const [locations, setLocations] = useState<Array<{ id: string; name: string; active: boolean }>>([]);
+  const locations = useApi<Array<{ id: string; name: string; active: boolean }>>(open ? '/locations' : null);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    api.get<Array<{ id: string; name: string; active: boolean }>>('/locations').then((l) => setLocations(l.filter((x) => x.active))).catch(() => undefined);
-  }, [open]);
 
   async function submit() {
     setValidation(null);
@@ -280,10 +253,10 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
             <Field label="Quantity returned" htmlFor="return-qty" required>
               <Input id="return-qty" type="number" inputMode="decimal" min="0" max={returnable} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
             </Field>
-            <Field label="Back into" htmlFor="return-loc">
+            <Field label="Back into" htmlFor="return-loc" error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
               <Select id="return-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
                 <option value={transaction.locationId}>{transaction.locationName}</option>
-                {locations.filter((l) => l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {(locations.data ?? []).filter((l) => l.active && l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </Select>
             </Field>
           </div>

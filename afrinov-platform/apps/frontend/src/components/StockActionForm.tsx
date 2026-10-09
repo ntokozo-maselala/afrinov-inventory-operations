@@ -1,21 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { useApi } from '../hooks/useApi';
+import type { CurrentStockRow } from '../api/types';
 
 // Issuing has its own page (IssueStock), so the row drawer only transfers and adjusts.
 export type StockActionKind = 'transfer' | 'adjust';
 
-interface Row {
-  materialId: string; materialSku: string; materialName: string;
-  locationId: string; locationName: string;
-  unitOfMeasure: string; quantity: string; requiredStock: string;
-}
 
 interface Props {
   kind: StockActionKind;
-  row: Row;
+  row: CurrentStockRow;
   onDone: () => void;
   onError: (err: ApiError) => void;
   onSuccess: (message: string) => void;
@@ -39,11 +36,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
   const [reasonCode, setReasonCode] = useState(REASONS[0]!.value);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
-  const [locations, setLocations] = useState<Location[]>([]);
-
-  useEffect(() => {
-    api.get<Location[]>('/locations').then(setLocations).catch(() => undefined);
-  }, []);
+  const locations = useApi<Location[]>('/locations');
 
   function reset() { setQuantity(''); setNote(''); setValidation(null); }
 
@@ -104,10 +97,10 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
           <Field label="Quantity to transfer" htmlFor="qty" required help={`Available at source: ${row.quantity} ${row.unitOfMeasure}`}>
             <Input id="qty" type="number" min="0.0001" step="0.0001" required value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
           </Field>
-          <Field label="Destination location" htmlFor="to" required>
+          <Field label="Destination location" htmlFor="to" required error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
             <Select id="to" required value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} invalid={!!validation}>
               <option value="">— select —</option>
-              {locations.filter((l) => l.id !== row.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {(locations.data ?? []).filter((l) => l.id !== row.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </Select>
           </Field>
           <Alert tone="info" title="Atomic transfer">

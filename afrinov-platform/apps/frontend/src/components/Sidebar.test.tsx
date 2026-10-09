@@ -56,9 +56,9 @@ describe('useNavGroups', () => {
     expect(operations).toBeDefined();
     const itemLabels = operations!.items.map(i => i.label);
     expect(itemLabels).toContain('Stock');
-    expect(itemLabels).toContain('Rack');
+    expect(itemLabels).toContain('Racks');
     expect(itemLabels).toContain('Locations');
-    expect(itemLabels).toContain('Project');
+    expect(itemLabels).toContain('Projects');
     expect(itemLabels).toContain('Movements');
     expect(itemLabels).toContain('Suppliers');
   });

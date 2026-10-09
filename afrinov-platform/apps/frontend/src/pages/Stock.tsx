@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { StockStatusBadge } from '../components/StockStatusBadge';
-import type { StockStatus as StockStatusValue } from '../lib/stockStatus';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
@@ -16,14 +15,8 @@ import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
 import { StockActionForm, type StockActionKind } from '../components/StockActionForm';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
+import type { CurrentStockRow } from '../api/types';
 
-interface StockRow {
-  materialId: string; materialSku: string; materialName: string;
-  category: string; unitOfMeasure: string; requiredStock: string;
-  locationId: string; locationName: string; locationType: string;
-  quantity: string; belowThreshold: boolean;
-  stockStatus?: StockStatusValue | null; percentOfRequired?: number | null;
-}
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -35,11 +28,11 @@ const STATUS_OPTIONS = [
 ];
 
 export function Stock() {
-  const stock = useApi<StockRow[]>('/reports/current-stock');
+  const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
-  const [action, setAction] = useState<{ kind: StockActionKind; row: StockRow } | null>(null);
+  const [action, setAction] = useState<{ kind: StockActionKind; row: CurrentStockRow } | null>(null);
   const toast = useToast();
 
   const filtered = useMemo(() => {
@@ -123,7 +116,7 @@ export function Stock() {
       {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
 
       {!stock.error && (
-        <DataTable<StockRow>
+        <DataTable<CurrentStockRow>
           ariaLabel="Stock lines"
           isLoading={stock.loading}
           rowKey={(r) => `${r.materialId}-${r.locationId}`}
@@ -160,14 +153,14 @@ export function Stock() {
   );
 }
 
-function actionTitle(kind: StockActionKind, row: StockRow): string {
+function actionTitle(kind: StockActionKind, row: CurrentStockRow): string {
   return {
     transfer: `Transfer ${row.materialSku}`,
     adjust: `Adjust ${row.materialSku}`,
   }[kind];
 }
 
-function columns({ onAction }: { onAction: (kind: StockActionKind, row: StockRow) => void }): DataTableColumn<StockRow>[] {
+function columns({ onAction }: { onAction: (kind: StockActionKind, row: CurrentStockRow) => void }): DataTableColumn<CurrentStockRow>[] {
   return [
     { key: 'sku', header: 'SKU', render: (r) => <Link to={`/materials/${r.materialId}`} className="btn-link text-mono">{r.materialSku}</Link>, width: '8rem' },
     { key: 'name', header: 'Material', render: (r) => <span className="line-clamp-1" title={r.materialName}>{r.materialName}</span> },
@@ -192,6 +185,6 @@ function columns({ onAction }: { onAction: (kind: StockActionKind, row: StockRow
 }
 
 /** The item's status (its total across locations), the same on each of its rows. */
-function statusBadge(r: StockRow) {
+function statusBadge(r: CurrentStockRow) {
   return <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} />;
 }

@@ -13,19 +13,8 @@ import { Drawer } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { TransactionDrawer } from '../components/TransactionDrawer';
+import type { MovementRow } from '../api/types';
 
-interface MovementRow {
-  id: string; postedAt: string; type: string;
-  materialId: string; materialSku: string; materialName: string;
-  locationId: string; locationName: string;
-  quantity: string; actorId: string; actorName: string;
-  projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
-  referenceType?: string | null; referenceId?: string | null;
-  reversesId?: string | null; reversedById?: string | null;
-  recipientName?: string | null;
-  returnedQuantity?: string | null;
-  receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
-}
 
 const TYPE_OPTIONS = [
   { value: '', label: 'All types' },

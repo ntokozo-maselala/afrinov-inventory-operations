@@ -17,11 +17,8 @@ import { MaterialForm } from '../components/MaterialForm';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
+import type { Material } from '../api/types';
 
-interface Material {
-  id: string; sku: string; name: string; category: string;
-  unitOfMeasure: string; requiredStock: string; active: boolean;
-}
 
 export function Materials() {
   const mats = useApi<Material[]>('/materials');
