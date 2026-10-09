@@ -215,7 +215,7 @@ export function Racks() {
     <div>
       <PageHeader
         title="Racks"
-        description="Manage physical storage racks and their workshop / project associations."
+        description="The racks in each workshop and the projects they are set aside for. Stock is not counted against these records: to hold stock on a rack, add it under Locations with the type Rack."
         actions={
           <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add rack

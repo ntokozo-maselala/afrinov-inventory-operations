@@ -151,7 +151,7 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
       <p className="text-sm text-surface-500">
-        Locations identify where stock is held. Add storerooms, racks, shop floor areas, containers, and off-site holdings.
+        Locations identify where stock is held. Add storerooms, racks, shop floor areas, containers, and off-site holdings. A rack that holds stock is added here with the type Rack; the Racks page only records which workshop and project a rack belongs to.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
