@@ -1,7 +1,17 @@
 # AS-IS: Current State (Excel System)
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 **Source:** `07__July_2026_Report.xlsm` (31 sheets), a monthly snapshot in a
 recurring series of workbooks.
+
+*Unverified:* every figure and sheet name below comes from that workbook,
+which is not in the repository. The workbook in the repository root is
+`AFRI-03A-08-IAM-02 - Stock Inventory1.xlsm`; the import tool reads four
+Main/Summary category pairs from it (Consumables, Fasteners/Slugs/Insulation,
+Tooling/PPE/Electrical, Project Material) — not Tools — and
+`workbook-replacement-roadmap.md` describes four stock categories. Whether
+the two workbooks are the same dataset needs confirming (assumption A-10).
 
 ## Structure
 Five material categories, each duplicating the same four-sheet pattern:

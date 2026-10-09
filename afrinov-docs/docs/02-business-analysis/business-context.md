@@ -1,8 +1,8 @@
 # Business Context
 
-**Status:** DRAFT — validate assumptions A-01, A-02 with business owner
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09 · validate assumptions A-01, A-02 with business owner
 
-## What Afrinov does (inferred from the workbook)
+## What Afrinov does (inferred from the workbook — *Unverified*)
 Afrinov appears to be a metal fabrication / engineering workshop that runs
 client projects (numbered `AFRI-####`) through a **boiler shop**, **machine
 shop**, **blasting**, and **paint shop**, consuming fasteners, consumables,
@@ -43,4 +43,5 @@ This context is what "study SAP" is really pointing at: Afrinov is not just
 "an inventory list", it's a workshop business where inventory sits between
 **procurement** (getting material in) and **operations** (consuming it on
 projects) — the same shape as SAP's Materials Management sitting between
-Purchasing and Production/Plant Maintenance. See `05-sap-study/sap-lessons-for-afrinov.md`.
+Purchasing and Production/Plant Maintenance. See
+`05-sap-study/sap-lessons-for-afrinov.md`.

@@ -1,5 +1,7 @@
 # SAP Study Plan
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 **Goal:** understand the reference model well enough to design Afrinov's
 system soundly — not to reproduce SAP's complexity (see
 `sap-not-to-copy.md`).

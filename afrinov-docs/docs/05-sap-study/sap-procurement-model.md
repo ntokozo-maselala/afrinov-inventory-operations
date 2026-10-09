@@ -1,5 +1,7 @@
 # SAP Procurement Model — What Was Studied
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 SAP's procurement chain: **Purchase Requisition** (internal ask) →
 **Purchase Order** (external commitment) → **Goods Receipt** (physical
 confirmation) → **Invoice Receipt** (financial confirmation) → **Payment**.

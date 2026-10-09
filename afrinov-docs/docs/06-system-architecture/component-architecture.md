@@ -1,34 +1,51 @@
 # Component Architecture (Inventory module example)
 
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
+The inventory module as it exists in
+`afrinov-platform/apps/backend/src/modules/inventory/` (tests omitted):
+
 ```
 inventory/
-├── http/
-│   ├── materials.routes.ts
-│   ├── locations.routes.ts
-│   ├── transactions.routes.ts
-│   └── balances.routes.ts
-├── application/
-│   ├── receive-stock.usecase.ts
-│   ├── issue-stock.usecase.ts
-│   ├── transfer-stock.usecase.ts
-│   ├── adjust-stock.usecase.ts
-│   └── check-out-tool.usecase.ts
-├── domain/
-│   ├── material.entity.ts
-│   ├── location.entity.ts
-│   ├── inventory-transaction.entity.ts
-│   ├── inventory-balance.ts          # derivation logic
-│   └── rules/
-│       ├── sufficient-balance.rule.ts
-│       └── reorder-threshold.rule.ts
-├── persistence/
-│   ├── material.repository.ts
-│   ├── location.repository.ts
-│   └── inventory-transaction.repository.ts
-└── events/
-    └── inventory.events.ts            # InventoryIncreased, InventoryIssued, ...
+├── material.routes.ts        # /materials and /locations routes (both live in this file)
+├── material.service.ts       # material master create/update/list, with audit entries
+├── location.service.ts       # location create/update/status/delete (delete only when unused)
+├── rack.routes.ts            # /racks
+├── rack.service.ts           # rack create/update/archive (archive = status INACTIVE)
+├── stock-item.routes.ts      # POST /stock-items
+├── stock-item.service.ts     # new material + optional opening RECEIPT in one transaction
+├── inventory.routes.ts       # ledger reads and stock movements (issue, transfer, adjust,
+│                             #   stock count, counter receipt, return, reversal)
+├── inventory.service.ts      # issue, return, transfer, adjust, reverse, post goods receipt
+├── stock-receipt.service.ts  # receiving at the counter without a purchase order
+├── stock-count.service.ts    # count by location; differences posted as COUNT_VARIANCE adjustments
+└── balances.ts               # recomputeBalancesFor() — used by the seed
 ```
 
-Each use case is one business transaction from `03-domain/business-transactions.md`
-— e.g. `receive-stock.usecase.ts` implements exactly the steps in
-`04-processes/goods-receiving.md`, nothing more, nothing less.
+Shared inventory helpers used by this and other modules live in
+`src/shared/inventory/`:
+
+```
+shared/inventory/
+├── balances.ts       # recomputeBalance(), getCurrentBalance() inside a Prisma transaction
+└── stock-status.ts   # URGENT / WARNING / OK / NOT_SET classification and the setting-driven bands
+```
+
+Each service method that moves stock runs one Prisma transaction: it
+validates the referenced material, location, recipient or project, checks
+the no-negative-stock rule against the current balance, inserts
+`inventory_transactions` rows, recomputes the affected balance rows, and in
+some cases writes an audit entry and dispatches in-process domain events.
+
+There is no tool check-out/check-in component; that capability is
+**Planned** (see `04-processes/stock-issuing.md`). There are no separate
+`application/`, `domain/` or `persistence/` folders: rules live in the
+service files.
+
+## Evidence
+- `afrinov-platform/apps/backend/src/modules/inventory/` — file list
+- `afrinov-platform/apps/backend/src/modules/inventory/material.routes.ts:27-161` — material and location routes
+- `afrinov-platform/apps/backend/src/modules/inventory/inventory.routes.ts:70-170`
+- `afrinov-platform/apps/backend/src/modules/inventory/inventory.service.ts:289-364` — issue as an example of the transaction pattern
+- `afrinov-platform/apps/backend/src/shared/inventory/balances.ts:6-32`
+- `afrinov-platform/apps/backend/src/shared/inventory/stock-status.ts:32-54`

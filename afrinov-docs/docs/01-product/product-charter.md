@@ -1,6 +1,6 @@
 # Product Charter
 
-**Status:** DRAFT · **Owner:** Product/Engineering
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
 
 ## Product name
 Afrinov Inventory & Operations Platform (working name — module 1: Inventory & Procurement)
@@ -32,9 +32,11 @@ See `stakeholder-map.md`.
 - Must be usable by workshop floor staff, not only office staff — the
   existing system is used directly by people issuing/receiving stock, not
   just by an inventory clerk (52 names in the `Employees` sheet, used as
-  Issued By / Issued To across categories).
+  Issued By / Issued To across categories — *Unverified*).
 - Must not require re-keying historical stock from scratch; migration must
   reconcile against the existing workbook (see `07-data/migration-strategy.md`).
+  *Implemented:* a one-off import with dry run, reviewed mapping files and a
+  reconciliation report.
 - Small team, incremental delivery — architecture should support building
   Inventory first and adding modules later, not require all modules at once.
 
@@ -43,6 +45,7 @@ See `00-governance/assumptions-register.md`.
 
 ## Success metrics
 - 100% of current spreadsheet categories represented in the new system.
+  *(Five categories exist; the import loads four — Tools are not imported.)*
 - Zero un-traceable stock changes (every balance change has a transaction record).
 - Time to answer "what's our current stock of X and where" reduced from
   "open the right workbook and find the row" to a direct query.
@@ -52,6 +55,12 @@ See `00-governance/assumptions-register.md`.
 Inventory + Procurement core: Materials, Locations, Suppliers, Purchase
 Orders, Goods Receipts, Stock Issues, Stock Transfers, Stock Adjustments,
 Reporting. See `product-roadmap.md` for sequencing.
+
+*Implementation status:* all of these exist in the platform; purchase
+orders and goods receipts against them are switched off by default
+(`PROCUREMENT_ENABLED`) and stock arrives through counter receipts. The
+live delivery plan is `workbook-replacement-roadmap.md` at the repository
+root.
 
 ## Future direction
 Operations (project/workshop consumption context), Document Management,

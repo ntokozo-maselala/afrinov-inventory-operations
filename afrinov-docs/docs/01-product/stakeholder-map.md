@@ -1,5 +1,7 @@
 # Stakeholder Map
 
+**Status:** DRAFT · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+
 | Stakeholder | Role today (AS-IS) | Goals | Pain points | System needs |
 |---|---|---|---|---|
 | Business owner ("your boss") | Sets direction, reviewed the first prototype | Wants inventory understood as a piece of a larger operational system, not a standalone app | First version modelled the spreadsheet too literally | Architecture that visibly maps to business processes; ability to validate scope before build |
@@ -10,3 +12,7 @@
 | Finance (future) | Not currently integrated | Know stock value, cost of materials issued to projects | Stock value only appears as a Dashboard/Stock Summary figure with no breakdown by transaction | Stock valuation reporting (future integration point) |
 | IT/Engineering (you) | Building and maintaining the system | Deliver a system that matches business intent, not just the old spreadsheet's shape | Ambiguous requirement ("study SAP") | Clear domain model and architecture docs (this set) |
 | Suppliers (external) | Deliver goods against orders | Get paid, be asked for the right quantities | No formal PO issued to them today (informal ordering) | Out of scope for v1 UI access; referenced as master data only |
+
+*Unverified:* every row is a stakeholder description pending the business
+owner's review (`14-validation/stakeholder-review.md`); see
+`00-governance/assumptions-register.md`.
