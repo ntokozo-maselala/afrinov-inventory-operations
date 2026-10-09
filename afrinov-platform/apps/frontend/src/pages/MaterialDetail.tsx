@@ -1,4 +1,6 @@
 import { useParams, Link } from 'react-router-dom';
+import { StockStatusBadge } from '../components/StockStatusBadge';
+import type { StockStatus } from '../lib/stockStatus';
 import { useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
@@ -22,6 +24,7 @@ interface StockRow {
   category: string; unitOfMeasure: string; requiredStock: string;
   locationId: string; locationName: string; locationType: string;
   quantity: string; belowThreshold: boolean;
+  stockStatus?: StockStatus | null; percentOfRequired?: number | null;
 }
 interface MovementRow {
   id: string; postedAt: string; type: string;
@@ -53,7 +56,8 @@ export function MaterialDetail() {
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
-  const below = (stock.data ?? []).filter((r) => r.belowThreshold).length;
+  // Every row carries the item's status; take it from the first.
+  const itemStatus = stock.data?.[0];
 
   return (
     <div>
@@ -96,8 +100,15 @@ export function MaterialDetail() {
                   <div className="text-h2 text-num font-semibold">{formatNumber(total)}</div>
                 </div>
                 <div>
-                  <div className="text-eyebrow">Below threshold</div>
-                  <div className={`text-h2 text-num font-semibold ${below > 0 ? 'text-warning-700' : ''}`}>{below}</div>
+                  <div className="text-eyebrow">Status</div>
+                  <div className="pt-1">
+                    {itemStatus?.stockStatus
+                      ? <StockStatusBadge status={itemStatus.stockStatus} percent={itemStatus.percentOfRequired} />
+                      : <span className="text-surface-400">—</span>}
+                    {itemStatus?.percentOfRequired !== null && itemStatus?.percentOfRequired !== undefined && (
+                      <span className="ml-2 text-sm text-surface-600">{itemStatus.percentOfRequired}% of required</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </section>
@@ -116,7 +127,7 @@ export function MaterialDetail() {
                   { key: 'type', header: 'Type', render: (r) => <span className="text-meta">{r.locationType}</span> },
                   { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
                   { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
-                  { key: 'status', header: 'Status', render: (r) => Number(r.quantity) <= 0 ? <Badge tone="danger" dot>Out</Badge> : r.belowThreshold ? <Badge tone="warning" dot>Low</Badge> : <Badge tone="success" dot>OK</Badge> },
+                  { key: 'status', header: 'Item status', render: (r) => <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} /> },
                 ]}
                 emptyState={<EmptyState title="No stock recorded" description={PROCUREMENT_ENABLED ? 'Record a goods receipt to add stock for this material.' : 'Record a stock adjustment to add stock for this material.'} />}
               />

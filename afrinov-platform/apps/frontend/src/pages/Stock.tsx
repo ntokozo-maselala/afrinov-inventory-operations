@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { StockStatusBadge } from '../components/StockStatusBadge';
+import type { StockStatus as StockStatusValue } from '../lib/stockStatus';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
@@ -6,7 +8,6 @@ import { Toolbar } from '../components/Toolbar';
 import { Button } from '../components/Button';
 import { Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
-import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
@@ -21,6 +22,7 @@ interface StockRow {
   category: string; unitOfMeasure: string; requiredStock: string;
   locationId: string; locationName: string; locationType: string;
   quantity: string; belowThreshold: boolean;
+  stockStatus?: StockStatusValue | null; percentOfRequired?: number | null;
 }
 
 const CATEGORY_OPTIONS = [
@@ -34,9 +36,11 @@ const CATEGORY_OPTIONS = [
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
-  { value: 'ok', label: 'In stock' },
-  { value: 'low', label: 'Below threshold' },
-  { value: 'out', label: 'Out of stock' },
+  { value: 'URGENT', label: 'Urgent' },
+  { value: 'WARNING', label: 'Warning' },
+  { value: 'OK', label: 'OK' },
+  { value: 'NOT_SET', label: 'No Required Stock' },
+  { value: 'out', label: 'None at this location' },
 ];
 
 export function Stock() {
@@ -54,9 +58,8 @@ export function Stock() {
     return stock.data.filter((r) => {
       if (category && r.category !== category) return false;
       const qty = Number(r.quantity);
-      if (status === 'ok' && (qty <= 0 || r.belowThreshold)) return false;
-      if (status === 'low' && !(qty > 0 && r.belowThreshold)) return false;
-      if (status === 'out' && qty !== 0) return false;
+      if (status === 'out' && qty > 0) return false;
+      if (status && status !== 'out' && r.stockStatus !== status) return false;
       if (needle) {
         const hay = `${r.materialSku} ${r.materialName} ${r.locationName}`.toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -224,11 +227,9 @@ function columns({ onAction }: { onAction: (kind: StockActionKind, row: StockRow
   ];
 }
 
+/** The item's status (its total across locations), the same on each of its rows. */
 function statusBadge(r: StockRow) {
-  const qty = Number(r.quantity);
-  if (qty <= 0) return <Badge tone="danger" dot>Out</Badge>;
-  if (r.belowThreshold) return <Badge tone="warning" dot>Low</Badge>;
-  return <Badge tone="success" dot>OK</Badge>;
+  return <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} />;
 }
 
 function categoryLabel(c: string): string {

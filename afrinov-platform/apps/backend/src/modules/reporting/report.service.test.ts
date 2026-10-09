@@ -99,6 +99,11 @@ function makePrismaStub(s: State) {
         if (where?.locationId?.in) list = list.filter((b) => where.locationId!.in!.includes(b.locationId));
         return list;
       },
+      groupBy: async () => {
+        const sums = new Map<string, number>();
+        for (const b of s.balances) sums.set(b.materialId, (sums.get(b.materialId) ?? 0) + b.quantity.toNumber());
+        return [...sums].map(([materialId, quantity]) => ({ materialId, _sum: { quantity: dec(quantity) } }));
+      },
     },
     inventoryTransaction: {
       groupBy: async ({ where }: { where: TxWhere }) => {
@@ -278,7 +283,8 @@ describe('ReportService.inventory', () => {
         makeMat('m-low', 'A-2', 'B', 100, 1),
         makeMat('m-out', 'A-3', 'C', 50, 1),
       ],
-      balances: [makeBal('m-ok', 'l-1', 100), makeBal('m-low', 'l-1', 50), makeBal('m-out', 'l-1', 0)],
+      // Low means the item is below 40% of its Required Stock (URGENT or WARNING).
+      balances: [makeBal('m-ok', 'l-1', 100), makeBal('m-low', 'l-1', 30), makeBal('m-out', 'l-1', 0)],
       locations: [makeLoc('l-1', 'Main')],
       suppliers: [],
       purchaseOrders: [],
@@ -347,8 +353,8 @@ describe('ReportService.inventory', () => {
         makeMat('m-ok', 'A-4', 'A', 10, 1),
       ],
       balances: [
-        makeBal('m-low-1', 'l-1', 5),
-        makeBal('m-low-2', 'l-1', 9),
+        makeBal('m-low-1', 'l-1', 1),
+        makeBal('m-low-2', 'l-1', 3),
         makeBal('m-out-1', 'l-1', 0),
         makeBal('m-ok', 'l-1', 200),
       ],
@@ -362,8 +368,8 @@ describe('ReportService.inventory', () => {
     const r = await ReportService.inventory(baseQuery);
     expect(r.exceptions.length).toBe(3);
     expect(r.exceptions[0]!.status).toBe('OUT_OF_STOCK');
-    expect(r.exceptions[1]!.quantity).toBe(5);
-    expect(r.exceptions[2]!.quantity).toBe(9);
+    expect(r.exceptions[1]!.quantity).toBe(1);
+    expect(r.exceptions[2]!.quantity).toBe(3);
   });
 
   it('honours stock status filter', async () => {
@@ -610,7 +616,7 @@ describe('report export builders', () => {
       ],
       balances: [
         makeBal('m-ok', 'l-1', 100),
-        makeBal('m-low', 'l-1', 5),
+        makeBal('m-low', 'l-1', 3),
         makeBal('m-out', 'l-1', 0),
       ],
       locations: [makeLoc('l-1', 'Main')],
