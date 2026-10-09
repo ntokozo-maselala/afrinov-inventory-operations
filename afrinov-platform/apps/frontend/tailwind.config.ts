@@ -1,8 +1,10 @@
-/** @type {import('tailwindcss').Config} */
 // Afrinov design tokens. Brand red #E3001B is the primary accent.
 // Semantic colors are derived from the brand + a neutral slate scale.
 // Colors are defined via CSS custom properties so Light/Dark themes
 // can swap values without changing component code.
+import type { Config } from 'tailwindcss';
+import animate from 'tailwindcss-animate';
+
 export default {
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
@@ -94,5 +96,5 @@ export default {
       },
     },
   },
-  plugins: [require('tailwindcss-animate')],
-};
+  plugins: [animate],
+} satisfies Config;

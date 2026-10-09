@@ -13,6 +13,9 @@ import { Alert } from '../components/Alert';
 import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
+import { Drawer } from '../components/Modal';
+import { MaterialForm, type CreatedMaterial } from '../components/MaterialForm';
+import { useCanManageMaterials } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 
 interface Supplier { id: string; name: string; active: boolean }
@@ -44,6 +47,8 @@ export function ReceiveStock() {
   const [focusKey, setFocusKey] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addingItem, setAddingItem] = useState(false);
+  const canAddItem = useCanManageMaterials();
   const toast = useToast();
 
   const activeSuppliers = useMemo(() => (suppliers.data ?? []).filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name)), [suppliers.data]);
@@ -77,6 +82,16 @@ export function ReceiveStock() {
     const home = heldAt.get(materialId)?.[0]?.locationId;
     const homeActive = !!home && activeLocations.some((l) => l.id === home);
     update(line.key, { materialId, ...(!line.locationId && homeActive ? { locationId: home } : {}) });
+  }
+
+  // A new catalogue item goes on the first line without an item, or a new line.
+  function itemAdded(m: CreatedMaterial) {
+    setAddingItem(false);
+    materials.reload();
+    toast.success(`${m.sku} added`);
+    const blank = lines.find((l) => !l.materialId);
+    if (blank) update(blank.key, { materialId: m.id });
+    else setLines((ls) => [...ls, { ...emptyLine(ls[ls.length - 1]?.locationId ?? ''), materialId: m.id }]);
   }
 
   async function submit(e: React.FormEvent) {
@@ -157,7 +172,7 @@ export function ReceiveStock() {
                     onChange={(v) => pickItem(l, v)}
                     options={itemOptions}
                     placeholder={loading ? 'Loading…' : 'Search by name or code'}
-                    noMatchText="No item matches. Add it under Stock first."
+                    noMatchText={canAddItem ? 'No item matches. Use New item below.' : 'No item matches.'}
                     disabled={loading}
                     autoFocus={focusKey === l.key}
                   />
@@ -196,7 +211,9 @@ export function ReceiveStock() {
               Add another item
             </Button>
             <p className="text-xs text-surface-500">
-              Item not listed? Add it first under <Link to="/stock" className="btn-link">Stock → Add stock item</Link>.
+              {canAddItem
+                ? <>Item not listed? <button type="button" className="btn-link" onClick={() => setAddingItem(true)}>New item</button></>
+                : 'Item not listed? Ask a store controller to add it.'}
             </p>
           </fieldset>
 
@@ -207,6 +224,16 @@ export function ReceiveStock() {
             <Button type="submit" variant="primary" loading={busy}>Receive stock</Button>
           </div>
         </form>
+      )}
+
+      {addingItem && (
+        <Drawer open onClose={() => setAddingItem(false)} title="New item" description="Add the item to the catalogue, then enter the quantity received on this delivery." width="md">
+          <MaterialForm
+            onCancel={() => setAddingItem(false)}
+            onSaved={itemAdded}
+            onError={(err) => toast.error('Could not add item', err.message)}
+          />
+        </Drawer>
       )}
     </div>
   );

@@ -50,7 +50,7 @@ export function Movements() {
     return moves.data.filter((m) => {
       if (type && m.type !== type) return false;
       if (needle) {
-        const hay = `${m.materialSku} ${m.materialName} ${m.locationName} ${m.projectNumber ?? ''}`.toLowerCase();
+        const hay = `${m.materialSku} ${m.materialName} ${m.locationName} ${m.projectNumber ?? ''} ${m.recipientName ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -92,7 +92,7 @@ export function Movements() {
           <>
             <div className="relative w-full sm:w-64">
               <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search SKU, material, project…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search movements" />
+              <Input className="pl-8" placeholder="Search SKU, material, project, recipient…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search movements" />
             </div>
             <Select value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by type">
               {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -153,6 +153,7 @@ function columns({ onSelect }: { onSelect: (m: MovementRow) => void }): DataTabl
     { key: 'loc', header: 'Location', render: (m) => m.locationName, width: '10rem' },
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => <span className={`font-mono ${Number(m.quantity) >= 0 ? 'text-success-700' : 'text-danger-700'}`}>{m.quantity}</span>, width: '8rem' },
     { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace('_', ' ').toLowerCase()}</span> : <span className="text-surface-300">—</span>, width: '8rem' },
+    { key: 'to', header: 'Issued to', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : <span className="text-surface-300">—</span>, width: '8rem' },
     { key: 'ref', header: 'Reference', render: (m) => m.referenceType ? <span className="text-meta">{m.referenceType}</span> : <span className="text-surface-300">—</span> },
     { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span>, width: '8rem' },

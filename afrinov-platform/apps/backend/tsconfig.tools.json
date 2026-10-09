@@ -1,6 +1,6 @@
 {
   // Type-checks the code that is not part of the build: integration tests and
-  // developer scripts. Never emits; tsconfig.json alone produces dist/.
+  // developer scripts. Never emits; tsconfig.build.json alone produces dist/.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": ".",
