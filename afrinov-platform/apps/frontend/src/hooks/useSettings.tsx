@@ -86,8 +86,11 @@ function validate(def: SettingValue, raw: unknown): string | null {
       const n = typeof raw === 'number' ? raw : Number(raw);
       if (!Number.isFinite(n)) return 'Must be a number.';
       if (!Number.isInteger(n)) return 'Must be a whole number.';
-      const min = def.key === 'general.defaultPageSize' ? 5 : def.key === 'inventory.lowStockMultiplier' ? 0 : 0;
-      const max = def.key === 'general.defaultPageSize' ? 200 : def.key === 'inventory.lowStockMultiplier' ? 5 : def.key === 'security.sessionTimeoutMinutes' ? 720 : 1_000_000;
+      const min = def.key === 'general.defaultPageSize' ? 5 : 0;
+      const max = def.key === 'general.defaultPageSize' ? 200
+        : def.key === 'inventory.urgentBelowPercent' ? 100
+        : def.key === 'inventory.warningBelowPercent' ? 1000
+        : def.key === 'security.sessionTimeoutMinutes' ? 720 : 1_000_000;
       if (n < min) return `Must be at least ${min}.`;
       if (n > max) return `Must be at most ${max}.`;
       return null;

@@ -155,6 +155,11 @@ const fakeTx = {
       else balances.set(key, { materialId: create.materialId, locationId: create.locationId, quantity: create.quantity });
       return existing ?? balances.get(key);
     },
+    aggregate: async ({ where }: { where: { materialId: string } }) => {
+      let sum = new Prisma.Decimal(0);
+      for (const b of balances.values()) if (b.materialId === where.materialId) sum = sum.add(b.quantity);
+      return { _sum: { quantity: sum } };
+    },
   },
   material: {
     findUnique: async () => ({ id: 'mat-1', requiredStock: new Prisma.Decimal(5), active: true }),

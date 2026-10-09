@@ -393,7 +393,17 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], query: movementQuery,
   },
   {
-    method: 'get', path: '/reports/low-stock', tag: 'Reports', summary: 'Materials at or below their required stock',
+    method: 'get', path: '/reports/stock-status', tag: 'Reports', summary: 'Stock status of every active item',
+    description: 'On hand across all locations as a percentage of Required Stock: URGENT below '
+      + 'inventory.urgentBelowPercent (default 20), WARNING below inventory.warningBelowPercent (default 40), '
+      + 'otherwise OK; NOT_SET when the item has no Required Stock. With the re-order quantity (Required Stock '
+      + 'less on hand) and stock per location. Optional ?status=URGENT,WARNING and ?category= filters. '
+      + 'Most urgent first.',
+    permissions: [P.ViewReports], errors: [400],
+  },
+  {
+    method: 'get', path: '/reports/low-stock', tag: 'Reports', summary: 'Items that need re-ordering (URGENT or WARNING)',
+    description: 'The stock status report limited to URGENT and WARNING; empty when inventory.enableStockAlerts is off.',
     permissions: [P.ViewReports],
   },
   {

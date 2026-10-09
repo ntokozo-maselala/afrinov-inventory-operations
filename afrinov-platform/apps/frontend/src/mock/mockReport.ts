@@ -8,6 +8,7 @@
 // Note: this module has no Prisma/Database dependency; it works directly on
 // the in-memory mock state.
 
+import { classifyItem, needsAttention, type StatusBands } from '../lib/stockStatus';
 import type { MockMaterial, MockLocation, MockSupplier, MockPurchaseOrder, MockInventoryTransaction } from './types';
 
 export interface ReportQuery {
@@ -203,9 +204,11 @@ function resolveDateWindow(q: ReportQuery, now: Date = new Date()): { from: Date
   }
 }
 
-function classifyStatus(quantity: number, required: number): 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' {
+// Mirrors the backend: OUT_OF_STOCK when the location holds nothing, LOW_STOCK
+// when the item as a whole is URGENT or WARNING on the stock status rule.
+function classifyStatus(quantity: number, itemNeedsReorder: boolean): 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' {
   if (quantity <= 0) return 'OUT_OF_STOCK';
-  if (quantity <= required) return 'LOW_STOCK';
+  if (itemNeedsReorder) return 'LOW_STOCK';
   return 'IN_STOCK';
 }
 
@@ -215,6 +218,7 @@ interface ReportInput {
   suppliers: MockSupplier[];
   purchaseOrders: MockPurchaseOrder[];
   transactions: MockInventoryTransaction[];
+  bands?: StatusBands;
 }
 
 export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
@@ -244,6 +248,13 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   }
 
   const locMap = new Map(input.locations.map((l) => [l.id, l]));
+  const totalByMaterial = new Map<string, number>();
+  for (const [k, qty] of balanceMap) {
+    const id = k.split('|')[0]!;
+    totalByMaterial.set(id, (totalByMaterial.get(id) ?? 0) + qty);
+  }
+  const itemNeedsReorder = (m: MockMaterial) =>
+    needsAttention(classifyItem(totalByMaterial.get(m.id) ?? 0, Number(m.requiredStock), input.bands).status);
 
   // Build initial lines: one per (material, location) where balance exists.
   // Materials with no balance at all get a synthetic "no location" row so
@@ -272,7 +283,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
         locationType: '—',
         quantity: 0,
         inventoryValue: 0,
-        status: classifyStatus(0, Number(m.requiredStock)),
+        status: classifyStatus(0, true),
         lastUpdated: lastUpdate.get(m.id) ?? null,
       };
       if (q.stockStatus === 'ALL' || line.status === q.stockStatus) allLines.push(line);
@@ -299,7 +310,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
         locationType: loc?.type ?? '—',
         quantity: qty,
         inventoryValue: value,
-        status: classifyStatus(qty, required),
+        status: classifyStatus(qty, itemNeedsReorder(m)),
         lastUpdated: lastUpdate.get(m.id) ?? null,
       };
       if (q.stockStatus !== 'ALL' && line.status !== q.stockStatus) continue;
