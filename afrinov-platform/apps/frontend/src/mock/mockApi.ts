@@ -24,6 +24,7 @@ import {
 import { buildReport, type ReportQuery as MockReportQuery } from './mockReport';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
 import { computeConsumption } from './mockConsumption';
+import { computeMonthEnd } from './mockMonthEnd';
 import type {
   MockMaterial,
   MockLocation,
@@ -866,11 +867,22 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
+  if (method === 'GET' && p === '/reports/month-end') {
+    const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
+    return computeMonthEnd(qs.month || new Date().toISOString().slice(0, 7), {
+      transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency,
+      consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
+    });
+  }
   if (method === 'GET' && p === '/reports/stock-value') {
     return computeStockValue();
   }
   if (method === 'GET' && p === '/reports/consumption') {
-    return computeConsumption(qs, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR') });
+    return computeConsumption(qs, {
+      transactions: state.transactions, materials: state.materials, projects: state.projects, recipients: state.recipients,
+      currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
+      userName: (id) => mockUsers.find((u) => u.id === id)?.name ?? 'Unknown',
+    });
   }
   if (method === 'GET' && p === '/reports/stock-status') {
     const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);

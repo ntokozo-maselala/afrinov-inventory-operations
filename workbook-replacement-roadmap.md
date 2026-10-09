@@ -220,8 +220,8 @@ The goal is to load the workbook's items, prices, locations and opening balances
 - [x] Re-order quantity = required − on hand, with a re-order list export
 - [x] Value consumed by project and by date range (quantity × unit cost), replacing the Stock Report sheets
 - [x] Stock value per category on the dashboard, matching the Summary totals
-- [ ] Issues by recipient over a date range (replaces the Consumable Box)
-- [ ] Month-end Excel export in the layout management already uses
+- [x] Issues by recipient over a date range (replaces the Consumable Box)
+- [x] Month-end Excel export in the layout management already uses
 
 **Exit criteria:** management signs off that the reports answer the questions the Summary and Stock Report sheets answer today.
 

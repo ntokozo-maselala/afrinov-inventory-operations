@@ -4,8 +4,10 @@ import { ReportService } from './report.service.js';
 import { parseReportQuery } from './report-query.schema.js';
 import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
 import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
-import { ConsumptionService, NO_PROJECT, type ConsumptionQuery } from './consumption.service.js';
+import { ConsumptionService, NO_PROJECT, NO_RECIPIENT, type ConsumptionQuery } from './consumption.service.js';
 import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
+import { MonthEndService } from './month-end.service.js';
+import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { requirePermission } from '../../shared/authorization.js';
@@ -55,6 +57,24 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
   });
 
+  // The month-end report: the workbook's Summary and Stock Report sheets, as at the end of ?month=YYYY-MM.
+  const monthParam = (q: Record<string, string | undefined>) => q['month'] || new Date().toISOString().slice(0, 7);
+  app.get('/reports/month-end', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return MonthEndService.report(monthParam(req.query as Record<string, string | undefined>));
+  });
+  app.get('/reports/month-end/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const report = await MonthEndService.report(monthParam(req.query as Record<string, string | undefined>));
+    const buf = await buildMonthEndXlsx(report);
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${monthEndFilename(report.month)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
+  });
+
   // The value of the stock on hand now, per category, and items by status.
   app.get('/reports/stock-value', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
@@ -64,6 +84,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
   // Stock used in a date range, by item, project and category, at unit price.
   const consumptionQuery = (q: Record<string, string | undefined>): ConsumptionQuery => ({
     from: q['from'] ?? '', to: q['to'] ?? '', projectNumber: q['projectNumber'] || undefined, category: q['category'] || undefined,
+    recipientId: q['recipientId'] || undefined,
   });
   app.get('/reports/consumption', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
@@ -79,6 +100,8 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     const scope = [
       q.projectNumber === NO_PROJECT ? 'Issues with no project' : q.projectNumber ? `Project ${q.projectNumber}` : 'All projects',
       q.category ? `category ${q.category}` : null,
+      q.recipientId === NO_RECIPIENT ? 'issues with no recipient recorded'
+        : q.recipientId ? `issued to ${report.byRecipient[0]?.name ?? 'one recipient'}` : null,
     ].filter(Boolean).join(', ');
     const buf = await buildConsumptionXlsx(report, { currency, scope });
     return reply
