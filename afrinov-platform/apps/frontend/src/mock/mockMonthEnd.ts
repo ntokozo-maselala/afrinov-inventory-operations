@@ -3,23 +3,9 @@
 // month from the ledger, graded by the stock status bands, with the month's
 // stock used from the consumption report.
 import type { ApiError } from '../api/client';
-import { classifyItem, type StatusBands, type StockStatus } from '../lib/stockStatus';
-import type { ConsumptionReport } from './mockConsumption';
+import { classifyItem, type StatusBands } from '../lib/stockStatus';
+import type { ConsumptionReport, MonthEndCategory, MonthEndItem, MonthEndReport } from '../api/reportTypes';
 import type { MockInventoryTransaction, MockLocation, MockMaterial } from './types';
-
-export interface MonthEndItem {
-  sku: string; name: string; location: string; requiredStock: number; currentStock: number;
-  unitCost: number | null; value: number | null; percentOfRequired: number | null; reorderQuantity: number | null; status: StockStatus;
-}
-export interface MonthEndCategory {
-  category: string; items: MonthEndItem[]; value: number; urgent: number; warning: number; itemsInStock: number;
-  used: Array<{ sku: string; name: string; location: string; used: number; value: number | null }>; usedValue: number;
-}
-export interface MonthEndReport {
-  month: string; from: string; to: string; generatedAt: string; currency: string; bands: StatusBands;
-  categories: MonthEndCategory[];
-  total: { items: number; itemsInStock: number; value: number; urgent: number; warning: number; usedValue: number };
-}
 
 const ORDER = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
 const round2 = (n: number) => Math.round(n * 100) / 100;

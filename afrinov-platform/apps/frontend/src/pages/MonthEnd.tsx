@@ -12,15 +12,8 @@ import { useToast } from '../components/Toast';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { downloadMonthEnd } from '../api/exportMonthEnd';
-import type { MonthEndReport } from '../mock/mockMonthEnd';
-
-const LABEL: Record<string, string> = {
-  CONSUMABLES: 'Consumables',
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
-  PROJECT_MATERIAL: 'Project Material',
-  TOOLS: 'Tools',
-};
+import type { MonthEndReport } from '../api/reportTypes';
+import { categoryLabel } from '../lib/categories';
 
 const monthOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
@@ -93,7 +86,7 @@ export function MonthEnd() {
             <tbody>
               {r.categories.map((c) => (
                 <tr key={c.category}>
-                  <td className="font-medium">{LABEL[c.category] ?? c.category}</td>
+                  <td className="font-medium">{categoryLabel(c.category)}</td>
                   <td className="text-right font-mono">{formatNumber(c.items.length)}</td>
                   <td className="text-right font-mono">{formatNumber(c.itemsInStock)}</td>
                   <td className="text-right font-mono">{formatCurrency(c.value, r.currency)}</td>

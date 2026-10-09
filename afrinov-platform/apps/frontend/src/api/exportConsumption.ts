@@ -3,7 +3,8 @@
 // sheets here from the mock report.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
-import type { ConsumptionReport } from '../mock/mockConsumption';
+import type { ConsumptionReport } from './reportTypes';
+import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -29,14 +30,6 @@ export async function downloadConsumption(query: string): Promise<void> {
   triggerDownload(blob, filenameFromDisposition(res.headers.get('content-disposition'), fallback));
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  CONSUMABLES: 'Consumables',
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
-  PROJECT_MATERIAL: 'Project Material',
-  TOOLS: 'Tools',
-};
-
 async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   const r = await api.get<ConsumptionReport>(`/reports/consumption?${query}`);
   const { default: ExcelJS } = await import('exceljs');
@@ -46,13 +39,13 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   ws.getCell('A2').value = 'Used = issued − returned; reversed issues and returns are left out. Value = used × unit price now, excl. VAT.';
   ws.getRow(4).values = ['Code', 'Item', 'Unit', 'Issued', 'Returned', 'Used', 'Unit price', 'Value'];
   ws.getRow(4).font = { bold: true };
-  const order = Object.keys(CATEGORY_LABEL);
+  const order = CATEGORIES.map((c) => c.value);
   const categories = [...new Set(r.items.map((i) => i.category))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   for (const category of categories) {
     const group = r.items.filter((i) => i.category === category);
-    ws.addRow([`${CATEGORY_LABEL[category] ?? category} (${group.length})`]).font = { bold: true };
+    ws.addRow([`${categoryLabel(category)} (${group.length})`]).font = { bold: true };
     for (const i of group) ws.addRow([i.sku, i.name, i.unitOfMeasure, i.issued, i.returned, i.used, i.unitCost, i.value]);
-    ws.addRow([null, `Subtotal ${CATEGORY_LABEL[category] ?? category}`, null, null, null, null, null, r.byCategory.find((c) => c.category === category)?.value ?? 0]).font = { bold: true };
+    ws.addRow([null, `Subtotal ${categoryLabel(category)}`, null, null, null, null, null, r.byCategory.find((c) => c.category === category)?.value ?? 0]).font = { bold: true };
     ws.addRow([]);
   }
   if (r.items.length === 0) ws.addRow(['Nothing was issued in this period.']);

@@ -1,6 +1,7 @@
 // The frontend-only consumption report, which mirrors the backend's.
 import { describe, it, expect } from 'vitest';
-import { computeConsumption, NO_PROJECT, NO_RECIPIENT } from './mockConsumption';
+import { computeConsumption } from './mockConsumption';
+import { NO_PROJECT, NO_RECIPIENT } from '../api/reportTypes';
 import type { MockInventoryTransaction, MockMaterial, MockProject, MockRecipient } from './types';
 
 const tx = (id: string, type: 'ISSUE' | 'RETURN' | 'RECEIPT', materialId: string, quantity: number, postedAt: string, extra: Partial<MockInventoryTransaction> = {}): MockInventoryTransaction => ({

@@ -6,6 +6,7 @@
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
 import type { StockStatusItem } from '../pages/StockStatus';
+import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const fallbackName = () => `afrinov-reorder-list-${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -30,14 +31,6 @@ export async function downloadReorderList(): Promise<void> {
   triggerDownload(blob, filenameFromDisposition(res.headers.get('content-disposition'), fallbackName()));
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  CONSUMABLES: 'Consumables',
-  FASTENERS_SLUGS_INSULATION: 'Fasteners, Slugs & Insulation',
-  TOOLING_PPE_ELECTRICAL: 'Tooling, PPE & Electrical',
-  PROJECT_MATERIAL: 'Project Material',
-  TOOLS: 'Tools',
-};
-
 async function buildInBrowser(): Promise<ArrayBuffer> {
   const [rows, settings] = await Promise.all([
     api.get<StockStatusItem[]>('/reports/stock-status?status=URGENT,WARNING'),
@@ -59,12 +52,12 @@ async function buildInBrowser(): Promise<ArrayBuffer> {
     `Unit price (${currency})`, `Re-order value (${currency})`, 'Last supplier', 'Last delivered', 'Where it is kept'];
   ws.getRow(4).font = { bold: true };
 
-  const order = Object.keys(CATEGORY_LABEL);
+  const order = CATEGORIES.map((c) => c.value);
   const categories = [...new Set(rows.map((r) => r.category))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   let total = 0;
   for (const category of categories) {
     const group = rows.filter((r) => r.category === category);
-    ws.addRow([`${CATEGORY_LABEL[category] ?? category} (${group.length})`]).font = { bold: true };
+    ws.addRow([`${categoryLabel(category)} (${group.length})`]).font = { bold: true };
     let subtotal = 0;
     for (const r of group) {
       const reorder = Number(r.reorderQuantity);
@@ -79,7 +72,7 @@ async function buildInBrowser(): Promise<ArrayBuffer> {
         r.locations.map((l) => `${l.locationName} (${Number(l.quantity)})`).join(', ') || 'None on hand',
       ]);
     }
-    ws.addRow([null, `Subtotal ${CATEGORY_LABEL[category] ?? category}`, null, null, null, null, null, null, null, Math.round(subtotal * 100) / 100]).font = { bold: true };
+    ws.addRow([null, `Subtotal ${categoryLabel(category)}`, null, null, null, null, null, null, null, Math.round(subtotal * 100) / 100]).font = { bold: true };
     ws.addRow([]);
     total += subtotal;
   }

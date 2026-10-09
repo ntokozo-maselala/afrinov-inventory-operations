@@ -16,20 +16,12 @@ import { formatNumber } from '../lib/format';
 import { MaterialForm } from '../components/MaterialForm';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
+import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 interface Material {
   id: string; sku: string; name: string; category: string;
   unitOfMeasure: string; requiredStock: string; active: boolean;
 }
-
-const CATEGORY_OPTIONS = [
-  { value: '', label: 'All categories' },
-  { value: 'FASTENERS_SLUGS_INSULATION', label: 'Fasteners, slugs, insulation' },
-  { value: 'TOOLING_PPE_ELECTRICAL', label: 'Tooling, PPE, electrical' },
-  { value: 'PROJECT_MATERIAL', label: 'Project material' },
-  { value: 'CONSUMABLES', label: 'Consumables' },
-  { value: 'TOOLS', label: 'Tools' },
-];
 
 export function Materials() {
   const mats = useApi<Material[]>('/materials');
@@ -81,7 +73,8 @@ export function Materials() {
               <Input ref={searchRef} className="pl-8" placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search materials" />
             </div>
             <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-              {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              <option value="">All categories</option>
+              {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
             {(q || category) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setCategory(''); }}>Clear</Button>}
           </>
@@ -119,7 +112,7 @@ function columns(): DataTableColumn<Material>[] {
   return [
     { key: 'sku', header: 'SKU', className: 'text-mono', render: (m) => <Link to={`/materials/${m.id}`} className="btn-link text-mono">{m.sku}</Link>, width: '12rem' },
     { key: 'name', header: 'Name', render: (m) => <span className="line-clamp-1" title={m.name}>{m.name}</span> },
-    { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{CATEGORY_OPTIONS.find((o) => o.value === m.category)?.label ?? m.category}</span> },
+    { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{categoryLabel(m.category)}</span> },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },
     { key: 'status', header: 'Status', render: (m) => m.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '7rem' },

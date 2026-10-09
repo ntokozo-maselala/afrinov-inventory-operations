@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ExcelJS from 'exceljs';
 import { downloadMonthEnd } from './exportMonthEnd';
-import type { MonthEndReport } from '../mock/mockMonthEnd';
+import type { MonthEndReport } from './reportTypes';
 
 const mocks = vi.hoisted(() => ({ frontendOnly: false, get: vi.fn(), token: vi.fn(), download: vi.fn(), fetch: vi.fn() }));
 vi.mock('./client', () => ({

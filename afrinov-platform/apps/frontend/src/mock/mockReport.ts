@@ -10,138 +10,16 @@
 
 import { classifyItem, needsAttention, type StatusBands } from '../lib/stockStatus';
 import type { MockMaterial, MockLocation, MockSupplier, MockPurchaseOrder, MockInventoryTransaction } from './types';
-
-export interface ReportQuery {
-  range: 'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'QUARTER' | 'YEAR' | 'CUSTOM';
-  from?: string;
-  to?: string;
-  category: string[];
-  locationId: string[];
-  supplierId: string[];
-  materialId: string[];
-  stockStatus: 'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
-  itemStatus: 'ALL' | 'ACTIVE' | 'INACTIVE';
-  search?: string;
-  movementType?: 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT' | 'RETURN';
-  page: number;
-  pageSize: number;
-}
-
-export interface ReportInventoryLine {
-  materialId: string;
-  sku: string;
-  name: string;
-  description: string | null;
-  category: string;
-  unitOfMeasure: string;
-  unitCost: number | null;
-  requiredStock: number;
-  active: boolean;
-  locationId: string;
-  locationName: string;
-  locationType: string;
-  quantity: number;
-  inventoryValue: number;
-  status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
-  lastUpdated: string | null;
-}
-
-export interface ReportCategoryRow {
-  category: string;
-  skuCount: number;
-  quantity: number;
-  inventoryValue: number;
-  share: number;
-}
-export interface ReportLocationRow {
-  locationId: string;
-  locationName: string;
-  locationType: string;
-  quantity: number;
-  inventoryValue: number;
-  share: number;
-}
-export interface ReportSupplierRow {
-  supplierId: string | null;
-  supplierName: string;
-  skuCount: number;
-  quantity: number;
-  inventoryValue: number;
-  share: number;
-}
-export interface ReportStatusRow {
-  status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
-  skuCount: number;
-  quantity: number;
-  inventoryValue: number;
-}
-export interface ReportMovementRow {
-  id: string;
-  postedAt: string;
-  type: string;
-  materialId: string;
-  materialSku: string;
-  materialName: string;
-  category: string;
-  locationId: string;
-  locationName: string;
-  quantity: number;
-  actorName: string;
-  reasonCode: string | null;
-  reasonNote: string | null;
-  projectNumber: string | null;
-  referenceType: string | null;
-  referenceId: string | null;
-  // Set on a reversal (the movement it cancels) and on a reversed movement
-  // (the reversal that cancels it). Optional: older payloads omit them.
-  reversesId?: string | null;
-  reversedById?: string | null;
-}
+import type {
+  ReportQuery, ReportInventoryLine, ReportCategoryRow, ReportLocationRow, ReportSupplierRow, ReportStatusRow,
+  ReportMovementRow, ReportMovementSummary, ReportKpis, ReportResult,
+} from '../api/reportTypes';
 
 // A reversed movement and its reversal cancel out. Totals and charts leave
 // both out; movement lists still show them.
 export function isReversedPair(m: Pick<ReportMovementRow, 'reversesId' | 'reversedById'>): boolean {
   return !!(m.reversesId || m.reversedById);
 }
-export interface ReportMovementSummary {
-  receipts: { count: number; quantity: number };
-  issues: { count: number; quantity: number };
-  transfers: { count: number; quantity: number };
-  adjustments: { count: number; quantity: number };
-  returns: { count: number; quantity: number };
-  total: { count: number; quantity: number };
-}
-export interface ReportKpis {
-  skuCount: number;
-  totalQuantity: number;
-  inventoryValue: number;
-  lowStockCount: number;
-  outOfStockCount: number;
-  categoryCount: number;
-  locationCount: number;
-  supplierCount: number;
-  movementCount: number;
-  currency: string;
-  generatedAt: string;
-  rangeLabel: string;
-}
-export interface ReportResult {
-  kpis: ReportKpis;
-  byStatus: ReportStatusRow[];
-  byCategory: ReportCategoryRow[];
-  byLocation: ReportLocationRow[];
-  bySupplier: ReportSupplierRow[];
-  exceptions: ReportInventoryLine[];
-  movements: ReportMovementRow[];
-  movementSummary: ReportMovementSummary;
-  inventory: ReportInventoryLine[];
-  inventoryTotal: number;
-  page: number;
-  pageSize: number;
-  currency: string;
-  generatedAt: string;
-}
-
 const CURRENCY = 'ZAR';
 
 const CATEGORY_LABELS: Record<string, string> = {

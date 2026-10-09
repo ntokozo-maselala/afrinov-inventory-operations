@@ -11,9 +11,10 @@
 // The two paths are designed to produce byte-identical *kinds* of files
 // with the same data and column ordering.
 import { getToken } from './client';
-import type { ReportResult } from '../mock/mockReport';
+import type { ReportResult } from './reportTypes';
 import { FRONTEND_ONLY } from './client';
 import { useToast } from '../components/Toast';
+import { categoryLabel } from '../lib/categories';
 
 export function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -165,7 +166,6 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
   const fmtQty = (n: number) => n.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
   const fmtCurrency = (n: number, ccy: string) => n.toLocaleString('en-ZA', { style: 'currency', currency: ccy, minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDateTime = (iso: string | null) => iso ? new Date(iso).toISOString().replace('T', ' ').slice(0, 19) : '';
-  const catLabel = (c: string) => ({ FASTENERS_SLUGS_INSULATION: 'Fasteners, slugs, insulation', TOOLING_PPE_ELECTRICAL: 'Tooling, PPE, electrical', PROJECT_MATERIAL: 'Project material', CONSUMABLES: 'Consumables', TOOLS: 'Tools' } as Record<string, string>)[c] ?? c;
   const stLabel = (s: string) => ({ IN_STOCK: 'In stock', LOW_STOCK: 'Low stock', OUT_OF_STOCK: 'Out of stock' } as Record<string, string>)[s] ?? s;
 
   const summary = wb.addWorksheet('Summary');
@@ -195,7 +195,7 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
   for (const s of report.byStatus) summary.addRow([stLabel(s.status), s.skuCount, s.quantity, fmtCurrency(s.inventoryValue, report.currency)]);
   summary.addRow([]);
   summary.addRow(['Category', 'SKUs', 'Quantity', 'Inventory value', 'Share']).font = { bold: true };
-  for (const c of report.byCategory) summary.addRow([catLabel(c.category), c.skuCount, c.quantity, fmtCurrency(c.inventoryValue, report.currency), c.share]);
+  for (const c of report.byCategory) summary.addRow([categoryLabel(c.category), c.skuCount, c.quantity, fmtCurrency(c.inventoryValue, report.currency), c.share]);
   summary.getColumn(5).numFmt = '0.0%';
   summary.views = [{ state: 'frozen', ySplit: 1 }];
 
@@ -216,7 +216,7 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
   inv.getRow(1).font = { bold: true };
   inv.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
   for (const l of report.inventory) {
-    inv.addRow([l.name, l.sku, catLabel(l.category), l.unitOfMeasure, l.quantity, l.requiredStock, l.unitCost ?? '', l.inventoryValue, stLabel(l.status), l.locationName, fmtDateTime(l.lastUpdated)]);
+    inv.addRow([l.name, l.sku, categoryLabel(l.category), l.unitOfMeasure, l.quantity, l.requiredStock, l.unitCost ?? '', l.inventoryValue, stLabel(l.status), l.locationName, fmtDateTime(l.lastUpdated)]);
   }
   inv.getColumn(5).numFmt = '#,##0.0000';
   inv.getColumn(6).numFmt = '#,##0.0000';
@@ -242,7 +242,7 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
   mov.getRow(1).font = { bold: true };
   mov.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
   for (const m of report.movements) {
-    mov.addRow([fmtDateTime(m.postedAt), m.materialName, m.materialSku, catLabel(m.category), m.type, m.quantity, m.locationName, m.referenceType ? `${m.referenceType}${m.referenceId ? '#' + m.referenceId : ''}` : '', m.projectNumber ?? '', m.reasonCode ? `${m.reasonCode}${m.reasonNote ? ' — ' + m.reasonNote : ''}` : '', m.actorName]);
+    mov.addRow([fmtDateTime(m.postedAt), m.materialName, m.materialSku, categoryLabel(m.category), m.type, m.quantity, m.locationName, m.referenceType ? `${m.referenceType}${m.referenceId ? '#' + m.referenceId : ''}` : '', m.projectNumber ?? '', m.reasonCode ? `${m.reasonCode}${m.reasonNote ? ' — ' + m.reasonNote : ''}` : '', m.actorName]);
   }
   mov.getColumn(6).numFmt = '#,##0.0000';
   mov.getColumn(1).numFmt = 'yyyy-mm-dd hh:mm:ss';
@@ -260,7 +260,6 @@ function buildPdfInBrowser(report: ReportResult): ArrayBuffer {
   const fmtQty = (n: number) => n.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
   const fmtCurrency = (n: number, c: string) => n.toLocaleString('en-ZA', { style: 'currency', currency: c, minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = (iso: string | null) => iso ? iso.slice(0, 10) : '';
-  const catLabel = (c: string) => ({ FASTENERS_SLUGS_INSULATION: 'Fasteners, slugs, insulation', TOOLING_PPE_ELECTRICAL: 'Tooling, PPE, electrical', PROJECT_MATERIAL: 'Project material', CONSUMABLES: 'Consumables', TOOLS: 'Tools' } as Record<string, string>)[c] ?? c;
   const stLabel = (s: string) => ({ IN_STOCK: 'In stock', LOW_STOCK: 'Low stock', OUT_OF_STOCK: 'Out of stock' } as Record<string, string>)[s] ?? s;
 
   const PAGE_W = 595;
@@ -308,7 +307,7 @@ function buildPdfInBrowser(report: ReportResult): ArrayBuffer {
   for (const s of report.byStatus) add(`  ${stLabel(s.status).padEnd(14)} SKUs=${String(s.skuCount).padStart(4)}  Qty=${fmtQty(s.quantity).padStart(10)}  Value=${fmtCurrency(s.inventoryValue, report.currency)}`);
   add('');
   add('Inventory by category');
-  for (const c of report.byCategory) add(`  ${catLabel(c.category).padEnd(28)} SKUs=${String(c.skuCount).padStart(3)}  Qty=${fmtQty(c.quantity).padStart(10)}  Value=${fmtCurrency(c.inventoryValue, report.currency).padStart(14)}  Share=${(c.share * 100).toFixed(1)}%`);
+  for (const c of report.byCategory) add(`  ${categoryLabel(c.category).padEnd(28)} SKUs=${String(c.skuCount).padStart(3)}  Qty=${fmtQty(c.quantity).padStart(10)}  Value=${fmtCurrency(c.inventoryValue, report.currency).padStart(14)}  Share=${(c.share * 100).toFixed(1)}%`);
   add('');
   add(`Inventory requiring attention (${report.exceptions.length})`);
   for (const l of report.exceptions) {

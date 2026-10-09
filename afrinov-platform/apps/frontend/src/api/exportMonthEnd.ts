@@ -3,7 +3,7 @@
 // here, in the stock workbook's layout, from the mock month-end report.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
-import type { MonthEndReport } from '../mock/mockMonthEnd';
+import type { MonthEndReport } from './reportTypes';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 

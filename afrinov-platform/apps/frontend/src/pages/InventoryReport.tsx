@@ -21,8 +21,9 @@ import type {
   ReportSupplierRow,
   ReportLocationRow,
   ReportStatusRow,
-} from '../mock/mockReport';
+} from '../api/reportTypes';
 import { useToast } from '../components/Toast';
+import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 // ── Query serialization (shared with the backend) ────────────────────────
 function buildQueryString(q: ReportQuery): string {
@@ -42,14 +43,6 @@ function buildQueryString(q: ReportQuery): string {
   p.set('pageSize', String(q.pageSize));
   return p.toString();
 }
-
-const CATEGORY_OPTIONS = [
-  { value: 'FASTENERS_SLUGS_INSULATION', label: 'Fasteners, slugs, insulation' },
-  { value: 'TOOLING_PPE_ELECTRICAL', label: 'Tooling, PPE, electrical' },
-  { value: 'PROJECT_MATERIAL', label: 'Project material' },
-  { value: 'CONSUMABLES', label: 'Consumables' },
-  { value: 'TOOLS', label: 'Tools' },
-];
 
 const STATUS_OPTIONS = [
   { value: 'ALL', label: 'All statuses' },
@@ -256,7 +249,7 @@ export function InventoryReportPage() {
         <div className="mt-3">
           <span className="text-eyebrow">Categories</span>
           <div className="flex items-center flex-wrap gap-2 mt-2">
-            {CATEGORY_OPTIONS.map((c) => {
+            {CATEGORIES.map((c) => {
               const active = query.category.includes(c.value);
               return (
                 <button
@@ -553,10 +546,6 @@ function CategoryBars({ data, currency }: { data: ReportCategoryRow[]; currency:
       })}
     </div>
   );
-}
-
-function categoryLabel(c: string): string {
-  return CATEGORY_OPTIONS.find((o) => o.value === c)?.label ?? c;
 }
 
 // ── Table columns ───────────────────────────────────────────────────────
