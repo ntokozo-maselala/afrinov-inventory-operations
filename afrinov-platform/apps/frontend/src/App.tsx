@@ -26,7 +26,6 @@ const GoodsReceipts = importPage(() => import('./pages/GoodsReceipts').then(m =>
 const StockStatus = importPage(() => import('./pages/StockStatus').then(m => ({ default: m.StockStatus })));
 const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ default: m.Consumption })));
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
-const InventoryReportPage = importPage(() => import('./pages/InventoryReport').then(m => ({ default: m.InventoryReportPage })));
 const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.Racks })));
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
@@ -139,7 +138,8 @@ export function App() {
         <Route path="/reports/month-end" element={<Suspense fallback={<PageSkeleton />}><MonthEnd /></Suspense>} />
         {/* The old Low stock page: kept so bookmarks still land. */}
         <Route path="/reports/low-stock" element={<Navigate to="/reports/stock-status" replace />} />
-        <Route path="/reports/inventory" element={<Suspense fallback={<PageSkeleton />}><InventoryReportPage /></Suspense>} />
+        {/* The retired Inventory report: its figures are on the Dashboard, Stock status and Locations. */}
+        <Route path="/reports/inventory" element={<Navigate to="/" replace />} />
         <Route path="/racks" element={<Suspense fallback={<PageSkeleton />}><Racks /></Suspense>} />
         <Route path="/locations" element={<Suspense fallback={<PageSkeleton />}><Locations /></Suspense>} />
         <Route path="/projects" element={<Suspense fallback={<PageSkeleton />}><Projects /></Suspense>} />

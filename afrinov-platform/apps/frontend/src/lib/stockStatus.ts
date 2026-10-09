@@ -31,3 +31,13 @@ export const STATUS_LABEL: Record<StockStatus, string> = { URGENT: 'Urgent', WAR
 export const STATUS_TONE: Record<StockStatus, 'danger' | 'warning' | 'success' | 'neutral'> = {
   URGENT: 'danger', WARNING: 'warning', OK: 'success', NOT_SET: 'neutral',
 };
+
+// The inventory report and its export also mark each item-at-a-location row,
+// built on the rule above: None here when that location holds nothing, Reorder
+// when the item as a whole is Urgent or Warning, In stock otherwise. So a row
+// can say None here while the item is OK across its other locations.
+export const LOCATION_STATUS_LABEL: Record<string, string> = {
+  IN_STOCK: 'In stock',
+  LOW_STOCK: 'Reorder',
+  OUT_OF_STOCK: 'None here',
+};

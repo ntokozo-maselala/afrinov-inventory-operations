@@ -12,6 +12,7 @@ import { formatCurrency } from '../lib/currency';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import { StockStatusBadge } from '../components/StockStatusBadge';
+import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { categoryLabel } from '../lib/categories';
 
 /** GET /reports/stock-value: the stock on hand now, valued per category. */
@@ -26,12 +27,6 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
   IN_STOCK: 'success',
   LOW_STOCK: 'warning',
   OUT_OF_STOCK: 'danger',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  IN_STOCK: 'In stock',
-  LOW_STOCK: 'Low stock',
-  OUT_OF_STOCK: 'Out of stock',
 };
 
 export function Dashboard() {
@@ -108,7 +103,7 @@ export function Dashboard() {
       align: 'center',
       render: (row) => (
         <Badge tone={STATUS_TONE[row.status] ?? 'neutral'} dot>
-          {STATUS_LABEL[row.status] ?? row.status}
+          {LOCATION_STATUS_LABEL[row.status] ?? row.status}
         </Badge>
       ),
     },

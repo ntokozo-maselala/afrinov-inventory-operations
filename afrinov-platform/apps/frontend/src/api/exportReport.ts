@@ -15,6 +15,7 @@ import type { ReportResult } from './reportTypes';
 import { FRONTEND_ONLY } from './client';
 import { useToast } from '../components/Toast';
 import { categoryLabel } from '../lib/categories';
+import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 
 export function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -166,7 +167,7 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
   const fmtQty = (n: number) => n.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
   const fmtCurrency = (n: number, ccy: string) => n.toLocaleString('en-ZA', { style: 'currency', currency: ccy, minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDateTime = (iso: string | null) => iso ? new Date(iso).toISOString().replace('T', ' ').slice(0, 19) : '';
-  const stLabel = (s: string) => ({ IN_STOCK: 'In stock', LOW_STOCK: 'Low stock', OUT_OF_STOCK: 'Out of stock' } as Record<string, string>)[s] ?? s;
+  const stLabel = (s: string) => LOCATION_STATUS_LABEL[s] ?? s;
 
   const summary = wb.addWorksheet('Summary');
   summary.getCell('A1').value = 'Afrinov Inventory Report';
@@ -181,8 +182,8 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
     ['Total SKUs', String(report.kpis.skuCount)],
     ['Total quantity', fmtQty(report.kpis.totalQuantity)],
     ['Inventory value', fmtCurrency(report.kpis.inventoryValue, report.currency)],
-    ['Low stock items', String(report.kpis.lowStockCount)],
-    ['Out of stock items', String(report.kpis.outOfStockCount)],
+    ['Rows marked Reorder', String(report.kpis.lowStockCount)],
+    ['Rows marked None here', String(report.kpis.outOfStockCount)],
     ['Categories', String(report.kpis.categoryCount)],
     ['Locations', String(report.kpis.locationCount)],
     ['Suppliers', String(report.kpis.supplierCount)],
@@ -260,7 +261,7 @@ function buildPdfInBrowser(report: ReportResult): ArrayBuffer {
   const fmtQty = (n: number) => n.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
   const fmtCurrency = (n: number, c: string) => n.toLocaleString('en-ZA', { style: 'currency', currency: c, minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = (iso: string | null) => iso ? iso.slice(0, 10) : '';
-  const stLabel = (s: string) => ({ IN_STOCK: 'In stock', LOW_STOCK: 'Low stock', OUT_OF_STOCK: 'Out of stock' } as Record<string, string>)[s] ?? s;
+  const stLabel = (s: string) => LOCATION_STATUS_LABEL[s] ?? s;
 
   const PAGE_W = 595;
   const PAGE_H = 842;
@@ -301,7 +302,7 @@ function buildPdfInBrowser(report: ReportResult): ArrayBuffer {
   add('');
   add('Executive summary');
   add(`SKUs: ${report.kpis.skuCount}    Total qty: ${fmtQty(report.kpis.totalQuantity)}    Inventory value: ${fmtCurrency(report.kpis.inventoryValue, report.currency)}`);
-  add(`Low stock: ${report.kpis.lowStockCount}    Out of stock: ${report.kpis.outOfStockCount}    Categories: ${report.kpis.categoryCount}    Locations: ${report.kpis.locationCount}    Suppliers: ${report.kpis.supplierCount}    Movements: ${report.kpis.movementCount}`);
+  add(`Reorder rows: ${report.kpis.lowStockCount}    None-here rows: ${report.kpis.outOfStockCount}    Categories: ${report.kpis.categoryCount}    Locations: ${report.kpis.locationCount}    Suppliers: ${report.kpis.supplierCount}    Movements: ${report.kpis.movementCount}`);
   add('');
   add('Stock status breakdown');
   for (const s of report.byStatus) add(`  ${stLabel(s.status).padEnd(14)} SKUs=${String(s.skuCount).padStart(4)}  Qty=${fmtQty(s.quantity).padStart(10)}  Value=${fmtCurrency(s.inventoryValue, report.currency)}`);

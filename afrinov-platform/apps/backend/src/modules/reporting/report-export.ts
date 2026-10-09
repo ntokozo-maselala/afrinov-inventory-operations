@@ -30,10 +30,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   TOOLS: 'Tools',
 };
 
+// Per item-at-a-location row: None here when that location holds nothing,
+// Reorder when the item as a whole is URGENT or WARNING, In stock otherwise.
 const STATUS_LABELS: Record<string, string> = {
   IN_STOCK: 'In stock',
-  LOW_STOCK: 'Low stock',
-  OUT_OF_STOCK: 'Out of stock',
+  LOW_STOCK: 'Reorder',
+  OUT_OF_STOCK: 'None here',
 };
 
 function categoryLabel(c: string): string {
@@ -67,8 +69,8 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
   kpiRow('Total SKUs', String(report.kpis.skuCount));
   kpiRow('Total quantity', fmtQty(report.kpis.totalQuantity));
   kpiRow('Inventory value', fmtCurrency(report.kpis.inventoryValue, report.currency));
-  kpiRow('Low stock items', String(report.kpis.lowStockCount));
-  kpiRow('Out of stock items', String(report.kpis.outOfStockCount));
+  kpiRow('Rows marked Reorder', String(report.kpis.lowStockCount));
+  kpiRow('Rows marked None here', String(report.kpis.outOfStockCount));
   kpiRow('Categories', String(report.kpis.categoryCount));
   kpiRow('Locations', String(report.kpis.locationCount));
   kpiRow('Suppliers', String(report.kpis.supplierCount));
@@ -293,8 +295,8 @@ function drawKpis(doc: PDFKit.PDFDocument, report: ReportResult): void {
     ['Total SKUs', String(report.kpis.skuCount)],
     ['Total quantity', fmtQty(report.kpis.totalQuantity)],
     ['Inventory value', fmtCurrency(report.kpis.inventoryValue, report.currency)],
-    ['Low stock', String(report.kpis.lowStockCount)],
-    ['Out of stock', String(report.kpis.outOfStockCount)],
+    ['Rows: Reorder', String(report.kpis.lowStockCount)],
+    ['Rows: None here', String(report.kpis.outOfStockCount)],
     ['Categories', String(report.kpis.categoryCount)],
     ['Locations', String(report.kpis.locationCount)],
     ['Suppliers', String(report.kpis.supplierCount)],
