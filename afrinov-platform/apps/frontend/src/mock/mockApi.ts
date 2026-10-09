@@ -663,6 +663,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
   }
+  if (method === 'POST' && p === '/stock-counts') {
+    return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> });
+  }
   if (method === 'POST' && p === '/inventory-adjustments') {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
     return handleAdjustment(b);
@@ -1349,6 +1352,37 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
     reasonNote: b.reasonNote,
   });
   return { transactionId: id };
+}
+
+// Mirrors StockCountService.post: all or nothing, refused when stock moved since it was shown.
+function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> }) {
+  const lines = b.lines ?? [];
+  if (!b.locationId || lines.length === 0) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
+  if (lines.some((l) => !(l.countedQuantity >= 0) || !(l.expectedQuantity >= 0))) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
+  if (new Set(lines.map((l) => l.materialId)).size !== lines.length) throw err('VALIDATION_ERROR', 'Each item can appear only once in a count');
+  const location = findLocation(b.locationId);
+  if (!location) throw err('NOT_FOUND', 'Location not found');
+  if (lines.some((l) => !findMaterial(l.materialId))) throw err('NOT_FOUND', 'Material not found');
+  const moved = lines
+    .map((l) => ({ sku: findMaterial(l.materialId)!.sku, expected: l.expectedQuantity, current: getBalance(l.materialId, b.locationId!) }))
+    .filter((m) => Math.abs(m.expected - m.current) > 0.00005);
+  if (moved.length > 0) {
+    throw err('CONFLICT', `Stock at ${location.name} changed while you were counting (${moved.slice(0, 3).map((m) => `${m.sku}: ${m.expected} → ${m.current}`).join(', ')}). Reload the system quantities, check those items, and post again.`);
+  }
+  const countId = nextId('count');
+  const note = b.note?.trim();
+  const results = lines.map((l) => {
+    const variance = l.countedQuantity - getBalance(l.materialId, b.locationId!);
+    if (Math.abs(variance) < 0.00005) return { materialId: l.materialId, variance: '0', transactionId: null as string | null };
+    const id = nextId('t');
+    state.transactions.push({
+      id, postedAt: new Date().toISOString(), type: 'ADJUSTMENT', materialId: l.materialId, locationId: b.locationId!,
+      quantity: String(variance), actorId: 'user-1', reasonCode: 'COUNT_VARIANCE',
+      reasonNote: note ? `Stock count: ${note}` : 'Stock count', referenceType: 'StockCount', referenceId: countId,
+    });
+    return { materialId: l.materialId, variance: String(variance), transactionId: id as string | null };
+  });
+  return { countId, counted: lines.length, adjusted: results.filter((r) => r.transactionId).length, lines: results };
 }
 
 function getBalance(materialId: string, locationId: string): number {

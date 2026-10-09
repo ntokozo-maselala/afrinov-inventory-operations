@@ -90,6 +90,15 @@ const DEMO_TRANSACTIONS: DemoTransaction[] = [
   { daysAgo: 28, type: 'RECEIPT', sku: 'CUT-DISC-115', location: 'Main Storeroom', quantity: '100' },
   { daysAgo: 20, type: 'RECEIPT', sku: 'GLOVES-WELD-L', location: 'Main Storeroom', quantity: '12' },
   { daysAgo: 20, type: 'RECEIPT', sku: 'GLASSES-CLR', location: 'Main Storeroom', quantity: '25' },
+  // Workshop stock: moved from Main Storeroom to Boiler Shop before it is issued there.
+  { daysAgo: 6, type: 'TRANSFER_OUT', sku: 'WELD-ROD-3.2', location: 'Main Storeroom', quantity: '-20' },
+  { daysAgo: 6, type: 'TRANSFER_IN', sku: 'WELD-ROD-3.2', location: 'Boiler Shop', quantity: '20' },
+  { daysAgo: 6, type: 'TRANSFER_OUT', sku: 'GRIND-DISC-125', location: 'Main Storeroom', quantity: '-45' },
+  { daysAgo: 6, type: 'TRANSFER_IN', sku: 'GRIND-DISC-125', location: 'Boiler Shop', quantity: '45' },
+  { daysAgo: 6, type: 'TRANSFER_OUT', sku: 'GLOVES-WELD-L', location: 'Main Storeroom', quantity: '-6' },
+  { daysAgo: 6, type: 'TRANSFER_IN', sku: 'GLOVES-WELD-L', location: 'Boiler Shop', quantity: '6' },
+  { daysAgo: 6, type: 'TRANSFER_OUT', sku: 'GLASSES-CLR', location: 'Main Storeroom', quantity: '-8' },
+  { daysAgo: 6, type: 'TRANSFER_IN', sku: 'GLASSES-CLR', location: 'Boiler Shop', quantity: '8' },
   // Issues (consumption against project AFRI-1325)
   { daysAgo: 7, type: 'ISSUE', sku: 'M16X40-88-HEX', location: 'Main Storeroom', quantity: '-70', projectNumber: 'AFRI-1325' },
   { daysAgo: 6, type: 'ISSUE', sku: 'M12-NUT-88', location: 'Main Storeroom', quantity: '-150', projectNumber: 'AFRI-1325' },
@@ -442,6 +451,17 @@ async function ensureTransactions(
   // append new transactions after a successful seed.
   const count = await prisma.inventoryTransaction.count();
   if (count > 0) return;
+
+  // The seed writes the ledger directly, past the services' no-negative-stock
+  // rule, so it checks the rule itself: in date order, no item at any
+  // location may go below zero.
+  const running = new Map<string, number>();
+  for (const t of [...DEMO_TRANSACTIONS].sort((a, b) => b.daysAgo - a.daysAgo)) {
+    const key = `${t.sku} @ ${t.location}`;
+    const after = (running.get(key) ?? 0) + Number(t.quantity);
+    if (after < 0) throw new Error(`Demo data would take ${key} to ${after}; stock can never go below zero.`);
+    running.set(key, after);
+  }
 
   // Build the transaction list. Pair the TRANSFER_OUT with its
   // TRANSFER_IN counterpart by `pairedWithId` so the ledger reflects a

@@ -29,6 +29,7 @@ const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.R
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
 const IssueStock = importPage(() => import('./pages/IssueStock').then(m => ({ default: m.IssueStock })));
+const StockCount = importPage(() => import('./pages/StockCount').then(m => ({ default: m.StockCount })));
 const Recipients = importPage(() => import('./pages/Recipients').then(m => ({ default: m.Recipients })));
 const Locations = importPage(() => import('./pages/Locations').then(m => ({ default: m.Locations })));
 const Settings = importPage(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
@@ -113,6 +114,7 @@ export function App() {
         <Route path="/stock" element={<Suspense fallback={<PageSkeleton />}><Stock /></Suspense>} />
         <Route path="/stock/issue" element={<Suspense fallback={<PageSkeleton />}><IssueStock /></Suspense>} />
         <Route path="/stock/receive" element={<Suspense fallback={<PageSkeleton />}><ReceiveStock /></Suspense>} />
+        <Route path="/stock/count" element={<Suspense fallback={<PageSkeleton />}><StockCount /></Suspense>} />
         <Route path="/materials" element={<Suspense fallback={<PageSkeleton />}><Materials /></Suspense>} />
         <Route path="/materials/:id" element={<Suspense fallback={<PageSkeleton />}><MaterialDetail /></Suspense>} />
         <Route path="/movements" element={<Suspense fallback={<PageSkeleton />}><Movements /></Suspense>} />

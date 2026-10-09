@@ -115,6 +115,9 @@ Run from `apps/backend`.
 | `npm run test:integration` | Run the integration tests against a real database |
 | `npm run db:migrate` | Apply pending Prisma migrations |
 | `npm run db:seed` | Load roles, permissions, the admin account and demo data |
+| `npm run import:workbook -- --file <workbook.xlsm>` | Dry run of the stock workbook import: checks the four Main and four Summary sheets against the mapping file and writes a problem report to `import-reports/` (git-ignored). The first run creates `import-reports/mapping.xlsx` (new SKUs, units, locations) and `import-reports/master-data.xlsx` (projects, recipients, suppliers) for the storeman and buyer to review; later runs read them. Never touches the database |
+| `npm run import:workbook -- --file <workbook.xlsm> --apply --database <name> --date <YYYY-MM-DD> --actor <email>` | The real import, once per database: creates the projects, recipients and suppliers (skipping any that exist), the items and locations and posts one dated opening-balance receipt per item and location, all or nothing. Refuses while the dry run has blocking problems, when `--database` does not match `DATABASE_URL`, or when opening balances were imported before |
+| `npm run import:workbook -- --file <workbook.xlsm> --reconcile` | After the import: compares the database in `DATABASE_URL` with the workbook plan (item count, units and rand value per category, and every item that differs) and writes a reconciliation report to `import-reports/`. Read-only |
 | `npm run diag:login` | Log in as the seed admin through the full server and print the result. Needs `.env` with `SEED_ADMIN_PASSWORD` |
 | `npm run diag:admin` | Print whether the seed admin exists, is active, its roles, and every user's email and status. Needs `.env` |
 
@@ -149,7 +152,7 @@ prisma/
   schema.prisma        Database schema
   migrations/          SQL migrations, applied in name order
 integration/           Tests against a real server and database
-scripts/               Developer diagnostics, not part of the build
+scripts/               Developer diagnostics and the workbook import, not part of the build
 src/
   index.ts             Entry point: validates config, then starts the server
   server.ts            Fastify setup: CORS, security headers, JWT, rate limits, routes
@@ -161,6 +164,7 @@ src/
     inventory/         Materials, locations, racks, stock items, stock movements, balances
     procurement/       Suppliers, purchase orders, goods receipts
     operations/        Projects
+    migration/         Reading and checking the stock workbook for the data import
     reporting/         Stock, movement, low-stock and project reports; Excel/PDF export
     settings/          Typed application settings
     audit/             Audit log

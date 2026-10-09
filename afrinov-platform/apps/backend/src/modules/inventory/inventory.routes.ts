@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
 import { InventoryService } from './inventory.service.js';
 import { StockReceiptService } from './stock-receipt.service.js';
+import { StockCountService } from './stock-count.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
@@ -40,6 +41,16 @@ export const stockReceiptSchema = z.object({
     locationId: z.string().uuid(),
     quantity: z.number().positive(),
   })).min(1).max(50),
+});
+
+export const stockCountSchema = z.object({
+  locationId: z.string().uuid(),
+  note: z.string().trim().max(500).optional(),
+  lines: z.array(z.object({
+    materialId: z.string().uuid(),
+    expectedQuantity: z.number().min(0),
+    countedQuantity: z.number().min(0),
+  })).min(1).max(2000),
 });
 
 export const returnSchema = z.object({
@@ -102,6 +113,19 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const result = await InventoryService.adjust({ ...parsed.data, actorId: actorId(req) });
+    return reply.code(201).send(result);
+  });
+
+  // A stock count by location; differences become COUNT_VARIANCE adjustments.
+  app.post('/stock-counts', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.AdjustInventory);
+    const parsed = stockCountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid stock count payload', details: parsed.error.flatten() },
+      });
+    }
+    const result = await StockCountService.post({ ...parsed.data, actorId: actorId(req) });
     return reply.code(201).send(result);
   });
 

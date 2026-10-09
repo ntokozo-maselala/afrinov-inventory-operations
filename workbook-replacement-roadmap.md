@@ -204,13 +204,13 @@ The goal is that a storeman can do every daily entry from the sheet's IN and OUT
 
 The goal is to load the workbook's items, prices, locations and opening balances in a way that can be repeated and checked. See Data migration below for the method.
 
-- [ ] Importer that reads the four Main sheets and the four Summary sheets
-- [ ] Mapping file: old Product ID to new SKU, location spelling to location, unit of measure per item
-- [ ] Dry-run mode with a report of every problem (duplicates, blanks, unmapped values) before anything is written
-- [ ] Opening balances posted as one dated "Opening balance" receipt per item and location
-- [ ] Projects, recipients and suppliers loaded from the Project No. and Employees sheets and the supplier names
-- [ ] Reconciliation report: item count and rand value per category, platform against workbook
-- [ ] Stock count screen: count sheet by location, with variances posted as adjustments
+- [x] Importer that reads the four Main sheets and the four Summary sheets
+- [x] Mapping file: old Product ID to new SKU, location spelling to location, unit of measure per item
+- [x] Dry-run mode with a report of every problem (duplicates, blanks, unmapped values) before anything is written
+- [x] Opening balances posted as one dated "Opening balance" receipt per item and location
+- [x] Projects, recipients and suppliers loaded from the Project No. and Employees sheets and the supplier names
+- [x] Reconciliation report: item count and rand value per category, platform against workbook
+- [x] Stock count screen: count sheet by location, with variances posted as adjustments
 
 **Exit criteria:** the dry run reports no unresolved problems; item counts and value per category match the workbook to the rand, or each difference is explained.
 
