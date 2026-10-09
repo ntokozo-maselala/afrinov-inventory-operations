@@ -3,6 +3,9 @@ import { ReportingService } from './reporting.service.js';
 import { ReportService } from './report.service.js';
 import { parseReportQuery } from './report-query.schema.js';
 import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
+import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
+import { getStatusBands } from '../../shared/inventory/stock-status.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { Errors } from '../../shared/errors.js';
@@ -48,6 +51,25 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     const allowed = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
     if (status.some((x) => !allowed.includes(x))) throw Errors.validation(`status must be one or more of ${allowed.join(', ')}`);
     return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
+  });
+
+  // The items to re-order (URGENT and WARNING) as an Excel file for the buyer.
+  app.get('/reports/reorder-list/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    const [rows, bands, currency] = await Promise.all([
+      ReportingService.stockStatus({ status: ['URGENT', 'WARNING'], category: q['category'] }),
+      getStatusBands(),
+      SettingsService.getValue<string>('general.defaultCurrency'),
+    ]);
+    const generatedAt = new Date();
+    const buf = await buildReorderXlsx(rows, { generatedAt, bands, currency });
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${reorderFilename(generatedAt)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
   });
 
   app.get('/reports/low-stock', { preHandler: [app.authenticate] }, async (req) => {

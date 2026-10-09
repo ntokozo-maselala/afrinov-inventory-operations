@@ -1469,6 +1469,16 @@ function mockBands(): StatusBands {
   };
 }
 
+// The supplier of the latest posted goods receipt with this item, as the backend reports it.
+function lastSupplierOf(materialId: string): { name: string; receivedAt: string } | null {
+  const latest = state.goodsReceipts
+    .filter((g) => g.status === 'POSTED' && g.lines.some((l) => l.materialId === materialId))
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
+  if (!latest) return null;
+  const name = state.suppliers.find((s) => s.id === latest.supplierId)?.name;
+  return name ? { name, receivedAt: new Date(latest.receivedAt).toISOString() } : null;
+}
+
 // Mirrors ReportingService.stockStatus.
 function computeStockStatus(filter: { status?: StockStatus[]; category?: string }) {
   const balances = computeBalances();
@@ -1488,6 +1498,7 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string 
         locations: mine
           .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
+        lastSupplier: lastSupplierOf(m.id),
       };
     })
     .filter((r) => !filter.status || filter.status.length === 0 || filter.status.includes(r.status))

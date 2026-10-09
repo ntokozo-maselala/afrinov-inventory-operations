@@ -15,7 +15,7 @@ import type { ReportResult } from '../mock/mockReport';
 import { FRONTEND_ONLY } from './client';
 import { useToast } from '../components/Toast';
 
-function triggerDownload(blob: Blob, filename: string): void {
+export function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -58,7 +58,7 @@ export function buildInventoryExportPath(format: ExportFormat, queryString = '')
   return `/reports/inventory/export?${params.toString()}`;
 }
 
-async function errorMessage(response: Response): Promise<string> {
+export async function errorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: { message?: string } };
     if (body.error?.message) return body.error.message;
@@ -68,7 +68,7 @@ async function errorMessage(response: Response): Promise<string> {
   return `Request failed (${response.status})`;
 }
 
-function filenameFromDisposition(header: string | null, fallback: string): string {
+export function filenameFromDisposition(header: string | null, fallback: string): string {
   const match = header?.match(/filename\*?=(?:UTF-8''|")?([^;"]+)/i);
   if (!match?.[1]) return fallback;
   try {
