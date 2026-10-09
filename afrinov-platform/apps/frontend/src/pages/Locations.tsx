@@ -15,6 +15,8 @@ import { Stat } from '../components/Stat';
 import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
+import { formatCurrency } from '../lib/currency';
+import type { ReportResult } from '../api/reportTypes';
 
 type LocationType = 'RACK' | 'STOREROOM' | 'SHOP_FLOOR_AREA' | 'CONTAINER' | 'OFF_SITE';
 type LocationStatus = 'ACTIVE' | 'INACTIVE';
@@ -249,6 +251,15 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
 
 export function Locations() {
   const locations = useApi<Location[]>('/locations');
+  // Stock value per location, from the inventory report's by-location totals
+  // (worked out over every row, so one row of the item list is enough).
+  const report = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=1');
+  const value = useMemo(() => {
+    if (!report.data) return null;
+    const byId = new Map(report.data.byLocation.map((r) => [r.locationId, r.inventoryValue]));
+    const currency = report.data.currency;
+    return (id: string) => formatCurrency(byId.get(id) ?? 0, currency);
+  }, [report.data]);
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -381,6 +392,7 @@ export function Locations() {
             onEdit: (l) => setDrawer({ mode: 'edit', location: l }),
             onToggleStatus: (l) => setPendingStatus(l),
             onDelete: (l) => setPendingDelete(l),
+            value,
           })}
           emptyState={
             <EmptyState
@@ -450,7 +462,10 @@ function columns({
   onEdit,
   onToggleStatus,
   onDelete,
+  value,
 }: {
+  /** Formatted stock value at a location; null while unknown (loading, or no access to reports). */
+  value: ((id: string) => string) | null;
   onView: (l: Location) => void;
   onEdit: (l: Location) => void;
   onToggleStatus: (l: Location) => void;
@@ -468,6 +483,7 @@ function columns({
     { key: 'type', header: 'Type', render: (l) => TYPE_LABEL[l.type] ?? l.type, width: '11rem' },
     { key: 'status', header: 'Status', render: (l) => <Badge tone={l.active ? 'success' : 'neutral'} dot>{l.active ? 'Active' : 'Inactive'}</Badge>, width: '9rem' },
     { key: 'inventory', header: 'Inventory', align: 'right', render: (l) => <span className="font-mono">{l.inventoryCount ?? 0}</span>, width: '7rem' },
+    { key: 'value', header: 'Value', align: 'right', render: (l) => value ? <span className="font-mono">{value(l.id)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     { key: 'updated', header: 'Updated', render: (l) => l.updatedAt ? <span className="text-meta">{formatDate(l.updatedAt)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     {
       key: 'actions', header: '', align: 'right', width: '16rem',
