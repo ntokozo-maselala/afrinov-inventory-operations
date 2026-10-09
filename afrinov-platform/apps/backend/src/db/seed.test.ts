@@ -136,4 +136,18 @@ describe('demo seed catalog', () => {
       running.set(key, after);
     }
   });
+
+  it('says who every issue was for, naming a demo recipient', () => {
+    const src = readSeed();
+    const recipientsBlock = src.match(/const DEMO_RECIPIENTS[\s\S]*?\n\];/)![0]!;
+    const names = new Set(Array.from(recipientsBlock.matchAll(/name:\s*'([^']+)'/g)).map((m) => m[1]!));
+    const txBlock = src.match(/const DEMO_TRANSACTIONS[\s\S]*?\n\];/)![0]!;
+    const issues = Array.from(txBlock.matchAll(/type:\s*'ISSUE'[^}]*\}/g)).map((m) => m[0]);
+    expect(issues.length).toBeGreaterThan(5);
+    for (const issue of issues) {
+      const who = issue.match(/recipient:\s*'([^']+)'/)?.[1];
+      expect(who, issue).toBeDefined();
+      expect(names.has(who!), `${who} is not a demo recipient`).toBe(true);
+    }
+  });
 });

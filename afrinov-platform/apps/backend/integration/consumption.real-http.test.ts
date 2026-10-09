@@ -7,7 +7,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, client, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 
 interface Item { sku: string; issued: number; returned: number; used: number; unitCost: number | null; value: number | null }
-interface Report { from: string; to: string; items: Item[]; byProject: Array<{ projectNumber: string | null; value: number; items: number }>; total: { value: number } }
+interface Line { type: string; sku: string; quantity: number; projectNumber: string | null; issuedBy: string }
+interface Report {
+  from: string; to: string; items: Item[];
+  byProject: Array<{ projectNumber: string | null; value: number; items: number }>;
+  byRecipient: Array<{ recipientId: string | null; name: string | null; type: string | null; value: number; items: number; issues: number }>;
+  lines?: Line[];
+  total: { value: number };
+}
 
 describe('consumption report over real HTTP', () => {
   const run = runId();
@@ -17,6 +24,7 @@ describe('consumption report over real HTTP', () => {
   let server: TestServer;
   let api: ReturnType<typeof client>;
   const sku = { disc: `IT-CONS-DISC-${run}`, pipe: `IT-CONS-PIPE-${run}` };
+  let recipientId = '';
 
   beforeAll(async () => {
     server = await startServer();
@@ -26,6 +34,7 @@ describe('consumption report over real HTTP', () => {
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT consumption rack ${run}`, type: 'RACK' });
     expect((await api('POST', '/projects', { projectNumber: project, name: 'Consumption test' })).status).toBe(201);
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT consumption fitter ${run}`, type: 'WORKER' });
+    recipientId = rcp.body.id;
     for (const m of [disc.body.id, pipe.body.id]) {
       expect((await api('POST', '/inventory-adjustments', { materialId: m, locationId: loc.body.id, quantity: 100, reasonCode: 'OTHER' })).status).toBe(201);
     }
@@ -80,5 +89,24 @@ describe('consumption report over real HTTP', () => {
     });
     expect(file.status).toBe(200);
     expect(file.headers.get('content-disposition')).toContain(`afrinov-consumption-${project}-${today}-to-${today}.xlsx`);
+  });
+
+  it('adds up by recipient, and lists one recipient’s issues and returns newest first', async () => {
+    const all = await api<Report>('GET', `/reports/consumption?${range}`);
+    expect(all.body.byRecipient.find((r) => r.recipientId === recipientId)).toEqual({
+      recipientId, name: `IT consumption fitter ${run}`, type: 'WORKER', value: 1471.75, items: 2, issues: 3,
+    });
+    expect(all.body.lines).toBeUndefined();
+
+    const one = await api<Report>('GET', `/reports/consumption?${range}&recipientId=${recipientId}`);
+    expect(one.body.byRecipient).toHaveLength(1);
+    // The reversed issue of 7 is not there.
+    expect(one.body.lines!.map((l) => [l.type, l.sku, l.quantity, l.projectNumber])).toEqual([
+      ['ISSUE', sku.pipe, 2.5, project],
+      ['ISSUE', sku.disc, 10, null],
+      ['RETURN', sku.disc, -5, project],
+      ['ISSUE', sku.disc, 30, project],
+    ]);
+    expect(one.body.lines!.every((l) => l.issuedBy)).toBe(true);
   });
 });
