@@ -67,6 +67,33 @@ describe('stock counts over real HTTP', () => {
     expect(await prisma.auditLogEntry.findFirst({ where: { entityType: 'StockCount', entityId: res.body.countId } })).toMatchObject({ action: 'STOCK_COUNT' });
   });
 
+  it('counts an item with a negative system balance', async () => {
+    const material = await api<{ id: string }>('POST', '/materials', { sku: `IT-CNT-negative-${run}`, name: `Count negative ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+    expect(material.status).toBe(200);
+    const materialId = material.body.id;
+    const actorId = (await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } })).id;
+
+    // Seed a historical negative balance; ordinary adjustments cannot create one.
+    await prisma.$transaction([
+      prisma.inventoryTransaction.create({ data: { materialId, locationId: rackId, type: 'ADJUSTMENT', quantity: -3, reasonCode: 'OTHER', actorId } }),
+      prisma.inventoryBalance.create({ data: { materialId, locationId: rackId, quantity: -3 } }),
+    ]);
+    expect(await onHand(materialId)).toBe('-3');
+
+    const res = await api<{ countId: string; counted: number; adjusted: number; lines: Array<{ materialId: string; variance: string; transactionId: string | null }> }>('POST', '/stock-counts', {
+      locationId: rackId,
+      lines: [{ materialId, expectedQuantity: -3, countedQuantity: 2 }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ counted: 1, adjusted: 1, lines: [{ materialId, variance: '5', transactionId: expect.any(String) }] });
+    expect(await onHand(materialId)).toBe('2');
+
+    const posted = await prisma.inventoryTransaction.findMany({ where: { referenceType: 'StockCount', referenceId: res.body.countId } });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ id: res.body.lines[0]?.transactionId, materialId, locationId: rackId, type: 'ADJUSTMENT', reasonCode: 'COUNT_VARIANCE' });
+    expect(posted[0]?.quantity.toString()).toBe('5');
+  });
+
   it('refuses the whole count when stock moved while counting, and posts nothing', async () => {
     // The sheet showed 17 discs, but 1 was issued at the counter meanwhile.
     const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT counter ${run}`, type: 'WORKER' });

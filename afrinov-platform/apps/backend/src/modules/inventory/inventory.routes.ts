@@ -48,7 +48,7 @@ export const stockCountSchema = z.object({
   note: z.string().trim().max(500).optional(),
   lines: z.array(z.object({
     materialId: z.string().uuid(),
-    expectedQuantity: z.number().min(0),
+    expectedQuantity: z.number(),
     countedQuantity: z.number().min(0),
   })).min(1).max(2000),
 });
