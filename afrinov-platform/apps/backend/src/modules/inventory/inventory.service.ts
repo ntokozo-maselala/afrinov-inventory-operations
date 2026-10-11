@@ -11,6 +11,7 @@ import { Errors } from '../../shared/errors.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
+import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 
 type Decimal = Prisma.Decimal;
@@ -343,12 +344,17 @@ export const InventoryService = {
         type: 'InventoryIssued', materialId: l.materialId, locationId: l.locationId, quantity: l.qty.toNumber(),
       }));
       const alertsOn = await SettingsService.getValue<boolean>('inventory.enableStockAlerts', tx);
-      for (const t of totals.values()) {
-        await recomputeBalance(t.materialId, t.locationId, tx);
-        const material = materials.get(t.materialId);
-        const updatedBalance = await getCurrentBalance(t.materialId, t.locationId, tx);
-        if (alertsOn && material && updatedBalance.lte(material.requiredStock)) {
-          events.push({ type: 'StockThresholdReached', materialId: t.materialId });
+      for (const t of totals.values()) await recomputeBalance(t.materialId, t.locationId, tx);
+      if (alertsOn) {
+        // The item's status from its total across locations, as the stock status report shows it.
+        const bands = await getStatusBands(tx);
+        for (const materialId of new Set([...totals.values()].map((t) => t.materialId))) {
+          const material = materials.get(materialId);
+          if (!material) continue;
+          const all = await tx.inventoryBalance.aggregate({ where: { materialId }, _sum: { quantity: true } });
+          if (needsAttention(classifyItem(Number(all._sum.quantity ?? 0), Number(material.requiredStock), bands).status)) {
+            events.push({ type: 'StockThresholdReached', materialId });
+          }
         }
       }
 

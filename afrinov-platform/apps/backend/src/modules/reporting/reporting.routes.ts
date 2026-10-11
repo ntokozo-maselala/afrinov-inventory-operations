@@ -41,6 +41,15 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  app.get('/reports/stock-status', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    const status = (q['status'] ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+    const allowed = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
+    if (status.some((x) => !allowed.includes(x))) throw Errors.validation(`status must be one or more of ${allowed.join(', ')}`);
+    return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
+  });
+
   app.get('/reports/low-stock', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
     return ReportingService.lowStock();

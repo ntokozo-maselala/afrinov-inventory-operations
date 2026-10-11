@@ -1,6 +1,39 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
+
+export interface StockStatusRow {
+  materialId: string;
+  sku: string;
+  name: string;
+  category: string;
+  unitOfMeasure: string;
+  requiredStock: string;
+  /** Total across every location. */
+  onHand: string;
+  percentOfRequired: number | null;
+  status: StockStatus;
+  reorderQuantity: string;
+  unitCost: string | null;
+  locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+}
+
+const STATUS_ORDER: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
+
+/** Total on hand per material, from the balances (the ledger's running totals). */
+async function totalsByMaterial(materialIds?: string[]): Promise<Map<string, Prisma.Decimal>> {
+  const rows = await prisma.inventoryBalance.groupBy({
+    by: ['materialId'],
+    where: materialIds ? { materialId: { in: materialIds } } : undefined,
+    _sum: { quantity: true },
+  });
+  return new Map(rows.map((r) => [r.materialId, r._sum.quantity ?? new Prisma.Decimal(0)]));
+}
+
+function statusFor(required: Prisma.Decimal, onHand: Prisma.Decimal | undefined, bands: StatusBands) {
+  return classifyItem(Number(onHand ?? 0), Number(required), bands);
+}
 
 // Reporting reads only. No mutations. Computed from the ledger (ADR-002).
 export const ReportingService = {
@@ -16,7 +49,7 @@ export const ReportingService = {
     const materialIds = Array.from(new Set(balances.map((b) => b.materialId)));
     const locationIds = Array.from(new Set(balances.map((b) => b.locationId)));
 
-    const [materials, locations, multiplier, alertsOn] = await Promise.all([
+    const [materials, locations, bands, alertsOn, totals] = await Promise.all([
       materialIds.length
         ? prisma.material.findMany({
             where: {
@@ -26,8 +59,9 @@ export const ReportingService = {
           })
         : Promise.resolve([]),
       locationIds.length ? prisma.location.findMany({ where: { id: { in: locationIds } } }) : Promise.resolve([]),
-      SettingsService.getValue<number>('inventory.lowStockMultiplier'),
+      getStatusBands(),
       SettingsService.getValue<boolean>('inventory.enableStockAlerts'),
+      totalsByMaterial(materialIds),
     ]);
 
     const matMap = new Map(materials.map((m) => [m.id, m]));
@@ -38,8 +72,10 @@ export const ReportingService = {
       .map((b) => {
         const m = matMap.get(b.materialId)!;
         const l = locMap.get(b.locationId)!;
-        const requiredStock = m.requiredStock.mul(new Prisma.Decimal(multiplier));
-        const belowThreshold = alertsOn && b.quantity.lte(requiredStock);
+        const requiredStock = m.requiredStock;
+        // The item's status, from its total across locations; the same on each of its rows.
+        const item = statusFor(m.requiredStock, totals.get(m.id), bands);
+        const belowThreshold = alertsOn && needsAttention(item.status);
         return {
           materialId: b.materialId,
           materialSku: m.sku,
@@ -52,6 +88,8 @@ export const ReportingService = {
           locationType: l.type,
           quantity: b.quantity.toString(),
           belowThreshold,
+          stockStatus: alertsOn ? item.status : null,
+          percentOfRequired: item.percentOfRequired,
         };
       });
   },
@@ -98,49 +136,57 @@ export const ReportingService = {
     }));
   },
 
-  async lowStock() {
-    const [balances, multiplier, alertsOn] = await Promise.all([
-      prisma.inventoryBalance.findMany(),
-      SettingsService.getValue<number>('inventory.lowStockMultiplier'),
-      SettingsService.getValue<boolean>('inventory.enableStockAlerts'),
+  /**
+   * Stock status of every active item: on hand across all locations against
+   * Required Stock, URGENT / WARNING / OK by the setting bands, or NOT_SET.
+   * Most urgent first, then lowest percentage.
+   */
+  async stockStatus(filter: { status?: StockStatus[]; category?: string } = {}): Promise<StockStatusRow[]> {
+    const materials = await prisma.material.findMany({
+      where: { active: true, ...(filter.category ? { category: filter.category as Prisma.MaterialWhereInput['category'] } : {}) },
+      orderBy: { name: 'asc' },
+    });
+    const ids = materials.map((m) => m.id);
+    const [balances, bands] = await Promise.all([
+      ids.length ? prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }) : Promise.resolve([]),
+      getStatusBands(),
     ]);
-    const materialIds = Array.from(new Set(balances.map((b) => b.materialId)));
-    const locationIds = Array.from(new Set(balances.map((b) => b.locationId)));
-    const [materials, locations] = await Promise.all([
-      materialIds.length
-        ? prisma.material.findMany({ where: { id: { in: materialIds } } })
-        : Promise.resolve([]),
-      locationIds.length
-        ? prisma.location.findMany({ where: { id: { in: locationIds } } })
-        : Promise.resolve([]),
-    ]);
-    const matMap = new Map(materials.map((m) => [m.id, m]));
-    const locMap = new Map(locations.map((l) => [l.id, l]));
+    const byMaterial = new Map<string, typeof balances>();
+    for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
 
-    if (!alertsOn) return [];
+    const rows = materials.map((m): StockStatusRow => {
+      const mine = byMaterial.get(m.id) ?? [];
+      const onHand = mine.reduce((a, b) => a.add(b.quantity), new Prisma.Decimal(0));
+      const item = statusFor(m.requiredStock, onHand, bands);
+      return {
+        materialId: m.id,
+        sku: m.sku,
+        name: m.name,
+        category: m.category,
+        unitOfMeasure: m.unitOfMeasure,
+        requiredStock: m.requiredStock.toString(),
+        onHand: onHand.toString(),
+        percentOfRequired: item.percentOfRequired,
+        status: item.status,
+        reorderQuantity: String(item.reorderQuantity),
+        unitCost: m.unitCost === null ? null : m.unitCost.toString(),
+        locations: mine
+          .filter((b) => !b.quantity.isZero())
+          .map((b) => ({ locationId: b.locationId, locationName: b.location.name, quantity: b.quantity.toString() }))
+          .sort((a, b) => a.locationName.localeCompare(b.locationName)),
+      };
+    });
+    return rows
+      .filter((r) => !filter.status || filter.status.length === 0 || filter.status.includes(r.status))
+      .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
+        || (a.percentOfRequired ?? Infinity) - (b.percentOfRequired ?? Infinity)
+        || a.name.localeCompare(b.name));
+  },
 
-    return balances
-      .filter((b) => {
-        const m = matMap.get(b.materialId);
-        if (!m) return false;
-        const required = m.requiredStock.mul(new Prisma.Decimal(multiplier));
-        return b.quantity.lte(required);
-      })
-      .map((b) => {
-        const m = matMap.get(b.materialId)!;
-        const required = m.requiredStock.mul(new Prisma.Decimal(multiplier));
-        const loc = locMap.get(b.locationId);
-        return {
-          materialId: m.id,
-          sku: m.sku,
-          name: m.name,
-          unitOfMeasure: m.unitOfMeasure,
-          locationId: b.locationId,
-          locationName: loc?.name ?? '—',
-          quantity: b.quantity.toString(),
-          requiredStock: required.toString(),
-        };
-      });
+  /** Items that need re-ordering (URGENT or WARNING); empty when stock alerts are off. */
+  async lowStock(): Promise<StockStatusRow[]> {
+    if (!(await SettingsService.getValue<boolean>('inventory.enableStockAlerts'))) return [];
+    return this.stockStatus({ status: ['URGENT', 'WARNING'] });
   },
 
   async projectConsumption(projectNumber: string) {

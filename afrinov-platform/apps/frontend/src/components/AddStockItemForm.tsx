@@ -217,7 +217,7 @@ export function AddStockItemForm({ onCancel, onSaved, onError }: Props) {
               required
             />
           </Field>
-          <Field label="Reorder level" htmlFor="asi-reorder" help="Triggers low-stock alert." error={fieldErrors.requiredStock}>
+          <Field label="Reorder level" htmlFor="asi-reorder" help="Stock status compares stock on hand with this." error={fieldErrors.requiredStock}>
             <Input
               id="asi-reorder"
               type="number"

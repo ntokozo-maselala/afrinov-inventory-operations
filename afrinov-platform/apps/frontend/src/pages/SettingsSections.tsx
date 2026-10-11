@@ -86,18 +86,25 @@ export function SettingsInventory() {
   const { draft, setDraft, errors, save, saving } = useSettings();
   const toast = useToast();
   const items = useCategorySettings('inventory');
-  const lowStockMultiplier = useSetting('inventory.lowStockMultiplier');
+  const urgentBelow = useSetting('inventory.urgentBelowPercent');
+  const warningBelow = useSetting('inventory.warningBelowPercent');
   const defaultUnitOfMeasure = useSetting('inventory.defaultUnitOfMeasure');
   const enableStockAlerts = useSetting('inventory.enableStockAlerts');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
-    <SectionPanel title="Inventory" description="These settings directly control inventory business logic, including low-stock alerts. Stock can never go below zero; that rule is fixed.">
+    <SectionPanel title="Inventory" description="These settings control stock status: an item is URGENT or WARNING when its stock on hand falls below these percentages of its Required Stock, as in the stock workbook. Stock can never go below zero; that rule is fixed.">
       <NumberField
-        def={lowStockMultiplier}
-        value={Number(draft['inventory.lowStockMultiplier'] ?? 0)}
-        onChange={(v) => setDraft('inventory.lowStockMultiplier', v)}
-        error={errors['inventory.lowStockMultiplier'] ?? null}
+        def={urgentBelow}
+        value={Number(draft['inventory.urgentBelowPercent'] ?? 0)}
+        onChange={(v) => setDraft('inventory.urgentBelowPercent', v)}
+        error={errors['inventory.urgentBelowPercent'] ?? null}
+      />
+      <NumberField
+        def={warningBelow}
+        value={Number(draft['inventory.warningBelowPercent'] ?? 0)}
+        onChange={(v) => setDraft('inventory.warningBelowPercent', v)}
+        error={errors['inventory.warningBelowPercent'] ?? null}
       />
       <TextField
         def={defaultUnitOfMeasure}

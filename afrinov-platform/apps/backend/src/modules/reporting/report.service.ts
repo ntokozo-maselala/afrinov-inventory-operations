@@ -11,6 +11,7 @@
 import { Prisma, MaterialCategory as PrismaMaterialCategory } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { resolveDateWindow, type ReportQuery } from './report-query.schema.js';
+import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 
 type Decimal = Prisma.Decimal;
 type MaterialCategory = PrismaMaterialCategory;
@@ -141,9 +142,15 @@ function toNum(d: Decimal | null | undefined): number {
   return d.toNumber();
 }
 
-function classifyStatus(quantity: number, required: number): StockStatus {
+/**
+ * A line is OUT_OF_STOCK when its location holds nothing, and LOW_STOCK when
+ * the item as a whole needs re-ordering (URGENT or WARNING on the stock
+ * status rule, which compares the item's total across locations with its
+ * Required Stock).
+ */
+function classifyStatus(quantity: number, itemNeedsReorder: boolean): StockStatus {
   if (quantity <= 0) return 'OUT_OF_STOCK';
-  if (quantity <= required) return 'LOW_STOCK';
+  if (itemNeedsReorder) return 'LOW_STOCK';
   return 'IN_STOCK';
 }
 
@@ -243,9 +250,10 @@ function buildLine(
   loc: { id: string; name: string; type: string } | undefined,
   qty: number,
   lastUpdated: Date | null,
+  itemNeedsReorder: boolean,
 ): ReportInventoryLine {
   const required = toNum(m.requiredStock);
-  const status = classifyStatus(qty, required);
+  const status = classifyStatus(qty, itemNeedsReorder);
   const cost = m.unitCost ? toNum(m.unitCost) : null;
   const value = cost === null ? 0 : qty * cost;
   return {
@@ -279,11 +287,17 @@ export const ReportService = {
    * to guarantee they cannot drift.
    */
   async inventory(q: ReportQuery): Promise<ReportResult> {
-    const [materials, balances, locations] = await Promise.all([
+    const [materials, balances, locations, bands] = await Promise.all([
       loadMaterials(q),
       loadBalances(q),
       loadLocations(),
+      getStatusBands(),
     ]);
+    // Status needs each item's total everywhere, even when the report is filtered to some locations.
+    const totalByMaterial = new Map(
+      (await prisma.inventoryBalance.groupBy({ by: ['materialId'], _sum: { quantity: true } }))
+        .map((r) => [r.materialId, toNum(r._sum.quantity)]),
+    );
 
     const matMap = new Map(materials.map((m) => [m.id, m]));
 
@@ -316,9 +330,12 @@ export const ReportService = {
     for (const m of materials) {
       const myBals = balancesByMaterial.get(m.id) ?? [];
       if (myBals.length === 0) {
-        allLines.push(buildLine(m, undefined, 0, lastUpdateByMaterial.get(m.id) ?? null));
+        allLines.push(buildLine(m, undefined, 0, lastUpdateByMaterial.get(m.id) ?? null, true));
         continue;
       }
+      const itemNeedsReorder = needsAttention(
+        classifyItem(totalByMaterial.get(m.id) ?? 0, toNum(m.requiredStock), bands).status,
+      );
       for (const b of myBals) {
         const loc = locations.get(b.locationId);
         if (q.locationId.length > 0 && !q.locationId.includes(b.locationId)) continue;
@@ -327,6 +344,7 @@ export const ReportService = {
           loc,
           toNum(b.quantity),
           lastUpdateByMaterial.get(m.id) ?? null,
+          itemNeedsReorder,
         );
         if (q.stockStatus !== 'ALL' && line.status !== q.stockStatus) continue;
         allLines.push(line);

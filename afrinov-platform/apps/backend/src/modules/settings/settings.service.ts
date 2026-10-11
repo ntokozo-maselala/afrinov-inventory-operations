@@ -169,9 +169,10 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'general.defaultLandingPage', type: 'enum', category: 'general', description: 'Where to go after sign-in.', default: 'dashboard', enumOptions: LANDING_PAGES, validate: ENUM(LANDING_PAGES) },
 
   // ── Inventory ──────────────────────────────────────────────────────────
-  { key: 'inventory.lowStockMultiplier', type: 'number', category: 'inventory', description: 'Multiplier applied to per-material reorder thresholds (e.g. 0.5 = warn at half the threshold; 2 = only at double).', default: 1, validate: NON_NEG(5) },
+  { key: 'inventory.urgentBelowPercent', type: 'number', category: 'inventory', description: 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.', default: 20, validate: NON_NEG(100) },
+  { key: 'inventory.warningBelowPercent', type: 'number', category: 'inventory', description: 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT). At or above it, the item is OK.', default: 40, validate: NON_NEG(1000) },
   { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'Default unit of measure suggested for new materials.', default: 'each', validate: isLength(1, 20) },
-  { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Highlight materials at or below their reorder threshold.', default: true },
+  { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.', default: true },
 
   // ── Purchase Orders ─────────────────────────────────────────────────────
   { key: 'purchaseOrders.requireApprovalBeforeProcessing', type: 'boolean', category: 'purchase_orders', description: 'When on, submitting a purchase order moves it to PENDING_APPROVAL; when off, submission auto-approves.', default: true },

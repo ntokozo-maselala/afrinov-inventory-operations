@@ -216,7 +216,7 @@ The goal is to load the workbook's items, prices, locations and opening balances
 
 ### Phase 3: Reporting the store already reads
 
-- [ ] Stock status per item: % of required, URGENT below 20%, WARNING below 40%, OK otherwise (the bands become settings)
+- [x] Stock status per item: % of required, URGENT below 20%, WARNING below 40%, OK otherwise (the bands become settings)
 - [ ] Re-order quantity = required − on hand, with a re-order list export
 - [ ] Value consumed by project and by date range (quantity × unit cost), replacing the Stock Report sheets
 - [ ] Stock value per category on the dashboard, matching the Summary totals

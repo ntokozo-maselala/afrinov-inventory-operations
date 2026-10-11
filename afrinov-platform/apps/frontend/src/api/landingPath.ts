@@ -9,7 +9,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 const LANDING_PATHS: Record<string, string> = {
   dashboard: '/',
   inventory: '/stock',
-  'low-stock': '/reports/low-stock',
+  'low-stock': '/reports/stock-status',
   movements: '/movements',
   'purchase-orders': '/purchase-orders',
 };

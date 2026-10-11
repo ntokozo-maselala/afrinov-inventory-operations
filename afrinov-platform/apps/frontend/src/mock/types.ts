@@ -167,6 +167,9 @@ export interface MockStockRow {
   locationType: LocationType;
   quantity: string;
   belowThreshold: boolean;
+  /** The item's status from its total across locations; null when stock alerts are off. */
+  stockStatus: 'URGENT' | 'WARNING' | 'OK' | 'NOT_SET' | null;
+  percentOfRequired: number | null;
 }
 
 export interface MockMovementRow {

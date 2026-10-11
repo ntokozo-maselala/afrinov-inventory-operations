@@ -59,7 +59,7 @@ export function useNavGroups(): NavGroup[] {
       title: 'Insights',
       items: [
         { to: '/reports/inventory', label: 'Inventory report', icon: <Icon.Chart /> },
-        { to: '/reports/low-stock', label: 'Low stock', icon: <Icon.Warning /> },
+        { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
       ],
     },
     {

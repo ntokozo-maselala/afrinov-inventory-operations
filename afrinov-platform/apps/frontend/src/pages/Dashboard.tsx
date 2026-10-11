@@ -10,7 +10,8 @@ import { useApi } from '../hooks/useApi';
 import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import type { ReportResult, ReportInventoryLine } from '../mock/mockReport';
-import type { LowStockItem } from './LowStock';
+import type { StockStatusItem } from './StockStatus';
+import { StockStatusBadge } from '../components/StockStatusBadge';
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   IN_STOCK: 'success',
@@ -39,7 +40,7 @@ export function Dashboard() {
   }, [range]);
 
   const { data: report, loading, error, reload } = useApi<ReportResult>(query);
-  const { data: lowStock, loading: lowStockLoading } = useApi<LowStockItem[]>('/reports/low-stock');
+  const { data: lowStock, loading: lowStockLoading } = useApi<StockStatusItem[]>('/reports/low-stock');
 
   const kpis = useMemo(() => {
     if (!report) return null;
@@ -183,7 +184,7 @@ export function Dashboard() {
         <section aria-label="Attention required">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-h2 text-surface-900">Attention Required</h2>
-            <Link to="/reports/low-stock">
+            <Link to="/reports/stock-status">
               <Button variant="secondary" size="sm">View all</Button>
             </Link>
           </div>
@@ -193,10 +194,10 @@ export function Dashboard() {
                 <tr>
                   <th scope="col">SKU</th>
                   <th scope="col">Material</th>
-                  <th scope="col">Location</th>
+                  <th scope="col">Where</th>
                   <th scope="col" className="text-right">On Hand</th>
-                  <th scope="col" className="text-right">Reorder At</th>
-                  <th scope="col" className="text-right">Shortfall</th>
+                  <th scope="col" className="text-right">Required</th>
+                  <th scope="col" className="text-right">Re-order qty</th>
                   <th scope="col" className="text-center">Status</th>
                 </tr>
               </thead>
@@ -212,39 +213,36 @@ export function Dashboard() {
                 ) : attentionItems.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-0">
-                      <EmptyState title="No items need attention" description="All inventory items are above their reorder thresholds." />
+                      <EmptyState title="No items need attention" description="Every item with a Required Stock has at least 40% of it on hand." />
                     </td>
                   </tr>
                 ) : (
                   attentionItems.map((item, i) => {
-                    const onHand = Number(item.quantity) || 0;
-                    const reorder = Number(item.requiredStock) || 0;
-                    const shortfall = Math.max(0, reorder - onHand);
-                    const status = onHand <= 0 ? 'OUT_OF_STOCK' : 'LOW_STOCK';
+                    const onHand = Number(item.onHand) || 0;
+                    const required = Number(item.requiredStock) || 0;
+                    const reorder = Number(item.reorderQuantity) || 0;
                     return (
-                      <tr key={`${item.materialId}-${item.locationId}-${i}`} className="cursor-pointer" onClick={() => navigate(`/materials/${item.materialId}`)}>
+                      <tr key={`${item.materialId}-${i}`} className="cursor-pointer" onClick={() => navigate(`/materials/${item.materialId}`)}>
                         <td>
-                          <span className="font-mono text-xs">{item.sku ?? <span className="text-surface-400">—</span>}</span>
+                          <span className="font-mono text-xs">{item.sku}</span>
                         </td>
                         <td>
                           <span className="text-sm font-medium text-surface-900">{item.name}</span>
                         </td>
                         <td>
-                          <span className="text-sm text-surface-600">{item.locationName}</span>
+                          <span className="text-sm text-surface-600">{item.locations.map((l) => l.locationName).join(', ') || '—'}</span>
                         </td>
                         <td className="text-right">
-                          <span className={`font-mono text-sm ${onHand <= 0 ? 'text-danger-700 font-medium' : 'text-surface-900'}`}>{formatNumber(onHand)}</span>
+                          <span className={`font-mono text-sm ${onHand <= 0 ? 'text-danger-600 font-medium' : 'text-surface-900'}`}>{formatNumber(onHand)}</span>
                         </td>
                         <td className="text-right">
-                          <span className="font-mono text-sm text-surface-500">{formatNumber(reorder)}</span>
+                          <span className="font-mono text-sm text-surface-500">{formatNumber(required)}</span>
                         </td>
                         <td className="text-right">
-                          <span className={`font-mono text-sm ${shortfall > 0 ? 'text-danger-700 font-medium' : 'text-surface-400'}`}>{formatNumber(shortfall)}</span>
+                          <span className="font-mono text-sm font-medium">{formatNumber(reorder)}</span>
                         </td>
                         <td className="text-center">
-                          <Badge tone={status === 'OUT_OF_STOCK' ? 'danger' : 'warning'} dot>
-                            {status === 'OUT_OF_STOCK' ? 'Out of stock' : 'Low stock'}
-                          </Badge>
+                          <StockStatusBadge status={item.status} percent={item.percentOfRequired} />
                         </td>
                       </tr>
                     );

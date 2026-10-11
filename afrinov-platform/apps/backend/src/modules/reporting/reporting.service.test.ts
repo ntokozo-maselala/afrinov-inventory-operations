@@ -40,17 +40,29 @@ vi.mock('../../shared/db.js', () => ({
 function makePrisma(): unknown {
   return {
     inventoryBalance: {
-      findMany: async ({ where }: { where?: { locationId?: string; materialId?: string } } = {}) => {
+      findMany: async ({ where, include }: { where?: { locationId?: string; materialId?: string | { in: string[] } }; include?: unknown } = {}) => {
         let list = db.balances.slice();
         if (where?.locationId) list = list.filter((b) => b.locationId === where.locationId);
-        if (where?.materialId) list = list.filter((b) => b.materialId === where.materialId);
-        return list;
+        const mid = where?.materialId;
+        if (typeof mid === 'string') list = list.filter((b) => b.materialId === mid);
+        else if (mid?.in) list = list.filter((b) => mid.in.includes(b.materialId));
+        return include ? list.map((b) => ({ ...b, location: { name: db.locations.find((l) => l.id === b.locationId)?.name ?? 'Loc' } })) : list;
+      },
+      groupBy: async ({ where }: { where?: { materialId?: { in: string[] } } } = {}) => {
+        const sums = new Map<string, Prisma.Decimal>();
+        for (const b of db.balances) {
+          if (where?.materialId?.in && !where.materialId.in.includes(b.materialId)) continue;
+          sums.set(b.materialId, (sums.get(b.materialId) ?? DEC(0)).add(b.quantity));
+        }
+        return [...sums].map(([materialId, quantity]) => ({ materialId, _sum: { quantity } }));
       },
     },
     material: {
-      findMany: async ({ where }: { where?: { id: { in: string[] } }; category?: string } = {}) => {
+      findMany: async ({ where }: { where?: { id?: { in: string[] }; active?: boolean; category?: string } } = {}) => {
         let list = db.materials.slice();
-        if (where?.id?.in) list = list.filter((m) => where.id.in.includes(m.id));
+        if (where?.id?.in) list = list.filter((m) => where.id!.in.includes(m.id));
+        if (where?.active !== undefined) list = list.filter((m) => m.active === where.active);
+        if (where?.category) list = list.filter((m) => m.category === where.category);
         return list;
       },
     },
@@ -141,7 +153,7 @@ describe('ReportingService', () => {
       expect(first.requiredStock).toBe('10');
     });
 
-    it('marks items below threshold when alerts are enabled (default)', async () => {
+    it('marks items needing re-order (URGENT or WARNING) when alerts are enabled (default)', async () => {
       seedMaterials();
       db.balances = [
         { materialId: 'm-1', locationId: 'l-1', quantity: DEC(5), updatedAt: new Date() },
@@ -150,9 +162,11 @@ describe('ReportingService', () => {
       const { ReportingService } = await import('./reporting.service.js');
       const result = await ReportingService.currentStock();
       const below = result.find((r) => r.materialId === 'm-1');
-      expect(below!.belowThreshold).toBe(true);
+      expect(below).toMatchObject({ belowThreshold: false, stockStatus: 'OK', percentOfRequired: 50 });
       const above = result.find((r) => r.materialId === 'm-2');
-      expect(above!.belowThreshold).toBe(false);
+      expect(above).toMatchObject({ belowThreshold: false, stockStatus: 'OK', percentOfRequired: 200 });
+      db.balances = [{ materialId: 'm-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() }];
+      expect((await ReportingService.currentStock())[0]).toMatchObject({ belowThreshold: true, stockStatus: 'URGENT', percentOfRequired: 10 });
     });
 
     it('never marks anything below threshold when enableStockAlerts is off', async () => {
@@ -164,21 +178,19 @@ describe('ReportingService', () => {
       ];
       const { ReportingService } = await import('./reporting.service.js');
       const result = await ReportingService.currentStock();
-      expect(result.every((r) => r.belowThreshold === false)).toBe(true);
+      expect(result.every((r) => r.belowThreshold === false && r.stockStatus === null)).toBe(true);
     });
 
-    it('applies the lowStockMultiplier to the threshold', async () => {
+    it('judges each row by the item\'s total across locations', async () => {
       seedMaterials();
-      db.settings.set('inventory.lowStockMultiplier', { value: 2 });
+      // Bolt: required 10; 1 + 3 = 4 on hand in all = 40% → OK, though each row alone is below 40%.
       db.balances = [
-        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(15), updatedAt: new Date() },
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() },
+        { materialId: 'm-1', locationId: 'l-2', quantity: DEC(3), updatedAt: new Date() },
       ];
       const { ReportingService } = await import('./reporting.service.js');
       const result = await ReportingService.currentStock();
-      const row = result[0]!;
-      // requiredStock 10 × multiplier 2 = 20; 15 <= 20 → below threshold
-      expect(row.requiredStock).toBe('20');
-      expect(row.belowThreshold).toBe(true);
+      expect(result.map((r) => [r.locationId, r.stockStatus, r.requiredStock])).toEqual([['l-1', 'OK', '10'], ['l-2', 'OK', '10']]);
     });
 
     it('filters by locationId', async () => {
@@ -206,42 +218,78 @@ describe('ReportingService', () => {
     });
   });
 
+  describe('stockStatus', () => {
+    it('grades every active item by on hand as a share of Required Stock, most urgent first', async () => {
+      seedMaterials();
+      db.materials.push(
+        { id: 'm-4', sku: 'SKU-004', name: 'Tape', category: 'CONSUMABLES', unitOfMeasure: 'roll', requiredStock: DEC(0), unitCost: null, active: true },
+        { id: 'm-5', sku: 'SKU-005', name: 'Old part', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: DEC(10), unitCost: null, active: false },
+      );
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() }, // 10% of 10
+        { materialId: 'm-1', locationId: 'l-2', quantity: DEC(0.9), updatedAt: new Date() }, // 19% in all → URGENT
+        { materialId: 'm-2', locationId: 'l-1', quantity: DEC(10), updatedAt: new Date() }, // 20% of 50 → WARNING
+        { materialId: 'm-3', locationId: 'l-1', quantity: DEC(10), updatedAt: new Date() }, // 40% of 25 → OK
+        { materialId: 'm-4', locationId: 'l-1', quantity: DEC(7), updatedAt: new Date() }, // no Required Stock
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus();
+      expect(rows.map((r) => [r.sku, r.status, r.percentOfRequired, r.onHand, r.reorderQuantity])).toEqual([
+        ['SKU-001', 'URGENT', 19, '1.9', '8.1'],
+        ['SKU-002', 'WARNING', 20, '10', '40'],
+        ['SKU-003', 'OK', 40, '10', '15'],
+        ['SKU-004', 'NOT_SET', null, '7', '0'],
+      ]);
+      expect(rows[0]!.locations).toEqual([
+        { locationId: 'l-2', locationName: 'Boiler Shop', quantity: '0.9' },
+        { locationId: 'l-1', locationName: 'Main Storeroom', quantity: '1' },
+      ]);
+    });
+
+    it('lists an item with no stock anywhere as URGENT', async () => {
+      seedMaterials();
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus({ status: ['URGENT'] });
+      expect(rows.map((r) => [r.sku, r.onHand, r.percentOfRequired])).toEqual([['SKU-001', '0', 0], ['SKU-002', '0', 0], ['SKU-003', '0', 0]]);
+    });
+
+    it('uses the bands from settings', async () => {
+      seedMaterials();
+      db.settings.set('inventory.urgentBelowPercent', { value: 10 });
+      db.settings.set('inventory.warningBelowPercent', { value: 60 });
+      db.balances = [{ materialId: 'm-1', locationId: 'l-1', quantity: DEC(5), updatedAt: new Date() }];
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus({ status: ['WARNING'] });
+      expect(rows.map((r) => r.sku)).toContain('SKU-001');
+    });
+
+    it('filters by category', async () => {
+      seedMaterials();
+      const { ReportingService } = await import('./reporting.service.js');
+      expect((await ReportingService.stockStatus({ category: 'ELECTRICAL' })).map((r) => r.sku)).toEqual(['SKU-002']);
+    });
+  });
+
   describe('lowStock', () => {
     it('returns an empty array when enableStockAlerts is off', async () => {
       seedMaterials();
       db.settings.set('inventory.enableStockAlerts', { value: false });
-      db.balances = [
-        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(0), updatedAt: new Date() },
-      ];
       const { ReportingService } = await import('./reporting.service.js');
-      const result = await ReportingService.lowStock();
-      expect(result).toEqual([]);
+      expect(await ReportingService.lowStock()).toEqual([]);
     });
 
-    it('returns only below-threshold rows when alerts are enabled', async () => {
+    it('returns the items that are URGENT or WARNING', async () => {
       seedMaterials();
       db.balances = [
-        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(5), updatedAt: new Date() },
-        { materialId: 'm-2', locationId: 'l-1', quantity: DEC(100), updatedAt: new Date() },
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(3), updatedAt: new Date() }, // 30% → WARNING
+        { materialId: 'm-2', locationId: 'l-1', quantity: DEC(100), updatedAt: new Date() }, // 200% → OK
+        { materialId: 'm-3', locationId: 'l-1', quantity: DEC(0), updatedAt: new Date() }, // 0% → URGENT
       ];
       const { ReportingService } = await import('./reporting.service.js');
       const result = await ReportingService.lowStock();
-      expect(result).toHaveLength(1);
-      expect(result[0]!.materialId).toBe('m-1');
-      expect(result[0]!.sku).toBe('SKU-001');
-      expect(Number(result[0]!.quantity)).toBe(5);
-      expect(Number(result[0]!.requiredStock)).toBe(10);
-    });
-
-    it('includes out-of-stock items (quantity 0) as low stock', async () => {
-      seedMaterials();
-      db.balances = [
-        { materialId: 'm-3', locationId: 'l-1', quantity: DEC(0), updatedAt: new Date() },
-      ];
-      const { ReportingService } = await import('./reporting.service.js');
-      const result = await ReportingService.lowStock();
-      expect(result).toHaveLength(1);
-      expect(Number(result[0]!.quantity)).toBe(0);
+      expect(result.map((r) => [r.sku, r.status, r.onHand, r.requiredStock])).toEqual([
+        ['SKU-003', 'URGENT', '0', '25'], ['SKU-001', 'WARNING', '3', '10'],
+      ]);
     });
   });
 

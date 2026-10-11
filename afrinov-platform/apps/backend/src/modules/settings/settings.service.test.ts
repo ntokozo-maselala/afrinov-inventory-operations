@@ -272,9 +272,9 @@ describe('SettingsService', () => {
   it('getValues returns a key->value map for the requested keys', async () => {
     const { SettingsService } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();
-    const map = await SettingsService.getValues(['general.companyName', 'inventory.lowStockMultiplier', 'does.not.exist']);
+    const map = await SettingsService.getValues(['general.companyName', 'inventory.urgentBelowPercent', 'does.not.exist']);
     expect(map['general.companyName']).toBe('Afrinov');
-    expect(map['inventory.lowStockMultiplier']).toBe(1);
+    expect(map['inventory.urgentBelowPercent']).toBe(20);
     expect(map['does.not.exist']).toBeUndefined();
   });
 
@@ -351,7 +351,7 @@ describe('SettingsService', () => {
       const { SettingsService } = await import('./settings.service.js');
       await SettingsService.ensureSeeded();
       await expect(
-        SettingsService.set('inventory.lowStockMultiplier', -1, 'u-1'),
+        SettingsService.set('inventory.urgentBelowPercent', -1, 'u-1'),
       ).rejects.toThrow(/at least 0/i);
     });
   });
