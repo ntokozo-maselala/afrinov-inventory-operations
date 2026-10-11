@@ -64,5 +64,20 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   wp.getRow(3).font = { bold: true };
   for (const p of r.byProject) wp.addRow([p.projectNumber ?? 'No project', p.projectName ?? '', p.items, p.value]);
   wp.addRow([null, 'Total', null, r.total.value]).font = { bold: true };
+
+  const wr = wb.addWorksheet('By recipient');
+  wr.getCell('A1').value = `Stock issued by recipient, ${r.from} to ${r.to}`;
+  wr.getRow(3).values = ['Issued to', 'Type', 'Issues', 'Items', 'Value'];
+  wr.getRow(3).font = { bold: true };
+  for (const x of r.byRecipient) wr.addRow([x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', x.issues, x.items, x.value]);
+  wr.addRow(['Total', null, null, null, r.total.value]).font = { bold: true };
+
+  if (r.lines) {
+    const wl = wb.addWorksheet('Issues');
+    wl.getCell('A1').value = `Issued to ${r.byRecipient[0]?.name ?? 'the recipient'}, ${r.from} to ${r.to}`;
+    wl.getRow(3).values = ['Date', 'Issue/Return', 'Code', 'Item', 'Quantity', 'Unit', 'Project', 'Issued by'];
+    wl.getRow(3).font = { bold: true };
+    for (const l of r.lines) wl.addRow([new Date(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, l.quantity, l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy]);
+  }
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }

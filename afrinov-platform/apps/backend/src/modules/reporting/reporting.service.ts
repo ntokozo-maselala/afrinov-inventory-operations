@@ -21,6 +21,25 @@ export interface StockStatusRow {
   lastSupplier: { name: string; receivedAt: string } | null;
 }
 
+export interface StockValueReport {
+  currency: string;
+  /** In the workbook's order: Consumables, Fasteners, Tooling, Project Material, then Tools. */
+  categories: Array<{
+    category: string;
+    items: number;
+    itemsInStock: number;
+    /** On hand × unit price, items with a price. */
+    value: number;
+    /** Items with stock but no unit price, so not in the value. */
+    unpriced: number;
+    share: number;
+  }>;
+  total: { items: number; itemsInStock: number; value: number; unpriced: number };
+  status: Record<StockStatus, number> & { outOfStock: number };
+}
+
+const CATEGORY_ORDER = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
+
 const STATUS_ORDER: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
 
 /** Total on hand per material, from the balances (the ledger's running totals). */
@@ -200,6 +219,44 @@ export const ReportingService = {
       .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
         || (a.percentOfRequired ?? Infinity) - (b.percentOfRequired ?? Infinity)
         || a.name.localeCompare(b.name));
+  },
+
+  /**
+   * The value of the stock on hand now, per category, as the workbook's
+   * Summary sheets add it up row by row (Current Stock × Unit Price), with the
+   * item counts by stock status for the dashboard cards.
+   */
+  async stockValue(): Promise<StockValueReport> {
+    const [rows, currency] = await Promise.all([this.stockStatus(), SettingsService.getValue<string>('general.defaultCurrency')]);
+    const cats = new Map<string, { items: number; itemsInStock: number; value: number; unpriced: number }>();
+    const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
+    for (const r of rows) {
+      const onHand = Number(r.onHand);
+      const c = cats.get(r.category) ?? { items: 0, itemsInStock: 0, value: 0, unpriced: 0 };
+      c.items++;
+      if (onHand > 0) {
+        c.itemsInStock++;
+        if (r.unitCost === null) c.unpriced++;
+        else c.value += onHand * Number(r.unitCost);
+      } else {
+        status.outOfStock++;
+      }
+      cats.set(r.category, c);
+      status[r.status]++;
+    }
+    const total = [...cats.values()].reduce(
+      (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
+      { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
+    );
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      currency,
+      categories: [...cats]
+        .sort(([a], [b]) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99))
+        .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
+      total: { ...total, value: round2(total.value) },
+      status,
+    };
   },
 
   /** Items that need re-ordering (URGENT or WARNING); empty when stock alerts are off. */

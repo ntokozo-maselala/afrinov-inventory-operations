@@ -16,13 +16,24 @@ const REPORT = {
     { materialId: 'm-2', sku: 'PRJ-1', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', issued: 2.5, returned: 0, used: 2.5, unitCost: null, value: null },
   ],
   byProject: [{ projectNumber: 'AFRI-1325', projectName: 'Plant upgrade', value: 1051.25, items: 2 }, { projectNumber: null, projectName: null, value: 0, items: 1 }],
+  byRecipient: [
+    { recipientId: 'r-1', name: 'Sabelo', type: 'WORKER', value: 1051.25, items: 2, issues: 3 },
+    { recipientId: null, name: null, type: null, value: 0, items: 1, issues: 1 },
+  ],
   byCategory: [{ category: 'CONSUMABLES', value: 1051.25, items: 1 }],
   total: { value: 1051.25, items: 2, unpriced: 1 },
 };
 
+const LINES = [
+  { id: 't-2', postedAt: '2026-10-03T09:30:00.000Z', type: 'RETURN', sku: 'CON-1', name: 'Grinding disc', unitOfMeasure: 'each', quantity: -5, projectNumber: 'AFRI-1325', issuedBy: 'Vusi' },
+  { id: 't-1', postedAt: '2026-10-02T08:00:00.000Z', type: 'ISSUE', sku: 'CON-1', name: 'Grinding disc', unitOfMeasure: 'each', quantity: 30, projectNumber: 'AFRI-1325', issuedBy: 'Vincent' },
+];
+
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade' }];
+    if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo', type: 'WORKER', active: true }, { id: 'r-2', name: 'Khodani', type: 'WORKER', active: false }];
+    if (path.includes('recipientId=')) return { ...REPORT, byRecipient: [REPORT.byRecipient[0]], lines: LINES };
     return REPORT;
   });
   render(<MemoryRouter><ToastProvider><Consumption /></ToastProvider></MemoryRouter>);
@@ -89,5 +100,20 @@ describe('Consumption page', () => {
     await waitFor(() => expect(lastReportCall()).toContain('category=CONSUMABLES'));
     fireEvent.click(screen.getByRole('button', { name: 'Download as Excel' }));
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(expect.stringContaining('category=CONSUMABLES')));
+  });
+
+  it('adds up by who it was issued to, and lists one recipient\u2019s issues and returns', async () => {
+    renderPage();
+    await screen.findByText('Pipe');
+    const byRecipient = within(screen.getByLabelText('Stock used by recipient'));
+    expect(byRecipient.getByRole('button', { name: 'Not recorded' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Khodani (inactive)' })).toBeInTheDocument();
+    fireEvent.click(byRecipient.getByRole('button', { name: 'Sabelo' }));
+
+    await waitFor(() => expect(lastReportCall()).toContain('recipientId=r-1'));
+    const issues = within(await screen.findByLabelText('Issued to Sabelo'));
+    expect(issues.getByText('5 returned')).toBeInTheDocument();
+    expect(issues.getByText('Vincent')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Stock used by recipient')).not.toBeInTheDocument();
   });
 });

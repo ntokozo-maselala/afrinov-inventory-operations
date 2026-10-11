@@ -402,15 +402,38 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], errors: [400],
   },
   {
+    method: 'get', path: '/reports/month-end', tag: 'Reports', summary: 'Month-end stock report',
+    description: 'Stock as at the end of ?month=YYYY-MM (default this month), rebuilt from the ledger, per category in '
+      + "the stock workbook's Summary columns (required, current, value, % of required, re-order quantity, URGENCY), "
+      + 'with the stock used in the month (Stock Report sheets). Refused with 400 for a future month.',
+    permissions: [P.ViewReports], errors: [400],
+  },
+  {
+    method: 'get', path: '/reports/month-end/export', tag: 'Reports', summary: 'Download the month-end report',
+    description: 'The month-end report as Excel in the workbook layout: Overview, then a Summary and a Used sheet per category.',
+    permissions: [P.ViewReports], errors: [400],
+    produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  },
+  {
+    method: 'get', path: '/reports/stock-value', tag: 'Reports', summary: 'Value of the stock on hand, per category',
+    description: 'For every active item: on hand across all locations × unit price, added up per category as the stock '
+      + "workbook's Summary sheets do, with item counts, items in stock but without a price, each category's share, and "
+      + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock.',
+    permissions: [P.ViewReports],
+  },
+  {
     method: 'get', path: '/reports/consumption', tag: 'Reports', summary: 'Stock used in a date range',
     description: 'Issued less returned per item between ?from and ?to (YYYY-MM-DD, both included; default this month), '
       + 'valued at the unit price, with totals by project and by category. Reversed issues and returns are left out with '
-      + 'their reversals. Optional ?projectNumber= (__none__ for issues with no project) and ?category=.',
+      + 'their reversals. Totals by project, by recipient and by category. Optional ?projectNumber= (__none__ for issues '
+      + 'with no project), ?category= and ?recipientId= (__none__ for issues with no recipient recorded); with a recipient, '
+      + 'their issues and returns are listed one by one, newest first (up to 1000).',
     permissions: [P.ViewReports], errors: [400],
   },
   {
     method: 'get', path: '/reports/consumption/export', tag: 'Reports', summary: 'Download stock used as Excel',
-    description: 'The consumption report, same query, as a By item sheet grouped by category and a By project sheet.',
+    description: 'The consumption report, same query, as By item (grouped by category), By project and By recipient '
+      + 'sheets, plus an Issues sheet when one recipient is asked for.',
     permissions: [P.ViewReports], errors: [400],
     produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   },

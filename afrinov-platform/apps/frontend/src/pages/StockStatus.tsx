@@ -3,7 +3,7 @@
 // URGENCY column does, with the re-order quantity. GET /reports/stock-status.
 // The bands are settings (Settings → Inventory).
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
@@ -57,7 +57,8 @@ const VIEWS: Array<{ value: string; label: string }> = [
 export function StockStatus() {
   const items = useApi<StockStatusItem[]>('/reports/stock-status');
   const [q, setQ] = useState('');
-  const [view, setView] = useState('attention');
+  const [params] = useSearchParams();
+  const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'attention'));
   const [category, setCategory] = useState('');
   const [downloading, setDownloading] = useState(false);
   const toast = useToast();

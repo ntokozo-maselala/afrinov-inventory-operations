@@ -81,6 +81,38 @@ export async function buildConsumptionXlsx(r: ConsumptionReport, meta: { currenc
   pt.font = { bold: true };
   pt.getCell('value').numFmt = MONEY;
 
+  // ── By recipient (the workbook's Consumable Box, added up) ────────────
+  const wr = wb.addWorksheet('By recipient');
+  wr.columns = [{ key: 'name', width: 30 }, { key: 'type', width: 12 }, { key: 'issues', width: 10 }, { key: 'items', width: 10 }, { key: 'value', width: 16 }];
+  wr.getCell('A1').value = `Stock issued by recipient, ${r.from} to ${r.to}`;
+  wr.getCell('A1').font = { bold: true, size: 14 };
+  const rh = wr.getRow(3);
+  rh.values = ['Issued to', 'Type', 'Issues', 'Items', `Value (${meta.currency})`];
+  rh.font = { bold: true };
+  for (const x of r.byRecipient) {
+    const row = wr.addRow({ name: x.name ?? 'Not recorded', type: x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', issues: x.issues, items: x.items, value: x.value });
+    row.getCell('value').numFmt = MONEY;
+  }
+  const rt = wr.addRow({ name: 'Total', value: r.total.value });
+  rt.font = { bold: true };
+  rt.getCell('value').numFmt = MONEY;
+
+  // ── One recipient's issues and returns ─────────────────────────────────
+  if (r.lines) {
+    const wl = wb.addWorksheet('Issues');
+    wl.columns = [{ key: 'date', width: 18 }, { key: 'kind', width: 9 }, { key: 'sku', width: 16 }, { key: 'name', width: 40 }, { key: 'qty', width: 10 }, { key: 'unit', width: 8 }, { key: 'project', width: 14 }, { key: 'by', width: 20 }];
+    wl.getCell('A1').value = `Issued to ${r.byRecipient[0]?.name ?? 'the recipient'}, ${r.from} to ${r.to}`;
+    wl.getCell('A1').font = { bold: true, size: 14 };
+    const lh = wl.getRow(3);
+    lh.values = ['Date', 'Issue/Return', 'Code', 'Item', 'Quantity', 'Unit', 'Project', 'Issued by'];
+    lh.font = { bold: true };
+    for (const l of r.lines) {
+      const row = wl.addRow({ date: new Date(l.postedAt), kind: l.type === 'ISSUE' ? 'Issue' : 'Return', sku: l.sku, name: l.name, qty: l.quantity, unit: l.unitOfMeasure, project: l.projectNumber ?? '', by: l.issuedBy });
+      row.getCell('date').numFmt = 'yyyy-mm-dd hh:mm';
+      row.getCell('qty').numFmt = QTY;
+    }
+  }
+
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out as ArrayBuffer);
 }
