@@ -129,11 +129,11 @@ export function Movements() {
         actions={(
           <div className="flex gap-2 no-print">
             {report.id !== 'other' && (
-              <Button variant="secondary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange}>
+              <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange}>
                 Download as Excel
               </Button>
             )}
-            <Button variant="secondary" size="sm" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print</Button>
+            <Button variant="primary" size="sm" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print</Button>
           </div>
         )}
       />
