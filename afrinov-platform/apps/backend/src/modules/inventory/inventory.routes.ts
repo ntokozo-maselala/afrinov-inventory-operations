@@ -189,6 +189,13 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send(result);
   });
 
+  // The issued-stock report: issue slips with their lines, newest first.
+  app.get('/inventory-issues', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    return InventoryService.issueSlips({ ...historyFilter(q), before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
+  });
+
   // The received-stock report: deliveries with their lines, newest first.
   app.get('/stock-receipts', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);

@@ -247,6 +247,16 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
   },
   {
+    method: 'get', path: '/inventory-issues', tag: 'Reports', summary: 'Issued stock: issue slips with their lines, newest first',
+    description: 'A slip is every line one issue posted; issues from before slips were recorded show as one-line slips. '
+      + 'A slip is listed when any of its lines matches the filters. Reversals are not slips; a reversed line carries reversedById.',
+    permissions: [P.ViewReports],
+    query: movementFilters.omit({ type: true, report: true }).extend({
+      before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last slip already shown.' }),
+      limit: z.coerce.number().int().positive().max(200).optional().openapi({ description: 'Default 50, at most 200.' }),
+    }),
+  },
+  {
     method: 'get', path: '/stock-receipts', tag: 'Reports', summary: 'Received stock: posted deliveries with their lines, newest first',
     permissions: [P.ViewReports],
     query: z.object({

@@ -25,7 +25,7 @@ const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedRev
 }));
 
 const { mockedReceive, mockedReceiptList, mockedCountList } = vi.hoisted(() => ({ mockedReceive: vi.fn(), mockedReceiptList: vi.fn(), mockedCountList: vi.fn() }));
-const { mockedSummary, mockedActors, mockedCount } = vi.hoisted(() => ({ mockedSummary: vi.fn(), mockedActors: vi.fn(), mockedCount: vi.fn() }));
+const { mockedSummary, mockedActors, mockedCount, mockedSlips } = vi.hoisted(() => ({ mockedSummary: vi.fn(), mockedActors: vi.fn(), mockedCount: vi.fn(), mockedSlips: vi.fn() }));
 vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive, list: mockedReceiptList } }));
 vi.mock('./stock-count.service.js', () => ({ StockCountService: { list: mockedCountList } }));
 
@@ -54,6 +54,7 @@ vi.mock('./inventory.service.js', () => ({
     historySummary: mockedSummary,
     historyActors: mockedActors,
     historyCount: mockedCount,
+    issueSlips: mockedSlips,
     reverse: mockedReverse,
     returnToStock: mockedReturn,
   },
@@ -385,11 +386,18 @@ describe('inventory routes', () => {
 
   describe('GET /api/v1/stock-receipts and /api/v1/stock-counts (Movements reports)', () => {
     it('need the view:reports permission', async () => {
-      for (const url of ['/api/v1/stock-receipts', '/api/v1/stock-counts']) {
+      for (const url of ['/api/v1/stock-receipts', '/api/v1/stock-counts', '/api/v1/inventory-issues']) {
         expect((await app.inject({ method: 'GET', url, headers: authed('user-none', []) })).statusCode, url).toBe(403);
       }
       expect(mockedReceiptList).not.toHaveBeenCalled();
       expect(mockedCountList).not.toHaveBeenCalled();
+      expect(mockedSlips).not.toHaveBeenCalled();
+    });
+
+    it('passes the day, filters and paging to the issue slips', async () => {
+      mockedSlips.mockResolvedValue([]);
+      await app.inject({ method: 'GET', url: '/api/v1/inventory-issues?from=2026-09-25&locationId=l-1&actorId=u-1&materialId=m-1&q=sabelo&before=c&limit=20', headers: authed('user-v', ['view:reports']) });
+      expect(mockedSlips).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-09-25', locationId: 'l-1', actorId: 'u-1', materialId: 'm-1', q: 'sabelo', before: 'c', limit: 20 }));
     });
 
     it('pass the day, filters and paging to the services', async () => {

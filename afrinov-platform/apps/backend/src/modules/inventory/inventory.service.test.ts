@@ -468,6 +468,21 @@ describe('InventoryService — ADR-002 invariants', () => {
       }
     });
 
+    it('gives every line of one issue the same slip id and time, and the next issue its own', async () => {
+      await stock(10);
+      await stock(4, 'loc-2');
+      const first = await InventoryService.issue({
+        recipientId: 'user-3', actorId: 'u',
+        lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }, { materialId: 'mat-1', locationId: 'loc-2', quantity: 1 }],
+      });
+      const second = await InventoryService.issue({ recipientId: 'user-3', actorId: 'u', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] });
+      const [a, b] = first.transactionIds.map((id) => trxRows.find((r) => r.id === id) as TxRow & { issueId?: string });
+      expect(a!.issueId).toBeTruthy();
+      expect(b!.issueId).toBe(a!.issueId);
+      expect(b!.postedAt).toEqual(a!.postedAt);
+      expect((trxRows.find((r) => r.id === second.transactionIds[0]) as TxRow & { issueId?: string }).issueId).not.toBe(a!.issueId);
+    });
+
     it('checks two lines for the same item as one total, and books nothing if it is short', async () => {
       await stock(5);
       await expect(InventoryService.issue({

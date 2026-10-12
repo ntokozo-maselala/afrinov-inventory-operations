@@ -5,6 +5,7 @@
 // from transactions; we never mutate balances directly. After any transaction
 // is committed we synchronously recompute the affected (material, location)
 // balance row(s) to keep the read model in sync.
+import { randomUUID } from 'node:crypto';
 import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
@@ -120,6 +121,8 @@ export interface HistoryFilter {
    * differences, which belong to the stock-counts report). Overrides `type`.
    */
   report?: 'issued' | 'transfers' | 'writeoffs';
+  /** Only the lines of these issue slips (used to fill in a page of slips). */
+  issueIds?: string[];
   /** Paging cursor: the `cursor` of the last row already shown; returns older rows. */
   before?: string;
   limit?: number;
@@ -144,6 +147,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   if (filter.projectNumber) where.projectNumber = filter.projectNumber;
   if (filter.locationId) where.locationId = filter.locationId;
   if (filter.actorId) where.actorId = filter.actorId;
+  if (filter.issueIds) where.issueId = { in: filter.issueIds };
   const postedAt = dayRange(filter.from, filter.to);
   if (postedAt) where.postedAt = postedAt;
   const q = filter.q?.trim();
@@ -220,6 +224,7 @@ export const InventoryService = {
       materialSku: t.material.sku,
       materialName: t.material.name,
       unitOfMeasure: t.material.unitOfMeasure,
+      issueId: t.issueId,
       locationId: t.locationId,
       locationName: t.location.name,
       quantity: t.quantity.toString(),
@@ -242,6 +247,46 @@ export const InventoryService = {
         return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null };
       })(),
     }));
+  },
+
+  /**
+   * The Issued stock report: issue slips, newest first, each with all its
+   * lines (and what came back). A slip is chosen when any of its lines matches
+   * the filter. Reversals are not slips; a reversed line says so.
+   */
+  async issueSlips(filter: Omit<HistoryFilter, 'report' | 'issueIds'>) {
+    const and: Prisma.InventoryTransactionWhereInput[] = [
+      historyWhere({ ...filter, report: 'issued' }),
+      { issueId: { not: null }, reversesId: null },
+    ];
+    if (filter.before) {
+      const { at, id } = parseCursor(filter.before);
+      and.push({ OR: [{ postedAt: { lt: at } }, { postedAt: at, issueId: { lt: id } }] });
+    }
+    const heads = await prisma.inventoryTransaction.findMany({
+      where: { AND: and },
+      distinct: ['issueId'],
+      orderBy: [{ postedAt: 'desc' }, { issueId: 'desc' }],
+      take: Math.min(filter.limit ?? 50, 200),
+      select: { issueId: true, postedAt: true },
+    });
+    const ids = heads.map((h) => h.issueId!);
+    if (ids.length === 0) return [];
+    const lines = (await this.queryHistory({ issueIds: ids, report: 'issued', limit: 10_000 }, 10_000)).filter((l) => !l.reversesId);
+    return heads.map((h) => {
+      const own = lines.filter((l) => l.issueId === h.issueId).sort((a, b) => a.materialName.localeCompare(b.materialName));
+      const first = own[0];
+      return {
+        id: h.issueId!,
+        cursor: pageCursor(h.postedAt, h.issueId!),
+        issuedAt: h.postedAt.toISOString(),
+        recipientName: first?.recipientName ?? null,
+        recipientType: first?.recipientType ?? null,
+        projectNumber: first?.projectNumber ?? null,
+        issuedByName: first?.actorName ?? 'Unknown user',
+        lines: own,
+      };
+    });
   },
 
   /** How many movements of each type the filter selects, for the totals above the list. */
@@ -414,10 +459,15 @@ export const InventoryService = {
         }
       }
 
+      // One slip: every line shares the issue id and the time, so the slip pages as one.
+      const issueId = randomUUID();
+      const postedAt = new Date();
       const transactionIds: string[] = [];
       for (const l of lines) {
         const trx = await tx.inventoryTransaction.create({
           data: {
+            issueId,
+            postedAt,
             materialId: l.materialId,
             locationId: l.locationId,
             type: InventoryTransactionType.ISSUE,

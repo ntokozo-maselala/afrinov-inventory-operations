@@ -424,6 +424,9 @@ model InventoryTransaction {
   referenceId   String?                  @map("reference_id")
   // Who received the stock (issues; copied onto their reversals).
   recipientId   String?                  @map("recipient_id")
+  // Issues: shared by every line one issue posted (an issue slip). Earlier
+  // issue lines carry their own id; reversals and other types carry none.
+  issueId       String?                  @map("issue_id")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")
   reasonNote    String?                  @map("reason_note")
@@ -455,6 +458,7 @@ model InventoryTransaction {
   @@index([postedAt])
   @@index([type])
   @@index([recipientId])
+  @@index([issueId])
   @@map("inventory_transactions")
 }
 
