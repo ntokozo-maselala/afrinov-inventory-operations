@@ -20,6 +20,7 @@ function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilte
     locationId: q['locationId'],
     actorId: q['actorId'],
     q: q['q'],
+    report: (['issued', 'transfers', 'writeoffs'] as const).find((r) => r === q['report']),
   };
 }
 
@@ -32,6 +33,7 @@ async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>)
   ]);
   return [
     f.from || f.to ? `${f.from ?? 'the start'} to ${f.to ?? 'today'}` : 'All dates',
+    f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments' }[f.report] : null,
     f.type ? `type ${f.type.replace(/_/g, ' ').toLowerCase()}` : null,
     material ? `item ${material.sku}` : null,
     location ? `at ${location.name}` : null,
@@ -185,6 +187,26 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     }
     const result = await StockCountService.post({ ...parsed.data, actorId: actorId(req) });
     return reply.code(201).send(result);
+  });
+
+  // The received-stock report: deliveries with their lines, newest first.
+  app.get('/stock-receipts', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    return StockReceiptService.list({
+      from: q['from'], to: q['to'], supplierId: q['supplierId'], locationId: q['locationId'], q: q['q'],
+      before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
+    });
+  });
+
+  // The stock-counts report: each count with its differences, newest first.
+  app.get('/stock-counts', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    return StockCountService.list({
+      from: q['from'], to: q['to'], locationId: q['locationId'], actorId: q['actorId'],
+      before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
+    });
   });
 
   // Counter receipts work whether or not procurement is switched on.

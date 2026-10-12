@@ -108,6 +108,9 @@ const movementFilters = z.object({
   locationId: z.string().optional(),
   actorId: z.string().optional().openapi({ description: 'Who posted the movement.' }),
   q: z.string().optional().openapi({ description: 'Matches item code or name, location, project or who it was issued to.' }),
+  report: z.enum(['issued', 'transfers', 'writeoffs']).optional().openapi({
+    description: 'A Movements report: issued stock, transfers (the out leg, with otherLocationName) or write-offs (adjustments other than count differences). Overrides type.',
+  }),
 });
 
 const movementQuery = movementFilters.extend({
@@ -242,6 +245,32 @@ export const OPERATIONS: Operation[] = [
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
       + 'material or location, and 400 for an inactive one.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'get', path: '/stock-receipts', tag: 'Reports', summary: 'Received stock: posted deliveries with their lines, newest first',
+    permissions: [P.ViewReports],
+    query: z.object({
+      from: z.string().optional().openapi({ description: 'Delivery date, a day (YYYY-MM-DD, UTC), from its start.' }),
+      to: z.string().optional().openapi({ description: 'Delivery date, a day (YYYY-MM-DD, UTC), included in full.' }),
+      supplierId: z.string().optional(),
+      locationId: z.string().optional().openapi({ description: 'Deliveries with a line into this location.' }),
+      q: z.string().optional().openapi({ description: 'Matches the receipt number, delivery note, supplier or an item code or name.' }),
+      before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last delivery already shown.' }),
+      limit: z.coerce.number().int().positive().max(200).optional().openapi({ description: 'Default 50, at most 200.' }),
+    }),
+  },
+  {
+    method: 'get', path: '/stock-counts', tag: 'Reports', summary: 'Stock counts with the differences each adjusted, newest first',
+    description: 'Items that matched the system are not stored, so a count lists its differences only.',
+    permissions: [P.ViewReports],
+    query: z.object({
+      from: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, UTC), from its start.' }),
+      to: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, UTC), included in full.' }),
+      locationId: z.string().optional(),
+      actorId: z.string().optional().openapi({ description: 'Who counted.' }),
+      before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last count already shown.' }),
+      limit: z.coerce.number().int().positive().max(200).optional().openapi({ description: 'Default 50, at most 200.' }),
+    }),
   },
   {
     method: 'post', path: '/stock-receipts', tag: 'Stock movements', summary: 'Receive stock from a supplier',
@@ -423,15 +452,17 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports], errors: [400],
   },
   {
-    method: 'get', path: '/reports/month-end', tag: 'Reports', summary: 'Month-end stock report',
-    description: 'Stock as at the end of ?month=YYYY-MM (default this month), rebuilt from the ledger, per category in '
-      + "the stock workbook's Summary columns (required, current, value, % of required, re-order quantity, URGENCY), "
-      + 'with the stock used in the month (Stock Report sheets). Refused with 400 for a future month.',
+    method: 'get', path: '/reports/month-end', tag: 'Reports', summary: 'Stock report for a month or a range of days',
+    description: 'Stock as at the end of ?from..?to (YYYY-MM-DD, both included) or of ?month=YYYY-MM (default this month), '
+      + "rebuilt from the ledger, per category in the stock workbook's Summary columns (required, current, value, "
+      + '% of required, re-order quantity, URGENCY), with the stock used in the period (Stock Report sheets). '
+      + 'The response month is set only when the period is exactly one calendar month. Refused with 400 for a '
+      + 'period that has not started, a reversed range, or only one of from/to.',
     permissions: [P.ViewReports], errors: [400],
   },
   {
-    method: 'get', path: '/reports/month-end/export', tag: 'Reports', summary: 'Download the month-end report',
-    description: 'The month-end report as Excel in the workbook layout: Overview, then a Summary and a Used sheet per category.',
+    method: 'get', path: '/reports/month-end/export', tag: 'Reports', summary: 'Download the stock report',
+    description: 'The stock report (same ?from/?to/?month) as Excel in the workbook layout: Overview, then a Summary and a Used sheet per category.',
     permissions: [P.ViewReports], errors: [400],
     produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   },
@@ -516,7 +547,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/activity', tag: 'Audit', summary: 'Other activity for the Movements page, described, newest first',
-    description: 'Stock counts, catalogue and master-data changes, users and imports. Leaves out settings changes, purchase orders and the entries '
+    description: 'Catalogue and master-data changes, users and imports. Leaves out stock counts (GET /stock-counts), settings changes, purchase orders and the entries '
       + 'the movement history already shows (stock receipts, returns, reversals).',
     permissions: [P.ViewAuditLog],
     query: z.object({
@@ -524,7 +555,6 @@ export const OPERATIONS: Operation[] = [
       to: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, included in full, UTC) or an ISO time.' }),
       entityType: z.enum(ACTIVITY_TYPES).optional(),
       actorId: z.string().optional(),
-      locationId: z.string().optional().openapi({ description: 'Stock counts at this location.' }),
       before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last row already shown.' }),
       limit: z.coerce.number().int().positive().max(500).optional().openapi({ description: 'Default 100, at most 500.' }),
     }),

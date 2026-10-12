@@ -42,7 +42,7 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     await requirePermission(req, PermissionCode.ViewAuditLog);
     const q = req.query as Record<string, string | undefined>;
     return ActivityService.list({
-      from: q['from'], to: q['to'], entityType: q['entityType'], actorId: q['actorId'], locationId: q['locationId'],
+      from: q['from'], to: q['to'], entityType: q['entityType'], actorId: q['actorId'],
       before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
     });
   });

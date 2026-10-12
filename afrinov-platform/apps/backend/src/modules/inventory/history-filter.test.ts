@@ -36,14 +36,25 @@ describe('historyWhere', () => {
   it('searches item code and name, location, project and who it was issued to, ignoring case', () => {
     const where = historyWhere({ q: '  disc ' });
     const contains = { contains: 'disc', mode: 'insensitive' };
-    expect(where.OR).toEqual([
-      { material: { sku: contains } },
-      { material: { name: contains } },
-      { location: { name: contains } },
-      { projectNumber: contains },
-      { recipient: { name: contains } },
-    ]);
-    expect(historyWhere({ q: '   ' }).OR).toBeUndefined();
+    expect(where.AND).toEqual([{
+      OR: [
+        { material: { sku: contains } },
+        { material: { name: contains } },
+        { location: { name: contains } },
+        { projectNumber: contains },
+        { recipient: { name: contains } },
+      ],
+    }]);
+    expect(historyWhere({ q: '   ' }).AND).toBeUndefined();
+  });
+
+  it('selects each report: issued stock, transfers by their out leg, write-offs without count differences', () => {
+    expect(historyWhere({ report: 'issued', type: 'RECEIPT' }).type).toBe('ISSUE');
+    expect(historyWhere({ report: 'transfers' }).type).toBe('TRANSFER_OUT');
+    const writeoffs = historyWhere({ report: 'writeoffs', q: 'disc' });
+    expect(writeoffs.type).toBe('ADJUSTMENT');
+    // Unreferenced adjustments must stay in: NULL <> 'StockCount' is not true in SQL.
+    expect(writeoffs.AND).toEqual([{ OR: [{ referenceType: null }, { referenceType: { not: 'StockCount' } }] }, expect.objectContaining({ OR: expect.any(Array) })]);
   });
 });
 

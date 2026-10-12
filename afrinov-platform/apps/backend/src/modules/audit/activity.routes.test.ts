@@ -61,14 +61,14 @@ describe('GET /api/v1/activity', () => {
     expect(mockedList).not.toHaveBeenCalled();
   });
 
-  it('passes the dates, type, person, location and cursor to the service', async () => {
+  it('passes the dates, type, person and cursor to the service', async () => {
     await app.inject({
       method: 'GET',
-      url: '/api/v1/activity?from=2026-10-12&to=2026-10-12&entityType=StockCount&actorId=u-1&locationId=l-1&before=c&limit=5',
+      url: '/api/v1/activity?from=2026-10-12&to=2026-10-12&entityType=Material&actorId=u-1&before=c&limit=5',
       headers: as('STORE_CONTROLLER'),
     });
     expect(mockedList).toHaveBeenCalledWith({
-      from: '2026-10-12', to: '2026-10-12', entityType: 'StockCount', actorId: 'u-1', locationId: 'l-1', before: 'c', limit: 5,
+      from: '2026-10-12', to: '2026-10-12', entityType: 'Material', actorId: 'u-1', before: 'c', limit: 5,
     });
   });
 });

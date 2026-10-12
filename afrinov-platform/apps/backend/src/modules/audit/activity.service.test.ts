@@ -26,7 +26,7 @@ describe('activityWhere', () => {
   it('shows only shop activity: never purchase orders, goods receipts or ledger entries', () => {
     const where = activityWhere({});
     expect(where.entityType).toEqual({ in: [...ACTIVITY_TYPES] });
-    for (const hidden of ['PurchaseOrder', 'GoodsReceipt', 'InventoryTransaction']) expect(ACTIVITY_TYPES).not.toContain(hidden);
+    for (const hidden of ['PurchaseOrder', 'GoodsReceipt', 'InventoryTransaction', 'StockCount']) expect(ACTIVITY_TYPES).not.toContain(hidden);
     expect(activityWhere({ entityType: 'PurchaseOrder' }).entityType).toBe('__none__');
     // Settings changes stay in Settings > Change history only.
     expect(ACTIVITY_TYPES).not.toContain('Setting');
@@ -40,21 +40,9 @@ describe('activityWhere', () => {
       createdAt: { gte: new Date('2026-10-12T00:00:00.000Z'), lt: new Date('2026-10-13T00:00:00.000Z') },
     });
   });
-
-  it('narrows to stock counts at a location', () => {
-    expect(activityWhere({ locationId: 'l-1' })).toMatchObject({ entityType: 'StockCount', after: { path: ['locationId'], equals: 'l-1' } });
-  });
 });
 
 describe('describeActivity', () => {
-  it('describes a stock count, with or without differences, and links to its adjustments', () => {
-    const names = new Map([['l-1', 'Boiler Shop']]);
-    expect(say({ entityType: 'StockCount', action: 'STOCK_COUNT', after: { locationId: 'l-1', counted: 4, adjusted: 2, note: 'Monthly' } }, names))
-      .toEqual({ summary: 'Counted Boiler Shop: 4 items, 2 adjusted (Monthly)', link: '/movements?from=2026-10-12&to=2026-10-12&type=ADJUSTMENT&locationId=l-1' });
-    expect(say({ entityType: 'StockCount', action: 'STOCK_COUNT', after: { locationId: 'l-1', counted: 1, adjusted: 0 } }, names).summary)
-      .toBe('Counted Boiler Shop: 1 item, no differences');
-  });
-
   it('describes items added and edited, naming what changed', () => {
     expect(say({ after: { sku: 'WSHR-16', name: 'Flat washer' } })).toEqual({ summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' });
     expect(say({ action: 'UPDATE', before: { sku: 'WSHR-16', name: 'Flat washer', requiredStock: '10', active: true }, after: { sku: 'WSHR-16', name: 'Flat washer', requiredStock: '20', active: false } }).summary)
@@ -93,15 +81,15 @@ describe('ActivityService.list', () => {
     rackFindMany.mockReset().mockResolvedValue([]);
   });
 
-  it('names who did it and the location a count was at', async () => {
+  it('names who did it and the location an entry only refers to by id', async () => {
     auditFindMany.mockResolvedValue([
-      entry({ id: 'a-2', entityType: 'StockCount', action: 'STOCK_COUNT', after: { locationId: 'l-1', counted: 2, adjusted: 1 } }),
+      entry({ id: 'a-2', entityType: 'Location', action: 'DEACTIVATE', entityId: 'l-1', after: { active: false } }),
       entry({ id: 'a-1', actorId: 'u-gone', after: { sku: 'X', name: 'Y' } }),
       entry({ id: 'a-0', actorId: null, entityType: 'WorkbookImport', action: 'IMPORT_OPENING_BALANCES', entityId: 'i-1', after: { materials: 2, balances: 3 } }),
     ]);
     const rows = await ActivityService.list({});
     expect(rows.map((r) => [r.actorName, r.summary])).toEqual([
-      ['Vusi', 'Counted Boiler Shop: 2 items, 1 adjusted'],
+      ['Vusi', 'Deactivated location Boiler Shop'],
       ['Unknown user', 'Added item X Y'],
       ['System', 'Imported opening balances: 2 items, 3 balances'],
     ]);

@@ -2,7 +2,8 @@
 // done at the shop besides stock movements (counts, catalogue and master-data
 // changes, users, imports), each described in a plain sentence.
 //
-// Left out: settings changes (Settings > Change history has them),
+// Left out: stock counts (the stock-counts report has them), settings changes
+// (Settings > Change history has them),
 // purchase-order entries (procurement is out of scope) and entries that the
 // Movements list already shows as ledger rows (stock receipts, returns and
 // reversals), so nothing appears twice.
@@ -11,7 +12,7 @@ import { prisma } from '../../shared/db.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 
 export const ACTIVITY_TYPES = [
-  'StockCount', 'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport',
+  'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport',
 ] as const;
 
 export interface ActivityFilter {
@@ -20,8 +21,6 @@ export interface ActivityFilter {
   /** One of ACTIVITY_TYPES; anything else selects nothing. */
   entityType?: string;
   actorId?: string;
-  /** Stock counts at this location (other entries carry no location). */
-  locationId?: string;
   before?: string;
   limit?: number;
 }
@@ -51,10 +50,6 @@ export function activityWhere(filter: Omit<ActivityFilter, 'before' | 'limit'>):
   const createdAt = dayRange(filter.from, filter.to);
   if (createdAt) where.createdAt = createdAt;
   if (filter.actorId) where.actorId = filter.actorId;
-  if (filter.locationId) {
-    where.entityType = 'StockCount';
-    where.after = { path: ['locationId'], equals: filter.locationId };
-  }
   return where;
 }
 
@@ -91,16 +86,6 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
   const b = (e.before ?? {}) as Json;
   const known = (id: string) => names.get(id);
   switch (e.entityType) {
-    case 'StockCount': {
-      const where = known(String(a['locationId'])) ?? 'a location';
-      const counted = Number(a['counted'] ?? 0);
-      const adjusted = Number(a['adjusted'] ?? 0);
-      const day = e.createdAt.toISOString().slice(0, 10);
-      return {
-        summary: `Counted ${where}: ${counted} item${counted === 1 ? '' : 's'}, ${adjusted === 0 ? 'no differences' : `${adjusted} adjusted`}${str(a['note']) ? ` (${a['note']})` : ''}`,
-        link: a['locationId'] ? `/movements?from=${day}&to=${day}&type=ADJUSTMENT&locationId=${a['locationId']}` : null,
-      };
-    }
     case 'Material': {
       const label = [str(a['sku']) ?? str(b['sku']), str(a['name']) ?? str(b['name'])].filter(Boolean).join(' ') || 'an item';
       const link = `/materials/${e.entityId}`;
@@ -177,8 +162,6 @@ export const ActivityService = {
     const locationIds = new Set<string>();
     const rackIds = new Set<string>();
     for (const e of entries) {
-      const after = (e.after ?? {}) as Json;
-      if (e.entityType === 'StockCount' && typeof after['locationId'] === 'string') locationIds.add(after['locationId']);
       if (e.entityType === 'Location' && (e.action === 'ACTIVATE' || e.action === 'DEACTIVATE')) locationIds.add(e.entityId);
       if (e.entityType === 'Rack' && e.action === 'ARCHIVE') rackIds.add(e.entityId);
     }

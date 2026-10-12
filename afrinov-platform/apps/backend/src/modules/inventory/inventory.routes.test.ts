@@ -24,9 +24,10 @@ const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedRev
   mockedReturn: vi.fn(),
 }));
 
-const { mockedReceive } = vi.hoisted(() => ({ mockedReceive: vi.fn() }));
+const { mockedReceive, mockedReceiptList, mockedCountList } = vi.hoisted(() => ({ mockedReceive: vi.fn(), mockedReceiptList: vi.fn(), mockedCountList: vi.fn() }));
 const { mockedSummary, mockedActors, mockedCount } = vi.hoisted(() => ({ mockedSummary: vi.fn(), mockedActors: vi.fn(), mockedCount: vi.fn() }));
-vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive } }));
+vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive, list: mockedReceiptList } }));
+vi.mock('./stock-count.service.js', () => ({ StockCountService: { list: mockedCountList } }));
 
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
@@ -379,6 +380,33 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error.message).toMatch(/shorter date range/);
       expect(mockedQueryHistory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /api/v1/stock-receipts and /api/v1/stock-counts (Movements reports)', () => {
+    it('need the view:reports permission', async () => {
+      for (const url of ['/api/v1/stock-receipts', '/api/v1/stock-counts']) {
+        expect((await app.inject({ method: 'GET', url, headers: authed('user-none', []) })).statusCode, url).toBe(403);
+      }
+      expect(mockedReceiptList).not.toHaveBeenCalled();
+      expect(mockedCountList).not.toHaveBeenCalled();
+    });
+
+    it('pass the day, filters and paging to the services', async () => {
+      mockedReceiptList.mockResolvedValue([]);
+      mockedCountList.mockResolvedValue([]);
+      await app.inject({ method: 'GET', url: '/api/v1/stock-receipts?from=2026-09-25&supplierId=s-1&locationId=l-1&q=inv&before=c&limit=10', headers: authed('user-v', ['view:reports']) });
+      expect(mockedReceiptList).toHaveBeenCalledWith({ from: '2026-09-25', to: undefined, supplierId: 's-1', locationId: 'l-1', q: 'inv', before: 'c', limit: 10 });
+      await app.inject({ method: 'GET', url: '/api/v1/stock-counts?from=2026-09-25&to=2026-09-30&locationId=l-1&actorId=u-1', headers: authed('user-v', ['view:reports']) });
+      expect(mockedCountList).toHaveBeenCalledWith({ from: '2026-09-25', to: '2026-09-30', locationId: 'l-1', actorId: 'u-1', before: undefined, limit: undefined });
+    });
+
+    it('passes a report kind to the movement history, ignoring an unknown one', async () => {
+      mockedQueryHistory.mockResolvedValue([]);
+      await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions?report=writeoffs', headers: authed() });
+      expect(mockedQueryHistory).toHaveBeenLastCalledWith(expect.objectContaining({ report: 'writeoffs' }));
+      await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions?report=everything', headers: authed() });
+      expect(mockedQueryHistory).toHaveBeenLastCalledWith(expect.objectContaining({ report: undefined }));
     });
   });
 
