@@ -42,7 +42,7 @@ const listCalls = () => mockGet.mock.calls.map((c) => c[0] as string).filter((p)
 describe('Movements page', () => {
   beforeEach(() => { mockGet.mockReset(); perms.activity = false; });
 
-  it('shows today by default, with totals for the whole range from the server', async () => {
+  it('shows today by default, counting the whole range from the server', async () => {
     renderAt('/movements');
     const now = new Date();
     const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -50,8 +50,7 @@ describe('Movements page', () => {
     expect(listCalls()[0]).toContain(`from=${day}&to=${day}`);
     expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe(day);
     expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe(day);
-    expect(screen.getByText('205')).toBeInTheDocument();
-    expect(screen.getByText('150')).toBeInTheDocument();
+    expect(screen.queryByText('Receipts')).not.toBeInTheDocument();
     expect(screen.getByText('1 of 205 shown')).toBeInTheDocument();
   });
 

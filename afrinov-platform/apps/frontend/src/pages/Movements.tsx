@@ -142,7 +142,6 @@ export function Movements() {
   }
 
   const filtersSet = FILTER_KEYS.some((k) => params.get(k)) || params.has('from') || params.has('to');
-  const count = (type: string) => formatNumber(summary.data?.byType[type] ?? 0);
 
   return (
     <div>
@@ -165,26 +164,6 @@ export function Movements() {
 
       {!stockView ? <OtherActivity /> : (
       <>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <div className="surface-card p-3">
-          <div className="text-eyebrow">Movements</div>
-          <div className="text-2xl font-semibold text-num">{summary.data ? formatNumber(summary.data.total) : '—'}</div>
-        </div>
-        <div className="surface-card p-3">
-          <div className="text-eyebrow">Receipts</div>
-          <div className="text-2xl font-semibold text-num">{summary.data ? count('RECEIPT') : '—'}</div>
-        </div>
-        <div className="surface-card p-3">
-          <div className="text-eyebrow">Issues</div>
-          <div className="text-2xl font-semibold text-num">{summary.data ? count('ISSUE') : '—'}</div>
-        </div>
-        <div className="surface-card p-3">
-          <div className="text-eyebrow">Adjustments</div>
-          <div className="text-2xl font-semibold text-num">{summary.data ? count('ADJUSTMENT') : '—'}</div>
-        </div>
-      </div>
-
       <Toolbar
         left={(
           <>
