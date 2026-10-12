@@ -1,5 +1,5 @@
 // The "Other activity" view on Movements: stock counts, catalogue and
-// master-data changes, users, settings and imports (GET /activity), for a date
+// master-data changes, users and imports (GET /activity), for a date
 // range (today unless chosen), by type and by person, a page at a time. Uses
 // the same from/to in the address as the stock movements view.
 import { useMemo, useState } from 'react';
@@ -27,7 +27,6 @@ export const ACTIVITY_TYPE_LABEL: Record<string, string> = {
   Recipient: 'Recipient',
   Supplier: 'Supplier',
   User: 'User',
-  Setting: 'Setting',
   WorkbookImport: 'Import',
 };
 

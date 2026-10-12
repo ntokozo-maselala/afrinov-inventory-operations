@@ -516,7 +516,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/activity', tag: 'Audit', summary: 'Other activity for the Movements page, described, newest first',
-    description: 'Stock counts, catalogue and master-data changes, users, settings and imports. Leaves out purchase orders and the entries '
+    description: 'Stock counts, catalogue and master-data changes, users and imports. Leaves out settings changes, purchase orders and the entries '
       + 'the movement history already shows (stock receipts, returns, reversals).',
     permissions: [P.ViewAuditLog],
     query: z.object({

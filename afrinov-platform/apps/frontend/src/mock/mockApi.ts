@@ -1666,8 +1666,8 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
 }
 
 // Mirrors ActivityService (apps/backend/src/modules/audit/activity.service.ts)
-// for what the mock records: stock counts, users and settings.
-const ACTIVITY_TYPES = ['StockCount', 'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'Setting', 'WorkbookImport'];
+// for what the mock records: stock counts and users.
+const ACTIVITY_TYPES = ['StockCount', 'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport'];
 
 function listActivity(qs: Record<string, string>) {
   const inRange = inDayRange(qs);
@@ -1682,7 +1682,6 @@ function listActivity(qs: Record<string, string>) {
   return olderThan(rows, qs.before, (a) => a.createdAt).slice(0, limit).map((a) => {
     const after = (a.after ?? {}) as Record<string, unknown>;
     const before = (a.before ?? {}) as Record<string, unknown>;
-    const show = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
     let summary = `${a.action.charAt(0)}${a.action.slice(1).toLowerCase().replace(/_/g, ' ')} ${a.entityType} ${a.entityId}`;
     let link: string | null = null;
     if (a.entityType === 'StockCount') {
@@ -1691,11 +1690,6 @@ function listActivity(qs: Record<string, string>) {
       const day = a.createdAt.slice(0, 10);
       summary = `Counted ${findLocation(String(after.locationId))?.name ?? 'a location'}: ${counted} item${counted === 1 ? '' : 's'}, ${adjusted === 0 ? 'no differences' : `${adjusted} adjusted`}${after.note ? ` (${after.note})` : ''}`;
       link = `/movements?from=${day}&to=${day}&type=ADJUSTMENT&locationId=${after.locationId}`;
-    } else if (a.entityType === 'Setting') {
-      summary = a.action === 'SETTING_RESET'
-        ? `Reset setting ${a.entityId} to its default (${show(after.value)})`
-        : `Changed setting ${a.entityId} from ${show(before.value)} to ${show(after.value)}`;
-      link = '/settings';
     } else if (a.entityType === 'User') {
       const name = (after.name ?? before.name ?? mockUsers.find((u) => u.id === a.entityId)?.name ?? 'a user') as string;
       summary = a.action === 'CREATE' ? `Added user ${name}` : `Edited user ${name}`;

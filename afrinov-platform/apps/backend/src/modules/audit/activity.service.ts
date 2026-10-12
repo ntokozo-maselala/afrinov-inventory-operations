@@ -1,16 +1,17 @@
 // "Other activity" on the Movements page: the audit log's record of what was
 // done at the shop besides stock movements (counts, catalogue and master-data
-// changes, users, settings, imports), each described in a plain sentence.
+// changes, users, imports), each described in a plain sentence.
 //
-// Left out: purchase-order entries (procurement is out of scope) and entries
-// that the Movements list already shows as ledger rows (stock receipts,
-// returns and reversals), so nothing appears twice.
+// Left out: settings changes (Settings > Change history has them),
+// purchase-order entries (procurement is out of scope) and entries that the
+// Movements list already shows as ledger rows (stock receipts, returns and
+// reversals), so nothing appears twice.
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 
 export const ACTIVITY_TYPES = [
-  'StockCount', 'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'Setting', 'WorkbookImport',
+  'StockCount', 'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport',
 ] as const;
 
 export interface ActivityFilter {
@@ -82,7 +83,6 @@ function editSentence(noun: string, label: string, before: unknown, after: unkno
   return `Edited ${noun} ${label}${parts.length ? `: ${parts.join('; ')}` : ''}`;
 }
 
-const show = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 
 /** A plain sentence for an entry, and where its record lives. `names` resolves ids the entry only refers to. */
@@ -148,12 +148,6 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
       if (e.action === 'UPDATE') return { summary: editSentence('user', label, e.before, e.after), link: null };
       break;
     }
-    case 'Setting':
-      if (e.action === 'SETTING_RESET') return { summary: `Reset setting ${e.entityId} to its default (${show(a['value'])})`, link: '/settings' };
-      if (e.action === 'SETTING_UPDATE' || e.action === 'SETTING_BULK_UPDATE') {
-        return { summary: `Changed setting ${e.entityId} from ${show(b['value'])} to ${show(a['value'])}`, link: '/settings' };
-      }
-      break;
     case 'WorkbookImport':
       return {
         summary: `Imported opening balances${str(a['sourceFile']) ? ` from ${a['sourceFile']}` : ''}: ${Number(a['materials'] ?? 0)} items, ${Number(a['balances'] ?? 0)} balances${str(a['openingDate']) ? ` as at ${a['openingDate']}` : ''}`,

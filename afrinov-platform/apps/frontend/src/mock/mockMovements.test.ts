@@ -70,11 +70,13 @@ describe('mock other activity', () => {
     expect(await fresh.get<Activity[]>('/activity?entityType=StockCount&locationId=loc-2')).toEqual([]);
   });
 
-  it('describes a settings change and names who made it, never a reversal', async () => {
+  it('leaves out settings changes and reversals', async () => {
     const fresh = createMockApi();
     await fresh.patch('/settings', { updates: { 'inventory.urgentBelowPercent': 25 } });
     const list = await fresh.get<Activity[]>('/activity');
-    expect(list[0]).toMatchObject({ entityType: 'Setting', summary: 'Changed setting inventory.urgentBelowPercent from 20 to 25', actorName: 'System Administrator (dev)' });
-    expect(list.some((a) => a.entityType === 'InventoryTransaction')).toBe(false);
+    expect(list.some((a) => a.entityType === 'Setting' || a.entityType === 'InventoryTransaction')).toBe(false);
+    // Settings > Change history still has it.
+    const history = await fresh.get<Array<{ entityId: string }>>('/audit?entityType=Setting');
+    expect(history.map((h) => h.entityId)).toContain('inventory.urgentBelowPercent');
   });
 });

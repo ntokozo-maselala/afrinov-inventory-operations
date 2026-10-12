@@ -1,8 +1,8 @@
 // Movements: the stock ledger for a date range (today unless chosen), filtered
 // on the server by type, item, location, who posted it and a search, and loaded
 // a page at a time so a long range is never cut short. Admin and Store
-// Controller also get an "Other activity" view (counts, catalogue, user and
-// settings changes). The view and filters live in the address, so a filtered
+// Controller also get an "Other activity" view (counts, catalogue and user
+// changes). The view and filters live in the address, so a filtered
 // view can be bookmarked or shared.
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';

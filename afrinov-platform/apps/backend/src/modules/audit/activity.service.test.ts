@@ -28,11 +28,14 @@ describe('activityWhere', () => {
     expect(where.entityType).toEqual({ in: [...ACTIVITY_TYPES] });
     for (const hidden of ['PurchaseOrder', 'GoodsReceipt', 'InventoryTransaction']) expect(ACTIVITY_TYPES).not.toContain(hidden);
     expect(activityWhere({ entityType: 'PurchaseOrder' }).entityType).toBe('__none__');
+    // Settings changes stay in Settings > Change history only.
+    expect(ACTIVITY_TYPES).not.toContain('Setting');
+    expect(activityWhere({ entityType: 'Setting' }).entityType).toBe('__none__');
   });
 
   it('applies the whole-day date rule, a type and who did it', () => {
-    expect(activityWhere({ from: '2026-10-12', to: '2026-10-12', entityType: 'Setting', actorId: 'u-1' })).toEqual({
-      entityType: 'Setting',
+    expect(activityWhere({ from: '2026-10-12', to: '2026-10-12', entityType: 'User', actorId: 'u-1' })).toEqual({
+      entityType: 'User',
       actorId: 'u-1',
       createdAt: { gte: new Date('2026-10-12T00:00:00.000Z'), lt: new Date('2026-10-13T00:00:00.000Z') },
     });
@@ -68,13 +71,11 @@ describe('describeActivity', () => {
     expect(say({ entityType: 'Supplier', action: 'CREATE', entityId: 's-1', after: { name: 'Hydroscand' } })).toEqual({ summary: 'Added supplier Hydroscand', link: '/suppliers/s-1' });
   });
 
-  it('describes users, settings and imports', () => {
+  it('describes users and imports', () => {
     expect(say({ entityType: 'User', action: 'CREATE', after: { name: 'Thabo', email: 't@a.co.za', roles: ['STORE_CONTROLLER'] } }).summary)
       .toBe('Added user Thabo (t@a.co.za) as store controller');
     expect(say({ entityType: 'User', action: 'UPDATE', before: { name: 'Thabo', active: true, roles: ['VIEWER'] }, after: { name: 'Thabo', active: true, roles: ['ADMIN'] } }).summary)
       .toBe('Edited user Thabo: changed roles');
-    expect(say({ entityType: 'Setting', action: 'SETTING_UPDATE', entityId: 'inventory.urgentBelowPercent', before: { value: 20 }, after: { value: 25 } }).summary)
-      .toBe('Changed setting inventory.urgentBelowPercent from 20 to 25');
     expect(say({ entityType: 'WorkbookImport', action: 'IMPORT_OPENING_BALANCES', after: { sourceFile: 'stock.xlsm', materials: 120, balances: 140, openingDate: '2026-10-01' } }).summary)
       .toBe('Imported opening balances from stock.xlsm: 120 items, 140 balances as at 2026-10-01');
   });
@@ -96,13 +97,13 @@ describe('ActivityService.list', () => {
     auditFindMany.mockResolvedValue([
       entry({ id: 'a-2', entityType: 'StockCount', action: 'STOCK_COUNT', after: { locationId: 'l-1', counted: 2, adjusted: 1 } }),
       entry({ id: 'a-1', actorId: 'u-gone', after: { sku: 'X', name: 'Y' } }),
-      entry({ id: 'a-0', actorId: null, entityType: 'Setting', action: 'SETTING_RESET', entityId: 'k', after: { value: 1 } }),
+      entry({ id: 'a-0', actorId: null, entityType: 'WorkbookImport', action: 'IMPORT_OPENING_BALANCES', entityId: 'i-1', after: { materials: 2, balances: 3 } }),
     ]);
     const rows = await ActivityService.list({});
     expect(rows.map((r) => [r.actorName, r.summary])).toEqual([
       ['Vusi', 'Counted Boiler Shop: 2 items, 1 adjusted'],
       ['Unknown user', 'Added item X Y'],
-      ['System', 'Reset setting k to its default (1)'],
+      ['System', 'Imported opening balances: 2 items, 3 balances'],
     ]);
     expect(rows[0]!.cursor).toBe('2026-10-12T09:30:00.000Z_a-2');
     expect(locationFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ['l-1'] } } }));
