@@ -14,9 +14,9 @@ vi.mock('./month-end-export.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('./month-end-export.js')>(), buildMonthEndXlsx: mocks.workbook,
 }));
 
-describe('month-end routes', () => {
+describe('stock report routes', () => {
   let app: FastifyInstance;
-  const report = { month: '2026-09', categories: [], total: { items: 0 } };
+  const report = { month: '2026-09', from: '2026-09-01', to: '2026-09-30', categories: [], total: { items: 0 } };
   const bytes = Buffer.from('test workbook bytes');
   const headers = () => ({ authorization: `Bearer ${app.jwt.sign({ sub: 'report-reader', email: 'reader@example.test', name: 'Reader', roles: [] })}` });
 
@@ -50,10 +50,16 @@ describe('month-end routes', () => {
       expect(mocks.workbook).not.toHaveBeenCalled();
     });
 
-    it.each(['', '?month='])('defaults to the current UTC month for %j', async (query) => {
+    it.each(['', '?month=', '?month=&from=&to='])('leaves the period to the service for %j', async (query) => {
       const response = await app.inject({ method: 'GET', url: `/api/v1${path}${query}`, headers: headers() });
       expect(response.statusCode).toBe(200);
-      expect(mocks.report).toHaveBeenCalledExactlyOnceWith('2026-10');
+      expect(mocks.report).toHaveBeenCalledExactlyOnceWith({ month: undefined, from: undefined, to: undefined });
+    });
+
+    it('passes a from/to range through', async () => {
+      const response = await app.inject({ method: 'GET', url: `/api/v1${path}?from=2026-09-07&to=2026-09-13`, headers: headers() });
+      expect(response.statusCode).toBe(200);
+      expect(mocks.report).toHaveBeenCalledExactlyOnceWith({ month: undefined, from: '2026-09-07', to: '2026-09-13' });
     });
 
     it('returns a service validation error without building a file', async () => {
@@ -69,19 +75,19 @@ describe('month-end routes', () => {
     const response = await app.inject({ method: 'GET', url: '/api/v1/reports/month-end?month=2026-09', headers: headers() });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual(report);
-    expect(mocks.report).toHaveBeenCalledExactlyOnceWith('2026-09');
+    expect(mocks.report).toHaveBeenCalledExactlyOnceWith({ month: '2026-09', from: undefined, to: undefined });
     expect(mocks.workbook).not.toHaveBeenCalled();
   });
 
   it('exports the report bytes with download headers and caching disabled', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/v1/reports/month-end/export?month=2026-09', headers: headers() });
     expect(response.statusCode).toBe(200);
-    expect(mocks.report).toHaveBeenCalledExactlyOnceWith('2026-09');
+    expect(mocks.report).toHaveBeenCalledExactlyOnceWith({ month: '2026-09', from: undefined, to: undefined });
     expect(mocks.workbook).toHaveBeenCalledExactlyOnceWith(report);
     expect(response.rawPayload).toEqual(bytes);
     expect(response.headers).toMatchObject({
       'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'content-disposition': 'attachment; filename="afrinov-month-end-2026-09.xlsx"',
+      'content-disposition': 'attachment; filename="afrinov-stock-report-2026-09.xlsx"',
       'content-length': String(bytes.length), 'cache-control': 'no-store',
     });
   });

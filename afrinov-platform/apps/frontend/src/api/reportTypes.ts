@@ -129,7 +129,7 @@ export interface ReportResult {
   generatedAt: string;
 }
 
-// ── Month-end report ─────────────────────────────────────────────────────
+// ── Stock report (/reports/month-end) ─────────────────────────────────────────────────────
 export interface MonthEndItem {
   sku: string; name: string; location: string; requiredStock: number; currentStock: number;
   unitCost: number | null; value: number | null; percentOfRequired: number | null; reorderQuantity: number | null; status: StockStatus;
@@ -139,7 +139,8 @@ export interface MonthEndCategory {
   used: Array<{ sku: string; name: string; location: string; used: number; value: number | null }>; usedValue: number;
 }
 export interface MonthEndReport {
-  month: string; from: string; to: string; generatedAt: string; currency: string; bands: StatusBands;
+  /** YYYY-MM when the period is exactly one calendar month, otherwise null. */
+  month: string | null; from: string; to: string; generatedAt: string; currency: string; bands: StatusBands;
   categories: MonthEndCategory[];
   total: { items: number; itemsInStock: number; value: number; urgent: number; warning: number; usedValue: number };
 }

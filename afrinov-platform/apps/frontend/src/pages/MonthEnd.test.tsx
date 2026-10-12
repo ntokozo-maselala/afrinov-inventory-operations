@@ -8,60 +8,39 @@ vi.mock('../api/client', async (importOriginal) => ({
 }));
 vi.mock('../api/exportMonthEnd', () => ({ downloadMonthEnd: mockDownload }));
 
-const { MonthEnd, lastMonth } = await import('./MonthEnd');
+const { MonthEnd, presetRange } = await import('./MonthEnd');
 const { ToastProvider } = await import('../components/Toast');
 
 const REPORT = {
-  month: '2026-09', from: '2026-09-01', to: '2026-09-30', generatedAt: '2026-10-09T10:00:00Z', currency: 'ZAR',
+  month: '2026-09' as string | null, from: '2026-09-01', to: '2026-09-30', generatedAt: '2026-10-09T10:00:00Z', currency: 'ZAR',
   bands: { urgentBelowPercent: 20, warningBelowPercent: 40 },
   categories: [
     { category: 'CONSUMABLES', items: [{}, {}, {}], value: 5489.25, urgent: 1, warning: 0, itemsInStock: 2, used: [], usedValue: 1051.25 },
   ],
   total: { items: 3, itemsInStock: 2, value: 5489.25, urgent: 1, warning: 0, usedValue: 1051.25 },
 };
+const SEPT = '/reports/month-end?from=2026-09-01&to=2026-09-30';
+const renderPage = () => render(<MemoryRouter><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
+const download = () => screen.getByRole('button', { name: 'Download stock report' });
 
-describe('MonthEnd page', () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-09T12:00:00Z'));
-    mockGet.mockReset().mockResolvedValue(REPORT);
-    mockDownload.mockReset().mockResolvedValue(undefined);
+describe('presetRange', () => {
+  it('gives last month across a year end, and this month', () => {
+    expect(presetRange('last-month', new Date(2026, 9, 9))).toEqual({ from: '2026-09-01', to: '2026-09-30' });
+    expect(presetRange('last-month', new Date(2027, 0, 5))).toEqual({ from: '2026-12-01', to: '2026-12-31' });
+    expect(presetRange('this-month', new Date(2024, 1, 10))).toEqual({ from: '2024-02-01', to: '2024-02-29' });
   });
 
-  afterEach(() => vi.useRealTimers());
-
-  it('defaults to the month just ended, across a year end', () => {
-    expect(lastMonth(new Date(2026, 9, 9))).toBe('2026-09');
-    expect(lastMonth(new Date(2027, 0, 5))).toBe('2026-12');
-  });
-
-  it('shows the overview per category for the chosen month, and downloads it', async () => {
-    render(<MemoryRouter><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
-    const overview = within(await screen.findByLabelText('Month-end overview'));
-    expect(overview.getByText('Consumables')).toBeInTheDocument();
-    expect(screen.getByText('Stock as at the end of 2026-09-30; stock used from 2026-09-01 to 2026-09-30.')).toBeInTheDocument();
-    expect(mockGet).toHaveBeenCalledWith(`/reports/month-end?month=${lastMonth()}`);
-
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: '2026-08' } });
-    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/reports/month-end?month=2026-08'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download month-end report' }));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('2026-08'));
-  });
-
-  it('will not ask for a month that has not started', async () => {
-    render(<MemoryRouter><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
-    await screen.findByLabelText('Month-end overview');
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: '2999-01' } });
-    expect(mockGet).toHaveBeenCalledTimes(1);
-    expect(screen.queryByLabelText('Month-end overview')).not.toBeInTheDocument();
-    expect(screen.getByText('Choose a month up to this one.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download month-end report' })).toBeDisabled();
+  it('runs weeks Monday to Sunday, across a month end', () => {
+    // Friday 9 October 2026.
+    expect(presetRange('this-week', new Date(2026, 9, 9))).toEqual({ from: '2026-10-05', to: '2026-10-11' });
+    expect(presetRange('last-week', new Date(2026, 9, 9))).toEqual({ from: '2026-09-28', to: '2026-10-04' });
+    // A Sunday belongs to the week that started the Monday before.
+    expect(presetRange('this-week', new Date(2026, 10, 1))).toEqual({ from: '2026-10-26', to: '2026-11-01' });
+    expect(presetRange('this-week', new Date(2026, 9, 5))).toEqual({ from: '2026-10-05', to: '2026-10-11' });
   });
 });
 
-
-describe('MonthEnd loading and failures', () => {
-  const renderPage = () => render(<MemoryRouter><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
+describe('Stock report page', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-09T12:00:00Z'));
@@ -70,32 +49,92 @@ describe('MonthEnd loading and failures', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('disables downloads until the selected month has loaded and discards a stale response', async () => {
+  it('defaults to last month, shows the overview per category, and downloads it', async () => {
+    renderPage();
+    expect(screen.getByRole('heading', { name: 'Stock report' })).toBeInTheDocument();
+    const overview = within(await screen.findByLabelText('Stock report overview'));
+    expect(overview.getByText('Consumables')).toBeInTheDocument();
+    expect(screen.getByText('Stock as at the end of 2026-09-30; stock used from 2026-09-01 to 2026-09-30.')).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith(SEPT);
+    fireEvent.click(download());
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith({ from: '2026-09-01', to: '2026-09-30' }));
+  });
+
+  it('switches to a week, and to this week as it stands now', async () => {
+    renderPage();
+    await screen.findByLabelText('Stock report overview');
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'last-week' } });
+    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-09-28&to=2026-10-04'));
+    expect(screen.getByText('Stock as at the end of 2026-10-04; stock used from 2026-09-28 to 2026-10-04.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'this-week' } });
+    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-10-05&to=2026-10-11'));
+    expect(screen.getByText('Stock as it stands now; stock used from 2026-10-05 to 2026-10-11.')).toBeInTheDocument();
+  });
+
+  it('lets the user choose their own dates, starting from the period shown', async () => {
+    renderPage();
+    await screen.findByLabelText('Stock report overview');
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'custom' } });
+    expect(screen.getByLabelText('From')).toHaveValue('2026-09-01');
+    expect(screen.getByLabelText('To')).toHaveValue('2026-09-30');
+    expect(screen.getByLabelText('From')).toHaveAttribute('max', '2026-10-09');
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-09-07' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-13' } });
+    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-09-07&to=2026-09-13'));
+    await waitFor(() => expect(download()).toBeEnabled());
+    fireEvent.click(download());
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith({ from: '2026-09-07', to: '2026-09-13' }));
+  });
+
+  it.each([
+    [{ From: '2026-09-20', To: '2026-09-13' }, 'The start date is after the end date.'],
+    [{ From: '2026-10-10', To: '2026-10-16' }, 'Choose a period that has started.'],
+    [{ From: '', To: '2026-09-30' }, 'Choose a start and an end date.'],
+  ])('will not ask for %j', async (dates, message) => {
+    renderPage();
+    await screen.findByLabelText('Stock report overview');
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'custom' } });
+    for (const [label, value] of Object.entries(dates)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    expect(mockGet).not.toHaveBeenCalledWith(`/reports/month-end?from=${dates.From}&to=${dates.To}`);
+    expect(screen.queryByLabelText('Stock report overview')).not.toBeInTheDocument();
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(download()).toBeDisabled();
+  });
+});
+
+describe('Stock report loading and failures', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-09T12:00:00Z'));
+    mockGet.mockReset().mockResolvedValue(REPORT);
+    mockDownload.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('disables downloads until the chosen period has loaded and discards a stale response', async () => {
     let resolvePrevious!: (value: typeof REPORT) => void;
     let resolveSelected!: (value: typeof REPORT) => void;
     mockGet.mockImplementationOnce(() => new Promise((resolve) => { resolvePrevious = resolve; }))
       .mockImplementationOnce(() => new Promise((resolve) => { resolveSelected = resolve; }));
     renderPage();
-    const button = screen.getByRole('button', { name: 'Download month-end report' });
-    expect(button).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: '2026-08' } });
+    expect(download()).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'last-week' } });
     await act(async () => resolvePrevious(REPORT));
-    expect(screen.queryByLabelText('Month-end overview')).not.toBeInTheDocument();
-    expect(button).toBeDisabled();
-    await act(async () => resolveSelected({ ...REPORT, month: '2026-08', from: '2026-08-01', to: '2026-08-31' }));
-    expect(button).toBeEnabled();
-    expect(screen.getByText('Stock as at the end of 2026-08-31; stock used from 2026-08-01 to 2026-08-31.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Stock report overview')).not.toBeInTheDocument();
+    expect(download()).toBeDisabled();
+    await act(async () => resolveSelected({ ...REPORT, month: null, from: '2026-09-28', to: '2026-10-04' }));
+    expect(download()).toBeEnabled();
   });
 
-  it('shows a report failure and retries the selected month', async () => {
+  it('shows a report failure and retries the chosen period', async () => {
     mockGet.mockRejectedValueOnce({ code: 'FORBIDDEN', message: 'Reports permission required' });
     renderPage();
     expect(await screen.findByText('Reports permission required')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download month-end report' })).toBeDisabled();
+    expect(download()).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    await screen.findByLabelText('Month-end overview');
+    await screen.findByLabelText('Stock report overview');
     expect(mockGet).toHaveBeenCalledTimes(2);
-    expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?month=2026-09');
+    expect(mockGet).toHaveBeenLastCalledWith(SEPT);
     expect(screen.queryByText('Reports permission required')).not.toBeInTheDocument();
   });
 
@@ -103,8 +142,8 @@ describe('MonthEnd loading and failures', () => {
     let rejectDownload!: (reason: Error) => void;
     mockDownload.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectDownload = reject; }));
     renderPage();
-    await screen.findByLabelText('Month-end overview');
-    const button = screen.getByRole('button', { name: 'Download month-end report' });
+    await screen.findByLabelText('Stock report overview');
+    const button = download();
     fireEvent.click(button);
     expect(button).toBeDisabled();
     fireEvent.click(button);
@@ -117,23 +156,5 @@ describe('MonthEnd loading and failures', () => {
     fireEvent.click(button);
     await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(button).toBeEnabled());
-  });
-
-  it('allows this month and explains that the report is still in progress', async () => {
-    renderPage();
-    await screen.findByLabelText('Month-end overview');
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: '2026-10' } });
-    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?month=2026-10'));
-    expect(screen.getByText('This month so far: stock as it stands now.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Month')).toHaveAttribute('max', '2026-10');
-  });
-
-  it('does not request or download a cleared month', async () => {
-    renderPage();
-    await screen.findByLabelText('Month-end overview');
-    fireEvent.change(screen.getByLabelText('Month'), { target: { value: '' } });
-    expect(mockGet).toHaveBeenCalledTimes(1);
-    expect(screen.queryByLabelText('Month-end overview')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download month-end report' })).toBeDisabled();
   });
 });

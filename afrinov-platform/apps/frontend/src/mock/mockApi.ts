@@ -874,7 +874,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'GET' && p === '/reports/month-end') {
     const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
-    return computeMonthEnd(qs.month || new Date().toISOString().slice(0, 7), {
+    return computeMonthEnd({ month: qs.month || undefined, from: qs.from || undefined, to: qs.to || undefined }, {
       transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency,
       consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
     });

@@ -1,23 +1,24 @@
-// The month-end report management receives: the stock workbook's Summary
-// sheets (stock on hand, value, % of Required Stock, re-order quantity,
-// URGENCY) and its Stock Report sheets (stock used), one per category.
+// The stock report management receives: the stock workbook's Summary sheets
+// (stock on hand, value, % of Required Stock, re-order quantity, URGENCY) and
+// its Stock Report sheets (stock used), one per category, for a month or any
+// other range of days (a week, say).
 //
-// Stock is as it stood at the end of the month, rebuilt from the ledger (the
-// sum of every movement before midnight on the first of the next month), so a
-// report for a past month does not change when stock moves later. The workbook
-// could only show "now". Status uses the stock status bands; prices are the
+// Stock is as it stood at the end of the range, rebuilt from the ledger (the
+// sum of every movement before midnight after the last day), so a report for a
+// past period does not change when stock moves later. The workbook could only
+// show "now". Status uses the stock status bands; prices are the
 // items' unit prices now, as the workbook's were.
 import type { MaterialCategory } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { classifyItem, getStatusBands, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { ConsumptionService } from './consumption.service.js';
+import { ConsumptionService, parseRange } from './consumption.service.js';
 
 export interface MonthEndItem {
   sku: string;
   name: string;
-  /** Where it was kept at month end, e.g. "A-1" or "A-1 (8), B-2 (3)". */
+  /** Where it was kept at the end of the range, e.g. "A-1" or "A-1 (8), B-2 (3)". */
   location: string;
   requiredStock: number;
   currentStock: number;
@@ -45,7 +46,8 @@ export interface MonthEndCategory {
 }
 
 export interface MonthEndReport {
-  month: string;
+  /** YYYY-MM when the range is exactly one calendar month, otherwise null. */
+  month: string | null;
   from: string;
   to: string;
   generatedAt: string;
@@ -79,23 +81,54 @@ export function monthRange(month: string, now = new Date()): { from: string; to:
   return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10), end: new Date(Date.UTC(y, mo, 1)) };
 }
 
+export interface StockReportQuery { month?: string; from?: string; to?: string }
+
+/** The calendar month a range covers exactly, as YYYY-MM, or null. */
+export function wholeMonth(from: string, to: string): string | null {
+  if (!from.endsWith('-01') || from.slice(0, 7) !== to.slice(0, 7)) return null;
+  const [y, m] = from.split('-').map(Number) as [number, number];
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) === to ? from.slice(0, 7) : null;
+}
+
+/**
+ * Resolve the report's days: ?from and ?to (YYYY-MM-DD, both included) when
+ * either is given, else ?month, else this UTC month. The last day may be in the
+ * future (stock is then as it stands now); the first may not.
+ * @param now - Reference date for "this month" and the future check.
+ * @throws {ApiError} VALIDATION_ERROR (400) for malformed, reversed or future ranges.
+ */
+export function reportRange(q: StockReportQuery, now = new Date()): { month: string | null; from: string; to: string; end: Date } {
+  if (!q.from && !q.to) {
+    const month = q.month || now.toISOString().slice(0, 7);
+    return { month, ...monthRange(month, now) };
+  }
+  if (!q.from || !q.to) throw Errors.validation('Give both a start and an end date');
+  const { from, to, start, end } = parseRange(q.from, q.to);
+  // Date rolls 2026-02-30 over to 2 March; refuse days that do not exist.
+  if (start.toISOString().slice(0, 10) !== from || new Date(end.getTime() - 86_400_000).toISOString().slice(0, 10) !== to) {
+    throw Errors.validation('Invalid date');
+  }
+  if (from > now.toISOString().slice(0, 10)) throw Errors.validation('That period has not started yet');
+  return { month: wholeMonth(from, to), from, to, end };
+}
+
 export const MonthEndService = {
   /**
-   * Read stock before the next month's UTC midnight and usage within the month,
+   * Read stock before UTC midnight after the last day and usage within the range,
    * grouped by category with totals. Includes active items and inactive items
    * with a nonzero balance at any location; empty categories are omitted.
    * Prices, item details, required stock, and status bands are current values.
    * Usage is issued minus returned, excluding reversed movements and reversals;
-   * its locations describe holdings at month end, not where stock was issued.
+   * its locations describe holdings at the end, not where stock was issued.
    * Unpriced values are null and contribute zero to totals. Stock ratios are
    * fractions (0.11 = 11%); reorder quantities may be negative when overstocked.
    * Settings read failures fall back to catalog defaults.
-   * @param month - YYYY-MM, validated by monthRange, including the current month.
-   * @throws {ApiError} For invalid or future months.
+   * @param q - A month or a from/to range, resolved by reportRange.
+   * @throws {ApiError} For invalid or future ranges.
    * @throws Propagates inventory, material, location, and consumption read failures.
    */
-  async report(month: string): Promise<MonthEndReport> {
-    const { from, to, end } = monthRange(month);
+  async report(q: StockReportQuery): Promise<MonthEndReport> {
+    const { month, from, to, end } = reportRange(q);
     const [balances, materials, bands, currency, consumption] = await Promise.all([
       prisma.inventoryTransaction.groupBy({ by: ['materialId', 'locationId'], where: { postedAt: { lt: end } }, _sum: { quantity: true } }),
       prisma.material.findMany({ select: { id: true, sku: true, name: true, category: true, requiredStock: true, unitCost: true, active: true } }),
@@ -123,7 +156,7 @@ export const MonthEndService = {
 
     const categories: MonthEndCategory[] = [];
     for (const category of CATEGORY_ORDER) {
-      // Active items, and any inactive one that still had stock at month end.
+      // Active items, and any inactive one that still had stock at the end.
       const mine = materials
         .filter((m) => m.category === category && (m.active || held.has(m.id)))
         .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));

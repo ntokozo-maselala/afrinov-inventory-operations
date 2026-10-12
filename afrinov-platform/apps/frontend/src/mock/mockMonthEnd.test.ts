@@ -1,4 +1,4 @@
-// The frontend-only month-end report, which mirrors the backend's.
+// The frontend-only stock report, which mirrors the backend's.
 import { describe, it, expect } from 'vitest';
 import { computeMonthEnd } from './mockMonthEnd';
 import { computeConsumption } from './mockConsumption';
@@ -19,7 +19,7 @@ const transactions = [
   tx('r3', 'RECEIPT', 85, '2026-10-01T00:00:00Z'),
 ];
 
-const run = (month: string) => computeMonthEnd(month, {
+const run = (q: string | { from: string; to: string }) => computeMonthEnd(typeof q === 'string' ? { month: q } : q, {
   transactions, materials, locations, bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, currency: 'ZAR',
   consumption: (from, to) => computeConsumption({ from, to }, { transactions, materials, projects: [] }),
 }, new Date('2026-10-09T10:00:00Z'));
@@ -40,11 +40,29 @@ describe('computeMonthEnd (mock)', () => {
   it('refuses a month that has not started', () => {
     expect(() => run('2026-11')).toThrow();
   });
+
+  it('reports a range of days as at midnight after its last day', () => {
+    const r = run({ from: '2026-09-01', to: '2026-09-19' });
+    expect(r).toMatchObject({ month: null, from: '2026-09-01', to: '2026-09-19' });
+    expect(r.categories[0]!.items[0]).toMatchObject({ currentStock: 50 });
+    expect(r.categories[0]!.used).toEqual([]);
+    expect(run({ from: '2026-09-20', to: '2026-09-20' }).categories[0]!.items[0]).toMatchObject({ currentStock: 25 });
+    expect(run({ from: '2026-09-01', to: '2026-09-30' }).month).toBe('2026-09');
+  });
+
+  it.each([
+    [{ from: '2026-09-08', to: '2026-09-01' }, 'The start date is after the end date'],
+    [{ from: '2026-10-10', to: '2026-10-16' }, 'That period has not started yet'],
+    [{ from: '2026-02-30', to: '2026-03-05' }, 'Invalid date'],
+    [{ from: '2026-09-01', to: '' }, 'Give both a start and an end date'],
+  ])('refuses %j', (q, message) => {
+    expect(() => run(q)).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR', message }));
+  });
 });
 
 describe('computeMonthEnd boundaries and totals', () => {
   const now = new Date('2026-10-09T10:00:00Z');
-  const calculate = (stock: MockMaterial[], ledger: MockInventoryTransaction[], month = '2026-09') => computeMonthEnd(month, {
+  const calculate = (stock: MockMaterial[], ledger: MockInventoryTransaction[], month = '2026-09') => computeMonthEnd({ month }, {
     materials: stock, transactions: ledger, locations, bands: { urgentBelowPercent: 25, warningBelowPercent: 60 }, currency: 'USD',
     consumption: (from, to) => computeConsumption({ from, to }, { materials: stock, transactions: ledger, projects: [] }),
   }, now);
@@ -56,7 +74,7 @@ describe('computeMonthEnd boundaries and totals', () => {
     ...tx(`${materialId}-${postedAt}-${locationId}`, type, quantity, postedAt, locationId), materialId,
   });
 
-  it.each(['', '2026-00', '2026-13', '2026-9', '2026-09-01', ' 2026-09'])('rejects malformed month %j', (month) => {
+  it.each(['2026-00', '2026-13', '2026-9', '2026-09-01', ' 2026-09'])('rejects malformed month %j', (month) => {
     expect(() => calculate([], [], month)).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR', message: 'Month must be YYYY-MM' }));
   });
 

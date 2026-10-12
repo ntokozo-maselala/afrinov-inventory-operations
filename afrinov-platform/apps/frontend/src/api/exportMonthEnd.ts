@@ -1,30 +1,36 @@
-// Download the month-end report. Live: the backend's
+// Download the stock report. Live: the backend's
 // GET /reports/month-end/export. Frontend-only mode builds the same workbook
-// here, in the stock workbook's layout, from the mock month-end report.
+// here, in the stock workbook's layout, from the mock stock report.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
 import type { MonthEndReport } from './reportTypes';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+/** The download name: the month when the report covers one, otherwise both dates (as the server names it). */
+export function stockReportFilename(r: Pick<MonthEndReport, 'month' | 'from' | 'to'>): string {
+  return `afrinov-stock-report-${r.month ?? `${r.from}-to-${r.to}`}.xlsx`;
+}
+
 /**
- * Start an XLSX download for a YYYY-MM month, fetching the live export or
- * building it locally in frontend-only mode. Resolves after triggering the
+ * Start an XLSX download for a YYYY-MM-DD from/to period (both days included),
+ * fetching the live export or building it locally in frontend-only mode. Resolves after triggering the
  * browser download, without waiting for the file to be saved.
  * @throws {Error} For live network failures, non-success responses, or empty files.
  * Network failures get a connection message; unreadable error responses use the
  * HTTP status. Report, workbook, response-body, and browser errors propagate.
  */
-export async function downloadMonthEnd(month: string): Promise<void> {
-  const fallback = `afrinov-month-end-${month}.xlsx`;
+export async function downloadMonthEnd(range: { from: string; to: string }): Promise<void> {
+  const query = new URLSearchParams(range).toString();
   if (FRONTEND_ONLY) {
-    triggerDownload(new Blob([await buildInBrowser(month)], { type: XLSX }), fallback);
+    const r = await api.get<MonthEndReport>(`/reports/month-end?${query}`);
+    triggerDownload(new Blob([await buildInBrowser(r)], { type: XLSX }), stockReportFilename(r));
     return;
   }
   const token = getToken();
   let res: Response;
   try {
-    res = await fetch(`/api/v1/reports/month-end/export?month=${encodeURIComponent(month)}`, {
+    res = await fetch(`/api/v1/reports/month-end/export?${query}`, {
       headers: { Accept: XLSX, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
   } catch {
@@ -33,7 +39,7 @@ export async function downloadMonthEnd(month: string): Promise<void> {
   if (!res.ok) throw new Error(await errorMessage(res));
   const blob = await res.blob();
   if (blob.size === 0) throw new Error('Download failed: the file was empty.');
-  triggerDownload(blob, filenameFromDisposition(res.headers.get('content-disposition'), fallback));
+  triggerDownload(blob, filenameFromDisposition(res.headers.get('content-disposition'), stockReportFilename({ month: null, ...range })));
 }
 
 const SHEET: Record<string, { summary: string; used: string; label: string; title: string }> = {
@@ -46,18 +52,17 @@ const SHEET: Record<string, { summary: string; used: string; label: string; titl
 const URGENCY: Record<string, string> = { URGENT: 'URGENT', WARNING: 'WARNING', OK: 'OK', NOT_SET: 'NOT SET' };
 
 /**
- * Fetch a YYYY-MM month's report and return XLSX bytes with an Overview and
- * per-category Summary and Used sheets, using the report's values and totals.
- * @throws Propagates report, ExcelJS loading, and workbook generation errors.
+ * Return XLSX bytes with an Overview and per-category Summary and Used sheets,
+ * using the report's values and totals.
+ * @throws Propagates ExcelJS loading and workbook generation errors.
  */
-async function buildInBrowser(month: string): Promise<ArrayBuffer> {
-  const r = await api.get<MonthEndReport>(`/reports/month-end?month=${encodeURIComponent(month)}`);
+async function buildInBrowser(r: MonthEndReport): Promise<ArrayBuffer> {
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   const ov = wb.addWorksheet('Overview');
-  ov.getCell('A1').value = `Month-end stock report, ${r.month}`;
+  ov.getCell('A1').value = `Stock report, ${r.month ?? `${r.from} to ${r.to}`}`;
   ov.getCell('A2').value = `Stock as at the end of ${r.to}; stock used from ${r.from} to ${r.to}. Values excl. VAT, ${r.currency}.`;
-  ov.getRow(4).values = ['Category', 'Items', 'In stock', `Stock value (${r.currency})`, 'Urgent', 'Warning', `Used in month (${r.currency})`];
+  ov.getRow(4).values = ['Category', 'Items', 'In stock', `Stock value (${r.currency})`, 'Urgent', 'Warning', `Used in period (${r.currency})`];
   ov.getRow(4).font = { bold: true };
   for (const c of r.categories) ov.addRow([SHEET[c.category]?.label ?? c.category, c.items.length, c.itemsInStock, c.value, c.urgent, c.warning, c.usedValue]);
   ov.addRow(['Total', r.total.items, r.total.itemsInStock, r.total.value, r.total.urgent, r.total.warning, r.total.usedValue]).font = { bold: true };
@@ -77,7 +82,7 @@ async function buildInBrowser(month: string): Promise<ArrayBuffer> {
     wu.getCell('A4').value = `Used Stock Inventory — ${r.from} to ${r.to}`;
     wu.getRow(5).values = ['Product ID', 'Item Name', 'Rack', 'Stock Used In QTY', 'Stock In Value Ex VAT'];
     wu.getRow(5).font = { bold: true };
-    if (c.used.length === 0) wu.addRow(['', 'Nothing was used in this month.']);
+    if (c.used.length === 0) wu.addRow(['', 'Nothing was used in this period.']);
     for (const u of c.used) wu.addRow([u.sku, u.name, u.location, u.used, u.value]);
   }
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;

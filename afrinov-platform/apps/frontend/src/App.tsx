@@ -135,7 +135,8 @@ export function App() {
         )}
         <Route path="/reports/stock-status" element={<Suspense fallback={<PageSkeleton />}><StockStatus /></Suspense>} />
         <Route path="/reports/consumption" element={<Suspense fallback={<PageSkeleton />}><Consumption /></Suspense>} />
-        <Route path="/reports/month-end" element={<Suspense fallback={<PageSkeleton />}><MonthEnd /></Suspense>} />
+        <Route path="/reports/stock-report" element={<Suspense fallback={<PageSkeleton />}><MonthEnd /></Suspense>} />
+        <Route path="/reports/month-end" element={<Navigate to="/reports/stock-report" replace />} />
         {/* The old Low stock page: kept so bookmarks still land. */}
         <Route path="/reports/low-stock" element={<Navigate to="/reports/stock-status" replace />} />
         {/* The retired Inventory report: its figures are on the Dashboard, Stock status and Locations. */}

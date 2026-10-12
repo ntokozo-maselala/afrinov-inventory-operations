@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ExcelJS from 'exceljs';
-import { downloadMonthEnd } from './exportMonthEnd';
+import { downloadMonthEnd, stockReportFilename } from './exportMonthEnd';
 import type { MonthEndReport } from './reportTypes';
 
 const mocks = vi.hoisted(() => ({ frontendOnly: false, get: vi.fn(), token: vi.fn(), download: vi.fn(), fetch: vi.fn() }));
@@ -12,6 +12,7 @@ vi.mock('./exportReport', async (importOriginal) => ({
 }));
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const SEPT = { from: '2026-09-01', to: '2026-09-30' };
 const report: MonthEndReport = {
   month: '2026-09', from: '2026-09-01', to: '2026-09-30', generatedAt: '2026-10-09T00:00:00Z', currency: 'USD',
   bands: { urgentBelowPercent: 20, warningBelowPercent: 40 },
@@ -41,8 +42,8 @@ describe('downloadMonthEnd from the server', () => {
     mocks.fetch.mockResolvedValue(new Response('workbook bytes', { headers: {
       'content-type': XLSX, 'content-disposition': 'attachment; filename="month-end.xlsx"',
     } }));
-    await downloadMonthEnd('2026-09');
-    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/reports/month-end/export?month=2026-09', {
+    await downloadMonthEnd(SEPT);
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/v1/reports/month-end/export?from=2026-09-01&to=2026-09-30', {
       headers: { Accept: XLSX, Authorization: 'Bearer test-token' },
     });
     expect(mocks.download).toHaveBeenCalledOnce();
@@ -53,18 +54,23 @@ describe('downloadMonthEnd from the server', () => {
     expect(mocks.get).not.toHaveBeenCalled();
   });
 
-  it('omits authorization when signed out and falls back to the month filename', async () => {
+  it('omits authorization when signed out and falls back to a filename with both dates', async () => {
     mocks.token.mockReturnValue(null);
     mocks.fetch.mockResolvedValue(new Response('xlsx'));
-    await downloadMonthEnd('2026-09');
+    await downloadMonthEnd({ from: '2026-09-07', to: '2026-09-13' });
     expect(mocks.fetch).toHaveBeenCalledWith(expect.any(String), { headers: { Accept: XLSX } });
-    expect(mocks.download).toHaveBeenCalledWith(expect.anything(), 'afrinov-month-end-2026-09.xlsx');
+    expect(mocks.download).toHaveBeenCalledWith(expect.anything(), 'afrinov-stock-report-2026-09-07-to-2026-09-13.xlsx');
   });
 
-  it('encodes the supplied month as a single query value', async () => {
+  it('encodes each date as a single query value', async () => {
     mocks.fetch.mockResolvedValue(new Response('xlsx'));
-    await downloadMonthEnd('2026-09&format=pdf');
-    expect(mocks.fetch).toHaveBeenCalledWith('/api/v1/reports/month-end/export?month=2026-09%26format%3Dpdf', expect.anything());
+    await downloadMonthEnd({ from: '2026-09-01&format=pdf', to: '2026-09-30' });
+    expect(mocks.fetch).toHaveBeenCalledWith('/api/v1/reports/month-end/export?from=2026-09-01%26format%3Dpdf&to=2026-09-30', expect.anything());
+  });
+
+  it('names the file by month or by both dates', () => {
+    expect(stockReportFilename(report)).toBe('afrinov-stock-report-2026-09.xlsx');
+    expect(stockReportFilename({ month: null, from: '2026-09-07', to: '2026-09-13' })).toBe('afrinov-stock-report-2026-09-07-to-2026-09-13.xlsx');
   });
 
   it.each([
@@ -73,13 +79,13 @@ describe('downloadMonthEnd from the server', () => {
     [new Response(''), 'Download failed: the file was empty.'],
   ])('does not download an invalid response (%s)', async (response, message) => {
     mocks.fetch.mockResolvedValue(response);
-    await expect(downloadMonthEnd('2026-09')).rejects.toThrow(message);
+    await expect(downloadMonthEnd(SEPT)).rejects.toThrow(message);
     expect(mocks.download).not.toHaveBeenCalled();
   });
 
   it('reports network failures without downloading', async () => {
     mocks.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
-    await expect(downloadMonthEnd('2026-09')).rejects.toThrow('Unable to reach the server. Check your connection and try again.');
+    await expect(downloadMonthEnd(SEPT)).rejects.toThrow('Unable to reach the server. Check your connection and try again.');
     expect(mocks.download).not.toHaveBeenCalled();
   });
 });
@@ -100,15 +106,16 @@ describe('downloadMonthEnd in frontend-only mode', () => {
   beforeEach(() => { mocks.frontendOnly = true; });
 
   it('builds a readable workbook with overview, summary, usage and empty-category sheets', async () => {
-    await downloadMonthEnd('2026-09');
-    expect(mocks.get).toHaveBeenCalledExactlyOnceWith('/reports/month-end?month=2026-09');
+    await downloadMonthEnd(SEPT);
+    expect(mocks.get).toHaveBeenCalledExactlyOnceWith('/reports/month-end?from=2026-09-01&to=2026-09-30');
     expect(mocks.fetch).not.toHaveBeenCalled();
     const [blob, filename] = mocks.download.mock.calls[0]!;
-    expect(filename).toBe('afrinov-month-end-2026-09.xlsx');
+    expect(filename).toBe('afrinov-stock-report-2026-09.xlsx');
     expect(blob.type).toBe(XLSX);
     const wb = await readWorkbook(blob);
     expect(wb.worksheets.map((s) => s.name)).toEqual(['Overview', 'Project Stock Summary', 'Project Used', 'Tools Summary', 'Tools Used']);
     const overview = wb.getWorksheet('Overview')!;
+    expect(overview.getCell('A1').value).toBe('Stock report, 2026-09');
     expect(overview.getCell('D4').value).toBe('Stock value (USD)');
     expect(overview.getRow(5).values).toEqual([undefined, 'Project Material', 2, 1, 24, 0, 0, 6]);
     expect(overview.getRow(7).values).toEqual([undefined, 'Total', 2, 1, 24, 0, 0, 6]);
@@ -121,13 +128,13 @@ describe('downloadMonthEnd in frontend-only mode', () => {
     expect(summary.getCell('J6').value).toBeNull();
     expect(summary.getCell('K6').value).toBe('NOT SET');
     expect(wb.getWorksheet('Project Used')!.getRow(6).values).toEqual([undefined, 'PRJ-1', 'Pipe', 'Rack A', 3, 6]);
-    expect(wb.getWorksheet('Tools Used')!.getCell('B6').value).toBe('Nothing was used in this month.');
+    expect(wb.getWorksheet('Tools Used')!.getCell('B6').value).toBe('Nothing was used in this period.');
   });
 
   it('propagates report failures without starting a download', async () => {
-    const error = new Error('That month has not started yet');
+    const error = new Error('That period has not started yet');
     mocks.get.mockRejectedValue(error);
-    await expect(downloadMonthEnd('2999-01')).rejects.toBe(error);
+    await expect(downloadMonthEnd({ from: '2999-01-01', to: '2999-01-31' })).rejects.toBe(error);
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.download).not.toHaveBeenCalled();
   });
