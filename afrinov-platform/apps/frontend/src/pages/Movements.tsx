@@ -10,7 +10,6 @@ import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useDebounced } from '../hooks/useDebounced';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
 import { Field, Input, Select } from '../components/Field';
 import { Button } from '../components/Button';
 import { ErrorState } from '../components/EmptyState';
@@ -129,11 +128,11 @@ export function Movements() {
         actions={(
           <div className="flex gap-2 no-print">
             {report.id !== 'other' && (
-              <Button variant="secondary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange}>
+              <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange}>
                 Download as Excel
               </Button>
             )}
-            <Button variant="secondary" size="sm" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print</Button>
+            <Button variant="primary" size="sm" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print</Button>
           </div>
         )}
       />
@@ -163,56 +162,58 @@ export function Movements() {
         </div>
       </div>
 
-      <Toolbar
-        className="no-print"
-        left={(
-          <>
-            {has('supplierId') && (
-              <Select value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)} aria-label="Filter by supplier">
-                <option value="">All suppliers</option>
-                {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            )}
-            {has('recipientId') && (
-              <Select value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)} aria-label="Filter by who it was issued to">
-                <option value="">Issued to anyone</option>
-                {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                <option value="__none__">Not recorded</option>
-              </Select>
-            )}
-            {has('locationId') && (
-              <Select value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)} aria-label="Filter by location">
-                <option value="">All locations</option>
-                {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </Select>
-            )}
-            {has('entityType') && (
-              <Select value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)} aria-label="Filter by kind of change">
-                <option value="">All changes</option>
-                {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </Select>
-            )}
-            {has('actorId') && (
-              <Select value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)} aria-label="Filter by who did it">
-                <option value="">Everyone</option>
-                {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
-            )}
-            {has('materialId') && (
-              <div className="w-full sm:w-64">
-                <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
-              </div>
-            )}
-            {has('q') && (
-              <div className="relative w-full sm:w-64">
-                <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-                <Input className="pl-8" placeholder={SEARCH_HINT[report.id]} value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
-              </div>
-            )}
-            {filtersSet && <Button variant="ghost" size="sm" onClick={() => showReport(report.id)}>Reset filters</Button>}
-          </>
+      {/* The report's filters, two to a row (one on a phone). */}
+      <div className="mb-3 no-print">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {has('supplierId') && (
+            <Select value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)} aria-label="Filter by supplier">
+              <option value="">All suppliers</option>
+              {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+          )}
+          {has('recipientId') && (
+            <Select value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)} aria-label="Filter by who it was issued to">
+              <option value="">Issued to anyone</option>
+              {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              <option value="__none__">Not recorded</option>
+            </Select>
+          )}
+          {has('locationId') && (
+            <Select value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)} aria-label="Filter by location">
+              <option value="">All locations</option>
+              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </Select>
+          )}
+          {has('entityType') && (
+            <Select value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)} aria-label="Filter by kind of change">
+              <option value="">All changes</option>
+              {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </Select>
+          )}
+          {has('actorId') && (
+            <Select value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)} aria-label="Filter by who did it">
+              <option value="">Everyone</option>
+              {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+          )}
+          {has('materialId') && (
+            <div>
+              <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
+            </div>
+          )}
+          {has('q') && (
+            <div className="relative">
+              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
+              <Input className="pl-8" placeholder={SEARCH_HINT[report.id]} value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
+            </div>
+          )}
+        </div>
+        {filtersSet && (
+          <div className="flex justify-end mt-2">
+            <Button variant="ghost" size="sm" onClick={() => showReport(report.id)}>Reset filters</Button>
+          </div>
         )}
-      />
+      </div>
 
       <h2 className="hidden print:block text-h2 mb-2">{report.label}, {from === to ? from : `${from} to ${to}`}</h2>
       {badRange ? <ErrorState message="The start date is after the end date." /> : (
