@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockPost, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), perms: { activity: false } }));
+const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }));
 
 vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ useCanViewActivity: () => perms.activity }));
 
 const { StockCount } = await import('./StockCount');
 const { ToastProvider } = await import('../components/Toast');
@@ -27,7 +26,7 @@ function renderPage() {
       { id: 'm-9', sku: 'BOLT-M12', name: 'M12 bolt', unitOfMeasure: 'each', active: true },
     ];
     if (path.startsWith('/reports/current-stock?locationId=l-1')) return stockAtA1;
-    if (path.startsWith('/activity')) return recentCounts;
+    if (path.startsWith('/stock-counts')) return recentCounts;
     return [];
   });
   render(<MemoryRouter><ToastProvider><StockCount /></ToastProvider></MemoryRouter>);
@@ -46,7 +45,6 @@ const count = (name: string, value: string) => fireEvent.change(screen.getByLabe
 describe('StockCount page', () => {
   beforeEach(() => {
     localStorage.clear();
-    perms.activity = false;
     recentCounts = [];
     stockAtA1 = stockAtA1.map((r) => ({ ...r }));
     mockGet.mockReset();
@@ -148,27 +146,27 @@ describe('StockCount page', () => {
     expect(within(rod).getByText('+15')).toBeInTheDocument();
   });
 
-  it('shows the recent counts at the location to those who may see activity, and refreshes them after posting', async () => {
-    perms.activity = true;
-    recentCounts = [{ id: 'a-1', cursor: 'c', at: '2026-10-10T08:00:00.000Z', action: 'STOCK_COUNT', entityType: 'StockCount', entityId: 'c-0',
-      actorId: 'u-1', actorName: 'Vusi', summary: 'Counted A-1: 3 items, no differences', link: null }];
+  it('shows the recent counts at the location, links to them all, and refreshes them after posting', async () => {
+    recentCounts = [{ id: 'c-0', cursor: 'c', at: '2026-10-10T08:00:00.000Z', locationId: 'l-1', locationName: 'A-1', countedByName: 'Vusi',
+      counted: 3, adjusted: 0, note: null, differences: [] }];
     renderPage();
     await chooseA1();
-    expect(await screen.findByText('Counted A-1: 3 items, no differences')).toBeInTheDocument();
+    expect(await screen.findByText('3 items counted, no differences')).toBeInTheDocument();
     expect(screen.getByText('by Vusi')).toBeInTheDocument();
-    expect(mockGet).toHaveBeenCalledWith('/activity?entityType=StockCount&locationId=l-1&limit=5');
+    expect(mockGet).toHaveBeenCalledWith('/stock-counts?locationId=l-1&limit=5');
+    expect(screen.getByRole('link', { name: 'All counts, last 90 days' }).getAttribute('href')).toMatch(/^\/movements\?report=counts&locationId=l-1&from=/);
 
-    const before = mockGet.mock.calls.filter((c) => String(c[0]).startsWith('/activity')).length;
+    const counted = () => mockGet.mock.calls.filter((c) => String(c[0]).startsWith('/stock-counts')).length;
+    const before = counted();
     count('Cutting disc', '7');
     fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
     fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
-    await waitFor(() => expect(mockGet.mock.calls.filter((c) => String(c[0]).startsWith('/activity')).length).toBe(before + 1));
+    await waitFor(() => expect(counted()).toBe(before + 1));
   });
 
-  it('does not ask for recent counts for someone who may not see activity', async () => {
+  it('says when nothing has been counted at the location yet', async () => {
     renderPage();
     await chooseA1();
-    expect(screen.queryByText('Recent counts here')).not.toBeInTheDocument();
-    expect(mockGet.mock.calls.some((c) => String(c[0]).startsWith('/activity'))).toBe(false);
+    expect(await screen.findByText('No counts recorded here yet.')).toBeInTheDocument();
   });
 });

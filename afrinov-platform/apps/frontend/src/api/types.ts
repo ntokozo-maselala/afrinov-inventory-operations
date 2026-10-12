@@ -34,6 +34,8 @@ export interface MovementRow {
   recipientName?: string | null;
   returnedQuantity?: string | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
+  /** A transfer's other leg: where the stock went to (or came from). */
+  otherLocationName?: string | null;
 }
 
 /** One entry of the shop's other activity (GET /activity): counts, catalogue, user and settings changes. */
@@ -46,4 +48,19 @@ export interface ActivityRow {
   summary: string;
   /** Where in the app the record lives, when it has a page. */
   link: string | null;
+}
+
+/** One delivery on the received-stock report (GET /stock-receipts). */
+export interface ReceiptRecord {
+  id: string; cursor: string; number: string; receivedAt: string;
+  supplierName: string; deliveryRef: string | null; receivedByName: string;
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; locationName: string; quantity: string }>;
+}
+
+/** One count on the stock-counts report (GET /stock-counts). Items that matched are not stored, so only differences are listed. */
+export interface CountRecord {
+  id: string; cursor: string; at: string;
+  locationId: string | null; locationName: string; countedByName: string;
+  counted: number; adjusted: number; note: string | null;
+  differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
 }

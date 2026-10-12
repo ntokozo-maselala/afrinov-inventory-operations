@@ -57,18 +57,45 @@ describe('mock movement history', () => {
 
 interface Activity { id: string; entityType: string; summary: string; actorName: string; link: string | null }
 
-describe('mock other activity', () => {
-  it('records every stock count, including one with no differences, and filters counts by location', async () => {
+interface Count { id: string; locationName: string; countedByName: string; counted: number; adjusted: number; differences: Array<{ sku: string; quantity: string }> }
+
+describe('mock movement reports', () => {
+  it('lists every stock count with its differences, including one with none, by location, and not under Other changes', async () => {
     const fresh = createMockApi();
     const stock = await fresh.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock?locationId=loc-1');
-    const line = stock.find((r) => Number(r.quantity) > 0)!;
-    await fresh.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: line.materialId, expectedQuantity: Number(line.quantity), countedQuantity: Number(line.quantity) }] });
+    const [a, b] = stock.filter((r) => Number(r.quantity) > 1);
+    await fresh.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: a!.materialId, expectedQuantity: Number(a!.quantity), countedQuantity: Number(a!.quantity) }] });
+    await fresh.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: b!.materialId, expectedQuantity: Number(b!.quantity), countedQuantity: Number(b!.quantity) - 1 }] });
 
-    const counts = await fresh.get<Activity[]>('/activity?entityType=StockCount&locationId=loc-1');
-    expect(counts[0]!.summary).toBe('Counted Main Storeroom: 1 item, no differences');
-    expect(counts[0]!.actorName).toBe('System Administrator (dev)');
-    expect(await fresh.get<Activity[]>('/activity?entityType=StockCount&locationId=loc-2')).toEqual([]);
+    const counts = await fresh.get<Count[]>('/stock-counts?locationId=loc-1');
+    expect(counts[0]).toMatchObject({ locationName: 'Main Storeroom', countedByName: 'System Administrator (dev)', counted: 1, adjusted: 1 });
+    expect(counts[0]!.differences.map((d) => d.quantity)).toEqual(['-1']);
+    expect(counts[1]).toMatchObject({ adjusted: 0, differences: [] });
+    expect(await fresh.get<Count[]>('/stock-counts?locationId=loc-2')).toEqual([]);
+    expect((await fresh.get<Activity[]>('/activity')).some((x) => x.entityType === 'StockCount')).toBe(false);
+
+    // Count differences belong to Stock counts, not to Write-offs.
+    const writeoffs = await fresh.get<Array<{ referenceType?: string | null; type: string }>>('/inventory-transactions?report=writeoffs&limit=1000');
+    expect(writeoffs.every((t) => t.type === 'ADJUSTMENT' && t.referenceType !== 'StockCount')).toBe(true);
   });
+
+  it('lists received stock by delivery, with its supplier, note and lines', async () => {
+    const receipts = await api.get<Array<{ number: string; supplierName: string; deliveryRef: string | null; lines: Array<{ sku: string; locationName: string; quantity: string }> }>>('/stock-receipts?limit=50');
+    expect(receipts.length).toBeGreaterThan(0);
+    expect(receipts[0]!.supplierName).toBeTruthy();
+    expect(receipts[0]!.lines[0]).toMatchObject({ sku: expect.any(String), locationName: expect.any(String) });
+    const found = await api.get<typeof receipts>(`/stock-receipts?q=${encodeURIComponent(receipts[0]!.deliveryRef ?? receipts[0]!.number)}`);
+    expect(found.map((r) => r.number)).toContain(receipts[0]!.number);
+  });
+
+  it('shows each transfer once, by its out leg, with where the stock went', async () => {
+    const transfers = await api.get<Array<{ type: string; locationName: string; otherLocationName: string | null }>>('/inventory-transactions?report=transfers&limit=1000');
+    expect(transfers.length).toBeGreaterThan(0);
+    expect(transfers.every((t) => t.type === 'TRANSFER_OUT' && t.otherLocationName && t.otherLocationName !== t.locationName)).toBe(true);
+  });
+});
+
+describe('mock other activity', () => {
 
   it('leaves out settings changes and reversals', async () => {
     const fresh = createMockApi();

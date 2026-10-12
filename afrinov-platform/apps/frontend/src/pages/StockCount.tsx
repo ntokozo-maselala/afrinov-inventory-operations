@@ -15,8 +15,7 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { api, type ApiError } from '../api/client';
-import type { ActivityRow, CurrentStockRow, Material } from '../api/types';
-import { useCanViewActivity } from '../hooks/usePermissions';
+import type { CountRecord, CurrentStockRow, Material } from '../api/types';
 import { formatDateTime } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 
@@ -61,9 +60,8 @@ export function StockCount() {
   const materials = useApi<Material[]>('/materials');
   const [locationId, setLocationId] = useState('');
   const stock = useApi<CurrentStockRow[]>(locationId ? `/reports/current-stock?locationId=${encodeURIComponent(locationId)}` : null);
-  // The last few counts here, including ones that found no differences (Admin and Store Controller).
-  const canViewActivity = useCanViewActivity();
-  const recent = useApi<ActivityRow[]>(locationId && canViewActivity ? `/activity?entityType=StockCount&locationId=${encodeURIComponent(locationId)}&limit=5` : null);
+  // The last few counts here, including ones that found no differences.
+  const recent = useApi<CountRecord[]>(locationId ? `/stock-counts?locationId=${encodeURIComponent(locationId)}&limit=5` : null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [filter, setFilter] = useState('');
   const [adding, setAdding] = useState('');
@@ -155,7 +153,7 @@ export function StockCount() {
       setDraft(EMPTY);
       setConfirming(false);
       stock.reload();
-      if (canViewActivity) recent.reload();
+      recent.reload();
     } catch (err) {
       const e = err as ApiError;
       setError({ message: e.message, moved: e.code === 'CONFLICT' });
@@ -197,12 +195,12 @@ export function StockCount() {
             )}
           </div>
 
-          {locationId && canViewActivity && (
+          {locationId && (
             <div className="surface-card p-4 no-print">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <h2 className="text-h3 text-surface-900">Recent counts here</h2>
                 <Link
-                  to={`/movements?view=other&entityType=StockCount&from=${daysAgo(90)}&to=${today()}`}
+                  to={`/movements?report=counts&locationId=${encodeURIComponent(locationId)}&from=${daysAgo(90)}&to=${today()}`}
                   className="btn-link text-sm"
                 >
                   All counts, last 90 days
@@ -216,8 +214,8 @@ export function StockCount() {
                   {recent.data.map((c) => (
                     <li key={c.id} className="py-1.5 flex flex-wrap gap-x-3">
                       <span className="text-meta whitespace-nowrap">{formatDateTime(c.at)}</span>
-                      {c.link ? <Link to={c.link} className="btn-link">{c.summary}</Link> : <span>{c.summary}</span>}
-                      <span className="text-meta">by {c.actorName}</span>
+                      <span>{c.counted} item{c.counted === 1 ? '' : 's'} counted, {c.adjusted === 0 ? 'no differences' : `${c.adjusted} adjusted`}{c.note ? ` (${c.note})` : ''}</span>
+                      <span className="text-meta">by {c.countedByName}</span>
                     </li>
                   ))}
                 </ul>

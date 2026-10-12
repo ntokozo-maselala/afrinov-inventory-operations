@@ -100,14 +100,14 @@ export const SEED_TRANSACTIONS: MockInventoryTransaction[] = [
   { id: 't-8', postedAt: day(20), type: 'RECEIPT', materialId: 'mat-8', locationId: 'loc-1', quantity: '25', actorId: 'user-1' },
 
   // Workshop stock: moved from Main Storeroom to Boiler Shop before it is issued there.
-  { id: 't-21', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-4', locationId: 'loc-1', quantity: '-20', actorId: 'user-1' },
-  { id: 't-22', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-4', locationId: 'loc-2', quantity: '20',  actorId: 'user-1' },
-  { id: 't-23', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-5', locationId: 'loc-1', quantity: '-45', actorId: 'user-1' },
-  { id: 't-24', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-5', locationId: 'loc-2', quantity: '45',  actorId: 'user-1' },
-  { id: 't-25', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-7', locationId: 'loc-1', quantity: '-6',  actorId: 'user-1' },
-  { id: 't-26', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-7', locationId: 'loc-2', quantity: '6',   actorId: 'user-1' },
-  { id: 't-27', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-8', locationId: 'loc-1', quantity: '-8',  actorId: 'user-1' },
-  { id: 't-28', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-8', locationId: 'loc-2', quantity: '8',   actorId: 'user-1' },
+  { id: 't-21', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-4', locationId: 'loc-1', quantity: '-20', actorId: 'user-1', pairedWithId: 't-22' },
+  { id: 't-22', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-4', locationId: 'loc-2', quantity: '20',  actorId: 'user-1', pairedWithId: 't-21' },
+  { id: 't-23', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-5', locationId: 'loc-1', quantity: '-45', actorId: 'user-1', pairedWithId: 't-24' },
+  { id: 't-24', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-5', locationId: 'loc-2', quantity: '45',  actorId: 'user-1', pairedWithId: 't-23' },
+  { id: 't-25', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-7', locationId: 'loc-1', quantity: '-6',  actorId: 'user-1', pairedWithId: 't-26' },
+  { id: 't-26', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-7', locationId: 'loc-2', quantity: '6',   actorId: 'user-1', pairedWithId: 't-25' },
+  { id: 't-27', postedAt: day(6), type: 'TRANSFER_OUT', materialId: 'mat-8', locationId: 'loc-1', quantity: '-8',  actorId: 'user-1', pairedWithId: 't-28' },
+  { id: 't-28', postedAt: day(6), type: 'TRANSFER_IN',  materialId: 'mat-8', locationId: 'loc-2', quantity: '8',   actorId: 'user-1', pairedWithId: 't-27' },
 
   // Issues (consumption), each to a recipient as the backend requires
   { id: 't-9', postedAt: day(7), type: 'ISSUE', materialId: 'mat-1', locationId: 'loc-1', quantity: '-70', actorId: 'user-2', recipientId: 'rcp-1', projectNumber: 'AFRI-1325' },
@@ -120,8 +120,8 @@ export const SEED_TRANSACTIONS: MockInventoryTransaction[] = [
   { id: 't-16', postedAt: day(3), type: 'ISSUE', materialId: 'mat-8', locationId: 'loc-2', quantity: '-5', actorId: 'user-2', recipientId: 'rcp-5' },
 
   // Transfer
-  { id: 't-17', postedAt: day(4), type: 'TRANSFER_OUT', materialId: 'mat-1', locationId: 'loc-1', quantity: '-20', actorId: 'user-1' },
-  { id: 't-18', postedAt: day(4), type: 'TRANSFER_IN',  materialId: 'mat-1', locationId: 'loc-3', quantity: '20',  actorId: 'user-1' },
+  { id: 't-17', postedAt: day(4), type: 'TRANSFER_OUT', materialId: 'mat-1', locationId: 'loc-1', quantity: '-20', actorId: 'user-1', pairedWithId: 't-18' },
+  { id: 't-18', postedAt: day(4), type: 'TRANSFER_IN',  materialId: 'mat-1', locationId: 'loc-3', quantity: '20',  actorId: 'user-1', pairedWithId: 't-17' },
 
   // Adjustment — variance
   { id: 't-19', postedAt: day(2), type: 'ADJUSTMENT', materialId: 'mat-6', locationId: 'loc-1', quantity: '-5', actorId: 'user-1', reasonCode: 'COUNT_VARIANCE' },

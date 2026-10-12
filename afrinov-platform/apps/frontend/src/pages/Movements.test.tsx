@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), perms: { activity: false } }));
@@ -16,86 +16,127 @@ const { Movements } = await import('./Movements');
 const { ToastProvider } = await import('../components/Toast');
 
 const row = (n: number) => ({
-  id: `tx-${n}`, cursor: `2026-10-${String(30 - (n % 28)).padStart(2, '0')}T08:00:00.000Z_tx-${n}`, postedAt: '2026-10-05T08:00:00.000Z', type: 'ISSUE',
+  id: `tx-${n}`, cursor: `2026-10-05T08:00:00.000Z_tx-${String(n).padStart(4, '0')}`, postedAt: '2026-10-05T08:00:00.000Z', type: 'ISSUE',
   materialId: 'm-1', materialSku: `SKU-${n}`, materialName: 'Cutting disc', unitOfMeasure: 'each', locationId: 'l-1', locationName: 'Boiler Shop',
   quantity: '-1', actorId: 'u-1', actorName: 'Vusi',
 });
 
+const RECEIPT = {
+  id: 'gr-1', cursor: 'c', number: 'GR-2026-0007', receivedAt: '2026-09-25T10:00:00.000Z', supplierName: 'Hydroscand', deliveryRef: 'INV-2041', receivedByName: 'Vusi',
+  lines: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', locationName: 'Main Storeroom', quantity: '20' }],
+};
+const COUNTS = [
+  { id: 'c-2', cursor: 'c2', at: '2026-09-25T09:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 4, adjusted: 1, note: null,
+    differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }] },
+  { id: 'c-1', cursor: 'c1', at: '2026-09-25T08:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 3, adjusted: 0, note: null, differences: [] },
+];
+
 function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)]]) {
   let page = 0;
   mockGet.mockImplementation(async (path: string) => {
-    if (path.startsWith('/inventory-transactions/summary')) return { total: 205, byType: { ISSUE: 150, RECEIPT: 40, ADJUSTMENT: 15 } };
-    if (path.startsWith('/inventory-transactions/actors')) return [{ id: 'u-1', name: 'Vusi' }];
-    if (path.startsWith('/activity/actors')) return [{ id: 'u-1', name: 'Vusi' }];
+    if (path.startsWith('/inventory-transactions/summary')) return { total: 205, byType: {} };
+    if (path.startsWith('/inventory-transactions/actors') || path.startsWith('/activity/actors')) return [{ id: 'u-1', name: 'Vusi' }];
     if (path.startsWith('/activity')) return [{ id: 'a-1', cursor: 'c', at: '2026-10-12T08:00:00.000Z', action: 'CREATE', entityType: 'Material', entityId: 'm-1',
       actorId: 'u-1', actorName: 'Vusi', summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' }];
+    if (path.startsWith('/stock-receipts')) return [RECEIPT];
+    if (path.startsWith('/stock-counts')) return COUNTS;
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'Boiler Shop' }];
-    if (path.startsWith('/materials')) return [];
+    if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydroscand' }];
     return [];
   });
   render(<MemoryRouter initialEntries={[url]}><ToastProvider><Movements /></ToastProvider></MemoryRouter>);
 }
 
-const listCalls = () => mockGet.mock.calls.map((c) => c[0] as string).filter((p) => /^\/inventory-transactions\?/.test(p));
+const calls = (prefix: string) => mockGet.mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith(prefix));
+const listCalls = () => calls('/inventory-transactions?');
+const todayIso = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 
 describe('Movements page', () => {
   beforeEach(() => { mockGet.mockReset(); perms.activity = false; });
 
-  it('shows today by default, counting the whole range from the server', async () => {
+  it('opens on All movements for today, a single day, with no type filter', async () => {
     renderAt('/movements');
-    const now = new Date();
-    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     await screen.findByText('SKU-1');
-    expect(listCalls()[0]).toContain(`from=${day}&to=${day}`);
-    expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe(day);
-    expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe(day);
-    expect(screen.queryByText('Receipts')).not.toBeInTheDocument();
+    const day = todayIso();
+    expect(listCalls()[0]).toBe(`/inventory-transactions?from=${day}&to=${day}&limit=100`);
+    expect(screen.getByLabelText('Report')).toHaveValue('all');
+    expect(screen.getByLabelText('Date')).toHaveValue(day);
+    expect(screen.queryByLabelText('To')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Filter by type')).not.toBeInTheDocument();
     expect(screen.getByText('1 of 205 shown')).toBeInTheDocument();
   });
 
-  it('sends the filters in the address to the list and the totals', async () => {
-    renderAt('/movements?from=2026-09-01&to=2026-09-30&type=ISSUE&locationId=l-1&actorId=u-1&q=disc');
+  it('adds an end date for a range, and goes back to a single day', async () => {
+    renderAt('/movements?from=2026-09-01');
     await screen.findByText('SKU-1');
-    const expected = 'from=2026-09-01&to=2026-09-30&type=ISSUE&locationId=l-1&actorId=u-1&q=disc';
+    fireEvent.click(screen.getByRole('button', { name: 'Add end date' }));
+    expect(screen.getByLabelText('To')).toHaveValue('2026-09-01');
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-30' } });
+    await waitFor(() => expect(listCalls().at(-1)).toBe('/inventory-transactions?from=2026-09-01&to=2026-09-30&limit=100'));
+    fireEvent.click(screen.getByRole('button', { name: 'Single day' }));
+    await waitFor(() => expect(listCalls().at(-1)).toBe('/inventory-transactions?from=2026-09-01&to=2026-09-01&limit=100'));
+  });
+
+  it('sends only the filters the chosen report has', async () => {
+    renderAt('/movements?report=issued&from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&q=disc&supplierId=s-1');
+    await screen.findByText('SKU-1');
+    const expected = 'from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&q=disc&report=issued';
     expect(listCalls()[0]).toBe(`/inventory-transactions?${expected}&limit=100`);
     expect(mockGet).toHaveBeenCalledWith(`/inventory-transactions/summary?${expected}`);
+    expect(screen.queryByLabelText('Filter by supplier')).not.toBeInTheDocument();
   });
 
   it('loads the next page after the last row shown, and stops when a page is short', async () => {
     const full = Array.from({ length: 100 }, (_, i) => row(i + 1));
-    renderAt('/movements?from=2026-10-01&to=2026-10-31', [full, [row(101)]]);
+    renderAt('/movements?from=2026-10-05', [full, [row(101)]]);
     await screen.findByText('SKU-100');
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
     await screen.findByText('SKU-101');
-    expect(listCalls()[1]).toBe(`/inventory-transactions?from=2026-10-01&to=2026-10-31&limit=100&before=${encodeURIComponent(full[99]!.cursor)}`);
+    expect(listCalls()[1]).toBe(`/inventory-transactions?from=2026-10-05&to=2026-10-05&limit=100&before=${encodeURIComponent(full[99]!.cursor)}`);
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
-  it('says so when the start date is after the end date, and asks the server nothing', async () => {
+  it('says so when the start date is after the end date, and asks for no records', async () => {
     renderAt('/movements?from=2026-10-31&to=2026-10-01');
     expect(await screen.findByText('The start date is after the end date.')).toBeInTheDocument();
-    await waitFor(() => expect(mockGet).toHaveBeenCalled());
     expect(listCalls()).toHaveLength(0);
   });
 
-  it('offers Other activity only to those who may see it', async () => {
-    renderAt('/movements?view=other');
-    await screen.findByText('SKU-1');
-    expect(screen.queryByRole('tab', { name: 'Other activity' })).not.toBeInTheDocument();
-    expect(mockGet.mock.calls.some((c) => String(c[0]).startsWith('/activity'))).toBe(false);
+  it('shows received stock as deliveries, laid out like the Receive stock form', async () => {
+    renderAt('/movements?report=received&from=2026-09-25&supplierId=s-1');
+    const delivery = await screen.findByRole('region', { name: 'Delivery INV-2041' });
+    expect(within(delivery).getByText('Hydroscand')).toBeInTheDocument();
+    expect(within(delivery).getByText('Main Storeroom')).toBeInTheDocument();
+    expect(within(delivery).getByText(/GR-2026-0007/)).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith('/stock-receipts?from=2026-09-25&to=2026-09-25&supplierId=s-1&limit=50');
+    expect(listCalls()).toHaveLength(0);
   });
 
-  it('switches to Other activity for the same dates, without loading stock movements', async () => {
+  it('shows each count with its differences, and says when a count found none', async () => {
+    renderAt('/movements?report=counts&from=2026-09-25');
+    const [withDiff, clean] = await screen.findAllByRole('region', { name: 'Count at Boiler Shop' });
+    expect(within(withDiff!).getByText('-2')).toBeInTheDocument();
+    expect(within(clean!).getByText('No differences: everything counted matched the system.')).toBeInTheDocument();
+  });
+
+  it('offers Other changes only to those who may see it', async () => {
+    renderAt('/movements?report=other');
+    await screen.findByText('SKU-1');
+    expect(screen.queryByRole('option', { name: 'Other changes' })).not.toBeInTheDocument();
+    expect(calls('/activity')).toHaveLength(0);
+  });
+
+  it('switches report keeping the day and dropping filters that do not apply', async () => {
     perms.activity = true;
-    renderAt('/movements?from=2026-10-12&to=2026-10-12&type=ISSUE');
+    renderAt('/movements?from=2026-10-12&locationId=l-1');
     await screen.findByText('SKU-1');
-    mockGet.mockClear();
-    fireEvent.click(screen.getByRole('tab', { name: 'Other activity' }));
-    const link = await screen.findByRole('link', { name: 'Added item WSHR-16 Flat washer' });
-    expect(link).toHaveAttribute('href', '/materials/m-1');
+    fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'other' } });
+    expect(await screen.findByRole('link', { name: 'Added item WSHR-16 Flat washer' })).toHaveAttribute('href', '/materials/m-1');
     expect(mockGet).toHaveBeenCalledWith('/activity?from=2026-10-12&to=2026-10-12&limit=50');
-    expect(listCalls()).toHaveLength(0);
     expect(screen.queryByRole('button', { name: /Download as Excel/ })).not.toBeInTheDocument();
   });
 });

@@ -671,6 +671,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
   }
+  if (method === 'GET' && p === '/stock-receipts') return listReceipts(qs);
+  if (method === 'GET' && p === '/stock-counts') return listCounts(qs);
   if (method === 'POST' && p === '/stock-counts') {
     return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> });
   }
@@ -1649,7 +1651,10 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
   return state.transactions
     .filter((t) => {
       if (qs.materialId && t.materialId !== qs.materialId) return false;
-      if (qs.type && t.type !== qs.type) return false;
+      if (qs.type && !qs.report && t.type !== qs.type) return false;
+      if (qs.report === 'issued' && t.type !== 'ISSUE') return false;
+      if (qs.report === 'transfers' && t.type !== 'TRANSFER_OUT') return false;
+      if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
       if (qs.locationId && t.locationId !== qs.locationId) return false;
       if (qs.actorId && t.actorId !== qs.actorId) return false;
@@ -1666,8 +1671,8 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
 }
 
 // Mirrors ActivityService (apps/backend/src/modules/audit/activity.service.ts)
-// for what the mock records: stock counts and users.
-const ACTIVITY_TYPES = ['StockCount', 'Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport'];
+// for what the mock records: users.
+const ACTIVITY_TYPES = ['Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport'];
 
 function listActivity(qs: Record<string, string>) {
   const inRange = inDayRange(qs);
@@ -1675,7 +1680,6 @@ function listActivity(qs: Record<string, string>) {
     .filter((a) => ACTIVITY_TYPES.includes(a.entityType)
       && (!qs.entityType || a.entityType === qs.entityType)
       && (!qs.actorId || a.actorId === qs.actorId)
-      && (!qs.locationId || (a.entityType === 'StockCount' && (a.after as { locationId?: string } | null)?.locationId === qs.locationId))
       && inRange(a.createdAt))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   const limit = Math.min(qs.limit ? Number(qs.limit) : 100, 500);
@@ -1683,20 +1687,64 @@ function listActivity(qs: Record<string, string>) {
     const after = (a.after ?? {}) as Record<string, unknown>;
     const before = (a.before ?? {}) as Record<string, unknown>;
     let summary = `${a.action.charAt(0)}${a.action.slice(1).toLowerCase().replace(/_/g, ' ')} ${a.entityType} ${a.entityId}`;
-    let link: string | null = null;
-    if (a.entityType === 'StockCount') {
-      const counted = Number(after.counted ?? 0);
-      const adjusted = Number(after.adjusted ?? 0);
-      const day = a.createdAt.slice(0, 10);
-      summary = `Counted ${findLocation(String(after.locationId))?.name ?? 'a location'}: ${counted} item${counted === 1 ? '' : 's'}, ${adjusted === 0 ? 'no differences' : `${adjusted} adjusted`}${after.note ? ` (${after.note})` : ''}`;
-      link = `/movements?from=${day}&to=${day}&type=ADJUSTMENT&locationId=${after.locationId}`;
-    } else if (a.entityType === 'User') {
+    const link: string | null = null;
+    if (a.entityType === 'User') {
       const name = (after.name ?? before.name ?? mockUsers.find((u) => u.id === a.entityId)?.name ?? 'a user') as string;
       summary = a.action === 'CREATE' ? `Added user ${name}` : `Edited user ${name}`;
     }
     return {
       id: a.id, cursor: `${a.createdAt}_${a.id}`, at: a.createdAt, action: a.action, entityType: a.entityType, entityId: a.entityId,
       actorId: a.actorId, actorName: a.actorId ? mockUsers.find((u) => u.id === a.actorId)?.name ?? 'Unknown user' : 'System', summary, link,
+    };
+  });
+}
+
+// Mirrors StockReceiptService.list: posted deliveries for a delivery-date range, newest first.
+function listReceipts(qs: Record<string, string>) {
+  const inRange = inDayRange(qs);
+  const needle = qs.q?.trim().toLowerCase();
+  const rows = state.goodsReceipts
+    .filter((g) => g.status === 'POSTED' && inRange(g.receivedAt)
+      && (!qs.supplierId || g.supplierId === qs.supplierId)
+      && (!qs.locationId || g.lines.some((l) => l.locationId === qs.locationId))
+      && (!needle || [g.number, g.deliveryRef, findSupplier(g.supplierId)?.name, ...g.lines.flatMap((l) => [findMaterial(l.materialId)?.sku, findMaterial(l.materialId)?.name])]
+        .filter(Boolean).join(' ').toLowerCase().includes(needle)))
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id));
+  const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
+  return olderThan(rows, qs.before, (g) => g.receivedAt).slice(0, limit).map((g) => ({
+    id: g.id, cursor: `${g.receivedAt}_${g.id}`, number: g.number, receivedAt: g.receivedAt,
+    supplierName: findSupplier(g.supplierId)?.name ?? 'Unknown supplier', deliveryRef: g.deliveryRef ?? null,
+    receivedByName: mockUsers.find((u) => u.id === 'user-1')?.name ?? 'Unknown user',
+    lines: g.lines.map((l) => {
+      const m = findMaterial(l.materialId);
+      return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', locationName: findLocation(l.locationId)?.name ?? l.locationId, quantity: l.quantity };
+    }).sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+}
+
+// Mirrors StockCountService.list: posted counts, newest first, with the differences each adjusted.
+function listCounts(qs: Record<string, string>) {
+  const inRange = inDayRange(qs);
+  const rows = MOCK_AUDIT
+    .filter((a) => a.entityType === 'StockCount' && inRange(a.createdAt)
+      && (!qs.actorId || a.actorId === qs.actorId)
+      && (!qs.locationId || (a.after as { locationId?: string } | null)?.locationId === qs.locationId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
+  return olderThan(rows, qs.before, (a) => a.createdAt).slice(0, limit).map((a) => {
+    const f = (a.after ?? {}) as { locationId?: string; counted?: number; adjusted?: number; note?: string | null };
+    return {
+      id: a.entityId, cursor: `${a.createdAt}_${a.id}`, at: a.createdAt, locationId: f.locationId ?? null,
+      locationName: findLocation(f.locationId ?? '')?.name ?? 'Unknown location',
+      countedByName: a.actorId ? mockUsers.find((u) => u.id === a.actorId)?.name ?? 'Unknown user' : 'System',
+      counted: Number(f.counted ?? 0), adjusted: Number(f.adjusted ?? 0), note: f.note ?? null,
+      differences: state.transactions
+        .filter((t) => t.referenceType === 'StockCount' && t.referenceId === a.entityId)
+        .map((t) => {
+          const m = findMaterial(t.materialId);
+          return { materialId: t.materialId, sku: m?.sku ?? t.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', quantity: t.quantity };
+        })
+        .sort((x, y) => x.name.localeCompare(y.name)),
     };
   });
 }
@@ -1723,6 +1771,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
     returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
+    otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
       return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
