@@ -45,7 +45,7 @@ describe('useNavGroups', () => {
     expect(titles).toContain('Overview');
     expect(titles).toContain('Operations');
     expect(titles).toContain('Catalogue');
-    expect(titles).toContain('Insights');
+    expect(titles).toContain('Reports');
     expect(titles).toContain('Account');
   });
 

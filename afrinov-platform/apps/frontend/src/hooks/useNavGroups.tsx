@@ -56,7 +56,7 @@ export function useNavGroups(): NavGroup[] {
       ],
     },
     {
-      title: 'Insights',
+      title: 'Reports',
       items: [
         { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
         { to: '/reports/consumption', label: 'Stock used', icon: <Icon.Cash /> },
