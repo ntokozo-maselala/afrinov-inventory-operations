@@ -671,6 +671,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
   }
+  if (method === 'GET' && p === '/inventory-issues') return listIssueSlips(qs);
   if (method === 'GET' && p === '/stock-receipts') return listReceipts(qs);
   if (method === 'GET' && p === '/stock-counts') return listCounts(qs);
   if (method === 'POST' && p === '/stock-counts') {
@@ -1239,12 +1240,15 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
       });
     }
   }
+  // One slip, as InventoryService.issue: every line shares the issue id and the time.
   const postedAt = new Date().toISOString();
+  const issueId = nextId('iss');
   return {
     transactionIds: lines.map((l) => {
       const id = nextId('t');
       state.transactions.push({
         id,
+        issueId,
         postedAt,
         type: 'ISSUE',
         materialId: l.materialId,
@@ -1699,6 +1703,35 @@ function listActivity(qs: Record<string, string>) {
   });
 }
 
+/** The slip an issue line belongs to; earlier lines (no issue id) are their own slip, as the backfill does. */
+function slipOf(t: MockInventoryTransaction): string | undefined {
+  if (t.type !== 'ISSUE' || t.reversesId) return undefined;
+  return t.issueId ?? t.id;
+}
+
+// Mirrors InventoryService.issueSlips: slips chosen by any matching line, newest first, with all their lines.
+function listIssueSlips(qs: Record<string, string>) {
+  const matching = filterHistory({ ...qs, report: 'issued' }).filter((t) => slipOf(t));
+  const heads = new Map<string, MockInventoryTransaction>();
+  for (const t of matching) if (!heads.has(slipOf(t)!)) heads.set(slipOf(t)!, t);
+  const ordered = [...heads.entries()]
+    .map(([id, t]) => ({ id, at: t.postedAt }))
+    .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
+  const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
+  return olderThan(ordered, qs.before, (h) => h.at).slice(0, limit).map((h) => {
+    const lines = state.transactions
+      .filter((t) => slipOf(t) === h.id)
+      .map((t) => enrichMovement(t))
+      .sort((a, b) => a.materialName.localeCompare(b.materialName));
+    const first = lines[0];
+    return {
+      id: h.id, cursor: `${h.at}_${h.id}`, issuedAt: h.at,
+      recipientName: first?.recipientName ?? null, recipientType: first?.recipientType ?? null,
+      projectNumber: first?.projectNumber ?? null, issuedByName: first?.actorName ?? 'Unknown user', lines,
+    };
+  });
+}
+
 // Mirrors StockReceiptService.list: posted deliveries for a delivery-date range, newest first.
 function listReceipts(qs: Record<string, string>) {
   const inRange = inDayRange(qs);
@@ -1762,6 +1795,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     materialSku: m?.sku ?? t.materialId,
     materialName: m?.name ?? 'Unknown',
     unitOfMeasure: m?.unitOfMeasure ?? '',
+    issueId: slipOf(t) ?? null,
     locationId: t.locationId,
     locationName: l?.name ?? t.locationId,
     quantity: t.quantity,

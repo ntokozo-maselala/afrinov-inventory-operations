@@ -25,6 +25,13 @@ const RECEIPT = {
   id: 'gr-1', cursor: 'c', number: 'GR-2026-0007', receivedAt: '2026-09-25T10:00:00.000Z', supplierName: 'Hydroscand', deliveryRef: 'INV-2041', receivedByName: 'Vusi',
   lines: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', locationName: 'Main Storeroom', quantity: '20' }],
 };
+const SLIP = {
+  id: 'iss-1', cursor: 's', issuedAt: '2026-09-25T08:00:00.000Z', recipientName: 'Sabelo', recipientType: 'WORKER', projectNumber: 'AFRI-1325', issuedByName: 'Vusi',
+  lines: [
+    { ...row(1), materialSku: 'DISC-115', quantity: '-3', returnedQuantity: '1', issueId: 'iss-1' },
+    { ...row(2), materialSku: 'GLOVE-L', materialName: 'Welding gloves', quantity: '-2', returnedQuantity: '0', issueId: 'iss-1', reversedById: 'tx-r' },
+  ],
+};
 const COUNTS = [
   { id: 'c-2', cursor: 'c2', at: '2026-09-25T09:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 4, adjusted: 1, note: null,
     differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }] },
@@ -39,6 +46,7 @@ function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)
     if (path.startsWith('/activity')) return [{ id: 'a-1', cursor: 'c', at: '2026-10-12T08:00:00.000Z', action: 'CREATE', entityType: 'Material', entityId: 'm-1',
       actorId: 'u-1', actorName: 'Vusi', summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' }];
     if (path.startsWith('/stock-receipts')) return [RECEIPT];
+    if (path.startsWith('/inventory-issues')) return [SLIP];
     if (path.startsWith('/stock-counts')) return COUNTS;
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'Boiler Shop' }];
@@ -82,12 +90,25 @@ describe('Movements page', () => {
   });
 
   it('sends only the filters the chosen report has', async () => {
-    renderAt('/movements?report=issued&from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&q=disc&supplierId=s-1');
+    renderAt('/movements?report=writeoffs&from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&q=disc&supplierId=s-1');
     await screen.findByText('SKU-1');
-    const expected = 'from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&q=disc&report=issued';
+    const expected = 'from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&report=writeoffs';
     expect(listCalls()[0]).toBe(`/inventory-transactions?${expected}&limit=100`);
     expect(mockGet).toHaveBeenCalledWith(`/inventory-transactions/summary?${expected}`);
     expect(screen.queryByLabelText('Filter by supplier')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Search')).not.toBeInTheDocument();
+  });
+
+  it('shows issued stock as issue slips, laid out like the Issue stock form, with what came back', async () => {
+    renderAt('/movements?report=issued&from=2026-09-25&locationId=l-1&q=disc');
+    const slip = await screen.findByRole('region', { name: 'Issue to Sabelo' });
+    expect(within(slip).getByText('AFRI-1325')).toBeInTheDocument();
+    const disc = within(slip).getByText('DISC-115').closest('tr')!;
+    expect(within(disc).getByText('3')).toBeInTheDocument();
+    expect(within(disc).getByText('1')).toBeInTheDocument();
+    expect(within(within(slip).getByText('GLOVE-L').closest('tr')!).getByText('Reversed')).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith('/inventory-issues?from=2026-09-25&to=2026-09-25&locationId=l-1&q=disc&limit=50');
+    expect(listCalls()).toHaveLength(0);
   });
 
   it('loads the next page after the last row shown, and stops when a page is short', async () => {

@@ -17,12 +17,13 @@ import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
-import { LedgerReport } from '../components/reports/LedgerReport';
+import { LedgerReport, type LedgerReportKind } from '../components/reports/LedgerReport';
 import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
+import { IssuedStockReport } from '../components/reports/IssuedStockReport';
 import { StockCountsReport } from '../components/reports/StockCountsReport';
 import { OtherActivity, ACTIVITY_TYPE_LABEL } from '../components/OtherActivity';
 import { downloadMovements } from '../api/exportMovements';
-import { downloadReceivedStock, downloadStockCounts } from '../api/exportReports';
+import { downloadIssuedStock, downloadReceivedStock, downloadStockCounts } from '../api/exportReports';
 import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
 import { today } from '../lib/dates';
@@ -107,6 +108,7 @@ export function Movements() {
     setDownloading(true);
     try {
       if (report.id === 'received') await downloadReceivedStock(query);
+      else if (report.id === 'issued') await downloadIssuedStock(query);
       else if (report.id === 'counts') await downloadStockCounts(query);
       else await downloadMovements(report.id === 'all' ? query : `${query}&report=${report.id}`);
     } catch (err) {
@@ -207,9 +209,10 @@ export function Movements() {
       <h2 className="hidden print:block text-h2 mb-2">{report.label}, {from === to ? from : `${from} to ${to}`}</h2>
       {badRange ? <ErrorState message="The start date is after the end date." /> : (
         report.id === 'received' ? <ReceivedStockReport query={query} />
+          : report.id === 'issued' ? <IssuedStockReport query={query} />
           : report.id === 'counts' ? <StockCountsReport query={query} />
             : report.id === 'other' ? <OtherActivity query={query} />
-              : <LedgerReport kind={report.id} query={query} />
+              : <LedgerReport kind={report.id as LedgerReportKind} query={query} />
       )}
     </div>
   );

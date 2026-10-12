@@ -114,10 +114,10 @@ export const SEED_TRANSACTIONS: MockInventoryTransaction[] = [
   { id: 't-10', postedAt: day(6), type: 'ISSUE', materialId: 'mat-2', locationId: 'loc-1', quantity: '-150', actorId: 'user-2', recipientId: 'rcp-1', projectNumber: 'AFRI-1325' },
   { id: 't-11', postedAt: day(6), type: 'ISSUE', materialId: 'mat-3', locationId: 'loc-1', quantity: '-300', actorId: 'user-2', recipientId: 'rcp-2', projectNumber: 'AFRI-1325' },
   { id: 't-12', postedAt: day(5), type: 'ISSUE', materialId: 'mat-4', locationId: 'loc-2', quantity: '-15', actorId: 'user-2', recipientId: 'rcp-2' },
-  { id: 't-13', postedAt: day(5), type: 'ISSUE', materialId: 'mat-5', locationId: 'loc-2', quantity: '-30', actorId: 'user-2', recipientId: 'rcp-1' },
-  { id: 't-14', postedAt: day(5), type: 'ISSUE', materialId: 'mat-5', locationId: 'loc-2', quantity: '-10', actorId: 'user-2', recipientId: 'rcp-1' },
-  { id: 't-15', postedAt: day(3), type: 'ISSUE', materialId: 'mat-7', locationId: 'loc-2', quantity: '-4', actorId: 'user-2', recipientId: 'rcp-5' },
-  { id: 't-16', postedAt: day(3), type: 'ISSUE', materialId: 'mat-8', locationId: 'loc-2', quantity: '-5', actorId: 'user-2', recipientId: 'rcp-5' },
+  { id: 't-13', postedAt: day(5), type: 'ISSUE', materialId: 'mat-5', locationId: 'loc-2', quantity: '-30', issueId: 'iss-seed-1', actorId: 'user-2', recipientId: 'rcp-1' },
+  { id: 't-14', postedAt: day(5), type: 'ISSUE', materialId: 'mat-5', locationId: 'loc-2', quantity: '-10', issueId: 'iss-seed-1', actorId: 'user-2', recipientId: 'rcp-1' },
+  { id: 't-15', postedAt: day(3), type: 'ISSUE', materialId: 'mat-7', locationId: 'loc-2', quantity: '-4', issueId: 'iss-seed-2', actorId: 'user-2', recipientId: 'rcp-5' },
+  { id: 't-16', postedAt: day(3), type: 'ISSUE', materialId: 'mat-8', locationId: 'loc-2', quantity: '-5', issueId: 'iss-seed-2', actorId: 'user-2', recipientId: 'rcp-5' },
 
   // Transfer
   { id: 't-17', postedAt: day(4), type: 'TRANSFER_OUT', materialId: 'mat-1', locationId: 'loc-1', quantity: '-20', actorId: 'user-1', pairedWithId: 't-18' },

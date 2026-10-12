@@ -1,10 +1,10 @@
-// Excel downloads for the grouped Movements reports (received stock, stock
-// counts), built in the browser from the same API the page shows, so live and
+// Excel downloads for the grouped Movements reports (received stock, issued
+// stock, stock counts), built in the browser from the same API the page shows, so live and
 // frontend-only mode give the same file. One row per line, with the delivery or
-// count it belongs to repeated, so the sheet can be sorted and filtered.
+// issue or count it belongs to repeated, so the sheet can be sorted and filtered.
 import { api } from './client';
 import { triggerDownload } from './exportReport';
-import type { CountRecord, ReceiptRecord } from './types';
+import type { CountRecord, IssueSlip, ReceiptRecord } from './types';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 /** The most records one download fetches; the page asks for a shorter range beyond it. */
@@ -52,6 +52,20 @@ export async function downloadReceivedStock(query: string): Promise<void> {
       new Date(r.receivedAt), r.supplierName, r.deliveryRef ?? '', r.number, r.receivedByName, l.sku, l.name, l.locationName, Number(l.quantity), l.unitOfMeasure,
     ])),
     'No stock was received on these dates.',
+  );
+}
+
+export async function downloadIssuedStock(query: string): Promise<void> {
+  const slips = await fetchAll<IssueSlip>(`/inventory-issues?${query}`);
+  await download(
+    'Issued stock',
+    `afrinov-issued-stock-${fileRange(query)}.xlsx`,
+    ['Issued', 'Issued to', 'Project', 'Issued by', 'Code', 'Item', 'From location', 'Issued qty', 'Returned', 'Unit', 'Reversed'],
+    slips.flatMap((s) => s.lines.map((l) => [
+      new Date(s.issuedAt), s.recipientName ?? 'Not recorded', s.projectNumber ?? '', s.issuedByName, l.materialSku, l.materialName, l.locationName,
+      Math.abs(Number(l.quantity)), Number(l.returnedQuantity ?? 0), l.unitOfMeasure ?? '', l.reversedById ? 'Yes' : '',
+    ])),
+    'No stock was issued on these dates.',
   );
 }
 
