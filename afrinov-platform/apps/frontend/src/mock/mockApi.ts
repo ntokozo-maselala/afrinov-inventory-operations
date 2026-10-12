@@ -1662,6 +1662,7 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
       if (qs.locationId && t.locationId !== qs.locationId) return false;
       if (qs.actorId && t.actorId !== qs.actorId) return false;
+      if (qs.recipientId && (qs.recipientId === '__none__' ? !!t.recipientId : t.recipientId !== qs.recipientId)) return false;
       if (!inRange(t.postedAt)) return false;
       if (needle) {
         const m = findMaterial(t.materialId);

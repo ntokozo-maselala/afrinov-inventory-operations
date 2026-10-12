@@ -113,6 +113,8 @@ export interface HistoryFilter {
   projectNumber?: string;
   locationId?: string;
   actorId?: string;
+  /** Who it was issued to; '__none__' for issues with no recipient recorded. */
+  recipientId?: string;
   /** Matches the item code or name, the location, the project or who it was issued to. */
   q?: string;
   /**
@@ -147,6 +149,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   if (filter.projectNumber) where.projectNumber = filter.projectNumber;
   if (filter.locationId) where.locationId = filter.locationId;
   if (filter.actorId) where.actorId = filter.actorId;
+  if (filter.recipientId) where.recipientId = filter.recipientId === '__none__' ? null : filter.recipientId;
   if (filter.issueIds) where.issueId = { in: filter.issueIds };
   const postedAt = dayRange(filter.from, filter.to);
   if (postedAt) where.postedAt = postedAt;

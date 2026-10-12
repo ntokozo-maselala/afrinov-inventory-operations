@@ -19,6 +19,7 @@ function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilte
     projectNumber: q['projectNumber'],
     locationId: q['locationId'],
     actorId: q['actorId'],
+    recipientId: q['recipientId'],
     q: q['q'],
     report: (['issued', 'transfers', 'writeoffs'] as const).find((r) => r === q['report']),
   };

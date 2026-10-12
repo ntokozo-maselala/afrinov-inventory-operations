@@ -28,13 +28,13 @@ import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
 import { today } from '../lib/dates';
 
-type Filter = 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
+type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
 type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'other';
 
 const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'all', label: 'All movements', filters: ['locationId', 'actorId', 'materialId', 'q'] },
   { id: 'received', label: 'Received stock', filters: ['supplierId', 'locationId', 'q'] },
-  { id: 'issued', label: 'Issued stock', filters: ['locationId', 'actorId', 'materialId', 'q'] },
+  { id: 'issued', label: 'Issued stock', filters: ['recipientId', 'locationId', 'actorId', 'materialId', 'q'] },
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
   { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
@@ -70,6 +70,7 @@ export function Movements() {
   const ledgerActors = has('actorId') && report.id !== 'other';
   const locations = useApi<Option[]>(has('locationId') ? '/locations' : null);
   const suppliers = useApi<Option[]>(has('supplierId') ? '/suppliers' : null);
+  const recipients = useApi<Option[]>(has('recipientId') ? '/recipients' : null);
   const materials = useApi<Material[]>(has('materialId') ? '/materials' : null);
   const actors = useApi<Option[]>(!has('actorId') ? null : ledgerActors ? '/inventory-transactions/actors' : '/activity/actors');
   const itemOptions = useMemo<SearchOption[]>(() => (materials.data ?? [])
@@ -170,6 +171,13 @@ export function Movements() {
               <Select value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)} aria-label="Filter by supplier">
                 <option value="">All suppliers</option>
                 {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            )}
+            {has('recipientId') && (
+              <Select value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)} aria-label="Filter by who it was issued to">
+                <option value="">Issued to anyone</option>
+                {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                <option value="__none__">Not recorded</option>
               </Select>
             )}
             {has('locationId') && (

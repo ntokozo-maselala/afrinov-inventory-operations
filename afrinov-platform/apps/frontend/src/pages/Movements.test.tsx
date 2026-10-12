@@ -51,6 +51,7 @@ function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'Boiler Shop' }];
     if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydroscand' }];
+    if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo' }];
     return [];
   });
   render(<MemoryRouter initialEntries={[url]}><ToastProvider><Movements /></ToastProvider></MemoryRouter>);
@@ -100,14 +101,15 @@ describe('Movements page', () => {
   });
 
   it('shows issued stock as issue slips, laid out like the Issue stock form, with what came back', async () => {
-    renderAt('/movements?report=issued&from=2026-09-25&locationId=l-1&q=disc');
+    renderAt('/movements?report=issued&from=2026-09-25&recipientId=r-1&locationId=l-1&q=disc');
     const slip = await screen.findByRole('region', { name: 'Issue to Sabelo' });
     expect(within(slip).getByText('AFRI-1325')).toBeInTheDocument();
     const disc = within(slip).getByText('DISC-115').closest('tr')!;
     expect(within(disc).getByText('3')).toBeInTheDocument();
     expect(within(disc).getByText('1')).toBeInTheDocument();
     expect(within(within(slip).getByText('GLOVE-L').closest('tr')!).getByText('Reversed')).toBeInTheDocument();
-    expect(mockGet).toHaveBeenCalledWith('/inventory-issues?from=2026-09-25&to=2026-09-25&locationId=l-1&q=disc&limit=50');
+    expect(mockGet).toHaveBeenCalledWith('/inventory-issues?from=2026-09-25&to=2026-09-25&recipientId=r-1&locationId=l-1&q=disc&limit=50');
+    expect(screen.getByLabelText('Filter by who it was issued to')).toHaveValue('r-1');
     expect(listCalls()).toHaveLength(0);
   });
 

@@ -33,6 +33,11 @@ describe('historyWhere', () => {
     expect(historyWhere({ locationId: 'l-1', actorId: 'u-1' })).toMatchObject({ locationId: 'l-1', actorId: 'u-1' });
   });
 
+  it('filters by who it was issued to, including issues with no recipient recorded', () => {
+    expect(historyWhere({ recipientId: 'r-1' }).recipientId).toBe('r-1');
+    expect(historyWhere({ recipientId: '__none__' }).recipientId).toBeNull();
+  });
+
   it('searches item code and name, location, project and who it was issued to, ignoring case', () => {
     const where = historyWhere({ q: '  disc ' });
     const contains = { contains: 'disc', mode: 'insensitive' };

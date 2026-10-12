@@ -1,8 +1,8 @@
 // Stock used: what the store issued in a date range, less returns, valued at
 // unit price, by project, by recipient and by item (GET /reports/consumption).
 // Replaces the workbook's Stock Report sheets, which showed the whole period
-// since the last rollover and never by project, and its Consumable Box log of
-// what each person was given: choose a recipient to list their issues.
+// since the last rollover and never by project. What each person was given,
+// issue by issue, is Movements > Issued stock: a recipient's name opens it.
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -14,10 +14,10 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
-import { formatDateTime, formatNumber } from '../lib/format';
+import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { downloadConsumption } from '../api/exportConsumption';
-import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionLine, type ConsumptionReport } from '../api/reportTypes';
+import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
 
 interface Project { projectNumber: string; name?: string | null }
@@ -68,10 +68,6 @@ export function Consumption() {
   const report = useApi<ConsumptionReport>(badRange ? null : `/reports/consumption?${query}`);
   const projects = useApi<Project[]>('/projects');
   const recipients = useApi<Recipient[]>('/recipients');
-  const recipientName = (id: string | null) => {
-    if (id === null || id === NO_RECIPIENT) return 'Not recorded';
-    return (recipients.data ?? []).find((r) => r.id === id)?.name ?? report.data?.byRecipient.find((r) => r.recipientId === id)?.name ?? 'Recipient';
-  };
   const currency = report.data?.currency ?? 'ZAR';
 
   async function download() {
@@ -110,38 +106,15 @@ export function Consumption() {
       key: 'name',
       header: 'Issued to',
       render: (r) => (
-        <button type="button" className="btn-link text-left" onClick={() => setRecipient(r.recipientId ?? NO_RECIPIENT)}>
+        <Link to={`/movements?report=issued&recipientId=${encodeURIComponent(r.recipientId ?? NO_RECIPIENT)}&from=${range.from}&to=${range.to}`} className="btn-link text-left">
           {r.name ?? 'Not recorded'}
-        </button>
+        </Link>
       ),
     },
     { key: 'type', header: 'Type', render: (r) => <span className="text-sm text-surface-600">{typeLabel(r.type)}</span>, width: '8rem' },
     { key: 'issues', header: 'Issues', align: 'right', className: 'text-num', render: (r) => formatNumber(r.issues), width: '6rem' },
     { key: 'items', header: 'Items', align: 'right', className: 'text-num', render: (r) => formatNumber(r.items), width: '6rem' },
     { key: 'value', header: 'Value', align: 'right', className: 'text-num', render: (r) => <span className="font-mono">{formatCurrency(r.value, currency)}</span>, width: '10rem' },
-  ];
-
-  const lineColumns: DataTableColumn<ConsumptionLine>[] = [
-    { key: 'date', header: 'Date', render: (l) => <span className="text-sm">{formatDateTime(l.postedAt)}</span>, width: '11rem' },
-    {
-      key: 'item',
-      header: 'Item',
-      render: (l) => <div><span className="text-surface-900">{l.name}</span><div className="text-xs text-surface-500 font-mono">{l.sku}</div></div>,
-    },
-    {
-      key: 'qty',
-      header: 'Quantity',
-      align: 'right',
-      className: 'text-num',
-      render: (l) => (
-        <span className={l.quantity < 0 ? 'text-success-600' : ''}>
-          {l.quantity < 0 ? `${formatNumber(-l.quantity)} returned` : formatNumber(l.quantity)} <span className="text-xs text-surface-500">{l.unitOfMeasure}</span>
-        </span>
-      ),
-      width: '10rem',
-    },
-    { key: 'project', header: 'Project', render: (l) => l.projectNumber ?? <span className="text-surface-400">—</span>, width: '9rem' },
-    { key: 'by', header: 'Issued by', render: (l) => <span className="text-sm text-surface-600">{l.issuedBy}</span>, width: '10rem' },
   ];
 
   return (
@@ -227,33 +200,16 @@ export function Consumption() {
             </section>
           )}
 
-          {!recipient && (
-            <section aria-label="By recipient">
-              <h2 className="text-h2 text-surface-900 mb-3">By who it was issued to</h2>
-              <DataTable
-                ariaLabel="Stock used by recipient"
-                rows={report.data.byRecipient}
-                rowKey={(r) => r.recipientId ?? NO_RECIPIENT}
-                columns={recipientColumns}
-                emptyState={<EmptyState title="Nothing issued" description="No stock was issued in this period." />}
-              />
-            </section>
-          )}
-
-          {recipient && report.data.lines && (
-            <section aria-label="Issues to recipient">
-              <h2 className="text-h2 text-surface-900 mb-3">
-                {recipient === NO_RECIPIENT ? 'Issues with no recipient recorded' : `Issued to ${recipientName(recipient)}`}
-              </h2>
-              <DataTable
-                ariaLabel={recipient === NO_RECIPIENT ? 'Issues with no recipient recorded' : `Issued to ${recipientName(recipient)}`}
-                rows={report.data.lines}
-                rowKey={(l) => l.id}
-                columns={lineColumns}
-                emptyState={<EmptyState title="Nothing issued" description="Nothing was issued to them in this period." />}
-              />
-            </section>
-          )}
+          <section aria-label="By recipient">
+            <h2 className="text-h2 text-surface-900 mb-3">By who it was issued to</h2>
+            <DataTable
+              ariaLabel="Stock used by recipient"
+              rows={report.data.byRecipient}
+              rowKey={(r) => r.recipientId ?? NO_RECIPIENT}
+              columns={recipientColumns}
+              emptyState={<EmptyState title="Nothing issued" description="No stock was issued in this period." />}
+            />
+          </section>
 
           <section aria-label="By item">
             <h2 className="text-h2 text-surface-900 mb-3">{project ? `${projectLabel(project === NO_PROJECT ? null : project)}: by item` : 'By item'}</h2>
