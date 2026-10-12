@@ -35,3 +35,15 @@ export interface MovementRow {
   returnedQuantity?: string | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
 }
+
+/** One entry of the shop's other activity (GET /activity): counts, catalogue, user and settings changes. */
+export interface ActivityRow {
+  id: string;
+  /** Paging cursor: pass as `before` to get the next, older rows. */
+  cursor: string;
+  at: string; action: string; entityType: string; entityId: string;
+  actorId: string | null; actorName: string;
+  summary: string;
+  /** Where in the app the record lives, when it has a page. */
+  link: string | null;
+}

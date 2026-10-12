@@ -1,7 +1,9 @@
-// Movements: the stock ledger for a date range (this month unless chosen),
-// filtered on the server by type, item, location, who posted it and a search,
-// and loaded a page at a time so a long range is never cut short. The filters
-// live in the address, so a filtered view can be bookmarked or shared.
+// Movements: the stock ledger for a date range (today unless chosen), filtered
+// on the server by type, item, location, who posted it and a search, and loaded
+// a page at a time so a long range is never cut short. Admin and Store
+// Controller also get an "Other activity" view (counts, catalogue, user and
+// settings changes). The view and filters live in the address, so a filtered
+// view can be bookmarked or shared.
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -22,6 +24,9 @@ import { TransactionDrawer } from '../components/TransactionDrawer';
 import { api, type ApiError } from '../api/client';
 import { downloadMovements } from '../api/exportMovements';
 import type { Material, MovementRow } from '../api/types';
+import { useCanViewActivity } from '../hooks/usePermissions';
+import { OtherActivity } from '../components/OtherActivity';
+import { today } from '../lib/dates';
 
 const PAGE = 100;
 
@@ -40,18 +45,14 @@ const FILTER_KEYS = ['type', 'materialId', 'locationId', 'actorId', 'q'] as cons
 interface Summary { total: number; byType: Record<string, number> }
 interface Option { id: string; name: string }
 
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-/** The first and last day of the current month, in the user's own calendar. */
-function thisMonth(): { from: string; to: string } {
-  const now = new Date();
-  return { from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
-}
-
 export function Movements() {
   const [params, setParams] = useSearchParams();
-  const month = useMemo(() => thisMonth(), []);
-  const from = params.get('from') ?? month.from;
-  const to = params.get('to') ?? month.to;
+  const canViewActivity = useCanViewActivity();
+  const view = canViewActivity && params.get('view') === 'other' ? 'other' : 'stock';
+  const stockView = view === 'stock';
+  const day = useMemo(() => today(), []);
+  const from = params.get('from') ?? day;
+  const to = params.get('to') ?? day;
   const badRange = !!from && !!to && from > to;
 
   // The query every request shares: dates plus whichever filters are set.
@@ -63,8 +64,9 @@ export function Movements() {
     return p.toString();
   }, [from, to, params]);
 
-  const summary = useApi<Summary>(badRange ? null : `/inventory-transactions/summary?${query}`);
-  const first = useApi<MovementRow[]>(badRange ? null : `/inventory-transactions?${query}&limit=${PAGE}`);
+  const listing = stockView && !badRange;
+  const summary = useApi<Summary>(listing ? `/inventory-transactions/summary?${query}` : null);
+  const first = useApi<MovementRow[]>(listing ? `/inventory-transactions?${query}&limit=${PAGE}` : null);
   // Later pages, kept against the query they belong to so a new filter drops them.
   const [more, setMore] = useState<{ query: string; rows: MovementRow[]; done: boolean }>({ query: '', rows: [], done: false });
   const [loadingMore, setLoadingMore] = useState(false);
@@ -72,9 +74,9 @@ export function Movements() {
   const rows = useMemo(() => [...(first.data ?? []), ...extra.rows], [first.data, extra.rows]);
   const hasMore = !!first.data && first.data.length === PAGE && !extra.done;
 
-  const materials = useApi<Material[]>('/materials');
-  const locations = useApi<Option[]>('/locations');
-  const actors = useApi<Option[]>('/inventory-transactions/actors');
+  const materials = useApi<Material[]>(stockView ? '/materials' : null);
+  const locations = useApi<Option[]>(stockView ? '/locations' : null);
+  const actors = useApi<Option[]>(stockView ? '/inventory-transactions/actors' : null);
   const itemOptions = useMemo<SearchOption[]>(() => (materials.data ?? [])
     .map((m) => ({ value: m.id, label: `${m.name} (${m.sku})` }))
     .sort((a, b) => a.label.localeCompare(b.label)), [materials.data]);
@@ -112,6 +114,16 @@ export function Movements() {
     }
   }
 
+  /** Switch view, keeping only the date range. */
+  function showView(next: 'stock' | 'other') {
+    const keep = new URLSearchParams();
+    if (params.get('from')) keep.set('from', params.get('from')!);
+    if (params.get('to')) keep.set('to', params.get('to')!);
+    if (next === 'other') keep.set('view', 'other');
+    setSearch('');
+    setParams(keep, { replace: true });
+  }
+
   function reload() {
     setMore({ query: '', rows: [], done: false });
     first.reload();
@@ -137,12 +149,22 @@ export function Movements() {
       <PageHeader
         title="Movements"
         description="Full history of inventory transactions. The ledger is the source of truth — balances are derived from these rows."
-        actions={(
+        actions={stockView ? (
           <Button variant="secondary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange || !summary.data?.total}>
             Download as Excel
           </Button>
-        )}
+        ) : undefined}
       />
+
+      {canViewActivity && (
+        <div role="tablist" aria-label="What to show" className="flex gap-2 mb-4">
+          <Button role="tab" aria-selected={stockView} size="sm" variant={stockView ? 'primary' : 'ghost'} onClick={() => showView('stock')}>Stock movements</Button>
+          <Button role="tab" aria-selected={!stockView} size="sm" variant={stockView ? 'ghost' : 'primary'} onClick={() => showView('other')}>Other activity</Button>
+        </div>
+      )}
+
+      {!stockView ? <OtherActivity /> : (
+      <>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div className="surface-card p-3">
@@ -194,7 +216,7 @@ export function Movements() {
               <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
               <Input className="pl-8" placeholder="Search item, location, project, recipient…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search movements" />
             </div>
-            {filtersSet && <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setParams(new URLSearchParams(), { replace: true }); }}>Reset</Button>}
+            {filtersSet && <Button variant="ghost" size="sm" onClick={() => showView('stock')}>Reset</Button>}
           </>
         )}
         right={<span className="text-meta">{first.loading ? 'Loading…' : summary.data ? `${formatNumber(rows.length)} of ${formatNumber(summary.data.total)} shown` : ''}</span>}
@@ -245,6 +267,8 @@ export function Movements() {
             onError={(err) => toast.error('Reversal failed', err.message)}
           />
         </Drawer>
+      )}
+      </>
       )}
     </div>
   );

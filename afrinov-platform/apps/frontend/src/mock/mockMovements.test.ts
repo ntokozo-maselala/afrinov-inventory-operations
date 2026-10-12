@@ -54,3 +54,27 @@ describe('mock movement history', () => {
     expect(actors.every((a) => a.id && a.name)).toBe(true);
   });
 });
+
+interface Activity { id: string; entityType: string; summary: string; actorName: string; link: string | null }
+
+describe('mock other activity', () => {
+  it('records every stock count, including one with no differences, and filters counts by location', async () => {
+    const fresh = createMockApi();
+    const stock = await fresh.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock?locationId=loc-1');
+    const line = stock.find((r) => Number(r.quantity) > 0)!;
+    await fresh.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: line.materialId, expectedQuantity: Number(line.quantity), countedQuantity: Number(line.quantity) }] });
+
+    const counts = await fresh.get<Activity[]>('/activity?entityType=StockCount&locationId=loc-1');
+    expect(counts[0]!.summary).toBe('Counted Main Storeroom: 1 item, no differences');
+    expect(counts[0]!.actorName).toBe('System Administrator (dev)');
+    expect(await fresh.get<Activity[]>('/activity?entityType=StockCount&locationId=loc-2')).toEqual([]);
+  });
+
+  it('describes a settings change and names who made it, never a reversal', async () => {
+    const fresh = createMockApi();
+    await fresh.patch('/settings', { updates: { 'inventory.urgentBelowPercent': 25 } });
+    const list = await fresh.get<Activity[]>('/activity');
+    expect(list[0]).toMatchObject({ entityType: 'Setting', summary: 'Changed setting inventory.urgentBelowPercent from 20 to 25', actorName: 'System Administrator (dev)' });
+    expect(list.some((a) => a.entityType === 'InventoryTransaction')).toBe(false);
+  });
+});

@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+const { mockGet, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), perms: { activity: false } }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ hasPermission: () => true }) }));
+vi.mock('../hooks/usePermissions', () => ({
+  usePermissions: () => ({ hasPermission: () => true }),
+  useCanViewActivity: () => perms.activity,
+}));
 
 const { Movements } = await import('./Movements');
 const { ToastProvider } = await import('../components/Toast');
@@ -23,6 +26,9 @@ function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/inventory-transactions/summary')) return { total: 205, byType: { ISSUE: 150, RECEIPT: 40, ADJUSTMENT: 15 } };
     if (path.startsWith('/inventory-transactions/actors')) return [{ id: 'u-1', name: 'Vusi' }];
+    if (path.startsWith('/activity/actors')) return [{ id: 'u-1', name: 'Vusi' }];
+    if (path.startsWith('/activity')) return [{ id: 'a-1', cursor: 'c', at: '2026-10-12T08:00:00.000Z', action: 'CREATE', entityType: 'Material', entityId: 'm-1',
+      actorId: 'u-1', actorName: 'Vusi', summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' }];
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'Boiler Shop' }];
     if (path.startsWith('/materials')) return [];
@@ -34,15 +40,16 @@ function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)
 const listCalls = () => mockGet.mock.calls.map((c) => c[0] as string).filter((p) => /^\/inventory-transactions\?/.test(p));
 
 describe('Movements page', () => {
-  beforeEach(() => { mockGet.mockReset(); });
+  beforeEach(() => { mockGet.mockReset(); perms.activity = false; });
 
-  it('shows this month by default, with totals for the whole range from the server', async () => {
+  it('shows today by default, with totals for the whole range from the server', async () => {
     renderAt('/movements');
     const now = new Date();
-    const first = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     await screen.findByText('SKU-1');
-    expect(listCalls()[0]).toContain(`from=${first}`);
-    expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe(first);
+    expect(listCalls()[0]).toContain(`from=${day}&to=${day}`);
+    expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe(day);
+    expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe(day);
     expect(screen.getByText('205')).toBeInTheDocument();
     expect(screen.getByText('150')).toBeInTheDocument();
     expect(screen.getByText('1 of 205 shown')).toBeInTheDocument();
@@ -71,5 +78,25 @@ describe('Movements page', () => {
     expect(await screen.findByText('The start date is after the end date.')).toBeInTheDocument();
     await waitFor(() => expect(mockGet).toHaveBeenCalled());
     expect(listCalls()).toHaveLength(0);
+  });
+
+  it('offers Other activity only to those who may see it', async () => {
+    renderAt('/movements?view=other');
+    await screen.findByText('SKU-1');
+    expect(screen.queryByRole('tab', { name: 'Other activity' })).not.toBeInTheDocument();
+    expect(mockGet.mock.calls.some((c) => String(c[0]).startsWith('/activity'))).toBe(false);
+  });
+
+  it('switches to Other activity for the same dates, without loading stock movements', async () => {
+    perms.activity = true;
+    renderAt('/movements?from=2026-10-12&to=2026-10-12&type=ISSUE');
+    await screen.findByText('SKU-1');
+    mockGet.mockClear();
+    fireEvent.click(screen.getByRole('tab', { name: 'Other activity' }));
+    const link = await screen.findByRole('link', { name: 'Added item WSHR-16 Flat washer' });
+    expect(link).toHaveAttribute('href', '/materials/m-1');
+    expect(mockGet).toHaveBeenCalledWith('/activity?from=2026-10-12&to=2026-10-12&limit=50');
+    expect(listCalls()).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /Download as Excel/ })).not.toBeInTheDocument();
   });
 });
