@@ -271,8 +271,8 @@ export const OPERATIONS: Operation[] = [
     }),
   },
   {
-    method: 'get', path: '/stock-counts', tag: 'Reports', summary: 'Stock counts with the differences each adjusted, newest first',
-    description: 'Items that matched the system are not stored, so a count lists its differences only.',
+    method: 'get', path: '/stock-counts', tag: 'Reports', summary: 'Stock counts with their count sheets and differences, newest first',
+    description: 'lines is the full sheet (every item counted, with what the system had); counts posted before sheets were kept have no lines, only differences.',
     permissions: [P.ViewReports],
     query: z.object({
       from: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, UTC), from its start.' }),

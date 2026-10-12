@@ -64,6 +64,12 @@ describe('stock counts over real HTTP', () => {
     expect(posted).toHaveLength(2);
     for (const t of posted) expect(t).toMatchObject({ type: 'ADJUSTMENT', reasonCode: 'COUNT_VARIANCE', reasonNote: 'Stock count: Go-live count', locationId: rackId });
     expect(await prisma.auditLogEntry.findFirst({ where: { entityType: 'StockCount', entityId: res.body.countId } })).toMatchObject({ action: 'STOCK_COUNT' });
+
+    // The Stock counts report has the full sheet, the matched item included.
+    const report = await api<Array<{ id: string; lines: Array<{ materialId: string; expected: string; counted: string }> }>>('GET', `/stock-counts?locationId=${rackId}`);
+    const sheet = report.body.find((c) => c.id === res.body.countId)!.lines;
+    const byItem = Object.fromEntries(sheet.map((l) => [l.materialId, [l.expected, l.counted]]));
+    expect(byItem).toEqual({ [items.disc]: ['20', '17'], [items.gloves]: ['6', '6'], [items.found]: ['0', '2.5'] });
   });
 
   it('refuses the whole count when stock moved while counting, and posts nothing', async () => {

@@ -3,8 +3,8 @@
 // differences it adjusted).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { grFindMany, auditFindMany, txFindMany, locationFindMany, userFindMany } = vi.hoisted(() => ({
-  grFindMany: vi.fn(), auditFindMany: vi.fn(), txFindMany: vi.fn(), locationFindMany: vi.fn(), userFindMany: vi.fn(),
+const { grFindMany, auditFindMany, txFindMany, locationFindMany, userFindMany, sheetFindMany } = vi.hoisted(() => ({
+  grFindMany: vi.fn(), auditFindMany: vi.fn(), txFindMany: vi.fn(), locationFindMany: vi.fn(), userFindMany: vi.fn(), sheetFindMany: vi.fn(),
 }));
 vi.mock('../../shared/db.js', () => ({
   prisma: {
@@ -13,6 +13,7 @@ vi.mock('../../shared/db.js', () => ({
     inventoryTransaction: { findMany: txFindMany },
     location: { findMany: locationFindMany },
     user: { findMany: userFindMany },
+    stockCountLine: { findMany: sheetFindMany },
   },
 }));
 
@@ -66,6 +67,7 @@ describe('StockCountService.list', () => {
     txFindMany.mockReset().mockResolvedValue([]);
     locationFindMany.mockReset().mockResolvedValue([{ id: 'l-1', name: 'Boiler Shop' }]);
     userFindMany.mockReset().mockResolvedValue([{ id: 'u-1', name: 'Vusi' }]);
+    sheetFindMany.mockReset().mockResolvedValue([]);
   });
 
   it('returns each count with where, who, how many items and the differences it adjusted', async () => {
@@ -76,15 +78,25 @@ describe('StockCountService.list', () => {
     txFindMany.mockResolvedValue([
       { referenceId: 'c-2', materialId: 'm-1', material: material('DISC-115', 'Cutting disc'), quantity: { toString: () => '-2' } },
     ]);
+    sheetFindMany.mockResolvedValue([
+      { countId: 'c-2', materialId: 'm-2', material: material('GLOVE-L', 'Welding gloves'), expectedQuantity: { toString: () => '4' }, countedQuantity: { toString: () => '4' } },
+      { countId: 'c-2', materialId: 'm-1', material: material('DISC-115', 'Cutting disc'), expectedQuantity: { toString: () => '9' }, countedQuantity: { toString: () => '7' } },
+    ]);
     const counts = await StockCountService.list({ locationId: 'l-1' });
     expect(counts).toEqual([
       {
         id: 'c-2', cursor: '2026-09-25T10:00:00.000Z_a-2', at: '2026-09-25T10:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop',
         countedByName: 'Vusi', counted: 4, adjusted: 1, note: 'Monthly',
         differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
+        lines: [
+          { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7' },
+          { materialId: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitOfMeasure: 'each', expected: '4', counted: '4' },
+        ],
       },
-      expect.objectContaining({ id: 'c-1', counted: 3, adjusted: 0, differences: [] }),
+      // Counted before sheets were kept: differences only.
+      expect.objectContaining({ id: 'c-1', counted: 3, adjusted: 0, differences: [], lines: [] }),
     ]);
+    expect(sheetFindMany.mock.calls[0]![0].where).toEqual({ countId: { in: ['c-2', 'c-1'] } });
     expect(txFindMany.mock.calls[0]![0].where).toEqual({ referenceType: 'StockCount', referenceId: { in: ['c-2', 'c-1'] } });
     expect(auditFindMany.mock.calls[0]![0].where.AND).toEqual(expect.arrayContaining([
       { entityType: 'StockCount', action: 'STOCK_COUNT' },
