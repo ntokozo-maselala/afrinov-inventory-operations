@@ -65,6 +65,8 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.ViewReports,
     PermissionCode.ViewUsers,
     PermissionCode.ReverseInventoryTransaction,
+    // Other activity on the Movements page (counts, catalogue, user and settings changes).
+    PermissionCode.ViewAuditLog,
   ],
   PROCUREMENT: [
     PermissionCode.CreateSupplier,

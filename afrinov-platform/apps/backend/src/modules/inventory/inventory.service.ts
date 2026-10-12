@@ -8,6 +8,7 @@
 import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
@@ -118,14 +119,6 @@ export interface HistoryFilter {
   limit?: number;
 }
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-function parseTime(value: string, name: string): Date {
-  const d = new Date(DAY.test(value) ? `${value}T00:00:00.000Z` : value);
-  if (Number.isNaN(d.getTime())) throw Errors.validation(`Invalid ${name} date`);
-  return d;
-}
-
 /**
  * The movements a history filter selects. Days are whole UTC days and the
  * `to` day is included, as on the stock-used report.
@@ -137,19 +130,8 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   if (filter.projectNumber) where.projectNumber = filter.projectNumber;
   if (filter.locationId) where.locationId = filter.locationId;
   if (filter.actorId) where.actorId = filter.actorId;
-  const start = filter.from ? parseTime(filter.from, 'from') : undefined;
-  const end = filter.to ? parseTime(filter.to, 'to') : undefined;
-  if (start && end && start > end) throw Errors.validation('The start date is after the end date');
-  if (start || end) {
-    where.postedAt = {};
-    if (start) where.postedAt.gte = start;
-    if (end && DAY.test(filter.to!)) {
-      end.setUTCDate(end.getUTCDate() + 1); // the last day is included
-      where.postedAt.lt = end;
-    } else if (end) {
-      where.postedAt.lte = end;
-    }
-  }
+  const postedAt = dayRange(filter.from, filter.to);
+  if (postedAt) where.postedAt = postedAt;
   const q = filter.q?.trim();
   if (q) {
     const contains = { contains: q, mode: 'insensitive' as const };
@@ -165,13 +147,10 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
 }
 
 /** A row's paging cursor: newest first, ties broken by id. */
-export const historyCursor = (t: { postedAt: Date; id: string }) => `${t.postedAt.toISOString()}_${t.id}`;
+export const historyCursor = (t: { postedAt: Date; id: string }) => pageCursor(t.postedAt, t.id);
 
 function olderThan(cursor: string): Prisma.InventoryTransactionWhereInput {
-  const cut = cursor.lastIndexOf('_');
-  const at = new Date(cursor.slice(0, cut));
-  const id = cursor.slice(cut + 1);
-  if (cut < 1 || !id || Number.isNaN(at.getTime())) throw Errors.validation('Invalid paging cursor');
+  const { at, id } = parseCursor(cursor);
   return { OR: [{ postedAt: { lt: at } }, { postedAt: at, id: { lt: id } }] };
 }
 

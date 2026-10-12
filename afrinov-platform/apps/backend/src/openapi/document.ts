@@ -14,6 +14,7 @@ import { z, type ZodTypeAny } from 'zod';
 import { PermissionCode, type PermissionCodeValue } from '../shared/permissions.js';
 import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
+import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
@@ -512,6 +513,25 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/audit', tag: 'Audit', summary: 'Audit log entries, newest first',
     permissions: [P.ViewAuditLog], query: auditQuerySchema,
+  },
+  {
+    method: 'get', path: '/activity', tag: 'Audit', summary: 'Other activity for the Movements page, described, newest first',
+    description: 'Stock counts, catalogue and master-data changes, users, settings and imports. Leaves out purchase orders and the entries '
+      + 'the movement history already shows (stock receipts, returns, reversals).',
+    permissions: [P.ViewAuditLog],
+    query: z.object({
+      from: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, from its start, UTC) or an ISO time.' }),
+      to: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, included in full, UTC) or an ISO time.' }),
+      entityType: z.enum(ACTIVITY_TYPES).optional(),
+      actorId: z.string().optional(),
+      locationId: z.string().optional().openapi({ description: 'Stock counts at this location.' }),
+      before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last row already shown.' }),
+      limit: z.coerce.number().int().positive().max(500).optional().openapi({ description: 'Default 100, at most 500.' }),
+    }),
+  },
+  {
+    method: 'get', path: '/activity/actors', tag: 'Audit', summary: 'Everyone with an entry in the activity list (id and name)',
+    permissions: [P.ViewAuditLog],
   },
 ];
 
