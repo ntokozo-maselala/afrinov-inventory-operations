@@ -57,7 +57,7 @@ describe('mock movement history', () => {
 
 interface Activity { id: string; entityType: string; summary: string; actorName: string; link: string | null }
 
-interface Count { id: string; locationName: string; countedByName: string; counted: number; adjusted: number; differences: Array<{ sku: string; quantity: string }> }
+interface Count { id: string; locationName: string; countedByName: string; counted: number; adjusted: number; differences: Array<{ sku: string; quantity: string }>; lines: Array<{ expected: string; counted: string }> }
 
 describe('mock movement reports', () => {
   it('lists issue slips: one per issue with all its lines, earlier issues one line each', async () => {
@@ -88,6 +88,9 @@ describe('mock movement reports', () => {
 
     const counts = await fresh.get<Count[]>('/stock-counts?locationId=loc-1');
     expect(counts[0]).toMatchObject({ locationName: 'Main Storeroom', countedByName: 'System Administrator (dev)', counted: 1, adjusted: 1 });
+    // The full sheet keeps the matched item too, with what the system had.
+    expect(counts[0]!.lines.map((l) => [l.expected, l.counted])).toEqual([[b!.quantity, String(Number(b!.quantity) - 1)]]);
+    expect(counts[1]!.lines.map((l) => [l.expected, l.counted])).toEqual([[a!.quantity, a!.quantity]]);
     expect(counts[0]!.differences.map((d) => d.quantity)).toEqual(['-1']);
     expect(counts[1]).toMatchObject({ adjusted: 0, differences: [] });
     expect(await fresh.get<Count[]>('/stock-counts?locationId=loc-2')).toEqual([]);
