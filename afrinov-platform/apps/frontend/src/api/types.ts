@@ -21,8 +21,11 @@ export interface CurrentStockRow {
 
 /** One ledger entry (GET /inventory-transactions). */
 export interface MovementRow {
-  id: string; postedAt: string; type: string;
-  materialId: string; materialSku: string; materialName: string;
+  id: string;
+  /** Paging cursor: pass as `before` to get the next, older rows. */
+  cursor: string;
+  postedAt: string; type: string;
+  materialId: string; materialSku: string; materialName: string; unitOfMeasure?: string;
   locationId: string; locationName: string;
   quantity: string; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;

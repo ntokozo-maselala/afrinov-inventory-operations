@@ -1,11 +1,45 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
-import { InventoryService } from './inventory.service.js';
+import { InventoryService, type HistoryFilter } from './inventory.service.js';
+import { buildMovementsXlsx, movementsFilename, MOVEMENTS_EXPORT_LIMIT } from './movements-export.js';
+import { prisma } from '../../shared/db.js';
 import { StockReceiptService } from './stock-receipt.service.js';
 import { StockCountService } from './stock-count.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+
+/** The history filters a query string carries; shared by the list, its totals and the download. */
+function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilter, 'before' | 'limit'> {
+  return {
+    materialId: q['materialId'],
+    type: q['type'],
+    from: q['from'],
+    to: q['to'],
+    projectNumber: q['projectNumber'],
+    locationId: q['locationId'],
+    actorId: q['actorId'],
+    q: q['q'],
+  };
+}
+
+/** The filters in words, for the top of the download. */
+async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>): Promise<string> {
+  const [material, location, actor] = await Promise.all([
+    f.materialId ? prisma.material.findUnique({ where: { id: f.materialId }, select: { sku: true } }) : null,
+    f.locationId ? prisma.location.findUnique({ where: { id: f.locationId }, select: { name: true } }) : null,
+    f.actorId ? prisma.user.findUnique({ where: { id: f.actorId }, select: { name: true } }) : null,
+  ]);
+  return [
+    f.from || f.to ? `${f.from ?? 'the start'} to ${f.to ?? 'today'}` : 'All dates',
+    f.type ? `type ${f.type.replace(/_/g, ' ').toLowerCase()}` : null,
+    material ? `item ${material.sku}` : null,
+    location ? `at ${location.name}` : null,
+    actor ? `by ${actor.name}` : null,
+    f.projectNumber ? `project ${f.projectNumber}` : null,
+    f.q?.trim() ? `matching "${f.q.trim()}"` : null,
+  ].filter(Boolean).join(', ');
+}
 
 export const issueSchema = z.object({
   recipientId: z.string().uuid(),
@@ -71,13 +105,37 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   app.get('/inventory-transactions', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as Record<string, string | undefined>;
     return InventoryService.queryHistory({
-      materialId: q['materialId'],
-      type: q['type'],
-      from: q['from'],
-      to: q['to'],
-      projectNumber: q['projectNumber'],
+      ...historyFilter(q),
+      before: q['before'],
       limit: q['limit'] ? Number(q['limit']) : undefined,
     });
+  });
+
+  app.get('/inventory-transactions/summary', { preHandler: [app.authenticate] }, async (req) => {
+    return InventoryService.historySummary(historyFilter(req.query as Record<string, string | undefined>));
+  });
+
+  app.get('/inventory-transactions/actors', { preHandler: [app.authenticate] }, async () => {
+    return InventoryService.historyActors();
+  });
+
+  app.get('/inventory-transactions/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const filter = historyFilter(req.query as Record<string, string | undefined>);
+    const count = await InventoryService.historyCount(filter);
+    if (count > MOVEMENTS_EXPORT_LIMIT) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: `These filters select ${count} movements; one download holds at most ${MOVEMENTS_EXPORT_LIMIT}. Choose a shorter date range.` },
+      });
+    }
+    const rows = await InventoryService.queryHistory({ ...filter, limit: MOVEMENTS_EXPORT_LIMIT }, MOVEMENTS_EXPORT_LIMIT);
+    const now = new Date();
+    const buf = await buildMovementsXlsx(rows, { scope: await describeHistoryFilter(filter), generatedAt: now });
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${movementsFilename(filter.from, filter.to, now)}"`)
+      .header('Content-Length', String(buf.length))
+      .header('Cache-Control', 'no-store')
+      .send(buf);
   });
 
   app.post('/inventory-issues', { preHandler: [app.authenticate] }, async (req, reply) => {

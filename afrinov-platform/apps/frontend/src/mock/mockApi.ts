@@ -616,14 +616,26 @@ function route(method: string, path: string, body?: unknown): unknown {
 
   // Inventory transactions
   if (method === 'GET' && p === '/inventory-transactions') {
-    const limit = qs.limit ? Number(qs.limit) : 200;
-    let list = state.transactions
-      .slice()
-      .sort((a, b) => b.postedAt.localeCompare(a.postedAt));
-    if (qs.materialId) list = list.filter((t) => t.materialId === qs.materialId);
-    if (qs.type) list = list.filter((t) => t.type === qs.type);
-    if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
+    const limit = Math.min(qs.limit ? Number(qs.limit) : 200, 1000);
+    let list = filterHistory(qs);
+    if (qs.before) {
+      const cut = qs.before.lastIndexOf('_');
+      const at = qs.before.slice(0, cut);
+      const id = qs.before.slice(cut + 1);
+      if (cut < 1 || !id) throw err('VALIDATION_ERROR', 'Invalid paging cursor');
+      list = list.filter((t) => t.postedAt < at || (t.postedAt === at && t.id < id));
+    }
     return list.slice(0, limit).map((t) => enrichMovement(t));
+  }
+  if (method === 'GET' && p === '/inventory-transactions/summary') {
+    const byType: Record<string, number> = {};
+    const list = filterHistory(qs);
+    for (const t of list) byType[t.type] = (byType[t.type] ?? 0) + 1;
+    return { total: list.length, byType };
+  }
+  if (method === 'GET' && p === '/inventory-transactions/actors') {
+    const ids = new Set(state.transactions.map((t) => t.actorId));
+    return mockUsers.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, name: u.name })).sort((a, b) => a.name.localeCompare(b.name));
   }
   // Mirrors StockReceiptService.receive: a posted goods receipt with no
   // purchase order, all-or-nothing.
@@ -1596,17 +1608,56 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
   return rows.sort((a, b) => a.materialSku.localeCompare(b.materialSku) || a.locationName.localeCompare(b.locationName));
 }
 
+/**
+ * Mirrors historyWhere (apps/backend/src/modules/inventory/inventory.service.ts):
+ * days are whole UTC days with the last one included; newest first, ties by id.
+ */
+function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const time = (v: string, name: string) => {
+    const d = new Date(day.test(v) ? `${v}T00:00:00.000Z` : v);
+    if (Number.isNaN(d.getTime())) throw err('VALIDATION_ERROR', `Invalid ${name} date`);
+    return d;
+  };
+  const start = qs.from ? time(qs.from, 'from') : null;
+  const end = qs.to ? time(qs.to, 'to') : null;
+  if (start && end && start > end) throw err('VALIDATION_ERROR', 'The start date is after the end date');
+  if (end && day.test(qs.to!)) end.setUTCDate(end.getUTCDate() + 1);
+  const needle = qs.q?.trim().toLowerCase();
+  return state.transactions
+    .filter((t) => {
+      if (qs.materialId && t.materialId !== qs.materialId) return false;
+      if (qs.type && t.type !== qs.type) return false;
+      if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
+      if (qs.locationId && t.locationId !== qs.locationId) return false;
+      if (qs.actorId && t.actorId !== qs.actorId) return false;
+      const at = new Date(t.postedAt);
+      if (start && at < start) return false;
+      if (end && (day.test(qs.to!) ? at >= end : at > end)) return false;
+      if (needle) {
+        const m = findMaterial(t.materialId);
+        const hay = [m?.sku, m?.name, findLocation(t.locationId)?.name, t.projectNumber, state.recipients.find((r) => r.id === t.recipientId)?.name]
+          .filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => b.postedAt.localeCompare(a.postedAt) || b.id.localeCompare(a.id));
+}
+
 function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
   const m = findMaterial(t.materialId);
   const l = findLocation(t.locationId);
   const actor = mockUsers.find((u) => u.id === t.actorId);
   return {
     id: t.id,
+    cursor: `${t.postedAt}_${t.id}`,
     postedAt: t.postedAt,
     type: t.type,
     materialId: t.materialId,
     materialSku: m?.sku ?? t.materialId,
     materialName: m?.name ?? 'Unknown',
+    unitOfMeasure: m?.unitOfMeasure ?? '',
     locationId: t.locationId,
     locationName: l?.name ?? t.locationId,
     quantity: t.quantity,

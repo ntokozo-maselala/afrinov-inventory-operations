@@ -72,7 +72,7 @@ export function Stock() {
           </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
             <Link to="/stock/count">
-              <Button variant="secondary" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
+              <Button variant="primary" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
             </Link>
           </RoleGuard>
           </div>
