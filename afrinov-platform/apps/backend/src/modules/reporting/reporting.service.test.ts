@@ -28,6 +28,7 @@ const db = {
   materials: [] as Mat[],
   locations: [] as Loc[],
   transactions: [] as Tx[],
+  receipts: [] as Array<{ materialId: string; receivedAt: Date; supplier: string; status: string }>,
   settings: new Map<string, { value: unknown }>(),
 };
 
@@ -104,6 +105,12 @@ function makePrisma(): unknown {
     setting: {
       findUnique: async ({ where }: { where: { key: string } }) => db.settings.get(where.key) ?? null,
     },
+    goodsReceiptLine: {
+      findMany: async ({ where }: { where: { materialId: { in: string[] }; goodsReceipt: { status: string } } }) => db.receipts
+        .filter((r) => where.materialId.in.includes(r.materialId) && r.status === where.goodsReceipt.status)
+        .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime())
+        .map((r) => ({ materialId: r.materialId, goodsReceipt: { receivedAt: r.receivedAt, supplier: { name: r.supplier } } })),
+    },
   };
 }
 
@@ -112,6 +119,7 @@ beforeEach(() => {
   db.materials = [];
   db.locations = [];
   db.transactions = [];
+  db.receipts = [];
   db.settings.clear();
 });
 
@@ -263,10 +271,47 @@ describe('ReportingService', () => {
       expect(rows.map((r) => r.sku)).toContain('SKU-001');
     });
 
+    it('names the supplier of the latest posted goods receipt', async () => {
+      seedMaterials();
+      db.receipts = [
+        { materialId: 'm-1', receivedAt: new Date('2026-08-01'), supplier: 'Old Supplier', status: 'POSTED' },
+        { materialId: 'm-1', receivedAt: new Date('2026-09-18'), supplier: 'Hydroscand', status: 'POSTED' },
+        { materialId: 'm-1', receivedAt: new Date('2026-10-01'), supplier: 'Draft Only', status: 'DRAFT' },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus();
+      expect(rows.find((r) => r.sku === 'SKU-001')?.lastSupplier).toEqual({ name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' });
+      expect(rows.find((r) => r.sku === 'SKU-002')?.lastSupplier).toBeNull();
+    });
+
     it('filters by category', async () => {
       seedMaterials();
       const { ReportingService } = await import('./reporting.service.js');
       expect((await ReportingService.stockStatus({ category: 'ELECTRICAL' })).map((r) => r.sku)).toEqual(['SKU-002']);
+    });
+  });
+
+  describe('stockValue', () => {
+    it('adds up on hand × unit price per category, as the Summary sheets do, with status counts', async () => {
+      seedMaterials();
+      db.materials.push({ id: 'm-4', sku: 'SKU-004', name: 'Tape', category: 'CONSUMABLES', unitOfMeasure: 'roll', requiredStock: DEC(0), unitCost: null, active: true });
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(4), updatedAt: new Date() },   // FASTENERS 4 × 5 = 20, 40% → OK
+        { materialId: 'm-1', locationId: 'l-2', quantity: DEC(0), updatedAt: new Date() },
+        { materialId: 'm-3', locationId: 'l-1', quantity: DEC(2.5), updatedAt: new Date() }, // CONSUMABLES 2.5 × 20 = 50, 10% → URGENT
+        { materialId: 'm-4', locationId: 'l-1', quantity: DEC(3), updatedAt: new Date() },   // CONSUMABLES, no price, NOT_SET
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const v = await ReportingService.stockValue();
+      expect(v.currency).toBe('ZAR');
+      expect(v.categories).toEqual([
+        { category: 'CONSUMABLES', items: 2, itemsInStock: 2, value: 50, unpriced: 1, share: 0.714 },
+        { category: 'ELECTRICAL', items: 1, itemsInStock: 0, value: 0, unpriced: 0, share: 0 },
+        { category: 'FASTENERS', items: 1, itemsInStock: 1, value: 20, unpriced: 0, share: 0.286 },
+      ]);
+      expect(v.total).toEqual({ items: 4, itemsInStock: 3, value: 70, unpriced: 1 });
+      // Cable (m-2) has nothing anywhere: URGENT and out of stock.
+      expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 1, outOfStock: 1 });
     });
   });
 

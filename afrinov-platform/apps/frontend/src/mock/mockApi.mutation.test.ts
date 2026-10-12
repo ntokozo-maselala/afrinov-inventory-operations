@@ -496,6 +496,13 @@ describe('mock API mutation flows', () => {
   });
 
   describe('receiving stock at the counter', () => {
+    it('names the supplier on the stock status as the last supplier of the item', async () => {
+      await api.post('/stock-receipts', { supplierId: 'sup-1', deliveryRef: 'INV-LAST', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] });
+      const rows = await api.get<Array<{ materialId: string; lastSupplier: { name: string } | null }>>('/reports/stock-status');
+      const supplier = (await api.get<Array<{ id: string; name: string }>>('/suppliers')).find((x) => x.id === 'sup-1')!;
+      expect(rows.find((r) => r.materialId === 'mat-1')?.lastSupplier?.name).toBe(supplier.name);
+    });
+
     it('books every line, shows the supplier on the movement, and can be reversed', async () => {
       const before = await api.get<Array<{ locationId: string; quantity: string }>>('/reports/current-stock?materialId=mat-1');
       const onHand = Number(before.find((s) => s.locationId === 'loc-1')?.quantity ?? 0);

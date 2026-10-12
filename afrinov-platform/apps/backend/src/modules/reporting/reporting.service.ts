@@ -17,7 +17,28 @@ export interface StockStatusRow {
   reorderQuantity: string;
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  /** Who it last came from: the most recent posted goods receipt with this item. */
+  lastSupplier: { name: string; receivedAt: string } | null;
 }
+
+export interface StockValueReport {
+  currency: string;
+  /** In the workbook's order: Consumables, Fasteners, Tooling, Project Material, then Tools. */
+  categories: Array<{
+    category: string;
+    items: number;
+    itemsInStock: number;
+    /** On hand × unit price, items with a price. */
+    value: number;
+    /** Items with stock but no unit price, so not in the value. */
+    unpriced: number;
+    share: number;
+  }>;
+  total: { items: number; itemsInStock: number; value: number; unpriced: number };
+  status: Record<StockStatus, number> & { outOfStock: number };
+}
+
+const CATEGORY_ORDER = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
 
 const STATUS_ORDER: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
 
@@ -29,6 +50,21 @@ async function totalsByMaterial(materialIds?: string[]): Promise<Map<string, Pri
     _sum: { quantity: true },
   });
   return new Map(rows.map((r) => [r.materialId, r._sum.quantity ?? new Prisma.Decimal(0)]));
+}
+
+/** The supplier of each item's most recent posted goods receipt (counter or purchase order). */
+async function lastSuppliers(materialIds: string[]): Promise<Map<string, { name: string; receivedAt: string }>> {
+  const out = new Map<string, { name: string; receivedAt: string }>();
+  if (materialIds.length === 0) return out;
+  const lines = await prisma.goodsReceiptLine.findMany({
+    where: { materialId: { in: materialIds }, goodsReceipt: { status: 'POSTED' } },
+    select: { materialId: true, goodsReceipt: { select: { receivedAt: true, supplier: { select: { name: true } } } } },
+    orderBy: { goodsReceipt: { receivedAt: 'desc' } },
+  });
+  for (const l of lines) {
+    if (!out.has(l.materialId)) out.set(l.materialId, { name: l.goodsReceipt.supplier.name, receivedAt: l.goodsReceipt.receivedAt.toISOString() });
+  }
+  return out;
 }
 
 function statusFor(required: Prisma.Decimal, onHand: Prisma.Decimal | undefined, bands: StatusBands) {
@@ -147,9 +183,10 @@ export const ReportingService = {
       orderBy: { name: 'asc' },
     });
     const ids = materials.map((m) => m.id);
-    const [balances, bands] = await Promise.all([
+    const [balances, bands, lastSupplier] = await Promise.all([
       ids.length ? prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }) : Promise.resolve([]),
       getStatusBands(),
+      lastSuppliers(ids),
     ]);
     const byMaterial = new Map<string, typeof balances>();
     for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
@@ -174,6 +211,7 @@ export const ReportingService = {
           .filter((b) => !b.quantity.isZero())
           .map((b) => ({ locationId: b.locationId, locationName: b.location.name, quantity: b.quantity.toString() }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
+        lastSupplier: lastSupplier.get(m.id) ?? null,
       };
     });
     return rows
@@ -181,6 +219,44 @@ export const ReportingService = {
       .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
         || (a.percentOfRequired ?? Infinity) - (b.percentOfRequired ?? Infinity)
         || a.name.localeCompare(b.name));
+  },
+
+  /**
+   * The value of the stock on hand now, per category, as the workbook's
+   * Summary sheets add it up row by row (Current Stock × Unit Price), with the
+   * item counts by stock status for the dashboard cards.
+   */
+  async stockValue(): Promise<StockValueReport> {
+    const [rows, currency] = await Promise.all([this.stockStatus(), SettingsService.getValue<string>('general.defaultCurrency')]);
+    const cats = new Map<string, { items: number; itemsInStock: number; value: number; unpriced: number }>();
+    const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
+    for (const r of rows) {
+      const onHand = Number(r.onHand);
+      const c = cats.get(r.category) ?? { items: 0, itemsInStock: 0, value: 0, unpriced: 0 };
+      c.items++;
+      if (onHand > 0) {
+        c.itemsInStock++;
+        if (r.unitCost === null) c.unpriced++;
+        else c.value += onHand * Number(r.unitCost);
+      } else {
+        status.outOfStock++;
+      }
+      cats.set(r.category, c);
+      status[r.status]++;
+    }
+    const total = [...cats.values()].reduce(
+      (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
+      { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
+    );
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      currency,
+      categories: [...cats]
+        .sort(([a], [b]) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99))
+        .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
+      total: { ...total, value: round2(total.value) },
+      status,
+    };
   },
 
   /** Items that need re-ordering (URGENT or WARNING); empty when stock alerts are off. */
