@@ -98,12 +98,19 @@ const reportQuery = z.object({
   pageSize: z.coerce.number().int().positive().max(1000).optional().openapi({ description: 'Default 200.' }),
 });
 
-const movementQuery = z.object({
+const movementFilters = z.object({
   materialId: z.string().optional(),
   type: movementTypeSchema.optional(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  from: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, from its start, UTC) or an ISO time.' }),
+  to: z.string().optional().openapi({ description: 'A day (YYYY-MM-DD, included in full, UTC) or an ISO time.' }),
   projectNumber: z.string().optional(),
+  locationId: z.string().optional(),
+  actorId: z.string().optional().openapi({ description: 'Who posted the movement.' }),
+  q: z.string().optional().openapi({ description: 'Matches item code or name, location, project or who it was issued to.' }),
+});
+
+const movementQuery = movementFilters.extend({
+  before: z.string().optional().openapi({ description: "Paging: the `cursor` of the last row already shown; returns the next, older rows." }),
   limit: z.coerce.number().int().positive().max(1000).optional().openapi({ description: 'Default 200, at most 1000.' }),
 });
 
@@ -213,6 +220,19 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/inventory-transactions', tag: 'Stock movements', summary: 'Movement history, newest first',
     query: movementQuery,
+  },
+  {
+    method: 'get', path: '/inventory-transactions/summary', tag: 'Stock movements', summary: 'How many movements of each type the filters select',
+    query: movementFilters,
+  },
+  {
+    method: 'get', path: '/inventory-transactions/actors', tag: 'Stock movements', summary: 'Everyone who has posted a movement (id and name)',
+  },
+  {
+    method: 'get', path: '/inventory-transactions/export', tag: 'Stock movements', summary: 'Download the filtered movement history as Excel',
+    description: 'Refused with 400 when the filters select more than 10,000 movements.',
+    query: movementFilters, errors: [400],
+    produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   },
   {
     method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock to a recipient',

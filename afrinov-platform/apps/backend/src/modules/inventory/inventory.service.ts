@@ -101,19 +101,86 @@ export interface ReverseInput {
   actorId: string;
 }
 
-export const InventoryService = {
-   async queryHistory(filter: { materialId?: string; type?: string; from?: string; to?: string; projectNumber?: string; limit?: number }) {
-    const where: Prisma.InventoryTransactionWhereInput = {};
-    if (filter.materialId) where.materialId = filter.materialId;
-    if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
-    if (filter.projectNumber) where.projectNumber = filter.projectNumber;
-    if (filter.from || filter.to) {
-      where.postedAt = {};
-      if (filter.from) where.postedAt.gte = new Date(filter.from);
-      if (filter.to) where.postedAt.lte = new Date(filter.to);
+export interface HistoryFilter {
+  materialId?: string;
+  type?: string;
+  /** A day (YYYY-MM-DD, from its start) or an ISO time. */
+  from?: string;
+  /** A day (YYYY-MM-DD, included in full) or an ISO time. */
+  to?: string;
+  projectNumber?: string;
+  locationId?: string;
+  actorId?: string;
+  /** Matches the item code or name, the location, the project or who it was issued to. */
+  q?: string;
+  /** Paging cursor: the `cursor` of the last row already shown; returns older rows. */
+  before?: string;
+  limit?: number;
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseTime(value: string, name: string): Date {
+  const d = new Date(DAY.test(value) ? `${value}T00:00:00.000Z` : value);
+  if (Number.isNaN(d.getTime())) throw Errors.validation(`Invalid ${name} date`);
+  return d;
+}
+
+/**
+ * The movements a history filter selects. Days are whole UTC days and the
+ * `to` day is included, as on the stock-used report.
+ */
+export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): Prisma.InventoryTransactionWhereInput {
+  const where: Prisma.InventoryTransactionWhereInput = {};
+  if (filter.materialId) where.materialId = filter.materialId;
+  if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
+  if (filter.projectNumber) where.projectNumber = filter.projectNumber;
+  if (filter.locationId) where.locationId = filter.locationId;
+  if (filter.actorId) where.actorId = filter.actorId;
+  const start = filter.from ? parseTime(filter.from, 'from') : undefined;
+  const end = filter.to ? parseTime(filter.to, 'to') : undefined;
+  if (start && end && start > end) throw Errors.validation('The start date is after the end date');
+  if (start || end) {
+    where.postedAt = {};
+    if (start) where.postedAt.gte = start;
+    if (end && DAY.test(filter.to!)) {
+      end.setUTCDate(end.getUTCDate() + 1); // the last day is included
+      where.postedAt.lt = end;
+    } else if (end) {
+      where.postedAt.lte = end;
     }
+  }
+  const q = filter.q?.trim();
+  if (q) {
+    const contains = { contains: q, mode: 'insensitive' as const };
+    where.OR = [
+      { material: { sku: contains } },
+      { material: { name: contains } },
+      { location: { name: contains } },
+      { projectNumber: contains },
+      { recipient: { name: contains } },
+    ];
+  }
+  return where;
+}
+
+/** A row's paging cursor: newest first, ties broken by id. */
+export const historyCursor = (t: { postedAt: Date; id: string }) => `${t.postedAt.toISOString()}_${t.id}`;
+
+function olderThan(cursor: string): Prisma.InventoryTransactionWhereInput {
+  const cut = cursor.lastIndexOf('_');
+  const at = new Date(cursor.slice(0, cut));
+  const id = cursor.slice(cut + 1);
+  if (cut < 1 || !id || Number.isNaN(at.getTime())) throw Errors.validation('Invalid paging cursor');
+  return { OR: [{ postedAt: { lt: at } }, { postedAt: at, id: { lt: id } }] };
+}
+
+export const InventoryService = {
+  async queryHistory(filter: HistoryFilter, maxRows = 1000) {
+    const base = historyWhere(filter);
+    const where = filter.before ? { AND: [base, olderThan(filter.before)] } : base;
     // Cap the page size to prevent unbounded memory usage from a single request.
-    const take = Math.min(filter.limit ?? 200, 1000);
+    const take = Math.min(filter.limit ?? 200, maxRows);
     const rows = await prisma.inventoryTransaction.findMany({
       where,
       include: {
@@ -123,7 +190,7 @@ export const InventoryService = {
         reversedBy: { select: { id: true } },
         recipient: { select: { name: true, type: true } },
       },
-      orderBy: { postedAt: 'desc' },
+      orderBy: [{ postedAt: 'desc' }, { id: 'desc' }],
       take,
     });
     // Receipts point at their goods receipt; show its number, supplier and
@@ -143,11 +210,13 @@ export const InventoryService = {
     const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity]));
     return rows.map((t) => ({
       id: t.id,
+      cursor: historyCursor(t),
       postedAt: t.postedAt.toISOString(),
       type: t.type,
       materialId: t.materialId,
       materialSku: t.material.sku,
       materialName: t.material.name,
+      unitOfMeasure: t.material.unitOfMeasure,
       locationId: t.locationId,
       locationName: t.location.name,
       quantity: t.quantity.toString(),
@@ -169,6 +238,25 @@ export const InventoryService = {
         return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null };
       })(),
     }));
+  },
+
+  /** How many movements of each type the filter selects, for the totals above the list. */
+  async historySummary(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<{ total: number; byType: Record<string, number> }> {
+    const groups = await prisma.inventoryTransaction.groupBy({ by: ['type'], where: historyWhere(filter), _count: { _all: true } });
+    const byType = Object.fromEntries(groups.map((g) => [g.type, g._count._all]));
+    return { total: groups.reduce((n, g) => n + g._count._all, 0), byType };
+  },
+
+  /** How many movements the filter selects (the export checks this before building). */
+  async historyCount(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<number> {
+    return prisma.inventoryTransaction.count({ where: historyWhere(filter) });
+  },
+
+  /** Everyone who has posted a movement, for the "by" filter. Names only. */
+  async historyActors(): Promise<Array<{ id: string; name: string }>> {
+    const ids = await prisma.inventoryTransaction.findMany({ distinct: ['actorId'], select: { actorId: true } });
+    const users = await prisma.user.findMany({ where: { id: { in: ids.map((r) => r.actorId) } }, select: { id: true, name: true } });
+    return users.sort((a, b) => a.name.localeCompare(b.name));
   },
   /**
    * Reverse a movement by posting an opposite entry that points at it. The

@@ -25,6 +25,7 @@ const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedRev
 }));
 
 const { mockedReceive } = vi.hoisted(() => ({ mockedReceive: vi.fn() }));
+const { mockedSummary, mockedActors, mockedCount } = vi.hoisted(() => ({ mockedSummary: vi.fn(), mockedActors: vi.fn(), mockedCount: vi.fn() }));
 vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive } }));
 
 vi.mock('../../shared/db.js', () => ({
@@ -49,6 +50,9 @@ vi.mock('./inventory.service.js', () => ({
     transfer: mockedTransfer,
     adjust: mockedAdjust,
     queryHistory: mockedQueryHistory,
+    historySummary: mockedSummary,
+    historyActors: mockedActors,
+    historyCount: mockedCount,
     reverse: mockedReverse,
     returnToStock: mockedReturn,
   },
@@ -324,6 +328,57 @@ describe('inventory routes', () => {
           limit: 50,
         }),
       );
+    });
+  });
+
+  describe('GET /api/v1/inventory-transactions filters, totals and download', () => {
+    it('forwards the date range, location, user, search and paging cursor', async () => {
+      mockedQueryHistory.mockResolvedValue([]);
+      await app.inject({
+        method: 'GET',
+        url: `/api/v1/inventory-transactions?from=2026-10-01&to=2026-10-31&locationId=${VALID_UUID}&actorId=user-1&q=disc&before=c1&limit=100`,
+        headers: authed(),
+      });
+      expect(mockedQueryHistory).toHaveBeenCalledWith(expect.objectContaining({
+        from: '2026-10-01', to: '2026-10-31', locationId: VALID_UUID, actorId: 'user-1', q: 'disc', before: 'c1', limit: 100,
+      }));
+    });
+
+    it('returns the totals for the same filters, without paging', async () => {
+      mockedSummary.mockResolvedValue({ total: 3, byType: { ISSUE: 2, RECEIPT: 1 } });
+      const res = await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/summary?from=2026-10-01&type=ISSUE&before=c1', headers: authed() });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ total: 3, byType: { ISSUE: 2, RECEIPT: 1 } });
+      expect(mockedSummary).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-10-01', type: 'ISSUE' }));
+      expect(mockedSummary.mock.calls[0]![0]).not.toHaveProperty('before');
+    });
+
+    it('lists who has posted movements', async () => {
+      mockedActors.mockResolvedValue([{ id: 'u-1', name: 'Vusi' }]);
+      const res = await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/actors', headers: authed() });
+      expect(res.json()).toEqual([{ id: 'u-1', name: 'Vusi' }]);
+    });
+
+    it('downloads the filtered movements as an Excel file', async () => {
+      mockedCount.mockResolvedValue(1);
+      mockedQueryHistory.mockResolvedValue([{
+        id: 'tx-1', cursor: 'c', postedAt: '2026-10-05T08:00:00.000Z', type: 'ISSUE', materialId: 'm', materialSku: 'DISC-115', materialName: 'Cutting disc',
+        unitOfMeasure: 'each', locationId: 'l', locationName: 'Boiler Shop', quantity: '-3', actorId: 'u', actorName: 'Vusi', recipientName: 'Sabelo',
+        projectNumber: null, reasonCode: null, reasonNote: null, referenceType: null, reversesId: null, reversedById: null, receiptNumber: null,
+      }]);
+      const res = await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/export?from=2026-10-01&to=2026-10-31', headers: authed() });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('spreadsheetml');
+      expect(res.headers['content-disposition']).toContain('afrinov-movements-2026-10-01-to-2026-10-31.xlsx');
+      expect(res.rawPayload.subarray(0, 2).toString()).toBe('PK');
+    });
+
+    it('refuses a download wider than the row limit, with a message to narrow it', async () => {
+      mockedCount.mockResolvedValue(10_001);
+      const res = await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/export', headers: authed() });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.message).toMatch(/shorter date range/);
+      expect(mockedQueryHistory).not.toHaveBeenCalled();
     });
   });
 
