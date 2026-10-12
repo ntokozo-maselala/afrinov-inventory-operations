@@ -2,10 +2,12 @@
 // (Summary and Stock Report sheets per category), with stock as it stood at the
 // end of the chosen period: a month, a week or any range of days
 // (GET /reports/month-end?from=&to=).
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Input, Select } from '../components/Field';
+import { Input } from '../components/Field';
+import { Toolbar } from '../components/Toolbar';
 import { ErrorState } from '../components/EmptyState';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
@@ -18,33 +20,17 @@ import { categoryLabel } from '../lib/categories';
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/** The dates a preset stands for, in the user's own calendar; weeks run Monday to Sunday. */
-export function presetRange(preset: string, today = new Date()): { from: string; to: string } {
-  const y = today.getFullYear();
-  const m = today.getMonth();
-  const monday = today.getDate() - ((today.getDay() + 6) % 7);
-  switch (preset) {
-    case 'this-week': return { from: iso(new Date(y, m, monday)), to: iso(new Date(y, m, monday + 6)) };
-    case 'last-week': return { from: iso(new Date(y, m, monday - 7)), to: iso(new Date(y, m, monday - 1)) };
-    case 'this-month': return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
-    default: return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
-  }
+/** The month just ended, in the user's own calendar: the usual report and the page's default period. */
+export function lastMonth(today = new Date()): { from: string; to: string } {
+  return { from: iso(new Date(today.getFullYear(), today.getMonth() - 1, 1)), to: iso(new Date(today.getFullYear(), today.getMonth(), 0)) };
 }
 
-const PRESETS = [
-  { value: 'last-month', label: 'Last month' },
-  { value: 'this-month', label: 'This month' },
-  { value: 'last-week', label: 'Last week' },
-  { value: 'this-week', label: 'This week' },
-  { value: 'custom', label: 'Choose dates' },
-];
-
-/** Show the chosen period's category overview and export action, defaulting to the previous local month. */
+/** Show the chosen period's category overview and export action; the dates live in the address, as on Movements. */
 export function MonthEnd() {
-  const today = iso(new Date());
-  const [preset, setPreset] = useState('last-month');
-  const [custom, setCustom] = useState(presetRange('last-month'));
-  const range = preset === 'custom' ? custom : presetRange(preset);
+  const [params, setParams] = useSearchParams();
+  const today = useMemo(() => iso(new Date()), []);
+  const fallback = useMemo(() => lastMonth(), []);
+  const range = { from: params.get('from') ?? fallback.from, to: params.get('to') ?? fallback.to };
   const problem = !range.from || !range.to ? 'Choose a start and an end date.'
     : range.from > range.to ? 'The start date is after the end date.'
       : range.from > today ? 'Choose a period that has started.'
@@ -52,6 +38,17 @@ export function MonthEnd() {
   const report = useApi<MonthEndReport>(problem ? null : `/reports/month-end?from=${range.from}&to=${range.to}`);
   const [downloading, setDownloading] = useState(false);
   const toast = useToast();
+
+  /** Set one end of the period, keeping the other where it is. */
+  function setDate(key: 'from' | 'to', value: string) {
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('from', range.from);
+      next.set('to', range.to);
+      next.set(key, value);
+      return next;
+    }, { replace: true });
+  }
 
   /** Download the chosen period, showing failures as toasts and clearing the busy state afterward. */
   async function download() {
@@ -70,7 +67,7 @@ export function MonthEnd() {
     <div>
       <PageHeader
         title="Stock report"
-        description="The report management receives, in the stock workbook's own layout: a Summary sheet per category (required, current, value, % of required, re-order quantity, URGENCY) and its Stock Report of stock used, with stock as it stood at the end of the period. Pick a month, a week or your own dates."
+        description="The report management receives, in the stock workbook's own layout: a Summary sheet per category (required, current, value, % of required, re-order quantity, URGENCY) and its Stock Report of stock used, with stock as it stood at the end of the period. Choose the dates; it opens on last month."
         actions={(
           <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={!!problem || !r}>
             Download stock report
@@ -78,34 +75,22 @@ export function MonthEnd() {
         )}
       />
 
-      <div className="surface-card p-4 mb-4 flex flex-wrap items-end gap-4">
-        <label className="field">
-          <span className="field-label">Period</span>
-          <Select className="sm:w-44" value={preset} aria-label="Period"
-            onChange={(e) => { if (e.target.value === 'custom') setCustom(range); setPreset(e.target.value); }}>
-            {PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </Select>
-        </label>
-        {preset === 'custom' && (
+      <Toolbar
+        left={(
           <>
-            <label className="field">
-              <span className="field-label">From</span>
-              <Input className="sm:w-40" type="date" aria-label="From" value={custom.from} max={today}
-                invalid={!!problem} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
-            </label>
-            <label className="field">
-              <span className="field-label">To</span>
-              <Input className="sm:w-40" type="date" aria-label="To" value={custom.to} min={custom.from || undefined}
-                invalid={!!problem} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} />
-            </label>
+            <Input type="date" className="sm:w-40" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} aria-label="From" invalid={!!problem} />
+            <span className="text-meta">to</span>
+            <Input type="date" className="sm:w-40" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} aria-label="To" invalid={!!problem} />
+            {!problem && (
+              <span className="text-sm text-surface-600">
+                {range.to >= today
+                  ? `Stock as it stands now; stock used from ${range.from} to ${range.to}.`
+                  : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
+              </span>
+            )}
           </>
         )}
-        <p className="text-sm text-surface-600 pb-2">
-          {problem ? '' : range.to >= today
-            ? `Stock as it stands now; stock used from ${range.from} to ${range.to}.`
-            : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
-        </p>
-      </div>
+      />
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}

@@ -8,7 +8,7 @@ vi.mock('../api/client', async (importOriginal) => ({
 }));
 vi.mock('../api/exportMonthEnd', () => ({ downloadMonthEnd: mockDownload }));
 
-const { MonthEnd, presetRange } = await import('./MonthEnd');
+const { MonthEnd, lastMonth } = await import('./MonthEnd');
 const { ToastProvider } = await import('../components/Toast');
 
 const REPORT = {
@@ -20,23 +20,14 @@ const REPORT = {
   total: { items: 3, itemsInStock: 2, value: 5489.25, urgent: 1, warning: 0, usedValue: 1051.25 },
 };
 const SEPT = '/reports/month-end?from=2026-09-01&to=2026-09-30';
-const renderPage = () => render(<MemoryRouter><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
+const renderPage = (url = '/reports/stock-report') => render(<MemoryRouter initialEntries={[url]}><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
 const download = () => screen.getByRole('button', { name: 'Download stock report' });
 
-describe('presetRange', () => {
-  it('gives last month across a year end, and this month', () => {
-    expect(presetRange('last-month', new Date(2026, 9, 9))).toEqual({ from: '2026-09-01', to: '2026-09-30' });
-    expect(presetRange('last-month', new Date(2027, 0, 5))).toEqual({ from: '2026-12-01', to: '2026-12-31' });
-    expect(presetRange('this-month', new Date(2024, 1, 10))).toEqual({ from: '2024-02-01', to: '2024-02-29' });
-  });
-
-  it('runs weeks Monday to Sunday, across a month end', () => {
-    // Friday 9 October 2026.
-    expect(presetRange('this-week', new Date(2026, 9, 9))).toEqual({ from: '2026-10-05', to: '2026-10-11' });
-    expect(presetRange('last-week', new Date(2026, 9, 9))).toEqual({ from: '2026-09-28', to: '2026-10-04' });
-    // A Sunday belongs to the week that started the Monday before.
-    expect(presetRange('this-week', new Date(2026, 10, 1))).toEqual({ from: '2026-10-26', to: '2026-11-01' });
-    expect(presetRange('this-week', new Date(2026, 9, 5))).toEqual({ from: '2026-10-05', to: '2026-10-11' });
+describe('lastMonth', () => {
+  it('gives the month just ended, across a year end and a leap February', () => {
+    expect(lastMonth(new Date(2026, 9, 9))).toEqual({ from: '2026-09-01', to: '2026-09-30' });
+    expect(lastMonth(new Date(2027, 0, 5))).toEqual({ from: '2026-12-01', to: '2026-12-31' });
+    expect(lastMonth(new Date(2024, 2, 10))).toEqual({ from: '2024-02-01', to: '2024-02-29' });
   });
 });
 
@@ -60,24 +51,21 @@ describe('Stock report page', () => {
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith({ from: '2026-09-01', to: '2026-09-30' }));
   });
 
-  it('switches to a week, and to this week as it stands now', async () => {
-    renderPage();
+  it('opens on the dates in the address, and says when stock is as it stands now', async () => {
+    renderPage('/reports/stock-report?from=2026-10-05&to=2026-10-11');
     await screen.findByLabelText('Stock report overview');
-    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'last-week' } });
-    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-09-28&to=2026-10-04'));
-    expect(screen.getByText('Stock as at the end of 2026-10-04; stock used from 2026-09-28 to 2026-10-04.')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'this-week' } });
-    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-10-05&to=2026-10-11'));
+    expect(mockGet).toHaveBeenCalledWith('/reports/month-end?from=2026-10-05&to=2026-10-11');
+    expect(screen.getByLabelText('From')).toHaveValue('2026-10-05');
     expect(screen.getByText('Stock as it stands now; stock used from 2026-10-05 to 2026-10-11.')).toBeInTheDocument();
   });
 
-  it('lets the user choose their own dates, starting from the period shown', async () => {
+  it('lets the user choose the dates with From and To, as on Movements', async () => {
     renderPage();
     await screen.findByLabelText('Stock report overview');
-    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'custom' } });
     expect(screen.getByLabelText('From')).toHaveValue('2026-09-01');
     expect(screen.getByLabelText('To')).toHaveValue('2026-09-30');
-    expect(screen.getByLabelText('From')).toHaveAttribute('max', '2026-10-09');
+    expect(screen.getByLabelText('From')).toHaveAttribute('max', '2026-09-30');
+    expect(screen.getByLabelText('To')).toHaveAttribute('min', '2026-09-01');
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-09-07' } });
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-13' } });
     await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-09-07&to=2026-09-13'));
@@ -93,7 +81,6 @@ describe('Stock report page', () => {
   ])('will not ask for %j', async (dates, message) => {
     renderPage();
     await screen.findByLabelText('Stock report overview');
-    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'custom' } });
     for (const [label, value] of Object.entries(dates)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
     expect(mockGet).not.toHaveBeenCalledWith(`/reports/month-end?from=${dates.From}&to=${dates.To}`);
     expect(screen.queryByLabelText('Stock report overview')).not.toBeInTheDocument();
@@ -118,11 +105,11 @@ describe('Stock report loading and failures', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { resolveSelected = resolve; }));
     renderPage();
     expect(download()).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'last-week' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-13' } });
     await act(async () => resolvePrevious(REPORT));
     expect(screen.queryByLabelText('Stock report overview')).not.toBeInTheDocument();
     expect(download()).toBeDisabled();
-    await act(async () => resolveSelected({ ...REPORT, month: null, from: '2026-09-28', to: '2026-10-04' }));
+    await act(async () => resolveSelected({ ...REPORT, month: null, to: '2026-09-13' }));
     expect(download()).toBeEnabled();
   });
 
