@@ -19,6 +19,7 @@ function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilte
     projectNumber: q['projectNumber'],
     locationId: q['locationId'],
     actorId: q['actorId'],
+    recipientId: q['recipientId'],
     q: q['q'],
     report: (['issued', 'transfers', 'writeoffs'] as const).find((r) => r === q['report']),
   };
@@ -187,6 +188,13 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     }
     const result = await StockCountService.post({ ...parsed.data, actorId: actorId(req) });
     return reply.code(201).send(result);
+  });
+
+  // The issued-stock report: issue slips with their lines, newest first.
+  app.get('/inventory-issues', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const q = req.query as Record<string, string | undefined>;
+    return InventoryService.issueSlips({ ...historyFilter(q), before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
   });
 
   // The received-stock report: deliveries with their lines, newest first.

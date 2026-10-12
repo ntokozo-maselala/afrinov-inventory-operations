@@ -17,23 +17,24 @@ import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
-import { LedgerReport } from '../components/reports/LedgerReport';
+import { LedgerReport, type LedgerReportKind } from '../components/reports/LedgerReport';
 import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
+import { IssuedStockReport } from '../components/reports/IssuedStockReport';
 import { StockCountsReport } from '../components/reports/StockCountsReport';
 import { OtherActivity, ACTIVITY_TYPE_LABEL } from '../components/OtherActivity';
 import { downloadMovements } from '../api/exportMovements';
-import { downloadReceivedStock, downloadStockCounts } from '../api/exportReports';
+import { downloadIssuedStock, downloadReceivedStock, downloadStockCounts } from '../api/exportReports';
 import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
 import { today } from '../lib/dates';
 
-type Filter = 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
+type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
 type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'other';
 
 const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'all', label: 'All movements', filters: ['locationId', 'actorId', 'materialId', 'q'] },
   { id: 'received', label: 'Received stock', filters: ['supplierId', 'locationId', 'q'] },
-  { id: 'issued', label: 'Issued stock', filters: ['locationId', 'actorId', 'materialId', 'q'] },
+  { id: 'issued', label: 'Issued stock', filters: ['recipientId', 'locationId', 'actorId', 'materialId', 'q'] },
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
   { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
@@ -69,6 +70,7 @@ export function Movements() {
   const ledgerActors = has('actorId') && report.id !== 'other';
   const locations = useApi<Option[]>(has('locationId') ? '/locations' : null);
   const suppliers = useApi<Option[]>(has('supplierId') ? '/suppliers' : null);
+  const recipients = useApi<Option[]>(has('recipientId') ? '/recipients' : null);
   const materials = useApi<Material[]>(has('materialId') ? '/materials' : null);
   const actors = useApi<Option[]>(!has('actorId') ? null : ledgerActors ? '/inventory-transactions/actors' : '/activity/actors');
   const itemOptions = useMemo<SearchOption[]>(() => (materials.data ?? [])
@@ -107,6 +109,7 @@ export function Movements() {
     setDownloading(true);
     try {
       if (report.id === 'received') await downloadReceivedStock(query);
+      else if (report.id === 'issued') await downloadIssuedStock(query);
       else if (report.id === 'counts') await downloadStockCounts(query);
       else await downloadMovements(report.id === 'all' ? query : `${query}&report=${report.id}`);
     } catch (err) {
@@ -170,6 +173,13 @@ export function Movements() {
                 {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </Select>
             )}
+            {has('recipientId') && (
+              <Select value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)} aria-label="Filter by who it was issued to">
+                <option value="">Issued to anyone</option>
+                {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                <option value="__none__">Not recorded</option>
+              </Select>
+            )}
             {has('locationId') && (
               <Select value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)} aria-label="Filter by location">
                 <option value="">All locations</option>
@@ -207,9 +217,10 @@ export function Movements() {
       <h2 className="hidden print:block text-h2 mb-2">{report.label}, {from === to ? from : `${from} to ${to}`}</h2>
       {badRange ? <ErrorState message="The start date is after the end date." /> : (
         report.id === 'received' ? <ReceivedStockReport query={query} />
+          : report.id === 'issued' ? <IssuedStockReport query={query} />
           : report.id === 'counts' ? <StockCountsReport query={query} />
             : report.id === 'other' ? <OtherActivity query={query} />
-              : <LedgerReport kind={report.id} query={query} />
+              : <LedgerReport kind={report.id as LedgerReportKind} query={query} />
       )}
     </div>
   );

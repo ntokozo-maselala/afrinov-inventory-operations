@@ -26,6 +26,8 @@ export interface MovementRow {
   cursor: string;
   postedAt: string; type: string;
   materialId: string; materialSku: string; materialName: string; unitOfMeasure?: string;
+  /** Issues: the slip this line belongs to. */
+  issueId?: string | null;
   locationId: string; locationName: string;
   quantity: string; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
@@ -48,6 +50,13 @@ export interface ActivityRow {
   summary: string;
   /** Where in the app the record lives, when it has a page. */
   link: string | null;
+}
+
+/** One issue slip on the issued-stock report (GET /inventory-issues): every line one issue posted. */
+export interface IssueSlip {
+  id: string; cursor: string; issuedAt: string;
+  recipientName: string | null; recipientType: string | null; projectNumber: string | null; issuedByName: string;
+  lines: MovementRow[];
 }
 
 /** One delivery on the received-stock report (GET /stock-receipts). */

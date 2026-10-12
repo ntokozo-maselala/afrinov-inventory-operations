@@ -102,18 +102,15 @@ describe('Consumption page', () => {
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(expect.stringContaining('category=CONSUMABLES')));
   });
 
-  it('adds up by who it was issued to, and lists one recipient\u2019s issues and returns', async () => {
+  it('adds up by who it was issued to; a name opens their issue slips under Movements', async () => {
     renderPage();
     await screen.findByText('Pipe');
     const byRecipient = within(screen.getByLabelText('Stock used by recipient'));
-    expect(byRecipient.getByRole('button', { name: 'Not recorded' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Khodani (inactive)' })).toBeInTheDocument();
-    fireEvent.click(byRecipient.getByRole('button', { name: 'Sabelo' }));
-
-    await waitFor(() => expect(lastReportCall()).toContain('recipientId=r-1'));
-    const issues = within(await screen.findByLabelText('Issued to Sabelo'));
-    expect(issues.getByText('5 returned')).toBeInTheDocument();
-    expect(issues.getByText('Vincent')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Stock used by recipient')).not.toBeInTheDocument();
+    const sabelo = byRecipient.getByRole('link', { name: 'Sabelo' }).getAttribute('href')!;
+    expect(sabelo).toMatch(/^\/movements\?report=issued&recipientId=r-1&from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}$/);
+    expect(byRecipient.getByRole('link', { name: 'Not recorded' }).getAttribute('href')).toContain('recipientId=__none__');
+    // The list of one person's issues lives in the Issued stock report, not here.
+    expect(screen.queryByLabelText('Issued to Sabelo')).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
-// The Movements reports that list ledger lines: all movements, issued stock,
-// transfers (one row each, from → to) and write-offs. Paged from
+// The Movements reports that list ledger lines: all movements, transfers (one
+// row each, from → to) and write-offs. Paged from
 // GET /inventory-transactions; a row opens its detail to reverse or return.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -15,11 +15,10 @@ import { TransactionDrawer } from '../TransactionDrawer';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import type { MovementRow } from '../../api/types';
 
-export type LedgerReportKind = 'all' | 'issued' | 'transfers' | 'writeoffs';
+export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs';
 
 const EMPTY: Record<LedgerReportKind, string> = {
   all: 'Nothing was recorded for these dates and filters.',
-  issued: 'No stock was issued for these dates and filters.',
   transfers: 'No stock was moved between locations for these dates and filters.',
   writeoffs: 'Nothing was written off or adjusted for these dates and filters. Count differences are under Stock counts.',
 };
@@ -92,12 +91,6 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     reason, issuedTo, project,
     { key: 'ref', header: 'Reference', render: (m) => m.referenceType ? <span className="text-meta">{m.referenceType}</span> : none },
     by,
-  ],
-  issued: (open) => [
-    when(open), item, loc,
-    { key: 'qty', header: 'Issued', align: 'right', className: 'text-num', render: (m) => qty(m, false), width: '8rem' },
-    { key: 'ret', header: 'Returned', align: 'right', className: 'text-num', render: (m) => Number(m.returnedQuantity ?? 0) > 0 ? <span className="font-mono">{m.returnedQuantity}</span> : none, width: '7rem' },
-    issuedTo, project, by,
   ],
   transfers: (open) => [
     when(open), item,

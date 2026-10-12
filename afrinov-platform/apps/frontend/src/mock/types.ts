@@ -153,6 +153,8 @@ export interface MockInventoryTransaction {
   referenceId?: string;
   pairedWithId?: string;
   reversesId?: string;
+  /** Issues: shared by every line one issue posted (an issue slip). */
+  issueId?: string;
 }
 
 export interface MockStockRow {
@@ -182,6 +184,7 @@ export interface MockMovementRow {
   materialSku: string;
   materialName: string;
   unitOfMeasure: string;
+  issueId?: string | null;
   locationId: string;
   locationName: string;
   quantity: string;

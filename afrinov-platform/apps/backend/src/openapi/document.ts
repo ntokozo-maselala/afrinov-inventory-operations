@@ -107,6 +107,7 @@ const movementFilters = z.object({
   projectNumber: z.string().optional(),
   locationId: z.string().optional(),
   actorId: z.string().optional().openapi({ description: 'Who posted the movement.' }),
+  recipientId: z.string().optional().openapi({ description: "Who it was issued to; '__none__' for issues with no recipient recorded." }),
   q: z.string().optional().openapi({ description: 'Matches item code or name, location, project or who it was issued to.' }),
   report: z.enum(['issued', 'transfers', 'writeoffs']).optional().openapi({
     description: 'A Movements report: issued stock, transfers (the out leg, with otherLocationName) or write-offs (adjustments other than count differences). Overrides type.',
@@ -245,6 +246,16 @@ export const OPERATIONS: Operation[] = [
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
       + 'material or location, and 400 for an inactive one.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'get', path: '/inventory-issues', tag: 'Reports', summary: 'Issued stock: issue slips with their lines, newest first',
+    description: 'A slip is every line one issue posted; issues from before slips were recorded show as one-line slips. '
+      + 'A slip is listed when any of its lines matches the filters. Reversals are not slips; a reversed line carries reversedById.',
+    permissions: [P.ViewReports],
+    query: movementFilters.omit({ type: true, report: true }).extend({
+      before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last slip already shown.' }),
+      limit: z.coerce.number().int().positive().max(200).optional().openapi({ description: 'Default 50, at most 200.' }),
+    }),
   },
   {
     method: 'get', path: '/stock-receipts', tag: 'Reports', summary: 'Received stock: posted deliveries with their lines, newest first',

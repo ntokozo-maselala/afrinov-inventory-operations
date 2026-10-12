@@ -60,6 +60,25 @@ interface Activity { id: string; entityType: string; summary: string; actorName:
 interface Count { id: string; locationName: string; countedByName: string; counted: number; adjusted: number; differences: Array<{ sku: string; quantity: string }> }
 
 describe('mock movement reports', () => {
+  it('lists issue slips: one per issue with all its lines, earlier issues one line each', async () => {
+    const fresh = createMockApi();
+    const stock = await fresh.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock?locationId=loc-1');
+    const [a, b] = stock.filter((r) => Number(r.quantity) > 1);
+    await fresh.post('/inventory-issues', { recipientId: 'rcp-2', lines: [{ materialId: a!.materialId, locationId: 'loc-1', quantity: 1 }, { materialId: b!.materialId, locationId: 'loc-1', quantity: 1 }] });
+
+    type Slip = { id: string; recipientName: string | null; lines: Array<{ issueId: string; materialId: string }> };
+    const slips = await fresh.get<Slip[]>('/inventory-issues?limit=200');
+    expect(slips[0]!.recipientName).toBe('Khodani');
+    expect(slips[0]!.lines.map((l) => l.materialId).sort()).toEqual([a!.materialId, b!.materialId].sort());
+    expect(new Set(slips[0]!.lines.map((l) => l.issueId)).size).toBe(1);
+    // The seed's two Boiler Shop issues to KTS went out together; older issues stand alone.
+    expect(slips.find((s) => s.id === 'iss-seed-2')!.lines).toHaveLength(2);
+    expect(slips.find((s) => s.id === 't-9')!.lines).toHaveLength(1);
+    // A slip is found by any of its lines, and comes back whole.
+    const byItem = await fresh.get<Slip[]>(`/inventory-issues?materialId=${a!.materialId}&limit=200`);
+    expect(byItem.find((s) => s.id === slips[0]!.id)!.lines).toHaveLength(2);
+  });
+
   it('lists every stock count with its differences, including one with none, by location, and not under Other changes', async () => {
     const fresh = createMockApi();
     const stock = await fresh.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock?locationId=loc-1');
