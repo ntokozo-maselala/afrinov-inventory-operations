@@ -174,11 +174,14 @@ export interface MockStockRow {
 
 export interface MockMovementRow {
   id: string;
+  /** Paging cursor, as the backend returns it. */
+  cursor: string;
   postedAt: string;
   type: InventoryTransactionType;
   materialId: string;
   materialSku: string;
   materialName: string;
+  unitOfMeasure: string;
   locationId: string;
   locationName: string;
   quantity: string;

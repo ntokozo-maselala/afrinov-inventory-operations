@@ -8,7 +8,7 @@ import type { MovementRow } from '../api/types';
 
 
 interface Props {
-  transaction: MovementRow;
+  transaction: Omit<MovementRow, 'cursor'>;
   onClose: () => void;
   onReversed: () => void;
   /** Called after stock is returned against this issue. */
@@ -204,7 +204,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
 
 // Unused stock coming back from this issue (POST /inventory-transactions/:id/returns).
 function ReturnSection({ transaction, returnable, onReturned, onError }: {
-  transaction: MovementRow;
+  transaction: Omit<MovementRow, 'cursor'>;
   returnable: number;
   onReturned: () => void;
   onError: (err: ApiError) => void;

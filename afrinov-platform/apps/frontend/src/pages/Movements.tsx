@@ -1,6 +1,11 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+// Movements: the stock ledger for a date range (this month unless chosen),
+// filtered on the server by type, item, location, who posted it and a search,
+// and loaded a page at a time so a long range is never cut short. The filters
+// live in the address, so a filtered view can be bookmarked or shared.
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
+import { useDebounced } from '../hooks/useDebounced';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
 import { Input, Select } from '../components/Field';
@@ -11,10 +16,14 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { Drawer } from '../components/Modal';
 import { useToast } from '../components/Toast';
+import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { TransactionDrawer } from '../components/TransactionDrawer';
-import type { MovementRow } from '../api/types';
+import { api, type ApiError } from '../api/client';
+import { downloadMovements } from '../api/exportMovements';
+import type { Material, MovementRow } from '../api/types';
 
+const PAGE = 100;
 
 const TYPE_OPTIONS = [
   { value: '', label: 'All types' },
@@ -26,83 +35,190 @@ const TYPE_OPTIONS = [
   { value: 'RETURN', label: 'Return' },
 ];
 
+const FILTER_KEYS = ['type', 'materialId', 'locationId', 'actorId', 'q'] as const;
+
+interface Summary { total: number; byType: Record<string, number> }
+interface Option { id: string; name: string }
+
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** The first and last day of the current month, in the user's own calendar. */
+function thisMonth(): { from: string; to: string } {
+  const now = new Date();
+  return { from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+}
+
 export function Movements() {
-  const moves = useApi<MovementRow[]>('/inventory-transactions?limit=500');
-  const [q, setQ] = useState('');
-  const [type, setType] = useState('');
+  const [params, setParams] = useSearchParams();
+  const month = useMemo(() => thisMonth(), []);
+  const from = params.get('from') ?? month.from;
+  const to = params.get('to') ?? month.to;
+  const badRange = !!from && !!to && from > to;
+
+  // The query every request shares: dates plus whichever filters are set.
+  const query = useMemo(() => {
+    const p = new URLSearchParams();
+    if (from) p.set('from', from);
+    if (to) p.set('to', to);
+    for (const k of FILTER_KEYS) { const v = params.get(k); if (v) p.set(k, v); }
+    return p.toString();
+  }, [from, to, params]);
+
+  const summary = useApi<Summary>(badRange ? null : `/inventory-transactions/summary?${query}`);
+  const first = useApi<MovementRow[]>(badRange ? null : `/inventory-transactions?${query}&limit=${PAGE}`);
+  // Later pages, kept against the query they belong to so a new filter drops them.
+  const [more, setMore] = useState<{ query: string; rows: MovementRow[]; done: boolean }>({ query: '', rows: [], done: false });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const extra = more.query === query ? more : { query, rows: [], done: false };
+  const rows = useMemo(() => [...(first.data ?? []), ...extra.rows], [first.data, extra.rows]);
+  const hasMore = !!first.data && first.data.length === PAGE && !extra.done;
+
+  const materials = useApi<Material[]>('/materials');
+  const locations = useApi<Option[]>('/locations');
+  const actors = useApi<Option[]>('/inventory-transactions/actors');
+  const itemOptions = useMemo<SearchOption[]>(() => (materials.data ?? [])
+    .map((m) => ({ value: m.id, label: `${m.name} (${m.sku})` }))
+    .sort((a, b) => a.label.localeCompare(b.label)), [materials.data]);
+
+  const [search, setSearch] = useState(params.get('q') ?? '');
+  const debouncedSearch = useDebounced(search, 300);
   const [selected, setSelected] = useState<MovementRow | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const toast = useToast();
 
-  const filtered = useMemo(() => {
-    if (!moves.data) return [];
-    const needle = q.trim().toLowerCase();
-    return moves.data.filter((m) => {
-      if (type && m.type !== type) return false;
-      if (needle) {
-        const hay = `${m.materialSku} ${m.materialName} ${m.locationName} ${m.projectNumber ?? ''} ${m.recipientName ?? ''}`.toLowerCase();
-        if (!hay.includes(needle)) return false;
-      }
-      return true;
-    });
-  }, [moves.data, q, type]);
+  function setParam(key: string, value: string) {
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      if (value) next.set(key, value); else next.delete(key);
+      return next;
+    }, { replace: true });
+  }
 
-  const totalIn = filtered.filter((m) => Number(m.quantity) > 0).reduce((acc, m) => acc + Number(m.quantity), 0);
-  const totalOut = filtered.filter((m) => Number(m.quantity) < 0).reduce((acc, m) => acc + Math.abs(Number(m.quantity)), 0);
-  const activeFilters = (type ? 1 : 0) + (q ? 1 : 0);
+  useEffect(() => {
+    if (debouncedSearch.trim() !== (params.get('q') ?? '')) setParam('q', debouncedSearch.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
+
+  async function loadMore() {
+    const last = rows[rows.length - 1];
+    if (!last) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.get<MovementRow[]>(`/inventory-transactions?${query}&limit=${PAGE}&before=${encodeURIComponent(last.cursor)}`);
+      setMore({ query, rows: [...extra.rows, ...page], done: page.length < PAGE });
+    } catch (err) {
+      toast.error("Couldn't load more movements", (err as ApiError).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  function reload() {
+    setMore({ query: '', rows: [], done: false });
+    first.reload();
+    summary.reload();
+  }
+
+  async function download() {
+    setDownloading(true);
+    try {
+      await downloadMovements(query);
+    } catch (err) {
+      toast.error('Download failed', (err as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const filtersSet = FILTER_KEYS.some((k) => params.get(k)) || params.has('from') || params.has('to');
+  const count = (type: string) => formatNumber(summary.data?.byType[type] ?? 0);
 
   return (
     <div>
       <PageHeader
         title="Movements"
         description="Full history of inventory transactions. The ledger is the source of truth — balances are derived from these rows."
+        actions={(
+          <Button variant="secondary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange || !summary.data?.total}>
+            Download as Excel
+          </Button>
+        )}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div className="surface-card p-3">
-          <div className="text-eyebrow">Total entries</div>
-          <div className="text-2xl font-semibold text-num">{formatNumber(filtered.length)}</div>
+          <div className="text-eyebrow">Movements</div>
+          <div className="text-2xl font-semibold text-num">{summary.data ? formatNumber(summary.data.total) : '—'}</div>
         </div>
         <div className="surface-card p-3">
-          <div className="text-eyebrow">Stock in</div>
-          <div className="text-2xl font-semibold text-num text-success-700">+{formatNumber(totalIn)}</div>
+          <div className="text-eyebrow">Receipts</div>
+          <div className="text-2xl font-semibold text-num">{summary.data ? count('RECEIPT') : '—'}</div>
         </div>
         <div className="surface-card p-3">
-          <div className="text-eyebrow">Stock out</div>
-          <div className="text-2xl font-semibold text-num text-danger-700">−{formatNumber(totalOut)}</div>
+          <div className="text-eyebrow">Issues</div>
+          <div className="text-2xl font-semibold text-num">{summary.data ? count('ISSUE') : '—'}</div>
         </div>
         <div className="surface-card p-3">
-          <div className="text-eyebrow">Net change</div>
-          <div className={`text-2xl font-semibold text-num ${totalIn - totalOut >= 0 ? 'text-success-700' : 'text-danger-700'}`}>{totalIn - totalOut >= 0 ? '+' : ''}{formatNumber(totalIn - totalOut)}</div>
+          <div className="text-eyebrow">Adjustments</div>
+          <div className="text-2xl font-semibold text-num">{summary.data ? count('ADJUSTMENT') : '—'}</div>
         </div>
       </div>
 
       <Toolbar
         left={(
           <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search SKU, material, project, recipient…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search movements" />
-            </div>
-            <Select value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by type">
+            <Input type="date" className="sm:w-40" value={from} max={to || undefined} onChange={(e) => setParam('from', e.target.value)} aria-label="From" invalid={badRange} />
+            <span className="text-meta">to</span>
+            <Input type="date" className="sm:w-40" value={to} min={from || undefined} onChange={(e) => setParam('to', e.target.value)} aria-label="To" invalid={badRange} />
+            <Select value={params.get('type') ?? ''} onChange={(e) => setParam('type', e.target.value)} aria-label="Filter by type">
               {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
-            {(q || type) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setType(''); }}>Clear</Button>}
+            <Select value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)} aria-label="Filter by location">
+              <option value="">All locations</option>
+              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </Select>
+            <Select value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)} aria-label="Filter by who posted it">
+              <option value="">Everyone</option>
+              {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+            <div className="w-full sm:w-64">
+              <SearchSelect
+                id="movements-item"
+                value={params.get('materialId') ?? ''}
+                onChange={(v) => setParam('materialId', v)}
+                options={itemOptions}
+                placeholder="All items"
+                noMatchText="No item matches"
+              />
+            </div>
+            <div className="relative w-full sm:w-64">
+              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
+              <Input className="pl-8" placeholder="Search item, location, project, recipient…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search movements" />
+            </div>
+            {filtersSet && <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setParams(new URLSearchParams(), { replace: true }); }}>Reset</Button>}
           </>
         )}
-        right={<span className="text-meta">{moves.loading ? 'Loading…' : `${filtered.length} movements`}</span>}
+        right={<span className="text-meta">{first.loading ? 'Loading…' : summary.data ? `${formatNumber(rows.length)} of ${formatNumber(summary.data.total)} shown` : ''}</span>}
       />
 
-      {moves.error && <ErrorState message={moves.error.message} onRetry={moves.reload} />}
+      {badRange && <ErrorState message="The start date is after the end date." />}
+      {!badRange && first.error && <ErrorState message={first.error.message} onRetry={reload} />}
 
-      {!moves.error && (
-        <DataTable
-          ariaLabel="Inventory movements"
-          isLoading={moves.loading}
-          rowKey={(m) => m.id}
-          rows={filtered}
-          columns={columns({ onSelect: (m) => setSelected(m) })}
-          emptyState={<EmptyState title={activeFilters ? 'No movements match your filters' : 'No movements yet'} description={activeFilters ? 'Try clearing your filters.' : 'Receipts, issues, transfers and adjustments will appear here.'} />}
-        />
+      {!badRange && !first.error && (
+        <>
+          <DataTable
+            ariaLabel="Inventory movements"
+            isLoading={first.loading}
+            rowKey={(m) => m.id}
+            rows={rows}
+            columns={columns({ onSelect: (m) => setSelected(m) })}
+            emptyState={<EmptyState title="No movements match" description="Nothing was recorded for these dates and filters. Try a wider date range or reset the filters." />}
+          />
+          {hasMore && (
+            <div className="flex justify-center mt-3">
+              <Button variant="secondary" onClick={loadMore} loading={loadingMore}>Load more</Button>
+            </div>
+          )}
+        </>
       )}
 
       {selected && (
@@ -118,12 +234,12 @@ export function Movements() {
             onClose={() => setSelected(null)}
             onReversed={() => {
               setSelected(null);
-              moves.reload();
+              reload();
               toast.success('Movement reversed');
             }}
             onReturned={() => {
               setSelected(null);
-              moves.reload();
+              reload();
               toast.success('Stock returned');
             }}
             onError={(err) => toast.error('Reversal failed', err.message)}
