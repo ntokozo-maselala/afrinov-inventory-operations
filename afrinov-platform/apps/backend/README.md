@@ -42,7 +42,7 @@ variable for one command with `$env:NAME = "value"; <command>`.
 4. Generate the Prisma client, apply migrations and load the demo data:
 
    ```sh
-   npx prisma generate
+   npm run db:generate
    npm run db:migrate
    SEED_ADMIN_PASSWORD=choose-a-password npm run db:seed
    ```
@@ -113,7 +113,8 @@ Run from `apps/backend`.
 | `npm run dev` | Start the API with hot reload, reading `.env` |
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Run the compiled API |
-| `npm run typecheck` | Type-check `src/`, `integration/` and `scripts/` without emitting files |
+| `npm run db:generate` | Generate Prisma Client from `prisma/schema.prisma` |
+| `npm run typecheck` | Generate Prisma Client and type-check `src/`, `integration/` and `scripts/` without emitting files |
 | `npm run lint` | Run ESLint on `src/`, `integration/` and `scripts/` |
 | `npm test` | Run the unit tests |
 | `npm run test:integration` | Run the integration tests against a real database |
