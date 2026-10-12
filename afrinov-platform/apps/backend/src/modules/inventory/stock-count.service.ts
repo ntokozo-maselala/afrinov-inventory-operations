@@ -13,6 +13,7 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
 import { getCurrentBalance, recomputeBalance } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
+import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 
 export const STOCK_COUNT_REFERENCE = 'StockCount';
 
@@ -35,7 +36,82 @@ export interface StockCountResult {
   lines: Array<{ materialId: string; variance: string; transactionId: string | null }>;
 }
 
+export interface CountListFilter {
+  /** Whole UTC days, the last one included. */
+  from?: string;
+  to?: string;
+  locationId?: string;
+  /** Who counted. */
+  actorId?: string;
+  before?: string;
+  limit?: number;
+}
+
+export interface CountRecord {
+  id: string;
+  cursor: string;
+  at: string;
+  locationId: string | null;
+  locationName: string;
+  countedByName: string;
+  counted: number;
+  adjusted: number;
+  note: string | null;
+  /** The adjustments the count posted: counted less what the system had. Items that matched are not stored. */
+  differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
+}
+
 export const StockCountService = {
+  /** Posted counts, newest first, each with the differences it adjusted, for the stock-counts report. */
+  async list(filter: CountListFilter): Promise<CountRecord[]> {
+    const and: Prisma.AuditLogEntryWhereInput[] = [{ entityType: 'StockCount', action: 'STOCK_COUNT' }];
+    const createdAt = dayRange(filter.from, filter.to);
+    if (createdAt) and.push({ createdAt });
+    if (filter.actorId) and.push({ actorId: filter.actorId });
+    if (filter.locationId) and.push({ after: { path: ['locationId'], equals: filter.locationId } });
+    if (filter.before) {
+      const { at, id } = parseCursor(filter.before);
+      and.push({ OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] });
+    }
+    const entries = await prisma.auditLogEntry.findMany({
+      where: { AND: and },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: Math.min(filter.limit ?? 50, 200),
+    });
+    const facts = entries.map((e) => (e.after ?? {}) as { locationId?: string; counted?: number; adjusted?: number; note?: string | null });
+    const locationIds = [...new Set(facts.map((f) => f.locationId).filter((id): id is string => !!id))];
+    const userIds = [...new Set(entries.map((e) => e.actorId).filter((id): id is string => !!id))];
+    const [adjustments, locations, users] = await Promise.all([
+      entries.length === 0 ? [] : prisma.inventoryTransaction.findMany({
+        where: { referenceType: STOCK_COUNT_REFERENCE, referenceId: { in: entries.map((e) => e.entityId) } },
+        include: { material: { select: { sku: true, name: true, unitOfMeasure: true } } },
+      }),
+      locationIds.length === 0 ? [] : prisma.location.findMany({ where: { id: { in: locationIds } }, select: { id: true, name: true } }),
+      userIds.length === 0 ? [] : prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
+    ]);
+    const locationName = new Map(locations.map((l) => [l.id, l.name]));
+    const userName = new Map(users.map((u) => [u.id, u.name]));
+    return entries.map((e, i) => {
+      const f = facts[i]!;
+      return {
+        id: e.entityId,
+        cursor: pageCursor(e.createdAt, e.id),
+        at: e.createdAt.toISOString(),
+        locationId: f.locationId ?? null,
+        locationName: (f.locationId && locationName.get(f.locationId)) || 'Unknown location',
+        countedByName: e.actorId ? userName.get(e.actorId) ?? 'Unknown user' : 'System',
+        counted: Number(f.counted ?? 0),
+        adjusted: Number(f.adjusted ?? 0),
+        note: f.note ?? null,
+        differences: adjustments
+          .filter((t) => t.referenceId === e.entityId)
+          .map((t) => ({ materialId: t.materialId, sku: t.material.sku, name: t.material.name, unitOfMeasure: t.material.unitOfMeasure, quantity: t.quantity.toString() }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    });
+  },
+
+
   async post(input: StockCountInput): Promise<StockCountResult> {
     if (input.lines.length === 0) throw Errors.validation('Count at least one item');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, expected: toDecimal(l.expectedQuantity), counted: toDecimal(l.countedQuantity) }));

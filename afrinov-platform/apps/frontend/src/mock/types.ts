@@ -198,6 +198,7 @@ export interface MockMovementRow {
   recipientName?: string | null;
   recipientType?: string | null;
   receiptNumber?: string | null;
+  otherLocationName?: string | null;
   supplierName?: string | null;
   deliveryRef?: string | null;
   returnedQuantity?: string | null;

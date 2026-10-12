@@ -26,6 +26,7 @@ function renderPage() {
       { id: 'm-9', sku: 'BOLT-M12', name: 'M12 bolt', unitOfMeasure: 'each', active: true },
     ];
     if (path.startsWith('/reports/current-stock?locationId=l-1')) return stockAtA1;
+    if (path.startsWith('/stock-counts')) return recentCounts;
     return [];
   });
   render(<MemoryRouter><ToastProvider><StockCount /></ToastProvider></MemoryRouter>);
@@ -37,11 +38,14 @@ async function chooseA1() {
   await screen.findByText('Cutting disc');
 }
 
+let recentCounts: Array<Record<string, unknown>> = [];
+
 const count = (name: string, value: string) => fireEvent.change(screen.getByLabelText(`Counted ${name}`), { target: { value } });
 
 describe('StockCount page', () => {
   beforeEach(() => {
     localStorage.clear();
+    recentCounts = [];
     stockAtA1 = stockAtA1.map((r) => ({ ...r }));
     mockGet.mockReset();
     mockPost.mockReset().mockResolvedValue({ countId: 'c-1', counted: 2, adjusted: 1, lines: [] });
@@ -140,5 +144,29 @@ describe('StockCount page', () => {
     expect(within(rod).getByText('Below zero: cannot be right')).toBeInTheDocument();
     count('Welding rod', '0');
     expect(within(rod).getByText('+15')).toBeInTheDocument();
+  });
+
+  it('shows the recent counts at the location, links to them all, and refreshes them after posting', async () => {
+    recentCounts = [{ id: 'c-0', cursor: 'c', at: '2026-10-10T08:00:00.000Z', locationId: 'l-1', locationName: 'A-1', countedByName: 'Vusi',
+      counted: 3, adjusted: 0, note: null, differences: [] }];
+    renderPage();
+    await chooseA1();
+    expect(await screen.findByText('3 items counted, no differences')).toBeInTheDocument();
+    expect(screen.getByText('by Vusi')).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith('/stock-counts?locationId=l-1&limit=5');
+    expect(screen.getByRole('link', { name: 'All counts, last 90 days' }).getAttribute('href')).toMatch(/^\/movements\?report=counts&locationId=l-1&from=/);
+
+    const counted = () => mockGet.mock.calls.filter((c) => String(c[0]).startsWith('/stock-counts')).length;
+    const before = counted();
+    count('Cutting disc', '7');
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    await waitFor(() => expect(counted()).toBe(before + 1));
+  });
+
+  it('says when nothing has been counted at the location yet', async () => {
+    renderPage();
+    await chooseA1();
+    expect(await screen.findByText('No counts recorded here yet.')).toBeInTheDocument();
   });
 });

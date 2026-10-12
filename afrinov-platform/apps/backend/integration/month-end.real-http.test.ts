@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, client, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 
 interface Item { sku: string; location: string; requiredStock: number; currentStock: number; value: number | null; percentOfRequired: number | null; reorderQuantity: number | null; status: string }
-interface Report { month: string; categories: Array<{ category: string; items: Item[]; used: Array<{ sku: string; used: number }> }> }
+interface Report { month: string | null; categories: Array<{ category: string; items: Item[]; used: Array<{ sku: string; used: number }> }> }
 
 describe('month-end report against a real database', () => {
   const run = runId();
@@ -53,6 +53,14 @@ describe('month-end report against a real database', () => {
     expect(item(current.body)).toEqual(expect.objectContaining({ currentStock: 100, percentOfRequired: 1, reorderQuantity: 0, status: 'OK' }));
   });
 
+  it('reports a range of days as at its last day', async () => {
+    const first = `${lastMonth}-01`;
+    const week = await api<Report>('GET', `/reports/month-end?from=${first}&to=${lastMonth}-07`);
+    expect(week.status).toBe(200);
+    expect(week.body.month).toBeNull();
+    expect((await api('GET', `/reports/month-end?from=${lastMonth}-07&to=${first}`)).status).toBe(400);
+  });
+
   it('refuses a month that has not started', async () => {
     const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
     expect((await api('GET', `/reports/month-end?month=${next}`)).status).toBe(400);
@@ -61,7 +69,7 @@ describe('month-end report against a real database', () => {
   it('downloads the month as Excel in the workbook layout', async () => {
     const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/reports/month-end/export?month=${lastMonth}`, { headers: { authorization: `Bearer ${token}` } });
     expect(res.status).toBe(200);
-    expect(res.headers.get('content-disposition')).toContain(`afrinov-month-end-${lastMonth}.xlsx`);
+    expect(res.headers.get('content-disposition')).toContain(`afrinov-stock-report-${lastMonth}.xlsx`);
     expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(1000);
   });
 });

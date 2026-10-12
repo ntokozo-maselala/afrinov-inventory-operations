@@ -1,4 +1,4 @@
-// The month-end workbook, in the stock workbook's own layout so management
+// The stock report workbook, in the stock workbook's own layout so management
 // reads it the way it always has: an Overview, then per category a Summary
 // sheet (S.N # … URGENCY, total above the table) and a Used sheet ("Used
 // Stock Inventory": Product ID, Item Name, Rack, Stock Used In QTY, Stock In
@@ -20,15 +20,20 @@ const MONEY = '#,##0.00';
 const FILL: Record<string, string> = { URGENT: 'FFF8D7DA', WARNING: 'FFFFF3CD', OK: 'FFD4EDDA' };
 const URGENCY: Record<string, string> = { URGENT: 'URGENT', WARNING: 'WARNING', OK: 'OK', NOT_SET: 'NOT SET' };
 
-/** Build the XLSX download name from a YYYY-MM month without validating it. */
-export function monthEndFilename(month: string): string {
-  return `afrinov-month-end-${month}.xlsx`;
+/** Build the XLSX download name: the month when the report covers one, otherwise both dates. */
+export function monthEndFilename(r: Pick<MonthEndReport, 'month' | 'from' | 'to'>): string {
+  return `afrinov-stock-report-${r.month ?? `${r.from}-to-${r.to}`}.xlsx`;
 }
 
-/** Format the report's final day in UTC using the en-ZA long date format. */
-function monthLabel(r: MonthEndReport): string {
-  const d = new Date(`${r.to}T00:00:00Z`);
-  return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+/** Format a YYYY-MM-DD day in UTC using the en-ZA long date format. */
+function dayLabel(day: string): string {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+/** The report's period for titles: "September 2026" for a whole month, otherwise its first and last days. */
+export function periodLabel(r: Pick<MonthEndReport, 'month' | 'from' | 'to'>): string {
+  if (r.month) return new Date(`${r.month}-01T00:00:00Z`).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return r.from === r.to ? dayLabel(r.from) : `${dayLabel(r.from)} to ${dayLabel(r.to)}`;
 }
 
 /** Apply bold, wrapped header styling and gray cell fills to the supplied row. */
@@ -47,19 +52,19 @@ function headerRow(row: ExcelJS.Row) {
 export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Afrinov IMS';
-  const asAt = monthLabel(r);
+  const asAt = dayLabel(r.to);
 
   // ── Overview ──────────────────────────────────────────────────────────
   const ov = wb.addWorksheet('Overview');
   ov.columns = [{ width: 32 }, { width: 10 }, { width: 10 }, { width: 18 }, { width: 10 }, { width: 10 }, { width: 18 }];
-  ov.getCell('A1').value = `Month-end stock report, ${r.month}`;
+  ov.getCell('A1').value = `Stock report, ${periodLabel(r)}`;
   ov.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFE3001B' } };
   ov.getCell('A2').value = `Stock as at the end of ${asAt}; stock used from ${r.from} to ${r.to}. `
     + `Values excl. VAT, ${r.currency}, at unit prices now. URGENT below ${r.bands.urgentBelowPercent}% of Required Stock, `
     + `WARNING below ${r.bands.warningBelowPercent}%.`;
   ov.getCell('A2').font = { italic: true, color: { argb: 'FF555555' } };
   const oh = ov.getRow(4);
-  oh.values = ['Category', 'Items', 'In stock', `Stock value (${r.currency})`, 'Urgent', 'Warning', `Used in month (${r.currency})`];
+  oh.values = ['Category', 'Items', 'In stock', `Stock value (${r.currency})`, 'Urgent', 'Warning', `Used in period (${r.currency})`];
   headerRow(oh);
   for (const c of r.categories) {
     const row = ov.addRow([SHEET[c.category]?.label ?? c.category, c.items.length, c.itemsInStock, c.value, c.urgent, c.warning, c.usedValue]);
@@ -110,7 +115,7 @@ export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
     const uh = wu.getRow(5);
     uh.values = ['Product ID', 'Item Name', 'Rack', 'Stock Used In QTY', 'Stock In Value Ex VAT'];
     headerRow(uh);
-    if (c.used.length === 0) wu.addRow(['', 'Nothing was used in this month.']);
+    if (c.used.length === 0) wu.addRow(['', 'Nothing was used in this period.']);
     for (const u of c.used) {
       const row = wu.addRow([u.sku, u.name, u.location, u.used, u.value]);
       row.getCell(4).numFmt = QTY;

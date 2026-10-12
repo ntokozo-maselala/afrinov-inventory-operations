@@ -6,7 +6,7 @@ import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
 import { buildReorderXlsx, reorderFilename } from './reorder-export.js';
 import { ConsumptionService, NO_PROJECT, NO_RECIPIENT, type ConsumptionQuery } from './consumption.service.js';
 import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
-import { MonthEndService } from './month-end.service.js';
+import { MonthEndService, type StockReportQuery } from './month-end.service.js';
 import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -57,20 +57,23 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
   });
 
-  // The month-end report: the workbook's Summary and Stock Report sheets, as at the end of ?month=YYYY-MM.
-  /** Use the supplied month, or the current UTC month when absent or empty; validation is deferred to the service. */
-  const monthParam = (q: Record<string, string | undefined>) => q['month'] || new Date().toISOString().slice(0, 7);
+  // The stock report: the workbook's Summary and Stock Report sheets, as at the end of
+  // ?from..?to (YYYY-MM-DD), or of ?month=YYYY-MM; this month when neither is given.
+  /** Pass the period through; validation is deferred to the service. */
+  const stockReportQuery = (q: Record<string, string | undefined>): StockReportQuery => ({
+    month: q['month'] || undefined, from: q['from'] || undefined, to: q['to'] || undefined,
+  });
   app.get('/reports/month-end', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
-    return MonthEndService.report(monthParam(req.query as Record<string, string | undefined>));
+    return MonthEndService.report(stockReportQuery(req.query as Record<string, string | undefined>));
   });
   app.get('/reports/month-end/export', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ViewReports);
-    const report = await MonthEndService.report(monthParam(req.query as Record<string, string | undefined>));
+    const report = await MonthEndService.report(stockReportQuery(req.query as Record<string, string | undefined>));
     const buf = await buildMonthEndXlsx(report);
     return reply
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .header('Content-Disposition', `attachment; filename="${monthEndFilename(report.month)}"`)
+      .header('Content-Disposition', `attachment; filename="${monthEndFilename(report)}"`)
       .header('Content-Length', String(buf.length))
       .header('Cache-Control', 'no-store')
       .send(buf);

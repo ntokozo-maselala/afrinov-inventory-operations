@@ -32,6 +32,11 @@ export function useCanApprove(): boolean {
   return useHasRole(['ADMIN', 'APPROVER']);
 }
 
+/** Other activity on Movements (server permission view:audit_log). */
+export function useCanViewActivity(): boolean {
+  return useHasRole(['ADMIN', 'STORE_CONTROLLER']);
+}
+
 export function useCanManageUsers(): boolean {
   return useHasRole(['ADMIN']);
 }

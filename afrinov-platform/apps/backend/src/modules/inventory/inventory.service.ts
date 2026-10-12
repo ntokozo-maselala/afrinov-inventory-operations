@@ -8,6 +8,7 @@
 import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
@@ -113,17 +114,15 @@ export interface HistoryFilter {
   actorId?: string;
   /** Matches the item code or name, the location, the project or who it was issued to. */
   q?: string;
+  /**
+   * A report on the Movements page: issued stock, transfers (one row per
+   * transfer, its out leg) or write-offs (adjustments other than count
+   * differences, which belong to the stock-counts report). Overrides `type`.
+   */
+  report?: 'issued' | 'transfers' | 'writeoffs';
   /** Paging cursor: the `cursor` of the last row already shown; returns older rows. */
   before?: string;
   limit?: number;
-}
-
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-function parseTime(value: string, name: string): Date {
-  const d = new Date(DAY.test(value) ? `${value}T00:00:00.000Z` : value);
-  if (Number.isNaN(d.getTime())) throw Errors.validation(`Invalid ${name} date`);
-  return d;
 }
 
 /**
@@ -132,46 +131,43 @@ function parseTime(value: string, name: string): Date {
  */
 export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): Prisma.InventoryTransactionWhereInput {
   const where: Prisma.InventoryTransactionWhereInput = {};
+  const and: Prisma.InventoryTransactionWhereInput[] = [];
   if (filter.materialId) where.materialId = filter.materialId;
   if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
+  if (filter.report === 'issued') where.type = InventoryTransactionType.ISSUE;
+  if (filter.report === 'transfers') where.type = InventoryTransactionType.TRANSFER_OUT;
+  if (filter.report === 'writeoffs') {
+    where.type = InventoryTransactionType.ADJUSTMENT;
+    // NULL <> 'StockCount' is not true in SQL, so a plain `not` would drop unreferenced rows.
+    and.push({ OR: [{ referenceType: null }, { referenceType: { not: 'StockCount' } }] });
+  }
   if (filter.projectNumber) where.projectNumber = filter.projectNumber;
   if (filter.locationId) where.locationId = filter.locationId;
   if (filter.actorId) where.actorId = filter.actorId;
-  const start = filter.from ? parseTime(filter.from, 'from') : undefined;
-  const end = filter.to ? parseTime(filter.to, 'to') : undefined;
-  if (start && end && start > end) throw Errors.validation('The start date is after the end date');
-  if (start || end) {
-    where.postedAt = {};
-    if (start) where.postedAt.gte = start;
-    if (end && DAY.test(filter.to!)) {
-      end.setUTCDate(end.getUTCDate() + 1); // the last day is included
-      where.postedAt.lt = end;
-    } else if (end) {
-      where.postedAt.lte = end;
-    }
-  }
+  const postedAt = dayRange(filter.from, filter.to);
+  if (postedAt) where.postedAt = postedAt;
   const q = filter.q?.trim();
   if (q) {
     const contains = { contains: q, mode: 'insensitive' as const };
-    where.OR = [
-      { material: { sku: contains } },
-      { material: { name: contains } },
-      { location: { name: contains } },
-      { projectNumber: contains },
-      { recipient: { name: contains } },
-    ];
+    and.push({
+      OR: [
+        { material: { sku: contains } },
+        { material: { name: contains } },
+        { location: { name: contains } },
+        { projectNumber: contains },
+        { recipient: { name: contains } },
+      ],
+    });
   }
+  if (and.length) where.AND = and;
   return where;
 }
 
 /** A row's paging cursor: newest first, ties broken by id. */
-export const historyCursor = (t: { postedAt: Date; id: string }) => `${t.postedAt.toISOString()}_${t.id}`;
+export const historyCursor = (t: { postedAt: Date; id: string }) => pageCursor(t.postedAt, t.id);
 
 function olderThan(cursor: string): Prisma.InventoryTransactionWhereInput {
-  const cut = cursor.lastIndexOf('_');
-  const at = new Date(cursor.slice(0, cut));
-  const id = cursor.slice(cut + 1);
-  if (cut < 1 || !id || Number.isNaN(at.getTime())) throw Errors.validation('Invalid paging cursor');
+  const { at, id } = parseCursor(cursor);
   return { OR: [{ postedAt: { lt: at } }, { postedAt: at, id: { lt: id } }] };
 }
 
@@ -208,6 +204,13 @@ export const InventoryService = {
       _sum: { quantity: true },
     });
     const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity]));
+    // A transfer's other leg: where the stock went to (or came from).
+    const partnerIds = rows.map((t) => t.pairedWithId).filter((id): id is string => !!id);
+    const partners = partnerIds.length === 0 ? [] : await prisma.inventoryTransaction.findMany({
+      where: { id: { in: partnerIds } },
+      select: { id: true, location: { select: { name: true } } },
+    });
+    const partnerLocation = new Map(partners.map((p) => [p.id, p.location.name]));
     return rows.map((t) => ({
       id: t.id,
       cursor: historyCursor(t),
@@ -233,6 +236,7 @@ export const InventoryService = {
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
       returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
+      otherLocationName: t.pairedWithId ? partnerLocation.get(t.pairedWithId) ?? null : null,
       ...(() => {
         const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
         return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null };

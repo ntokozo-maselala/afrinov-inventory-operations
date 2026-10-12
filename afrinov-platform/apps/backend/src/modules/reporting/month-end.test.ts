@@ -1,9 +1,9 @@
-// Month-end report: the month rules and the workbook-layout Excel file. The
-// as-at-month-end ledger query is covered against a real database.
+// Stock report: the month and range rules and the workbook-layout Excel file.
+// The as-at-the-end ledger query is covered against a real database.
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
-import { monthRange, type MonthEndReport } from './month-end.service.js';
-import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
+import { monthRange, reportRange, wholeMonth, type MonthEndReport } from './month-end.service.js';
+import { buildMonthEndXlsx, monthEndFilename, periodLabel } from './month-end-export.js';
 
 describe('month range', () => {
   const now = new Date('2026-10-09T10:00:00Z');
@@ -15,6 +15,44 @@ describe('month range', () => {
 
   it.each([['2026-11', /not started/], ['2026-13', /YYYY-MM/], ['10/2026', /YYYY-MM/]])('refuses %s', (month, message) => {
     expect(() => monthRange(month, now)).toThrow(message);
+  });
+});
+
+describe('report range', () => {
+  const now = new Date('2026-10-09T10:00:00Z');
+  it('defaults to this UTC month and accepts a month', () => {
+    expect(reportRange({}, now)).toEqual({ month: '2026-10', from: '2026-10-01', to: '2026-10-31', end: new Date('2026-11-01T00:00:00Z') });
+    expect(reportRange({ month: '2026-09' }, now)).toMatchObject({ month: '2026-09', from: '2026-09-01', to: '2026-09-30' });
+  });
+
+  it('prefers from/to over month and ends at midnight after the last day', () => {
+    expect(reportRange({ from: '2026-09-07', to: '2026-09-13', month: '2026-01' }, now))
+      .toEqual({ month: null, from: '2026-09-07', to: '2026-09-13', end: new Date('2026-09-14T00:00:00Z') });
+  });
+
+  it('allows a last day after today, and a single day', () => {
+    expect(reportRange({ from: '2026-10-05', to: '2026-10-11', }, now).to).toBe('2026-10-11');
+    expect(reportRange({ from: '2026-10-09', to: '2026-10-09' }, now).end.toISOString()).toBe('2026-10-10T00:00:00.000Z');
+  });
+
+  it('names the month when the range is exactly one', () => {
+    expect(reportRange({ from: '2026-09-01', to: '2026-09-30' }, now).month).toBe('2026-09');
+    expect(wholeMonth('2024-02-01', '2024-02-29')).toBe('2024-02');
+    expect(wholeMonth('2026-09-01', '2026-09-29')).toBeNull();
+    expect(wholeMonth('2026-09-02', '2026-09-30')).toBeNull();
+    expect(wholeMonth('2026-09-01', '2026-10-31')).toBeNull();
+  });
+
+  it.each([
+    [{ from: '2026-09-01' }, /both/],
+    [{ to: '2026-09-01' }, /both/],
+    [{ from: '2026-09-08', to: '2026-09-01' }, /after the end/],
+    [{ from: '2026-10-10', to: '2026-10-16' }, /not started/],
+    [{ from: '2026-02-30', to: '2026-03-05' }, /Invalid date/],
+    [{ from: '2026-09-01', to: '2026-09-31' }, /Invalid date/],
+    [{ from: '1/9/2026', to: '2026-09-30' }, /YYYY-MM-DD/],
+  ])('refuses %j', (q, message) => {
+    expect(() => reportRange(q, now)).toThrow(message);
   });
 });
 
@@ -63,9 +101,10 @@ describe('month-end workbook', () => {
     const wb = await load();
     expect(wb.worksheets.map((w) => w.name)).toEqual(['Overview', 'Stock Summary', 'Consumables Used', 'Tools Summary', 'Tools Used']);
     const t = rows(wb.getWorksheet('Overview')!, 4);
-    expect(t[0]).toEqual(['Category', 'Items', 'In stock', 'Stock value (ZAR)', 'Urgent', 'Warning', 'Used in month (ZAR)']);
+    expect(t[0]).toEqual(['Category', 'Items', 'In stock', 'Stock value (ZAR)', 'Urgent', 'Warning', 'Used in period (ZAR)']);
     expect(t[1]).toEqual(['Consumables', 3, 2, 5489.25, 1, 0, 1051.25]);
     expect(t[3]).toEqual(['Total', 3, 2, 5489.25, 1, 0, 1051.25]);
+    expect(String(wb.getWorksheet('Overview')!.getCell('A1').value)).toBe('Stock report, September 2026');
     expect(String(wb.getWorksheet('Overview')!.getCell('A2').value)).toContain('as at the end of 30 September 2026');
   });
 
@@ -90,11 +129,15 @@ describe('month-end workbook', () => {
     const t = rows(ws, 5);
     expect(t[0]).toEqual(['Product ID', 'Item Name', 'Rack', 'Stock Used In QTY', 'Stock In Value Ex VAT']);
     expect(t[1]).toEqual(['CON-0001', 'E115-7 PSF Grinding Disc', 'A-1', 25, 1051.25]);
-    expect(rows((await load()).getWorksheet('Tools Used')!, 6)[0]).toEqual(['', 'Nothing was used in this month.']);
+    expect(rows((await load()).getWorksheet('Tools Used')!, 6)[0]).toEqual(['', 'Nothing was used in this period.']);
   });
 
-  it('names the file by month', () => {
-    expect(monthEndFilename('2026-09')).toBe('afrinov-month-end-2026-09.xlsx');
+  it('names the file and the period by month, or by both days for any other range', () => {
+    expect(monthEndFilename(REPORT)).toBe('afrinov-stock-report-2026-09.xlsx');
+    const week = { month: null, from: '2026-09-07', to: '2026-09-13' };
+    expect(monthEndFilename(week)).toBe('afrinov-stock-report-2026-09-07-to-2026-09-13.xlsx');
+    expect(periodLabel(week)).toBe('7 September 2026 to 13 September 2026');
+    expect(periodLabel({ month: null, from: '2026-09-07', to: '2026-09-07' })).toBe('7 September 2026');
   });
 });
 

@@ -617,15 +617,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Inventory transactions
   if (method === 'GET' && p === '/inventory-transactions') {
     const limit = Math.min(qs.limit ? Number(qs.limit) : 200, 1000);
-    let list = filterHistory(qs);
-    if (qs.before) {
-      const cut = qs.before.lastIndexOf('_');
-      const at = qs.before.slice(0, cut);
-      const id = qs.before.slice(cut + 1);
-      if (cut < 1 || !id) throw err('VALIDATION_ERROR', 'Invalid paging cursor');
-      list = list.filter((t) => t.postedAt < at || (t.postedAt === at && t.id < id));
-    }
-    return list.slice(0, limit).map((t) => enrichMovement(t));
+    return olderThan(filterHistory(qs), qs.before, (t) => t.postedAt).slice(0, limit).map((t) => enrichMovement(t));
   }
   if (method === 'GET' && p === '/inventory-transactions/summary') {
     const byType: Record<string, number> = {};
@@ -679,6 +671,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
   }
+  if (method === 'GET' && p === '/stock-receipts') return listReceipts(qs);
+  if (method === 'GET' && p === '/stock-counts') return listCounts(qs);
   if (method === 'POST' && p === '/stock-counts') {
     return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> });
   }
@@ -882,7 +876,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'GET' && p === '/reports/month-end') {
     const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
-    return computeMonthEnd(qs.month || new Date().toISOString().slice(0, 7), {
+    return computeMonthEnd({ month: qs.month || undefined, from: qs.from || undefined, to: qs.to || undefined }, {
       transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency,
       consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
     });
@@ -977,7 +971,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     def.value = validated.value;
     def.updatedAt = new Date().toISOString();
     def.updatedById = 'u-admin';
-    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'u-admin' });
+    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'user-1' });
     return def;
   }
   if (method === 'PATCH' && p === '/settings') {
@@ -993,7 +987,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       def.value = validated.value;
       def.updatedAt = new Date().toISOString();
       def.updatedById = 'u-admin';
-      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_BULK_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'u-admin' });
+      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_BULK_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'user-1' });
       out.push({ ...def });
     }
     return out;
@@ -1003,12 +997,17 @@ function route(method: string, path: string, body?: unknown): unknown {
       def.value = def.defaultValue;
       def.updatedAt = new Date().toISOString();
       def.updatedById = 'u-admin';
-      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_RESET', entityType: 'Setting', entityId: def.key, before: { value: def.value }, after: { value: def.value, reset: true }, createdAt: new Date().toISOString(), actorId: 'u-admin' });
+      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_RESET', entityType: 'Setting', entityId: def.key, before: { value: def.value }, after: { value: def.value, reset: true }, createdAt: new Date().toISOString(), actorId: 'user-1' });
     }
     return Object.values(MOCK_SETTINGS);
   }
 
   // ── Audit log ─────────────────────────────────────────────────────────
+  if (method === 'GET' && p === '/activity') return listActivity(qs);
+  if (method === 'GET' && p === '/activity/actors') {
+    const ids = new Set(MOCK_AUDIT.filter((a) => ACTIVITY_TYPES.includes(a.entityType)).map((a) => a.actorId));
+    return mockUsers.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, name: u.name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
   if (method === 'GET' && p.startsWith('/audit')) {
     const q = parseQuery(p);
     const entityType = q['entityType'];
@@ -1355,7 +1354,7 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
     reversals[1]!.pairedWithId = reversals[0]!.id;
   }
   state.transactions.push(...reversals);
-  MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'REVERSE', entityType: 'InventoryTransaction', entityId: original.id, before: null, after: { reversalIds: reversals.map((r) => r.id), reason }, createdAt: postedAt, actorId: 'u-admin' });
+  MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'REVERSE', entityType: 'InventoryTransaction', entityId: original.id, before: null, after: { reversalIds: reversals.map((r) => r.id), reason }, createdAt: postedAt, actorId: 'user-1' });
   return { reversalIds: reversals.map((r) => r.id) };
 }
 
@@ -1409,7 +1408,12 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
     });
     return { materialId: l.materialId, variance: String(variance), transactionId: id as string | null };
   });
-  return { countId, counted: lines.length, adjusted: results.filter((r) => r.transactionId).length, lines: results };
+  const adjusted = results.filter((r) => r.transactionId).length;
+  MOCK_AUDIT.unshift({
+    id: nextId('audit'), action: 'STOCK_COUNT', entityType: 'StockCount', entityId: countId, before: null,
+    after: { locationId: b.locationId, counted: lines.length, adjusted, note: note ?? null }, createdAt: new Date().toISOString(), actorId: 'user-1',
+  });
+  return { countId, counted: lines.length, adjusted, lines: results };
 }
 
 function getBalance(materialId: string, locationId: string): number {
@@ -1454,7 +1458,7 @@ function recordAudit(action: string, entityId: string, before: unknown, after: u
     before,
     after,
     createdAt: new Date().toISOString(),
-    actorId: 'u-admin',
+    actorId: 'user-1',
   });
 }
 
@@ -1612,7 +1616,8 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
  * Mirrors historyWhere (apps/backend/src/modules/inventory/inventory.service.ts):
  * days are whole UTC days with the last one included; newest first, ties by id.
  */
-function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
+/** Mirrors dayRange (apps/backend/src/shared/dates.ts): whether a time falls in the from/to range. */
+function inDayRange(qs: Record<string, string>): (iso: string) => boolean {
   const day = /^\d{4}-\d{2}-\d{2}$/;
   const time = (v: string, name: string) => {
     const d = new Date(day.test(v) ? `${v}T00:00:00.000Z` : v);
@@ -1622,18 +1627,38 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
   const start = qs.from ? time(qs.from, 'from') : null;
   const end = qs.to ? time(qs.to, 'to') : null;
   if (start && end && start > end) throw err('VALIDATION_ERROR', 'The start date is after the end date');
-  if (end && day.test(qs.to!)) end.setUTCDate(end.getUTCDate() + 1);
+  const endExclusive = !!end && day.test(qs.to!);
+  if (end && endExclusive) end.setUTCDate(end.getUTCDate() + 1);
+  return (iso) => {
+    const at = new Date(iso);
+    return !(start && at < start) && !(end && (endExclusive ? at >= end : at > end));
+  };
+}
+
+/** Rows older than a paging cursor (`<time>_<id>`), newest first. */
+function olderThan<T extends { id: string }>(rows: T[], cursor: string | undefined, timeOf: (r: T) => string): T[] {
+  if (!cursor) return rows;
+  const cut = cursor.lastIndexOf('_');
+  const at = cursor.slice(0, cut);
+  const id = cursor.slice(cut + 1);
+  if (cut < 1 || !id) throw err('VALIDATION_ERROR', 'Invalid paging cursor');
+  return rows.filter((r) => timeOf(r) < at || (timeOf(r) === at && r.id < id));
+}
+
+function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
+  const inRange = inDayRange(qs);
   const needle = qs.q?.trim().toLowerCase();
   return state.transactions
     .filter((t) => {
       if (qs.materialId && t.materialId !== qs.materialId) return false;
-      if (qs.type && t.type !== qs.type) return false;
+      if (qs.type && !qs.report && t.type !== qs.type) return false;
+      if (qs.report === 'issued' && t.type !== 'ISSUE') return false;
+      if (qs.report === 'transfers' && t.type !== 'TRANSFER_OUT') return false;
+      if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
       if (qs.locationId && t.locationId !== qs.locationId) return false;
       if (qs.actorId && t.actorId !== qs.actorId) return false;
-      const at = new Date(t.postedAt);
-      if (start && at < start) return false;
-      if (end && (day.test(qs.to!) ? at >= end : at > end)) return false;
+      if (!inRange(t.postedAt)) return false;
       if (needle) {
         const m = findMaterial(t.materialId);
         const hay = [m?.sku, m?.name, findLocation(t.locationId)?.name, t.projectNumber, state.recipients.find((r) => r.id === t.recipientId)?.name]
@@ -1643,6 +1668,85 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       return true;
     })
     .sort((a, b) => b.postedAt.localeCompare(a.postedAt) || b.id.localeCompare(a.id));
+}
+
+// Mirrors ActivityService (apps/backend/src/modules/audit/activity.service.ts)
+// for what the mock records: users.
+const ACTIVITY_TYPES = ['Material', 'Location', 'Rack', 'Project', 'Recipient', 'Supplier', 'User', 'WorkbookImport'];
+
+function listActivity(qs: Record<string, string>) {
+  const inRange = inDayRange(qs);
+  const rows = MOCK_AUDIT
+    .filter((a) => ACTIVITY_TYPES.includes(a.entityType)
+      && (!qs.entityType || a.entityType === qs.entityType)
+      && (!qs.actorId || a.actorId === qs.actorId)
+      && inRange(a.createdAt))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  const limit = Math.min(qs.limit ? Number(qs.limit) : 100, 500);
+  return olderThan(rows, qs.before, (a) => a.createdAt).slice(0, limit).map((a) => {
+    const after = (a.after ?? {}) as Record<string, unknown>;
+    const before = (a.before ?? {}) as Record<string, unknown>;
+    let summary = `${a.action.charAt(0)}${a.action.slice(1).toLowerCase().replace(/_/g, ' ')} ${a.entityType} ${a.entityId}`;
+    const link: string | null = null;
+    if (a.entityType === 'User') {
+      const name = (after.name ?? before.name ?? mockUsers.find((u) => u.id === a.entityId)?.name ?? 'a user') as string;
+      summary = a.action === 'CREATE' ? `Added user ${name}` : `Edited user ${name}`;
+    }
+    return {
+      id: a.id, cursor: `${a.createdAt}_${a.id}`, at: a.createdAt, action: a.action, entityType: a.entityType, entityId: a.entityId,
+      actorId: a.actorId, actorName: a.actorId ? mockUsers.find((u) => u.id === a.actorId)?.name ?? 'Unknown user' : 'System', summary, link,
+    };
+  });
+}
+
+// Mirrors StockReceiptService.list: posted deliveries for a delivery-date range, newest first.
+function listReceipts(qs: Record<string, string>) {
+  const inRange = inDayRange(qs);
+  const needle = qs.q?.trim().toLowerCase();
+  const rows = state.goodsReceipts
+    .filter((g) => g.status === 'POSTED' && inRange(g.receivedAt)
+      && (!qs.supplierId || g.supplierId === qs.supplierId)
+      && (!qs.locationId || g.lines.some((l) => l.locationId === qs.locationId))
+      && (!needle || [g.number, g.deliveryRef, findSupplier(g.supplierId)?.name, ...g.lines.flatMap((l) => [findMaterial(l.materialId)?.sku, findMaterial(l.materialId)?.name])]
+        .filter(Boolean).join(' ').toLowerCase().includes(needle)))
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id));
+  const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
+  return olderThan(rows, qs.before, (g) => g.receivedAt).slice(0, limit).map((g) => ({
+    id: g.id, cursor: `${g.receivedAt}_${g.id}`, number: g.number, receivedAt: g.receivedAt,
+    supplierName: findSupplier(g.supplierId)?.name ?? 'Unknown supplier', deliveryRef: g.deliveryRef ?? null,
+    receivedByName: mockUsers.find((u) => u.id === 'user-1')?.name ?? 'Unknown user',
+    lines: g.lines.map((l) => {
+      const m = findMaterial(l.materialId);
+      return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', locationName: findLocation(l.locationId)?.name ?? l.locationId, quantity: l.quantity };
+    }).sort((a, b) => a.name.localeCompare(b.name)),
+  }));
+}
+
+// Mirrors StockCountService.list: posted counts, newest first, with the differences each adjusted.
+function listCounts(qs: Record<string, string>) {
+  const inRange = inDayRange(qs);
+  const rows = MOCK_AUDIT
+    .filter((a) => a.entityType === 'StockCount' && inRange(a.createdAt)
+      && (!qs.actorId || a.actorId === qs.actorId)
+      && (!qs.locationId || (a.after as { locationId?: string } | null)?.locationId === qs.locationId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
+  return olderThan(rows, qs.before, (a) => a.createdAt).slice(0, limit).map((a) => {
+    const f = (a.after ?? {}) as { locationId?: string; counted?: number; adjusted?: number; note?: string | null };
+    return {
+      id: a.entityId, cursor: `${a.createdAt}_${a.id}`, at: a.createdAt, locationId: f.locationId ?? null,
+      locationName: findLocation(f.locationId ?? '')?.name ?? 'Unknown location',
+      countedByName: a.actorId ? mockUsers.find((u) => u.id === a.actorId)?.name ?? 'Unknown user' : 'System',
+      counted: Number(f.counted ?? 0), adjusted: Number(f.adjusted ?? 0), note: f.note ?? null,
+      differences: state.transactions
+        .filter((t) => t.referenceType === 'StockCount' && t.referenceId === a.entityId)
+        .map((t) => {
+          const m = findMaterial(t.materialId);
+          return { materialId: t.materialId, sku: m?.sku ?? t.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', quantity: t.quantity };
+        })
+        .sort((x, y) => x.name.localeCompare(y.name)),
+    };
+  });
 }
 
 function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
@@ -1667,6 +1771,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
     returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
+    otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
       return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };

@@ -15,7 +15,9 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { api, type ApiError } from '../api/client';
-import type { CurrentStockRow, Material } from '../api/types';
+import type { CountRecord, CurrentStockRow, Material } from '../api/types';
+import { formatDateTime } from '../lib/format';
+import { daysAgo, today } from '../lib/dates';
 
 interface Location { id: string; name: string; active: boolean }
 interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
@@ -58,6 +60,8 @@ export function StockCount() {
   const materials = useApi<Material[]>('/materials');
   const [locationId, setLocationId] = useState('');
   const stock = useApi<CurrentStockRow[]>(locationId ? `/reports/current-stock?locationId=${encodeURIComponent(locationId)}` : null);
+  // The last few counts here, including ones that found no differences.
+  const recent = useApi<CountRecord[]>(locationId ? `/stock-counts?locationId=${encodeURIComponent(locationId)}&limit=5` : null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [filter, setFilter] = useState('');
   const [adding, setAdding] = useState('');
@@ -149,6 +153,7 @@ export function StockCount() {
       setDraft(EMPTY);
       setConfirming(false);
       stock.reload();
+      recent.reload();
     } catch (err) {
       const e = err as ApiError;
       setError({ message: e.message, moved: e.code === 'CONFLICT' });
@@ -189,6 +194,34 @@ export function StockCount() {
               </div>
             )}
           </div>
+
+          {locationId && (
+            <div className="surface-card p-4 no-print">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <h2 className="text-h3 text-surface-900">Recent counts here</h2>
+                <Link
+                  to={`/movements?report=counts&locationId=${encodeURIComponent(locationId)}&from=${daysAgo(90)}&to=${today()}`}
+                  className="btn-link text-sm"
+                >
+                  All counts, last 90 days
+                </Link>
+              </div>
+              {recent.loading && <p className="text-sm text-surface-500">Loading…</p>}
+              {recent.error && <p className="text-sm text-danger-700">Couldn&apos;t load recent counts: {recent.error.message}</p>}
+              {recent.data && recent.data.length === 0 && <p className="text-sm text-surface-500">No counts recorded here yet.</p>}
+              {recent.data && recent.data.length > 0 && (
+                <ul className="text-sm divide-y divide-surface-200">
+                  {recent.data.map((c) => (
+                    <li key={c.id} className="py-1.5 flex flex-wrap gap-x-3">
+                      <span className="text-meta whitespace-nowrap">{formatDateTime(c.at)}</span>
+                      <span>{c.counted} item{c.counted === 1 ? '' : 's'} counted, {c.adjusted === 0 ? 'no differences' : `${c.adjusted} adjusted`}{c.note ? ` (${c.note})` : ''}</span>
+                      <span className="text-meta">by {c.countedByName}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {locationId && stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
 

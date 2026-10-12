@@ -1,7 +1,7 @@
 // Mirrors MonthEndService.report (apps/backend/src/modules/reporting/
 // month-end.service.ts) for frontend-only mode: stock as at the end of the
-// month from the ledger, graded by the stock status bands, with the month's
-// stock used from the consumption report.
+// period (a month or any from/to range of days) from the ledger, graded by the
+// stock status bands, with the period's stock used from the consumption report.
 import type { ApiError } from '../api/client';
 import { classifyItem, type StatusBands } from '../lib/stockStatus';
 import type { ConsumptionReport, MonthEndCategory, MonthEndItem, MonthEndReport } from '../api/reportTypes';
@@ -12,37 +12,66 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 const fail = (message: string): ApiError => ({ code: 'VALIDATION_ERROR', message });
 
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * Build the frontend-only report from ledger balances before the next month's
- * UTC midnight and the supplied consumption report. Includes active items and
+ * Resolve the period as the backend's reportRange does: from/to when either is
+ * given (both required, both days included, the first not in the future), else
+ * the month, else this UTC month. month is set only for exactly one calendar month.
+ * @throws A VALIDATION_ERROR ApiError object for malformed, reversed or future periods.
+ */
+function resolveRange(q: { month?: string; from?: string; to?: string }, now: Date): { month: string | null; from: string; to: string; end: string } {
+  if (q.from || q.to) {
+    if (!q.from || !q.to) throw fail('Give both a start and an end date');
+    if (!DAY.test(q.from) || !DAY.test(q.to)) throw fail('Dates must be YYYY-MM-DD');
+    const start = new Date(`${q.from}T00:00:00.000Z`);
+    const last = new Date(`${q.to}T00:00:00.000Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(last.getTime())
+      || start.toISOString().slice(0, 10) !== q.from || last.toISOString().slice(0, 10) !== q.to) throw fail('Invalid date');
+    if (q.from > q.to) throw fail('The start date is after the end date');
+    if (q.from > now.toISOString().slice(0, 10)) throw fail('That period has not started yet');
+    const end = new Date(last.getTime() + 86_400_000);
+    const whole = q.from.endsWith('-01') && end.getUTCDate() === 1 && q.from.slice(0, 7) === q.to.slice(0, 7);
+    return { month: whole ? q.from.slice(0, 7) : null, from: q.from, to: q.to, end: end.toISOString() };
+  }
+  const month = q.month || now.toISOString().slice(0, 7);
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw fail('Month must be YYYY-MM');
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (y * 12 + mo > now.getUTCFullYear() * 12 + now.getUTCMonth() + 1) throw fail('That month has not started yet');
+  return {
+    month,
+    from: new Date(Date.UTC(y, mo - 1, 1)).toISOString().slice(0, 10),
+    to: new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10),
+    end: new Date(Date.UTC(y, mo, 1)).toISOString(),
+  };
+}
+
+/**
+ * Build the frontend-only report from ledger balances before UTC midnight
+ * after the period's last day and the supplied consumption report. Includes active items and
  * inactive items with nonzero location balances; omits empty categories.
  * Stock values use supplied prices (null when absent, zero toward totals),
  * ratios are fractions, and reorder quantities may be negative.
- * @param month - YYYY-MM; the current UTC month is allowed. Years 0000–0099
- * follow Date.UTC's mapping to 1900–1999.
+ * @param q - A YYYY-MM month (the current UTC month is allowed; years 0000–0099
+ * follow Date.UTC's mapping to 1900–1999) or a from/to range of days.
  * @param data - Current catalog and settings plus ledger entries with comparable
- * UTC ISO timestamps. consumption receives inclusive YYYY-MM-DD month bounds;
- * usage locations reflect month-end holdings, not the issue locations.
- * @param now - Reference for future-month validation and generatedAt.
- * @throws A VALIDATION_ERROR ApiError object for malformed or future months.
+ * UTC ISO timestamps. consumption receives inclusive YYYY-MM-DD bounds;
+ * usage locations reflect holdings at the end, not the issue locations.
+ * @param now - Reference for future-period validation and generatedAt.
+ * @throws A VALIDATION_ERROR ApiError object for malformed or future periods.
  * Errors from consumption propagate; an invalid now causes a RangeError.
  */
 export function computeMonthEnd(
-  month: string,
+  q: { month?: string; from?: string; to?: string },
   data: {
     transactions: MockInventoryTransaction[]; materials: MockMaterial[]; locations: MockLocation[];
     bands: StatusBands; currency: string; consumption: (from: string, to: string) => ConsumptionReport;
   },
   now = new Date(),
 ): MonthEndReport {
-  const m = /^(\d{4})-(\d{2})$/.exec(month);
-  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12) throw fail('Month must be YYYY-MM');
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  if (y * 12 + mo > now.getUTCFullYear() * 12 + now.getUTCMonth() + 1) throw fail('That month has not started yet');
-  const from = new Date(Date.UTC(y, mo - 1, 1)).toISOString().slice(0, 10);
-  const to = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
-  const end = new Date(Date.UTC(y, mo, 1)).toISOString();
+  const { month, from, to, end } = resolveRange(q, now);
 
   const locationName = new Map(data.locations.map((l) => [l.id, l.name]));
   const balance = new Map<string, Map<string, number>>();

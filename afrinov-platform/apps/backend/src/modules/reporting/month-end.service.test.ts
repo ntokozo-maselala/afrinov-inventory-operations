@@ -10,7 +10,9 @@ vi.mock('../../shared/db.js', () => ({ prisma: {
   material: { findMany: mocks.materials }, location: { findMany: mocks.locations },
 } }));
 vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValue: mocks.setting } }));
-vi.mock('./consumption.service.js', () => ({ ConsumptionService: { report: mocks.consumption } }));
+vi.mock('./consumption.service.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./consumption.service.js')>(), ConsumptionService: { report: mocks.consumption },
+}));
 
 type ReportMaterial = Pick<Material, 'id' | 'sku' | 'name' | 'category' | 'requiredStock' | 'unitCost' | 'active'>;
 const material = (id: string, overrides: Partial<ReportMaterial> = {}): ReportMaterial => ({
@@ -38,7 +40,7 @@ afterEach(() => vi.useRealTimers());
 
 describe('MonthEndService.report', () => {
   it('requests all ledger history strictly before next month and usage within the chosen month', async () => {
-    const report = await MonthEndService.report('2026-09');
+    const report = await MonthEndService.report({ month: '2026-09' });
     expect(mocks.balances).toHaveBeenCalledExactlyOnceWith({
       by: ['materialId', 'locationId'], where: { postedAt: { lt: new Date('2026-10-01T00:00:00Z') } }, _sum: { quantity: true },
     });
@@ -50,16 +52,28 @@ describe('MonthEndService.report', () => {
     });
   });
 
-  it.each(['', '2026-00', '2026-11', '2026-9'])('rejects %j before reading any dependencies', async (month) => {
-    await expect(MonthEndService.report(month)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  it.each([
+    { month: '2026-00' }, { month: '2026-11' }, { month: '2026-9' },
+    { from: '2026-10-10', to: '2026-10-16' }, { from: '2026-09-08', to: '2026-09-01' }, { from: '2026-09-01' },
+  ])('rejects %j before reading any dependencies', async (q) => {
+    await expect(MonthEndService.report(q)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     for (const mock of Object.values(mocks)) expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('reports a range of days: stock as at midnight after the last day, usage within it', async () => {
+    const report = await MonthEndService.report({ from: '2026-09-07', to: '2026-09-13', month: '2026-01' });
+    expect(mocks.balances).toHaveBeenCalledExactlyOnceWith({
+      by: ['materialId', 'locationId'], where: { postedAt: { lt: new Date('2026-09-14T00:00:00Z') } }, _sum: { quantity: true },
+    });
+    expect(mocks.consumption).toHaveBeenCalledExactlyOnceWith({ from: '2026-09-07', to: '2026-09-13' });
+    expect(report).toMatchObject({ month: null, from: '2026-09-07', to: '2026-09-13' });
   });
 
   it('combines locations, ignores zero and null balances, and rounds fractional stock and money', async () => {
     mocks.materials.mockResolvedValue([material('1', { requiredStock: new Prisma.Decimal(3), unitCost: new Prisma.Decimal(1.23) })]);
     mocks.balances.mockResolvedValue([balance('1', 0.23456, 'b'), balance('1', 1, 'a'), balance('1', 0, 'empty'), balance('1', null, 'null')]);
     mocks.consumption.mockResolvedValue({ items: [used('CON-1', 3.69)] });
-    const category = (await MonthEndService.report('2026-09')).categories[0]!;
+    const category = (await MonthEndService.report({ month: '2026-09' })).categories[0]!;
     expect(category.items).toEqual([{
       sku: 'CON-1', name: 'Item 1', location: 'A-1 (1), B-2 (0.2346)', requiredStock: 3, currentStock: 1.2346,
       unitCost: 1.23, value: 1.52, percentOfRequired: 0.4115, reorderQuantity: 1.7654, status: 'OK',
@@ -72,7 +86,7 @@ describe('MonthEndService.report', () => {
       material('10', { active: false }), material('2', { active: false }), material('3', { active: false }), material('1'),
     ]);
     mocks.balances.mockResolvedValue([balance('10', -2, 'missing'), balance('2', 12), balance('3', 0)]);
-    const category = (await MonthEndService.report('2026-09')).categories[0]!;
+    const category = (await MonthEndService.report({ month: '2026-09' })).categories[0]!;
     expect(category.items.map((i) => i.sku)).toEqual(['CON-1', 'CON-2', 'CON-10']);
     expect(category.items[0]).toMatchObject({ location: '', currentStock: 0, status: 'URGENT' });
     expect(category.items[1]).toMatchObject({ location: 'A-1', currentStock: 12, reorderQuantity: -2, status: 'OK' });
@@ -86,7 +100,7 @@ describe('MonthEndService.report', () => {
       material('2', { unitCost: new Prisma.Decimal(0) }),
     ]);
     mocks.balances.mockResolvedValue([balance('1', 5), balance('2', 2)]);
-    const report = await MonthEndService.report('2026-09');
+    const report = await MonthEndService.report({ month: '2026-09' });
     expect(report.categories[0]!.items[0]).toMatchObject({ unitCost: null, value: null, percentOfRequired: null, reorderQuantity: null, status: 'NOT_SET' });
     expect(report.categories[0]!.items[1]).toMatchObject({ unitCost: 0, value: 0, percentOfRequired: 0.2, status: 'WARNING' });
     expect(report.total).toEqual({ items: 2, itemsInStock: 2, value: 0, urgent: 0, warning: 1, usedValue: 0 });
@@ -99,7 +113,7 @@ describe('MonthEndService.report', () => {
       })[key]);
       mocks.materials.mockResolvedValue([material('1')]);
       mocks.balances.mockResolvedValue([balance('1', quantity)]);
-      const report = await MonthEndService.report('2026-09');
+      const report = await MonthEndService.report({ month: '2026-09' });
       expect(report.categories[0]!.items[0]!.status).toBe(status);
       expect(report.currency).toBe('EUR');
       expect(report.bands).toEqual({ urgentBelowPercent: 25, warningBelowPercent: 60 });
@@ -110,7 +124,7 @@ describe('MonthEndService.report', () => {
     mocks.materials.mockResolvedValue([material('tool', { category: 'TOOLS' }), material('1')]);
     mocks.balances.mockResolvedValue([balance('tool', 4), balance('1', 1)]);
     mocks.consumption.mockResolvedValue({ items: [used('OLD-10', null, 'PROJECT_MATERIAL'), used('CON-1', 2.35), used('OLD-2', 3.45, 'PROJECT_MATERIAL')] });
-    const report = await MonthEndService.report('2026-09');
+    const report = await MonthEndService.report({ month: '2026-09' });
     expect(report.categories.map((c) => c.category)).toEqual(['CONSUMABLES', 'PROJECT_MATERIAL', 'TOOLS']);
     expect(report.categories[1]).toMatchObject({ items: [], itemsInStock: 0, value: 0, usedValue: 3.45 });
     expect(report.categories[1]!.used).toEqual([
@@ -123,6 +137,6 @@ describe('MonthEndService.report', () => {
   it('propagates dependency failures instead of returning a partial report', async () => {
     const failure = new Error('Ledger unavailable');
     mocks.balances.mockRejectedValue(failure);
-    await expect(MonthEndService.report('2026-09')).rejects.toBe(failure);
+    await expect(MonthEndService.report({ month: '2026-09' })).rejects.toBe(failure);
   });
 });
