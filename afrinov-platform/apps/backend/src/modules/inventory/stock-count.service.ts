@@ -57,8 +57,13 @@ export interface CountRecord {
   counted: number;
   adjusted: number;
   note: string | null;
-  /** The adjustments the count posted: counted less what the system had. Items that matched are not stored. */
+  /** The adjustments the count posted: counted less what the system had. */
   differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
+  /**
+   * The full count sheet: every item counted, matched or not, with what the
+   * system had. Empty for counts posted before sheets were kept.
+   */
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string }>;
 }
 
 export const StockCountService = {
@@ -81,11 +86,14 @@ export const StockCountService = {
     const facts = entries.map((e) => (e.after ?? {}) as { locationId?: string; counted?: number; adjusted?: number; note?: string | null });
     const locationIds = [...new Set(facts.map((f) => f.locationId).filter((id): id is string => !!id))];
     const userIds = [...new Set(entries.map((e) => e.actorId).filter((id): id is string => !!id))];
-    const [adjustments, locations, users] = await Promise.all([
+    const countIds = entries.map((e) => e.entityId);
+    const material = { select: { sku: true, name: true, unitOfMeasure: true } } as const;
+    const [adjustments, sheetLines, locations, users] = await Promise.all([
       entries.length === 0 ? [] : prisma.inventoryTransaction.findMany({
-        where: { referenceType: STOCK_COUNT_REFERENCE, referenceId: { in: entries.map((e) => e.entityId) } },
-        include: { material: { select: { sku: true, name: true, unitOfMeasure: true } } },
+        where: { referenceType: STOCK_COUNT_REFERENCE, referenceId: { in: countIds } },
+        include: { material },
       }),
+      entries.length === 0 ? [] : prisma.stockCountLine.findMany({ where: { countId: { in: countIds } }, include: { material } }),
       locationIds.length === 0 ? [] : prisma.location.findMany({ where: { id: { in: locationIds } }, select: { id: true, name: true } }),
       userIds.length === 0 ? [] : prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
     ]);
@@ -106,6 +114,10 @@ export const StockCountService = {
         differences: adjustments
           .filter((t) => t.referenceId === e.entityId)
           .map((t) => ({ materialId: t.materialId, sku: t.material.sku, name: t.material.name, unitOfMeasure: t.material.unitOfMeasure, quantity: t.quantity.toString() }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        lines: sheetLines
+          .filter((l) => l.countId === e.entityId)
+          .map((l) => ({ materialId: l.materialId, sku: l.material.sku, name: l.material.name, unitOfMeasure: l.material.unitOfMeasure, expected: l.expectedQuantity.toString(), counted: l.countedQuantity.toString() }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       };
     });
@@ -172,6 +184,11 @@ export const StockCountService = {
         results.push({ materialId: l.materialId, variance: variance.toString(), transactionId: trx.id });
         events.push({ type: 'InventoryAdjusted', materialId: l.materialId, locationId: input.locationId, quantity: variance.toNumber() });
       }
+
+      // The full sheet, matched items included, with what the system had.
+      await tx.stockCountLine.createMany({
+        data: lines.map((l) => ({ countId, materialId: l.materialId, expectedQuantity: current.get(l.materialId)!, countedQuantity: l.counted })),
+      });
 
       const adjusted = results.filter((r) => r.transactionId).length;
       await tx.auditLogEntry.create({

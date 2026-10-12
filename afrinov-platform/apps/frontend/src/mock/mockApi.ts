@@ -89,6 +89,7 @@ export function resetMockState(): void {
   state = freshState();
   mockUsers = JSON.parse(JSON.stringify(SEED_USERS));
   MOCK_AUDIT.length = 0;
+  MOCK_COUNT_LINES.length = 0;
 }
 
 let idCounter = 1000;
@@ -1070,6 +1071,8 @@ function buildMockSettings(): Record<string, MockSetting> {
 
 const MOCK_SETTINGS: Record<string, MockSetting> = buildMockSettings();
 const MOCK_AUDIT: Array<{ id: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: string; actorId: string | null }> = [];
+/** Full count sheets (stock_count_lines): every item counted, with what the system had. */
+const MOCK_COUNT_LINES: Array<{ countId: string; materialId: string; expected: number; counted: number }> = [];
 
 function validateMockSetting(key: string, raw: unknown): { value?: unknown; error?: string } {
   const def = MOCK_SETTINGS[key];
@@ -1401,6 +1404,7 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
   }
   const countId = nextId('count');
   const note = b.note?.trim();
+  for (const l of lines) MOCK_COUNT_LINES.push({ countId, materialId: l.materialId, expected: getBalance(l.materialId, b.locationId!), counted: l.countedQuantity });
   const results = lines.map((l) => {
     const variance = l.countedQuantity - getBalance(l.materialId, b.locationId!);
     if (Math.abs(variance) < 0.00005) return { materialId: l.materialId, variance: '0', transactionId: null as string | null };
@@ -1777,6 +1781,13 @@ function listCounts(qs: Record<string, string>) {
         .map((t) => {
           const m = findMaterial(t.materialId);
           return { materialId: t.materialId, sku: m?.sku ?? t.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', quantity: t.quantity };
+        })
+        .sort((x, y) => x.name.localeCompare(y.name)),
+      lines: MOCK_COUNT_LINES
+        .filter((l) => l.countId === a.entityId)
+        .map((l) => {
+          const m = findMaterial(l.materialId);
+          return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', expected: String(l.expected), counted: String(l.counted) };
         })
         .sort((x, y) => x.name.localeCompare(y.name)),
     };

@@ -74,12 +74,16 @@ export async function downloadStockCounts(query: string): Promise<void> {
   await download(
     'Stock counts',
     `afrinov-stock-counts-${fileRange(query)}.xlsx`,
-    ['Counted', 'Location', 'Counted by', 'Items counted', 'Differences', 'Note', 'Code', 'Item', 'Difference', 'Unit'],
+    ['Counted', 'Location', 'Counted by', 'Items counted', 'Differences', 'Note', 'Code', 'Item', 'System', 'Counted qty', 'Difference', 'Unit'],
     counts.flatMap((c) => {
       const head = [new Date(c.at), c.locationName, c.countedByName, c.counted, c.adjusted, c.note ?? ''];
+      // A full sheet where one was kept; older counts give their differences only.
+      if (c.lines.length > 0) {
+        return c.lines.map((l) => [...head, l.sku, l.name, Number(l.expected), Number(l.counted), Math.round((Number(l.counted) - Number(l.expected)) * 10000) / 10000, l.unitOfMeasure]);
+      }
       return c.differences.length === 0
-        ? [[...head, '', 'No differences', null, '']]
-        : c.differences.map((d) => [...head, d.sku, d.name, Number(d.quantity), d.unitOfMeasure]);
+        ? [[...head, '', 'No differences', null, null, null, '']]
+        : c.differences.map((d) => [...head, d.sku, d.name, null, null, Number(d.quantity), d.unitOfMeasure]);
     }),
     'No counts were posted on these dates.',
   );

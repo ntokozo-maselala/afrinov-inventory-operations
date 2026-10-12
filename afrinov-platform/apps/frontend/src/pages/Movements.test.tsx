@@ -33,9 +33,15 @@ const SLIP = {
   ],
 };
 const COUNTS = [
+  { id: 'c-3', cursor: 'c3', at: '2026-09-25T10:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 2, adjusted: 1, note: null,
+    differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
+    lines: [
+      { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7' },
+      { materialId: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitOfMeasure: 'pair', expected: '4', counted: '4' },
+    ] },
   { id: 'c-2', cursor: 'c2', at: '2026-09-25T09:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 4, adjusted: 1, note: null,
-    differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }] },
-  { id: 'c-1', cursor: 'c1', at: '2026-09-25T08:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 3, adjusted: 0, note: null, differences: [] },
+    differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }], lines: [] },
+  { id: 'c-1', cursor: 'c1', at: '2026-09-25T08:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 3, adjusted: 0, note: null, differences: [], lines: [] },
 ];
 
 function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)]]) {
@@ -139,10 +145,14 @@ describe('Movements page', () => {
     expect(listCalls()).toHaveLength(0);
   });
 
-  it('shows each count with its differences, and says when a count found none', async () => {
+  it('shows each count as its full sheet, and older counts by their differences', async () => {
     renderAt('/movements?report=counts&from=2026-09-25');
-    const [withDiff, clean] = await screen.findAllByRole('region', { name: 'Count at Boiler Shop' });
-    expect(within(withDiff!).getByText('-2')).toBeInTheDocument();
+    const [sheet, older, clean] = await screen.findAllByRole('region', { name: 'Count at Boiler Shop' });
+    const disc = within(sheet!).getByText('DISC-115').closest('tr')!;
+    expect([...disc.querySelectorAll('td')].slice(1).map((td) => td.textContent)).toEqual(['9', '7 each', '-2']);
+    expect(within(within(sheet!).getByText('GLOVE-L').closest('tr')!).getByText('✓')).toBeInTheDocument();
+    expect(within(older!).getByText('Counted before full count sheets were kept: only the differences are shown.')).toBeInTheDocument();
+    expect(within(older!).getByText('-2')).toBeInTheDocument();
     expect(within(clean!).getByText('No differences: everything counted matched the system.')).toBeInTheDocument();
   });
 

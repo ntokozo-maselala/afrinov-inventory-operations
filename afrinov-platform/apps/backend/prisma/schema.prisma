@@ -116,6 +116,7 @@ model Material {
   goodsReceiptLines    GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
+  stockCountLines      StockCountLine[]
 
   @@index([category])
   @@index([active])
@@ -372,6 +373,22 @@ model GoodsReceipt {
   @@index([status])
   @@index([purchaseOrderId])
   @@map("goods_receipts")
+}
+
+// One item on a stock count: what the system had and what was counted, matched
+// or not. The count itself is the STOCK_COUNT audit entry with this count id;
+// its differences were posted as COUNT_VARIANCE adjustments.
+model StockCountLine {
+  id               String   @id @default(uuid())
+  countId          String   @map("count_id")
+  materialId       String   @map("material_id")
+  expectedQuantity Decimal  @map("expected_quantity") @db.Decimal(18, 4)
+  countedQuantity  Decimal  @map("counted_quantity") @db.Decimal(18, 4)
+
+  material Material @relation(fields: [materialId], references: [id])
+
+  @@index([countId])
+  @@map("stock_count_lines")
 }
 
 model GoodsReceiptLine {

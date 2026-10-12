@@ -66,10 +66,12 @@ export interface ReceiptRecord {
   lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; locationName: string; quantity: string }>;
 }
 
-/** One count on the stock-counts report (GET /stock-counts). Items that matched are not stored, so only differences are listed. */
+/** One count on the stock-counts report (GET /stock-counts): its full sheet, or for older counts only its differences. */
 export interface CountRecord {
   id: string; cursor: string; at: string;
   locationId: string | null; locationName: string; countedByName: string;
   counted: number; adjusted: number; note: string | null;
   differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
+  /** Every item counted, matched or not, with what the system had. Empty for counts posted before sheets were kept. */
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string }>;
 }
