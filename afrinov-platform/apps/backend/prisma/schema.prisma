@@ -423,6 +423,14 @@ enum InventoryTransactionType {
   // Unused stock coming back from an issue. referenceType 'Return' and
   // referenceId = the issue's id; recipient and project are copied from it.
   RETURN
+  // A tool lent to a recipient (negative): it leaves its location but stays
+  // owned. Lines lent together share an issueId (the loan slip).
+  LOAN
+  // A lent tool coming back (positive). referenceType 'ToolLoan' and
+  // referenceId = the loan's id; recipient and project are copied from it.
+  // reasonCode DAMAGE when it came back damaged; LOSS when it was lost, with
+  // an ADJUSTMENT (LOSS) writing it off at the same time.
+  LOAN_RETURN
 }
 
 enum AdjustmentReasonCode {
@@ -446,8 +454,9 @@ model InventoryTransaction {
   referenceId   String?                  @map("reference_id")
   // Who received the stock (issues; copied onto their reversals).
   recipientId   String?                  @map("recipient_id")
-  // Issues: shared by every line one issue posted (an issue slip). Earlier
-  // issue lines carry their own id; reversals and other types carry none.
+  // Issues and tool loans: shared by every line one issue or check-out posted
+  // (the slip). Earlier issue lines carry their own id; reversals and other
+  // types carry none.
   issueId       String?                  @map("issue_id")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")

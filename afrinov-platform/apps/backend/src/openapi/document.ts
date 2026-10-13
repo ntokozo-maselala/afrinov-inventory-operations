@@ -18,6 +18,7 @@ import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
+import { toolCheckInSchema, toolCheckOutSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
   updateMaterialSchema,
@@ -244,8 +245,27 @@ export const OPERATIONS: Operation[] = [
     description: 'One recipient (required), an optional project, and up to 50 lines, booked all-or-nothing. '
       + 'Lines for the same item and location are checked against stock as one total. '
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
-      + 'material or location, and 400 for an inactive one.',
+      + 'material or location, and 400 for an inactive one. Tools are refused (400): they are checked out, not issued.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'get', path: '/tools', tag: 'Tools', summary: 'Every active tool: in store where, out on loan and with whom',
+    description: 'Per tool: inStore (on the shelf, by location), onLoan, owned (in store + on loan) and its open loans '
+      + '(recipient, project, where it came from, how many were lent and how many are still out).',
+  },
+  {
+    method: 'post', path: '/tools/check-out', tag: 'Tools', summary: 'Lend tools to a recipient',
+    description: 'One recipient (required), an optional project and note, and up to 50 lines, booked all-or-nothing as one slip. '
+      + 'Each line is a LOAN movement that takes the tool off its location. Tools only. '
+      + 'Refused with 422 INSUFFICIENT_BALANCE when fewer are in store there.',
+    permissions: [P.CheckOutTool], body: toolCheckOutSchema, success: 201, errors: [404, 422],
+  },
+  {
+    method: 'post', path: '/tools/check-in', tag: 'Tools', summary: 'Take lent tools back',
+    description: 'Each line is against a loan, at most what is still out on it, and comes back to the location it left. '
+      + 'GOOD or DAMAGED puts it back in store (LOAN_RETURN); LOST needs a note and writes it off at once '
+      + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned.',
+    permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },
   {
     method: 'get', path: '/inventory-issues', tag: 'Reports', summary: 'Issued stock: issue slips with their lines, newest first',
