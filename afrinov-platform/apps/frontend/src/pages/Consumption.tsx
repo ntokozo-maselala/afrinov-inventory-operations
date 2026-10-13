@@ -4,7 +4,7 @@
 // since the last rollover and never by project. What each person was given,
 // issue by issue, is Movements > Issued stock: a recipient's name opens it.
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -19,44 +19,40 @@ import { formatCurrency } from '../lib/currency';
 import { downloadConsumption } from '../api/exportConsumption';
 import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
+import { thisMonth, today as todayIso } from '../lib/dates';
 
 interface Project { projectNumber: string; name?: string | null }
 interface Recipient { id: string; name: string; type: string; active: boolean }
 
 const typeLabel = (t: string | null) => (t ? t.charAt(0) + t.slice(1).toLowerCase() : '');
 
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-/** The dates a preset stands for, in the user's own calendar. */
-export function presetRange(preset: string, today = new Date()): { from: string; to: string } {
-  const y = today.getFullYear();
-  const m = today.getMonth();
-  switch (preset) {
-    case 'last-month': return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
-    case 'this-year': return { from: iso(new Date(y, 0, 1)), to: iso(new Date(y, 11, 31)) };
-    case 'last-12': return { from: iso(new Date(y, m - 11, 1)), to: iso(new Date(y, m + 1, 0)) };
-    default: return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
-  }
-}
-
-const PRESETS = [
-  { value: 'this-month', label: 'This month' },
-  { value: 'last-month', label: 'Last month' },
-  { value: 'this-year', label: 'This year' },
-  { value: 'last-12', label: 'Last 12 months' },
-  { value: 'custom', label: 'Choose dates' },
-];
-
 export function Consumption() {
-  const [preset, setPreset] = useState('this-month');
-  const [custom, setCustom] = useState(presetRange('this-month'));
+  // The period lives in the address, as on the Stock report; it opens on this month.
+  const [params, setParams] = useSearchParams();
+  const today = useMemo(() => todayIso(), []);
+  const fallback = useMemo(() => thisMonth(), []);
+  const range = { from: params.get('from') ?? fallback.from, to: params.get('to') ?? fallback.to };
+  const problem = !range.from || !range.to ? 'Choose a start and an end date.'
+    : range.from > range.to ? 'The start date is after the end date.'
+      : range.from > today ? 'Choose a period that has started.'
+        : null;
   const [project, setProject] = useState('');
   const [category, setCategory] = useState('');
   const [recipient, setRecipient] = useState('');
   const [downloading, setDownloading] = useState(false);
   const toast = useToast();
 
-  const range = preset === 'custom' ? custom : presetRange(preset);
+  /** Set one end of the period, keeping the other where it is. */
+  function setDate(key: 'from' | 'to', value: string) {
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('from', range.from);
+      next.set('to', range.to);
+      next.set(key, value);
+      return next;
+    }, { replace: true });
+  }
+
   const query = useMemo(() => {
     const p = new URLSearchParams({ from: range.from, to: range.to });
     if (project) p.set('projectNumber', project);
@@ -64,8 +60,7 @@ export function Consumption() {
     if (recipient) p.set('recipientId', recipient);
     return p.toString();
   }, [range.from, range.to, project, category, recipient]);
-  const badRange = range.from > range.to;
-  const report = useApi<ConsumptionReport>(badRange ? null : `/reports/consumption?${query}`);
+  const report = useApi<ConsumptionReport>(problem ? null : `/reports/consumption?${query}`);
   const projects = useApi<Project[]>('/projects');
   const recipients = useApi<Recipient[]>('/recipients');
   const currency = report.data?.currency ?? 'ZAR';
@@ -123,7 +118,7 @@ export function Consumption() {
         title="Stock used"
         description="What the store issued in a period, less what came back, at each item's unit price (excl. VAT): by project, by who it was issued to, and by item. Replaces the workbook's Stock Report and Consumable Box sheets."
         actions={(
-          <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange || !report.data}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={!!problem || !report.data}>
             Download as Excel
           </Button>
         )}
@@ -132,15 +127,9 @@ export function Consumption() {
       <Toolbar
         left={(
           <>
-            <Select className="sm:w-44" value={preset} onChange={(e) => { if (e.target.value === 'custom') setCustom(range); setPreset(e.target.value); }} aria-label="Period">
-              {PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </Select>
-            {preset === 'custom' && (
-              <>
-                <Input className="sm:w-40" type="date" aria-label="From" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
-                <Input className="sm:w-40" type="date" aria-label="To" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} />
-              </>
-            )}
+            <Input type="date" className="sm:w-40" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} aria-label="From" invalid={!!problem} />
+            <span className="text-meta">to</span>
+            <Input type="date" className="sm:w-40" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} aria-label="To" invalid={!!problem} />
             <Select className="sm:w-60" value={project} onChange={(e) => setProject(e.target.value)} aria-label="Project">
               <option value="">All projects</option>
               <option value={NO_PROJECT}>No project</option>
@@ -163,7 +152,7 @@ export function Consumption() {
         right={<span className="text-meta">{range.from} to {range.to}</span>}
       />
 
-      {badRange && <p className="text-sm text-danger-600 mb-3">The start date is after the end date.</p>}
+      {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}
 
       {report.data && (
