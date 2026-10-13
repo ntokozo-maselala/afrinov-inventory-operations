@@ -5,7 +5,9 @@
 //
 // Rows are matched by category, old Product ID, item name and location as
 // written, not by row number, so editing the stock workbook (merging the
-// duplicate rows, say) does not unhook the rest of the mapping.
+// duplicate rows, say) does not unhook the rest of the mapping. Identical tool
+// rows (each tool of one model on its own row) are matched in order: the
+// second such workbook row with the second such mapping row.
 import ExcelJS from 'exceljs';
 import type { LocationType, MaterialCategory } from '@prisma/client';
 import { CATEGORY_SHEETS, textOf } from './workbook-reader.js';
@@ -18,6 +20,8 @@ export interface ItemMapping {
   locationAsWritten: string | null;
   sku: string | null;
   unitOfMeasure: string | null;
+  /** Tools kept as one unit: the serial number. */
+  serialNumber: string | null;
   /** Row in the mapping file, for messages. */
   row?: number;
 }
@@ -39,6 +43,7 @@ export interface PlannedMaterial {
   unitOfMeasure: string;
   requiredStock: number;
   unitCost: number | null;
+  serialNumber: string | null;
   oldProductIds: string[];
   balances: Array<{ location: string; quantity: number }>;
 }
@@ -67,6 +72,18 @@ export function unitHint(name: string): string | null {
   // are not hints; nor is "set", which is counted as one.
   const m = name.match(/\d+(?:[.,]\d+)?\s*(kg|lt?|litres?|liters?|ml)\b|\bper\s+(m|metre|meter|kg|box|roll|pack)\b|\b(rolls?|box(es)?|packs?|pkts?|tins?|drums?|bags?|pairs?|litres?)\b/i);
   return m ? m[0].trim() : null;
+}
+
+/**
+ * The serial number a tool's name ends with ("Makita Hand Drill - 34322"): a
+ * code with at least five digits after the last dash and space; it may hold a
+ * dash itself ("Grease Drum - ADF1381-06282022"). Only for a single tool; a number
+ * on a set ("Safety Harness - 110446", six of them) is a model, not a serial.
+ */
+export function suggestSerial(name: string, quantity: number): string | null {
+  if (quantity !== 1) return null;
+  const m = name.match(/[-\u2013]\s+([A-Za-z0-9/-]*\d{5,}[A-Za-z0-9/]*)\s*$/);
+  return m ? m[1]! : null;
 }
 
 /** Best guess at the kind of place, from its name. */
@@ -99,6 +116,7 @@ export function suggestMapping(analysis: Analysis): Mapping {
       locationAsWritten: i.location,
       sku: `${prefix.get(i.category)}-${String(n).padStart(4, '0')}`,
       unitOfMeasure: 'each',
+      serialNumber: i.category === 'TOOLS' ? suggestSerial(i.name, i.quantity) : null,
     };
   });
   const locations: LocationMapping[] = [];
@@ -121,6 +139,7 @@ const ITEM_COLUMNS = [
   { header: 'Unit price excl. VAT', key: 'unitPrice', width: 12, fromWorkbook: true },
   { header: 'New SKU', key: 'sku', width: 14, fromWorkbook: false },
   { header: 'Unit of measure', key: 'unit', width: 14, fromWorkbook: false },
+  { header: 'Serial number (tools)', key: 'serial', width: 18, fromWorkbook: false },
   { header: 'Check the unit? (word found in the name)', key: 'hint', width: 22, fromWorkbook: true },
 ] as const;
 
@@ -137,9 +156,11 @@ const README = [
   'Fill in or correct the white columns only. Grey columns come from the stock workbook; change those in the workbook itself.',
   '',
   'Items sheet',
-  '- New SKU: the item code in the platform. Suggested as CON-0001, FSI-0001, TPE-0001 and PRJ-0001 by category.',
+  '- New SKU: the item code in the platform. Suggested as CON-0001, FSI-0001, TPE-0001, PRJ-0001 and TL-0001 by category.',
   '- Give two rows the same SKU to make them one item kept in two locations. They must be in the same category and use the same unit.',
   '- Unit of measure: how the item is counted (each, m, kg, l, box, ...). Every item starts as "each"; check the rows with a word in the last column.',
+  '- Serial number (tools): for a single tool, the maker\'s serial number. Suggested from a number at the end of the tool\'s name; leave it blank for a set of identical tools, and for everything that is not a tool.',
+  '- Tools: the Tools sheet\'s Required Tools is read as how many the store owns. Tools that are really consumables (blades, inserts) can move to Tooling, PPE & Electrical: change the category in the stock workbook.',
   '',
   'Locations sheet',
   '- Platform location: the one name to use for that spelling. Give every spelling of the same place the same platform location.',
@@ -190,6 +211,7 @@ export async function writeMappingFile(path: string, mapping: Mapping, analysis:
       unitPrice: p?.unitPrice ?? null,
       sku: m.sku,
       unit: m.unitOfMeasure,
+      serial: m.serialNumber,
       hint: unitHint(m.itemName),
     });
     row.getCell(8).dataValidation = {
@@ -267,6 +289,8 @@ export function readMappingSheets(wb: ExcelJS.Workbook): { mapping: Mapping; pro
         locationAsWritten: location === NO_LOCATION ? null : location,
         sku: get(row, 'New SKU'),
         unitOfMeasure: get(row, 'Unit of measure'),
+        // Absent from mapping files written before tools were imported.
+        serialNumber: get(row, 'Serial number (tools)'),
         row: r,
       });
     }
@@ -339,18 +363,31 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
   };
   const reportedSpellings = new Set<string>();
 
-  // Items.
+  // Items. A repeat of a tool row is the next tool of that model, so it is numbered.
+  const numbered = () => {
+    const seen = new Map<string, number>();
+    return (r: Parameters<typeof itemKey>[0]) => {
+      const key = itemKey(r);
+      if (r.category !== 'TOOLS') return key;
+      const n = (seen.get(key) ?? 0) + 1;
+      seen.set(key, n);
+      return n === 1 ? key : `${key}#${n}`;
+    };
+  };
+  const mappingKey = numbered();
+  const keyOf = new Map<ItemMapping, string>(mapping.items.map((m) => [m, mappingKey(m)]));
   const byKey = new Map<string, ItemMapping>();
   for (const m of mapping.items) {
-    const key = itemKey(m);
+    const key = keyOf.get(m)!;
     if (byKey.has(key)) problems.push({ code: 'MAPPING_ROW_INVALID', ...at(m), detail: `Same row as mapping row ${byKey.get(key)!.row}` });
     else byKey.set(key, m);
   }
 
   const used = new Set<string>();
   const groups = new Map<string, Array<{ item: PlannedItem; map: ItemMapping; location: string }>>();
+  const workbookKey = numbered();
   for (const item of analysis.items) {
-    const key = itemKey(item);
+    const key = workbookKey(item);
     const map = byKey.get(key);
     if (!map) {
       problems.push({ code: 'UNMAPPED_ITEM', category: item.category, sheet: item.sheet, row: item.row, productId: item.oldProductId, name: item.name, detail: `Location "${item.location ?? NO_LOCATION}" — add a row for it to the mapping file` });
@@ -362,6 +399,11 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
     else if (!SKU_PATTERN.test(map.sku)) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: `SKU "${map.sku}": use letters, digits and - . / _ only, at most 64` }); ok = false; }
     if (!map.unitOfMeasure) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'No unit of measure' }); ok = false; }
     else if (map.unitOfMeasure.length > 32) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'Unit of measure longer than 32 characters' }); ok = false; }
+    if (map.serialNumber) {
+      if (item.category !== 'TOOLS') { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: `Serial number "${map.serialNumber}": only tools have one` }); ok = false; }
+      else if (map.serialNumber.length > 64) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'Serial number longer than 64 characters' }); ok = false; }
+      else if (item.quantity > 1) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: `Serial number "${map.serialNumber}" on ${item.quantity} tools: a serial number is for one tool; clear it, or list each tool on its own row` }); ok = false; }
+    }
     const location = platformLocationOf(item.location);
     if (!location) {
       const spelling = item.location ?? NO_LOCATION;
@@ -379,7 +421,7 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
     groups.set(sku, [...(groups.get(sku) ?? []), { item, map, location: location! }]);
   }
   for (const m of mapping.items) {
-    if (!used.has(itemKey(m)) && !problems.some((p) => p.code === 'MAPPING_ROW_INVALID' && p.row === m.row)) {
+    if (!used.has(keyOf.get(m)!) && !problems.some((p) => p.code === 'MAPPING_ROW_INVALID' && p.row === m.row)) {
       problems.push({ code: 'UNUSED_MAPPING_ROW', ...at(m), detail: 'Not in the stock workbook any more; delete the row or check the workbook' });
     }
   }
@@ -408,6 +450,11 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
     if (new Set(rows.map((r) => nameKey(r.item.name))).size > 1) {
       problems.push({ code: 'SKU_JOINS_DIFFERENT_NAMES', productId: sku, name: first.item.name, detail: `${sku} joins ${rows.map((r) => `"${r.item.name}"`).join(', ')}; the first name is used` });
     }
+    const serials = [...new Set(rows.map((r) => r.map.serialNumber).filter((x): x is string => !!x))];
+    if (serials.length > 1 || (serials.length === 1 && rows.reduce((a, r) => a + r.item.quantity, 0) > 1)) {
+      problems.push({ code: 'SKU_CONFLICT', productId: sku, detail: `${sku} joins rows with a serial number (${serials.join(', ')}); a serial number is for one tool (${where})` });
+      continue;
+    }
     const prices = [...new Set(rows.map((r) => r.item.unitPrice).filter((p): p is number => p !== null))];
     if (prices.length > 1) {
       problems.push({ code: 'SKU_JOINS_DIFFERENT_NAMES', productId: sku, name: first.item.name, detail: `${sku} joins rows with prices ${prices.map((p) => `R${p}`).join(', ')}; R${prices[0]} is used` });
@@ -419,6 +466,7 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
       unitOfMeasure: first.map.unitOfMeasure!,
       requiredStock: rows.reduce((a, r) => a + r.item.requiredStock, 0),
       unitCost: prices[0] ?? null,
+      serialNumber: serials[0] ?? null,
       oldProductIds: [...new Set(rows.map((r) => r.item.oldProductId).filter((x): x is string => !!x))],
       balances: rows.map((r) => ({ location: r.location, quantity: r.item.quantity })),
     });
@@ -429,6 +477,17 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
     .filter((name) => typeByPlatform.has(name))
     .sort((a, b) => a.localeCompare(b))
     .map((name) => ({ name, type: typeByPlatform.get(name)! }));
+
+  // No two items with one serial number.
+  const bySerial = new Map<string, string[]>();
+  for (const m of materials) if (m.serialNumber) bySerial.set(m.serialNumber.toLowerCase(), [...(bySerial.get(m.serialNumber.toLowerCase()) ?? []), m.sku]);
+  const sharing = new Set<string>();
+  for (const [serial, skus] of bySerial) {
+    if (skus.length < 2) continue;
+    problems.push({ code: 'SKU_CONFLICT', productId: skus[0], detail: `Serial number "${serial}" is given to ${skus.join(', ')}; each tool has its own` });
+    skus.forEach((x) => sharing.add(x));
+  }
+  if (sharing.size > 0) materials.splice(0, materials.length, ...materials.filter((m) => !sharing.has(m.sku)));
 
   materials.sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
   return { materials, locations: plannedLocations, problems };
