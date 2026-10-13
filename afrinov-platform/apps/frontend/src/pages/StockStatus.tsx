@@ -138,21 +138,21 @@ export function StockStatus() {
         </div>
       )}
 
-      {/* Search and filters, each with its label, in a grid (one to a row on a phone). */}
+      {/* Labelled filters, each only as wide as it needs, side by side and wrapping (one to a row on a phone). */}
       <div className="mb-3">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="Search" htmlFor="ss-search">
+        <div className="flex flex-wrap items-start gap-3">
+          <Field label="Search" htmlFor="ss-search" className="w-full sm:w-80">
             <div className="relative">
               <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
               <Input id="ss-search" className="pl-8" placeholder="Item, code or location…" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
           </Field>
-          <Field label="Show" htmlFor="ss-view">
+          <Field label="Show" htmlFor="ss-view" className="w-full sm:w-64">
             <Select id="ss-view" value={view} onChange={(e) => setView(e.target.value)}>
               {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
             </Select>
           </Field>
-          <Field label="Category" htmlFor="ss-category">
+          <Field label="Category" htmlFor="ss-category" className="w-full sm:w-64">
             <Select id="ss-category" value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All categories</option>
               {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}

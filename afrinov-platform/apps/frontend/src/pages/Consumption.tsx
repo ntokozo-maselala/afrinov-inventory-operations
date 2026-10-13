@@ -123,23 +123,23 @@ export function Consumption() {
         )}
       />
 
-      {/* The period and filters, each with its label, in a grid (two to a row on a phone). */}
+      {/* Labelled filters, each only as wide as it needs, side by side and wrapping (one to a row on a phone). */}
       <div className="mb-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <Field label="From" htmlFor="su-from">
+        <div className="flex flex-wrap items-start gap-3">
+          <Field label="From" htmlFor="su-from" className="w-full sm:w-44">
             <Input id="su-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
           </Field>
-          <Field label="To" htmlFor="su-to">
+          <Field label="To" htmlFor="su-to" className="w-full sm:w-44">
             <Input id="su-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
           </Field>
-          <Field label="Project" htmlFor="su-project">
+          <Field label="Project" htmlFor="su-project" className="w-full sm:w-72">
             <Select id="su-project" value={project} onChange={(e) => setProject(e.target.value)}>
               <option value="">All projects</option>
               <option value={NO_PROJECT}>No project</option>
               {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{projectLabel(p.projectNumber)}</option>)}
             </Select>
           </Field>
-          <Field label="Issued to" htmlFor="su-recipient">
+          <Field label="Issued to" htmlFor="su-recipient" className="w-full sm:w-64">
             <Select id="su-recipient" value={recipient} onChange={(e) => setRecipient(e.target.value)}>
               <option value="">Everyone</option>
               <option value={NO_RECIPIENT}>Not recorded</option>
@@ -148,7 +148,7 @@ export function Consumption() {
               ))}
             </Select>
           </Field>
-          <Field label="Category" htmlFor="su-category">
+          <Field label="Category" htmlFor="su-category" className="w-full sm:w-64">
             <Select id="su-category" value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All categories</option>
               {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
