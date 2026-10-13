@@ -345,7 +345,7 @@ export function Locations() {
         title="Locations"
         description="Manage inventory storage and operational locations."
         actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add location
           </Button>
         }

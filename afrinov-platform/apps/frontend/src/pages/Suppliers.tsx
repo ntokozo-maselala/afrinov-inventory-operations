@@ -38,7 +38,7 @@ export function Suppliers() {
       <PageHeader
         title="Suppliers"
         description={PROCUREMENT_ENABLED ? 'Vendor master. Used to populate purchase orders and goods receipts.' : 'Vendor master. The companies your stock is bought from.'}
-        actions={<Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setAdding(true)}>Add supplier</Button>}
+        actions={<Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setAdding(true)}>Add supplier</Button>}
       />
 
       <Toolbar

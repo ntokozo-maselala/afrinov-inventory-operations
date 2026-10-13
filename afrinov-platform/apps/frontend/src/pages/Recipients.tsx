@@ -72,7 +72,7 @@ export function Recipients() {
       <PageHeader
         title="Recipients"
         description="The people and places stock is issued to: workers, machines, client sites and contractors."
-        actions={canManage && <Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setEditing('new')}>Add recipient</Button>}
+        actions={canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setEditing('new')}>Add recipient</Button>}
       />
 
       <Toolbar

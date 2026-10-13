@@ -135,7 +135,7 @@ export function Dashboard() {
             <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
               Refresh
             </Button>
-            <Button variant="primary" size="sm" leadingIcon={<Icon.Box size={12} />} onClick={() => navigate('/materials')}>
+            <Button variant="primary" size="sm" leadingIcon={<Icon.Box size={14} />} onClick={() => navigate('/materials')}>
               Add Item
             </Button>
           </div>

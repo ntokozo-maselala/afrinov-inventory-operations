@@ -249,7 +249,7 @@ export function Projects() {
         title="Projects"
         description="Manage projects and their lifecycle. Inventory consumption is tracked per project number."
         actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add project
           </Button>
         }

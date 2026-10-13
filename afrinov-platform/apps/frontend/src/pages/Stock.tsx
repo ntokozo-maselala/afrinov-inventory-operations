@@ -62,17 +62,17 @@ export function Stock() {
           <div className="flex flex-wrap gap-2">
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']}>
             <Link to="/stock/receive">
-              <Button variant="primary" leadingIcon={<Icon.ArrowDown size={14} />}>Receive stock</Button>
+              <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowDown size={14} />}>Receive stock</Button>
             </Link>
           </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
             <Link to="/stock/issue">
-              <Button variant="primary" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
+              <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
             </Link>
           </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
             <Link to="/stock/count">
-              <Button variant="primary" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
+              <Button variant="primary" size="sm" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
             </Link>
           </RoleGuard>
           </div>
