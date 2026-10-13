@@ -339,7 +339,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       <Field label="Roles" htmlFor="usr-roles" required help="Users need at least one role. ADMIN is the only role with full settings access." error={fieldErrors.roles}>
         <div id="usr-roles" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {ALL_ROLES.map((r) => (
-            <label key={r} className={`flex items-center gap-2 p-2 rounded border ${roles.includes(r) ? 'border-brand-300 bg-brand-50/50' : 'border-surface-200 bg-surface-0'} cursor-pointer hover:bg-surface-50`}>
+            <label key={r} className={`flex items-center gap-2 p-2 rounded border ${roles.includes(r) ? 'border-brand-300 bg-brand-50/50 dark:bg-brand-900/30' : 'border-surface-200 bg-surface-0'} cursor-pointer hover:bg-surface-50`}>
               <input type="checkbox" className="h-4 w-4 rounded border-surface-300 text-brand-500 focus:ring-brand-100" checked={roles.includes(r)} onChange={() => toggleRole(r)} />
               <span className="text-sm text-surface-900">{ROLE_LABEL[r]}</span>
               <span className="text-xs text-surface-500 font-mono">{r}</span>
