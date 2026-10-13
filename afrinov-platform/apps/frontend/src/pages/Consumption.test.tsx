@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
+const { mockGet, mockDownload, mockPdf } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn() }));
 vi.mock('../api/client', () => ({ api: { get: mockGet } }));
-vi.mock('../api/exportConsumption', () => ({ downloadConsumption: mockDownload }));
+vi.mock('../api/exportConsumption', () => ({ downloadConsumption: mockDownload, downloadConsumptionPdf: mockPdf }));
 
 const { Consumption } = await import('./Consumption');
 const { ToastProvider } = await import('../components/Toast');
@@ -45,6 +45,7 @@ describe('Consumption page', () => {
   beforeEach(() => {
     mockGet.mockReset();
     mockDownload.mockReset().mockResolvedValue(undefined);
+    mockPdf.mockReset().mockResolvedValue(undefined);
   });
 
   it('opens on this month, with From and To date boxes as on the Stock report', async () => {
@@ -108,16 +109,20 @@ describe('Consumption page', () => {
     await waitFor(() => expect(lastReportCall()).toBe('/reports/consumption?from=2026-03-01&to=2026-03-31'));
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-04-01' } });
     expect(screen.getByText('The start date is after the end date.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download as Excel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
   });
 
-  it('downloads the same selection as Excel', async () => {
+  it('downloads the same selection as Excel, or as a PDF that says what it covers', async () => {
     renderPage();
     await screen.findByText('Pipe');
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CONSUMABLES' } });
     await waitFor(() => expect(lastReportCall()).toContain('category=CONSUMABLES'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download as Excel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(expect.stringContaining('category=CONSUMABLES')));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith(expect.stringContaining('category=CONSUMABLES'), ['Category: Consumables']));
   });
 
   it('adds up by who it was issued to; a name opens their issue slips under Movements', async () => {

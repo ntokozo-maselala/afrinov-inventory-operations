@@ -13,13 +13,12 @@ import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
-import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
-import { useToast } from '../components/Toast';
-import { downloadReorderList } from '../api/exportReorderList';
+import { DownloadMenu } from '../components/DownloadMenu';
+import { downloadReorderList, downloadReorderListPdf } from '../api/exportReorderList';
 import { CATEGORIES } from '../lib/categories';
 
 /** One item, as GET /reports/stock-status returns it. */
@@ -57,19 +56,6 @@ export function StockStatus() {
   const [params] = useSearchParams();
   const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'attention'));
   const [category, setCategory] = useState('');
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
-
-  async function download() {
-    setDownloading(true);
-    try {
-      await downloadReorderList(category || undefined);
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message);
-    } finally {
-      setDownloading(false);
-    }
-  }
 
   const counts = useMemo(() => {
     const c: Record<Status, number> = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0 };
@@ -107,16 +93,11 @@ export function StockStatus() {
         )}
         actions={(
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              leadingIcon={<Icon.Download size={14} />}
-              onClick={download}
-              loading={downloading}
+            <DownloadMenu
+              label="Download re-order list"
+              onDownload={(format) => (format === 'pdf' ? downloadReorderListPdf : downloadReorderList)(category || undefined)}
               disabled={!items.data || toReorder === 0}
-            >
-              Download re-order list
-            </Button>
+            />
             {PROCUREMENT_ENABLED && (
               <Link to="/purchase-orders" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.Cart size={14} /> Create purchase order

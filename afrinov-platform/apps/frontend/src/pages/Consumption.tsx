@@ -11,12 +11,10 @@ import { FilterBar, FILTER_WIDTH, DATE_WIDTH } from '../components/FilterBar';
 import { Field, Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
-import { Button } from '../components/Button';
-import { Icon } from '../components/Icon';
-import { useToast } from '../components/Toast';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
-import { downloadConsumption } from '../api/exportConsumption';
+import { downloadConsumption, downloadConsumptionPdf } from '../api/exportConsumption';
 import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
 import { thisMonth, today as todayIso } from '../lib/dates';
@@ -39,8 +37,6 @@ export function Consumption() {
   const [project, setProject] = useState('');
   const [category, setCategory] = useState('');
   const [recipient, setRecipient] = useState('');
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
 
   /** Set one end of the period, keeping the other where it is. */
   function setDate(key: 'from' | 'to', value: string) {
@@ -65,22 +61,18 @@ export function Consumption() {
   const recipients = useApi<Recipient[]>('/recipients');
   const currency = report.data?.currency ?? 'ZAR';
 
-  async function download() {
-    setDownloading(true);
-    try {
-      await downloadConsumption(query);
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message);
-    } finally {
-      setDownloading(false);
-    }
-  }
-
   const projectLabel = (p: string | null) => {
     if (p === null) return 'No project';
     const name = (projects.data ?? []).find((x) => x.projectNumber === p)?.name;
     return name ? `${p} · ${name}` : p;
   };
+
+  /** The selection in words, for the top of the PDF. */
+  const filters = [
+    project && `Project: ${projectLabel(project === NO_PROJECT ? null : project)}`,
+    recipient && `Issued to: ${recipient === NO_RECIPIENT ? 'Not recorded' : (recipients.data ?? []).find((r) => r.id === recipient)?.name ?? recipient}`,
+    category && `Category: ${categoryLabel(category)}`,
+  ].filter((f): f is string => !!f);
 
   const projectColumns: DataTableColumn<ConsumptionReport['byProject'][number]>[] = [
     {
@@ -118,9 +110,10 @@ export function Consumption() {
         title="Stock used"
         description="What the store issued in a period, less what came back, at each item's unit price (excl. VAT): by project, by who it was issued to, and by item. Replaces the workbook's Stock Report and Consumable Box sheets."
         actions={(
-          <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={!!problem || !report.data}>
-            Download as Excel
-          </Button>
+          <DownloadMenu
+            onDownload={(format) => (format === 'pdf' ? downloadConsumptionPdf(query, filters) : downloadConsumption(query))}
+            disabled={!!problem || !report.data}
+          />
         )}
       />
 

@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), perms: { admin: false } }));
+const { mockGet, mockDownload, mockPdf, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn(), perms: { admin: false } }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin }));
-vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload }));
+vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload, downloadReorderListPdf: mockPdf }));
 
 const { StockStatus } = await import('./StockStatus');
 const { ToastProvider } = await import('../components/Toast');
@@ -32,7 +32,14 @@ describe('StockStatus page', () => {
     perms.admin = false;
     mockGet.mockReset().mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : ROWS));
     mockDownload.mockReset().mockResolvedValue(undefined);
+    mockPdf.mockReset().mockResolvedValue(undefined);
   });
+
+  /** Open the Download menu and choose a format. */
+  function downloadAs(format: 'Excel (.xlsx)' | 'PDF (.pdf)') {
+    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: format }));
+  }
 
   function renderPage() {
     render(<MemoryRouter><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
@@ -69,13 +76,15 @@ describe('StockStatus page', () => {
     expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
   });
 
-  it('downloads the re-order list, and reports a failure', async () => {
+  it('downloads the re-order list as Excel or PDF, and reports a failure', async () => {
     renderPage();
     await screen.findByText('Grinding disc');
-    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
+    downloadAs('Excel (.xlsx)');
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(undefined));
+    downloadAs('PDF (.pdf)');
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith(undefined));
     mockDownload.mockRejectedValueOnce(new Error('Request failed (500)'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
+    downloadAs('Excel (.xlsx)');
     expect(await screen.findByText('Request failed (500)')).toBeInTheDocument();
   });
 
@@ -83,8 +92,8 @@ describe('StockStatus page', () => {
     renderPage();
     await screen.findByText('Grinding disc');
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CONSUMABLES' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('CONSUMABLES'));
+    downloadAs('PDF (.pdf)');
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith('CONSUMABLES'));
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'TOOLS' } });
     expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled();
   });
