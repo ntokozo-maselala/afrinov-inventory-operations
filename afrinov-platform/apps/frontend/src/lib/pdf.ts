@@ -1,8 +1,8 @@
 // The PDF copy of a report, for sending by email or filing: A4 landscape, the
-// Afrinov logo, the report's title and what it covers at the top, then its
-// tables, each with its subtotal rows, and "Page X of Y" with when it was made
-// at the foot of every page. Each table is as wide as its content, from the left
-// margin; only one too wide for the page spans it, and then only its text
+// Afrinov logo centred at the top, then the report's title and what it covers,
+// its tables, each with its subtotal rows, and "Page X of Y" with when it was
+// made at the foot of every page. Each table is as wide as its content, from the
+// left margin; only one too wide for the page spans it, and then only its text
 // columns wrap. Built in the browser from the same data the page shows, so live
 // and frontend-only mode give the same file. jsPDF loads only when a PDF is
 // asked for.
@@ -77,7 +77,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
   const pageHeight = doc.internal.pageSize.getHeight();
   const finalY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
-  drawLogo(doc, SIDE, MARGIN - 2, LOGO_HEIGHT);
+  drawLogo(doc, pageWidth / 2, MARGIN - 2, LOGO_HEIGHT);
   const titleY = MARGIN - 2 + LOGO_HEIGHT + 9;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
@@ -206,8 +206,8 @@ export function parsePath(d: string): PathOp[] {
   return ops;
 }
 
-/** The Afrinov logo as vector shapes, so it stays sharp in print: its top-left at (x, y), `height` mm tall. */
-function drawLogo(doc: jsPDF, x: number, y: number, height: number) {
+/** The Afrinov logo as vector shapes, so it stays sharp in print: centred on `centre`, its top at `y`, `height` mm tall. */
+function drawLogo(doc: jsPDF, centre: number, y: number, height: number) {
   const shapes = LOGO_PATHS.map(parsePath);
   const xs: number[] = [];
   const ys: number[] = [];
@@ -215,6 +215,7 @@ function drawLogo(doc: jsPDF, x: number, y: number, height: number) {
   const left = Math.min(...xs);
   const top = Math.min(...ys);
   const scale = height / (Math.max(...ys) - top);
+  const x = centre - ((Math.max(...xs) - left) * scale) / 2;
   shapes.forEach((ops, i) => {
     if (LOGO_HIGHLIGHTS.has(i)) return; // too faint to show in print
     doc.setFillColor(LOGO_FILLS[i] ?? '#E3001B');
