@@ -7,8 +7,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
-import { Input, Select } from '../components/Field';
+import { Field, Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Button } from '../components/Button';
@@ -124,33 +123,44 @@ export function Consumption() {
         )}
       />
 
-      <Toolbar
-        left={(
-          <>
-            <Input type="date" className="sm:w-40" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} aria-label="From" invalid={!!problem} />
-            <span className="text-meta">to</span>
-            <Input type="date" className="sm:w-40" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} aria-label="To" invalid={!!problem} />
-            <Select className="sm:w-60" value={project} onChange={(e) => setProject(e.target.value)} aria-label="Project">
+      {/* The period and filters, each with its label, in a grid (two to a row on a phone). */}
+      <div className="mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <Field label="From" htmlFor="su-from">
+            <Input id="su-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+          </Field>
+          <Field label="To" htmlFor="su-to">
+            <Input id="su-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+          </Field>
+          <Field label="Project" htmlFor="su-project">
+            <Select id="su-project" value={project} onChange={(e) => setProject(e.target.value)}>
               <option value="">All projects</option>
               <option value={NO_PROJECT}>No project</option>
               {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{projectLabel(p.projectNumber)}</option>)}
             </Select>
-            <Select className="sm:w-52" value={recipient} onChange={(e) => setRecipient(e.target.value)} aria-label="Issued to">
+          </Field>
+          <Field label="Issued to" htmlFor="su-recipient">
+            <Select id="su-recipient" value={recipient} onChange={(e) => setRecipient(e.target.value)}>
               <option value="">Everyone</option>
               <option value={NO_RECIPIENT}>Not recorded</option>
               {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
                 <option key={r.id} value={r.id}>{r.name}{r.active ? '' : ' (inactive)'}</option>
               ))}
             </Select>
-            <Select className="sm:w-56" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+          </Field>
+          <Field label="Category" htmlFor="su-category">
+            <Select id="su-category" value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All categories</option>
               {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </Select>
-            {(project || category || recipient) && <Button variant="ghost" size="sm" onClick={() => { setProject(''); setCategory(''); setRecipient(''); }}>Clear</Button>}
-          </>
+          </Field>
+        </div>
+        {(project || category || recipient) && (
+          <div className="flex justify-end mt-2">
+            <Button variant="ghost" size="sm" onClick={() => { setProject(''); setCategory(''); setRecipient(''); }}>Clear filters</Button>
+          </div>
         )}
-        right={<span className="text-meta">{range.from} to {range.to}</span>}
-      />
+      </div>
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}

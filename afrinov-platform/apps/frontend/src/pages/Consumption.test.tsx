@@ -57,6 +57,17 @@ describe('Consumption page', () => {
     expect(screen.queryByLabelText('Period')).not.toBeInTheDocument();
   });
 
+  it('labels every selector, and does not repeat the dates beside them', async () => {
+    renderPage('/reports/consumption?from=2026-03-01&to=2026-03-31');
+    await screen.findByText('Pipe');
+    for (const label of ['From', 'To', 'Project', 'Issued to', 'Category']) {
+      // A visible label, tied to its control.
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('2026-03-01 to 2026-03-31')).not.toBeInTheDocument();
+  });
+
   it('takes its period from the address, so it can be bookmarked or shared', async () => {
     renderPage('/reports/consumption?from=2026-03-01&to=2026-03-31');
     await screen.findByText('Pipe');
