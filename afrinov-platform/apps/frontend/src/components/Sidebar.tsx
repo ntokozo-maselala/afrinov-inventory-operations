@@ -58,11 +58,11 @@ function NavItemComponent({
     : 'flex items-center gap-2.5 px-3 py-1.5 mx-2 rounded text-sm transition-colors';
 
   const stateClass = (isActive || isChildActive)
-    ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-50 dark:text-brand-700'
+    ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
     : 'text-surface-700 hover:bg-surface-100 dark:text-surface-700 dark:hover:bg-surface-100';
 
   const iconColorClass = (isActive || isChildActive)
-    ? 'text-brand-600 dark:text-brand-600'
+    ? 'text-brand-600 dark:text-brand-300'
     : 'text-surface-400 dark:text-surface-400';
 
   const handleClick = (e: React.MouseEvent) => {

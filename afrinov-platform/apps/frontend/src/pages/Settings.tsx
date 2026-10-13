@@ -134,7 +134,7 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
                     className={({ isActive }) =>
                       `block rounded px-3 py-2 text-sm transition-colors ${
                         isActive
-                          ? 'bg-brand-50 text-brand-700 font-semibold'
+                          ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
                           : 'text-surface-700 hover:bg-surface-100'
                       }`
                     }
