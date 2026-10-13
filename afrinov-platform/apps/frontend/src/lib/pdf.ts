@@ -53,7 +53,7 @@ const SIDE = 20;
 /** Top and bottom. */
 const MARGIN = 12;
 /** The logo's height at the top of the first page, in mm. */
-const LOGO_HEIGHT = 16;
+const LOGO_HEIGHT = 24;
 const FONT_SIZE = 8;
 const CELL_PADDING = 1.5;
 
