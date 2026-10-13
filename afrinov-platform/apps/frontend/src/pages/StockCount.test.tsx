@@ -68,7 +68,7 @@ describe('StockCount page', () => {
     await chooseA1();
     count('Cutting disc', '7,5');
     count('Welding gloves', '4');
-    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: ' Rack A recount ' } });
+    fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: ' Rack A recount ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
     expect(screen.getByText(/1 adjustment will be posted at A-1: 0 up, 1 down/)).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
@@ -168,5 +168,43 @@ describe('StockCount page', () => {
     renderPage();
     await chooseA1();
     expect(await screen.findByText('No counts recorded here yet.')).toBeInTheDocument();
+  });
+
+  it('offers a note on an item that differs, not on one that matches, and sends it with the count', async () => {
+    renderPage();
+    await chooseA1();
+    count('Cutting disc', '7');
+    count('Welding gloves', '4');
+    expect(screen.queryByLabelText('Note for Welding gloves')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Note for Cutting disc'), { target: { value: ' 3 cracked, binned ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    const lines = (mockPost.mock.calls[0]![1] as { lines: Array<{ materialId: string; note?: string }> }).lines;
+    expect(lines.find((l) => l.materialId === 'm-1')!.note).toBe('3 cracked, binned');
+    expect(lines.find((l) => l.materialId === 'm-2')).not.toHaveProperty('note');
+  });
+
+  it('drops a note when the count is corrected to match, and keeps notes in the draft', async () => {
+    renderPage();
+    await chooseA1();
+    count('Cutting disc', '7');
+    fireEvent.change(screen.getByLabelText('Note for Cutting disc'), { target: { value: 'behind rack' } });
+    expect(JSON.parse(localStorage.getItem('stock-count-draft:l-1')!).notes).toEqual({ 'm-1': 'behind rack' });
+    count('Cutting disc', stockAtA1.find((r) => r.materialId === 'm-1')!.quantity);
+    expect(screen.queryByLabelText('Note for Cutting disc')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect((mockPost.mock.calls[0]![1] as { lines: Array<{ note?: string }> }).lines[0]).not.toHaveProperty('note');
+  });
+
+  it('counting blind, offers a note on every counted item so the box gives nothing away', async () => {
+    renderPage();
+    await chooseA1();
+    fireEvent.click(screen.getByLabelText(/Hide system quantities/));
+    count('Welding gloves', '4');
+    expect(screen.getByLabelText('Note for Welding gloves')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Note for Cutting disc')).not.toBeInTheDocument();
   });
 });

@@ -20,6 +20,7 @@ function CountSheet({ lines }: { lines: CountRecord['lines'] }) {
           <th className="py-1.5 font-normal text-right">System</th>
           <th className="py-1.5 font-normal text-right">Counted</th>
           <th className="py-1.5 font-normal text-right">Difference</th>
+          <th className="py-1.5 font-normal pl-4">Note</th>
         </tr>
       </thead>
       <tbody>
@@ -33,6 +34,7 @@ function CountSheet({ lines }: { lines: CountRecord['lines'] }) {
               <td className={`py-1.5 text-right font-mono ${diff === 0 ? 'text-surface-500' : diff > 0 ? 'text-success-700' : 'text-danger-700'}`}>
                 {diff === 0 ? '✓' : `${diff > 0 ? '+' : ''}${diff}`}
               </td>
+              <td className="py-1.5 pl-4 text-surface-700">{l.note ?? ''}</td>
             </tr>
           );
         })}

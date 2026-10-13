@@ -73,5 +73,5 @@ export interface CountRecord {
   counted: number; adjusted: number; note: string | null;
   differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
   /** Every item counted, matched or not, with what the system had. Empty for counts posted before sheets were kept. */
-  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string }>;
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string; note?: string | null }>;
 }

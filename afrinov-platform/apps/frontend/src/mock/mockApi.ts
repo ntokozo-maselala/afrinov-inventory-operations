@@ -676,7 +676,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/stock-receipts') return listReceipts(qs);
   if (method === 'GET' && p === '/stock-counts') return listCounts(qs);
   if (method === 'POST' && p === '/stock-counts') {
-    return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> });
+    return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number; note?: string }> });
   }
   if (method === 'POST' && p === '/inventory-adjustments') {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
@@ -1072,7 +1072,7 @@ function buildMockSettings(): Record<string, MockSetting> {
 const MOCK_SETTINGS: Record<string, MockSetting> = buildMockSettings();
 const MOCK_AUDIT: Array<{ id: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: string; actorId: string | null }> = [];
 /** Full count sheets (stock_count_lines): every item counted, with what the system had. */
-const MOCK_COUNT_LINES: Array<{ countId: string; materialId: string; expected: number; counted: number }> = [];
+const MOCK_COUNT_LINES: Array<{ countId: string; materialId: string; expected: number; counted: number; note: string | null }> = [];
 
 function validateMockSetting(key: string, raw: unknown): { value?: unknown; error?: string } {
   const def = MOCK_SETTINGS[key];
@@ -1388,7 +1388,7 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
 }
 
 // Mirrors StockCountService.post: all or nothing, refused when stock moved since it was shown.
-function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> }) {
+function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number; note?: string }> }) {
   const lines = b.lines ?? [];
   if (!b.locationId || lines.length === 0) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
   if (lines.some((l) => !(l.countedQuantity >= 0) || !(l.expectedQuantity >= 0))) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
@@ -1404,7 +1404,7 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
   }
   const countId = nextId('count');
   const note = b.note?.trim();
-  for (const l of lines) MOCK_COUNT_LINES.push({ countId, materialId: l.materialId, expected: getBalance(l.materialId, b.locationId!), counted: l.countedQuantity });
+  for (const l of lines) MOCK_COUNT_LINES.push({ countId, materialId: l.materialId, expected: getBalance(l.materialId, b.locationId!), counted: l.countedQuantity, note: l.note?.trim() || null });
   const results = lines.map((l) => {
     const variance = l.countedQuantity - getBalance(l.materialId, b.locationId!);
     if (Math.abs(variance) < 0.00005) return { materialId: l.materialId, variance: '0', transactionId: null as string | null };
@@ -1412,7 +1412,7 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
     state.transactions.push({
       id, postedAt: new Date().toISOString(), type: 'ADJUSTMENT', materialId: l.materialId, locationId: b.locationId!,
       quantity: String(variance), actorId: 'user-1', reasonCode: 'COUNT_VARIANCE',
-      reasonNote: note ? `Stock count: ${note}` : 'Stock count', referenceType: 'StockCount', referenceId: countId,
+      reasonNote: [note, l.note?.trim()].some(Boolean) ? `Stock count: ${[note, l.note?.trim()].filter(Boolean).join(' — ')}` : 'Stock count', referenceType: 'StockCount', referenceId: countId,
     });
     return { materialId: l.materialId, variance: String(variance), transactionId: id as string | null };
   });
@@ -1787,7 +1787,7 @@ function listCounts(qs: Record<string, string>) {
         .filter((l) => l.countId === a.entityId)
         .map((l) => {
           const m = findMaterial(l.materialId);
-          return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', expected: String(l.expected), counted: String(l.counted) };
+          return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', expected: String(l.expected), counted: String(l.counted), note: l.note };
         })
         .sort((x, y) => x.name.localeCompare(y.name)),
     };
