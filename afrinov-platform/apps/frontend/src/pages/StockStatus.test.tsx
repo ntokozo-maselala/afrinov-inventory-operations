@@ -73,10 +73,20 @@ describe('StockStatus page', () => {
     renderPage();
     await screen.findByText('Grinding disc');
     fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(undefined));
     mockDownload.mockRejectedValueOnce(new Error('Request failed (500)'));
     fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
     expect(await screen.findByText('Request failed (500)')).toBeInTheDocument();
+  });
+
+  it('downloads the re-order list for the chosen category, and none for a category with nothing to re-order', async () => {
+    renderPage();
+    await screen.findByText('Grinding disc');
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CONSUMABLES' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('CONSUMABLES'));
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'TOOLS' } });
+    expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled();
   });
 
   it('offers no download when nothing needs re-ordering', async () => {

@@ -70,7 +70,16 @@ describe('re-order list export', () => {
     expect(String(t[1]![0])).toMatch(/^Nothing needs re-ordering/);
   });
 
-  it('names the file by date', () => {
+  it('names the file by date, and by category when it is for one', () => {
     expect(reorderFilename(meta.generatedAt)).toBe('afrinov-reorder-list-2026-10-09.xlsx');
+    expect(reorderFilename(meta.generatedAt, 'TOOLING_PPE_ELECTRICAL')).toBe('afrinov-reorder-list-tooling-ppe-electrical-2026-10-09.xlsx');
+  });
+
+  it('names the category in the title of a one-category list', async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildReorderXlsx([], { ...meta, category: 'CONSUMABLES' })) as unknown as ExcelJS.Buffer);
+    const ws = wb.getWorksheet('Re-order list')!;
+    expect(ws.getCell('A1').value).toBe('Re-order list: Consumables');
+    expect(String(table(ws)[1]![0])).toMatch(/^Nothing in Consumables needs re-ordering/);
   });
 });

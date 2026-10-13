@@ -63,7 +63,7 @@ export function StockStatus() {
   async function download() {
     setDownloading(true);
     try {
-      await downloadReorderList();
+      await downloadReorderList(category || undefined);
     } catch (e) {
       toast.error('Download failed', (e as Error).message);
     } finally {
@@ -76,6 +76,9 @@ export function StockStatus() {
     for (const r of items.data ?? []) c[r.status]++;
     return c;
   }, [items.data]);
+
+  // What the download would hold: the items to re-order, in the chosen category if one is.
+  const toReorder = (items.data ?? []).filter((r) => needsAttention(r.status) && (!category || r.category === category)).length;
 
   const filtered = useMemo(() => {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -110,7 +113,7 @@ export function StockStatus() {
               leadingIcon={<Icon.Download size={14} />}
               onClick={download}
               loading={downloading}
-              disabled={!items.data || counts.URGENT + counts.WARNING === 0}
+              disabled={!items.data || toReorder === 0}
             >
               Download re-order list
             </Button>
