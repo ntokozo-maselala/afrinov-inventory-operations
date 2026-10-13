@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest';
 import { buildPdf, pdfText } from './pdf';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
+/** Where the table's cells end on the right, in points (an A4 landscape page is 842 wide). */
+const rightEdge = (pdf: string) => Math.max(...[...pdf.matchAll(/^([\d.]+) [\d.]+ ([\d.]+) -?[\d.]+ re$/gm)].map((m) => Number(m[1]) + Number(m[2])));
 
 describe('report PDF', () => {
   it('prints the title, what it covers, each table with its totals, and page numbers', async () => {
@@ -50,6 +52,15 @@ describe('report PDF', () => {
     const one = { columns: [{ header: 'Code' }], rows: [['A']] };
     const out = text(await buildPdf({ title: 'Sheets', lines: [], sections: [one, { ...one, newPage: true }] }));
     expect(out).toContain('Page 2 of 2');
+  });
+
+  it('makes a short table only as wide as its content, and a wide one span the page with only its text wrapping', async () => {
+    const short = text(await buildPdf({ title: 'Short', lines: [], sections: [{ columns: [{ header: 'Category' }, { header: 'Value', align: 'right' }], rows: [['Tools', 'R 7 700,00']] }] }));
+    expect(rightEdge(short)).toBeLessThan(200);
+    const long = 'A very long item name that keeps going '.repeat(8);
+    const wide = text(await buildPdf({ title: 'Wide', lines: [], sections: [{ columns: [{ header: 'Code' }, { header: 'Item', wrap: true }], rows: [['TOOL-TORQUE-1/2', long]] }] }));
+    expect(rightEdge(wide)).toBeGreaterThan(800);
+    expect(wide).toContain('(TOOL-TORQUE-1/2)');
   });
 
   it('swaps characters the PDF fonts cannot print', () => {

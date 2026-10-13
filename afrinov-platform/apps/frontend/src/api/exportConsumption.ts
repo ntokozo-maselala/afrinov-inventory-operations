@@ -94,7 +94,7 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
 
   const sections: PdfTable[] = [{
     heading: 'By category',
-    columns: [{ header: 'Category' }, { header: 'Items', align: 'right', width: 24 }, { header: `Value (${r.currency})`, align: 'right', width: 40 }],
+    columns: [{ header: 'Category', wrap: true }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
     rows: r.byCategory.map((c) => [categoryLabel(c.category), formatNumber(c.items), money(c.value)]),
     totals: [['Total', formatNumber(r.total.items), money(r.total.value)]],
     empty: nothing,
@@ -102,7 +102,7 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
   if (!params.get('projectNumber')) {
     sections.push({
       heading: 'By project',
-      columns: [{ header: 'Project', width: 40 }, { header: 'Name' }, { header: 'Items', align: 'right', width: 24 }, { header: `Value (${r.currency})`, align: 'right', width: 40 }],
+      columns: [{ header: 'Project' }, { header: 'Name', wrap: true }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
       rows: r.byProject.map((p) => [p.projectNumber ?? 'No project', p.projectName ?? '', formatNumber(p.items), money(p.value)]),
       totals: [['Total', '', formatNumber(r.total.items), money(r.total.value)]],
       empty: nothing,
@@ -110,7 +110,7 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
   }
   sections.push({
     heading: 'By who it was issued to',
-    columns: [{ header: 'Issued to' }, { header: 'Type', width: 30 }, { header: 'Issues', align: 'right', width: 22 }, { header: 'Items', align: 'right', width: 24 }, { header: `Value (${r.currency})`, align: 'right', width: 40 }],
+    columns: [{ header: 'Issued to', wrap: true }, { header: 'Type' }, { header: 'Issues', align: 'right' }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
     rows: r.byRecipient.map((x) => [x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', formatNumber(x.issues), formatNumber(x.items), money(x.value)]),
     totals: [['Total', '', '', formatNumber(r.total.items), money(r.total.value)]],
     empty: nothing,
@@ -120,9 +120,9 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
     sections.push({
       heading: `${categoryLabel(category)}: by item (${group.length})`,
       columns: [
-        { header: 'Code', width: 28 }, { header: 'Item' }, { header: 'Unit', width: 16 },
-        { header: 'Issued', align: 'right', width: 22 }, { header: 'Returned', align: 'right', width: 22 }, { header: 'Used', align: 'right', width: 22 },
-        { header: 'Unit price', align: 'right', width: 28 }, { header: 'Value', align: 'right', width: 32 },
+        { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Unit' },
+        { header: 'Issued', align: 'right' }, { header: 'Returned', align: 'right' }, { header: 'Used', align: 'right' },
+        { header: 'Unit price', align: 'right' }, { header: 'Value', align: 'right' },
       ],
       rows: group.map((i) => [
         i.sku, i.name, i.unitOfMeasure, formatNumber(i.issued), i.returned ? formatNumber(i.returned) : '-', formatNumber(i.used),
@@ -135,8 +135,8 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
     sections.push({
       heading: `Issued to ${r.byRecipient[0]?.name ?? 'the recipient'}, issue by issue`,
       columns: [
-        { header: 'Date', width: 34 }, { header: 'Issue/Return', width: 24 }, { header: 'Code', width: 28 }, { header: 'Item' },
-        { header: 'Quantity', align: 'right', width: 22 }, { header: 'Unit', width: 16 }, { header: 'Project', width: 28 }, { header: 'Issued by', width: 36 },
+        { header: 'Date' }, { header: 'Issue/Return' }, { header: 'Code' }, { header: 'Item', wrap: true },
+        { header: 'Quantity', align: 'right' }, { header: 'Unit' }, { header: 'Project' }, { header: 'Issued by' },
       ],
       rows: r.lines.map((l) => [formatDate(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, formatNumber(l.quantity), l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy]),
     });

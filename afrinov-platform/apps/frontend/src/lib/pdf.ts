@@ -1,7 +1,8 @@
 // The PDF copy of a report, for sending by email or filing: A4 landscape, the
 // report's title and what it covers at the top, then its tables, each with its
 // subtotal rows, and "Page X of Y" with when it was made at the foot of every
-// page. Built in the browser from the same data the page shows, so live and
+// page. Each table is as wide as its content, from the left margin; only one
+// too wide for the page spans it, and then only its text columns wrap. Built in the browser from the same data the page shows, so live and
 // frontend-only mode give the same file. jsPDF loads only when a PDF is asked for.
 import { triggerDownload } from '../api/exportReport';
 import { formatDateTime } from './format';
@@ -9,8 +10,11 @@ import { formatDateTime } from './format';
 export interface PdfColumn {
   header: string;
   align?: 'left' | 'right';
-  /** Width in millimetres; columns without one share what is left. */
-  width?: number;
+  /**
+   * Text that may wrap onto more lines when the table is wider than the page:
+   * names, places and notes. Codes, dates, quantities and amounts never wrap.
+   */
+  wrap?: boolean;
 }
 
 export interface PdfTable {
@@ -42,6 +46,8 @@ export interface PdfReport {
 const BRAND: [number, number, number] = [227, 0, 27];
 const MUTED: [number, number, number] = [90, 99, 112];
 const MARGIN = 12;
+const FONT_SIZE = 8;
+const CELL_PADDING = 1.5;
 
 /**
  * The standard PDF fonts only carry Western European characters; swap the few
@@ -111,18 +117,32 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       y += 10;
       continue;
     }
-    const columnStyles: Record<number, { halign?: 'left' | 'right'; cellWidth?: number }> = {};
-    section.columns.forEach((c, i) => { columnStyles[i] = { halign: c.align ?? 'left', ...(c.width ? { cellWidth: c.width } : {}) }; });
+    // How wide each column is with nothing wrapped: its widest cell, header and totals in bold.
+    const measure = (s: string, bold: boolean) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFontSize(FONT_SIZE);
+      return doc.getTextWidth(pdfText(s));
+    };
+    const natural = section.columns.map((c, i) => Math.max(
+      measure(c.header, true),
+      ...section.rows.map((r) => measure(r[i] ?? '', false)),
+      ...(section.totals ?? []).map((r) => measure(r[i] ?? '', true)),
+    ) + 2 * CELL_PADDING + 0.5);
+    const contentWidth = natural.reduce((sum, w) => sum + w, 0);
+    const fits = contentWidth <= pageWidth - 2 * MARGIN;
+    const columnStyles: Record<number, { halign: 'left' | 'right'; cellWidth: 'wrap' | 'auto' }> = {};
+    section.columns.forEach((c, i) => { columnStyles[i] = { halign: c.align ?? 'left', cellWidth: c.wrap && !fits ? 'auto' : 'wrap' }; });
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN + 6 },
+      tableWidth: fits ? contentWidth : 'auto',
       theme: 'grid',
       head: [section.columns.map((c) => pdfText(c.header))],
       body: [
         ...section.rows.map((r) => r.map(pdfText)),
         ...(section.totals ?? []).map((r) => r.map((cell) => ({ content: pdfText(cell), styles: { fontStyle: 'bold' as const, fillColor: [243, 244, 246] as [number, number, number] } }))),
       ],
-      styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.5, lineColor: [221, 225, 232], lineWidth: 0.1, textColor: [33, 38, 46], overflow: 'linebreak' },
+      styles: { font: 'helvetica', fontSize: FONT_SIZE, cellPadding: CELL_PADDING, lineColor: [221, 225, 232], lineWidth: 0.1, textColor: [33, 38, 46], overflow: 'linebreak' },
       headStyles: { fillColor: [52, 58, 69], textColor: 255, fontStyle: 'bold' },
       columnStyles,
       didParseCell: (data) => {

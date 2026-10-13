@@ -126,7 +126,7 @@ export async function downloadReorderListPdf(category?: string): Promise<void> {
 
   const summary: PdfTable = {
     heading: 'Summary',
-    columns: [{ header: 'Category' }, { header: 'Urgent', align: 'right', width: 22 }, { header: 'Warning', align: 'right', width: 22 }, { header: `Re-order value (${currency})`, align: 'right', width: 40 }],
+    columns: [{ header: 'Category', wrap: true }, { header: 'Urgent', align: 'right' }, { header: 'Warning', align: 'right' }, { header: `Re-order value (${currency})`, align: 'right' }],
     rows: categories.map((c) => {
       const group = rows.filter((r) => r.category === c);
       return [categoryLabel(c), String(group.filter((r) => r.status === 'URGENT').length), String(group.filter((r) => r.status === 'WARNING').length), money(subtotal(c))];
@@ -139,11 +139,11 @@ export async function downloadReorderListPdf(category?: string): Promise<void> {
     return {
       heading: `${categoryLabel(c)} (${group.length})`,
       columns: [
-        { header: 'Code', width: 26 }, { header: 'Item' }, { header: 'Status', width: 16 },
-        { header: 'On hand', align: 'right', width: 18 }, { header: 'Required', align: 'right', width: 18 },
-        { header: '% of req.', align: 'right', width: 16 }, { header: 'Re-order qty', align: 'right', width: 20 },
-        { header: 'Unit', width: 14 }, { header: 'Unit price', align: 'right', width: 24 },
-        { header: 'Re-order value', align: 'right', width: 26 }, { header: 'Last supplier', width: 40 },
+        { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Status' },
+        { header: 'On hand', align: 'right' }, { header: 'Required', align: 'right' },
+        { header: '% of req.', align: 'right' }, { header: 'Re-order qty', align: 'right' },
+        { header: 'Unit' }, { header: 'Unit price', align: 'right' },
+        { header: 'Re-order value', align: 'right' }, { header: 'Last supplier', wrap: true },
       ],
       rows: group.map((r) => {
         const v = value(r);

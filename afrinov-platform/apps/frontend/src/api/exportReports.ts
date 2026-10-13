@@ -105,7 +105,7 @@ export async function downloadReceivedStockPdf(query: string, about: PdfAbout): 
       : receipts.map((r) => ({
         heading: `${formatDate(r.receivedAt)}  ·  ${r.supplierName}  ·  ${r.deliveryRef ?? 'No delivery note'}`,
         note: `Receipt ${r.number}, received by ${r.receivedByName}`,
-        columns: [{ header: 'Code', width: 34 }, { header: 'Item' }, { header: 'Into location', width: 50 }, { header: 'Quantity', align: 'right' as const, width: 26 }, { header: 'Unit', width: 18 }],
+        columns: [{ header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Into location', wrap: true }, { header: 'Quantity', align: 'right' as const }, { header: 'Unit' }],
         rows: r.lines.map((l) => [l.sku, l.name, l.locationName, formatNumber(Number(l.quantity)), l.unitOfMeasure]),
       })),
   }, `afrinov-received-stock-${fileRange(query)}.pdf`);
@@ -123,9 +123,9 @@ export async function downloadIssuedStockPdf(query: string, about: PdfAbout): Pr
         heading: `${formatDateTime(s.issuedAt)}  ·  Issued to ${s.recipientName ?? 'not recorded'}${s.projectNumber ? `  ·  Project ${s.projectNumber}` : ''}`,
         note: `Issued by ${s.issuedByName}`,
         columns: [
-          { header: 'Code', width: 34 }, { header: 'Item' }, { header: 'From location', width: 46 },
-          { header: 'Issued', align: 'right' as const, width: 22 }, { header: 'Returned', align: 'right' as const, width: 22 },
-          { header: 'Unit', width: 16 }, { header: 'Reversed', width: 20 },
+          { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'From location', wrap: true },
+          { header: 'Issued', align: 'right' as const }, { header: 'Returned', align: 'right' as const },
+          { header: 'Unit' }, { header: 'Reversed' },
         ],
         rows: s.lines.map((l) => [
           l.materialSku, l.materialName, l.locationName, formatNumber(Math.abs(Number(l.quantity))),
@@ -139,9 +139,9 @@ export async function downloadIssuedStockPdf(query: string, about: PdfAbout): Pr
 export async function downloadStockCountsPdf(query: string, about: PdfAbout): Promise<void> {
   const counts = await fetchAll<CountRecord>(`/stock-counts?${query}`);
   const columns = [
-    { header: 'Code', width: 34 }, { header: 'Item' }, { header: 'System', align: 'right' as const, width: 22 },
-    { header: 'Counted', align: 'right' as const, width: 22 }, { header: 'Difference', align: 'right' as const, width: 22 },
-    { header: 'Unit', width: 16 }, { header: 'Note', width: 60 },
+    { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'System', align: 'right' as const },
+    { header: 'Counted', align: 'right' as const }, { header: 'Difference', align: 'right' as const },
+    { header: 'Unit' }, { header: 'Note', wrap: true },
   ];
   await downloadPdf({
     ...about,

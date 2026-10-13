@@ -109,9 +109,9 @@ export async function downloadMonthEndPdf(range: { from: string; to: string }): 
   const sections: PdfTable[] = [{
     heading: 'Overview',
     columns: [
-      { header: 'Category' }, { header: 'Items', align: 'right', width: 22 }, { header: 'In stock', align: 'right', width: 22 },
-      { header: `Stock value (${r.currency})`, align: 'right', width: 40 }, { header: 'Urgent', align: 'right', width: 22 },
-      { header: 'Warning', align: 'right', width: 22 }, { header: `Used in period (${r.currency})`, align: 'right', width: 42 },
+      { header: 'Category', wrap: true }, { header: 'Items', align: 'right' }, { header: 'In stock', align: 'right' },
+      { header: `Stock value (${r.currency})`, align: 'right' }, { header: 'Urgent', align: 'right' },
+      { header: 'Warning', align: 'right' }, { header: `Used in period (${r.currency})`, align: 'right' },
     ],
     rows: r.categories.map((c) => [label(c.category), formatNumber(c.items.length), formatNumber(c.itemsInStock), money(c.value), formatNumber(c.urgent), formatNumber(c.warning), money(c.usedValue)]),
     totals: [['Total', formatNumber(r.total.items), formatNumber(r.total.itemsInStock), money(r.total.value), formatNumber(r.total.urgent), formatNumber(r.total.warning), money(r.total.usedValue)]],
@@ -123,10 +123,10 @@ export async function downloadMonthEndPdf(range: { from: string; to: string }): 
       newPage: true,
       heading: `${label(c.category)}: ${title.toLowerCase().replace(/^\w/, (x) => x.toUpperCase())} ${asAt}`,
       columns: [
-        { header: 'S.N', align: 'right', width: 10 }, { header: 'Product ID', width: 26 }, { header: 'Item Name' }, { header: 'Location', width: 26 },
-        { header: 'Required Stock', align: 'right', width: 20 }, { header: 'Current Stock', align: 'right', width: 20 },
-        { header: 'Stock Value Ex VAT', align: 'right', width: 28 }, { header: '% In Stock', align: 'right', width: 18 },
-        { header: 'Unit Price Ex VAT', align: 'right', width: 26 }, { header: 'Re-order Qty', align: 'right', width: 20 }, { header: 'Urgency', width: 18 },
+        { header: 'S.N', align: 'right' }, { header: 'Product ID' }, { header: 'Item Name', wrap: true }, { header: 'Location', wrap: true },
+        { header: 'Required Stock', align: 'right' }, { header: 'Current Stock', align: 'right' },
+        { header: 'Stock Value Ex VAT', align: 'right' }, { header: '% In Stock', align: 'right' },
+        { header: 'Unit Price Ex VAT', align: 'right' }, { header: 'Re-order Qty', align: 'right' }, { header: 'Urgency' },
       ],
       rows: c.items.map((i, n) => [
         String(n + 1), i.sku, i.name, i.location, formatNumber(i.requiredStock), formatNumber(i.currentStock), money(i.value),
@@ -139,8 +139,8 @@ export async function downloadMonthEndPdf(range: { from: string; to: string }): 
     sections.push({
       heading: `${label(c.category)}: stock used, ${formatDate(r.from)} to ${formatDate(r.to)}`,
       columns: [
-        { header: 'Product ID', width: 30 }, { header: 'Item Name' }, { header: 'Rack', width: 34 },
-        { header: 'Stock Used In QTY', align: 'right', width: 30 }, { header: 'Stock In Value Ex VAT', align: 'right', width: 36 },
+        { header: 'Product ID' }, { header: 'Item Name', wrap: true }, { header: 'Rack', wrap: true },
+        { header: 'Stock Used In QTY', align: 'right' }, { header: 'Stock In Value Ex VAT', align: 'right' },
       ],
       rows: c.used.map((u) => [u.sku, u.name, u.location, formatNumber(u.used), money(u.value)]),
       totals: [['', `Total used ${label(c.category)}`, '', '', money(c.usedValue)]],
