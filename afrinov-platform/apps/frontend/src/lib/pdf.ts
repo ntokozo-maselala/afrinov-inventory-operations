@@ -21,6 +21,8 @@ export interface PdfTable {
   totals?: string[][];
   /** Shown instead of the table when it has no rows. */
   empty?: string;
+  /** Start on a new page, as a workbook starts a new sheet. */
+  newPage?: boolean;
 }
 
 export interface PdfReport {
@@ -78,7 +80,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
   const footer = pdfText(`${report.title} · Generated ${formatDateTime(generatedAt.toISOString())}`);
   for (const section of report.sections) {
     // Keep a heading with at least the start of its table.
-    if (y > pageHeight - 40) { doc.addPage(); y = MARGIN; }
+    if (y > pageHeight - 40 || (section.newPage && y > MARGIN)) { doc.addPage(); y = MARGIN; }
     if (section.heading) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);

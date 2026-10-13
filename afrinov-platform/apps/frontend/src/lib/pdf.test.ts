@@ -41,6 +41,12 @@ describe('report PDF', () => {
     expect(out).toMatch(/Page 1 of [3-9]/);
   });
 
+  it('starts a section on a new page when asked', async () => {
+    const one = { columns: [{ header: 'Code' }], rows: [['A']] };
+    const out = text(await buildPdf({ title: 'Sheets', lines: [], sections: [one, { ...one, newPage: true }] }));
+    expect(out).toContain('Page 2 of 2');
+  });
+
   it('swaps characters the PDF fonts cannot print', () => {
     expect(pdfText('R 1 234 − 5 → 6')).toBe('R 1 234 - 5 -> 6');
   });

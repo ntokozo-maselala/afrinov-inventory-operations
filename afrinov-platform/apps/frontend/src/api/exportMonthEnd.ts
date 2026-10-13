@@ -4,12 +4,16 @@
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
 import type { MonthEndReport } from './reportTypes';
+import { downloadPdf, type PdfTable } from '../lib/pdf';
+import { formatDate, formatNumber } from '../lib/format';
+import { formatCurrency } from '../lib/currency';
+import { today } from '../lib/dates';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** The download name: the month when the report covers one, otherwise both dates (as the server names it). */
-export function stockReportFilename(r: Pick<MonthEndReport, 'month' | 'from' | 'to'>): string {
-  return `afrinov-stock-report-${r.month ?? `${r.from}-to-${r.to}`}.xlsx`;
+export function stockReportFilename(r: Pick<MonthEndReport, 'month' | 'from' | 'to'>, extension: 'xlsx' | 'pdf' = 'xlsx'): string {
+  return `afrinov-stock-report-${r.month ?? `${r.from}-to-${r.to}`}.${extension}`;
 }
 
 /**
@@ -86,4 +90,70 @@ async function buildInBrowser(r: MonthEndReport): Promise<ArrayBuffer> {
     for (const u of c.used) wu.addRow([u.sku, u.name, u.location, u.used, u.value]);
   }
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+/**
+ * The stock report as a PDF, laid out as the workbook is: the overview per
+ * category, then each category on its own page with its stock summary (the
+ * Summary sheet's columns) and the stock used in the period (its Used sheet).
+ */
+export async function downloadMonthEndPdf(range: { from: string; to: string }): Promise<void> {
+  const r = await api.get<MonthEndReport>(`/reports/month-end?${new URLSearchParams(range).toString()}`);
+  const money = (n: number | null) => (n === null ? '-' : formatCurrency(n, r.currency));
+  const label = (c: string) => SHEET[c]?.label ?? c;
+  const period = r.month
+    ? new Date(`${r.month}-01T00:00:00Z`).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    : `${formatDate(r.from)} to ${formatDate(r.to)}`;
+  const asAt = r.to >= today() ? 'as it stands now' : `as at the end of ${formatDate(r.to)}`;
+
+  const sections: PdfTable[] = [{
+    heading: 'Overview',
+    columns: [
+      { header: 'Category' }, { header: 'Items', align: 'right', width: 22 }, { header: 'In stock', align: 'right', width: 22 },
+      { header: `Stock value (${r.currency})`, align: 'right', width: 40 }, { header: 'Urgent', align: 'right', width: 22 },
+      { header: 'Warning', align: 'right', width: 22 }, { header: `Used in period (${r.currency})`, align: 'right', width: 42 },
+    ],
+    rows: r.categories.map((c) => [label(c.category), formatNumber(c.items.length), formatNumber(c.itemsInStock), money(c.value), formatNumber(c.urgent), formatNumber(c.warning), money(c.usedValue)]),
+    totals: [['Total', formatNumber(r.total.items), formatNumber(r.total.itemsInStock), money(r.total.value), formatNumber(r.total.urgent), formatNumber(r.total.warning), money(r.total.usedValue)]],
+    empty: 'No items in stock or used in this period.',
+  }];
+  for (const c of r.categories) {
+    const title = SHEET[c.category]?.title ?? 'STOCK INVENTORY';
+    sections.push({
+      newPage: true,
+      heading: `${label(c.category)}: ${title.toLowerCase().replace(/^\w/, (x) => x.toUpperCase())} ${asAt}`,
+      columns: [
+        { header: 'S.N', align: 'right', width: 10 }, { header: 'Product ID', width: 26 }, { header: 'Item Name' }, { header: 'Location', width: 26 },
+        { header: 'Required Stock', align: 'right', width: 20 }, { header: 'Current Stock', align: 'right', width: 20 },
+        { header: 'Stock Value Ex VAT', align: 'right', width: 28 }, { header: '% In Stock', align: 'right', width: 18 },
+        { header: 'Unit Price Ex VAT', align: 'right', width: 26 }, { header: 'Re-order Qty', align: 'right', width: 20 }, { header: 'Urgency', width: 18 },
+      ],
+      rows: c.items.map((i, n) => [
+        String(n + 1), i.sku, i.name, i.location, formatNumber(i.requiredStock), formatNumber(i.currentStock), money(i.value),
+        i.percentOfRequired === null ? '' : `${i.percentOfRequired.toFixed(1)}%`, money(i.unitCost),
+        i.reorderQuantity === null ? '' : formatNumber(i.reorderQuantity), URGENCY[i.status] ?? i.status,
+      ]),
+      totals: [['', '', `Total ${label(c.category)}`, '', '', '', money(c.value), '', '', '', '']],
+      empty: 'No items in this category.',
+    });
+    sections.push({
+      heading: `${label(c.category)}: stock used, ${formatDate(r.from)} to ${formatDate(r.to)}`,
+      columns: [
+        { header: 'Product ID', width: 30 }, { header: 'Item Name' }, { header: 'Rack', width: 34 },
+        { header: 'Stock Used In QTY', align: 'right', width: 30 }, { header: 'Stock In Value Ex VAT', align: 'right', width: 36 },
+      ],
+      rows: c.used.map((u) => [u.sku, u.name, u.location, formatNumber(u.used), money(u.value)]),
+      totals: [['', `Total used ${label(c.category)}`, '', '', money(c.usedValue)]],
+      empty: 'Nothing was used in this period.',
+    });
+  }
+
+  await downloadPdf({
+    title: `Stock report, ${period}`,
+    lines: [
+      `Stock ${asAt}; stock used from ${formatDate(r.from)} to ${formatDate(r.to)}. Values excl. VAT, ${r.currency}.`,
+      `URGENCY against Required Stock: urgent below ${r.bands.urgentBelowPercent}%, warning below ${r.bands.warningBelowPercent}%.`,
+    ],
+    sections,
+  }, stockReportFilename(r, 'pdf'));
 }
