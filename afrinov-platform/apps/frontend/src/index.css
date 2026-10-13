@@ -229,6 +229,8 @@
   .input-error { @apply border-danger-500 focus:border-danger-500 focus:ring-danger-100; }
   .select { @apply input pr-8 appearance-none; }
   .dark .select { background-color: rgb(var(--color-surface-0) / <alpha-value>); }
+  /* The open list is drawn by the browser, which on Windows keeps it white; colour the options to match. */
+  .dark .select option { background-color: rgb(var(--color-surface-0)); color: rgb(var(--color-surface-800)); }
   .textarea { @apply input min-h-[80px] resize-y; }
   .checkbox { @apply h-4 w-4 rounded border-surface-300 text-brand-500 focus:ring-brand-100; }
 
