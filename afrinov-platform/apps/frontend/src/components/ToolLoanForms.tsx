@@ -179,6 +179,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
             <div className="text-sm">
               <span className="font-medium text-surface-900">{l.recipientName ?? 'Not recorded'}</span>
               <span className="text-surface-600"> · {formatNumber(Number(l.out))} out since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
+              {l.overdue && <span className="ml-1 text-xs font-medium text-danger-600">overdue, {l.daysOut} days</span>}
               <div className="text-xs text-surface-500">From {l.locationName}; it goes back there. Checked out by {l.checkedOutBy}.{l.note ? ` ${l.note}` : ''}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[6rem_10rem_1fr] gap-2 items-start">

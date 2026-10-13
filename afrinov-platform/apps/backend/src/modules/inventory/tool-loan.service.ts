@@ -15,6 +15,7 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 type Decimal = Prisma.Decimal;
 type Tx = Prisma.TransactionClient;
@@ -51,6 +52,10 @@ export interface OpenLoan {
   checkedOutAt: string;
   checkedOutBy: string;
   note: string | null;
+  /** Whole days since it went out. */
+  daysOut: number;
+  /** Out longer than inventory.toolOverdueDays. */
+  overdue: boolean;
 }
 
 export interface ToolRow {
@@ -87,8 +92,8 @@ async function returnedByLoan(tx: Pick<Tx, 'inventoryTransaction'>, loanIds: str
 }
 
 export const ToolLoanService = {
-  /** Every active tool with what is in store where, what is out, and with whom. */
-  async list(): Promise<ToolRow[]> {
+  /** Every active tool with what is in store where, what is out, with whom, and since when. */
+  async list(now = new Date()): Promise<ToolRow[]> {
     const tools = await prisma.material.findMany({ where: { category: 'TOOLS', active: true }, orderBy: { name: 'asc' } });
     const ids = tools.map((t) => t.id);
     if (ids.length === 0) return [];
@@ -100,13 +105,17 @@ export const ToolLoanService = {
         orderBy: { postedAt: 'asc' },
       }),
     ]);
-    const returned = await returnedByLoan(prisma, loans.map((l) => l.id));
+    const [returned, overdueDays] = await Promise.all([
+      returnedByLoan(prisma, loans.map((l) => l.id)),
+      SettingsService.getValue<number>('inventory.toolOverdueDays'),
+    ]);
 
     const open = new Map<string, OpenLoan[]>();
     for (const l of loans) {
       const lent = l.quantity.negated();
       const out = lent.minus(returned.get(l.id) ?? 0);
       if (!out.gt(0)) continue;
+      const daysOut = Math.floor((now.getTime() - l.postedAt.getTime()) / 86_400_000);
       open.set(l.materialId, [...(open.get(l.materialId) ?? []), {
         loanId: l.id,
         slipId: l.issueId,
@@ -120,6 +129,8 @@ export const ToolLoanService = {
         checkedOutAt: l.postedAt.toISOString(),
         checkedOutBy: l.actor.name,
         note: l.reasonNote,
+        daysOut,
+        overdue: daysOut > Number(overdueDays ?? 7),
       }]);
     }
 

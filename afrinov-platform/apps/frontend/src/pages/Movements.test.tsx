@@ -52,7 +52,7 @@ const COUNTS = [
   { id: 'c-1', cursor: 'c1', at: '2026-09-25T08:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 3, adjusted: 0, note: null, differences: [], lines: [] },
 ];
 
-function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)]]) {
+function renderAt(url: string, pages: Array<Array<ReturnType<typeof row> & Record<string, unknown>>> = [[row(1)]]) {
   let page = 0;
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/inventory-transactions/summary')) return { total: 205, byType: {} };
@@ -205,6 +205,19 @@ describe('Movements page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
     await waitFor(() => expect(exports.excel).toHaveBeenCalledWith('from=2026-10-05&to=2026-10-05&report=writeoffs'));
+  });
+
+  it('lists tool loans, filtered by who has them, with the condition each came back in', async () => {
+    const lines = [
+      { ...row(1), type: 'LOAN', quantity: '-1', recipientName: 'Sabelo' },
+      { ...row(2), type: 'LOAN_RETURN', quantity: '1', recipientName: 'Sabelo', reasonCode: 'DAMAGE', reasonNote: 'Chuck damaged' },
+    ];
+    renderAt('/movements?report=loans&from=2026-10-05&recipientId=r-1', [lines]);
+    expect(await screen.findByText('Chuck damaged')).toBeInTheDocument();
+    expect(listCalls()[0]).toBe('/inventory-transactions?from=2026-10-05&to=2026-10-05&recipientId=r-1&report=loans&limit=100');
+    expect(screen.getByText('Checked out to', { selector: 'label' })).toBeInTheDocument();
+    expect(screen.getByText('Tool out')).toBeInTheDocument();
+    expect(screen.getByText('Damaged')).toBeInTheDocument();
   });
 
   it('labels each filter of the chosen report', async () => {

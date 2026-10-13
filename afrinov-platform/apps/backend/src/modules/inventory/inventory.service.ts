@@ -120,9 +120,10 @@ export interface HistoryFilter {
   /**
    * A report on the Movements page: issued stock, transfers (one row per
    * transfer, its out leg) or write-offs (adjustments other than count
-   * differences, which belong to the stock-counts report). Overrides `type`.
+   * differences, which belong to the stock-counts report) or tool loans (tools
+   * checked out and back in). Overrides `type`.
    */
-  report?: 'issued' | 'transfers' | 'writeoffs';
+  report?: 'issued' | 'transfers' | 'writeoffs' | 'loans';
   /** Only the lines of these issue slips (used to fill in a page of slips). */
   issueIds?: string[];
   /** Paging cursor: the `cursor` of the last row already shown; returns older rows. */
@@ -141,6 +142,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
   if (filter.report === 'issued') where.type = InventoryTransactionType.ISSUE;
   if (filter.report === 'transfers') where.type = InventoryTransactionType.TRANSFER_OUT;
+  if (filter.report === 'loans') where.type = { in: [InventoryTransactionType.LOAN, InventoryTransactionType.LOAN_RETURN] };
   if (filter.report === 'writeoffs') {
     where.type = InventoryTransactionType.ADJUSTMENT;
     // NULL <> 'StockCount' is not true in SQL, so a plain `not` would drop unreferenced rows.

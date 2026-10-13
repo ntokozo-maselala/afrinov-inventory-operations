@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
 import { PageHeader } from '../components/PageHeader';
@@ -13,6 +14,7 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
+import type { ToolRow } from '../api/types';
 
 export type RecipientType = 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR';
 
@@ -41,6 +43,12 @@ const TYPE_TONE: Record<RecipientType, 'brand' | 'info' | 'warning' | 'neutral'>
 // The people and places stock is issued to ("Issued To").
 export function Recipients() {
   const recipients = useApi<Recipient[]>('/recipients');
+  // Tools each recipient has out on loan, from the Tools page's list.
+  const tools = useApi<ToolRow[]>('/tools');
+  const toolsOut = new Map<string, number>();
+  for (const l of (tools.data ?? []).flatMap((t) => t.loans)) {
+    if (l.recipientId) toolsOut.set(l.recipientId, (toolsOut.get(l.recipientId) ?? 0) + Number(l.out));
+  }
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('recipients:manage');
   const [q, setQ] = useState('');
@@ -97,7 +105,7 @@ export function Recipients() {
           isLoading={recipients.loading}
           rowKey={(r) => r.id}
           rows={filtered}
-          columns={columns({ canManage, onEdit: setEditing, onSetActive: setActive })}
+          columns={columns({ canManage, onEdit: setEditing, onSetActive: setActive, toolsOut })}
           emptyState={<EmptyState
             title={q || type ? 'No recipients match your filters' : 'No recipients yet'}
             description={q || type ? 'Try clearing your filters.' : 'Add the workers, machines, sites and contractors stock is issued to.'}
@@ -125,14 +133,21 @@ export function Recipients() {
   );
 }
 
-function columns({ canManage, onEdit, onSetActive }: {
+function columns({ canManage, onEdit, onSetActive, toolsOut }: {
   canManage: boolean;
+  toolsOut: Map<string, number>;
   onEdit: (r: Recipient) => void;
   onSetActive: (r: Recipient, active: boolean) => void;
 }): DataTableColumn<Recipient>[] {
   return [
     { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'type', header: 'Type', render: (r) => <Badge tone={TYPE_TONE[r.type]}>{RECIPIENT_TYPE_LABEL[r.type]}</Badge>, width: '9rem' },
+    {
+      key: 'tools', header: 'Tools out', align: 'right' as const, width: '7rem',
+      render: (r) => (toolsOut.get(r.id)
+        ? <Link to={`/tools?q=${encodeURIComponent(r.name)}`} className="btn-link font-mono">{toolsOut.get(r.id)}</Link>
+        : <span className="text-surface-300">—</span>),
+    },
     { key: 'notes', header: 'Notes', render: (r) => r.notes || <span className="text-surface-300">—</span> },
     { key: 'status', header: 'Status', render: (r) => r.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '8rem' },
     ...(canManage ? [{

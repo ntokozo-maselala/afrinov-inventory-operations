@@ -78,7 +78,9 @@ const typeLabel = (m: MovementRow) => {
 };
 
 /** Each ledger report's columns, as the page shows them. */
-const LEDGER: Record<'all' | 'transfers' | 'writeoffs', Array<PdfColumn & { cell: (m: MovementRow) => string }>> = {
+const condition = (m: MovementRow) => (m.type !== 'LOAN_RETURN' ? '' : m.reasonCode === 'DAMAGE' ? 'Damaged' : m.reasonCode === 'LOSS' ? 'Lost' : 'Good');
+
+const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans', Array<PdfColumn & { cell: (m: MovementRow) => string }>> = {
   all: [
     { header: 'When', cell: (m) => formatDateTime(m.postedAt) },
     { header: 'Type', cell: typeLabel },
@@ -113,13 +115,26 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs', Array<PdfColumn & { cell
     { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
     { header: 'By', cell: (m) => m.actorName },
   ],
+  loans: [
+    { header: 'When', cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Movement', cell: typeLabel },
+    { header: 'Code', cell: (m) => m.materialSku },
+    { header: 'Tool', wrap: true, cell: (m) => m.materialName },
+    { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
+    { header: 'Person', wrap: true, cell: (m) => m.recipientName ?? '' },
+    { header: 'Project', cell: (m) => m.projectNumber ?? '' },
+    { header: 'Location', wrap: true, cell: (m) => m.locationName },
+    { header: 'Condition', cell: condition },
+    { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
+    { header: 'By', cell: (m) => m.actorName },
+  ],
 };
 
 /**
  * A ledger report (all movements, transfers, or write-offs and adjustments) as
  * a PDF, with the page's columns, for the same day or range and filters.
  */
-export async function downloadMovementsPdf(query: string, kind: 'all' | 'transfers' | 'writeoffs', about: PdfAbout): Promise<void> {
+export async function downloadMovementsPdf(query: string, kind: 'all' | 'transfers' | 'writeoffs' | 'loans', about: PdfAbout): Promise<void> {
   const path = `/inventory-transactions?${query}${kind === 'all' ? '' : `&report=${kind}`}`;
   const rows: MovementRow[] = [];
   for (let before = ''; ;) {

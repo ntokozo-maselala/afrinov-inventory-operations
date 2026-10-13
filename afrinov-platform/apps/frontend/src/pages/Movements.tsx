@@ -2,7 +2,8 @@
 // an end date for a range) and narrow it with the filters that report has.
 // Every record has one home: receipts under Received stock, issues under Issued
 // stock, count differences under Stock counts, transfers under Transfers, other
-// adjustments under Write-offs, catalogue and user changes under Other changes
+// adjustments under Write-offs, tools lent and back under Tool loans,
+// catalogue and user changes under Other changes
 // (Admin and Store Controller); All movements is the full ledger. The report,
 // day and filters live in the address, so a report can be bookmarked or shared.
 import { useEffect, useMemo, useState } from 'react';
@@ -32,7 +33,7 @@ import { today } from '../lib/dates';
 import { formatDate } from '../lib/format';
 
 type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
-type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'other';
+type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'loans' | 'other';
 
 const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'all', label: 'All movements', filters: ['locationId', 'actorId', 'materialId', 'q'] },
@@ -41,6 +42,7 @@ const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
   { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
+  { id: 'loans', label: 'Tool loans', filters: ['recipientId', 'materialId', 'locationId'] },
   { id: 'other', label: 'Other changes', filters: ['entityType', 'actorId'] },
 ];
 
@@ -106,6 +108,9 @@ export function Movements() {
     setParams(keep, { replace: true });
   }
 
+  // Tools are checked out to someone; stock is issued to them.
+  const recipientLabel = report.id === 'loans' ? 'Checked out to' : 'Issued to';
+
   /** The filters that are set, in words, for the top of the PDF. */
   function filterWords(): string[] {
     const name = (list: Option[] | null | undefined, id: string) => (list ?? []).find((o) => o.id === id)?.name ?? id;
@@ -114,7 +119,7 @@ export function Movements() {
       const v = params.get(f);
       if (!v) continue;
       if (f === 'supplierId') words.push(`Supplier: ${name(suppliers.data, v)}`);
-      else if (f === 'recipientId') words.push(`Issued to: ${v === '__none__' ? 'Not recorded' : name(recipients.data, v)}`);
+      else if (f === 'recipientId') words.push(`${recipientLabel}: ${v === '__none__' ? 'Not recorded' : name(recipients.data, v)}`);
       else if (f === 'locationId') words.push(`Location: ${name(locations.data, v)}`);
       else if (f === 'actorId') words.push(`Person: ${name(actors.data, v)}`);
       else if (f === 'materialId') words.push(`Item: ${itemOptions.find((o) => o.value === v)?.label ?? v}`);
@@ -189,7 +194,7 @@ export function Movements() {
           </Field>
         )}
         {has('recipientId') && (
-          <Field label="Issued to" htmlFor="mv-recipient" className={FILTER_WIDTH}>
+          <Field label={recipientLabel} htmlFor="mv-recipient" className={FILTER_WIDTH}>
             <Select id="mv-recipient" value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)}>
               <option value="">Anyone</option>
               {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}

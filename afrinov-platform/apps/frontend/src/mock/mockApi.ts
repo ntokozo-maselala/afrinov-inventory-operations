@@ -1067,6 +1067,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'general.defaultLandingPage': row('general.defaultLandingPage', 'dashboard', 'enum', 'general', 'Where to go after sign-in.', ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders']),
 
     'inventory.urgentBelowPercent': row('inventory.urgentBelowPercent', 20, 'number', 'inventory', 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.'),
+    'inventory.toolOverdueDays': row('inventory.toolOverdueDays', 7, 'number', 'inventory', 'A tool checked out longer than this many days is overdue: flagged on the Tools page and counted on the Dashboard.'),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
@@ -1310,12 +1311,14 @@ function listTools() {
         .filter((t) => t.type === 'LOAN' && t.materialId === m.id)
         .map((t) => ({ t, out: -Number(t.quantity) - returnedOnLoan(t.id) }))
         .filter(({ out }) => out > 0)
-        .map(({ t, out }) => ({
+        .map(({ t, out }) => ({ t, out, daysOut: Math.floor((Date.now() - new Date(t.postedAt).getTime()) / 86_400_000) }))
+        .map(({ t, out, daysOut }) => ({
           loanId: t.id, slipId: t.issueId ?? null, recipientId: t.recipientId ?? null,
           recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
           projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
           quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
           checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
+          daysOut, overdue: daysOut > Number(MOCK_SETTINGS['inventory.toolOverdueDays']?.value ?? 7),
         }));
       const inStore = locations.reduce((a, l) => a + Number(l.quantity), 0);
       const onLoan = loans.reduce((a, l) => a + Number(l.out), 0);
@@ -1811,6 +1814,7 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (qs.type && !qs.report && t.type !== qs.type) return false;
       if (qs.report === 'issued' && t.type !== 'ISSUE') return false;
       if (qs.report === 'transfers' && t.type !== 'TRANSFER_OUT') return false;
+      if (qs.report === 'loans' && t.type !== 'LOAN' && t.type !== 'LOAN_RETURN') return false;
       if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
       if (qs.locationId && t.locationId !== qs.locationId) return false;

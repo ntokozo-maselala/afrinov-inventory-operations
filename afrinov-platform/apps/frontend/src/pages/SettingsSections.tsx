@@ -90,6 +90,7 @@ export function SettingsInventory() {
   const warningBelow = useSetting('inventory.warningBelowPercent');
   const defaultUnitOfMeasure = useSetting('inventory.defaultUnitOfMeasure');
   const enableStockAlerts = useSetting('inventory.enableStockAlerts');
+  const toolOverdueDays = useSetting('inventory.toolOverdueDays');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
@@ -106,6 +107,14 @@ export function SettingsInventory() {
         onChange={(v) => setDraft('inventory.warningBelowPercent', v)}
         error={errors['inventory.warningBelowPercent'] ?? null}
       />
+      {toolOverdueDays && (
+        <NumberField
+          def={toolOverdueDays}
+          value={Number(draft['inventory.toolOverdueDays'] ?? 7)}
+          onChange={(v) => setDraft('inventory.toolOverdueDays', v)}
+          error={errors['inventory.toolOverdueDays'] ?? null}
+        />
+      )}
       <TextField
         def={defaultUnitOfMeasure}
         value={(draft['inventory.defaultUnitOfMeasure'] as string) ?? ''}

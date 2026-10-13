@@ -18,6 +18,8 @@ export interface OpenLoan {
   /** How many were lent, and how many of them are still out. */
   quantity: string; out: string;
   checkedOutAt: string; checkedOutBy: string; note: string | null;
+  /** Whole days out, and whether that is past Settings > Inventory's overdue days. */
+  daysOut: number; overdue: boolean;
 }
 
 /** A tool with what is in store where, what is out, and with whom (GET /tools). */

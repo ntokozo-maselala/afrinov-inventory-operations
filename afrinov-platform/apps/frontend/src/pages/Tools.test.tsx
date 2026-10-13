@@ -15,6 +15,7 @@ const { ToastProvider } = await import('../components/Toast');
 const loan = (loanId: string, recipientName: string, out: string) => ({
   loanId, slipId: 's-1', recipientId: `r-${recipientName}`, recipientName, projectNumber: 'AFRI-1325', locationId: 'l-1', locationName: 'Stores',
   quantity: out, out, checkedOutAt: '2026-10-10T08:00:00.000Z', checkedOutBy: 'Vusi', note: null,
+  daysOut: recipientName === 'Bukho' ? 12 : 2, overdue: recipientName === 'Bukho',
 });
 const TOOLS = [
   { materialId: 'm-drill', sku: 'TL-0002', name: 'Makita Hand Drill', serialNumber: '34322', unitOfMeasure: 'each', inStore: '0', onLoan: '1', owned: '1', locations: [], loans: [loan('t-1', 'Sabelo', '1')] },
@@ -24,8 +25,8 @@ const TOOLS = [
     locations: [{ locationId: 'l-1', locationName: 'Stores', quantity: '1' }], loans: [] },
 ];
 
-function renderPage() {
-  render(<MemoryRouter><ToastProvider><Tools /></ToastProvider></MemoryRouter>);
+function renderPage(url = '/tools') {
+  render(<MemoryRouter initialEntries={[url]}><ToastProvider><Tools /></ToastProvider></MemoryRouter>);
 }
 const row = (name: string) => screen.getByText(name).closest('tr')!;
 
@@ -47,7 +48,15 @@ describe('Tools page', () => {
     expect(within(row('Scraper')).getByText('Bukho')).toBeInTheDocument();
     expect(within(row('Scraper')).getByText(/2 since/)).toBeInTheDocument();
     expect(within(row('Makita Hand Drill')).getByText('TL-0002 · S/N 34322')).toBeInTheDocument();
-    expect(screen.getByText('3 of 3 tools · 4 out')).toBeInTheDocument();
+    expect(screen.getByText('3 of 3 tools · 4 out · 2 overdue')).toBeInTheDocument();
+    expect(within(row('Scraper')).getByText('overdue, 12 days')).toBeInTheDocument();
+  });
+
+  it('opens on the overdue tools when the Dashboard links there', async () => {
+    renderPage('/tools?view=overdue');
+    await screen.findByText('Scraper');
+    expect(screen.getByLabelText('Show')).toHaveValue('overdue');
+    expect(screen.queryByText('Makita Hand Drill')).not.toBeInTheDocument();
   });
 
   it('filters to the tools out now, and finds a tool by who has it', async () => {

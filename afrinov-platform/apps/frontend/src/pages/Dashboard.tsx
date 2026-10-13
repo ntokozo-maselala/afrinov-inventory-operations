@@ -11,6 +11,7 @@ import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
+import type { ToolRow } from '../api/types';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { categoryLabel } from '../lib/categories';
@@ -29,6 +30,19 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
   OUT_OF_STOCK: 'danger',
 };
 
+/** Tools out on loan and how many of them are overdue, linking to the Tools page. */
+function toolsCard(tools: ToolRow[]) {
+  const loans = tools.flatMap((t) => t.loans);
+  const out = loans.reduce((n, l) => n + Number(l.out), 0);
+  const overdue = loans.filter((l) => l.overdue).reduce((n, l) => n + Number(l.out), 0);
+  return {
+    label: 'Tools out', value: formatNumber(out),
+    tone: overdue > 0 ? 'danger' as const : 'neutral' as const,
+    note: out === 0 ? 'all in store' : overdue > 0 ? `${formatNumber(overdue)} overdue` : 'none overdue',
+    to: overdue > 0 ? '/tools?view=overdue' : '/tools?view=out',
+  };
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
 
@@ -37,6 +51,7 @@ export function Dashboard() {
   const { data: lowStock, loading: lowStockLoading, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
   const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
+  const { data: tools, reload: reloadTools } = useApi<ToolRow[]>('/tools');
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -50,8 +65,9 @@ export function Dashboard() {
       { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
       { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
       { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=all' },
+      toolsCard(tools ?? []),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools]);
 
   const attentionItems = useMemo(() => {
     if (!lowStock) return [];
@@ -117,7 +133,8 @@ export function Dashboard() {
     reload();
     reloadLowStock();
     reloadValue();
-  }, [reload, reloadLowStock, reloadValue]);
+    reloadTools();
+  }, [reload, reloadLowStock, reloadValue, reloadTools]);
 
   return (
     <div className="space-y-6">
@@ -145,9 +162,9 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-6 gap-4">
         {valueLoading && !kpis
-          ? Array.from({ length: 5 }).map((_, i) => (
+          ? Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="surface-card p-4 animate-pulse">
                 <div className="h-3 w-20 bg-surface-100 rounded mb-3" />
                 <div className="h-6 w-24 bg-surface-100 rounded" />

@@ -110,8 +110,9 @@ const movementFilters = z.object({
   actorId: z.string().optional().openapi({ description: 'Who posted the movement.' }),
   recipientId: z.string().optional().openapi({ description: "Who it was issued to; '__none__' for issues with no recipient recorded." }),
   q: z.string().optional().openapi({ description: 'Matches item code or name, location, project or who it was issued to.' }),
-  report: z.enum(['issued', 'transfers', 'writeoffs']).optional().openapi({
-    description: 'A Movements report: issued stock, transfers (the out leg, with otherLocationName) or write-offs (adjustments other than count differences). Overrides type.',
+  report: z.enum(['issued', 'transfers', 'writeoffs', 'loans']).optional().openapi({
+    description: 'A Movements report: issued stock, transfers (the out leg, with otherLocationName), write-offs (adjustments other than count differences) '
+      + 'or tool loans (LOAN and LOAN_RETURN: tools checked out and back in). Overrides type.',
   }),
 });
 

@@ -67,6 +67,7 @@ const client = {
 };
 
 vi.mock('../../shared/db.js', () => ({ prisma: { ...client, $transaction: async (fn: (t: typeof client) => unknown) => fn(client) } }));
+vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValue: async () => 7 } }));
 vi.mock('../../shared/inventory/balances.js', () => ({
   getCurrentBalance: async (materialId: string, locationId: string) => balance(materialId, locationId),
   recomputeBalance: async () => undefined,
@@ -147,6 +148,13 @@ describe('ToolLoanService', () => {
     expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.reasonNote]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'Lost on loan to Sabelo: Left on site']);
     const drill = await tool('m-drill');
     expect([drill.inStore, drill.onLoan, drill.owned]).toEqual(['0', '0', '0']);
+  });
+
+  it('says how long each loan has been out, and that it is overdue after the days set (7)', async () => {
+    await ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] });
+    const after = async (days: number) => (await ToolLoanService.list(new Date(Date.now() + days * 86_400_000))).find((t) => t.materialId === 'm-drill')!.loans[0]!;
+    expect(await after(7)).toMatchObject({ daysOut: 7, overdue: false });
+    expect(await after(9)).toMatchObject({ daysOut: 9, overdue: true });
   });
 
   it('checks in only a check-out', async () => {

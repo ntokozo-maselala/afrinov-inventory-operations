@@ -3,7 +3,7 @@
 // Tools come in through Receive stock and are counted on Count stock like
 // anything else; they are not issued.
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
@@ -22,6 +22,7 @@ import type { ToolRow } from '../api/types';
 const VIEWS = [
   { value: 'all', label: 'All tools' },
   { value: 'out', label: 'Out now' },
+  { value: 'overdue', label: 'Overdue' },
   { value: 'in', label: 'In store' },
 ];
 
@@ -29,8 +30,10 @@ export function Tools() {
   const tools = useApi<ToolRow[]>('/tools');
   const canLend = usePermissions().hasPermission('tools:lend');
   const toast = useToast();
-  const [q, setQ] = useState('');
-  const [view, setView] = useState('all');
+  // The Dashboard and Recipients link here with ?view=overdue or ?q=<name>.
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(() => params.get('q') ?? '');
+  const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'all'));
   const [checkingOut, setCheckingOut] = useState<{ start?: ToolRow } | null>(null);
   const [checkingIn, setCheckingIn] = useState<ToolRow | null>(null);
 
@@ -39,12 +42,14 @@ export function Tools() {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return all.filter((t) => {
       if (view === 'out' && !(Number(t.onLoan) > 0)) return false;
+      if (view === 'overdue' && !t.loans.some((l) => l.overdue)) return false;
       if (view === 'in' && !(Number(t.inStore) > 0)) return false;
       const hay = `${t.name} ${t.sku} ${t.serialNumber ?? ''} ${t.loans.map((l) => l.recipientName ?? '').join(' ')} ${t.locations.map((l) => l.locationName).join(' ')}`.toLowerCase();
       return terms.every((term) => hay.includes(term));
     });
   }, [all, q, view]);
   const out = all.reduce((n, t) => n + Number(t.onLoan), 0);
+  const overdue = all.reduce((n, t) => n + t.loans.filter((l) => l.overdue).reduce((m, l) => m + Number(l.out), 0), 0);
 
   function done(summary: string) {
     setCheckingOut(null);
@@ -86,6 +91,7 @@ export function Tools() {
               <li key={l.loanId}>
                 <span className="font-medium">{l.recipientName ?? 'Not recorded'}</span>
                 <span className="text-surface-500"> · {formatNumber(Number(l.out))} since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
+                {l.overdue && <span className="ml-1 text-xs font-medium text-danger-600">overdue, {l.daysOut} days</span>}
               </li>
             ))}
           </ul>
@@ -119,7 +125,7 @@ export function Tools() {
 
       <FilterBar
         onClear={q || view !== 'all' ? () => { setQ(''); setView('all'); } : undefined}
-        count={tools.loading ? 'Loading…' : `${filtered.length} of ${all.length} tools · ${formatNumber(out)} out`}
+        count={tools.loading ? 'Loading…' : `${filtered.length} of ${all.length} tools · ${formatNumber(out)} out${overdue ? ` · ${formatNumber(overdue)} overdue` : ''}`}
       >
         <SearchField id="tools-search" value={q} onChange={setQ} placeholder="Tool, code, serial number or person…" />
         <Field label="Show" htmlFor="tools-view" className={FILTER_WIDTH}>
