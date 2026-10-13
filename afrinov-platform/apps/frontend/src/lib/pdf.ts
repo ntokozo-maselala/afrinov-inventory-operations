@@ -45,6 +45,9 @@ export interface PdfReport {
 
 const BRAND: [number, number, number] = [227, 0, 27];
 const MUTED: [number, number, number] = [90, 99, 112];
+/** Left and right: room to punch or bind a printed copy. */
+const SIDE = 20;
+/** Top and bottom. */
 const MARGIN = 12;
 const FONT_SIZE = 8;
 const CELL_PADDING = 1.5;
@@ -72,17 +75,17 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...BRAND);
-  doc.text('AFRINOV IMS', MARGIN, MARGIN + 2);
+  doc.text('AFRINOV IMS', SIDE, MARGIN + 2);
   doc.setFontSize(16);
   doc.setTextColor(20, 20, 20);
-  doc.text(pdfText(report.title), MARGIN, MARGIN + 10);
+  doc.text(pdfText(report.title), SIDE, MARGIN + 10);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
   let y = MARGIN + 16;
   for (const line of report.lines) {
-    for (const wrapped of doc.splitTextToSize(pdfText(line), pageWidth - 2 * MARGIN) as string[]) {
-      doc.text(wrapped, MARGIN, y);
+    for (const wrapped of doc.splitTextToSize(pdfText(line), pageWidth - 2 * SIDE) as string[]) {
+      doc.text(wrapped, SIDE, y);
       y += 4.5;
     }
   }
@@ -96,15 +99,15 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(20, 20, 20);
-      doc.text(pdfText(section.heading), MARGIN, y + 4);
+      doc.text(pdfText(section.heading), SIDE, y + 4);
       y += 7;
     }
     if (section.note) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(...MUTED);
-      for (const wrapped of doc.splitTextToSize(pdfText(section.note), pageWidth - 2 * MARGIN) as string[]) {
-        doc.text(wrapped, MARGIN, y + 2);
+      for (const wrapped of doc.splitTextToSize(pdfText(section.note), pageWidth - 2 * SIDE) as string[]) {
+        doc.text(wrapped, SIDE, y + 2);
         y += 4.5;
       }
       y += 1;
@@ -113,7 +116,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(...MUTED);
-      doc.text(pdfText(section.empty), MARGIN, y + 3);
+      doc.text(pdfText(section.empty), SIDE, y + 3);
       y += 10;
       continue;
     }
@@ -129,12 +132,12 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       ...(section.totals ?? []).map((r) => measure(r[i] ?? '', true)),
     ) + 2 * CELL_PADDING + 0.5);
     const contentWidth = natural.reduce((sum, w) => sum + w, 0);
-    const fits = contentWidth <= pageWidth - 2 * MARGIN;
+    const fits = contentWidth <= pageWidth - 2 * SIDE;
     const columnStyles: Record<number, { halign: 'left' | 'right'; cellWidth: 'wrap' | 'auto' }> = {};
     section.columns.forEach((c, i) => { columnStyles[i] = { halign: c.align ?? 'left', cellWidth: c.wrap && !fits ? 'auto' : 'wrap' }; });
     autoTable(doc, {
       startY: y,
-      margin: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN + 6 },
+      margin: { left: SIDE, right: SIDE, top: MARGIN, bottom: MARGIN + 6 },
       tableWidth: fits ? contentWidth : 'auto',
       theme: 'grid',
       head: [section.columns.map((c) => pdfText(c.header))],
@@ -159,7 +162,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
     doc.setTextColor(...MUTED);
     for (const note of report.notes) {
       if (y > pageHeight - MARGIN - 8) { doc.addPage(); y = MARGIN; }
-      doc.text(pdfText(note), MARGIN, y);
+      doc.text(pdfText(note), SIDE, y);
       y += 4.5;
     }
   }
@@ -170,8 +173,8 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...MUTED);
-    doc.text(footer, MARGIN, pageHeight - MARGIN + 4);
-    doc.text(`Page ${p} of ${pages}`, pageWidth - MARGIN, pageHeight - MARGIN + 4, { align: 'right' });
+    doc.text(footer, SIDE, pageHeight - MARGIN + 4);
+    doc.text(`Page ${p} of ${pages}`, pageWidth - SIDE, pageHeight - MARGIN + 4, { align: 'right' });
   }
   return doc.output('arraybuffer');
 }

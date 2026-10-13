@@ -5,8 +5,11 @@ import { describe, it, expect } from 'vitest';
 import { buildPdf, pdfText } from './pdf';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
-/** Where the table's cells end on the right, in points (an A4 landscape page is 842 wide). */
-const rightEdge = (pdf: string) => Math.max(...[...pdf.matchAll(/^([\d.]+) [\d.]+ ([\d.]+) -?[\d.]+ re$/gm)].map((m) => Number(m[1]) + Number(m[2])));
+const cells = (pdf: string) => [...pdf.matchAll(/^([\d.]+) [\d.]+ ([\d.]+) -?[\d.]+ re$/gm)].map((m) => [Number(m[1]), Number(m[2])] as const);
+/** Where the table's cells start on the left, in points (an A4 landscape page is 842 wide). */
+const leftEdge = (pdf: string) => Math.min(...cells(pdf).map(([x]) => x));
+/** Where the table's cells end on the right, in points. */
+const rightEdge = (pdf: string) => Math.max(...cells(pdf).map(([x, w]) => x + w));
 
 describe('report PDF', () => {
   it('prints the title, what it covers, each table with its totals, and page numbers', async () => {
@@ -59,7 +62,9 @@ describe('report PDF', () => {
     expect(rightEdge(short)).toBeLessThan(200);
     const long = 'A very long item name that keeps going '.repeat(8);
     const wide = text(await buildPdf({ title: 'Wide', lines: [], sections: [{ columns: [{ header: 'Code' }, { header: 'Item', wrap: true }], rows: [['TOOL-TORQUE-1/2', long]] }] }));
-    expect(rightEdge(wide)).toBeGreaterThan(800);
+    // The page less its 20 mm side margins ends at about 785.
+    expect(rightEdge(wide)).toBeGreaterThan(780);
+    expect(leftEdge(wide)).toBeCloseTo(56.7, 0);
     expect(wide).toContain('(TOOL-TORQUE-1/2)');
   });
 
