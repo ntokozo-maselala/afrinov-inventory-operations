@@ -68,7 +68,7 @@ describe('StockCount page', () => {
     await chooseA1();
     count('Cutting disc', '7,5');
     count('Welding gloves', '4');
-    fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: ' Rack A recount ' } });
+    fireEvent.change(screen.getByLabelText('Note on this count (optional)'), { target: { value: ' Rack A recount ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Post count' }));
     expect(screen.getByText(/1 adjustment will be posted at A-1: 0 up, 1 down/)).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();

@@ -336,12 +336,13 @@ export function StockCount() {
                   </table>
                 </div>
 
-                <div className="no-print grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  <Field label="Found an item that is not listed?" htmlFor="count-add" help="It is added with a system quantity of 0.">
+                <div className="no-print pt-2 md:w-1/2">
+                  <Field
+                    label="Found an item that is not listed?"
+                    htmlFor="count-add"
+                    help="It is added to the list with a system quantity of 0. Type what you counted there, and add a note if needed."
+                  >
                     <SearchSelect id="count-add" value={adding} onChange={addFound} options={addOptions} placeholder="Search by name or code" noMatchText="No other item matches" />
-                  </Field>
-                  <Field label="Note (optional)" htmlFor="count-note">
-                    <Textarea id="count-note" rows={2} maxLength={500} value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} placeholder="e.g. Go-live count, rack A" />
                   </Field>
                 </div>
               </div>
@@ -364,6 +365,13 @@ export function StockCount() {
                     : `${differences.length} adjustment${differences.length === 1 ? '' : 's'} will be posted at ${location?.name}: ${up} up, ${differences.length - up} down. Items left blank are not changed.`}
                 </Alert>
               )}
+
+              {/* About the whole count, so it sits with posting it, apart from the item search. */}
+              <div className="no-print">
+                <Field label="Note on this count (optional)" htmlFor="count-note" help="Applies to the whole count; use a row's note to explain one item.">
+                  <Textarea id="count-note" rows={2} maxLength={500} value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} placeholder="e.g. Go-live count, rack A" />
+                </Field>
+              </div>
 
               <div className="entry-actions flex flex-wrap justify-end gap-2 py-3 border-t border-surface-200 no-print">
                 <Link to="/stock"><Button type="button" variant="ghost" disabled={busy}>Back to stock</Button></Link>
