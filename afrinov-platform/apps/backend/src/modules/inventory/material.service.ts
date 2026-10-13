@@ -1,4 +1,5 @@
-// Material master CRUD with audit.
+// Material master CRUD with audit. A tool kept as one unit can carry its serial
+// number; nothing else can, and no two items share one.
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
@@ -11,6 +12,7 @@ export interface CreateMaterialInput {
   requiredStock?: number;
   unitCost?: number;
   description?: string;
+  serialNumber?: string;
 }
 
 export interface UpdateMaterialInput {
@@ -21,6 +23,14 @@ export interface UpdateMaterialInput {
   requiredStock?: number;
   unitCost?: number;
   active?: boolean;
+  serialNumber?: string | null;
+}
+
+/** Refuses a serial number on anything but a tool, or one another item already has. */
+async function checkSerial(serialNumber: string, category: string, exceptId?: string) {
+  if (category !== 'TOOLS') throw Errors.validation('Only tools have a serial number');
+  const holder = await prisma.material.findFirst({ where: { serialNumber: { equals: serialNumber, mode: 'insensitive' }, ...(exceptId ? { id: { not: exceptId } } : {}) }, select: { sku: true } });
+  if (holder) throw Errors.conflict(`Serial number "${serialNumber}" is already on ${holder.sku}`);
 }
 
 export const MaterialService = {
@@ -32,6 +42,7 @@ export const MaterialService = {
       where.OR = [
         { name: { contains: filter.q, mode: 'insensitive' } },
         { sku: { contains: filter.q, mode: 'insensitive' } },
+        { serialNumber: { contains: filter.q, mode: 'insensitive' } },
       ];
     }
     return prisma.material.findMany({ where, orderBy: [{ active: 'desc' }, { name: 'asc' }] });
@@ -47,6 +58,8 @@ export const MaterialService = {
     const sku = input.sku.trim();
     const existing = await prisma.material.findUnique({ where: { sku } });
     if (existing) throw Errors.conflict(`Material with SKU "${sku}" already exists`);
+    const serialNumber = input.serialNumber?.trim() || null;
+    if (serialNumber) await checkSerial(serialNumber, input.category);
 
     const created = await prisma.material.create({
       data: {
@@ -57,6 +70,7 @@ export const MaterialService = {
         requiredStock: input.requiredStock ?? 0,
         unitCost: input.unitCost ?? null,
         description: input.description ?? null,
+        serialNumber,
       },
     });
     await prisma.auditLogEntry.create({
@@ -82,6 +96,11 @@ export const MaterialService = {
     if (input.requiredStock !== undefined) data.requiredStock = input.requiredStock;
     if (input.unitCost !== undefined) data.unitCost = input.unitCost;
     if (input.active !== undefined) data.active = input.active;
+    if (input.serialNumber !== undefined) {
+      const serialNumber = input.serialNumber?.trim() || null;
+      if (serialNumber) await checkSerial(serialNumber, before.category, before.id);
+      data.serialNumber = serialNumber;
+    }
 
     const after = await prisma.material.update({ where: { id: input.id }, data });
     await prisma.auditLogEntry.create({

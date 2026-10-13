@@ -108,6 +108,9 @@ model Material {
   unitOfMeasure String              @map("unit_of_measure")
   requiredStock Decimal             @default(0) @map("required_stock") @db.Decimal(18, 4)
   unitCost      Decimal?            @map("unit_cost") @db.Decimal(18, 4)
+  // A tool kept as one unit (a drill, a harness): its maker's serial number.
+  // Only tools have one; null for everything else.
+  serialNumber  String?             @unique @map("serial_number")
   active        Boolean             @default(true)
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")

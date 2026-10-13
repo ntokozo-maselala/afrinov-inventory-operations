@@ -49,6 +49,7 @@ export interface MockMaterial {
   requiredStock: string;
   unitCost?: string;
   active: boolean;
+  serialNumber?: string | null;
 }
 
 export interface MockLocation {

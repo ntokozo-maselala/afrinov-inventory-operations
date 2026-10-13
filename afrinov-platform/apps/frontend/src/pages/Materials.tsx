@@ -43,7 +43,7 @@ export function Materials() {
     return mats.data.filter((m) => {
       if (category && m.category !== category) return false;
       if (needle) {
-        const hay = `${m.sku} ${m.name}`.toLowerCase();
+        const hay = `${m.sku} ${m.name} ${m.serialNumber ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -66,7 +66,7 @@ export function Materials() {
         onClear={q || category ? () => { setQ(''); setCategory(''); } : undefined}
         count={mats.loading ? 'Loading…' : `${filtered.length} of ${mats.data?.length ?? 0}`}
       >
-        <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder="SKU or name…" />
+        <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder="SKU, name or serial number…" />
         <Field label="Category" htmlFor="materials-category" className={FILTER_WIDTH}>
           <Select id="materials-category" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">All categories</option>
@@ -104,7 +104,16 @@ export function Materials() {
 function columns(): DataTableColumn<Material>[] {
   return [
     { key: 'sku', header: 'SKU', className: 'text-mono', render: (m) => <Link to={`/materials/${m.id}`} className="btn-link text-mono">{m.sku}</Link>, width: '12rem' },
-    { key: 'name', header: 'Name', render: (m) => <span className="line-clamp-1" title={m.name}>{m.name}</span> },
+    {
+      key: 'name',
+      header: 'Name',
+      render: (m) => (
+        <div>
+          <span className="line-clamp-1" title={m.name}>{m.name}</span>
+          {m.serialNumber && <span className="text-xs text-surface-500 font-mono">S/N {m.serialNumber}</span>}
+        </div>
+      ),
+    },
     { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{categoryLabel(m.category)}</span> },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },

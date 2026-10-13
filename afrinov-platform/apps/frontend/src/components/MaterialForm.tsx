@@ -21,6 +21,7 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
   const [description, setDescription] = useState('');
   const [requiredStock, setReorder] = useState('0');
   const [unitCost, setUnitCost] = useState('');
+  const [serialNumber, setSerialNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const bands = useStatusBands();
@@ -38,6 +39,7 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
       const created = await api.post<CreatedMaterial>('/materials', {
         sku: sku.trim(), name: name.trim(), category, unitOfMeasure: unitOfMeasure.trim(),
         requiredStock: reorder, unitCost: cost, description: description.trim() || undefined,
+        serialNumber: category === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
       });
       onSaved(created);
     } catch (err) { onError(err as ApiError); }
@@ -64,6 +66,11 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
           {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </Select>
       </Field>
+      {category === 'TOOLS' && (
+        <Field label="Serial number" htmlFor="m-serial" help="For a single tool, such as a drill or a harness. Leave it blank for a set of identical tools.">
+          <Input id="m-serial" value={serialNumber} onChange={(e) => setSerialNumber(e.target.value)} maxLength={64} autoComplete="off" />
+        </Field>
+      )}
       <Field label="Description" htmlFor="m-desc" help="Optional. Helps identify the item in lists and exports.">
         <Textarea id="m-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
       </Field>

@@ -172,12 +172,18 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   // Materials
+  /** As MaterialService: only a tool has a serial number, and no two items share one. */
+  const checkSerial = (serialNumber: string, category: string | undefined, exceptId?: string) => {
+    if (category !== 'TOOLS') throw err('VALIDATION_ERROR', 'Only tools have a serial number');
+    const holder = state.materials.find((m) => m.id !== exceptId && m.serialNumber?.toLowerCase() === serialNumber.toLowerCase());
+    if (holder) throw err('CONFLICT', `Serial number "${serialNumber}" is already on ${holder.sku}`);
+  };
   if (method === 'GET' && p === '/materials') {
     let list = [...state.materials].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
     const cat = qs.category;
     const active = qs.active;
-    if (q) list = list.filter((m) => m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q));
+    if (q) list = list.filter((m) => m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q) || (m.serialNumber ?? '').toLowerCase().includes(q));
     if (cat) list = list.filter((m) => m.category === cat);
     if (active !== undefined) list = list.filter((m) => m.active === (active === 'true'));
     return list;
@@ -196,6 +202,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (state.materials.some((m) => m.sku === b.sku)) {
       throw err('CONFLICT', `SKU "${b.sku}" already exists`);
     }
+    const serialNumber = b.serialNumber?.trim() || null;
+    if (serialNumber) checkSerial(serialNumber, b.category);
     const created: MockMaterial = {
       id: nextId('mat'),
       sku: b.sku,
@@ -206,6 +214,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       requiredStock: String(b.requiredStock ?? 0),
       unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
       active: true,
+      serialNumber,
     };
     state.materials.push(created);
     return created;
@@ -221,6 +230,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
     if (b.unitCost !== undefined) m.unitCost = String(b.unitCost);
     if (b.active !== undefined) m.active = b.active;
+    if (b.serialNumber !== undefined) {
+      const serialNumber = b.serialNumber?.trim() || null;
+      if (serialNumber) checkSerial(serialNumber, m.category, m.id);
+      m.serialNumber = serialNumber;
+    }
     return m;
   }
 

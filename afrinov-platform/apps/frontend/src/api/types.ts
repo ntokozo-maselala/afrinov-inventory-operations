@@ -7,6 +7,8 @@ export interface Material {
   id: string; sku: string; name: string; description?: string | null;
   category: string; unitOfMeasure: string; requiredStock: string;
   unitCost?: string | null; active: boolean;
+  /** Tools kept as one unit: the serial number. */
+  serialNumber?: string | null;
 }
 
 /** One item at one location (GET /reports/current-stock). */
