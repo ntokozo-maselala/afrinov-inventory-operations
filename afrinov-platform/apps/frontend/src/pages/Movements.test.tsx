@@ -102,7 +102,7 @@ describe('Movements page', () => {
     const expected = 'from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&report=writeoffs';
     expect(listCalls()[0]).toBe(`/inventory-transactions?${expected}&limit=100`);
     expect(mockGet).toHaveBeenCalledWith(`/inventory-transactions/summary?${expected}`);
-    expect(screen.queryByLabelText('Filter by supplier')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Supplier')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Search')).not.toBeInTheDocument();
   });
 
@@ -115,7 +115,7 @@ describe('Movements page', () => {
     expect(within(disc).getByText('1')).toBeInTheDocument();
     expect(within(within(slip).getByText('GLOVE-L').closest('tr')!).getByText('Reversed')).toBeInTheDocument();
     expect(mockGet).toHaveBeenCalledWith('/inventory-issues?from=2026-09-25&to=2026-09-25&recipientId=r-1&locationId=l-1&q=disc&limit=50');
-    expect(screen.getByLabelText('Filter by who it was issued to')).toHaveValue('r-1');
+    expect(screen.getByLabelText('Issued to')).toHaveValue('r-1');
     expect(listCalls()).toHaveLength(0);
   });
 
@@ -171,5 +171,14 @@ describe('Movements page', () => {
     expect(await screen.findByRole('link', { name: 'Added item WSHR-16 Flat washer' })).toHaveAttribute('href', '/materials/m-1');
     expect(mockGet).toHaveBeenCalledWith('/activity?from=2026-10-12&to=2026-10-12&limit=50');
     expect(screen.queryByRole('button', { name: /Download as Excel/ })).not.toBeInTheDocument();
+  });
+
+  it('labels each filter of the chosen report', async () => {
+    renderAt('/movements');
+    await screen.findByText('SKU-1');
+    for (const label of ['Location', 'Person', 'Item', 'Search']) {
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
   });
 });

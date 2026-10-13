@@ -164,48 +164,60 @@ export function Movements() {
 
       {/* The report's filters, two to a row (one on a phone). */}
       <div className="mb-3 no-print">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {has('supplierId') && (
-            <Select value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)} aria-label="Filter by supplier">
-              <option value="">All suppliers</option>
-              {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </Select>
+            <Field label="Supplier" htmlFor="mv-supplier">
+              <Select id="mv-supplier" value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)}>
+                <option value="">All suppliers</option>
+                {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            </Field>
           )}
           {has('recipientId') && (
-            <Select value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)} aria-label="Filter by who it was issued to">
-              <option value="">Issued to anyone</option>
-              {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-              <option value="__none__">Not recorded</option>
-            </Select>
+            <Field label="Issued to" htmlFor="mv-recipient">
+              <Select id="mv-recipient" value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)}>
+                <option value="">Anyone</option>
+                {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                <option value="__none__">Not recorded</option>
+              </Select>
+            </Field>
           )}
           {has('locationId') && (
-            <Select value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)} aria-label="Filter by location">
-              <option value="">All locations</option>
-              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </Select>
+            <Field label="Location" htmlFor="mv-location">
+              <Select id="mv-location" value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)}>
+                <option value="">All locations</option>
+                {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </Select>
+            </Field>
           )}
           {has('entityType') && (
-            <Select value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)} aria-label="Filter by kind of change">
-              <option value="">All changes</option>
-              {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </Select>
+            <Field label="Kind of change" htmlFor="mv-kind">
+              <Select id="mv-kind" value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)}>
+                <option value="">All changes</option>
+                {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </Select>
+            </Field>
           )}
           {has('actorId') && (
-            <Select value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)} aria-label="Filter by who did it">
-              <option value="">Everyone</option>
-              {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </Select>
+            <Field label="Person" htmlFor="mv-person">
+              <Select id="mv-person" value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)}>
+                <option value="">Everyone</option>
+                {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </Select>
+            </Field>
           )}
           {has('materialId') && (
-            <div>
+            <Field label="Item" htmlFor="movements-item">
               <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
-            </div>
+            </Field>
           )}
           {has('q') && (
-            <div className="relative">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder={SEARCH_HINT[report.id]} value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
-            </div>
+            <Field label="Search" htmlFor="mv-search">
+              <div className="relative">
+                <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
+                <Input id="mv-search" className="pl-8" placeholder={SEARCH_HINT[report.id]} value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+            </Field>
           )}
         </div>
         {filtersSet && (

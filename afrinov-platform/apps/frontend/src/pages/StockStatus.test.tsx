@@ -64,7 +64,7 @@ describe('StockStatus page', () => {
   it('searches by item, code or location', async () => {
     renderPage();
     await screen.findByText('Grinding disc');
-    fireEvent.change(screen.getByLabelText('Search stock status'), { target: { value: 'stores' } });
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'stores' } });
     expect(screen.getByText('Flap disc')).toBeInTheDocument();
     expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
   });
@@ -112,5 +112,14 @@ describe('StockStatus page', () => {
     expect(await screen.findByText(/urgent below 20%/)).toBeInTheDocument();
     expect(screen.getByText(/warning below 40%/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Settings → Inventory' })).not.toBeInTheDocument();
+  });
+
+  it('labels its search and filters', async () => {
+    renderPage();
+    await screen.findByText('Grinding disc');
+    for (const label of ['Search', 'Show', 'Category']) {
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
   });
 });
