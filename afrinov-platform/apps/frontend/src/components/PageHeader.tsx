@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 interface PageHeaderProps {
   title: string;
-  description?: string;
+  description?: ReactNode;
   breadcrumb?: Array<{ label: string; to?: string }>;
   actions?: ReactNode;
   meta?: ReactNode;

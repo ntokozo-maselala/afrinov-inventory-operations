@@ -6,6 +6,8 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
+import { useStatusBands } from '../hooks/useStatusBands';
+import { useIsAdmin } from '../hooks/usePermissions';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
 import { Input, Select } from '../components/Field';
@@ -49,6 +51,8 @@ const VIEWS: Array<{ value: string; label: string }> = [
 
 export function StockStatus() {
   const items = useApi<StockStatusItem[]>('/reports/stock-status');
+  const bands = useStatusBands();
+  const isAdmin = useIsAdmin();
   const [q, setQ] = useState('');
   const [params] = useSearchParams();
   const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'attention'));
@@ -91,7 +95,13 @@ export function StockStatus() {
     <div>
       <PageHeader
         title="Stock status"
-        description="Each item's stock on hand, across all locations, against its Required Stock: urgent below 20%, warning below 40%, as the stock workbook's URGENCY column. The bands are under Settings → Inventory."
+        description={(
+          <>
+            Each item&apos;s stock on hand, across all locations, against its Required Stock: urgent below {bands.urgentBelowPercent}%,
+            warning below {bands.warningBelowPercent}%, as the stock workbook&apos;s URGENCY column. The bands are
+            under {isAdmin ? <Link to="/settings/inventory" className="btn-link">Settings → Inventory</Link> : 'Settings → Inventory'}.
+          </>
+        )}
         actions={(
           <div className="flex flex-wrap gap-2">
             <Button
@@ -163,7 +173,7 @@ export function StockStatus() {
           emptyState={
             <EmptyState
               title={view === 'attention' ? 'Nothing needs re-ordering' : 'No items match'}
-              description={view === 'attention' ? 'Every item with a Required Stock has at least 40% of it on hand.' : 'Try another filter.'}
+              description={view === 'attention' ? `Every item with a Required Stock has at least ${bands.warningBelowPercent}% of it on hand.` : 'Try another filter.'}
             />
           }
         />

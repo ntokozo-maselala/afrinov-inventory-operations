@@ -7,6 +7,7 @@ import { Badge } from '../components/Badge';
 import { EmptyState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useApi } from '../hooks/useApi';
+import { useStatusBands } from '../hooks/useStatusBands';
 import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
@@ -36,6 +37,7 @@ export function Dashboard() {
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
+  const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -46,11 +48,11 @@ export function Dashboard() {
         note: value.total.unpriced > 0 ? `${value.total.unpriced} item${value.total.unpriced === 1 ? '' : 's'} in stock without a price` : 'excl. VAT',
       },
       { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, to: '/stock' },
-      { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: 'below 20% of required', to: '/reports/stock-status?view=URGENT' },
-      { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: 'below 40% of required', to: '/reports/stock-status?view=WARNING' },
+      { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
+      { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
       { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=all' },
     ];
-  }, [value]);
+  }, [value, urgentBelowPercent, warningBelowPercent]);
 
   const attentionItems = useMemo(() => {
     if (!lowStock) return [];
@@ -258,7 +260,7 @@ export function Dashboard() {
                 ) : attentionItems.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-0">
-                      <EmptyState title="No items need attention" description="Every item with a Required Stock has at least 40% of it on hand." />
+                      <EmptyState title="No items need attention" description={`Every item with a Required Stock has at least ${warningBelowPercent}% of it on hand.`} />
                     </td>
                   </tr>
                 ) : (

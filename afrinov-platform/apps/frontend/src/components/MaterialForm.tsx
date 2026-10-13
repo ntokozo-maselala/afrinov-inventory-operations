@@ -6,6 +6,7 @@ import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { useStatusBands } from '../hooks/useStatusBands';
 import { CATEGORIES } from '../lib/categories';
 
 export interface CreatedMaterial { id: string; sku: string; name: string }
@@ -22,6 +23,7 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
   const [unitCost, setUnitCost] = useState('');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
+  const bands = useStatusBands();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -66,7 +68,7 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
         <Textarea id="m-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Reorder level" htmlFor="m-reorder" help="Stock status compares stock on hand with this: urgent below 20%, warning below 40%.">
+        <Field label="Reorder level" htmlFor="m-reorder" help={`Stock status compares stock on hand with this: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
           <Input id="m-reorder" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
         </Field>
         <Field label="Unit cost" htmlFor="m-cost" help="Optional, in ZAR excl. VAT.">

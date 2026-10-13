@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
-vi.mock('../api/client', () => ({ api: { get: mockGet } }));
+const { mockGet, mockDownload, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), perms: { admin: false } }));
+vi.mock('../api/client', () => ({
+  api: { get: mockGet },
+  isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
+}));
+vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin }));
 vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload }));
 
 const { StockStatus } = await import('./StockStatus');
@@ -25,7 +29,8 @@ const ROWS = [
 
 describe('StockStatus page', () => {
   beforeEach(() => {
-    mockGet.mockReset().mockResolvedValue(ROWS);
+    perms.admin = false;
+    mockGet.mockReset().mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : ROWS));
     mockDownload.mockReset().mockResolvedValue(undefined);
   });
 
@@ -85,5 +90,27 @@ describe('StockStatus page', () => {
     render(<MemoryRouter initialEntries={['/reports/stock-status?view=OK']}><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
     expect(await screen.findByText('Cutting disc')).toBeInTheDocument();
     expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
+  });
+
+  it('says the bands as set under Settings, and links there for an admin', async () => {
+    perms.admin = true;
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+      ? { 'inventory.urgentBelowPercent': 25, 'inventory.warningBelowPercent': 50 }
+      : ROWS));
+    renderPage();
+    expect(await screen.findByText(/urgent below 25%/)).toBeInTheDocument();
+    expect(screen.getByText(/warning below 50%/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings → Inventory' })).toHaveAttribute('href', '/settings/inventory');
+  });
+
+  it('falls back to 20% and 40% when the bands cannot be read, without a link for others', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/settings/values')) throw { code: 'INTERNAL_ERROR', message: 'down' };
+      return ROWS;
+    });
+    renderPage();
+    expect(await screen.findByText(/urgent below 20%/)).toBeInTheDocument();
+    expect(screen.getByText(/warning below 40%/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Settings → Inventory' })).not.toBeInTheDocument();
   });
 });
