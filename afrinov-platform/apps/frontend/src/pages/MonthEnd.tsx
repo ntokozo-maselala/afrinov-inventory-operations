@@ -6,8 +6,8 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Input } from '../components/Field';
-import { Toolbar } from '../components/Toolbar';
+import { Field, Input } from '../components/Field';
+import { FilterBar, DATE_WIDTH } from '../components/FilterBar';
 import { ErrorState } from '../components/EmptyState';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
@@ -75,22 +75,18 @@ export function MonthEnd() {
         )}
       />
 
-      <Toolbar
-        left={(
-          <>
-            <Input type="date" className="sm:w-40" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} aria-label="From" invalid={!!problem} />
-            <span className="text-meta">to</span>
-            <Input type="date" className="sm:w-40" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} aria-label="To" invalid={!!problem} />
-            {!problem && (
-              <span className="text-sm text-surface-600">
-                {range.to >= today
-                  ? `Stock as it stands now; stock used from ${range.from} to ${range.to}.`
-                  : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
-              </span>
-            )}
-          </>
-        )}
-      />
+      <FilterBar
+        count={problem ? undefined : range.to >= today
+          ? `Stock as it stands now; stock used from ${range.from} to ${range.to}.`
+          : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
+      >
+        <Field label="From" htmlFor="me-from" className={DATE_WIDTH}>
+          <Input id="me-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+        </Field>
+        <Field label="To" htmlFor="me-to" className={DATE_WIDTH}>
+          <Input id="me-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+        </Field>
+      </FilterBar>
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}

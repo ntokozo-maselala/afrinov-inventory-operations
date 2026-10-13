@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Field, Select, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -75,25 +75,19 @@ export function Recipients() {
         actions={canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setEditing('new')}>Add recipient</Button>}
       />
 
-      <Toolbar
-        left={(
-          <div className="flex flex-wrap items-center gap-2 w-full">
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search recipients…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search recipients" />
-            </div>
-            <Select aria-label="Filter by type" value={type} onChange={(e) => setType(e.target.value as RecipientType | '')} className="w-full sm:w-40">
-              <option value="">All types</option>
-              {(Object.keys(RECIPIENT_TYPE_LABEL) as RecipientType[]).map((t) => <option key={t} value={t}>{RECIPIENT_TYPE_LABEL[t]}</option>)}
-            </Select>
-            <label className="flex items-center gap-2 text-sm text-surface-600">
-              <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-              Show inactive
-            </label>
-          </div>
-        )}
-        right={<span className="text-meta">{recipients.loading ? 'Loading…' : `${filtered.length} of ${all.length}`}</span>}
-      />
+      <FilterBar count={recipients.loading ? 'Loading…' : `${filtered.length} of ${all.length}`}>
+        <SearchField id="recipients-search" value={q} onChange={setQ} placeholder="Name…" />
+        <Field label="Type" htmlFor="recipients-type" className={FILTER_WIDTH}>
+          <Select id="recipients-type" value={type} onChange={(e) => setType(e.target.value as RecipientType | '')}>
+            <option value="">All types</option>
+            {(Object.keys(RECIPIENT_TYPE_LABEL) as RecipientType[]).map((t) => <option key={t} value={t}>{RECIPIENT_TYPE_LABEL[t]}</option>)}
+          </Select>
+        </Field>
+        <label className="flex items-center gap-2 text-sm text-surface-600 pb-2">
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          Show inactive
+        </label>
+      </FilterBar>
 
       {recipients.error && <ErrorState message={recipients.error.message} onRetry={recipients.reload} />}
 

@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
+import { FilterBar, FILTER_WIDTH, DATE_WIDTH } from '../components/FilterBar';
 import { Field, Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
@@ -123,44 +124,36 @@ export function Consumption() {
         )}
       />
 
-      {/* Labelled filters, each only as wide as it needs, side by side and wrapping (one to a row on a phone). */}
-      <div className="mb-3">
-        <div className="flex flex-wrap items-start gap-3">
-          <Field label="From" htmlFor="su-from" className="w-full sm:w-44">
-            <Input id="su-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
-          </Field>
-          <Field label="To" htmlFor="su-to" className="w-full sm:w-44">
-            <Input id="su-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
-          </Field>
-          <Field label="Project" htmlFor="su-project" className="w-full sm:w-72">
-            <Select id="su-project" value={project} onChange={(e) => setProject(e.target.value)}>
-              <option value="">All projects</option>
-              <option value={NO_PROJECT}>No project</option>
-              {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{projectLabel(p.projectNumber)}</option>)}
-            </Select>
-          </Field>
-          <Field label="Issued to" htmlFor="su-recipient" className="w-full sm:w-64">
-            <Select id="su-recipient" value={recipient} onChange={(e) => setRecipient(e.target.value)}>
-              <option value="">Everyone</option>
-              <option value={NO_RECIPIENT}>Not recorded</option>
-              {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
-                <option key={r.id} value={r.id}>{r.name}{r.active ? '' : ' (inactive)'}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Category" htmlFor="su-category" className="w-full sm:w-64">
-            <Select id="su-category" value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">All categories</option>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </Select>
-          </Field>
-        </div>
-        {(project || category || recipient) && (
-          <div className="flex justify-end mt-2">
-            <Button variant="ghost" size="sm" onClick={() => { setProject(''); setCategory(''); setRecipient(''); }}>Clear filters</Button>
-          </div>
-        )}
-      </div>
+      <FilterBar onClear={project || category || recipient ? () => { setProject(''); setCategory(''); setRecipient(''); } : undefined}>
+        <Field label="From" htmlFor="su-from" className={DATE_WIDTH}>
+          <Input id="su-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+        </Field>
+        <Field label="To" htmlFor="su-to" className={DATE_WIDTH}>
+          <Input id="su-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+        </Field>
+        <Field label="Project" htmlFor="su-project" className="w-full sm:w-72">
+          <Select id="su-project" value={project} onChange={(e) => setProject(e.target.value)}>
+            <option value="">All projects</option>
+            <option value={NO_PROJECT}>No project</option>
+            {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{projectLabel(p.projectNumber)}</option>)}
+          </Select>
+        </Field>
+        <Field label="Issued to" htmlFor="su-recipient" className={FILTER_WIDTH}>
+          <Select id="su-recipient" value={recipient} onChange={(e) => setRecipient(e.target.value)}>
+            <option value="">Everyone</option>
+            <option value={NO_RECIPIENT}>Not recorded</option>
+            {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
+              <option key={r.id} value={r.id}>{r.name}{r.active ? '' : ' (inactive)'}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Category" htmlFor="su-category" className={FILTER_WIDTH}>
+          <Select id="su-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}

@@ -9,7 +9,8 @@ import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { useIsAdmin } from '../hooks/usePermissions';
 import { PageHeader } from '../components/PageHeader';
-import { Field, Input, Select } from '../components/Field';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
+import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Button } from '../components/Button';
@@ -138,34 +139,23 @@ export function StockStatus() {
         </div>
       )}
 
-      {/* Labelled filters, each only as wide as it needs, side by side and wrapping (one to a row on a phone). */}
-      <div className="mb-3">
-        <div className="flex flex-wrap items-start gap-3">
-          <Field label="Search" htmlFor="ss-search" className="w-full sm:w-80">
-            <div className="relative">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input id="ss-search" className="pl-8" placeholder="Item, code or location…" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-          </Field>
-          <Field label="Show" htmlFor="ss-view" className="w-full sm:w-64">
-            <Select id="ss-view" value={view} onChange={(e) => setView(e.target.value)}>
-              {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
-            </Select>
-          </Field>
-          <Field label="Category" htmlFor="ss-category" className="w-full sm:w-64">
-            <Select id="ss-category" value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">All categories</option>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </Select>
-          </Field>
-        </div>
-        <div className="flex items-center justify-end gap-3 mt-2">
-          {(q || view !== 'attention' || category) && (
-            <Button variant="ghost" size="sm" onClick={() => { setQ(''); setView('attention'); setCategory(''); }}>Clear filters</Button>
-          )}
-          <span className="text-meta">{items.loading ? 'Loading…' : `${filtered.length} of ${items.data?.length ?? 0}`}</span>
-        </div>
-      </div>
+      <FilterBar
+        onClear={q || view !== 'attention' || category ? () => { setQ(''); setView('attention'); setCategory(''); } : undefined}
+        count={items.loading ? 'Loading…' : `${filtered.length} of ${items.data?.length ?? 0}`}
+      >
+        <SearchField id="ss-search" value={q} onChange={setQ} placeholder="Item, code or location…" />
+        <Field label="Show" htmlFor="ss-view" className={FILTER_WIDTH}>
+          <Select id="ss-view" value={view} onChange={(e) => setView(e.target.value)}>
+            {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Category" htmlFor="ss-category" className={FILTER_WIDTH}>
+          <Select id="ss-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {items.error && <ErrorState message={items.error.message} onRetry={items.reload} />}
 

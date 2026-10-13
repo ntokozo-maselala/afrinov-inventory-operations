@@ -3,9 +3,9 @@ import { StockStatusBadge } from '../components/StockStatusBadge';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
-import { Input, Select } from '../components/Field';
+import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
@@ -79,39 +79,23 @@ export function Stock() {
         }
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input
-                placeholder="Search SKU, material, or location…"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                className="pl-8"
-                aria-label="Search stock"
-              />
-            </div>
-            <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-              <option value="">All categories</option>
-              {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            <Select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {activeFilters > 0 && (
-              <Button variant="ghost" size="sm" onClick={() => { setQ(''); setCategory(''); setStatus(''); }}>
-                Clear filters
-              </Button>
-            )}
-          </>
-        )}
-        right={(
-          <span className="text-meta">
-            {stock.loading ? 'Loading…' : `${filtered.length} of ${stock.data?.length ?? 0} lines`}
-          </span>
-        )}
-      />
+      <FilterBar
+        onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); } : undefined}
+        count={stock.loading ? 'Loading…' : `${filtered.length} of ${stock.data?.length ?? 0} lines`}
+      >
+        <SearchField id="stock-search" value={q} onChange={setQ} placeholder="SKU, material or location…" />
+        <Field label="Category" htmlFor="stock-category" className={FILTER_WIDTH}>
+          <Select id="stock-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Status" htmlFor="stock-status" className={FILTER_WIDTH}>
+          <Select id="stock-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
 

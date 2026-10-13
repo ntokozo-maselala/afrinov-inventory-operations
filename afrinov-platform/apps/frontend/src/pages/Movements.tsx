@@ -10,6 +10,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useDebounced } from '../hooks/useDebounced';
 import { PageHeader } from '../components/PageHeader';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Field, Input, Select } from '../components/Field';
 import { Button } from '../components/Button';
 import { ErrorState } from '../components/EmptyState';
@@ -162,70 +163,55 @@ export function Movements() {
         </div>
       </div>
 
-      {/* Labelled filters, each only as wide as it needs, side by side and wrapping (one to a row on a phone). */}
-      <div className="mb-3 no-print">
-        <div className="flex flex-wrap items-start gap-3">
-          {has('supplierId') && (
-            <Field label="Supplier" htmlFor="mv-supplier" className="w-full sm:w-64">
-              <Select id="mv-supplier" value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)}>
-                <option value="">All suppliers</option>
-                {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            </Field>
-          )}
-          {has('recipientId') && (
-            <Field label="Issued to" htmlFor="mv-recipient" className="w-full sm:w-64">
-              <Select id="mv-recipient" value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)}>
-                <option value="">Anyone</option>
-                {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                <option value="__none__">Not recorded</option>
-              </Select>
-            </Field>
-          )}
-          {has('locationId') && (
-            <Field label="Location" htmlFor="mv-location" className="w-full sm:w-64">
-              <Select id="mv-location" value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)}>
-                <option value="">All locations</option>
-                {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </Select>
-            </Field>
-          )}
-          {has('entityType') && (
-            <Field label="Kind of change" htmlFor="mv-kind" className="w-full sm:w-64">
-              <Select id="mv-kind" value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)}>
-                <option value="">All changes</option>
-                {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </Select>
-            </Field>
-          )}
-          {has('actorId') && (
-            <Field label="Person" htmlFor="mv-person" className="w-full sm:w-64">
-              <Select id="mv-person" value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)}>
-                <option value="">Everyone</option>
-                {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </Select>
-            </Field>
-          )}
-          {has('materialId') && (
-            <Field label="Item" htmlFor="movements-item" className="w-full sm:w-64">
-              <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
-            </Field>
-          )}
-          {has('q') && (
-            <Field label="Search" htmlFor="mv-search" className="w-full sm:w-80">
-              <div className="relative">
-                <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-                <Input id="mv-search" className="pl-8" placeholder={SEARCH_HINT[report.id]} value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-            </Field>
-          )}
-        </div>
-        {filtersSet && (
-          <div className="flex justify-end mt-2">
-            <Button variant="ghost" size="sm" onClick={() => showReport(report.id)}>Reset filters</Button>
-          </div>
+      <FilterBar onClear={filtersSet ? () => showReport(report.id) : undefined}>
+        {has('supplierId') && (
+          <Field label="Supplier" htmlFor="mv-supplier" className={FILTER_WIDTH}>
+            <Select id="mv-supplier" value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)}>
+              <option value="">All suppliers</option>
+              {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+          </Field>
         )}
-      </div>
+        {has('recipientId') && (
+          <Field label="Issued to" htmlFor="mv-recipient" className={FILTER_WIDTH}>
+            <Select id="mv-recipient" value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)}>
+              <option value="">Anyone</option>
+              {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              <option value="__none__">Not recorded</option>
+            </Select>
+          </Field>
+        )}
+        {has('locationId') && (
+          <Field label="Location" htmlFor="mv-location" className={FILTER_WIDTH}>
+            <Select id="mv-location" value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)}>
+              <option value="">All locations</option>
+              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        {has('entityType') && (
+          <Field label="Kind of change" htmlFor="mv-kind" className={FILTER_WIDTH}>
+            <Select id="mv-kind" value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)}>
+              <option value="">All changes</option>
+              {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </Select>
+          </Field>
+        )}
+        {has('actorId') && (
+          <Field label="Person" htmlFor="mv-person" className={FILTER_WIDTH}>
+            <Select id="mv-person" value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)}>
+              <option value="">Everyone</option>
+              {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        {has('materialId') && (
+          <Field label="Item" htmlFor="movements-item" className={FILTER_WIDTH}>
+            <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
+          </Field>
+        )}
+        {has('q') && <SearchField id="mv-search" value={search} onChange={setSearch} placeholder={SEARCH_HINT[report.id] ?? ''} />}
+      </FilterBar>
 
       <h2 className="hidden print:block text-h2 mb-2">{report.label}, {from === to ? from : `${from} to ${to}`}</h2>
       {badRange ? <ErrorState message="The start date is after the end date." /> : (

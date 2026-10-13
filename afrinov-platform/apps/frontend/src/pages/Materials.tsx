@@ -2,9 +2,9 @@ import { useMemo, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
-import { Input, Select } from '../components/Field';
+import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
@@ -62,22 +62,18 @@ export function Materials() {
         }
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input ref={searchRef} className="pl-8" placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search materials" />
-            </div>
-            <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-              <option value="">All categories</option>
-              {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {(q || category) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setCategory(''); }}>Clear</Button>}
-          </>
-        )}
-        right={<span className="text-meta">{mats.loading ? 'Loading…' : `${filtered.length} of ${mats.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || category ? () => { setQ(''); setCategory(''); } : undefined}
+        count={mats.loading ? 'Loading…' : `${filtered.length} of ${mats.data?.length ?? 0}`}
+      >
+        <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder="SKU or name…" />
+        <Field label="Category" htmlFor="materials-category" className={FILTER_WIDTH}>
+          <Select id="materials-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {mats.error && <ErrorState message={mats.error.message} onRetry={mats.reload} />}
 
