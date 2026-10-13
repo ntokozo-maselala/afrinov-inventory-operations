@@ -5,7 +5,6 @@ import { Button } from '../components/Button';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { EmptyState } from '../components/EmptyState';
-import { Icon } from '../components/Icon';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { formatNumber, formatDateTime } from '../lib/format';
@@ -133,14 +132,9 @@ export function Dashboard() {
           ) : null
         }
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
-              Refresh
-            </Button>
-            <Button variant="primary" size="sm" leadingIcon={<Icon.Box size={14} />} onClick={() => navigate('/materials')}>
-              Add Item
-            </Button>
-          </div>
+          <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
+            Refresh
+          </Button>
         }
       />
 
