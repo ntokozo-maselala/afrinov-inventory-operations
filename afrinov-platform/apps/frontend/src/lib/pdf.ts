@@ -1,11 +1,15 @@
 // The PDF copy of a report, for sending by email or filing: A4 landscape, the
-// report's title and what it covers at the top, then its tables, each with its
-// subtotal rows, and "Page X of Y" with when it was made at the foot of every
-// page. Each table is as wide as its content, from the left margin; only one
-// too wide for the page spans it, and then only its text columns wrap. Built in the browser from the same data the page shows, so live and
-// frontend-only mode give the same file. jsPDF loads only when a PDF is asked for.
+// Afrinov logo, the report's title and what it covers at the top, then its
+// tables, each with its subtotal rows, and "Page X of Y" with when it was made
+// at the foot of every page. Each table is as wide as its content, from the left
+// margin; only one too wide for the page spans it, and then only its text
+// columns wrap. Built in the browser from the same data the page shows, so live
+// and frontend-only mode give the same file. jsPDF loads only when a PDF is
+// asked for.
 import { triggerDownload } from '../api/exportReport';
+import type { jsPDF } from 'jspdf';
 import { formatDateTime } from './format';
+import { LOGO_FILLS, LOGO_HIGHLIGHTS, LOGO_PATHS } from './logoArt';
 
 export interface PdfColumn {
   header: string;
@@ -43,12 +47,13 @@ export interface PdfReport {
   notes?: string[];
 }
 
-const BRAND: [number, number, number] = [227, 0, 27];
 const MUTED: [number, number, number] = [90, 99, 112];
 /** Left and right: room to punch or bind a printed copy. */
 const SIDE = 20;
 /** Top and bottom. */
 const MARGIN = 12;
+/** The logo's height at the top of the first page, in mm. */
+const LOGO_HEIGHT = 16;
 const FONT_SIZE = 8;
 const CELL_PADDING = 1.5;
 
@@ -72,17 +77,16 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
   const pageHeight = doc.internal.pageSize.getHeight();
   const finalY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
 
+  drawLogo(doc, SIDE, MARGIN - 2, LOGO_HEIGHT);
+  const titleY = MARGIN - 2 + LOGO_HEIGHT + 9;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(...BRAND);
-  doc.text('AFRINOV IMS', SIDE, MARGIN + 2);
   doc.setFontSize(16);
   doc.setTextColor(20, 20, 20);
-  doc.text(pdfText(report.title), SIDE, MARGIN + 10);
+  doc.text(pdfText(report.title), SIDE, titleY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  let y = MARGIN + 16;
+  let y = titleY + 6;
   for (const line of report.lines) {
     for (const wrapped of doc.splitTextToSize(pdfText(line), pageWidth - 2 * SIDE) as string[]) {
       doc.text(wrapped, SIDE, y);
@@ -177,6 +181,46 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
     doc.text(`Page ${p} of ${pages}`, pageWidth - SIDE, pageHeight - MARGIN + 4, { align: 'right' });
   }
   return doc.output('arraybuffer');
+}
+
+type PathOp = { op: 'm' | 'l' | 'c' | 'h'; c: number[] };
+
+/** An SVG path of absolute moves, lines and curves (all the logo uses) as PDF path operations. */
+export function parsePath(d: string): PathOp[] {
+  const tokens = d.match(/[MLCZ]|-?[\d.]+/gi) ?? [];
+  const ops: PathOp[] = [];
+  let command = '';
+  for (let i = 0; i < tokens.length;) {
+    const token = tokens[i]!;
+    if (/^[a-z]$/i.test(token)) {
+      command = token.toUpperCase();
+      i++;
+      if (command === 'Z') ops.push({ op: 'h', c: [] });
+      continue;
+    }
+    const n = command === 'C' ? 6 : 2;
+    ops.push({ op: command === 'M' ? 'm' : command === 'C' ? 'c' : 'l', c: tokens.slice(i, i + n).map(Number) });
+    i += n;
+    if (command === 'M') command = 'L'; // numbers after a move are lines
+  }
+  return ops;
+}
+
+/** The Afrinov logo as vector shapes, so it stays sharp in print: its top-left at (x, y), `height` mm tall. */
+function drawLogo(doc: jsPDF, x: number, y: number, height: number) {
+  const shapes = LOGO_PATHS.map(parsePath);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const op of shapes.flat()) op.c.forEach((v, k) => (k % 2 === 0 ? xs : ys).push(v));
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const scale = height / (Math.max(...ys) - top);
+  shapes.forEach((ops, i) => {
+    if (LOGO_HIGHLIGHTS.has(i)) return; // too faint to show in print
+    doc.setFillColor(LOGO_FILLS[i] ?? '#E3001B');
+    doc.path(ops.map((o) => ({ op: o.op, c: o.c.map((v, k) => (k % 2 === 0 ? x + (v - left) * scale : y + (v - top) * scale)) })));
+    doc.fill();
+  });
 }
 
 export async function downloadPdf(report: PdfReport, filename: string): Promise<void> {

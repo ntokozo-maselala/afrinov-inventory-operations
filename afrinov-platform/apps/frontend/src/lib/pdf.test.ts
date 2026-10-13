@@ -2,7 +2,7 @@
 // pages uncompressed, so what is printed can be found in the file (with its
 // brackets escaped).
 import { describe, it, expect } from 'vitest';
-import { buildPdf, pdfText } from './pdf';
+import { buildPdf, parsePath, pdfText } from './pdf';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
 const cells = (pdf: string) => [...pdf.matchAll(/^([\d.]+) [\d.]+ ([\d.]+) -?[\d.]+ re$/gm)].map((m) => [Number(m[1]), Number(m[2])] as const);
@@ -25,9 +25,23 @@ describe('report PDF', () => {
       notes: ['1 item has no unit price and is not in the totals.'],
     }, new Date('2026-10-13T08:00:00Z')));
     expect(out.startsWith('%PDF-')).toBe(true);
-    for (const s of ['AFRINOV IMS', 'Re-order list', 'All categories', 'Consumables \\(1\\)', 'Grinding disc', 'Subtotal Consumables', '1 item has no unit price', 'Page 1 of 1']) {
+    for (const s of ['Re-order list', 'All categories', 'Consumables \\(1\\)', 'Grinding disc', 'Subtotal Consumables', '1 item has no unit price', 'Page 1 of 1']) {
       expect(out).toContain(s);
     }
+  });
+
+  it('draws the Afrinov logo in its red and green, in place of the name in text', async () => {
+    const out = text(await buildPdf({ title: 'Re-order list', lines: [], sections: [] }));
+    expect(out).not.toContain('AFRINOV IMS');
+    expect(out).toContain('0.9 0.2 0.16 rg'); // #E6332A
+    expect(out).toContain('0.18 0.76 0.07 rg'); // #2FC112
+  });
+
+  it('reads the logo paths: moves, lines, curves and closes', () => {
+    expect(parsePath('M 1 2 L 3 4 C 5 6 7 8 9 10 z M 0 0 1 1')).toEqual([
+      { op: 'm', c: [1, 2] }, { op: 'l', c: [3, 4] }, { op: 'c', c: [5, 6, 7, 8, 9, 10] }, { op: 'h', c: [] },
+      { op: 'm', c: [0, 0] }, { op: 'l', c: [1, 1] },
+    ]);
   });
 
   it('says so in place of a table with no rows', async () => {
