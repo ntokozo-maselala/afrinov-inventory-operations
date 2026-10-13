@@ -682,6 +682,9 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'POST' && p === '/inventory-issues') {
     return handleIssue((body as IssueBody) ?? {});
   }
+  if (method === 'GET' && p === '/tools') return listTools();
+  if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
+  if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
   if (method === 'POST' && p === '/inventory-transfers') {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
@@ -1248,6 +1251,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
   for (const t of totals.values()) {
     const material = findMaterial(t.materialId);
     if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (material.category === 'TOOLS') throw err('VALIDATION_ERROR', `${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
     if (!findLocation(t.locationId)) throw err('NOT_FOUND', 'Location not found');
     const balance = getBalance(t.materialId, t.locationId);
     if (balance < t.quantity) {
@@ -1280,6 +1284,126 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
       return id;
     }),
   };
+}
+
+// Tool loans, as the backend's ToolLoanService: a check-out takes a tool off
+// its location to a recipient (LOAN), a check-in brings it back (LOAN_RETURN),
+// and a lost tool comes back on paper and is written off (ADJUSTMENT, LOSS).
+interface ToolCheckOutBody { recipientId?: string; projectNumber?: string; note?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }
+interface ToolCheckInBody { lines?: Array<{ loanId: string; quantity: number; condition: 'GOOD' | 'DAMAGED' | 'LOST'; note?: string }> }
+
+const returnedOnLoan = (loanId: string) => state.transactions
+  .filter((t) => t.type === 'LOAN_RETURN' && t.referenceType === 'ToolLoan' && t.referenceId === loanId)
+  .reduce((a, t) => a + Number(t.quantity), 0);
+
+function listTools() {
+  const balances = computeBalances();
+  return state.materials
+    .filter((m) => m.category === 'TOOLS' && m.active)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((m) => {
+      const locations = balances
+        .filter((b) => b.materialId === m.id && b.quantity > 0)
+        .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))
+        .sort((a, b) => a.locationName.localeCompare(b.locationName));
+      const loans = state.transactions
+        .filter((t) => t.type === 'LOAN' && t.materialId === m.id)
+        .map((t) => ({ t, out: -Number(t.quantity) - returnedOnLoan(t.id) }))
+        .filter(({ out }) => out > 0)
+        .map(({ t, out }) => ({
+          loanId: t.id, slipId: t.issueId ?? null, recipientId: t.recipientId ?? null,
+          recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
+          projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
+          quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
+          checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
+        }));
+      const inStore = locations.reduce((a, l) => a + Number(l.quantity), 0);
+      const onLoan = loans.reduce((a, l) => a + Number(l.out), 0);
+      return {
+        materialId: m.id, sku: m.sku, name: m.name, serialNumber: m.serialNumber ?? null, unitOfMeasure: m.unitOfMeasure,
+        inStore: String(inStore), onLoan: String(onLoan), owned: String(inStore + onLoan), locations, loans,
+      };
+    });
+}
+
+function handleToolCheckOut(b: ToolCheckOutBody): { slipId: string; loanIds: string[] } {
+  if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the tools are checked out to');
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool');
+  if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Check-out quantity must be positive');
+  const recipient = state.recipients.find((x) => x.id === b.recipientId);
+  if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
+  if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+  for (const l of lines) {
+    const key = `${l.materialId}|${l.locationId}`;
+    const t = totals.get(key);
+    if (t) t.quantity += l.quantity;
+    else totals.set(key, { ...l });
+  }
+  for (const t of totals.values()) {
+    const material = findMaterial(t.materialId);
+    if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (material.category !== 'TOOLS') throw err('VALIDATION_ERROR', `${material.sku} is not a tool; issue it on Issue stock instead`);
+    const inStore = getBalance(t.materialId, t.locationId);
+    if (inStore < t.quantity) throw err('INSUFFICIENT_BALANCE', `Cannot check out ${t.quantity} × ${material.sku}: only ${inStore} in store there.`);
+  }
+  const slipId = nextId('loan');
+  const postedAt = new Date().toISOString();
+  const loanIds = lines.map((l) => {
+    const id = nextId('t');
+    state.transactions.push({
+      id, issueId: slipId, postedAt, type: 'LOAN', materialId: l.materialId, locationId: l.locationId, quantity: String(-l.quantity),
+      actorId: 'user-1', recipientId: b.recipientId, projectNumber: b.projectNumber, reasonNote: b.note?.trim() || undefined,
+    });
+    return id;
+  });
+  return { slipId, loanIds };
+}
+
+function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[] } {
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool to check in');
+  if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Check-in quantity must be positive');
+  if (lines.some((l) => l.condition === 'LOST' && !l.note?.trim())) throw err('VALIDATION_ERROR', 'Say what happened to a lost tool');
+  const asked = new Map<string, number>();
+  for (const l of lines) {
+    const loan = state.transactions.find((t) => t.id === l.loanId);
+    if (!loan) throw err('NOT_FOUND', 'Tool loan not found');
+    if (loan.type !== 'LOAN') throw err('INVALID_STATE', 'Only a tool check-out can be checked in');
+    asked.set(l.loanId, (asked.get(l.loanId) ?? 0) + l.quantity);
+  }
+  for (const [loanId, quantity] of asked) {
+    const loan = state.transactions.find((t) => t.id === loanId)!;
+    const out = -Number(loan.quantity) - returnedOnLoan(loanId);
+    if (quantity > out) throw err('VALIDATION_ERROR', `Cannot check in ${quantity} × ${findMaterial(loan.materialId)?.sku}: only ${out} still out on this loan.`);
+  }
+  const postedAt = new Date().toISOString();
+  const returnIds: string[] = [];
+  const writeOffIds: string[] = [];
+  for (const l of lines) {
+    const loan = state.transactions.find((t) => t.id === l.loanId)!;
+    const note = l.note?.trim() || undefined;
+    const back = nextId('t');
+    state.transactions.push({
+      id: back, postedAt, type: 'LOAN_RETURN', materialId: loan.materialId, locationId: loan.locationId, quantity: String(l.quantity),
+      actorId: 'user-1', recipientId: loan.recipientId, projectNumber: loan.projectNumber,
+      reasonCode: l.condition === 'DAMAGED' ? 'DAMAGE' : l.condition === 'LOST' ? 'LOSS' : undefined, reasonNote: note,
+      referenceType: 'ToolLoan', referenceId: loan.id,
+    });
+    returnIds.push(back);
+    if (l.condition === 'LOST') {
+      const writeOff = nextId('t');
+      const who = state.recipients.find((r) => r.id === loan.recipientId)?.name ?? 'an unknown recipient';
+      state.transactions.push({
+        id: writeOff, postedAt, type: 'ADJUSTMENT', materialId: loan.materialId, locationId: loan.locationId, quantity: String(-l.quantity),
+        actorId: 'user-1', recipientId: loan.recipientId, projectNumber: loan.projectNumber, reasonCode: 'LOSS',
+        reasonNote: `Lost on loan to ${who}: ${note}`, referenceType: 'ToolLoan', referenceId: loan.id,
+      });
+      writeOffIds.push(writeOff);
+    }
+  }
+  return { returnIds, writeOffIds };
 }
 
 function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number }): { outTransactionId: string; inTransactionId: string } {
@@ -1341,6 +1465,9 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   const original = state.transactions.find((t) => t.id === id);
   if (!original) throw err('NOT_FOUND', 'InventoryTransaction not found');
   if (original.reversesId) throw err('INVALID_STATE', 'A reversal cannot itself be reversed. Record the movement again instead.');
+  if (original.type === 'LOAN' || original.type === 'LOAN_RETURN' || original.referenceType === 'ToolLoan') {
+    throw err('INVALID_STATE', 'Tool check-outs and check-ins are not reversed: check the tool in, or out, again instead.');
+  }
   if (original.type === 'ISSUE' && returnedAgainst(original.id) > 0) {
     throw err('INVALID_STATE', 'Part of this issue has been returned. Reverse the returns first.');
   }
@@ -1538,6 +1665,13 @@ function lastSupplierOf(materialId: string): { name: string; receivedAt: string 
 }
 
 // Mirrors ReportingService.stockStatus.
+/** Units of a tool out on loan: lent less what came back (see the backend's tool-loans.ts). */
+function onLoanOf(materialId: string): number {
+  return -state.transactions
+    .filter((t) => t.materialId === materialId && (t.type === 'LOAN' || t.type === 'LOAN_RETURN'))
+    .reduce((a, t) => a + Number(t.quantity), 0);
+}
+
 function computeStockStatus(filter: { status?: StockStatus[]; category?: string }) {
   const balances = computeBalances();
   const bands = mockBands();
@@ -1547,10 +1681,11 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string 
     .map((m) => {
       const mine = balances.filter((b) => b.materialId === m.id);
       const onHand = mine.reduce((a, b) => a + b.quantity, 0);
-      const item = classifyItem(onHand, Number(m.requiredStock), bands);
+      const lent = onLoanOf(m.id);
+      const item = classifyItem(onHand + lent, Number(m.requiredStock), bands);
       return {
         materialId: m.id, sku: m.sku, name: m.name, category: m.category, unitOfMeasure: m.unitOfMeasure,
-        requiredStock: String(Number(m.requiredStock)), onHand: String(onHand),
+        requiredStock: String(Number(m.requiredStock)), onHand: String(onHand), onLoan: String(lent),
         percentOfRequired: item.percentOfRequired, status: item.status, reorderQuantity: String(item.reorderQuantity),
         unitCost: m.unitCost === undefined || m.unitCost === null ? null : String(m.unitCost),
         locations: mine
@@ -1626,7 +1761,7 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       locationType: l.type,
       quantity: String(b.quantity),
       ...(() => {
-        const item = classifyItem(totals.get(m.id) ?? 0, required, bands);
+        const item = classifyItem((totals.get(m.id) ?? 0) + onLoanOf(m.id), required, bands);
         return { belowThreshold: alertsOn && needsAttention(item.status), stockStatus: alertsOn ? item.status : null, percentOfRequired: item.percentOfRequired };
       })(),
     });

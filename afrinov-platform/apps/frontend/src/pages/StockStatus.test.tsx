@@ -105,6 +105,12 @@ describe('StockStatus page', () => {
     expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled();
   });
 
+  it('shows a tool out on loan beside what is on hand', async () => {
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : [{ ...row('TL-1', 'Torque wrench', 'WARNING', '0', '10', 20, '8'), category: 'TOOLS', onLoan: '2' }]));
+    renderPage();
+    expect(await screen.findByText('+2 on loan')).toBeInTheDocument();
+  });
+
   it('opens on the view a link asks for', async () => {
     render(<MemoryRouter initialEntries={['/reports/stock-status?view=OK']}><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
     expect(await screen.findByText('Cutting disc')).toBeInTheDocument();

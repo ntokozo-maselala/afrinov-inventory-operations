@@ -11,7 +11,7 @@ const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 const LIMIT = 10_000;
 
 const TYPE_LABEL: Record<string, string> = {
-  RECEIPT: 'Receipt', ISSUE: 'Issue', TRANSFER_OUT: 'Transfer out', TRANSFER_IN: 'Transfer in', ADJUSTMENT: 'Adjustment', RETURN: 'Return',
+  RECEIPT: 'Receipt', ISSUE: 'Issue', TRANSFER_OUT: 'Transfer out', TRANSFER_IN: 'Transfer in', ADJUSTMENT: 'Adjustment', RETURN: 'Return', LOAN: 'Tool out', LOAN_RETURN: 'Tool back',
 };
 
 export async function downloadMovements(query: string): Promise<void> {

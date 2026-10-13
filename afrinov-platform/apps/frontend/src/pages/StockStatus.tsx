@@ -30,6 +30,8 @@ export interface StockStatusItem {
   unitOfMeasure: string;
   requiredStock: string;
   onHand: string;
+  /** Tools: out on loan, still owned; the status counts it with what is on hand. */
+  onLoan?: string;
   percentOfRequired: number | null;
   status: Status;
   reorderQuantity: string;
@@ -190,7 +192,12 @@ const COLUMNS: DataTableColumn<StockStatusItem>[] = [
     header: 'On hand',
     align: 'right',
     className: 'text-num',
-    render: (r) => <span className="font-mono">{formatNumber(num(r.onHand))} <span className="text-surface-500 text-xs">{r.unitOfMeasure}</span></span>,
+    render: (r) => (
+      <div>
+        <span className="font-mono">{formatNumber(num(r.onHand))} <span className="text-surface-500 text-xs">{r.unitOfMeasure}</span></span>
+        {num(r.onLoan ?? '0') > 0 && <div className="text-xs text-surface-500">+{formatNumber(num(r.onLoan!))} on loan</div>}
+      </div>
+    ),
     width: '8rem',
   },
   {

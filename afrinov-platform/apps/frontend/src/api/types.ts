@@ -11,6 +11,23 @@ export interface Material {
   serialNumber?: string | null;
 }
 
+/** A tool lent and not yet all back (GET /tools). */
+export interface OpenLoan {
+  loanId: string; slipId: string | null; recipientId: string | null; recipientName: string | null; projectNumber: string | null;
+  locationId: string; locationName: string;
+  /** How many were lent, and how many of them are still out. */
+  quantity: string; out: string;
+  checkedOutAt: string; checkedOutBy: string; note: string | null;
+}
+
+/** A tool with what is in store where, what is out, and with whom (GET /tools). */
+export interface ToolRow {
+  materialId: string; sku: string; name: string; serialNumber: string | null; unitOfMeasure: string;
+  inStore: string; onLoan: string; owned: string;
+  locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  loans: OpenLoan[];
+}
+
 /** One item at one location (GET /reports/current-stock). */
 export interface CurrentStockRow {
   materialId: string; materialSku: string; materialName: string;
