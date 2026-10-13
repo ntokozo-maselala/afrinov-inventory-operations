@@ -41,6 +41,11 @@ describe('report PDF', () => {
     expect(out).toMatch(/Page 1 of [3-9]/);
   });
 
+  it('prints a note under a section heading', async () => {
+    const out = text(await buildPdf({ title: 'Counts', lines: [], sections: [{ heading: 'Main Storeroom', note: 'Shelf 3 recounted', columns: [{ header: 'Code' }], rows: [['A']] }] }));
+    expect(out).toContain('Shelf 3 recounted');
+  });
+
   it('starts a section on a new page when asked', async () => {
     const one = { columns: [{ header: 'Code' }], rows: [['A']] };
     const out = text(await buildPdf({ title: 'Sheets', lines: [], sections: [one, { ...one, newPage: true }] }));

@@ -15,18 +15,21 @@ import { Field, Input, Select } from '../components/Field';
 import { Button } from '../components/Button';
 import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
-import { useToast } from '../components/Toast';
+import { DownloadMenu, type DownloadFormat } from '../components/DownloadMenu';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { LedgerReport, type LedgerReportKind } from '../components/reports/LedgerReport';
 import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
 import { IssuedStockReport } from '../components/reports/IssuedStockReport';
 import { StockCountsReport } from '../components/reports/StockCountsReport';
 import { OtherActivity, ACTIVITY_TYPE_LABEL } from '../components/OtherActivity';
-import { downloadMovements } from '../api/exportMovements';
-import { downloadIssuedStock, downloadReceivedStock, downloadStockCounts } from '../api/exportReports';
+import { downloadMovements, downloadMovementsPdf } from '../api/exportMovements';
+import {
+  downloadIssuedStock, downloadIssuedStockPdf, downloadReceivedStock, downloadReceivedStockPdf, downloadStockCounts, downloadStockCountsPdf,
+} from '../api/exportReports';
 import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
 import { today } from '../lib/dates';
+import { formatDate } from '../lib/format';
 
 type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
 type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'other';
@@ -79,8 +82,6 @@ export function Movements() {
 
   const [search, setSearch] = useState(params.get('q') ?? '');
   const debouncedSearch = useDebounced(search, 300);
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
 
   function setParam(key: string, value: string | null) {
     setParams((p) => {
@@ -105,18 +106,37 @@ export function Movements() {
     setParams(keep, { replace: true });
   }
 
-  async function download() {
-    setDownloading(true);
-    try {
-      if (report.id === 'received') await downloadReceivedStock(query);
-      else if (report.id === 'issued') await downloadIssuedStock(query);
-      else if (report.id === 'counts') await downloadStockCounts(query);
-      else await downloadMovements(report.id === 'all' ? query : `${query}&report=${report.id}`);
-    } catch (err) {
-      toast.error('Download failed', (err as Error).message);
-    } finally {
-      setDownloading(false);
+  /** The filters that are set, in words, for the top of the PDF. */
+  function filterWords(): string[] {
+    const name = (list: Option[] | null | undefined, id: string) => (list ?? []).find((o) => o.id === id)?.name ?? id;
+    const words: string[] = [];
+    for (const f of report.filters) {
+      const v = params.get(f);
+      if (!v) continue;
+      if (f === 'supplierId') words.push(`Supplier: ${name(suppliers.data, v)}`);
+      else if (f === 'recipientId') words.push(`Issued to: ${v === '__none__' ? 'Not recorded' : name(recipients.data, v)}`);
+      else if (f === 'locationId') words.push(`Location: ${name(locations.data, v)}`);
+      else if (f === 'actorId') words.push(`Person: ${name(actors.data, v)}`);
+      else if (f === 'materialId') words.push(`Item: ${itemOptions.find((o) => o.value === v)?.label ?? v}`);
+      else if (f === 'q') words.push(`Search: "${v}"`);
     }
+    return words;
+  }
+
+  async function download(format: DownloadFormat) {
+    if (format === 'pdf') {
+      const words = filterWords();
+      const about = { title: `${report.label}, ${from === to ? formatDate(from) : `${formatDate(from)} to ${formatDate(to)}`}`, lines: words.length ? [words.join('  ·  ')] : [] };
+      if (report.id === 'received') await downloadReceivedStockPdf(query, about);
+      else if (report.id === 'issued') await downloadIssuedStockPdf(query, about);
+      else if (report.id === 'counts') await downloadStockCountsPdf(query, about);
+      else if (report.id !== 'other') await downloadMovementsPdf(query, report.id, about);
+      return;
+    }
+    if (report.id === 'received') await downloadReceivedStock(query);
+    else if (report.id === 'issued') await downloadIssuedStock(query);
+    else if (report.id === 'counts') await downloadStockCounts(query);
+    else await downloadMovements(report.id === 'all' ? query : `${query}&report=${report.id}`);
   }
 
   const filtersSet = report.filters.some((f) => params.get(f));
@@ -128,11 +148,7 @@ export function Movements() {
         description="The shop's records by report: choose what to see and the day, then narrow it down."
         actions={(
           <div className="flex gap-2 no-print">
-            {report.id !== 'other' && (
-              <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange}>
-                Download as Excel
-              </Button>
-            )}
+            {report.id !== 'other' && <DownloadMenu onDownload={download} disabled={badRange} />}
             <Button variant="primary" size="sm" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print</Button>
           </div>
         )}

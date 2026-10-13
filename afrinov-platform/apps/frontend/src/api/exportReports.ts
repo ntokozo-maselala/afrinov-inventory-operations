@@ -2,9 +2,12 @@
 // stock, stock counts), built in the browser from the same API the page shows, so live and
 // frontend-only mode give the same file. One row per line, with the delivery or
 // issue or count it belongs to repeated, so the sheet can be sorted and filtered.
+// The PDF copies keep each delivery, issue slip or count together instead.
 import { api } from './client';
 import { triggerDownload } from './exportReport';
 import type { CountRecord, IssueSlip, ReceiptRecord } from './types';
+import { downloadPdf, type PdfAbout } from '../lib/pdf';
+import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 /** The most records one download fetches; the page asks for a shorter range beyond it. */
@@ -87,4 +90,75 @@ export async function downloadStockCounts(query: string): Promise<void> {
     }),
     'No counts were posted on these dates.',
   );
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Received stock as a PDF: each delivery with its supplier, delivery note and lines. */
+export async function downloadReceivedStockPdf(query: string, about: PdfAbout): Promise<void> {
+  const receipts = await fetchAll<ReceiptRecord>(`/stock-receipts?${query}`);
+  await downloadPdf({
+    ...about,
+    lines: [...about.lines, `${plural(receipts.length, 'delivery', 'deliveries')}, ${plural(receipts.reduce((n, r) => n + r.lines.length, 0), 'line')}`],
+    sections: receipts.length === 0
+      ? [{ columns: [], rows: [], empty: 'No stock was received on these dates.' }]
+      : receipts.map((r) => ({
+        heading: `${formatDate(r.receivedAt)}  ·  ${r.supplierName}  ·  ${r.deliveryRef ?? 'No delivery note'}`,
+        note: `Receipt ${r.number}, received by ${r.receivedByName}`,
+        columns: [{ header: 'Code', width: 34 }, { header: 'Item' }, { header: 'Into location', width: 50 }, { header: 'Quantity', align: 'right' as const, width: 26 }, { header: 'Unit', width: 18 }],
+        rows: r.lines.map((l) => [l.sku, l.name, l.locationName, formatNumber(Number(l.quantity)), l.unitOfMeasure]),
+      })),
+  }, `afrinov-received-stock-${fileRange(query)}.pdf`);
+}
+
+/** Issued stock as a PDF: each issue slip with who it went to, the project and its lines. */
+export async function downloadIssuedStockPdf(query: string, about: PdfAbout): Promise<void> {
+  const slips = await fetchAll<IssueSlip>(`/inventory-issues?${query}`);
+  await downloadPdf({
+    ...about,
+    lines: [...about.lines, `${plural(slips.length, 'issue')}, ${plural(slips.reduce((n, s) => n + s.lines.length, 0), 'line')}`],
+    sections: slips.length === 0
+      ? [{ columns: [], rows: [], empty: 'No stock was issued on these dates.' }]
+      : slips.map((s) => ({
+        heading: `${formatDateTime(s.issuedAt)}  ·  Issued to ${s.recipientName ?? 'not recorded'}${s.projectNumber ? `  ·  Project ${s.projectNumber}` : ''}`,
+        note: `Issued by ${s.issuedByName}`,
+        columns: [
+          { header: 'Code', width: 34 }, { header: 'Item' }, { header: 'From location', width: 46 },
+          { header: 'Issued', align: 'right' as const, width: 22 }, { header: 'Returned', align: 'right' as const, width: 22 },
+          { header: 'Unit', width: 16 }, { header: 'Reversed', width: 20 },
+        ],
+        rows: s.lines.map((l) => [
+          l.materialSku, l.materialName, l.locationName, formatNumber(Math.abs(Number(l.quantity))),
+          Number(l.returnedQuantity ?? 0) ? formatNumber(Number(l.returnedQuantity)) : '-', l.unitOfMeasure ?? '', l.reversedById ? 'Yes' : '',
+        ]),
+      })),
+  }, `afrinov-issued-stock-${fileRange(query)}.pdf`);
+}
+
+/** Stock counts as a PDF: each count with its sheet (or, for older counts, its differences) and notes. */
+export async function downloadStockCountsPdf(query: string, about: PdfAbout): Promise<void> {
+  const counts = await fetchAll<CountRecord>(`/stock-counts?${query}`);
+  const columns = [
+    { header: 'Code', width: 34 }, { header: 'Item' }, { header: 'System', align: 'right' as const, width: 22 },
+    { header: 'Counted', align: 'right' as const, width: 22 }, { header: 'Difference', align: 'right' as const, width: 22 },
+    { header: 'Unit', width: 16 }, { header: 'Note', width: 60 },
+  ];
+  await downloadPdf({
+    ...about,
+    lines: [...about.lines, plural(counts.length, 'count')],
+    sections: counts.length === 0
+      ? [{ columns: [], rows: [], empty: 'No counts were posted on these dates.' }]
+      : counts.map((c) => ({
+        heading: `${formatDateTime(c.at)}  ·  ${c.locationName}  ·  ${plural(c.counted, 'item')} counted, ${plural(c.adjusted, 'difference')}`,
+        note: [`Counted by ${c.countedByName}`, c.note, c.lines.length === 0 && c.differences.length > 0 ? 'Posted before full sheets were kept: differences only.' : null].filter(Boolean).join('. '),
+        columns,
+        rows: c.lines.length > 0
+          ? c.lines.map((l) => {
+            const diff = Math.round((Number(l.counted) - Number(l.expected)) * 10000) / 10000;
+            return [l.sku, l.name, formatNumber(Number(l.expected)), formatNumber(Number(l.counted)), diff === 0 ? '-' : `${diff > 0 ? '+' : ''}${formatNumber(diff)}`, l.unitOfMeasure, l.note ?? ''];
+          })
+          : c.differences.map((d) => [d.sku, d.name, '', '', `${Number(d.quantity) > 0 ? '+' : ''}${formatNumber(Number(d.quantity))}`, d.unitOfMeasure, '']),
+        empty: 'No differences.',
+      })),
+  }, `afrinov-stock-counts-${fileRange(query)}.pdf`);
 }

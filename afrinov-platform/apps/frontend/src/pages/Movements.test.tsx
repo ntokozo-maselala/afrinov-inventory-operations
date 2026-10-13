@@ -2,10 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), perms: { activity: false } }));
+const { mockGet, perms, exports } = vi.hoisted(() => ({
+  mockGet: vi.fn(), perms: { activity: false },
+  exports: { excel: vi.fn(), received: vi.fn(), issued: vi.fn(), counts: vi.fn(), ledger: vi.fn() },
+}));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
+}));
+vi.mock('../api/exportMovements', () => ({ downloadMovements: exports.excel, downloadMovementsPdf: exports.ledger }));
+vi.mock('../api/exportReports', () => ({
+  downloadReceivedStock: exports.excel, downloadIssuedStock: exports.excel, downloadStockCounts: exports.excel,
+  downloadReceivedStockPdf: exports.received, downloadIssuedStockPdf: exports.issued, downloadStockCountsPdf: exports.counts,
 }));
 vi.mock('../hooks/usePermissions', () => ({
   usePermissions: () => ({ hasPermission: () => true }),
@@ -170,7 +178,33 @@ describe('Movements page', () => {
     fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'other' } });
     expect(await screen.findByRole('link', { name: 'Added item WSHR-16 Flat washer' })).toHaveAttribute('href', '/materials/m-1');
     expect(mockGet).toHaveBeenCalledWith('/activity?from=2026-10-12&to=2026-10-12&limit=50');
-    expect(screen.queryByRole('button', { name: /Download as Excel/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('downloads the chosen report as a PDF that names its dates and filters', async () => {
+    for (const f of Object.values(exports)) f.mockReset().mockResolvedValue(undefined);
+    renderAt('/movements?report=received&from=2026-09-25&to=2026-09-30&supplierId=s-1');
+    await screen.findByText('GR-2026-0007', { exact: false });
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Hydroscand' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(exports.received).toHaveBeenCalledWith(
+      'from=2026-09-25&to=2026-09-30&supplierId=s-1',
+      { title: 'Received stock, 25 Sept 2026 to 30 Sept 2026', lines: ['Supplier: Hydroscand'] },
+    ));
+    expect(exports.excel).not.toHaveBeenCalled();
+  });
+
+  it('downloads a ledger report as a PDF of that report, and as Excel', async () => {
+    for (const f of Object.values(exports)) f.mockReset().mockResolvedValue(undefined);
+    renderAt('/movements?report=writeoffs&from=2026-10-05');
+    await screen.findByText('SKU-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(exports.ledger).toHaveBeenCalledWith('from=2026-10-05&to=2026-10-05', 'writeoffs', { title: 'Write-offs and adjustments, 05 Oct 2026', lines: [] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
+    await waitFor(() => expect(exports.excel).toHaveBeenCalledWith('from=2026-10-05&to=2026-10-05&report=writeoffs'));
   });
 
   it('labels each filter of the chosen report', async () => {

@@ -15,6 +15,8 @@ export interface PdfColumn {
 
 export interface PdfTable {
   heading?: string;
+  /** A line under the heading, e.g. a count's note. */
+  note?: string;
   columns: PdfColumn[];
   rows: string[][];
   /** Bold rows under the body: subtotals and totals. */
@@ -24,6 +26,9 @@ export interface PdfTable {
   /** Start on a new page, as a workbook starts a new sheet. */
   newPage?: boolean;
 }
+
+/** What a page says about the copy it asks for: its title and what it covers. */
+export type PdfAbout = Pick<PdfReport, 'title' | 'lines'>;
 
 export interface PdfReport {
   title: string;
@@ -87,6 +92,16 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       doc.setTextColor(20, 20, 20);
       doc.text(pdfText(section.heading), MARGIN, y + 4);
       y += 7;
+    }
+    if (section.note) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...MUTED);
+      for (const wrapped of doc.splitTextToSize(pdfText(section.note), pageWidth - 2 * MARGIN) as string[]) {
+        doc.text(wrapped, MARGIN, y + 2);
+        y += 4.5;
+      }
+      y += 1;
     }
     if (section.rows.length === 0 && section.empty) {
       doc.setFont('helvetica', 'normal');

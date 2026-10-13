@@ -1,9 +1,11 @@
 // Download the Movements list, with its filters, as Excel. Live: the backend's
 // GET /inventory-transactions/export. Frontend-only mode builds the same sheet
-// here from the mock history.
+// here from the mock history. The PDF copy is built here in both modes.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
 import type { MovementRow } from './types';
+import { downloadPdf, type PdfAbout, type PdfColumn } from '../lib/pdf';
+import { formatDateTime, formatNumber } from '../lib/format';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const LIMIT = 10_000;
@@ -64,4 +66,76 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   }
   if (rows.length === 0) ws.addRow(['No movements match these filters.']);
   return wb.xlsx.writeBuffer();
+}
+
+/** The most movements one PDF holds; beyond it the page asks for a shorter range. */
+const PDF_LIMIT = 5_000;
+
+const reason = (m: MovementRow) => (m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '');
+const typeLabel = (m: MovementRow) => {
+  const type = TYPE_LABEL[m.type] ?? m.type;
+  return m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type;
+};
+
+/** Each ledger report's columns, as the page shows them. */
+const LEDGER: Record<'all' | 'transfers' | 'writeoffs', Array<PdfColumn & { cell: (m: MovementRow) => string }>> = {
+  all: [
+    { header: 'When', width: 30, cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Type', width: 22, cell: typeLabel },
+    { header: 'Code', width: 24, cell: (m) => m.materialSku },
+    { header: 'Item', cell: (m) => m.materialName },
+    { header: 'Location', width: 26, cell: (m) => m.locationName },
+    { header: 'Quantity', align: 'right', width: 18, cell: (m) => formatNumber(Number(m.quantity)) },
+    { header: 'Unit', width: 12, cell: (m) => m.unitOfMeasure ?? '' },
+    { header: 'Reason', width: 30, cell: (m) => [reason(m), m.reasonNote].filter(Boolean).join(': ') },
+    { header: 'Issued to', width: 26, cell: (m) => m.recipientName ?? '' },
+    { header: 'Project', width: 20, cell: (m) => m.projectNumber ?? '' },
+    { header: 'By', width: 24, cell: (m) => m.actorName },
+  ],
+  transfers: [
+    { header: 'When', width: 32, cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Code', width: 28, cell: (m) => m.materialSku },
+    { header: 'Item', cell: (m) => m.materialName },
+    { header: 'From', width: 34, cell: (m) => m.locationName },
+    { header: 'To', width: 34, cell: (m) => m.otherLocationName ?? '' },
+    { header: 'Quantity', align: 'right', width: 20, cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
+    { header: 'Unit', width: 14, cell: (m) => m.unitOfMeasure ?? '' },
+    { header: 'By', width: 30, cell: (m) => m.actorName },
+  ],
+  writeoffs: [
+    { header: 'When', width: 30, cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Code', width: 26, cell: (m) => m.materialSku },
+    { header: 'Item', cell: (m) => m.materialName },
+    { header: 'Location', width: 30, cell: (m) => m.locationName },
+    { header: 'Quantity', align: 'right', width: 20, cell: (m) => formatNumber(Number(m.quantity)) },
+    { header: 'Unit', width: 14, cell: (m) => m.unitOfMeasure ?? '' },
+    { header: 'Reason', width: 30, cell: reason },
+    { header: 'Note', width: 50, cell: (m) => m.reasonNote ?? '' },
+    { header: 'By', width: 26, cell: (m) => m.actorName },
+  ],
+};
+
+/**
+ * A ledger report (all movements, transfers, or write-offs and adjustments) as
+ * a PDF, with the page's columns, for the same day or range and filters.
+ */
+export async function downloadMovementsPdf(query: string, kind: 'all' | 'transfers' | 'writeoffs', about: PdfAbout): Promise<void> {
+  const path = `/inventory-transactions?${query}${kind === 'all' ? '' : `&report=${kind}`}`;
+  const rows: MovementRow[] = [];
+  for (let before = ''; ;) {
+    const page = await api.get<MovementRow[]>(`${path}&limit=1000${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+    rows.push(...page);
+    if (page.length < 1000) break;
+    if (rows.length >= PDF_LIMIT) throw new Error(`More than ${PDF_LIMIT} movements match. Choose a shorter date range.`);
+    before = page[page.length - 1]!.cursor;
+  }
+  const columns = LEDGER[kind];
+  const params = new URLSearchParams(query);
+  const from = params.get('from') ?? '';
+  const to = params.get('to') ?? from;
+  await downloadPdf({
+    ...about,
+    lines: [...about.lines, `${rows.length} movement${rows.length === 1 ? '' : 's'}`],
+    sections: [{ columns, rows: rows.map((m) => columns.map((c) => c.cell(m))), empty: 'No movements match these filters.' }],
+  }, `afrinov-${kind === 'all' ? 'movements' : kind}-${to && to !== from ? `${from}-to-${to}` : from}.pdf`);
 }
