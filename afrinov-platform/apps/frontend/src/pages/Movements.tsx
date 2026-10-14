@@ -22,6 +22,7 @@ import { LedgerReport, type LedgerReportKind } from '../components/reports/Ledge
 import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
 import { IssuedStockReport } from '../components/reports/IssuedStockReport';
 import { StockCountsReport } from '../components/reports/StockCountsReport';
+import type { ReportView } from '../components/reports/ReportView';
 import { OtherActivity, ACTIVITY_TYPE_LABEL } from '../components/OtherActivity';
 import { downloadMovements, downloadMovementsPdf } from '../api/exportMovements';
 import {
@@ -66,6 +67,8 @@ export function Movements() {
   const ranged = params.has('to');
   const to = ranged ? params.get('to') || from : from;
   const badRange = from > to;
+  // Received, issued and counts read as a flat table unless cards are asked for.
+  const view: ReportView = params.get('view') === 'cards' ? 'cards' : 'table';
 
   // What every request of this report shares: the day or range, and its filters.
   const queryParams = new URLSearchParams({ from, to });
@@ -104,9 +107,12 @@ export function Movements() {
     if (id !== 'all') keep.set('report', id);
     if (params.get('from')) keep.set('from', params.get('from')!);
     if (params.has('to')) keep.set('to', params.get('to')!);
+    if (view === 'cards') keep.set('view', 'cards');
     setSearch('');
     setParams(keep, { replace: true });
   }
+
+  const showView = (v: ReportView) => setParam('view', v === 'cards' ? 'cards' : null);
 
   // Tools are checked out to someone; stock is issued to them.
   const recipientLabel = report.id === 'loans' ? 'Checked out to' : 'Issued to';
@@ -236,9 +242,9 @@ export function Movements() {
 
       <h2 className="hidden print:block text-h2 mb-2">{report.label}, {from === to ? from : `${from} to ${to}`}</h2>
       {badRange ? <ErrorState message="The start date is after the end date." /> : (
-        report.id === 'received' ? <ReceivedStockReport query={query} />
-          : report.id === 'issued' ? <IssuedStockReport query={query} />
-          : report.id === 'counts' ? <StockCountsReport query={query} />
+        report.id === 'received' ? <ReceivedStockReport query={query} view={view} onView={showView} />
+          : report.id === 'issued' ? <IssuedStockReport query={query} view={view} onView={showView} />
+          : report.id === 'counts' ? <StockCountsReport query={query} view={view} onView={showView} />
             : report.id === 'other' ? <OtherActivity query={query} />
               : <LedgerReport kind={report.id as LedgerReportKind} query={query} />
       )}

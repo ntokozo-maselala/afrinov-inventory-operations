@@ -114,8 +114,8 @@ describe('Movements page', () => {
     expect(screen.queryByLabelText('Search')).not.toBeInTheDocument();
   });
 
-  it('shows issued stock as issue slips, laid out like the Issue stock form, with what came back', async () => {
-    renderAt('/movements?report=issued&from=2026-09-25&recipientId=r-1&locationId=l-1&q=disc');
+  it('shows issued stock as issue slips when cards are chosen, laid out like the Issue stock form, with what came back', async () => {
+    renderAt('/movements?report=issued&view=cards&from=2026-09-25&recipientId=r-1&locationId=l-1&q=disc');
     const slip = await screen.findByRole('region', { name: 'Issue to Sabelo' });
     expect(within(slip).getByText('AFRI-1325')).toBeInTheDocument();
     const disc = within(slip).getByText('DISC-115').closest('tr')!;
@@ -143,8 +143,8 @@ describe('Movements page', () => {
     expect(listCalls()).toHaveLength(0);
   });
 
-  it('shows received stock as deliveries, laid out like the Receive stock form', async () => {
-    renderAt('/movements?report=received&from=2026-09-25&supplierId=s-1');
+  it('shows received stock as deliveries when cards are chosen, laid out like the Receive stock form', async () => {
+    renderAt('/movements?report=received&view=cards&from=2026-09-25&supplierId=s-1');
     const delivery = await screen.findByRole('region', { name: 'Delivery INV-2041' });
     expect(within(delivery).getByText('Hydroscand')).toBeInTheDocument();
     expect(within(delivery).getByText('Main Storeroom')).toBeInTheDocument();
@@ -153,8 +153,8 @@ describe('Movements page', () => {
     expect(listCalls()).toHaveLength(0);
   });
 
-  it('shows each count as its full sheet, and older counts by their differences', async () => {
-    renderAt('/movements?report=counts&from=2026-09-25');
+  it('shows each count as its full sheet when cards are chosen, and older counts by their differences', async () => {
+    renderAt('/movements?report=counts&view=cards&from=2026-09-25');
     const [sheet, older, clean] = await screen.findAllByRole('region', { name: 'Count at Boiler Shop' });
     const disc = within(sheet!).getByText('DISC-115').closest('tr')!;
     expect([...disc.querySelectorAll('td')].slice(1).map((td) => td.textContent)).toEqual(['9', '7 each', '-2', '2 cracked']);
@@ -162,6 +162,56 @@ describe('Movements page', () => {
     expect(within(older!).getByText('Counted before full count sheets were kept: only the differences are shown.')).toBeInTheDocument();
     expect(within(older!).getByText('-2')).toBeInTheDocument();
     expect(within(clean!).getByText('No differences: everything counted matched the system.')).toBeInTheDocument();
+  });
+
+  const cells = (tr: HTMLElement) => [...tr.querySelectorAll('td')].map((td) => td.textContent);
+
+  it('shows received stock as a flat table by default, one row per item received', async () => {
+    renderAt('/movements?report=received&from=2026-09-25&supplierId=s-1');
+    const table = await screen.findByRole('table', { name: 'Received stock' });
+    const disc = within(table).getByText('DISC-115').closest('tr')!;
+    expect(cells(disc).slice(1)).toEqual(['Hydroscand', 'INV-2041', 'DISC-115 Cutting disc', 'Main Storeroom', '20 each', 'GR-2026-0007', 'Vusi']);
+    expect(screen.getByText('1 delivery, 1 line')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Table' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('region', { name: 'Delivery INV-2041' })).not.toBeInTheDocument();
+  });
+
+  it('shows issued stock as a flat table by default, each line with its slip, and opens a line to return or reverse it', async () => {
+    renderAt('/movements?report=issued&from=2026-09-25');
+    const table = await screen.findByRole('table', { name: 'Issued stock' });
+    const disc = within(table).getByText('DISC-115').closest('tr')!;
+    expect(cells(disc).slice(1)).toEqual(['Sabelo (Worker)', 'AFRI-1325', 'DISC-115 Cutting disc', 'Boiler Shop', '3 each', '1', 'Vusi']);
+    const gloves = within(table).getByText('GLOVE-L').closest('tr')!;
+    expect(within(gloves).getByText('Reversed')).toBeInTheDocument();
+    expect(cells(gloves)[2]).toBe('AFRI-1325');
+    expect(screen.getByText(/1 issue, 2 lines/)).toBeInTheDocument();
+    fireEvent.click(within(disc).getAllByRole('button')[0]!);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('shows stock counts as a flat table by default: sheet lines, older differences, and counts with none', async () => {
+    renderAt('/movements?report=counts&from=2026-09-25');
+    const table = await screen.findByRole('table', { name: 'Stock counts' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(4);
+    expect(cells(rows[0]!).slice(1)).toEqual(['Boiler Shop', 'DISC-115 Cutting disc', '9', '7 each', '-2', '2 cracked', 'Vusi']);
+    expect(cells(rows[1]!)[5]).toBe('✓');
+    expect(cells(rows[2]!).slice(2, 6)).toEqual(['DISC-115 Cutting disc', '—', '—', '-2 each']);
+    expect(cells(rows[2]!)[6]).toBe('Counted before full sheets were kept');
+    expect(cells(rows[3]!)[2]).toBe('No differences: everything counted matched the system');
+    expect(screen.getByText('3 counts, 4 lines')).toBeInTheDocument();
+  });
+
+  it('switches between table and cards, and keeps the choice when the report changes', async () => {
+    renderAt('/movements?report=received&from=2026-09-25');
+    await screen.findByRole('table', { name: 'Received stock' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
+    expect(await screen.findByRole('region', { name: 'Delivery INV-2041' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cards' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'issued' } });
+    expect(await screen.findByRole('region', { name: 'Issue to Sabelo' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
+    expect(await screen.findByRole('table', { name: 'Issued stock' })).toBeInTheDocument();
   });
 
   it('offers Other changes only to those who may see it', async () => {
