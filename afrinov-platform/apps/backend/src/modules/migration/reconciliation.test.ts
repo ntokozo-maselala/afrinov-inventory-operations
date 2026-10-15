@@ -5,7 +5,7 @@ import type { MappedImport, PlannedMaterial } from './mapping.js';
 
 const material = (sku: string, extra: Partial<PlannedMaterial> = {}): PlannedMaterial => ({
   sku, name: `Item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: 0, unitCost: 10,
-  oldProductIds: [], balances: [{ location: 'A-1', quantity: 5 }], ...extra,
+  serialNumber: null, oldProductIds: [], balances: [{ location: 'A-1', quantity: 5 }], ...extra,
 });
 
 const plan = (materials: PlannedMaterial[]): MappedImport => ({ materials, locations: [], problems: [] });

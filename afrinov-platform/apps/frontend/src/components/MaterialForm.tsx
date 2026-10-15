@@ -6,6 +6,7 @@ import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { useStatusBands } from '../hooks/useStatusBands';
 import { CATEGORIES } from '../lib/categories';
 
 export interface CreatedMaterial { id: string; sku: string; name: string }
@@ -20,8 +21,10 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
   const [description, setDescription] = useState('');
   const [requiredStock, setReorder] = useState('0');
   const [unitCost, setUnitCost] = useState('');
+  const [serialNumber, setSerialNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
+  const bands = useStatusBands();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +39,7 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
       const created = await api.post<CreatedMaterial>('/materials', {
         sku: sku.trim(), name: name.trim(), category, unitOfMeasure: unitOfMeasure.trim(),
         requiredStock: reorder, unitCost: cost, description: description.trim() || undefined,
+        serialNumber: category === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
       });
       onSaved(created);
     } catch (err) { onError(err as ApiError); }
@@ -62,11 +66,16 @@ export function MaterialForm({ onCancel, onSaved, onError }: {
           {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </Select>
       </Field>
+      {category === 'TOOLS' && (
+        <Field label="Serial number" htmlFor="m-serial" help="For a single tool, such as a drill or a harness. Leave it blank for a set of identical tools.">
+          <Input id="m-serial" value={serialNumber} onChange={(e) => setSerialNumber(e.target.value)} maxLength={64} autoComplete="off" />
+        </Field>
+      )}
       <Field label="Description" htmlFor="m-desc" help="Optional. Helps identify the item in lists and exports.">
         <Textarea id="m-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Reorder level" htmlFor="m-reorder" help="Stock status compares stock on hand with this: urgent below 20%, warning below 40%.">
+        <Field label="Reorder level" htmlFor="m-reorder" help={`Stock status compares stock on hand with this: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
           <Input id="m-reorder" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
         </Field>
         <Field label="Unit cost" htmlFor="m-cost" help="Optional, in ZAR excl. VAT.">

@@ -24,6 +24,9 @@ export type ProblemCode =
   | 'PRICE_CONFLICT'
   | 'BLANK_LOCATION'
   | 'LOCATION_SPELLINGS'
+  | 'TOOL_COUNT_BLANK'
+  | 'TOOL_CHECKED_OUT'
+  | 'TOOL_ON_SEVERAL_ROWS'
   // Mapping file checks (see mapping.ts).
   | 'MAPPING_SHEET_MISSING'
   | 'MAPPING_ROW_INVALID'
@@ -53,6 +56,9 @@ export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; t
   PRICE_CONFLICT: { severity: 'review', title: 'Different prices for the same item', resolution: 'The price on the row with the same Product ID and location is used; the buyer confirms.' },
   BLANK_LOCATION: { severity: 'review', title: 'No location', resolution: 'Choose the location in the mapping file.' },
   LOCATION_SPELLINGS: { severity: 'review', title: 'One location spelt several ways', resolution: 'Map every spelling to one location in the mapping file.' },
+  TOOL_COUNT_BLANK: { severity: 'review', title: 'Tool with no count', resolution: 'Imported with none owned. If the row is a heading rather than a tool (e.g. "Site tool box 001"), delete it in the workbook; otherwise give it a count.' },
+  TOOL_ON_SEVERAL_ROWS: { severity: 'review', title: 'Same tool on several rows', resolution: 'Imported as separate tools, one per row (several grinders of one model, say). To make them one set, merge the rows in the workbook.' },
+  TOOL_CHECKED_OUT: { severity: 'review', title: 'Tool checked out in the workbook', resolution: 'Imported as owned and in store. Record who has it once tool check-out is in the platform.' },
   MAPPING_SHEET_MISSING: { severity: 'error', title: 'Mapping file sheet missing', resolution: 'Delete the mapping file and run the dry run again to get a fresh one.' },
   MAPPING_ROW_INVALID: { severity: 'error', title: 'Mapping row incomplete or wrong', resolution: 'Correct the row in the mapping file.' },
   UNMAPPED_ITEM: { severity: 'error', title: 'Workbook row not in the mapping file', resolution: 'Add a row for it on the Items sheet, copying the grey columns exactly.' },
@@ -158,7 +164,10 @@ export function analyseWorkbook(read: WorkbookRead): Analysis {
 
   for (const sheet of read.missingSheets) problems.push({ code: 'MISSING_SHEET', sheet, detail: `"${sheet}" is not in the workbook` });
 
+  let unpricedTools = 0;
   for (const row of read.mainRows) {
+    // The Tools register has no Product IDs or prices, and counts what is owned.
+    const tool = row.category === 'TOOLS';
     if (!row.name) {
       const hasStock = [row.broughtForward, row.currentStock, row.in, row.out]
         .some((n) => (n.value !== null && n.value !== 0) || n.raw !== undefined);
@@ -166,7 +175,7 @@ export function analyseWorkbook(read: WorkbookRead): Analysis {
       else unusedRows++;
       continue;
     }
-    if (!row.productId) problems.push({ code: 'MISSING_PRODUCT_ID', ...where(row), detail: 'New SKU assigned' });
+    if (!row.productId && !tool) problems.push({ code: 'MISSING_PRODUCT_ID', ...where(row), detail: 'New SKU assigned' });
     if (!row.location) problems.push({ code: 'BLANK_LOCATION', ...where(row), detail: 'No location on the row' });
 
     const bad = (['broughtForward', 'currentStock', 'in', 'out', 'requiredStock'] as const)
@@ -182,11 +191,17 @@ export function analyseWorkbook(read: WorkbookRead): Analysis {
     }
     if (current < 0) problems.push({ code: 'NEGATIVE_STOCK', ...where(row), detail: `Current Stock ${current}` });
     if (row.requiredStock.value === null && row.requiredStock.raw === undefined) {
-      problems.push({ code: 'REQUIRED_STOCK_BLANK', ...where(row), detail: 'Imported as 0' });
+      problems.push(tool
+        ? { code: 'TOOL_COUNT_BLANK', ...where(row), detail: 'No Required Tools; imported with none owned' }
+        : { code: 'REQUIRED_STOCK_BLANK', ...where(row), detail: 'Imported as 0' });
     }
+    // Tools Issued counts check-outs against Required Tools but forgets check-ins; out now is OUT - IN.
+    const outNow = (row.out.value ?? 0) - (row.in.value ?? 0);
+    if (tool && outNow > 0) problems.push({ code: 'TOOL_CHECKED_OUT', ...where(row), detail: `${outNow} checked out (OUT ${row.out.value ?? 0}, IN ${row.in.value ?? 0})` });
 
-    const unitPrice = matchPrice(row, read.summaryRows, problems);
-    if (unitPrice === null) problems.push({ code: 'MISSING_UNIT_PRICE', ...where(row), detail: 'No price on the Summary sheet for this item' });
+    const unitPrice = tool ? null : matchPrice(row, read.summaryRows, problems);
+    if (tool) unpricedTools++;
+    else if (unitPrice === null) problems.push({ code: 'MISSING_UNIT_PRICE', ...where(row), detail: 'No price on the Summary sheet for this item' });
 
     items.push({
       category: row.category,
@@ -201,13 +216,18 @@ export function analyseWorkbook(read: WorkbookRead): Analysis {
     });
   }
 
-  // Same item and location twice in a category.
+  if (unpricedTools > 0) {
+    problems.push({ code: 'MISSING_UNIT_PRICE', category: 'TOOLS', sheet: 'Tools Main', detail: `The Tools sheet has no prices: ${unpricedTools} tools are imported without one` });
+  }
+
+  // Same item and location twice in a category. Stock would be counted twice;
+  // the Tools register, though, often lists each tool of one model on its own row.
   const seenRow = new Map<string, PlannedItem>();
   for (const item of items) {
     const key = `${item.category}|${nameKey(item.name)}|${locationKey(item.location ?? '')}`;
     const first = seenRow.get(key);
     if (first) {
-      problems.push({ code: 'DUPLICATE_ROW', category: item.category, sheet: item.sheet, row: item.row, productId: item.oldProductId, name: item.name, detail: `Also on row ${first.row}` });
+      problems.push({ code: item.category === 'TOOLS' ? 'TOOL_ON_SEVERAL_ROWS' : 'DUPLICATE_ROW', category: item.category, sheet: item.sheet, row: item.row, productId: item.oldProductId, name: item.name, detail: `Also on row ${first.row}` });
     } else {
       seenRow.set(key, item);
     }

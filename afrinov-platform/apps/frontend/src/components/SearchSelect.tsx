@@ -117,7 +117,7 @@ export function SearchSelect({ id, value, onChange, options, placeholder = 'Type
               id={optionId(i)}
               role="option"
               aria-selected={o.value === value}
-              className={`search-option px-3 py-2 cursor-pointer ${i === active ? 'bg-brand-50' : ''}`}
+              className={`search-option px-3 py-2 cursor-pointer ${i === active ? 'bg-brand-50 dark:bg-brand-900/50' : ''}`}
               // mousedown, not click: it fires before the input's blur closes the list.
               onMouseDown={(e) => { e.preventDefault(); pick(o); }}
               onMouseEnter={() => setActive(i)}

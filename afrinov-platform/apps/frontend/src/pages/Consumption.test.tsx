@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
+const { mockGet, mockDownload, mockPdf } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn() }));
 vi.mock('../api/client', () => ({ api: { get: mockGet } }));
-vi.mock('../api/exportConsumption', () => ({ downloadConsumption: mockDownload }));
+vi.mock('../api/exportConsumption', () => ({ downloadConsumption: mockDownload, downloadConsumptionPdf: mockPdf }));
 
-const { Consumption, presetRange } = await import('./Consumption');
+const { Consumption } = await import('./Consumption');
 const { ToastProvider } = await import('../components/Toast');
 
 const REPORT = {
@@ -29,14 +29,14 @@ const LINES = [
   { id: 't-1', postedAt: '2026-10-02T08:00:00.000Z', type: 'ISSUE', sku: 'CON-1', name: 'Grinding disc', unitOfMeasure: 'each', quantity: 30, projectNumber: 'AFRI-1325', issuedBy: 'Vincent' },
 ];
 
-function renderPage() {
+function renderPage(url = '/reports/consumption') {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade' }];
     if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo', type: 'WORKER', active: true }, { id: 'r-2', name: 'Khodani', type: 'WORKER', active: false }];
     if (path.includes('recipientId=')) return { ...REPORT, byRecipient: [REPORT.byRecipient[0]], lines: LINES };
     return REPORT;
   });
-  render(<MemoryRouter><ToastProvider><Consumption /></ToastProvider></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[url]}><ToastProvider><Consumption /></ToastProvider></MemoryRouter>);
 }
 
 const lastReportCall = () => mockGet.mock.calls.map((c) => String(c[0])).filter((p) => p.startsWith('/reports/consumption')).pop()!;
@@ -45,15 +45,35 @@ describe('Consumption page', () => {
   beforeEach(() => {
     mockGet.mockReset();
     mockDownload.mockReset().mockResolvedValue(undefined);
+    mockPdf.mockReset().mockResolvedValue(undefined);
   });
 
-  it('works out the preset periods in the local calendar', () => {
-    const today = new Date(2026, 9, 9);
-    expect(presetRange('this-month', today)).toEqual({ from: '2026-10-01', to: '2026-10-31' });
-    expect(presetRange('last-month', today)).toEqual({ from: '2026-09-01', to: '2026-09-30' });
-    expect(presetRange('this-year', today)).toEqual({ from: '2026-01-01', to: '2026-12-31' });
-    expect(presetRange('last-12', today)).toEqual({ from: '2025-11-01', to: '2026-10-31' });
-    expect(presetRange('last-month', new Date(2026, 0, 15))).toEqual({ from: '2025-12-01', to: '2025-12-31' });
+  it('opens on this month, with From and To date boxes as on the Stock report', async () => {
+    renderPage();
+    await screen.findByText('Pipe');
+    const now = new Date();
+    const first = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    expect(screen.getByLabelText('From')).toHaveValue(first);
+    expect(lastReportCall()).toMatch(new RegExp(`^/reports/consumption\\?from=${first}&to=\\d{4}-\\d{2}-\\d{2}$`));
+    expect(screen.queryByLabelText('Period')).not.toBeInTheDocument();
+  });
+
+  it('labels every selector, and does not repeat the dates beside them', async () => {
+    renderPage('/reports/consumption?from=2026-03-01&to=2026-03-31');
+    await screen.findByText('Pipe');
+    for (const label of ['From', 'To', 'Project', 'Issued to', 'Category']) {
+      // A visible label, tied to its control.
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('2026-03-01 to 2026-03-31')).not.toBeInTheDocument();
+  });
+
+  it('takes its period from the address, so it can be bookmarked or shared', async () => {
+    renderPage('/reports/consumption?from=2026-03-01&to=2026-03-31');
+    await screen.findByText('Pipe');
+    expect(lastReportCall()).toBe('/reports/consumption?from=2026-03-01&to=2026-03-31');
+    expect(screen.getByLabelText('To')).toHaveValue('2026-03-31');
   });
 
   it('shows the value used, by project and by item, for this month', async () => {
@@ -84,22 +104,25 @@ describe('Consumption page', () => {
   it('takes a chosen period, and refuses one that runs backwards', async () => {
     renderPage();
     await screen.findByText('Pipe');
-    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'custom' } });
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-03-01' } });
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-03-31' } });
     await waitFor(() => expect(lastReportCall()).toBe('/reports/consumption?from=2026-03-01&to=2026-03-31'));
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-04-01' } });
     expect(screen.getByText('The start date is after the end date.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download as Excel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
   });
 
-  it('downloads the same selection as Excel', async () => {
+  it('downloads the same selection as Excel, or as a PDF that says what it covers', async () => {
     renderPage();
     await screen.findByText('Pipe');
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CONSUMABLES' } });
     await waitFor(() => expect(lastReportCall()).toContain('category=CONSUMABLES'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download as Excel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(expect.stringContaining('category=CONSUMABLES')));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith(expect.stringContaining('category=CONSUMABLES'), ['Category: Consumables']));
   });
 
   it('adds up by who it was issued to; a name opens their issue slips under Movements', async () => {

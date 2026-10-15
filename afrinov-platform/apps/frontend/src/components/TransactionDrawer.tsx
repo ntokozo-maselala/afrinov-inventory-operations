@@ -47,7 +47,9 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !hasReturns
     && !transaction.reversesId
     && !transaction.reversedById
-    && !isGoodsReceipt;
+    && !isGoodsReceipt
+    // Tool loans are put right by checking the tool in or out again.
+    && transaction.type !== 'LOAN' && transaction.type !== 'LOAN_RETURN' && transaction.referenceType !== 'ToolLoan';
 
   function handleCancel() {
     setReversing(false);

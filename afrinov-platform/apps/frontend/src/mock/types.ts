@@ -17,7 +17,10 @@ export type InventoryTransactionType =
   | 'TRANSFER_OUT'
   | 'TRANSFER_IN'
   | 'ADJUSTMENT'
-  | 'RETURN';
+  | 'RETURN'
+  // Tools: lent (negative) and back (positive), as the backend's LOAN and LOAN_RETURN.
+  | 'LOAN'
+  | 'LOAN_RETURN';
 
 export type PurchaseOrderStatus =
   | 'DRAFT'
@@ -49,6 +52,7 @@ export interface MockMaterial {
   requiredStock: string;
   unitCost?: string;
   active: boolean;
+  serialNumber?: string | null;
 }
 
 export interface MockLocation {
@@ -153,7 +157,7 @@ export interface MockInventoryTransaction {
   referenceId?: string;
   pairedWithId?: string;
   reversesId?: string;
-  /** Issues: shared by every line one issue posted (an issue slip). */
+  /** Issues and tool loans: shared by every line one issue or check-out posted (the slip). */
   issueId?: string;
 }
 

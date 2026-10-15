@@ -119,17 +119,17 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
   // The items to re-order (URGENT and WARNING) as an Excel file for the buyer.
   app.get('/reports/reorder-list/export', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ViewReports);
-    const q = req.query as Record<string, string | undefined>;
+    const category = (req.query as Record<string, string | undefined>)['category'] || undefined;
     const [rows, bands, currency] = await Promise.all([
-      ReportingService.stockStatus({ status: ['URGENT', 'WARNING'], category: q['category'] }),
+      ReportingService.stockStatus({ status: ['URGENT', 'WARNING'], category }),
       getStatusBands(),
       SettingsService.getValue<string>('general.defaultCurrency'),
     ]);
     const generatedAt = new Date();
-    const buf = await buildReorderXlsx(rows, { generatedAt, bands, currency });
+    const buf = await buildReorderXlsx(rows, { generatedAt, bands, currency, category });
     return reply
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .header('Content-Disposition', `attachment; filename="${reorderFilename(generatedAt)}"`)
+      .header('Content-Disposition', `attachment; filename="${reorderFilename(generatedAt, category)}"`)
       .header('Content-Length', String(buf.length))
       .header('Cache-Control', 'no-store')
       .send(buf);

@@ -2,9 +2,9 @@ import { useMemo, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
-import { Input, Select } from '../components/Field';
+import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
@@ -43,7 +43,7 @@ export function Materials() {
     return mats.data.filter((m) => {
       if (category && m.category !== category) return false;
       if (needle) {
-        const hay = `${m.sku} ${m.name}`.toLowerCase();
+        const hay = `${m.sku} ${m.name} ${m.serialNumber ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -57,27 +57,23 @@ export function Materials() {
         description="Catalogue of stockable items. Each material has a category, unit of measure, and reorder threshold."
         actions={
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
-            <Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setAdding(true)}>Add item</Button>
+            <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setAdding(true)}>Add item</Button>
           </RoleGuard>
         }
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input ref={searchRef} className="pl-8" placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search materials" />
-            </div>
-            <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-              <option value="">All categories</option>
-              {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {(q || category) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setCategory(''); }}>Clear</Button>}
-          </>
-        )}
-        right={<span className="text-meta">{mats.loading ? 'Loading…' : `${filtered.length} of ${mats.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || category ? () => { setQ(''); setCategory(''); } : undefined}
+        count={mats.loading ? 'Loading…' : `${filtered.length} of ${mats.data?.length ?? 0}`}
+      >
+        <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder="SKU, name or serial number…" />
+        <Field label="Category" htmlFor="materials-category" className={FILTER_WIDTH}>
+          <Select id="materials-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {mats.error && <ErrorState message={mats.error.message} onRetry={mats.reload} />}
 
@@ -108,7 +104,16 @@ export function Materials() {
 function columns(): DataTableColumn<Material>[] {
   return [
     { key: 'sku', header: 'SKU', className: 'text-mono', render: (m) => <Link to={`/materials/${m.id}`} className="btn-link text-mono">{m.sku}</Link>, width: '12rem' },
-    { key: 'name', header: 'Name', render: (m) => <span className="line-clamp-1" title={m.name}>{m.name}</span> },
+    {
+      key: 'name',
+      header: 'Name',
+      render: (m) => (
+        <div>
+          <span className="line-clamp-1" title={m.name}>{m.name}</span>
+          {m.serialNumber && <span className="text-xs text-surface-500 font-mono">S/N {m.serialNumber}</span>}
+        </div>
+      ),
+    },
     { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{categoryLabel(m.category)}</span> },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },

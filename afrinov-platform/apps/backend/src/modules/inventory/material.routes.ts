@@ -13,6 +13,8 @@ export const createMaterialSchema = z.object({
   requiredStock: z.number().nonnegative().optional(),
   unitCost: z.number().nonnegative().optional(),
   description: z.string().optional(),
+  /** Tools only: the serial number of a tool kept as one unit. */
+  serialNumber: z.string().trim().min(1).max(64).optional(),
 });
 
 export const updateMaterialSchema = z.object({
@@ -22,6 +24,8 @@ export const updateMaterialSchema = z.object({
   requiredStock: z.number().nonnegative().optional(),
   unitCost: z.number().nonnegative().optional(),
   active: z.boolean().optional(),
+  /** Tools only; null clears it. */
+  serialNumber: z.string().trim().min(1).max(64).nullable().optional(),
 });
 
 export async function materialRoutes(app: FastifyInstance): Promise<void> {
