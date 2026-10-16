@@ -62,30 +62,15 @@ export function Stock() {
       <PageHeader
         title="Stock"
         description="Current on-hand quantities across all locations. Source of truth is the inventory transaction ledger."
+        // Receive, Issue, Return and Count are in the Store menu. On a phone the
+        // menu folds into a drawer (below md), so the most frequent action stays
+        // one tap away here.
         actions={
-          <div className="flex flex-wrap gap-2">
-          <RoleGuard permission="inventory:receive">
-            <Link to="/stock/receive">
-              <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowDown size={14} />}>Receive stock</Button>
-            </Link>
-          </RoleGuard>
           <RoleGuard permission="inventory:issue">
-            <Link to="/stock/issue">
+            <Link to="/stock/issue" className="md:hidden">
               <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
             </Link>
           </RoleGuard>
-          {/* Returns are booked by the people who issue, as on the server. */}
-          <RoleGuard permission="inventory:return">
-            <Link to="/stock/return">
-              <Button variant="primary" size="sm" leadingIcon={<Icon.Arrows size={14} />}>Return stock</Button>
-            </Link>
-          </RoleGuard>
-          <RoleGuard permission="inventory:count">
-            <Link to="/stock/count">
-              <Button variant="primary" size="sm" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
-            </Link>
-          </RoleGuard>
-          </div>
         }
       />
 

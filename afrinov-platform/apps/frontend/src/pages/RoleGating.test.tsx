@@ -47,28 +47,34 @@ const page = (el: React.ReactNode, roles: string[]) => {
 };
 const button = (name: string) => screen.queryByRole('button', { name });
 
-describe('Stock row actions', () => {
-  it('a technician can issue and return but not transfer or adjust', async () => {
+// Receive, Issue, Return and Count live in the Store menu (Sidebar.test.tsx);
+// the Stock page keeps only the row actions, and an Issue stock button for
+// phones, where the menu is folded away.
+describe('Stock page actions', () => {
+  it('a technician gets the phone Issue stock button but not Transfer or Adjust', async () => {
     page(<Stock />, ['TECHNICIAN']);
     await screen.findByText('Cutting disc');
     expect(button('Transfer')).not.toBeInTheDocument();
     expect(button('Adjust')).not.toBeInTheDocument();
-    expect(button('Issue stock')).toBeInTheDocument();
-    expect(button('Return stock')).toBeInTheDocument();
-    expect(button('Receive stock')).not.toBeInTheDocument();
-    expect(button('Count stock')).not.toBeInTheDocument();
+    expect(button('Issue stock')!.closest('a')).toHaveClass('md:hidden');
   });
 
-  it('a store controller can do all of them', async () => {
+  it('a store controller gets Transfer and Adjust on each row', async () => {
     page(<Stock />, ['STORE_CONTROLLER']);
     await screen.findByText('Cutting disc');
-    for (const name of ['Transfer', 'Adjust', 'Receive stock', 'Issue stock', 'Return stock', 'Count stock']) expect(button(name)).toBeInTheDocument();
+    for (const name of ['Transfer', 'Adjust', 'Issue stock']) expect(button(name)).toBeInTheDocument();
+  });
+
+  it('no longer repeats the menu: no Receive, Return or Count buttons on the page', async () => {
+    page(<Stock />, ['STORE_CONTROLLER']);
+    await screen.findByText('Cutting disc');
+    for (const name of ['Receive stock', 'Return stock', 'Count stock']) expect(button(name)).not.toBeInTheDocument();
   });
 
   it('a viewer gets no action at all', async () => {
     page(<Stock />, ['VIEWER']);
     await screen.findByText('Cutting disc');
-    for (const name of ['Transfer', 'Adjust', 'Receive stock', 'Issue stock', 'Return stock', 'Count stock']) expect(button(name)).not.toBeInTheDocument();
+    for (const name of ['Transfer', 'Adjust', 'Issue stock']) expect(button(name)).not.toBeInTheDocument();
   });
 });
 
