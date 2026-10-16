@@ -2,19 +2,17 @@
 // (Summary and Stock Report sheets per category), with stock as it stood at the
 // end of the chosen period: a month, a week or any range of days
 // (GET /reports/month-end?from=&to=).
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Input } from '../components/Field';
-import { Toolbar } from '../components/Toolbar';
+import { Field, Input } from '../components/Field';
+import { FilterBar, DATE_WIDTH } from '../components/FilterBar';
 import { ErrorState } from '../components/EmptyState';
-import { Button } from '../components/Button';
-import { Icon } from '../components/Icon';
-import { useToast } from '../components/Toast';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
-import { downloadMonthEnd } from '../api/exportMonthEnd';
+import { downloadMonthEnd, downloadMonthEndPdf } from '../api/exportMonthEnd';
 import type { MonthEndReport } from '../api/reportTypes';
 import { categoryLabel } from '../lib/categories';
 
@@ -36,8 +34,6 @@ export function MonthEnd() {
       : range.from > today ? 'Choose a period that has started.'
         : null;
   const report = useApi<MonthEndReport>(problem ? null : `/reports/month-end?from=${range.from}&to=${range.to}`);
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
 
   /** Set one end of the period, keeping the other where it is. */
   function setDate(key: 'from' | 'to', value: string) {
@@ -50,18 +46,6 @@ export function MonthEnd() {
     }, { replace: true });
   }
 
-  /** Download the chosen period, showing failures as toasts and clearing the busy state afterward. */
-  async function download() {
-    setDownloading(true);
-    try {
-      await downloadMonthEnd(range);
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message);
-    } finally {
-      setDownloading(false);
-    }
-  }
-
   const r = report.data;
   return (
     <div>
@@ -69,28 +53,26 @@ export function MonthEnd() {
         title="Stock report"
         description="The report management receives, in the stock workbook's own layout: a Summary sheet per category (required, current, value, % of required, re-order quantity, URGENCY) and its Stock Report of stock used, with stock as it stood at the end of the period. Choose the dates; it opens on last month."
         actions={(
-          <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={!!problem || !r}>
-            Download stock report
-          </Button>
+          <DownloadMenu
+            label="Download stock report"
+            onDownload={(format) => (format === 'pdf' ? downloadMonthEndPdf : downloadMonthEnd)(range)}
+            disabled={!!problem || !r}
+          />
         )}
       />
 
-      <Toolbar
-        left={(
-          <>
-            <Input type="date" className="sm:w-40" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} aria-label="From" invalid={!!problem} />
-            <span className="text-meta">to</span>
-            <Input type="date" className="sm:w-40" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} aria-label="To" invalid={!!problem} />
-            {!problem && (
-              <span className="text-sm text-surface-600">
-                {range.to >= today
-                  ? `Stock as it stands now; stock used from ${range.from} to ${range.to}.`
-                  : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
-              </span>
-            )}
-          </>
-        )}
-      />
+      <FilterBar
+        count={problem ? undefined : range.to >= today
+          ? `Stock as it stands now; stock used from ${range.from} to ${range.to}.`
+          : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
+      >
+        <Field label="From" htmlFor="me-from" className={DATE_WIDTH}>
+          <Input id="me-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+        </Field>
+        <Field label="To" htmlFor="me-to" className={DATE_WIDTH}>
+          <Input id="me-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+        </Field>
+      </FilterBar>
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}
@@ -138,7 +120,7 @@ export function MonthEnd() {
       )}
       {r && (
         <p className="text-xs text-surface-500 mt-2">
-          The download has this overview, then for each category a Summary sheet and a Used sheet, with the workbook&rsquo;s column names.
+          The download has this overview, then for each category a Summary sheet and a Used sheet, with the workbook&rsquo;s column names; the PDF puts each category on its own page.
         </p>
       )}
     </div>

@@ -21,9 +21,9 @@ import { daysAgo, today } from '../lib/dates';
 
 interface Location { id: string; name: string; active: boolean }
 interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
-interface Draft { counts: Record<string, string>; extra: string[]; note: string }
+interface Draft { counts: Record<string, string>; notes: Record<string, string>; extra: string[]; note: string }
 
-const EMPTY: Draft = { counts: {}, extra: [], note: '' };
+const EMPTY: Draft = { counts: {}, notes: {}, extra: [], note: '' };
 const draftKey = (locationId: string) => `stock-count-draft:${locationId}`;
 
 function loadDraft(locationId: string): Draft {
@@ -31,7 +31,7 @@ function loadDraft(locationId: string): Draft {
     const raw = localStorage.getItem(draftKey(locationId));
     if (!raw) return EMPTY;
     const d = JSON.parse(raw) as Partial<Draft>;
-    return { counts: d.counts ?? {}, extra: d.extra ?? [], note: d.note ?? '' };
+    return { counts: d.counts ?? {}, notes: d.notes ?? {}, extra: d.extra ?? [], note: d.note ?? '' };
   } catch {
     return EMPTY;
   }
@@ -39,7 +39,7 @@ function loadDraft(locationId: string): Draft {
 
 function saveDraft(locationId: string, draft: Draft) {
   try {
-    if (Object.keys(draft.counts).length === 0 && draft.extra.length === 0 && !draft.note) localStorage.removeItem(draftKey(locationId));
+    if (Object.keys(draft.counts).length === 0 && Object.keys(draft.notes).length === 0 && draft.extra.length === 0 && !draft.note) localStorage.removeItem(draftKey(locationId));
     else localStorage.setItem(draftKey(locationId), JSON.stringify(draft));
   } catch {
     // Private windows and blocked storage: the count still works, it just is not kept.
@@ -117,6 +117,25 @@ export function StockCount() {
     setError(null);
   }
 
+  function setLineNote(materialId: string, value: string) {
+    setDraft((d) => {
+      const notes = { ...d.notes };
+      if (value === '') delete notes[materialId];
+      else notes[materialId] = value;
+      return { ...d, notes };
+    });
+  }
+
+  /**
+   * Whether a row offers a note: when its count differs from the system, or,
+   * counting blind, once anything is counted (so the box gives nothing away).
+   */
+  function offersNote(r: Row): boolean {
+    const c = parseCount(draft.counts[r.materialId]);
+    if (c === null || Number.isNaN(c)) return false;
+    return hideSystem || Math.abs(c - r.system) > 0.00005;
+  }
+
   function setCount(materialId: string, value: string) {
     setDraft((d) => {
       const counts = { ...d.counts };
@@ -147,7 +166,10 @@ export function StockCount() {
       const result = await api.post<{ adjusted: number }>('/stock-counts', {
         locationId,
         note: draft.note.trim() || undefined,
-        lines: counted.map((r) => ({ materialId: r.materialId, expectedQuantity: r.system, countedQuantity: parseCount(draft.counts[r.materialId])! })),
+        lines: counted.map((r) => {
+          const lineNote = offersNote(r) ? draft.notes[r.materialId]?.trim() : '';
+          return { materialId: r.materialId, expectedQuantity: r.system, countedQuantity: parseCount(draft.counts[r.materialId])!, ...(lineNote ? { note: lineNote } : {}) };
+        }),
       });
       toast.success(`Count posted at ${location?.name ?? 'the location'}: ${result.adjusted} adjustment${result.adjusted === 1 ? '' : 's'}`);
       setDraft(EMPTY);
@@ -259,12 +281,13 @@ export function StockCount() {
                         <th scope="col" className={`text-right print:hidden ${hideSystem ? 'hidden' : ''}`}>System</th>
                         <th scope="col" className="text-right">Counted</th>
                         <th scope="col" className={`text-right print:hidden ${hideSystem ? 'hidden' : ''}`}>Difference</th>
+                        <th scope="col">Note</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {stock.loading && <tr><td colSpan={6} className="text-surface-500">Loading stock…</td></tr>}
+                      {stock.loading && <tr><td colSpan={7} className="text-surface-500">Loading stock…</td></tr>}
                       {!stock.loading && shown.length === 0 && (
-                        <tr><td colSpan={6} className="text-surface-500">{rows.length === 0 ? 'Nothing is booked at this location. Add any items you find below.' : 'No item matches.'}</td></tr>
+                        <tr><td colSpan={7} className="text-surface-500">{rows.length === 0 ? 'Nothing is booked at this location. Add any items you find below.' : 'No item matches.'}</td></tr>
                       )}
                       {!stock.loading && shown.map((r) => {
                         const c = parseCount(draft.counts[r.materialId]);
@@ -293,6 +316,19 @@ export function StockCount() {
                             <td className={`text-right tabular-nums print:hidden ${hideSystem ? 'hidden' : ''} ${diff && diff < 0 ? 'text-danger-600' : diff && diff > 0 ? 'text-success-600' : 'text-surface-500'}`}>
                               {diff === null ? '' : Math.abs(diff) < 0.00005 ? '✓' : `${diff > 0 ? '+' : ''}${fmt(diff)}`}
                             </td>
+                            <td>
+                              <span className="hidden print:inline">______________________</span>
+                              {offersNote(r) && (
+                                <Input
+                                  aria-label={`Note for ${r.name}`}
+                                  className="w-48 print:hidden"
+                                  maxLength={200}
+                                  value={draft.notes[r.materialId] ?? ''}
+                                  onChange={(e) => setLineNote(r.materialId, e.target.value)}
+                                  placeholder="Why it differs"
+                                />
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -300,12 +336,13 @@ export function StockCount() {
                   </table>
                 </div>
 
-                <div className="no-print grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  <Field label="Found an item that is not listed?" htmlFor="count-add" help="It is added with a system quantity of 0.">
+                <div className="no-print pt-2 md:w-1/2">
+                  <Field
+                    label="Found an item that is not listed?"
+                    htmlFor="count-add"
+                    help="It is added to the list with a system quantity of 0. Type what you counted there, and add a note if needed."
+                  >
                     <SearchSelect id="count-add" value={adding} onChange={addFound} options={addOptions} placeholder="Search by name or code" noMatchText="No other item matches" />
-                  </Field>
-                  <Field label="Note (optional)" htmlFor="count-note">
-                    <Textarea id="count-note" rows={2} maxLength={500} value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} placeholder="e.g. Go-live count, rack A" />
                   </Field>
                 </div>
               </div>
@@ -328,6 +365,13 @@ export function StockCount() {
                     : `${differences.length} adjustment${differences.length === 1 ? '' : 's'} will be posted at ${location?.name}: ${up} up, ${differences.length - up} down. Items left blank are not changed.`}
                 </Alert>
               )}
+
+              {/* About the whole count, so it sits with posting it, apart from the item search. */}
+              <div className="no-print">
+                <Field label="Note on this count (optional)" htmlFor="count-note" help="Applies to the whole count; use a row's note to explain one item.">
+                  <Textarea id="count-note" rows={2} maxLength={500} value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} placeholder="e.g. Go-live count, rack A" />
+                </Field>
+              </div>
 
               <div className="entry-actions flex flex-wrap justify-end gap-2 py-3 border-t border-surface-200 no-print">
                 <Link to="/stock"><Button type="button" variant="ghost" disabled={busy}>Back to stock</Button></Link>

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
+import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
 
 export interface StockStatusRow {
   materialId: string;
@@ -12,6 +13,8 @@ export interface StockStatusRow {
   requiredStock: string;
   /** Total across every location. */
   onHand: string;
+  /** Tools only: out on loan, still owned; the status counts it with what is on hand. */
+  onLoan: string;
   percentOfRequired: number | null;
   status: StockStatus;
   reorderQuantity: string;
@@ -99,6 +102,8 @@ export const ReportingService = {
       SettingsService.getValue<boolean>('inventory.enableStockAlerts'),
       totalsByMaterial(materialIds),
     ]);
+    // A tool out on loan is still owned, so it counts towards Required Stock.
+    const onLoan = await onLoanByMaterial(prisma, materialIds);
 
     const matMap = new Map(materials.map((m) => [m.id, m]));
     const locMap = new Map(locations.map((l) => [l.id, l]));
@@ -110,7 +115,7 @@ export const ReportingService = {
         const l = locMap.get(b.locationId)!;
         const requiredStock = m.requiredStock;
         // The item's status, from its total across locations; the same on each of its rows.
-        const item = statusFor(m.requiredStock, totals.get(m.id), bands);
+        const item = statusFor(m.requiredStock, (totals.get(m.id) ?? new Prisma.Decimal(0)).plus(onLoan.get(m.id) ?? 0), bands);
         const belowThreshold = alertsOn && needsAttention(item.status);
         return {
           materialId: b.materialId,
@@ -183,10 +188,11 @@ export const ReportingService = {
       orderBy: { name: 'asc' },
     });
     const ids = materials.map((m) => m.id);
-    const [balances, bands, lastSupplier] = await Promise.all([
+    const [balances, bands, lastSupplier, loans] = await Promise.all([
       ids.length ? prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }) : Promise.resolve([]),
       getStatusBands(),
       lastSuppliers(ids),
+      onLoanByMaterial(prisma, ids),
     ]);
     const byMaterial = new Map<string, typeof balances>();
     for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
@@ -194,7 +200,9 @@ export const ReportingService = {
     const rows = materials.map((m): StockStatusRow => {
       const mine = byMaterial.get(m.id) ?? [];
       const onHand = mine.reduce((a, b) => a.add(b.quantity), new Prisma.Decimal(0));
-      const item = statusFor(m.requiredStock, onHand, bands);
+      // A tool out on loan is still owned, so it counts towards Required Stock.
+      const onLoan = loans.get(m.id) ?? new Prisma.Decimal(0);
+      const item = statusFor(m.requiredStock, onHand.plus(onLoan), bands);
       return {
         materialId: m.id,
         sku: m.sku,
@@ -203,6 +211,7 @@ export const ReportingService = {
         unitOfMeasure: m.unitOfMeasure,
         requiredStock: m.requiredStock.toString(),
         onHand: onHand.toString(),
+        onLoan: onLoan.toString(),
         percentOfRequired: item.percentOfRequired,
         status: item.status,
         reorderQuantity: String(item.reorderQuantity),

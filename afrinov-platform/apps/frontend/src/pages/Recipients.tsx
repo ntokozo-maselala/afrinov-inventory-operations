@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Field, Select, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -13,6 +14,7 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
+import type { ToolRow } from '../api/types';
 
 export type RecipientType = 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR';
 
@@ -41,6 +43,12 @@ const TYPE_TONE: Record<RecipientType, 'brand' | 'info' | 'warning' | 'neutral'>
 // The people and places stock is issued to ("Issued To").
 export function Recipients() {
   const recipients = useApi<Recipient[]>('/recipients');
+  // Tools each recipient has out on loan, from the Tools page's list.
+  const tools = useApi<ToolRow[]>('/tools');
+  const toolsOut = new Map<string, number>();
+  for (const l of (tools.data ?? []).flatMap((t) => t.loans)) {
+    if (l.recipientId) toolsOut.set(l.recipientId, (toolsOut.get(l.recipientId) ?? 0) + Number(l.out));
+  }
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('recipients:manage');
   const [q, setQ] = useState('');
@@ -72,28 +80,22 @@ export function Recipients() {
       <PageHeader
         title="Recipients"
         description="The people and places stock is issued to: workers, machines, client sites and contractors."
-        actions={canManage && <Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setEditing('new')}>Add recipient</Button>}
+        actions={canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setEditing('new')}>Add recipient</Button>}
       />
 
-      <Toolbar
-        left={(
-          <div className="flex flex-wrap items-center gap-2 w-full">
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search recipients…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search recipients" />
-            </div>
-            <Select aria-label="Filter by type" value={type} onChange={(e) => setType(e.target.value as RecipientType | '')} className="w-full sm:w-40">
-              <option value="">All types</option>
-              {(Object.keys(RECIPIENT_TYPE_LABEL) as RecipientType[]).map((t) => <option key={t} value={t}>{RECIPIENT_TYPE_LABEL[t]}</option>)}
-            </Select>
-            <label className="flex items-center gap-2 text-sm text-surface-600">
-              <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-              Show inactive
-            </label>
-          </div>
-        )}
-        right={<span className="text-meta">{recipients.loading ? 'Loading…' : `${filtered.length} of ${all.length}`}</span>}
-      />
+      <FilterBar count={recipients.loading ? 'Loading…' : `${filtered.length} of ${all.length}`}>
+        <SearchField id="recipients-search" value={q} onChange={setQ} placeholder="Name…" />
+        <Field label="Type" htmlFor="recipients-type" className={FILTER_WIDTH}>
+          <Select id="recipients-type" value={type} onChange={(e) => setType(e.target.value as RecipientType | '')}>
+            <option value="">All types</option>
+            {(Object.keys(RECIPIENT_TYPE_LABEL) as RecipientType[]).map((t) => <option key={t} value={t}>{RECIPIENT_TYPE_LABEL[t]}</option>)}
+          </Select>
+        </Field>
+        <label className="flex items-center gap-2 text-sm text-surface-600 pb-2">
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          Show inactive
+        </label>
+      </FilterBar>
 
       {recipients.error && <ErrorState message={recipients.error.message} onRetry={recipients.reload} />}
 
@@ -103,7 +105,7 @@ export function Recipients() {
           isLoading={recipients.loading}
           rowKey={(r) => r.id}
           rows={filtered}
-          columns={columns({ canManage, onEdit: setEditing, onSetActive: setActive })}
+          columns={columns({ canManage, onEdit: setEditing, onSetActive: setActive, toolsOut })}
           emptyState={<EmptyState
             title={q || type ? 'No recipients match your filters' : 'No recipients yet'}
             description={q || type ? 'Try clearing your filters.' : 'Add the workers, machines, sites and contractors stock is issued to.'}
@@ -131,14 +133,26 @@ export function Recipients() {
   );
 }
 
-function columns({ canManage, onEdit, onSetActive }: {
+function columns({ canManage, onEdit, onSetActive, toolsOut }: {
   canManage: boolean;
+  toolsOut: Map<string, number>;
   onEdit: (r: Recipient) => void;
   onSetActive: (r: Recipient, active: boolean) => void;
 }): DataTableColumn<Recipient>[] {
   return [
     { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'type', header: 'Type', render: (r) => <Badge tone={TYPE_TONE[r.type]}>{RECIPIENT_TYPE_LABEL[r.type]}</Badge>, width: '9rem' },
+    {
+      key: 'tools', header: 'Tools out', align: 'right' as const, width: '7rem',
+      render: (r) => (toolsOut.get(r.id)
+        ? <Link to={`/tools?q=${encodeURIComponent(r.name)}`} className="btn-link font-mono">{toolsOut.get(r.id)}</Link>
+        : <span className="text-surface-300">—</span>),
+    },
+    {
+      // What was issued to them this month, less returns; the report links on to each issue.
+      key: 'used', header: 'Stock used', width: '7rem',
+      render: (r) => <Link to={`/reports/consumption?recipientId=${encodeURIComponent(r.id)}`} className="btn-link text-sm">This month</Link>,
+    },
     { key: 'notes', header: 'Notes', render: (r) => r.notes || <span className="text-surface-300">—</span> },
     { key: 'status', header: 'Status', render: (r) => r.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '8rem' },
     ...(canManage ? [{

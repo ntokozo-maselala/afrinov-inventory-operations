@@ -16,6 +16,8 @@ const TYPE_LABEL: Record<string, string> = {
   TRANSFER_IN: 'Transfer in',
   ADJUSTMENT: 'Adjustment',
   RETURN: 'Return',
+  LOAN: 'Tool out',
+  LOAN_RETURN: 'Tool back',
 };
 
 const QTY = '#,##0.####';

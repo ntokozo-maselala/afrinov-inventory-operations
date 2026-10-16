@@ -95,6 +95,15 @@ describe('mock API demo data flow', () => {
     expect(list.every((m) => m.sku && m.active !== undefined)).toBe(true);
   });
 
+  it('keeps a serial number on a tool only, one item per serial number, and finds the tool by it', async () => {
+    const tool = await api.post<{ id: string; serialNumber: string | null }>('/materials', { sku: 'TL-T1', name: 'Makita Hand Drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: ' 34322 ' });
+    expect(tool.serialNumber).toBe('34322');
+    await expect(api.post('/materials', { sku: 'CON-T1', name: 'Disc', category: 'CONSUMABLES', unitOfMeasure: 'each', serialNumber: '1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(api.post('/materials', { sku: 'TL-T2', name: 'Other drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: '34322' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await api.get<Array<{ sku: string }>>('/materials?q=34322')).map((m) => m.sku)).toEqual(['TL-T1']);
+    expect((await api.patch<{ serialNumber: string | null }>(`/materials/${tool.id}`, { serialNumber: null })).serialNumber).toBeNull();
+  });
+
   it('GET /suppliers returns the seeded supplier catalogue', async () => {
     const list = await api.get<Array<{ id: string; name: string }>>('/suppliers');
     expect(list.length).toBeGreaterThanOrEqual(4);

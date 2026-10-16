@@ -16,6 +16,7 @@ const STOCK = [
   { materialId: 'm-1', materialSku: 'DISC-115', materialName: 'Cutting disc', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '10' },
   { materialId: 'm-2', materialSku: 'GLOVE-L', materialName: 'Welding gloves', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'pair', quantity: '4' },
   { materialId: 'm-3', materialSku: 'EMPTY', materialName: 'Out of stock item', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '0' },
+  { materialId: 'm-4', materialSku: 'TL-0001', materialName: 'Makita Hand Drill', category: 'TOOLS', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '1' },
 ];
 
 async function respond(path: string) {
@@ -25,9 +26,9 @@ async function respond(path: string) {
   return [];
 }
 
-function renderPage() {
+function renderPage(url = '/stock/issue') {
   if (!mockGet.getMockImplementation()) mockGet.mockImplementation(respond);
-  render(<MemoryRouter><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[url]}><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
 }
 
 async function ready() {
@@ -49,12 +50,14 @@ describe('IssueStock page', () => {
     mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1', 't-2'] });
   });
 
-  it('offers only items that are in stock', async () => {
+  it('offers only items that are in stock, and no tools: they are checked out on Tools', async () => {
     renderPage();
     await ready();
     fireEvent.focus(screen.getByLabelText('Item 1'));
     expect(screen.getAllByRole('option', { name: /on hand/ })).toHaveLength(2);
     expect(screen.queryByRole('option', { name: /Out of stock item/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Makita Hand Drill/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tools' })).toHaveAttribute('href', '/tools');
   });
 
   it('issues several items to one recipient and project in one request', async () => {
@@ -159,5 +162,24 @@ describe('IssueStock page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.getByRole('option', { name: /Sabelo/ })).toBeInTheDocument());
     expect(screen.queryByText("Couldn't load recipients and projects")).not.toBeInTheDocument();
+  });
+});
+
+describe('IssueStock linked from an item', () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+    mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1'] });
+  });
+
+  it('starts the first line on the item in ?materialId=', async () => {
+    renderPage('/stock/issue?materialId=m-1');
+    await ready();
+    expect(await screen.findByText('On hand at A-1: 10 each')).toBeInTheDocument();
+  });
+
+  it('ignores an item that cannot be issued here, such as a tool', async () => {
+    renderPage('/stock/issue?materialId=m-4');
+    await ready();
+    expect(screen.queryByText(/On hand at/)).not.toBeInTheDocument();
   });
 });

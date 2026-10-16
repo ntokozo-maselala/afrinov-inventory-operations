@@ -59,6 +59,7 @@ export function usePermissions(): { hasPermission: (permission: string) => boole
       case 'recipients:manage':
         return canManageMaterials;
       case 'inventory:return':
+      case 'tools:lend':
         return canReturn;
       case 'procurement:manage':
         return canManageProcurement;

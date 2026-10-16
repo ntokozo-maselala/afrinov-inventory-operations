@@ -25,6 +25,8 @@ export interface StockCountInput {
     /** The system quantity the counter was shown. */
     expectedQuantity: number | string;
     countedQuantity: number | string;
+    /** Why this item differs, as the counter wrote it. */
+    note?: string;
   }>;
   actorId: string;
 }
@@ -63,7 +65,7 @@ export interface CountRecord {
    * The full count sheet: every item counted, matched or not, with what the
    * system had. Empty for counts posted before sheets were kept.
    */
-  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string }>;
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string; note: string | null }>;
 }
 
 export const StockCountService = {
@@ -117,7 +119,7 @@ export const StockCountService = {
           .sort((a, b) => a.name.localeCompare(b.name)),
         lines: sheetLines
           .filter((l) => l.countId === e.entityId)
-          .map((l) => ({ materialId: l.materialId, sku: l.material.sku, name: l.material.name, unitOfMeasure: l.material.unitOfMeasure, expected: l.expectedQuantity.toString(), counted: l.countedQuantity.toString() }))
+          .map((l) => ({ materialId: l.materialId, sku: l.material.sku, name: l.material.name, unitOfMeasure: l.material.unitOfMeasure, expected: l.expectedQuantity.toString(), counted: l.countedQuantity.toString(), note: l.note }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       };
     });
@@ -126,7 +128,7 @@ export const StockCountService = {
 
   async post(input: StockCountInput): Promise<StockCountResult> {
     if (input.lines.length === 0) throw Errors.validation('Count at least one item');
-    const lines = input.lines.map((l) => ({ materialId: l.materialId, expected: toDecimal(l.expectedQuantity), counted: toDecimal(l.countedQuantity) }));
+    const lines = input.lines.map((l) => ({ materialId: l.materialId, expected: toDecimal(l.expectedQuantity), counted: toDecimal(l.countedQuantity), note: l.note?.trim() || null }));
     if (lines.some((l) => l.counted.isNegative())) throw Errors.validation('A counted quantity cannot be negative');
     if (new Set(lines.map((l) => l.materialId)).size !== lines.length) throw Errors.validation('Each item can appear only once in a count');
     const note = input.note?.trim() || null;
@@ -174,7 +176,8 @@ export const StockCountService = {
             type: InventoryTransactionType.ADJUSTMENT,
             quantity: variance,
             reasonCode: AdjustmentReasonCode.COUNT_VARIANCE,
-            reasonNote: note ? `Stock count: ${note}` : 'Stock count',
+            // The count's note, then the item's own: "Stock count: Monthly — 3 cracked, binned".
+            reasonNote: [note, l.note].some(Boolean) ? `Stock count: ${[note, l.note].filter(Boolean).join(' — ')}` : 'Stock count',
             referenceType: STOCK_COUNT_REFERENCE,
             referenceId: countId,
             actorId: input.actorId,
@@ -187,7 +190,7 @@ export const StockCountService = {
 
       // The full sheet, matched items included, with what the system had.
       await tx.stockCountLine.createMany({
-        data: lines.map((l) => ({ countId, materialId: l.materialId, expectedQuantity: current.get(l.materialId)!, countedQuantity: l.counted })),
+        data: lines.map((l) => ({ countId, materialId: l.materialId, expectedQuantity: current.get(l.materialId)!, countedQuantity: l.counted, note: l.note })),
       });
 
       const adjusted = results.filter((r) => r.transactionId).length;

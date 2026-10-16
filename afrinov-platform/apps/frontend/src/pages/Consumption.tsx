@@ -4,59 +4,52 @@
 // since the last rollover and never by project. What each person was given,
 // issue by issue, is Movements > Issued stock: a recipient's name opens it.
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
-import { Input, Select } from '../components/Field';
+import { FilterBar, FILTER_WIDTH, DATE_WIDTH } from '../components/FilterBar';
+import { Field, Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
-import { Button } from '../components/Button';
-import { Icon } from '../components/Icon';
-import { useToast } from '../components/Toast';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
-import { downloadConsumption } from '../api/exportConsumption';
+import { downloadConsumption, downloadConsumptionPdf } from '../api/exportConsumption';
 import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
+import { thisMonth, today as todayIso } from '../lib/dates';
 
 interface Project { projectNumber: string; name?: string | null }
 interface Recipient { id: string; name: string; type: string; active: boolean }
 
 const typeLabel = (t: string | null) => (t ? t.charAt(0) + t.slice(1).toLowerCase() : '');
 
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-/** The dates a preset stands for, in the user's own calendar. */
-export function presetRange(preset: string, today = new Date()): { from: string; to: string } {
-  const y = today.getFullYear();
-  const m = today.getMonth();
-  switch (preset) {
-    case 'last-month': return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
-    case 'this-year': return { from: iso(new Date(y, 0, 1)), to: iso(new Date(y, 11, 31)) };
-    case 'last-12': return { from: iso(new Date(y, m - 11, 1)), to: iso(new Date(y, m + 1, 0)) };
-    default: return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
-  }
-}
-
-const PRESETS = [
-  { value: 'this-month', label: 'This month' },
-  { value: 'last-month', label: 'Last month' },
-  { value: 'this-year', label: 'This year' },
-  { value: 'last-12', label: 'Last 12 months' },
-  { value: 'custom', label: 'Choose dates' },
-];
-
 export function Consumption() {
-  const [preset, setPreset] = useState('this-month');
-  const [custom, setCustom] = useState(presetRange('this-month'));
-  const [project, setProject] = useState('');
-  const [category, setCategory] = useState('');
-  const [recipient, setRecipient] = useState('');
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
+  // The period lives in the address, as on the Stock report; it opens on this month.
+  const [params, setParams] = useSearchParams();
+  const today = useMemo(() => todayIso(), []);
+  const fallback = useMemo(() => thisMonth(), []);
+  const range = { from: params.get('from') ?? fallback.from, to: params.get('to') ?? fallback.to };
+  const problem = !range.from || !range.to ? 'Choose a start and an end date.'
+    : range.from > range.to ? 'The start date is after the end date.'
+      : range.from > today ? 'Choose a period that has started.'
+        : null;
+  // The Projects and Recipients pages link here with ?projectNumber= or ?recipientId=.
+  const [project, setProject] = useState(() => params.get('projectNumber') ?? '');
+  const [category, setCategory] = useState(() => params.get('category') ?? '');
+  const [recipient, setRecipient] = useState(() => params.get('recipientId') ?? '');
 
-  const range = preset === 'custom' ? custom : presetRange(preset);
+  /** Set one end of the period, keeping the other where it is. */
+  function setDate(key: 'from' | 'to', value: string) {
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('from', range.from);
+      next.set('to', range.to);
+      next.set(key, value);
+      return next;
+    }, { replace: true });
+  }
+
   const query = useMemo(() => {
     const p = new URLSearchParams({ from: range.from, to: range.to });
     if (project) p.set('projectNumber', project);
@@ -64,28 +57,23 @@ export function Consumption() {
     if (recipient) p.set('recipientId', recipient);
     return p.toString();
   }, [range.from, range.to, project, category, recipient]);
-  const badRange = range.from > range.to;
-  const report = useApi<ConsumptionReport>(badRange ? null : `/reports/consumption?${query}`);
+  const report = useApi<ConsumptionReport>(problem ? null : `/reports/consumption?${query}`);
   const projects = useApi<Project[]>('/projects');
   const recipients = useApi<Recipient[]>('/recipients');
   const currency = report.data?.currency ?? 'ZAR';
-
-  async function download() {
-    setDownloading(true);
-    try {
-      await downloadConsumption(query);
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message);
-    } finally {
-      setDownloading(false);
-    }
-  }
 
   const projectLabel = (p: string | null) => {
     if (p === null) return 'No project';
     const name = (projects.data ?? []).find((x) => x.projectNumber === p)?.name;
     return name ? `${p} · ${name}` : p;
   };
+
+  /** The selection in words, for the top of the PDF. */
+  const filters = [
+    project && `Project: ${projectLabel(project === NO_PROJECT ? null : project)}`,
+    recipient && `Issued to: ${recipient === NO_RECIPIENT ? 'Not recorded' : (recipients.data ?? []).find((r) => r.id === recipient)?.name ?? recipient}`,
+    category && `Category: ${categoryLabel(category)}`,
+  ].filter((f): f is string => !!f);
 
   const projectColumns: DataTableColumn<ConsumptionReport['byProject'][number]>[] = [
     {
@@ -123,47 +111,45 @@ export function Consumption() {
         title="Stock used"
         description="What the store issued in a period, less what came back, at each item's unit price (excl. VAT): by project, by who it was issued to, and by item. Replaces the workbook's Stock Report and Consumable Box sheets."
         actions={(
-          <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange || !report.data}>
-            Download as Excel
-          </Button>
+          <DownloadMenu
+            onDownload={(format) => (format === 'pdf' ? downloadConsumptionPdf(query, filters) : downloadConsumption(query))}
+            disabled={!!problem || !report.data}
+          />
         )}
       />
 
-      <Toolbar
-        left={(
-          <>
-            <Select className="sm:w-44" value={preset} onChange={(e) => { if (e.target.value === 'custom') setCustom(range); setPreset(e.target.value); }} aria-label="Period">
-              {PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </Select>
-            {preset === 'custom' && (
-              <>
-                <Input className="sm:w-40" type="date" aria-label="From" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
-                <Input className="sm:w-40" type="date" aria-label="To" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} />
-              </>
-            )}
-            <Select className="sm:w-60" value={project} onChange={(e) => setProject(e.target.value)} aria-label="Project">
-              <option value="">All projects</option>
-              <option value={NO_PROJECT}>No project</option>
-              {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{projectLabel(p.projectNumber)}</option>)}
-            </Select>
-            <Select className="sm:w-52" value={recipient} onChange={(e) => setRecipient(e.target.value)} aria-label="Issued to">
-              <option value="">Everyone</option>
-              <option value={NO_RECIPIENT}>Not recorded</option>
-              {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
-                <option key={r.id} value={r.id}>{r.name}{r.active ? '' : ' (inactive)'}</option>
-              ))}
-            </Select>
-            <Select className="sm:w-56" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
-              <option value="">All categories</option>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </Select>
-            {(project || category || recipient) && <Button variant="ghost" size="sm" onClick={() => { setProject(''); setCategory(''); setRecipient(''); }}>Clear</Button>}
-          </>
-        )}
-        right={<span className="text-meta">{range.from} to {range.to}</span>}
-      />
+      <FilterBar onClear={project || category || recipient ? () => { setProject(''); setCategory(''); setRecipient(''); } : undefined}>
+        <Field label="From" htmlFor="su-from" className={DATE_WIDTH}>
+          <Input id="su-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+        </Field>
+        <Field label="To" htmlFor="su-to" className={DATE_WIDTH}>
+          <Input id="su-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+        </Field>
+        <Field label="Project" htmlFor="su-project" className="w-full sm:w-72">
+          <Select id="su-project" value={project} onChange={(e) => setProject(e.target.value)}>
+            <option value="">All projects</option>
+            <option value={NO_PROJECT}>No project</option>
+            {(projects.data ?? []).map((p) => <option key={p.projectNumber} value={p.projectNumber}>{projectLabel(p.projectNumber)}</option>)}
+          </Select>
+        </Field>
+        <Field label="Issued to" htmlFor="su-recipient" className={FILTER_WIDTH}>
+          <Select id="su-recipient" value={recipient} onChange={(e) => setRecipient(e.target.value)}>
+            <option value="">Everyone</option>
+            <option value={NO_RECIPIENT}>Not recorded</option>
+            {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
+              <option key={r.id} value={r.id}>{r.name}{r.active ? '' : ' (inactive)'}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Category" htmlFor="su-category" className={FILTER_WIDTH}>
+          <Select id="su-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
-      {badRange && <p className="text-sm text-danger-600 mb-3">The start date is after the end date.</p>}
+      {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
       {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}
 
       {report.data && (
