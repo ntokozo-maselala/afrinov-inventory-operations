@@ -13,11 +13,11 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
 import { MaterialForm } from '../components/MaterialForm';
 import { useToast } from '../components/Toast';
-import { useCanManageMaterials } from '../hooks/usePermissions';
+import { useCanManageMaterials, useHasRole } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
+import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
-import { PROCUREMENT_ENABLED } from '../config/features';
 import { categoryLabel } from '../lib/categories';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 
@@ -32,6 +32,9 @@ export function MaterialDetail() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [toggling, setToggling] = useState(false);
   const canManage = useCanManageMaterials();
+  // The same roles as the Receive and Issue buttons on the Stock page.
+  const canReceive = useHasRole(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']);
+  const canIssue = useHasRole(['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']);
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
@@ -39,6 +42,11 @@ export function MaterialDetail() {
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;
   const hasPrice = unitCost !== null && unitCost !== undefined && unitCost !== '';
+  // An inactive item cannot be moved; tools are lent on the Tools page, not issued.
+  const active = !!material.data?.active;
+  const isTool = material.data?.category === 'TOOLS';
+  const receiveLink = id ? `/stock/receive?materialId=${encodeURIComponent(id)}` : '/stock/receive';
+  const historyLink = id ? `/movements?report=all&materialId=${encodeURIComponent(id)}&from=${daysAgo(365)}&to=${today()}` : '/movements';
 
   // The required stock drives the item's status, so the stock rows reload too.
   function reloadItem() {
@@ -73,7 +81,11 @@ export function MaterialDetail() {
         actions={material.data && (
           <>
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
-            <Link to="/stock" className="btn-secondary btn-sm">View in stock</Link>
+            <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
+            {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
+            {active && canIssue && total > 0 && (isTool
+              ? <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>
+              : <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>)}
             {canManage && (material.data.active
               ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
               : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
@@ -141,12 +153,22 @@ export function MaterialDetail() {
                   { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
                   { key: 'status', header: 'Item status', render: (r) => <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} /> },
                 ]}
-                emptyState={<EmptyState title="No stock recorded" description={PROCUREMENT_ENABLED ? 'Record a goods receipt to add stock for this material.' : 'Record a stock adjustment to add stock for this material.'} />}
+                emptyState={(
+                  <EmptyState
+                    title="No stock recorded"
+                    description="Stock comes in when a delivery of this item is received."
+                    action={active && canReceive ? <Link to={receiveLink} className="btn-primary btn-sm">Receive stock</Link> : undefined}
+                  />
+                )}
               />
             </section>
 
             <section>
-              <SectionHeader title="Movement history" description="Last 50 transactions for this material." />
+              <SectionHeader
+                title="Movement history"
+                description="Last 50 transactions for this material."
+                actions={<Link to={historyLink} className="btn-link text-sm">All movements, last 12 months</Link>}
+              />
               <DataTable
                 ariaLabel="Material movement history"
                 isLoading={moves.loading}

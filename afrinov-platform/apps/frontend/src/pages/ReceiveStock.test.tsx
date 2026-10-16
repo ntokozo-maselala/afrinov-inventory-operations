@@ -15,7 +15,7 @@ const { ToastProvider } = await import('../components/Toast');
 
 let addedMaterials: Array<{ id: string; sku: string; name: string; unitOfMeasure: string; active: boolean }> = [];
 
-function renderPage() {
+function renderPage(url = '/stock/receive') {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/suppliers')) return [
       { id: 's-1', name: 'Hydroscand', active: true },
@@ -34,7 +34,7 @@ function renderPage() {
     ];
     return [];
   });
-  render(<MemoryRouter><ToastProvider><ReceiveStock /></ToastProvider></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[url]}><ToastProvider><ReceiveStock /></ToastProvider></MemoryRouter>);
 }
 
 async function ready() {
@@ -149,5 +149,27 @@ describe('ReceiveStock page', () => {
     await ready();
     expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
     expect(screen.getByText('Item not listed? Ask a store controller to add it.')).toBeInTheDocument();
+  });
+});
+
+describe('ReceiveStock linked from an item', () => {
+  beforeEach(() => {
+    perms.canManageMaterials = true;
+    addedMaterials = [];
+    mockGet.mockReset();
+    mockPost.mockReset();
+  });
+
+  it('starts the first line on the item in ?materialId=, going where most of it is kept', async () => {
+    renderPage('/stock/receive?materialId=m-1');
+    await ready();
+    expect(await screen.findByText('11 each in stock · B-2 (8), A-1 (3)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Into location')).toHaveValue('l-2');
+  });
+
+  it('ignores an inactive item', async () => {
+    renderPage('/stock/receive?materialId=m-old');
+    await ready();
+    expect(screen.getByLabelText('Into location')).toHaveValue('');
   });
 });

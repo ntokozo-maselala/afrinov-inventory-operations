@@ -39,7 +39,7 @@ describe('Dashboard', () => {
 
     expect(screen.getByText('10 of 14')).toBeInTheDocument();
     expect(screen.getByText('Urgent').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=URGENT');
-    expect(screen.getByText('Out of stock').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=all');
+    expect(screen.getByText('Out of stock').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=out');
     expect(screen.queryByLabelText('Time range')).not.toBeInTheDocument();
   });
 
@@ -65,5 +65,21 @@ describe('Dashboard', () => {
     expect(card).toHaveAttribute('href', '/tools?view=overdue');
     expect(card).toHaveTextContent('3');
     expect(card).toHaveTextContent('1 overdue');
+  });
+});
+
+describe('Dashboard items table', () => {
+  it('sends View all to Stock, and says when the table is cut short', async () => {
+    const line = (n: number) => ({ materialId: `m-${n}`, locationId: 'l-1', sku: `SKU-${n}`, name: `Item ${n}`, category: 'CONSUMABLES', locationName: 'A-1', quantity: 1, inventoryValue: 1, status: 'IN_STOCK' });
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-value') return VALUE;
+      if (path === '/reports/low-stock' || path === '/tools') return [];
+      return { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [line(1), line(2)], inventoryTotal: 340, kpis: {} };
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText(/Showing the first 2 of 340 lines/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'See them all on Stock' })).toHaveAttribute('href', '/stock');
+    const section = within(screen.getByRole('region', { name: 'Inventory items' }));
+    expect(section.getByRole('button', { name: 'View all' }).closest('a')).toHaveAttribute('href', '/stock');
   });
 });

@@ -148,6 +148,11 @@ function columns({ canManage, onEdit, onSetActive, toolsOut }: {
         ? <Link to={`/tools?q=${encodeURIComponent(r.name)}`} className="btn-link font-mono">{toolsOut.get(r.id)}</Link>
         : <span className="text-surface-300">—</span>),
     },
+    {
+      // What was issued to them this month, less returns; the report links on to each issue.
+      key: 'used', header: 'Stock used', width: '7rem',
+      render: (r) => <Link to={`/reports/consumption?recipientId=${encodeURIComponent(r.id)}`} className="btn-link text-sm">This month</Link>,
+    },
     { key: 'notes', header: 'Notes', render: (r) => r.notes || <span className="text-surface-300">—</span> },
     { key: 'status', header: 'Status', render: (r) => r.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '8rem' },
     ...(canManage ? [{

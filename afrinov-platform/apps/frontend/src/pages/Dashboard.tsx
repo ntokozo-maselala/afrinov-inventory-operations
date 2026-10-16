@@ -66,7 +66,7 @@ export function Dashboard() {
       { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, to: '/stock' },
       { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
       { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
-      { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=all' },
+      { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
       toolsCard(tools ?? []),
     ];
   }, [value, urgentBelowPercent, warningBelowPercent, tools]);
@@ -317,10 +317,15 @@ export function Dashboard() {
       <section aria-label="Inventory items">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-h2 text-surface-900">Inventory Items</h2>
-          <Link to="/materials">
+          <Link to="/stock">
             <Button variant="secondary" size="sm">View all</Button>
           </Link>
         </div>
+        {report && report.inventoryTotal > rows.length && (
+          <p className="text-xs text-surface-500 mb-2">
+            Showing the first {formatNumber(rows.length)} of {formatNumber(report.inventoryTotal)} lines. <Link to="/stock" className="btn-link">See them all on Stock</Link>.
+          </p>
+        )}
         <DataTable
           columns={columns}
           rows={rows}

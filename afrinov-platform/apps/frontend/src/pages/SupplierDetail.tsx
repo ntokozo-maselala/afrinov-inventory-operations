@@ -1,5 +1,9 @@
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
+import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
+import type { ReportView } from '../components/reports/ReportView';
+import { daysAgo, today } from '../lib/dates';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { PurchaseOrderStatusBadge, Badge } from '../components/Badge';
@@ -32,6 +36,13 @@ export function SupplierDetail() {
   const totalOrdered = supplierPOs.reduce((acc, p) => acc + p.lines.reduce((a, l) => a + Number(l.orderedQty), 0), 0);
   const totalReceived = supplierPOs.reduce((acc, p) => acc + p.lines.reduce((a, l) => a + Number(l.receivedQty), 0), 0);
 
+  // The same deliveries as Movements > Received stock, filtered to this supplier.
+  const [view, setView] = useState<ReportView>('table');
+  const deliveriesQuery = useMemo(
+    () => new URLSearchParams({ from: daysAgo(365), to: today(), supplierId: id ?? '' }).toString(),
+    [id],
+  );
+
   return (
     <div>
       <PageHeader
@@ -54,7 +65,17 @@ export function SupplierDetail() {
             </dl>
           </aside>
 
-          {PROCUREMENT_ENABLED && <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-6">
+            <section>
+              <SectionHeader
+                title="Deliveries"
+                description="Stock received from this supplier in the last 12 months, newest first."
+                actions={<Link to={`/movements?report=received&${deliveriesQuery}`} className="btn-link text-sm">Open in Movements</Link>}
+              />
+              <ReceivedStockReport query={deliveriesQuery} view={view} onView={setView} />
+            </section>
+
+          {PROCUREMENT_ENABLED && <>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="surface-card p-3"><div className="text-eyebrow">POs</div><div className="text-2xl font-semibold text-num">{formatNumber(supplierPOs.length)}</div></div>
               <div className="surface-card p-3"><div className="text-eyebrow">Ordered</div><div className="text-2xl font-semibold text-num">{formatNumber(totalOrdered)}</div></div>
@@ -72,7 +93,8 @@ export function SupplierDetail() {
                 emptyState={<EmptyState title="No purchase history" description="This supplier has no recorded purchase orders yet." action={<Link to="/purchase-orders" className="btn-secondary btn-sm">View all POs</Link>} />}
               />
             </section>
-          </div>}
+          </>}
+          </div>
         </div>
       )}
 

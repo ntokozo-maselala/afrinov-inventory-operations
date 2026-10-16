@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
@@ -14,6 +15,7 @@ import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
+import { today } from '../lib/dates';
 
 interface UserOpt { id: string; name: string }
 
@@ -326,6 +328,14 @@ export function Projects() {
   );
 }
 
+/** Stock used on this project, from its start date when it has one that has passed, else this month. */
+function stockUsedLink(p: Project): string {
+  const q = new URLSearchParams({ projectNumber: p.projectNumber });
+  const start = p.startDate?.slice(0, 10);
+  if (start && start <= today()) { q.set('from', start); q.set('to', today()); }
+  return `/reports/consumption?${q.toString()}`;
+}
+
 function columns({ onEdit, onArchive }: { onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
   return [
     { key: 'num', header: 'Number', render: (p) => <span className="font-mono">{p.projectNumber}</span>, width: '10rem' },
@@ -335,6 +345,7 @@ function columns({ onEdit, onArchive }: { onEdit: (p: Project) => void; onArchiv
     { key: 'mgr', header: 'Manager', render: (p) => p.manager?.name ?? <span className="text-surface-300">—</span>, width: '12rem' },
     { key: 'status', header: 'Status', render: (p) => <Badge tone={STATUS_TONE[p.status]} dot>{p.status}</Badge>, width: '10rem' },
     { key: 'start', header: 'Start', render: (p) => p.startDate ? <span className="text-meta">{formatDate(p.startDate)}</span> : <span className="text-surface-300">—</span>, width: '10rem' },
+    { key: 'used', header: 'Stock used', render: (p) => <Link to={stockUsedLink(p)} className="btn-link text-sm">View</Link>, width: '7rem' },
     {
       key: 'actions', header: '', align: 'right', width: '12rem',
       render: (p) => (

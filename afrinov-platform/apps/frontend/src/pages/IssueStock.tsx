@@ -1,7 +1,7 @@
 // Issue stock at the store counter: one recipient, an optional project, and
 // any number of items, booked all-or-nothing (POST /inventory-issues).
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -47,6 +47,16 @@ export function IssueStock() {
     label: `${r.materialName} (${r.materialSku}) · ${r.locationName}`,
     detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
   })), [available]);
+
+  // An item's page links here with ?materialId=: once stock has loaded, the
+  // first line starts on that item, at the location that holds the most.
+  const [params] = useSearchParams();
+  const [preset, setPreset] = useState(() => params.get('materialId'));
+  if (preset && stock.data) {
+    setPreset(null);
+    const best = available.filter((r) => r.materialId === preset).sort((a, b) => Number(b.quantity) - Number(a.quantity))[0];
+    if (best) setLines([{ ...emptyLine(), stockKey: stockKey(best) }]);
+  }
 
   // Requested per item and location, across lines, to warn before submitting.
   const requested = new Map<string, number>();

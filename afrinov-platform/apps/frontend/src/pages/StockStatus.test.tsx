@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload, mockPdf, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn(), perms: { admin: false } }));
+const { mockGet, mockDownload, mockPdf, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn(), perms: { admin: false, receive: false } }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin }));
+vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin, useHasRole: () => perms.receive }));
 vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload, downloadReorderListPdf: mockPdf }));
 
 const { StockStatus } = await import('./StockStatus');
@@ -147,5 +147,36 @@ describe('StockStatus page', () => {
       expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
+  });
+});
+
+describe('StockStatus links', () => {
+  beforeEach(() => {
+    perms.admin = false;
+    perms.receive = false;
+    mockGet.mockReset().mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : [...ROWS, row('GONE', 'Empty bin', 'URGENT', '0', '10', 0, '10')]));
+  });
+
+  function renderAt(url: string) {
+    render(<MemoryRouter initialEntries={[url]}><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
+  }
+
+  it('shows only the items with nothing on hand under ?view=out, as the Dashboard card counts them', async () => {
+    renderAt('/reports/stock-status?view=out');
+    expect(await screen.findByText('Empty bin')).toBeInTheDocument();
+    expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Show')).toHaveValue('out');
+  });
+
+  it('offers Receive stock to those who can receive', async () => {
+    perms.receive = true;
+    renderAt('/reports/stock-status');
+    expect(await screen.findByRole('link', { name: /Receive stock/ })).toHaveAttribute('href', '/stock/receive');
+  });
+
+  it('offers no Receive stock to others', async () => {
+    renderAt('/reports/stock-status');
+    await screen.findByText('Grinding disc');
+    expect(screen.queryByRole('link', { name: /Receive stock/ })).not.toBeInTheDocument();
   });
 });
