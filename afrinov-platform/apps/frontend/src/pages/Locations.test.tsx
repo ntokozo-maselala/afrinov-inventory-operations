@@ -8,6 +8,10 @@ vi.mock('../api/client', () => ({
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 
+// Signed in as a store controller, who may do everything on these pages; tests that need another role set signedIn.roles.
+const { signedIn } = vi.hoisted(() => ({ signedIn: { roles: ['STORE_CONTROLLER'] as string[] } }));
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } }) }));
+
 const { Locations } = await import('./Locations');
 const { ToastProvider } = await import('../components/Toast');
 
@@ -44,5 +48,14 @@ describe('Locations page', () => {
   it('shows a dash when the report cannot be read, for example without access to reports', async () => {
     renderPage(async () => { throw { code: 'FORBIDDEN', message: 'No access' }; });
     expect((await valueCell('Main Storeroom')).textContent).toBe('—');
+  });
+
+  it('labels its search and filters', async () => {
+    renderPage(async () => ({ currency: 'ZAR', byLocation: [] }));
+    await screen.findByText('Main Storeroom');
+    for (const label of ['Search', 'Type', 'Status']) {
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
   });
 });

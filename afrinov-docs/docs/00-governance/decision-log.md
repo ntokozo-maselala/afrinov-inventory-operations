@@ -304,3 +304,27 @@ and registered routes differ. Off in production unless enabled.
 
 **Evidence:** `afrinov-platform/apps/backend/src/openapi/document.ts`,
 `afrinov-platform/apps/backend/src/openapi/openapi.test.ts:37-39`.
+
+---
+
+### ADR-018 — Store controllers may add and edit suppliers
+**Date:** 2026-10-16 · **Status:** Accepted
+
+**Context:** Only Procurement (and Admin) held `create:supplier` and
+`edit:supplier`. With procurement switched off (ADR-012), suppliers exist
+only to record who a delivery came from, and the person booking deliveries
+on Receive stock is the store controller. A delivery from a new supplier
+could not be booked until someone else added the supplier, and Receive stock
+sent store controllers to a Suppliers page where they could not do it.
+
+**Decision:** `STORE_CONTROLLER` also holds `create:supplier` and
+`edit:supplier`. Receive stock lets them add a supplier from the form, as it
+already lets them add a new item. Purchase orders stay with Procurement.
+
+**Consequences:** A counter delivery from a new supplier is booked in one
+go. More people can create suppliers, so duplicates are more likely; names
+are already unique ignoring case and spacing. There is no route to edit a
+supplier yet, so `edit:supplier` has nothing to apply to until one is built.
+
+**Evidence:** `afrinov-platform/apps/backend/src/shared/permissions.ts`,
+`afrinov-platform/apps/frontend/src/hooks/usePermissions.ts` (`suppliers:manage`).

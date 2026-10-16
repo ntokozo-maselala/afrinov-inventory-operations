@@ -8,10 +8,16 @@ import { MovementBadge, Badge } from '../components/Badge';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { Drawer } from '../components/Modal';
+import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Icon } from '../components/Icon';
+import { MaterialForm } from '../components/MaterialForm';
 import { useToast } from '../components/Toast';
+import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
+import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
+import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
-import { PROCUREMENT_ENABLED } from '../config/features';
 import { categoryLabel } from '../lib/categories';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 
@@ -22,11 +28,48 @@ export function MaterialDetail() {
   const stock = useApi<CurrentStockRow[]>(id ? `/reports/current-stock?materialId=${id}` : null);
   const moves = useApi<MovementRow[]>(id ? `/inventory-transactions?materialId=${id}&limit=50` : null);
   const [selected, setSelected] = useState<MovementRow | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const canManage = useCanManageMaterials();
+  // The same permissions as the Receive, Issue and Check out buttons elsewhere.
+  const { hasPermission } = usePermissions();
+  const canReceive = hasPermission('inventory:receive');
+  const canIssue = hasPermission('inventory:issue');
+  const canLend = hasPermission('tools:lend');
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
+  const unitCost = material.data?.unitCost;
+  const hasPrice = unitCost !== null && unitCost !== undefined && unitCost !== '';
+  // An inactive item cannot be moved; tools are lent on the Tools page, not issued.
+  const active = !!material.data?.active;
+  const isTool = material.data?.category === 'TOOLS';
+  const receiveLink = id ? `/stock/receive?materialId=${encodeURIComponent(id)}` : '/stock/receive';
+  const historyLink = id ? `/movements?report=all&materialId=${encodeURIComponent(id)}&from=${daysAgo(365)}&to=${today()}` : '/movements';
+
+  // The required stock drives the item's status, so the stock rows reload too.
+  function reloadItem() {
+    material.reload();
+    stock.reload();
+  }
+
+  async function setActive(active: boolean) {
+    if (!material.data) return;
+    setToggling(true);
+    try {
+      await api.patch(`/materials/${material.data.id}`, { active });
+      toast.success(active ? `${material.data.sku} reactivated` : `${material.data.sku} deactivated`);
+      setConfirmDeactivate(false);
+      reloadItem();
+    } catch (err) {
+      toast.error(active ? 'Could not reactivate item' : 'Could not deactivate item', (err as ApiError).message);
+    } finally {
+      setToggling(false);
+    }
+  }
 
   return (
     <div>
@@ -40,7 +83,14 @@ export function MaterialDetail() {
         actions={material.data && (
           <>
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
-            <Link to="/stock" className="btn-secondary btn-sm">View in stock</Link>
+            <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
+            {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
+            {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
+            {active && total > 0 && !isTool && canIssue && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
+            {canManage && (material.data.active
+              ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
+              : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
+            {canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Edit size={12} />} onClick={() => setEditing(true)}>Edit</Button>}
           </>
         )}
       />
@@ -56,8 +106,14 @@ export function MaterialDetail() {
                 <dt className="text-surface-500">SKU</dt><dd className="col-span-2 text-mono">{material.data.sku}</dd>
                 <dt className="text-surface-500">Category</dt><dd className="col-span-2">{categoryLabel(material.data.category)}</dd>
                 <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
+                {material.data.serialNumber && (<><dt className="text-surface-500">Serial number</dt><dd className="col-span-2 text-mono">{material.data.serialNumber}</dd></>)}
                 <dt className="text-surface-500">Reorder at</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd>
-                {material.data.unitCost && (<><dt className="text-surface-500">Unit cost</dt><dd className="col-span-2 text-num">R {formatNumber(Number(material.data.unitCost), { fixed: true })}</dd></>)}
+                <dt className="text-surface-500">Unit cost</dt>
+                <dd className="col-span-2 text-num">
+                  {hasPrice
+                    ? `R ${formatNumber(Number(unitCost), { fixed: true })}`
+                    : <span className="text-warning-700">No price{canManage && <> · <button type="button" className="btn-link" onClick={() => setEditing(true)}>Set one</button></>}</span>}
+                </dd>
                 {material.data.description && (<><dt className="text-surface-500">Description</dt><dd className="col-span-2">{material.data.description}</dd></>)}
               </dl>
             </section>
@@ -98,12 +154,22 @@ export function MaterialDetail() {
                   { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
                   { key: 'status', header: 'Item status', render: (r) => <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} /> },
                 ]}
-                emptyState={<EmptyState title="No stock recorded" description={PROCUREMENT_ENABLED ? 'Record a goods receipt to add stock for this material.' : 'Record a stock adjustment to add stock for this material.'} />}
+                emptyState={(
+                  <EmptyState
+                    title="No stock recorded"
+                    description="Stock comes in when a delivery of this item is received."
+                    action={active && canReceive ? <Link to={receiveLink} className="btn-primary btn-sm">Receive stock</Link> : undefined}
+                  />
+                )}
               />
             </section>
 
             <section>
-              <SectionHeader title="Movement history" description="Last 50 transactions for this material." />
+              <SectionHeader
+                title="Movement history"
+                description="Last 50 transactions for this material."
+                actions={<Link to={historyLink} className="btn-link text-sm">All movements, last 12 months</Link>}
+              />
               <DataTable
                 ariaLabel="Material movement history"
                 isLoading={moves.loading}
@@ -126,6 +192,32 @@ export function MaterialDetail() {
           <div className="surface-card p-4 h-48"><Skeleton h={120} /></div>
           <div className="lg:col-span-2 surface-card p-4 h-72"><Skeleton h={240} /></div>
         </div>
+      )}
+
+      {editing && material.data && (
+        <Drawer open onClose={() => setEditing(false)} title={`Edit ${material.data.sku}`} description="Changes apply from now on. Movements already booked keep the values they were booked with." width="md">
+          <MaterialForm
+            initial={material.data}
+            onCancel={() => setEditing(false)}
+            onSaved={(m) => { setEditing(false); reloadItem(); toast.success(`${m.sku} saved`); }}
+            onError={(err) => toast.error('Could not save item', err.message)}
+          />
+        </Drawer>
+      )}
+
+      {confirmDeactivate && material.data && (
+        <ConfirmDialog
+          open
+          onClose={() => setConfirmDeactivate(false)}
+          onConfirm={() => void setActive(false)}
+          title={`Deactivate ${material.data.sku}?`}
+          description={total > 0
+            ? `${formatNumber(total)} ${material.data.unitOfMeasure} is still on hand. While the item is inactive, that stock cannot be received, issued, transferred or adjusted, and the item drops off Stock status. You can reactivate it at any time.`
+            : 'While the item is inactive it cannot be received, issued, transferred or adjusted, and it drops off Stock status. Its history stays. You can reactivate it at any time.'}
+          confirmLabel="Deactivate"
+          destructive
+          loading={toggling}
+        />
       )}
 
       {selected && (

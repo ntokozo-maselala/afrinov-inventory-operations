@@ -65,6 +65,14 @@ async function sampleWorkbook(): Promise<ExcelJS.Workbook> {
     ['P-700', 'Drill 6mm', 'E-2', 1, stock(2), 0, 0, null, 1],
   ]);
   addSummary(wb, 'TP&E Stock Summary', 0, [[null, 'P-700', 'Drill 6mm', 'E-2', 1, 2, 20, null, 10]]);
+  // The Tools register: Tools Issued is Required Tools - OUT; OUT and IN add up the Tools Issued log.
+  const tools = wb.addWorksheet('Tools Main');
+  tools.addRow(['Tool Type', 'Rack', 'Required Tools', 'Tools Issued', 'IN', 'OUT']);
+  const inStore = (result: number): ExcelJS.CellValue => ({ formula: 'C2-F2', result } as ExcelJS.CellFormulaValue);
+  tools.addRow(['Makita Hand Drill - 34322', 'O-1', 1, inStore(1), 0, 0]);
+  tools.addRow(['Scraper', 'Stores', 11, inStore(8), 1, 3]);
+  tools.addRow(['Safety Harness - 110446', 'Stores', 6, inStore(6), 0, 0]);
+  tools.addRow(['Site tool box 001', 'Tool box 001', null, inStore(0), 0, 0]);
   // Project Material sheets left out on purpose.
   return wb;
 }
@@ -104,7 +112,7 @@ describe('workbook reader', () => {
 describe('workbook analysis', () => {
   it('plans one item per named row and skips rows with only a Product ID', async () => {
     const a = await analyse();
-    expect(a.items).toHaveLength(8);
+    expect(a.items).toHaveLength(12);
     expect(a.unusedRows).toBe(1);
     expect(a.items.find((i) => i.oldProductId === 'P-002' && i.location === 'Store room')?.name).toBe('Cutting disc');
   });
@@ -147,7 +155,7 @@ describe('workbook analysis', () => {
     expect(buckets.map((b) => b.unitPrice)).toEqual([10, 12]);
     expect(codes(a, 'PRICE_CONFLICT')).toHaveLength(2);
     expect(a.items.find((i) => i.name === 'Cutting disc')?.unitPrice).toBe(10);
-    expect(codes(a, 'MISSING_UNIT_PRICE')).toEqual([expect.objectContaining({ name: 'Flap disc' })]);
+    expect(codes(a, 'MISSING_UNIT_PRICE').filter((p) => p.category !== 'TOOLS')).toEqual([expect.objectContaining({ name: 'Flap disc' })]);
   });
 
   it('lists blank Required Stock and groups location spellings', async () => {
@@ -171,6 +179,30 @@ describe('workbook analysis', () => {
       workbookTotal: 100, workbookRowsTotal: 110 + 50 + 30 + 12,
     });
     expect(a.categories.find((c) => c.category === 'PROJECT_MATERIAL')).toMatchObject({ rows: 0, workbookTotal: null });
+  });
+});
+
+describe('the Tools register', () => {
+  it('reads each tool with its rack, and what the store owns as its quantity and Required Stock', async () => {
+    const a = await analyse();
+    const tools = a.items.filter((i) => i.category === 'TOOLS');
+    expect(tools.map((t) => [t.name, t.location, t.quantity, t.requiredStock, t.oldProductId, t.unitPrice])).toEqual([
+      ['Makita Hand Drill - 34322', 'O-1', 1, 1, null, null],
+      ['Scraper', 'Stores', 11, 11, null, null],
+      ['Safety Harness - 110446', 'Stores', 6, 6, null, null],
+      ['Site tool box 001', 'Tool box 001', 0, 0, null, null],
+    ]);
+    expect(a.categories.find((c) => c.category === 'TOOLS')).toEqual({ category: 'TOOLS', rows: 4, quantity: 18, value: 0, workbookTotal: null, workbookRowsTotal: null });
+  });
+
+  it('flags tools out now (OUT less IN) and rows with no count, but not the missing Product IDs and prices one by one', async () => {
+    const a = await analyse();
+    expect(codes(a, 'TOOL_CHECKED_OUT')).toEqual([expect.objectContaining({ name: 'Scraper', detail: '2 checked out (OUT 3, IN 1)' })]);
+    expect(codes(a, 'TOOL_COUNT_BLANK')).toEqual([expect.objectContaining({ name: 'Site tool box 001' })]);
+    expect(a.problems.filter((p) => p.category === 'TOOLS' && ['MISSING_PRODUCT_ID', 'REQUIRED_STOCK_BLANK', 'STOCK_MISMATCH'].includes(p.code))).toEqual([]);
+    expect(codes(a, 'MISSING_UNIT_PRICE').filter((p) => p.category === 'TOOLS')).toEqual([
+      expect.objectContaining({ detail: 'The Tools sheet has no prices: 4 tools are imported without one' }),
+    ]);
   });
 });
 

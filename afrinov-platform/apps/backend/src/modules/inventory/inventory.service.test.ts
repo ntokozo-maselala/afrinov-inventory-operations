@@ -162,7 +162,10 @@ const fakeTx = {
     },
   },
   material: {
-    findUnique: async () => ({ id: 'mat-1', requiredStock: new Prisma.Decimal(5), active: true }),
+    // An id starting "tool" is a tool.
+    findUnique: async ({ where }: { where: { id: string } }) => ({
+      id: where.id, sku: where.id.toUpperCase(), category: where.id.startsWith('tool') ? 'TOOLS' : 'CONSUMABLES', requiredStock: new Prisma.Decimal(5), active: true,
+    }),
   },
   location: {
     findUnique: async () => ({ id: 'loc-1', active: true }),
@@ -315,6 +318,11 @@ describe('InventoryService — ADR-002 invariants', () => {
     await expect(
       issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 100, actorId: 'u' }),
     ).rejects.toThrow(/available/);
+  });
+
+  it('refuses to issue a tool: tools are checked out', async () => {
+    await InventoryService.adjust({ materialId: 'tool-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    await expect(issueOne({ materialId: 'tool-1', locationId: 'loc-1', quantity: 1, actorId: 'u' })).rejects.toThrow(/is a tool: check it out on the Tools page/);
   });
 
   it('transfer moves stock atomically: out & in both land, paired together', async () => {
@@ -568,6 +576,49 @@ describe('InventoryService — ADR-002 invariants', () => {
     });
   });
 
+  // ── Several returns at once ───────────────────────────────────────────
+  // All-or-nothing is the database transaction's job; this fake does not roll
+  // back, so integration/returns.real-http.test.ts covers it.
+  describe('return many', () => {
+    async function twoIssues() {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 20, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      const a = (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 10, actorId: 'u', projectNumber: 'AFRI-1325' })).transactionId;
+      const b = (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 4, actorId: 'u' })).transactionId;
+      return { a, b };
+    }
+
+    it('books a RETURN against each line\'s own issue, with one note and one time', async () => {
+      const { a, b } = await twoIssues();
+      const { transactionIds } = await InventoryService.returnMany({
+        lines: [{ issueTransactionId: a, quantity: 3 }, { issueTransactionId: b, quantity: 1, locationId: 'loc-2' }],
+        reason: ' Job finished early ', actorId: 'storeman',
+      });
+      expect(transactionIds).toHaveLength(2);
+      const [ra, rb] = transactionIds.map((id) => trxRows.find((r) => r.id === id)!);
+      expect(ra).toMatchObject({ type: 'RETURN', referenceId: a, projectNumber: 'AFRI-1325', locationId: 'loc-1', reasonNote: 'Job finished early' });
+      expect(rb).toMatchObject({ type: 'RETURN', referenceId: b, projectNumber: null, locationId: 'loc-2', reasonNote: 'Job finished early' });
+      expect(ra!.postedAt).toEqual(rb!.postedAt);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('9');
+      expect(getBalance('mat-1', 'loc-2').toString()).toBe('1');
+    });
+
+    it('counts two lines for the same issue together', async () => {
+      const { b } = await twoIssues();
+      await expect(InventoryService.returnMany({
+        lines: [{ issueTransactionId: b, quantity: 3 }, { issueTransactionId: b, quantity: 2 }], actorId: 'u',
+      })).rejects.toThrow(/Cannot return 2 × SKU: only 1 of the 4 issued is still out/);
+    });
+
+    it('refuses an empty return or a line that is not positive before booking anything', async () => {
+      const { a } = await twoIssues();
+      const before = trxRows.length;
+      await expect(InventoryService.returnMany({ lines: [], actorId: 'u' })).rejects.toThrow(/at least one item/);
+      await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 1 }, { issueTransactionId: a, quantity: 0 }], actorId: 'u' }))
+        .rejects.toThrow(/must be positive/);
+      expect(trxRows).toHaveLength(before);
+    });
+  });
+
   // ── Reversal ──────────────────────────────────────────────────────────
   describe('reverse', () => {
     afterEach(() => vi.restoreAllMocks());
@@ -747,6 +798,13 @@ describe('InventoryService — ADR-002 invariants', () => {
       await expect(
         InventoryService.reverse({ transactionId: reversalIds[0]!, reason: 'Undo', actorId: 'u' }),
       ).rejects.toThrow(/cannot itself be reversed/);
+    });
+
+    it('refuses to reverse a tool check-out, a check-in or a tool written off as lost on loan', async () => {
+      for (const [id, type, referenceType] of [['loan', 'LOAN', null], ['back', 'LOAN_RETURN', 'ToolLoan'], ['lost', 'ADJUSTMENT', 'ToolLoan']] as const) {
+        trxRows.push({ id, materialId: 'tool-1', locationId: 'loc-1', type, quantity: new Prisma.Decimal(1), actorId: 'u', postedAt: new Date(), referenceType, referenceId: 'loan' });
+        await expect(InventoryService.reverse({ transactionId: id, reason: 'Wrong person', actorId: 'u' })).rejects.toThrow(/check the tool in, or out, again/);
+      }
     });
 
     it('refuses to reverse stock received against a purchase order', async () => {

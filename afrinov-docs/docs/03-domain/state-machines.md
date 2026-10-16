@@ -46,14 +46,26 @@ never edited. A counter receipt (no PO) can be corrected by reversing its
 transactions; a receipt against a purchase order cannot be reversed
 (it also changed the order's received quantities).
 
-## Tool — Planned
+## Tool
 ```
-IN_STORE -> CHECKED_OUT (to a specific person) -> IN_STORE
+IN_STORE -> CHECKED_OUT (to a recipient, optional project) -> IN_STORE (good or damaged)
                 |
-                -> LOST / DAMAGED (terminal, requires Adjustment + reason)
+                -> LOST (written off: no longer owned)
 ```
-Not implemented: there is no tool state in the schema and no check-out or
-check-in endpoint. Tools are issued like any other material.
+*Verified against code 2026-10-13.* There is no stored state: a tool's state is
+read from the ledger. Check-out is a `LOAN` transaction (negative) that takes
+the tool off its location to a recipient; tools lent together share a slip
+(`issueId`). Check-in is a `LOAN_RETURN` (positive) against the loan
+(`referenceType` `ToolLoan`), back to the same location, with `reasonCode`
+`DAMAGE` when it came back damaged. A tool lost on loan is checked in on paper
+(`LOAN_RETURN`, `reasonCode` `LOSS`) and written off at once (`ADJUSTMENT`,
+`LOSS`). A loan is open while what was lent exceeds what came back. Stock on
+hand is what is on the shelf; owned = on hand + out on loan, which is what
+stock status counts against Required Stock. A loan is overdue after
+`inventory.toolOverdueDays` (default 7). Loans are not reversed; they are put
+right by checking the tool in or out again. Tools cannot be issued.
+(`apps/backend/src/modules/inventory/tool-loan.service.ts`,
+`apps/backend/src/shared/inventory/tool-loans.ts`)
 
 ## Inventory Transaction
 ```

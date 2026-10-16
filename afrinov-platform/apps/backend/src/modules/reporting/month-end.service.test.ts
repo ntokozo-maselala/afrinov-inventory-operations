@@ -5,6 +5,12 @@ import { MonthEndService } from './month-end.service.js';
 const mocks = vi.hoisted(() => ({
   balances: vi.fn(), materials: vi.fn(), locations: vi.fn(), setting: vi.fn(), consumption: vi.fn(),
 }));
+// Tools out on loan, per item (see tool-loans.ts); none unless a test lends some.
+const loans = vi.hoisted(() => ({ out: new Map<string, number>() }));
+vi.mock('../../shared/inventory/tool-loans.js', async () => {
+  const { Prisma } = await import('@prisma/client');
+  return { onLoanByMaterial: async () => new Map([...loans.out].map(([k, v]) => [k, new Prisma.Decimal(v)])) };
+});
 vi.mock('../../shared/db.js', () => ({ prisma: {
   inventoryTransaction: { groupBy: mocks.balances },
   material: { findMany: mocks.materials }, location: { findMany: mocks.locations },

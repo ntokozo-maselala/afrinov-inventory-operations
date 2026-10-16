@@ -1,5 +1,6 @@
 // The Movements reports that list ledger lines: all movements, transfers (one
-// row each, from → to) and write-offs. Paged from
+// row each, from → to), write-offs, tool loans (out and back in), and returned
+// stock (each return linked to the issue it came back from). Paged from
 // GET /inventory-transactions; a row opens its detail to reverse or return.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -15,13 +16,33 @@ import { TransactionDrawer } from '../TransactionDrawer';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import type { MovementRow } from '../../api/types';
 
-export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs';
+export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
 
 const EMPTY: Record<LedgerReportKind, string> = {
   all: 'Nothing was recorded for these dates and filters.',
   transfers: 'No stock was moved between locations for these dates and filters.',
   writeoffs: 'Nothing was written off or adjusted for these dates and filters. Count differences are under Stock counts.',
+  loans: 'No tools were checked out or in for these dates and filters.',
+  returned: 'No unused stock came back for these dates and filters.',
 };
+
+/**
+ * Issued stock on the day of the issue a return came back from, for that item
+ * (and person): where the return links to.
+ */
+export function issueLink(m: Pick<MovementRow, 'materialId' | 'recipientId' | 'returnOf'>): string | null {
+  if (!m.returnOf) return null;
+  const day = m.returnOf.postedAt.slice(0, 10);
+  const q = new URLSearchParams({ report: 'issued', from: day, to: day, materialId: m.materialId });
+  if (m.recipientId) q.set('recipientId', m.recipientId);
+  return `/movements?${q.toString()}`;
+}
+
+/** How a lent tool came back, from its check-in's reason. */
+export function toolCondition(m: Pick<MovementRow, 'type' | 'reasonCode'>): string {
+  if (m.type !== 'LOAN_RETURN') return '';
+  return m.reasonCode === 'DAMAGE' ? 'Damaged' : m.reasonCode === 'LOSS' ? 'Lost' : 'Good';
+}
 
 export function LedgerReport({ kind, query }: { kind: LedgerReportKind; query: string }) {
   const q = kind === 'all' ? query : `${query}&report=${kind}`;
@@ -103,6 +124,32 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     when(open), item, loc,
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m), width: '8rem' },
     reason,
+    { key: 'note', header: 'Note', render: (m) => m.reasonNote ? <span className="text-meta">{m.reasonNote}</span> : none },
+    by,
+  ],
+  loans: (open) => [
+    when(open),
+    { key: 'type', header: 'Movement', render: (m) => <MovementBadge type={m.type} />, width: '8rem' },
+    item,
+    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m, false), width: '7rem' },
+    { key: 'who', header: 'Person', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : none, width: '9rem' },
+    project, loc,
+    { key: 'cond', header: 'Condition', render: (m) => toolCondition(m) || none, width: '7rem' },
+    { key: 'note', header: 'Note', render: (m) => m.reasonNote ? <span className="text-meta">{m.reasonNote}</span> : none },
+    by,
+  ],
+  returned: (open) => [
+    when(open), item,
+    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m, false), width: '7rem' },
+    { key: 'who', header: 'Returned by', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : none, width: '9rem' },
+    project,
+    { key: 'into', header: 'Back into', render: (m) => m.locationName, width: '9rem' },
+    {
+      key: 'issue', header: 'From the issue of', width: '12rem',
+      render: (m) => (m.returnOf
+        ? <Link to={issueLink(m)!} className="btn-link text-meta whitespace-nowrap">{formatDateTime(m.returnOf.postedAt)} · {m.returnOf.locationName}</Link>
+        : none),
+    },
     { key: 'note', header: 'Note', render: (m) => m.reasonNote ? <span className="text-meta">{m.reasonNote}</span> : none },
     by,
   ],

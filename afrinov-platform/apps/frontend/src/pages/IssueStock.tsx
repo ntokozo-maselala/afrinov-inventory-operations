@@ -1,7 +1,7 @@
 // Issue stock at the store counter: one recipient, an optional project, and
 // any number of items, booked all-or-nothing (POST /inventory-issues).
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -12,7 +12,10 @@ import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { RecipientSelect, ProjectSelect, useIssueOptions } from '../components/IssueFields';
+import { usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
+import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
 
 
@@ -33,11 +36,13 @@ export function IssueStock() {
   const [focusKey, setFocusKey] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The issue just posted, kept on the page (a toast fades) with a way to its slip.
+  const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
 
-  // Only items with stock can be issued.
+  // Only items with stock can be issued, and tools are lent on the Tools page instead.
   const available = useMemo(
-    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0)
+    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS')
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
     [stock.data],
   );
@@ -47,6 +52,16 @@ export function IssueStock() {
     label: `${r.materialName} (${r.materialSku}) · ${r.locationName}`,
     detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
   })), [available]);
+
+  // An item's page links here with ?materialId=: once stock has loaded, the
+  // first line starts on that item, at the location that holds the most.
+  const [params] = useSearchParams();
+  const [preset, setPreset] = useState(() => params.get('materialId'));
+  if (preset && stock.data) {
+    setPreset(null);
+    const best = available.filter((r) => r.materialId === preset).sort((a, b) => Number(b.quantity) - Number(a.quantity))[0];
+    if (best) setLines([{ ...emptyLine(), stockKey: stockKey(best) }]);
+  }
 
   // Requested per item and location, across lines, to warn before submitting.
   const requested = new Map<string, number>();
@@ -80,6 +95,7 @@ export function IssueStock() {
       });
       const who = recipients.find((r) => r.id === recipientId)?.name ?? 'recipient';
       toast.success(`Issued ${filled.length} item${filled.length === 1 ? '' : 's'} to ${who}`);
+      setLast({ who, recipientId, count: filled.length });
       setLines([emptyLine()]);
       setProjectNumber('');
       stock.reload();
@@ -90,15 +106,29 @@ export function IssueStock() {
     }
   }
 
+  // Reached by a typed or old link: say so rather than offer a form the server would refuse.
+  const allowed = usePermissions().hasPermission('inventory:issue');
+  if (!allowed) return <NoAccess title="Issue stock" action="issue stock" />;
+
   return (
     <div>
       <PageHeader
         title="Issue stock"
-        description="Record stock leaving the store: who took it, for which project, and which items."
+        description={<>Record stock leaving the store: who took it, for which project, and which items. Tools are lent, not issued: check them out on <Link to="/tools" className="btn-link">Tools</Link>.</>}
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Issue stock' }]}
       />
 
       {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
+
+      {last && (
+        <Alert tone="success" title={`Issued ${last.count} item${last.count === 1 ? '' : 's'} to ${last.who}`} className="mb-4 max-w-4xl">
+          {/* Today's issues to them, newest first, in the slip layout that prints. */}
+          <Link to={`/movements?report=issued&view=cards&recipientId=${encodeURIComponent(last.recipientId)}&from=${today()}&to=${today()}`} className="btn-link">
+            See the issue slip in Movements
+          </Link>
+          {' '}to check or print it. The form below is ready for the next issue.
+        </Alert>
+      )}
 
       {!stock.error && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>

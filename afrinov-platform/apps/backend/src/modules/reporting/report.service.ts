@@ -12,6 +12,7 @@ import { Prisma, MaterialCategory as PrismaMaterialCategory } from '@prisma/clie
 import { prisma } from '../../shared/db.js';
 import { resolveDateWindow, type ReportQuery } from './report-query.schema.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
+import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
 
 type Decimal = Prisma.Decimal;
 type MaterialCategory = PrismaMaterialCategory;
@@ -322,6 +323,9 @@ export const ReportService = {
       if (r._max.postedAt) lastUpdateByMaterial.set(r.materialId, r._max.postedAt);
     }
 
+    // Tools out on loan are still owned, so they count towards Required Stock.
+    const onLoan = await onLoanByMaterial(prisma, materials.map((m) => m.id));
+
     // Build a material -> lines index so we never filter allLines by materialId again.
     const linesByMaterial = new Map<string, ReportInventoryLine[]>();
 
@@ -334,7 +338,7 @@ export const ReportService = {
         continue;
       }
       const itemNeedsReorder = needsAttention(
-        classifyItem(totalByMaterial.get(m.id) ?? 0, toNum(m.requiredStock), bands).status,
+        classifyItem((totalByMaterial.get(m.id) ?? 0) + Number(onLoan.get(m.id) ?? 0), toNum(m.requiredStock), bands).status,
       );
       for (const b of myBals) {
         const loc = locations.get(b.locationId);

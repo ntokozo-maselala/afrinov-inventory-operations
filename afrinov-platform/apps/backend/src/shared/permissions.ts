@@ -46,6 +46,9 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
   STORE_CONTROLLER: [
     PermissionCode.CreateMaterial,
     PermissionCode.EditMaterial,
+    // ADR-018: the store controller receives deliveries, so may add the supplier of one.
+    PermissionCode.CreateSupplier,
+    PermissionCode.EditSupplier,
     PermissionCode.CreateLocation,
     PermissionCode.EditLocation,
     PermissionCode.DeleteLocation,

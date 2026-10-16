@@ -250,6 +250,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const { stockItemRoutes } = await import('./modules/inventory/stock-item.routes.js');
     const { rackRoutes } = await import('./modules/inventory/rack.routes.js');
     const { inventoryRoutes } = await import('./modules/inventory/inventory.routes.js');
+    const { toolRoutes } = await import('./modules/inventory/tool.routes.js');
     const { supplierRoutes, procurementRoutes } = await import('./modules/procurement/procurement.routes.js');
     const { projectRoutes } = await import('./modules/operations/project.routes.js');
     const { recipientRoutes } = await import('./modules/operations/recipient.routes.js');
@@ -265,6 +266,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     await stockItemRoutes(instance);
     await rackRoutes(instance);
     await inventoryRoutes(instance);
+    await toolRoutes(instance);
     await supplierRoutes(instance);
     if (procurementEnabled) {
       await procurementRoutes(instance);

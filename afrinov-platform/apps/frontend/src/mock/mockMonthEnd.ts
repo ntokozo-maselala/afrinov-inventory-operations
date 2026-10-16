@@ -81,6 +81,10 @@ export function computeMonthEnd(
     perLocation.set(t.locationId, (perLocation.get(t.locationId) ?? 0) + Number(t.quantity));
     balance.set(t.materialId, perLocation);
   }
+  // Tools out on loan at the end are still owned (see the backend's tool-loans.ts).
+  const onLoan = (materialId: string) => -data.transactions
+    .filter((t) => t.materialId === materialId && t.postedAt < end && (t.type === 'LOAN' || t.type === 'LOAN_RETURN'))
+    .reduce((a, t) => a + Number(t.quantity), 0);
   const held = (materialId: string) => [...(balance.get(materialId) ?? new Map<string, number>())]
     .filter(([, q]) => q !== 0)
     .map(([loc, quantity]) => ({ location: locationName.get(loc) ?? '—', quantity }))
@@ -102,12 +106,13 @@ export function computeMonthEnd(
       const current = round4(held(x.id).reduce((a, r) => a + r.quantity, 0));
       const required = Number(x.requiredStock);
       const unitCost = x.unitCost === undefined || x.unitCost === null ? null : Number(x.unitCost);
-      const s = classifyItem(current, required, data.bands);
+      const owned = round4(current + onLoan(x.id));
+      const s = classifyItem(owned, required, data.bands);
       return {
         sku: x.sku, name: x.name, location: whereKept(x.id), requiredStock: required, currentStock: current, unitCost,
         value: unitCost === null ? null : round2(current * unitCost),
-        percentOfRequired: s.percentOfRequired === null ? null : round4(current / required),
-        reorderQuantity: required > 0 ? round4(required - current) : null,
+        percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
+        reorderQuantity: required > 0 ? round4(required - owned) : null,
         status: s.status,
       };
     });

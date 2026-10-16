@@ -23,6 +23,9 @@ export interface NavGroup {
 export function useNavGroups(): NavGroup[] {
   const { hasPermission } = usePermissions();
 
+  // In the order the work happens: the store counter first, then reports,
+  // then the lists the counter work draws on. Actions show only to the roles
+  // the server lets do them (see PERMISSION_ROLES).
   const allGroups: NavGroup[] = [
     {
       title: 'Overview',
@@ -31,15 +34,37 @@ export function useNavGroups(): NavGroup[] {
       ],
     },
     {
+      title: 'Store',
+      items: [
+        // `end`: Stock is not also lit on /stock/issue and the other action pages below it.
+        { to: '/stock', label: 'Stock', end: true, icon: <Icon.Box /> },
+        { to: '/stock/issue', label: 'Issue stock', icon: <Icon.ArrowRight />, permissions: ['inventory:issue'] },
+        { to: '/stock/receive', label: 'Receive stock', icon: <Icon.ArrowDown />, permissions: ['inventory:receive'] },
+        { to: '/stock/return', label: 'Return stock', icon: <Icon.Arrows />, permissions: ['inventory:return'] },
+        { to: '/stock/count', label: 'Count stock', icon: <Icon.Check />, permissions: ['inventory:count'] },
+        { to: '/tools', label: 'Tools', icon: <Icon.Wrench /> },
+      ],
+    },
+    {
+      title: 'Reports',
+      items: [
+        { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
+        { to: '/reports/consumption', label: 'Stock used', icon: <Icon.Cash /> },
+        { to: '/reports/stock-report', label: 'Stock report', icon: <Icon.Doc /> },
+        // The history of every movement, as reports with downloads; mistakes are reversed from here.
+        { to: '/movements', label: 'Movements', icon: <Icon.Activity /> },
+      ],
+    },
+    {
+      // The lists the store's work draws on.
       title: 'Operations',
       items: [
-        { to: '/stock', label: 'Stock', icon: <Icon.Box /> },
-        { to: '/racks', label: 'Racks', icon: <Icon.Layers /> },
+        { to: '/materials', label: 'Materials', icon: <Icon.Layers /> },
         { to: '/locations', label: 'Locations', icon: <Icon.Map /> },
         { to: '/projects', label: 'Projects', icon: <Icon.Tag /> },
         { to: '/recipients', label: 'Recipients', icon: <Icon.Users /> },
-        { to: '/movements', label: 'Movements', icon: <Icon.Arrows /> },
-        { to: '/suppliers', label: 'Suppliers', icon: <Icon.Users /> },
+        { to: '/suppliers', label: 'Suppliers', icon: <Icon.Truck /> },
+        { to: '/racks', label: 'Racks', icon: <Icon.Layers /> },
       ],
     },
     ...(PROCUREMENT_ENABLED ? [{
@@ -49,20 +74,6 @@ export function useNavGroups(): NavGroup[] {
         { to: '/goods-receipts', label: 'Goods receipts', icon: <Icon.Truck /> },
       ],
     }] : []),
-    {
-      title: 'Catalogue',
-      items: [
-        { to: '/materials', label: 'Materials', icon: <Icon.Layers /> },
-      ],
-    },
-    {
-      title: 'Reports',
-      items: [
-        { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
-        { to: '/reports/consumption', label: 'Stock used', icon: <Icon.Cash /> },
-        { to: '/reports/stock-report', label: 'Stock report', icon: <Icon.Doc /> },
-      ],
-    },
     {
       title: 'Account',
       items: [

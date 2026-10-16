@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Select, Field, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Stat } from '../components/Stat';
 import { Alert } from '../components/Alert';
+import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
@@ -270,6 +271,8 @@ export function Locations() {
   const [pendingStatus, setPendingStatus] = useState<Location | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
+  // Viewing is for everyone; adding, editing, (de)activating and deleting need the location permissions.
+  const canManage = usePermissions().hasPermission('locations:manage');
 
   const filtered = useMemo(() => {
     if (!locations.data) return [];
@@ -344,11 +347,11 @@ export function Locations() {
       <PageHeader
         title="Locations"
         description="Manage inventory storage and operational locations."
-        actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+        actions={canManage && (
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add location
           </Button>
-        }
+        )}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -358,26 +361,22 @@ export function Locations() {
         <Stat label="With inventory" value={stats.withInventory} tone="warning" icon={<Icon.Box size={14} />} />
       </div>
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search name, code, description…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search locations" />
-            </div>
-            <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type">
-              {TYPE_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {(q || typeFilter || statusFilter) && (
-              <Button variant="ghost" size="sm" onClick={() => { setQ(''); setTypeFilter(''); setStatusFilter(''); }}>Clear</Button>
-            )}
-          </>
-        )}
-        right={<span className="text-meta">{locations.loading ? 'Loading…' : `${filtered.length} of ${locations.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || typeFilter || statusFilter ? () => { setQ(''); setTypeFilter(''); setStatusFilter(''); } : undefined}
+        count={locations.loading ? 'Loading…' : `${filtered.length} of ${locations.data?.length ?? 0}`}
+      >
+        <SearchField id="locations-search" value={q} onChange={setQ} placeholder="Name, code, description…" />
+        <Field label="Type" htmlFor="locations-type" className={FILTER_WIDTH}>
+          <Select id="locations-type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            {TYPE_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Status" htmlFor="locations-status" className={FILTER_WIDTH}>
+          <Select id="locations-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {locations.error && <ErrorState message={locations.error.message} onRetry={locations.reload} />}
 
@@ -388,6 +387,7 @@ export function Locations() {
           rowKey={(l) => l.id}
           rows={filtered}
           columns={columns({
+            canManage,
             onView: (l) => openView(l.id),
             onEdit: (l) => setDrawer({ mode: 'edit', location: l }),
             onToggleStatus: (l) => setPendingStatus(l),
@@ -398,7 +398,7 @@ export function Locations() {
             <EmptyState
               title={q || typeFilter || statusFilter ? 'No locations match your filters' : 'No locations yet'}
               description={q || typeFilter || statusFilter ? 'Try clearing your filters.' : 'Create your first location to start organising inventory.'}
-              action={!q && !typeFilter && !statusFilter ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first location</Button> : undefined}
+              action={!q && !typeFilter && !statusFilter && canManage ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first location</Button> : undefined}
             />
           }
         />
@@ -458,12 +458,14 @@ export function Locations() {
 }
 
 function columns({
+  canManage,
   onView,
   onEdit,
   onToggleStatus,
   onDelete,
   value,
 }: {
+  canManage: boolean;
   /** Formatted stock value at a location; null while unknown (loading, or no access to reports). */
   value: ((id: string) => string) | null;
   onView: (l: Location) => void;
@@ -486,15 +488,19 @@ function columns({
     { key: 'value', header: 'Value', align: 'right', render: (l) => value ? <span className="font-mono">{value(l.id)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     { key: 'updated', header: 'Updated', render: (l) => l.updatedAt ? <span className="text-meta">{formatDate(l.updatedAt)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     {
-      key: 'actions', header: '', align: 'right', width: '16rem',
+      key: 'actions', header: '', align: 'right', width: canManage ? '16rem' : '5rem',
       render: (l) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="ghost" leadingIcon={<Icon.Eye size={12} />} onClick={() => onView(l)}>View</Button>
-          <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(l)}>Edit</Button>
-          <Button size="sm" variant="ghost" onClick={() => onToggleStatus(l)}>
-            {l.active ? 'Deactivate' : 'Activate'}
-          </Button>
-          <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onDelete(l)}>Delete</Button>
+          {canManage && (
+            <>
+              <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(l)}>Edit</Button>
+              <Button size="sm" variant="ghost" onClick={() => onToggleStatus(l)}>
+                {l.active ? 'Deactivate' : 'Activate'}
+              </Button>
+              <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onDelete(l)}>Delete</Button>
+            </>
+          )}
         </div>
       ),
     },

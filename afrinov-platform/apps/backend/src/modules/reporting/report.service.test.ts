@@ -19,6 +19,12 @@ beforeEach(() => {
   __stubState.current = null;
 });
 
+// Tools out on loan, per item (see tool-loans.ts); none unless a test lends some.
+const loans = vi.hoisted(() => ({ out: new Map<string, number>() }));
+vi.mock('../../shared/inventory/tool-loans.js', async () => {
+  const { Prisma } = await import('@prisma/client');
+  return { onLoanByMaterial: async () => new Map([...loans.out].map(([k, v]) => [k, new Prisma.Decimal(v)])) };
+});
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
     if (!__stubState.current) throw new Error('Stub prisma not initialised for this test');
@@ -485,6 +491,8 @@ describe('report export builders', () => {
     const buf = await buildInventoryPdf(fullReport);
     expect(buf.length).toBeGreaterThan(1000);
     expect(buf.slice(0, 4).toString()).toBe('%PDF');
+    // A4 landscape, as the other report PDFs: wider than it is tall.
+    expect(buf.toString('latin1')).toMatch(/\/MediaBox \[0 0 841\.89 595\.28\]/);
   });
 
   it('paginates the complete visible inventory page instead of truncating it', async () => {

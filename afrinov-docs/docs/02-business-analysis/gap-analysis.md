@@ -12,7 +12,7 @@
 | `Required Stock` is a silent threshold | Nobody is alerted; relies on someone noticing a rack looks empty | Active reorder alerting (FR-INV-007) | Implemented in product (status, re-order list); no push alerts |
 | No user accounts | Anyone with the file can edit anything; `Issued By`/`Issued To` are unverified free text | Authenticated users, role-based permissions, actor recorded on every transaction | Implemented; Issued To is a Recipients list (ADR-008) |
 | No audit trail | Cannot answer "who changed this and why" | Immutable transaction ledger + audit log (`07-data/audit-model.md`) | Implemented with gaps (TD-006, TD-008) |
-| Tools tracked via a `Check In/Out` column, easy to leave inconsistent | Can't reliably answer "who currently has this tool" | Explicit Tool state machine (`03-domain/state-machines.md`) | **Planned** |
+| Tools tracked via a `Check In/Out` column, easy to leave inconsistent | Can't reliably answer "who currently has this tool" | Explicit Tool state machine (`03-domain/state-machines.md`) | Implemented (2026-10-13): check-out and check-in as ledger movements, Tools page with who has what, overdue loans; Tools register imported |
 | Dashboard manually refreshed via dropdown selectors | Point-in-time snapshot, not live; requires opening the file | Live reporting views computed from the ledger | Implemented (dashboard, reports, month-end) |
 | Office equipment (`Office Device List`) mixed into the same workbook family conceptually, but structurally different (no IN/OUT) | Blurs inventory (consumed) with fixed assets (owned, assigned, insured) | Explicitly out of scope for v1; candidate separate Asset Management module | Out of scope (not built) |
 
@@ -24,7 +24,7 @@ The highest-value gap to close first is **balance-from-transactions**
 (ADR-002) and **location normalisation** (ADR-003) — both are structural
 problems that get worse the longer they're left, and both block reliable
 reporting, which is the thing the business actually looks at day to day.
-Both are now implemented; the remaining structural gap is tool tracking.
+Both are now implemented, and so is tool tracking (check-out and check-in).
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/shared/inventory/balances.ts:6-21`

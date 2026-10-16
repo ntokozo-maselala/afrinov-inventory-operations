@@ -57,7 +57,7 @@ describe('mock movement history', () => {
 
 interface Activity { id: string; entityType: string; summary: string; actorName: string; link: string | null }
 
-interface Count { id: string; locationName: string; countedByName: string; counted: number; adjusted: number; differences: Array<{ sku: string; quantity: string }>; lines: Array<{ expected: string; counted: string }> }
+interface Count { id: string; locationName: string; countedByName: string; counted: number; adjusted: number; differences: Array<{ sku: string; quantity: string }>; lines: Array<{ expected: string; counted: string; note?: string | null }> }
 
 describe('mock movement reports', () => {
   it('lists issue slips: one per issue with all its lines, earlier issues one line each', async () => {
@@ -84,13 +84,16 @@ describe('mock movement reports', () => {
     const stock = await fresh.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock?locationId=loc-1');
     const [a, b] = stock.filter((r) => Number(r.quantity) > 1);
     await fresh.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: a!.materialId, expectedQuantity: Number(a!.quantity), countedQuantity: Number(a!.quantity) }] });
-    await fresh.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: b!.materialId, expectedQuantity: Number(b!.quantity), countedQuantity: Number(b!.quantity) - 1 }] });
+    await fresh.post('/stock-counts', { locationId: 'loc-1', note: 'Monthly', lines: [{ materialId: b!.materialId, expectedQuantity: Number(b!.quantity), countedQuantity: Number(b!.quantity) - 1, note: 'one cracked' }] });
 
     const counts = await fresh.get<Count[]>('/stock-counts?locationId=loc-1');
     expect(counts[0]).toMatchObject({ locationName: 'Main Storeroom', countedByName: 'System Administrator (dev)', counted: 1, adjusted: 1 });
     // The full sheet keeps the matched item too, with what the system had.
     expect(counts[0]!.lines.map((l) => [l.expected, l.counted])).toEqual([[b!.quantity, String(Number(b!.quantity) - 1)]]);
     expect(counts[1]!.lines.map((l) => [l.expected, l.counted])).toEqual([[a!.quantity, a!.quantity]]);
+    expect(counts[0]!.lines[0]!.note).toBe('one cracked');
+    const adjustment = (await fresh.get<Array<{ reasonNote: string | null; referenceType: string | null }>>(`/inventory-transactions?materialId=${b!.materialId}&limit=5`))[0]!;
+    expect(adjustment.reasonNote).toBe('Stock count: Monthly — one cracked');
     expect(counts[0]!.differences.map((d) => d.quantity)).toEqual(['-1']);
     expect(counts[1]).toMatchObject({ adjusted: 0, differences: [] });
     expect(await fresh.get<Count[]>('/stock-counts?locationId=loc-2')).toEqual([]);

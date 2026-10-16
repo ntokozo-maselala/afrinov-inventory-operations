@@ -75,7 +75,7 @@ The platform fully covers 7 of the workbook's 16 workflows, covers 3 in part, an
 | **IN (receive) with supplier and invoice no.** | Only through goods receipts, which are switched off with procurement | Missing | 1 |
 | **Issued To** | Must be a user who logs in, and the form doesn't ask | Missing | 1 |
 | **Loading the workbook's data** | No importer | Missing | 2 |
-| Tools check-out / check-in | Permissions exist, nothing else | Missing | 5 |
+| Tools check-out / check-in | Tools page: check-out, check-in, who has it, overdue; Tool loans report | Covered (Phase 5 built) | 5 |
 | Consumable Box (per-worker accountability) | Nothing yet; becomes possible once Issued To exists | Missing | 1 (recipients), 3 (report) |
 | Office devices, scrap sales | Nothing | Missing, scope to decide | 6 |
 
@@ -239,10 +239,10 @@ The steps are in Cutover and go-live below.
 
 ### Phase 5: Tools check-out / check-in
 
-- [ ] Tool register: one record per serial-numbered tool, plus counted tools for small items
-- [ ] Check-out to a recipient and project, check-in with condition (good, damaged), and scrap
-- [ ] "Who has it now" view, and tools out longer than a set number of days
-- [ ] Import the 453 tools from the Tools Main sheet
+- [x] Tool register: one record per serial-numbered tool, plus counted tools for small items (Tools items with an optional serial number)
+- [x] Check-out to a recipient and project, check-in with condition (good, damaged, lost and written off); scrap through a write-off
+- [x] "Who has it now" view (Tools page, Recipients), and tools out longer than a set number of days (Settings > Inventory, default 7)
+- [x] Import the 453 tools from the Tools Main sheet
 
 **Exit criteria:** every tool shows its current holder or location.
 
