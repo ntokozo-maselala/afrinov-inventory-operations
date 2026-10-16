@@ -45,4 +45,13 @@ describe('Locations page', () => {
     renderPage(async () => { throw { code: 'FORBIDDEN', message: 'No access' }; });
     expect((await valueCell('Main Storeroom')).textContent).toBe('—');
   });
+
+  it('labels its search and filters', async () => {
+    renderPage(async () => ({ currency: 'ZAR', byLocation: [] }));
+    await screen.findByText('Main Storeroom');
+    for (const label of ['Search', 'Type', 'Status']) {
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+  });
 });

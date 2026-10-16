@@ -16,6 +16,7 @@ const STOCK = [
   { materialId: 'm-1', materialSku: 'DISC-115', materialName: 'Cutting disc', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '10' },
   { materialId: 'm-2', materialSku: 'GLOVE-L', materialName: 'Welding gloves', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'pair', quantity: '4' },
   { materialId: 'm-3', materialSku: 'EMPTY', materialName: 'Out of stock item', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '0' },
+  { materialId: 'm-4', materialSku: 'TL-0001', materialName: 'Makita Hand Drill', category: 'TOOLS', locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'each', quantity: '1' },
 ];
 
 async function respond(path: string) {
@@ -49,12 +50,14 @@ describe('IssueStock page', () => {
     mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1', 't-2'] });
   });
 
-  it('offers only items that are in stock', async () => {
+  it('offers only items that are in stock, and no tools: they are checked out on Tools', async () => {
     renderPage();
     await ready();
     fireEvent.focus(screen.getByLabelText('Item 1'));
     expect(screen.getAllByRole('option', { name: /on hand/ })).toHaveLength(2);
     expect(screen.queryByRole('option', { name: /Out of stock item/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Makita Hand Drill/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tools' })).toHaveAttribute('href', '/tools');
   });
 
   it('issues several items to one recipient and project in one request', async () => {

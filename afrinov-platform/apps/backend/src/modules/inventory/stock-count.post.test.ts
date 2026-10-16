@@ -34,19 +34,22 @@ describe('StockCountService.post', () => {
     const result = await StockCountService.post({
       locationId: 'l-1', actorId: 'u-1',
       lines: [
-        { materialId: 'm-1', expectedQuantity: 10, countedQuantity: 7 },
+        { materialId: 'm-1', expectedQuantity: 10, countedQuantity: 7, note: ' 3 cracked, binned ' },
         { materialId: 'm-2', expectedQuantity: 4, countedQuantity: 4 },
       ],
+      note: 'Monthly',
     });
     expect(result).toMatchObject({ counted: 2, adjusted: 1 });
     expect(tx.inventoryTransaction.create).toHaveBeenCalledTimes(1);
     const { data } = tx.stockCountLine.createMany.mock.calls[0]![0];
-    expect(data.map((l: { materialId: string; expectedQuantity: Prisma.Decimal; countedQuantity: Prisma.Decimal; countId: string }) => [
-      l.materialId, l.expectedQuantity.toString(), l.countedQuantity.toString(), l.countId,
+    expect(data.map((l: { materialId: string; expectedQuantity: Prisma.Decimal; countedQuantity: Prisma.Decimal; countId: string; note: string | null }) => [
+      l.materialId, l.expectedQuantity.toString(), l.countedQuantity.toString(), l.countId, l.note,
     ])).toEqual([
-      ['m-1', '10', '7', result.countId],
-      ['m-2', '4', '4', result.countId],
+      ['m-1', '10', '7', result.countId, '3 cracked, binned'],
+      ['m-2', '4', '4', result.countId, null],
     ]);
+    // The item's note joins the count's on its adjustment.
+    expect(tx.inventoryTransaction.create.mock.calls[0]![0].data.reasonNote).toBe('Stock count: Monthly — 3 cracked, binned');
   });
 
   it('saves no sheet when stock moved while counting, because nothing is posted', async () => {

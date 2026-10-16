@@ -41,13 +41,13 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
           onClick={handleClick}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm ${prefersReducedMotion ? 'transition-none' : 'transition-colors'} ${
             isActive
-              ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-50 dark:text-brand-700'
+              ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
               : 'text-surface-700 hover:bg-surface-100 dark:text-surface-700 dark:hover:bg-surface-100'
           }`}
           aria-expanded={false}
         >
           <span aria-hidden="true" className={`shrink-0 h-5 w-5 flex items-center justify-center ${
-            isActive ? 'text-brand-600 dark:text-brand-600' : 'text-surface-400 dark:text-surface-400'
+            isActive ? 'text-brand-600 dark:text-brand-300' : 'text-surface-400 dark:text-surface-400'
           }`}>
             {item.icon}
           </span>
@@ -65,7 +65,7 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
                 (child.exact || child.end
                   ? location.pathname === child.to
                   : location.pathname.startsWith(child.to))
-                  ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-50 dark:text-brand-700'
+                  ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
                   : 'text-surface-700 hover:bg-surface-100 dark:text-surface-700 dark:hover:bg-surface-100'
               }`}
             >
@@ -73,7 +73,7 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
                 (child.exact || child.end
                   ? location.pathname === child.to
                   : location.pathname.startsWith(child.to))
-                    ? 'text-brand-600 dark:text-brand-600'
+                    ? 'text-brand-600 dark:text-brand-300'
                     : 'text-surface-400 dark:text-surface-400'
               }`}>
                 {child.icon}
@@ -93,12 +93,12 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
       onClick={onNavigate}
       className={`flex items-center gap-3 px-3 py-2.5 rounded text-sm ${prefersReducedMotion ? 'transition-none' : 'transition-colors'} ${
         isActive
-          ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-50 dark:text-brand-700'
+          ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
           : 'text-surface-700 hover:bg-surface-100 dark:text-surface-700 dark:hover:bg-surface-100'
       }`}
     >
       <span aria-hidden="true" className={`shrink-0 h-5 w-5 flex items-center justify-center ${
-        isActive ? 'text-brand-600 dark:text-brand-600' : 'text-surface-400 dark:text-surface-400'
+        isActive ? 'text-brand-600 dark:text-brand-300' : 'text-surface-400 dark:text-surface-400'
       }`}>
         {item.icon}
       </span>

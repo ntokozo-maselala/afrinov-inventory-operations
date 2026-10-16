@@ -6,7 +6,7 @@ import type { MaterialCategory } from '@prisma/client';
 import { analyseWorkbook, RESOLVED_BY_MAPPING, type Analysis, type Problem, type ProblemCode } from './workbook-analysis.js';
 import type { MainRow, NumberCell, WorkbookRead } from './workbook-reader.js';
 import {
-  applyMapping, guessLocationType, itemKey, readMappingSheets, suggestMapping, unitHint, NO_LOCATION, type Mapping,
+  applyMapping, guessLocationType, itemKey, readMappingSheets, suggestMapping, suggestSerial, unitHint, NO_LOCATION, type Mapping,
 } from './mapping.js';
 
 const n = (value: number | null): NumberCell => ({ value });
@@ -177,7 +177,7 @@ describe('applying the mapping', () => {
   it('notes mapping rows whose workbook row has gone', () => {
     const analysis = sample();
     const m = suggestedFor(analysis);
-    m.items.push({ category: 'CONSUMABLES', oldProductId: 'P-999', itemName: 'Merged away', locationAsWritten: 'A-1', sku: 'CON-0099', unitOfMeasure: 'each', row: 99 });
+    m.items.push({ category: 'CONSUMABLES', oldProductId: 'P-999', itemName: 'Merged away', locationAsWritten: 'A-1', sku: 'CON-0099', unitOfMeasure: 'each', serialNumber: null, row: 99 });
     expect(codes(applyMapping(analysis, m).problems, 'UNUSED_MAPPING_ROW')).toEqual([expect.objectContaining({ row: 99, name: 'Merged away' })]);
   });
 
@@ -193,5 +193,75 @@ describe('applying the mapping', () => {
 
   it('settles the workbook problems that new SKUs and mapped spellings replace', () => {
     expect([...RESOLVED_BY_MAPPING].sort()).toEqual(['BLANK_LOCATION', 'DUPLICATE_PRODUCT_ID', 'LOCATION_SPELLINGS', 'MISSING_PRODUCT_ID', 'PRODUCT_ID_IN_SEVERAL_CATEGORIES']);
+  });
+});
+
+describe('tools', () => {
+  function tools(): Analysis {
+    return analyseWorkbook({
+      mainRows: [
+        main('TOOLS', 2, null, 'Makita Hand Drill - 34322', 'O-1', 1),
+        main('TOOLS', 3, null, 'Bosch GSB 570 Hand Drill- 128006542', 'O-1', 1),
+        main('TOOLS', 4, null, 'Safety Harness (A grange) - 110446', 'Stores', 6),
+        main('TOOLS', 5, null, 'Scraper', 'Stores', 11),
+      ],
+      summaryRows: [], summaryTotals: {}, summaryRowTotals: {}, missingSheets: [],
+    });
+  }
+
+  it('takes a serial number from the end of a single tool\'s name, not from a set\'s', () => {
+    expect(suggestSerial('Makita Hand Drill - 34322', 1)).toBe('34322');
+    expect(suggestSerial('Bosch GSB 570 Hand Drill- 128006542', 1)).toBe('128006542');
+    expect(suggestSerial('Grease Drum - ADF1381-06282022', 1)).toBe('ADF1381-06282022');
+    expect(suggestSerial('Big Grinder - Bosch Professional GWS-220 - 131000670', 1)).toBe('131000670');
+    expect(suggestSerial('Safety Harness (A grange) - 110446', 6)).toBeNull();
+    expect(suggestSerial('Bosch GSB 570 Hand Drill', 1)).toBeNull();
+    expect(suggestSerial('Drill 6mm - 1234', 1)).toBeNull();
+  });
+
+  it('suggests TL- SKUs and the serial numbers, which survive the Excel round trip', async () => {
+    const analysis = tools();
+    const m = suggestMapping(analysis);
+    expect(m.items.map((i) => [i.sku, i.serialNumber])).toEqual([['TL-0001', '34322'], ['TL-0002', '128006542'], ['TL-0003', null], ['TL-0004', null]]);
+    const { mapping, problems } = await roundTrip(m, analysis);
+    expect(problems).toEqual([]);
+    expect(mapping.items.map((i) => i.serialNumber)).toEqual(['34322', '128006542', null, null]);
+    const result = applyMapping(analysis, mapping);
+    expect(result.problems).toEqual([]);
+    expect(result.materials.map((x) => [x.sku, x.category, x.serialNumber, x.balances[0]!.quantity])).toEqual([
+      ['TL-0001', 'TOOLS', '34322', 1], ['TL-0002', 'TOOLS', '128006542', 1], ['TL-0003', 'TOOLS', null, 6], ['TL-0004', 'TOOLS', null, 11],
+    ]);
+  });
+
+  it('refuses a serial number on a set, on something that is not a tool, or on two tools', () => {
+    const analysis = analyseWorkbook({
+      mainRows: [...tools().items.map((i, k) => main('TOOLS', k + 2, null, i.name, i.location, i.quantity)), main('CONSUMABLES', 2, 'P-1', 'Disc', 'A-1', 1)],
+      summaryRows: [], summaryTotals: {}, summaryRowTotals: {}, missingSheets: [],
+    });
+    const m = suggestMapping(analysis);
+    m.items.find((i) => i.itemName === 'Scraper')!.serialNumber = 'SC-99999';
+    m.items.find((i) => i.itemName === 'Disc')!.serialNumber = '55555';
+    m.items.find((i) => i.sku === 'TL-0002')!.serialNumber = '34322';
+    const { problems, materials } = applyMapping(analysis, m);
+    expect(codes(problems, 'MAPPING_ROW_INVALID').map((p) => p.detail)).toEqual([
+      expect.stringContaining('on 11 tools: a serial number is for one tool'),
+      expect.stringContaining('only tools have one'),
+    ]);
+    expect(codes(problems, 'SKU_CONFLICT')).toEqual([expect.objectContaining({ detail: 'Serial number "34322" is given to TL-0001, TL-0002; each tool has its own' })]);
+    expect(materials.map((x) => x.sku)).not.toContain('TL-0001');
+  });
+
+  it('keeps each of several identical tool rows as its own tool, matched in order', () => {
+    const analysis = analyseWorkbook({
+      mainRows: [1, 2, 3].map((k) => main('TOOLS', k + 1, null, 'Angle grinder GWS 11-125P', 'P-2', 1)),
+      summaryRows: [], summaryTotals: {}, summaryRowTotals: {}, missingSheets: [],
+    });
+    expect(codes(analysis.problems, 'DUPLICATE_ROW')).toEqual([]);
+    expect(codes(analysis.problems, 'TOOL_ON_SEVERAL_ROWS').map((p) => p.row)).toEqual([3, 4]);
+    const m = suggestMapping(analysis);
+    m.items[2]!.serialNumber = 'GWS-77777';
+    const result = applyMapping(analysis, m);
+    expect(result.problems).toEqual([]);
+    expect(result.materials.map((x) => [x.sku, x.serialNumber])).toEqual([['TL-0001', null], ['TL-0002', null], ['TL-0003', 'GWS-77777']]);
   });
 });

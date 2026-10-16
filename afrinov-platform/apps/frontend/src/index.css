@@ -92,8 +92,8 @@
   --color-surface-300: 61 67 78;
   --color-surface-400: 90 99 112;
   --color-surface-500: 154 163 178;
-  --color-surface-600: 74 82 96;
-  --color-surface-700: 52 58 69;
+  --color-surface-600: 190 196 206;
+  --color-surface-700: 214 218 224;
   --color-surface-800: 232 234 237;
   --color-surface-900: 247 248 250;
 
@@ -229,6 +229,8 @@
   .input-error { @apply border-danger-500 focus:border-danger-500 focus:ring-danger-100; }
   .select { @apply input pr-8 appearance-none; }
   .dark .select { background-color: rgb(var(--color-surface-0) / <alpha-value>); }
+  /* The open list is drawn by the browser, which on Windows keeps it white; colour the options to match. */
+  .dark .select option { background-color: rgb(var(--color-surface-0)); color: rgb(var(--color-surface-800)); }
   .textarea { @apply input min-h-[80px] resize-y; }
   .checkbox { @apply h-4 w-4 rounded border-surface-300 text-brand-500 focus:ring-brand-100; }
 

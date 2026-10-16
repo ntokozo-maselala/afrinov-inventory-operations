@@ -18,10 +18,13 @@ const VALUE = {
 };
 
 describe('Dashboard', () => {
+  let tools: unknown[] = [];
   beforeEach(() => {
+    tools = [];
     mockGet.mockReset().mockImplementation(async (path: string) => {
       if (path === '/reports/stock-value') return VALUE;
       if (path === '/reports/low-stock') return [];
+      if (path === '/tools') return tools;
       return { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} };
     });
   });
@@ -38,5 +41,29 @@ describe('Dashboard', () => {
     expect(screen.getByText('Urgent').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=URGENT');
     expect(screen.getByText('Out of stock').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=all');
     expect(screen.queryByLabelText('Time range')).not.toBeInTheDocument();
+  });
+
+  it('opens the unpriced items from the stock value card, and links nowhere when all are priced', async () => {
+    const { unmount } = render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect((await screen.findByText('Stock value')).closest('a')).toHaveAttribute('href', '/materials?view=no-price');
+    unmount();
+
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-value') return { ...VALUE, total: { ...VALUE.total, unpriced: 0 } };
+      if (path === '/reports/low-stock' || path === '/tools') return [];
+      return { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} };
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect((await screen.findByText('Stock value')).closest('a')).toBeNull();
+  });
+
+  it('counts the tools out on loan, and links to the overdue ones', async () => {
+    const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2 });
+    tools = [{ materialId: 'm-1', loans: [loan('2', false), loan('1', true)] }, { materialId: 'm-2', loans: [] }];
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = (await screen.findByText('Tools out')).closest('a')!;
+    expect(card).toHaveAttribute('href', '/tools?view=overdue');
+    expect(card).toHaveTextContent('3');
+    expect(card).toHaveTextContent('1 overdue');
   });
 });

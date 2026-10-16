@@ -34,6 +34,12 @@ const db = {
 
 const DEC = (n: number) => new Prisma.Decimal(n);
 
+// Tools out on loan, per item (see tool-loans.ts); none unless a test lends some.
+const loans = vi.hoisted(() => ({ out: new Map<string, number>() }));
+vi.mock('../../shared/inventory/tool-loans.js', async () => {
+  const { Prisma } = await import('@prisma/client');
+  return { onLoanByMaterial: async () => new Map([...loans.out].map(([k, v]) => [k, new Prisma.Decimal(v)])) };
+});
 vi.mock('../../shared/db.js', () => ({
   get prisma() { return makePrisma(); },
 }));
@@ -252,6 +258,19 @@ describe('ReportingService', () => {
         { locationId: 'l-2', locationName: 'Boiler Shop', quantity: '0.9' },
         { locationId: 'l-1', locationName: 'Main Storeroom', quantity: '1' },
       ]);
+    });
+
+    it('counts a tool out on loan as still owned', async () => {
+      seedMaterials();
+      db.balances = [{ materialId: 'm-2', locationId: 'l-1', quantity: DEC(10), updatedAt: new Date() }];
+      loans.out.set('m-2', 15); // 10 in store + 15 lent = 25 of 50 owned
+      try {
+        const { ReportingService } = await import('./reporting.service.js');
+        const row = (await ReportingService.stockStatus()).find((r) => r.sku === 'SKU-002')!;
+        expect([row.onHand, row.onLoan, row.percentOfRequired, row.status, row.reorderQuantity]).toEqual(['10', '15', 50, 'OK', '25']);
+      } finally {
+        loans.out.clear();
+      }
     });
 
     it('lists an item with no stock anywhere as URGENT', async () => {

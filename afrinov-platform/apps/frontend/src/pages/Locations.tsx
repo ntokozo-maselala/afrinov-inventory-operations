@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Select, Field, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -345,7 +345,7 @@ export function Locations() {
         title="Locations"
         description="Manage inventory storage and operational locations."
         actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add location
           </Button>
         }
@@ -358,26 +358,22 @@ export function Locations() {
         <Stat label="With inventory" value={stats.withInventory} tone="warning" icon={<Icon.Box size={14} />} />
       </div>
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search name, code, description…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search locations" />
-            </div>
-            <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Filter by type">
-              {TYPE_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {(q || typeFilter || statusFilter) && (
-              <Button variant="ghost" size="sm" onClick={() => { setQ(''); setTypeFilter(''); setStatusFilter(''); }}>Clear</Button>
-            )}
-          </>
-        )}
-        right={<span className="text-meta">{locations.loading ? 'Loading…' : `${filtered.length} of ${locations.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || typeFilter || statusFilter ? () => { setQ(''); setTypeFilter(''); setStatusFilter(''); } : undefined}
+        count={locations.loading ? 'Loading…' : `${filtered.length} of ${locations.data?.length ?? 0}`}
+      >
+        <SearchField id="locations-search" value={q} onChange={setQ} placeholder="Name, code, description…" />
+        <Field label="Type" htmlFor="locations-type" className={FILTER_WIDTH}>
+          <Select id="locations-type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            {TYPE_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Status" htmlFor="locations-status" className={FILTER_WIDTH}>
+          <Select id="locations-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {locations.error && <ErrorState message={locations.error.message} onRetry={locations.reload} />}
 

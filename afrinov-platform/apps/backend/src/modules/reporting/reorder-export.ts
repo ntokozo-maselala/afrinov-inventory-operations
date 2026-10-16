@@ -19,10 +19,12 @@ const STATUS_FILL: Record<string, string> = { URGENT: 'FFF8D7DA', WARNING: 'FFFF
 const QTY = '#,##0.####';
 const MONEY = '#,##0.00';
 
-export interface ReorderMeta { generatedAt: Date; bands: StatusBands; currency: string }
+/** `category` when the list is for one category only. */
+export interface ReorderMeta { generatedAt: Date; bands: StatusBands; currency: string; category?: string }
 
-export function reorderFilename(generatedAt: Date): string {
-  return `afrinov-reorder-list-${generatedAt.toISOString().slice(0, 10)}.xlsx`;
+export function reorderFilename(generatedAt: Date, category?: string): string {
+  const which = category ? `-${category.toLowerCase().replace(/_/g, '-')}` : '';
+  return `afrinov-reorder-list${which}-${generatedAt.toISOString().slice(0, 10)}.xlsx`;
 }
 
 export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta): Promise<Buffer> {
@@ -47,7 +49,7 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
     { key: 'where', width: 30 },
   ];
 
-  ws.getCell('A1').value = 'Re-order list';
+  ws.getCell('A1').value = meta.category ? `Re-order list: ${CATEGORY_LABEL[meta.category] ?? meta.category}` : 'Re-order list';
   ws.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFE3001B' } };
   ws.getCell('A2').value = `Generated ${meta.generatedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC. `
     + `Items below ${meta.bands.warningBelowPercent}% of their Required Stock (urgent below ${meta.bands.urgentBelowPercent}%). `
@@ -112,7 +114,9 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
   }
 
   if (rows.length === 0) {
-    ws.addRow(['Nothing needs re-ordering: every item with a Required Stock is at or above the warning level.']);
+    ws.addRow([meta.category
+      ? `Nothing in ${CATEGORY_LABEL[meta.category] ?? meta.category} needs re-ordering: every item with a Required Stock is at or above the warning level.`
+      : 'Nothing needs re-ordering: every item with a Required Stock is at or above the warning level.']);
   } else {
     const total = ws.addRow({ name: `Total re-order value (${rows.length} items)`, value: Math.round(grandTotal * 100) / 100 });
     total.font = { bold: true, size: 12 };

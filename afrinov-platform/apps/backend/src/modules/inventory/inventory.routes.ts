@@ -21,7 +21,7 @@ function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilte
     actorId: q['actorId'],
     recipientId: q['recipientId'],
     q: q['q'],
-    report: (['issued', 'transfers', 'writeoffs'] as const).find((r) => r === q['report']),
+    report: (['issued', 'transfers', 'writeoffs', 'loans'] as const).find((r) => r === q['report']),
   };
 }
 
@@ -34,7 +34,7 @@ async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>)
   ]);
   return [
     f.from || f.to ? `${f.from ?? 'the start'} to ${f.to ?? 'today'}` : 'All dates',
-    f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments' }[f.report] : null,
+    f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments', loans: 'tool loans' }[f.report] : null,
     f.type ? `type ${f.type.replace(/_/g, ' ').toLowerCase()}` : null,
     material ? `item ${material.sku}` : null,
     location ? `at ${location.name}` : null,
@@ -87,6 +87,7 @@ export const stockCountSchema = z.object({
     materialId: z.string().uuid(),
     expectedQuantity: z.number().min(0),
     countedQuantity: z.number().min(0),
+    note: z.string().trim().max(200).optional(),
   })).min(1).max(2000),
 });
 

@@ -90,14 +90,15 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
         actions={
           isAdmin ? (
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" onClick={resetDraft} disabled={!dirty || saving || resetting}>
+              <Button variant="secondary" size="sm" onClick={resetDraft} disabled={!dirty || saving || resetting}>
                 Reset changes
               </Button>
-              <Button variant="danger" onClick={() => setConfirmReset(true)} disabled={saving || resetting} loading={resetting}>
+              <Button variant="danger" size="sm" onClick={() => setConfirmReset(true)} disabled={saving || resetting} loading={resetting}>
                 Reset to defaults
               </Button>
               <Button
                 variant="primary"
+                size="sm"
                 onClick={async () => {
                   try {
                     const { updated } = await save();
@@ -133,7 +134,7 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
                     className={({ isActive }) =>
                       `block rounded px-3 py-2 text-sm transition-colors ${
                         isActive
-                          ? 'bg-brand-50 text-brand-700 font-semibold'
+                          ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
                           : 'text-surface-700 hover:bg-surface-100'
                       }`
                     }

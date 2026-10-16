@@ -5,12 +5,13 @@ import { Button } from '../components/Button';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { EmptyState } from '../components/EmptyState';
-import { Icon } from '../components/Icon';
 import { useApi } from '../hooks/useApi';
+import { useStatusBands } from '../hooks/useStatusBands';
 import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
+import type { ToolRow } from '../api/types';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { categoryLabel } from '../lib/categories';
@@ -29,6 +30,19 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
   OUT_OF_STOCK: 'danger',
 };
 
+/** Tools out on loan and how many of them are overdue, linking to the Tools page. */
+function toolsCard(tools: ToolRow[]) {
+  const loans = tools.flatMap((t) => t.loans);
+  const out = loans.reduce((n, l) => n + Number(l.out), 0);
+  const overdue = loans.filter((l) => l.overdue).reduce((n, l) => n + Number(l.out), 0);
+  return {
+    label: 'Tools out', value: formatNumber(out),
+    tone: overdue > 0 ? 'danger' as const : 'neutral' as const,
+    note: out === 0 ? 'all in store' : overdue > 0 ? `${formatNumber(overdue)} overdue` : 'none overdue',
+    to: overdue > 0 ? '/tools?view=overdue' : '/tools?view=out',
+  };
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
 
@@ -36,6 +50,8 @@ export function Dashboard() {
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
+  const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
+  const { data: tools, reload: reloadTools } = useApi<ToolRow[]>('/tools');
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -44,13 +60,16 @@ export function Dashboard() {
       {
         label: 'Stock value', value: formatCurrency(value.total.value, value.currency), tone: 'success' as const,
         note: value.total.unpriced > 0 ? `${value.total.unpriced} item${value.total.unpriced === 1 ? '' : 's'} in stock without a price` : 'excl. VAT',
+        // Unpriced items leave the value short; the card opens the list to price them.
+        to: value.total.unpriced > 0 ? '/materials?view=no-price' : undefined,
       },
       { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, to: '/stock' },
-      { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: 'below 20% of required', to: '/reports/stock-status?view=URGENT' },
-      { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: 'below 40% of required', to: '/reports/stock-status?view=WARNING' },
+      { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
+      { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
       { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=all' },
+      toolsCard(tools ?? []),
     ];
-  }, [value]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools]);
 
   const attentionItems = useMemo(() => {
     if (!lowStock) return [];
@@ -116,7 +135,8 @@ export function Dashboard() {
     reload();
     reloadLowStock();
     reloadValue();
-  }, [reload, reloadLowStock, reloadValue]);
+    reloadTools();
+  }, [reload, reloadLowStock, reloadValue, reloadTools]);
 
   return (
     <div className="space-y-6">
@@ -131,14 +151,9 @@ export function Dashboard() {
           ) : null
         }
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
-              Refresh
-            </Button>
-            <Button variant="primary" size="sm" leadingIcon={<Icon.Box size={12} />} onClick={() => navigate('/materials')}>
-              Add Item
-            </Button>
-          </div>
+          <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
+            Refresh
+          </Button>
         }
       />
 
@@ -149,9 +164,9 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-6 gap-4">
         {valueLoading && !kpis
-          ? Array.from({ length: 5 }).map((_, i) => (
+          ? Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="surface-card p-4 animate-pulse">
                 <div className="h-3 w-20 bg-surface-100 rounded mb-3" />
                 <div className="h-6 w-24 bg-surface-100 rounded" />
@@ -258,7 +273,7 @@ export function Dashboard() {
                 ) : attentionItems.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-0">
-                      <EmptyState title="No items need attention" description="Every item with a Required Stock has at least 40% of it on hand." />
+                      <EmptyState title="No items need attention" description={`Every item with a Required Stock has at least ${warningBelowPercent}% of it on hand.`} />
                     </td>
                   </tr>
                 ) : (
