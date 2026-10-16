@@ -43,7 +43,6 @@ export function useNavGroups(): NavGroup[] {
         { to: '/stock/return', label: 'Return stock', icon: <Icon.Arrows />, permissions: ['inventory:return'] },
         { to: '/stock/count', label: 'Count stock', icon: <Icon.Check />, permissions: ['inventory:count'] },
         { to: '/tools', label: 'Tools', icon: <Icon.Wrench /> },
-        { to: '/movements', label: 'Movements', icon: <Icon.Activity /> },
       ],
     },
     {
@@ -52,10 +51,13 @@ export function useNavGroups(): NavGroup[] {
         { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
         { to: '/reports/consumption', label: 'Stock used', icon: <Icon.Cash /> },
         { to: '/reports/stock-report', label: 'Stock report', icon: <Icon.Doc /> },
+        // The history of every movement, as reports with downloads; mistakes are reversed from here.
+        { to: '/movements', label: 'Movements', icon: <Icon.Activity /> },
       ],
     },
     {
-      title: 'Master data',
+      // The lists the store's work draws on.
+      title: 'Operations',
       items: [
         { to: '/materials', label: 'Materials', icon: <Icon.Layers /> },
         { to: '/locations', label: 'Locations', icon: <Icon.Map /> },

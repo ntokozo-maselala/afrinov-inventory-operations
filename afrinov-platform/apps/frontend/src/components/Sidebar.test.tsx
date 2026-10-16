@@ -42,15 +42,19 @@ describe('useNavGroups', () => {
 
   it('groups the menu in the order the work happens', () => {
     features.procurement = false;
-    expect(useNavGroups().map((g) => g.title)).toEqual(['Overview', 'Store', 'Reports', 'Master data', 'Account']);
+    expect(useNavGroups().map((g) => g.title)).toEqual(['Overview', 'Store', 'Reports', 'Operations', 'Account']);
   });
 
   it('puts the counter actions in Store, after Stock', () => {
-    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools', 'Movements']);
+    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools']);
   });
 
-  it('puts the lists the counter draws on in Master data', () => {
-    expect(useLabelsIn('Master data')).toEqual(['Materials', 'Locations', 'Projects', 'Recipients', 'Suppliers', 'Racks']);
+  it('puts Movements, the history of every movement, with the other reports', () => {
+    expect(useLabelsIn('Reports')).toEqual(['Stock status', 'Stock used', 'Stock report', 'Movements']);
+  });
+
+  it('puts the lists the counter draws on in Operations', () => {
+    expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Projects', 'Recipients', 'Suppliers', 'Racks']);
   });
 
   it('marks Stock as an exact match, so it is not lit on /stock/issue', () => {
@@ -59,10 +63,10 @@ describe('useNavGroups', () => {
   });
 
   it.each([
-    ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Tools', 'Movements']],
-    ['PROCUREMENT', ['Stock', 'Receive stock', 'Tools', 'Movements']],
-    ['VIEWER', ['Stock', 'Tools', 'Movements']],
-    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools', 'Movements']],
+    ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Tools']],
+    ['PROCUREMENT', ['Stock', 'Receive stock', 'Tools']],
+    ['VIEWER', ['Stock', 'Tools']],
+    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools']],
   ])('shows a %s only the Store actions the server lets them do', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Store')).toEqual(expected);
