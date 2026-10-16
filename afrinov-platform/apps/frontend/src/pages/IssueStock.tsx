@@ -13,6 +13,7 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { RecipientSelect, ProjectSelect, useIssueOptions } from '../components/IssueFields';
 import { api, type ApiError } from '../api/client';
+import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
 
 
@@ -33,6 +34,8 @@ export function IssueStock() {
   const [focusKey, setFocusKey] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The issue just posted, kept on the page (a toast fades) with a way to its slip.
+  const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
 
   // Only items with stock can be issued, and tools are lent on the Tools page instead.
@@ -90,6 +93,7 @@ export function IssueStock() {
       });
       const who = recipients.find((r) => r.id === recipientId)?.name ?? 'recipient';
       toast.success(`Issued ${filled.length} item${filled.length === 1 ? '' : 's'} to ${who}`);
+      setLast({ who, recipientId, count: filled.length });
       setLines([emptyLine()]);
       setProjectNumber('');
       stock.reload();
@@ -109,6 +113,16 @@ export function IssueStock() {
       />
 
       {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
+
+      {last && (
+        <Alert tone="success" title={`Issued ${last.count} item${last.count === 1 ? '' : 's'} to ${last.who}`} className="mb-4 max-w-4xl">
+          {/* Today's issues to them, newest first, in the slip layout that prints. */}
+          <Link to={`/movements?report=issued&view=cards&recipientId=${encodeURIComponent(last.recipientId)}&from=${today()}&to=${today()}`} className="btn-link">
+            See the issue slip in Movements
+          </Link>
+          {' '}to check or print it. The form below is ready for the next issue.
+        </Alert>
+      )}
 
       {!stock.error && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>

@@ -80,6 +80,11 @@ describe('IssueStock page', () => {
         { materialId: 'm-2', locationId: 'l-1', quantity: 2 },
       ],
     }));
+
+    // The confirmation stays on the page, with the way to today's slip for them.
+    const slip = await screen.findByRole('link', { name: 'See the issue slip in Movements' });
+    expect(slip.getAttribute('href')).toMatch(/^\/movements\?report=issued&view=cards&recipientId=r-1&from=(\d{4}-\d\d-\d\d)&to=\1$/);
+    expect(screen.getAllByText('Issued 2 items to Sabelo').length).toBeGreaterThan(0);
   });
 
   it('asks for a recipient before sending anything', async () => {
