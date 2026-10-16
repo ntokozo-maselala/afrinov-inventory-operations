@@ -45,6 +45,8 @@ export function ReturnStock() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The return just booked, kept on the page (a toast fades) with a way to see it in the report.
+  const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
 
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
@@ -88,6 +90,7 @@ export function ReturnStock() {
         })),
       });
       toast.success(`Returned ${entered.length} item${entered.length === 1 ? '' : 's'}${who ? ` from ${who}` : ''}`);
+      setLast({ who: who ?? 'them', recipientId, count: entered.length });
       setQty({});
       setInto({});
       setNote('');
@@ -114,6 +117,15 @@ export function ReturnStock() {
       />
 
       {loadError && <ErrorState message={loadError.message} onRetry={() => { recipients.reload(); locations.reload(); }} />}
+
+      {last && (
+        <Alert tone="success" title={`Returned ${last.count} item${last.count === 1 ? '' : 's'} from ${last.who}`} className="mb-4 max-w-5xl">
+          <Link to={`/movements?report=returned&recipientId=${encodeURIComponent(last.recipientId)}&from=${today()}&to=${today()}`} className="btn-link">
+            See it in Returned stock
+          </Link>
+          {' '}under Movements. The list below shows what is still out.
+        </Alert>
+      )}
 
       {!loadError && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-5xl" noValidate>

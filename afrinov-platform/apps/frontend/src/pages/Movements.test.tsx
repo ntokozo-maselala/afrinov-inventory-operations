@@ -270,6 +270,25 @@ describe('Movements page', () => {
     expect(screen.getByText('Damaged')).toBeInTheDocument();
   });
 
+  it('lists returned stock by the day it came back, with who returned it and a link to the issue it came from', async () => {
+    const back = {
+      ...row(1), type: 'RETURN', quantity: '3', recipientId: 'r-1', recipientName: 'Sabelo', projectNumber: 'AFRI-1325', locationName: 'Main Storeroom',
+      reasonNote: 'Job finished early', returnOf: { id: 'tx-9', postedAt: '2026-09-28T07:30:00.000Z', issueId: 'slip-9', locationName: 'Boiler Shop' },
+    };
+    renderAt('/movements?report=returned&from=2026-10-05&recipientId=r-1', [[back]]);
+    expect(await screen.findByText('Job finished early')).toBeInTheDocument();
+    expect(listCalls()[0]).toBe('/inventory-transactions?from=2026-10-05&to=2026-10-05&recipientId=r-1&report=returned&limit=100');
+    expect(screen.getByText('Returned by', { selector: 'label' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Boiler Shop/ })).toHaveAttribute('href', '/movements?report=issued&from=2026-09-28&to=2026-09-28&materialId=m-1&recipientId=r-1');
+  });
+
+  it('links what came back on an issue to those returns, from the issue to today', async () => {
+    renderAt('/movements?report=issued&from=2026-09-25');
+    const link = await screen.findByTitle('See when and where it came back');
+    expect(link).toHaveTextContent('1');
+    expect(link.getAttribute('href')).toBe(`/movements?report=returned&from=2026-10-05&to=${todayIso()}&materialId=m-1`);
+  });
+
   it('labels each filter of the chosen report', async () => {
     renderAt('/movements');
     await screen.findByText('SKU-1');

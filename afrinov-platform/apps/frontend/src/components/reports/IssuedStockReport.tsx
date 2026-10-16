@@ -14,13 +14,20 @@ import { Drawer } from '../Modal';
 import { useToast } from '../Toast';
 import { TransactionDrawer } from '../TransactionDrawer';
 import { formatDateTime } from '../../lib/format';
+import { today } from '../../lib/dates';
 import { ReportBar, countWords, type ReportView } from './ReportView';
 import type { IssueSlip, MovementRow } from '../../api/types';
 
 const typeLabel = (t: string | null) => (t ? t.charAt(0) + t.slice(1).toLowerCase() : '');
 const none = <span className="text-surface-300">—</span>;
 const issued = (l: MovementRow) => String(Math.abs(Number(l.quantity)));
-const returned = (l: MovementRow) => (Number(l.returnedQuantity ?? 0) > 0 ? l.returnedQuantity : none);
+// What came back links to those returns: Returned stock for this item (and person), from the issue to today.
+const returned = (l: MovementRow) => {
+  if (!(Number(l.returnedQuantity ?? 0) > 0)) return none;
+  const q = new URLSearchParams({ report: 'returned', from: l.postedAt.slice(0, 10), to: today(), materialId: l.materialId });
+  if (l.recipientId) q.set('recipientId', l.recipientId);
+  return <Link to={`/movements?${q.toString()}`} className="btn-link" title="See when and where it came back">{l.returnedQuantity}</Link>;
+};
 
 interface Row { s: IssueSlip; l: MovementRow }
 

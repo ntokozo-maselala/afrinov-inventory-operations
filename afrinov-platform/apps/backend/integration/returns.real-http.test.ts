@@ -165,4 +165,11 @@ describe('several returns at once over real HTTP', () => {
     expect(await onHand()).toBe('34');
     expect((await returnable()).map((r) => [r.issueTransactionId, r.returned, r.outstanding])).toEqual([[first, '4', '6']]);
   });
+
+  it('lists the returns in the Returned stock report, each naming the issue it came back from', async () => {
+    const res = await api<Array<{ type: string; quantity: string; returnOf: { id: string } | null }>>('GET', `/inventory-transactions?report=returned&recipientId=${recipientId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.every((r) => r.type === 'RETURN')).toBe(true);
+    expect(res.body.map((r) => [r.returnOf?.id, r.quantity]).sort()).toEqual([[first, '4'], [second, '5']].sort());
+  });
 });

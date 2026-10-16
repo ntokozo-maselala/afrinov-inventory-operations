@@ -1862,6 +1862,7 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (qs.report === 'issued' && t.type !== 'ISSUE') return false;
       if (qs.report === 'transfers' && t.type !== 'TRANSFER_OUT') return false;
       if (qs.report === 'loans' && t.type !== 'LOAN' && t.type !== 'LOAN_RETURN') return false;
+      if (qs.report === 'returned' && t.type !== 'RETURN') return false;
       if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
       if (qs.locationId && t.locationId !== qs.locationId) return false;
@@ -2018,6 +2019,11 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
     returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
     otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
+    // As the server: a return names the issue it came back from.
+    returnOf: (() => {
+      const i = t.type === 'RETURN' && t.referenceType === 'Return' ? state.transactions.find((x) => x.id === t.referenceId) : undefined;
+      return i ? { id: i.id, postedAt: i.postedAt, issueId: slipOf(i) ?? null, locationName: findLocation(i.locationId)?.name ?? i.locationId } : null;
+    })(),
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
       return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null, fromPurchaseOrder: !!gr?.purchaseOrderId };

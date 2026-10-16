@@ -205,9 +205,10 @@ export interface HistoryFilter {
    * A report on the Movements page: issued stock, transfers (one row per
    * transfer, its out leg) or write-offs (adjustments other than count
    * differences, which belong to the stock-counts report) or tool loans (tools
-   * checked out and back in). Overrides `type`.
+   * checked out and back in) or returned stock (unused stock back from an
+   * issue, dated when it came back). Overrides `type`.
    */
-  report?: 'issued' | 'transfers' | 'writeoffs' | 'loans';
+  report?: 'issued' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
   /** Only the lines of these issue slips (used to fill in a page of slips). */
   issueIds?: string[];
   /** Paging cursor: the `cursor` of the last row already shown; returns older rows. */
@@ -227,6 +228,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   if (filter.report === 'issued') where.type = InventoryTransactionType.ISSUE;
   if (filter.report === 'transfers') where.type = InventoryTransactionType.TRANSFER_OUT;
   if (filter.report === 'loans') where.type = { in: [InventoryTransactionType.LOAN, InventoryTransactionType.LOAN_RETURN] };
+  if (filter.report === 'returned') where.type = InventoryTransactionType.RETURN;
   if (filter.report === 'writeoffs') {
     where.type = InventoryTransactionType.ADJUSTMENT;
     // NULL <> 'StockCount' is not true in SQL, so a plain `not` would drop unreferenced rows.
@@ -290,6 +292,13 @@ export const InventoryService = {
       select: { id: true, number: true, deliveryRef: true, purchaseOrderId: true, supplier: { select: { name: true } } },
     });
     const receiptById = new Map(receipts.map((r) => [r.id, r]));
+    // A return points at the issue it came back from: say when and where that was.
+    const returnedIssueIds = [...new Set(rows.filter((t) => t.type === InventoryTransactionType.RETURN && t.referenceType === 'Return' && t.referenceId).map((t) => t.referenceId!))];
+    const returnedIssues = returnedIssueIds.length === 0 ? [] : await prisma.inventoryTransaction.findMany({
+      where: { id: { in: returnedIssueIds } },
+      select: { id: true, postedAt: true, issueId: true, location: { select: { name: true } } },
+    });
+    const issueById = new Map(returnedIssues.map((i) => [i.id, i]));
     const issueIds = rows.filter((t) => t.type === InventoryTransactionType.ISSUE).map((t) => t.id);
     const returnedRows = issueIds.length === 0 ? [] : await prisma.inventoryTransaction.groupBy({
       by: ['referenceId'],
@@ -331,6 +340,10 @@ export const InventoryService = {
       reversedById: t.reversedBy?.id ?? null,
       returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
       otherLocationName: t.pairedWithId ? partnerLocation.get(t.pairedWithId) ?? null : null,
+      returnOf: (() => {
+        const i = t.type === InventoryTransactionType.RETURN && t.referenceId ? issueById.get(t.referenceId) : undefined;
+        return i ? { id: i.id, postedAt: i.postedAt.toISOString(), issueId: i.issueId, locationName: i.location.name } : null;
+      })(),
       ...(() => {
         const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
         // fromPurchaseOrder: such a receipt also moved the order's received quantities, so it cannot be reversed here.
