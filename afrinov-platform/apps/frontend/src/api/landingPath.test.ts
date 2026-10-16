@@ -19,6 +19,19 @@ describe('landingPathFor', () => {
     expect(landingPathFor('nope')).toBe('/');
   });
 
+  it('maps the counter pages', () => {
+    expect(landingPathFor('issue-stock')).toBe('/stock/issue');
+    expect(landingPathFor('receive-stock')).toBe('/stock/receive');
+  });
+
+  it('by role, sends a technician to Issue stock and everyone else to the Dashboard', () => {
+    expect(landingPathFor('by-role', ['TECHNICIAN'])).toBe('/stock/issue');
+    expect(landingPathFor('by-role', ['technician'])).toBe('/stock/issue');
+    for (const roles of [['STORE_CONTROLLER'], ['ADMIN'], ['TECHNICIAN', 'STORE_CONTROLLER'], ['VIEWER'], []]) {
+      expect(landingPathFor('by-role', roles)).toBe('/');
+    }
+  });
+
   it('falls back to the dashboard for purchase orders when procurement is disabled', () => {
     features.procurement = false;
     expect(landingPathFor('purchase-orders')).toBe('/');

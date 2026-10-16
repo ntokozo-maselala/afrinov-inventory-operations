@@ -334,7 +334,18 @@ function labelForKey(key: string): string {
     .trim();
 }
 
+/** Words for option values that do not read well as stored, such as the landing pages. */
+const OPTION_LABELS: Record<string, string> = {
+  'by-role': 'By role (technicians on Issue stock, others on the Dashboard)',
+  inventory: 'Stock',
+  'issue-stock': 'Issue stock',
+  'receive-stock': 'Receive stock',
+  'low-stock': 'Stock status',
+  'purchase-orders': 'Purchase orders',
+};
+
 function humanizeOption(value: string): string {
+  if (OPTION_LABELS[value]) return OPTION_LABELS[value];
   return value
     .replace(/_/g, ' ')
     .replace(/([A-Z])/g, ' $1')
