@@ -28,7 +28,7 @@ const issue = {
   actorName: 'Vusi',
 };
 
-function renderDrawer(overrides: Partial<typeof issue & { reversesId: string; reversedById: string; referenceType: string }> = {}) {
+function renderDrawer(overrides: Partial<typeof issue & { reversesId: string; reversedById: string; referenceType: string; fromPurchaseOrder: boolean; receiptNumber: string }> = {}) {
   const onReversed = vi.fn();
   const onError = vi.fn();
   render(<TransactionDrawer transaction={{ ...issue, ...overrides }} onClose={() => {}} onReversed={onReversed} onError={onError} />);
@@ -174,11 +174,11 @@ describe('TransactionDrawer', () => {
     expect(onReversed).not.toHaveBeenCalled();
   });
 
-  it('hides the action for reversed movements, reversals, goods receipts and users without permission', () => {
+  it('hides the action for reversed movements, reversals, receipts against a purchase order and users without permission', () => {
     const cases: Array<() => void> = [
       () => renderDrawer({ reversedById: 'tx-2' }),
       () => renderDrawer({ reversesId: 'tx-0' }),
-      () => renderDrawer({ type: 'RECEIPT', quantity: '5', referenceType: 'GoodsReceipt' }),
+      () => renderDrawer({ type: 'RECEIPT', quantity: '5', referenceType: 'GoodsReceipt', fromPurchaseOrder: true }),
       () => { mockHasPermission.mockReturnValue(false); renderDrawer(); },
     ];
     for (const renderCase of cases) {
@@ -186,6 +186,17 @@ describe('TransactionDrawer', () => {
       expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
       cleanup();
     }
+  });
+
+  it('offers to reverse a counter receipt, booked on Receive stock', () => {
+    renderDrawer({ type: 'RECEIPT', quantity: '5', referenceType: 'GoodsReceipt', fromPurchaseOrder: false, receiptNumber: 'GR-2026-0007' });
+    expect(screen.getByRole('button', { name: 'Reverse this movement' })).toBeInTheDocument();
+    expect(screen.queryByText(/received against a purchase order/)).not.toBeInTheDocument();
+  });
+
+  it('says where to correct a receipt made against a purchase order', () => {
+    renderDrawer({ type: 'RECEIPT', quantity: '5', referenceType: 'GoodsReceipt', fromPurchaseOrder: true, receiptNumber: 'GR-2026-0008' });
+    expect(screen.getByText(/received against a purchase order \(GR-2026-0008\), so it cannot be reversed here: correct it on the order/)).toBeInTheDocument();
   });
 
   describe('returning stock', () => {

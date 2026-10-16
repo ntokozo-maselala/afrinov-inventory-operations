@@ -56,6 +56,7 @@ describe('historyWhere', () => {
   it('selects each report: issued stock, transfers by their out leg, write-offs without count differences', () => {
     expect(historyWhere({ report: 'issued', type: 'RECEIPT' }).type).toBe('ISSUE');
     expect(historyWhere({ report: 'transfers' }).type).toBe('TRANSFER_OUT');
+    expect(historyWhere({ report: 'loans' }).type).toEqual({ in: ['LOAN', 'LOAN_RETURN'] });
     const writeoffs = historyWhere({ report: 'writeoffs', q: 'disc' });
     expect(writeoffs.type).toBe('ADJUSTMENT');
     // Unreferenced adjustments must stay in: NULL <> 'StockCount' is not true in SQL.

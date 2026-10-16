@@ -99,11 +99,13 @@ export async function login(email: string, password: string): Promise<LoginResul
     const res = await api.post<{ token: string; user: AuthUser }>('/auth/login', { email: trimmedEmail, password });
     if (res.token) setToken(res.token);
     else if (!getToken()) setToken(null);
-    let landingPath = landingPathFor('dashboard');
+    // "by-role" (the default) needs the roles: a technician starts on Issue stock.
+    const roles = res.user?.roles ?? [];
+    let landingPath = landingPathFor('by-role', roles);
     try {
       const landing = await api.get<{ value: string }>('/settings/general.defaultLandingPage');
-      landingPath = landingPathFor(String(landing.value ?? 'dashboard'));
-    } catch { /* settings not reachable — fall back to default route */ }
+      landingPath = landingPathFor(String(landing.value ?? 'by-role'), roles);
+    } catch { /* settings not reachable — fall back to the default, by role */ }
     return { user: res.user, landingPath };
   } catch (err) {
     if (isApiError(err)) {

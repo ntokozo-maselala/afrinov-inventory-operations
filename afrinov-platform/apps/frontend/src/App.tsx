@@ -30,8 +30,10 @@ const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.R
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
 const IssueStock = importPage(() => import('./pages/IssueStock').then(m => ({ default: m.IssueStock })));
+const ReturnStock = importPage(() => import('./pages/ReturnStock').then(m => ({ default: m.ReturnStock })));
 const StockCount = importPage(() => import('./pages/StockCount').then(m => ({ default: m.StockCount })));
 const Recipients = importPage(() => import('./pages/Recipients').then(m => ({ default: m.Recipients })));
+const Tools = importPage(() => import('./pages/Tools').then(m => ({ default: m.Tools })));
 const Locations = importPage(() => import('./pages/Locations').then(m => ({ default: m.Locations })));
 const Settings = importPage(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const SettingsGeneral = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsGeneral })));
@@ -114,6 +116,7 @@ export function App() {
         <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Dashboard /></Suspense>} />
         <Route path="/stock" element={<Suspense fallback={<PageSkeleton />}><Stock /></Suspense>} />
         <Route path="/stock/issue" element={<Suspense fallback={<PageSkeleton />}><IssueStock /></Suspense>} />
+        <Route path="/stock/return" element={<Suspense fallback={<PageSkeleton />}><ReturnStock /></Suspense>} />
         <Route path="/stock/receive" element={<Suspense fallback={<PageSkeleton />}><ReceiveStock /></Suspense>} />
         <Route path="/stock/count" element={<Suspense fallback={<PageSkeleton />}><StockCount /></Suspense>} />
         <Route path="/materials" element={<Suspense fallback={<PageSkeleton />}><Materials /></Suspense>} />
@@ -145,6 +148,7 @@ export function App() {
         <Route path="/locations" element={<Suspense fallback={<PageSkeleton />}><Locations /></Suspense>} />
         <Route path="/projects" element={<Suspense fallback={<PageSkeleton />}><Projects /></Suspense>} />
         <Route path="/recipients" element={<Suspense fallback={<PageSkeleton />}><Recipients /></Suspense>} />
+        <Route path="/tools" element={<Suspense fallback={<PageSkeleton />}><Tools /></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<PageSkeleton />}><Settings /></Suspense>}>
           <Route index element={<Suspense fallback={<PageSkeleton />}><SettingsGeneral /></Suspense>} />
           <Route path="notifications" element={<Suspense fallback={<PageSkeleton />}><SettingsNotifications /></Suspense>} />

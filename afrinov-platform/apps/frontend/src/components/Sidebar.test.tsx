@@ -4,10 +4,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { useNavGroups } from '../hooks/useNavGroups';
 
-// Mock usePermissions
-vi.mock('../hooks/usePermissions', () => ({
-  usePermissions: () => ({ hasPermission: () => true }),
-}));
+// Signed in through the auth mock, so the real permission table decides what
+// each role sees. ADMIN sees everything unless a test sets other roles.
+const signedIn = vi.hoisted(() => ({ roles: ['ADMIN'] as string[] }));
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } }) }));
 
 // The procurement switch is read at build time; a getter lets each test flip it.
 const features = vi.hoisted(() => ({ procurement: true }));
@@ -15,8 +15,10 @@ vi.mock('../config/features', () => ({
   get PROCUREMENT_ENABLED() { return features.procurement; },
 }));
 
+const useLabelsIn = (title: string) => useNavGroups().find((g) => g.title === title)?.items.map((i) => i.label) ?? [];
+
 describe('useNavGroups', () => {
-  afterEach(() => { features.procurement = true; });
+  afterEach(() => { features.procurement = true; signedIn.roles = ['ADMIN']; });
 
   it('returns navigation groups with correct structure', () => {
     const groups = useNavGroups();
@@ -38,29 +40,36 @@ describe('useNavGroups', () => {
     });
   });
 
-  it('includes all expected top-level groups', () => {
-    const groups = useNavGroups();
-    const titles = groups.map(g => g.title);
-    
-    expect(titles).toContain('Overview');
-    expect(titles).toContain('Operations');
-    expect(titles).toContain('Catalogue');
-    expect(titles).toContain('Reports');
-    expect(titles).toContain('Account');
+  it('groups the menu in the order the work happens', () => {
+    features.procurement = false;
+    expect(useNavGroups().map((g) => g.title)).toEqual(['Overview', 'Store', 'Reports', 'Operations', 'Account']);
   });
 
-  it('includes expected navigation items in Operations group', () => {
-    const groups = useNavGroups();
-    const operations = groups.find(g => g.title === 'Operations');
-    
-    expect(operations).toBeDefined();
-    const itemLabels = operations!.items.map(i => i.label);
-    expect(itemLabels).toContain('Stock');
-    expect(itemLabels).toContain('Racks');
-    expect(itemLabels).toContain('Locations');
-    expect(itemLabels).toContain('Projects');
-    expect(itemLabels).toContain('Movements');
-    expect(itemLabels).toContain('Suppliers');
+  it('puts the counter actions in Store, after Stock', () => {
+    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools']);
+  });
+
+  it('puts Movements, the history of every movement, with the other reports', () => {
+    expect(useLabelsIn('Reports')).toEqual(['Stock status', 'Stock used', 'Stock report', 'Movements']);
+  });
+
+  it('puts the lists the counter draws on in Operations', () => {
+    expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Projects', 'Recipients', 'Suppliers', 'Racks']);
+  });
+
+  it('marks Stock as an exact match, so it is not lit on /stock/issue', () => {
+    const stock = useNavGroups().flatMap((g) => g.items).find((i) => i.to === '/stock');
+    expect(stock?.end).toBe(true);
+  });
+
+  it.each([
+    ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Tools']],
+    ['PROCUREMENT', ['Stock', 'Receive stock', 'Tools']],
+    ['VIEWER', ['Stock', 'Tools']],
+    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools']],
+  ])('shows a %s only the Store actions the server lets them do', (role, expected) => {
+    signedIn.roles = [role];
+    expect(useLabelsIn('Store')).toEqual(expected);
   });
 
   it('includes the Procurement group when procurement is enabled', () => {

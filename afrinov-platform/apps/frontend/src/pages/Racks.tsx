@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Select, Field, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -12,6 +12,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
+import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 
 interface LocationOpt { id: string; name: string }
@@ -182,6 +183,8 @@ export function Racks() {
   const [archive, setArchive] = useState<Rack | null>(null);
   const [archiving, setArchiving] = useState(false);
   const toast = useToast();
+  // Adding, editing and archiving need manage:racks on the server.
+  const canManage = usePermissions().hasPermission('racks:manage');
 
   const filtered = useMemo(() => {
     if (!racks.data) return [];
@@ -216,28 +219,24 @@ export function Racks() {
       <PageHeader
         title="Racks"
         description="The racks in each workshop and the projects they are set aside for. Stock is not counted against these records: to hold stock on a rack, add it under Locations with the type Rack."
-        actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+        actions={canManage && (
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add rack
           </Button>
-        }
+        )}
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search rack code, name, or location…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search racks" />
-            </div>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {(q || statusFilter) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setStatusFilter(''); }}>Clear</Button>}
-          </>
-        )}
-        right={<span className="text-meta">{racks.loading ? 'Loading…' : `${filtered.length} of ${racks.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || statusFilter ? () => { setQ(''); setStatusFilter(''); } : undefined}
+        count={racks.loading ? 'Loading…' : `${filtered.length} of ${racks.data?.length ?? 0}`}
+      >
+        <SearchField id="racks-search" value={q} onChange={setQ} placeholder="Rack code, name or location…" />
+        <Field label="Status" htmlFor="racks-status" className={FILTER_WIDTH}>
+          <Select id="racks-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {racks.error && <ErrorState message={racks.error.message} onRetry={racks.reload} />}
 
@@ -248,6 +247,7 @@ export function Racks() {
           rowKey={(r) => r.id}
           rows={filtered}
           columns={columns({
+            canManage,
             onEdit: (r) => setDrawer({ mode: 'edit', rack: r }),
             onArchive: (r) => setArchive(r),
           })}
@@ -255,7 +255,7 @@ export function Racks() {
             <EmptyState
               title={q || statusFilter ? 'No racks match your filters' : 'No racks yet'}
               description={q || statusFilter ? 'Try clearing your filters.' : 'Add your first rack to start mapping physical storage.'}
-              action={!q && !statusFilter ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first rack</Button> : undefined}
+              action={!q && !statusFilter && canManage ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first rack</Button> : undefined}
             />
           }
         />
@@ -294,21 +294,21 @@ export function Racks() {
   );
 }
 
-function columns({ onEdit, onArchive }: { onEdit: (r: Rack) => void; onArchive: (r: Rack) => void }): DataTableColumn<Rack>[] {
+function columns({ canManage, onEdit, onArchive }: { canManage: boolean; onEdit: (r: Rack) => void; onArchive: (r: Rack) => void }): DataTableColumn<Rack>[] {
   return [
     { key: 'code', header: 'Code', render: (r) => <span className="font-mono">{r.code}</span>, width: '7rem' },
     { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'loc', header: 'Location', render: (r) => r.location?.name ?? <span className="text-surface-300">—</span>, width: '12rem' },
     { key: 'prj', header: 'Project', render: (r) => r.projectNumber ?? <span className="text-surface-300">—</span>, width: '10rem' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status]} dot>{r.status}</Badge>, width: '9rem' },
-    {
-      key: 'actions', header: '', align: 'right', width: '12rem',
-      render: (r) => (
+    ...(canManage ? [{
+      key: 'actions', header: '', align: 'right' as const, width: '12rem',
+      render: (r: Rack) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(r)}>Edit</Button>
           <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onArchive(r)} disabled={r.status === 'INACTIVE'}>Archive</Button>
         </div>
       ),
-    },
+    }] : []),
   ];
 }

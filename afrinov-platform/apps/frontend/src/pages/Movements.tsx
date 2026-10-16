@@ -2,7 +2,8 @@
 // an end date for a range) and narrow it with the filters that report has.
 // Every record has one home: receipts under Received stock, issues under Issued
 // stock, count differences under Stock counts, transfers under Transfers, other
-// adjustments under Write-offs, catalogue and user changes under Other changes
+// adjustments under Write-offs, tools lent and back under Tool loans,
+// catalogue and user changes under Other changes
 // (Admin and Store Controller); All movements is the full ledger. The report,
 // day and filters live in the address, so a report can be bookmarked or shared.
 import { useEffect, useMemo, useState } from 'react';
@@ -10,25 +11,30 @@ import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useDebounced } from '../hooks/useDebounced';
 import { PageHeader } from '../components/PageHeader';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Field, Input, Select } from '../components/Field';
 import { Button } from '../components/Button';
 import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
-import { useToast } from '../components/Toast';
+import { DownloadMenu, type DownloadFormat } from '../components/DownloadMenu';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { LedgerReport, type LedgerReportKind } from '../components/reports/LedgerReport';
 import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
 import { IssuedStockReport } from '../components/reports/IssuedStockReport';
 import { StockCountsReport } from '../components/reports/StockCountsReport';
+import type { ReportView } from '../components/reports/ReportView';
 import { OtherActivity, ACTIVITY_TYPE_LABEL } from '../components/OtherActivity';
-import { downloadMovements } from '../api/exportMovements';
-import { downloadIssuedStock, downloadReceivedStock, downloadStockCounts } from '../api/exportReports';
+import { downloadMovements, downloadMovementsPdf } from '../api/exportMovements';
+import {
+  downloadIssuedStock, downloadIssuedStockPdf, downloadReceivedStock, downloadReceivedStockPdf, downloadStockCounts, downloadStockCountsPdf,
+} from '../api/exportReports';
 import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
 import { today } from '../lib/dates';
+import { formatDate } from '../lib/format';
 
 type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
-type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'other';
+type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'loans' | 'other';
 
 const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'all', label: 'All movements', filters: ['locationId', 'actorId', 'materialId', 'q'] },
@@ -37,6 +43,7 @@ const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
   { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
+  { id: 'loans', label: 'Tool loans', filters: ['recipientId', 'materialId', 'locationId'] },
   { id: 'other', label: 'Other changes', filters: ['entityType', 'actorId'] },
 ];
 
@@ -60,6 +67,8 @@ export function Movements() {
   const ranged = params.has('to');
   const to = ranged ? params.get('to') || from : from;
   const badRange = from > to;
+  // Received, issued and counts read as a flat table unless cards are asked for.
+  const view: ReportView = params.get('view') === 'cards' ? 'cards' : 'table';
 
   // What every request of this report shares: the day or range, and its filters.
   const queryParams = new URLSearchParams({ from, to });
@@ -78,8 +87,6 @@ export function Movements() {
 
   const [search, setSearch] = useState(params.get('q') ?? '');
   const debouncedSearch = useDebounced(search, 300);
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
 
   function setParam(key: string, value: string | null) {
     setParams((p) => {
@@ -100,22 +107,47 @@ export function Movements() {
     if (id !== 'all') keep.set('report', id);
     if (params.get('from')) keep.set('from', params.get('from')!);
     if (params.has('to')) keep.set('to', params.get('to')!);
+    if (view === 'cards') keep.set('view', 'cards');
     setSearch('');
     setParams(keep, { replace: true });
   }
 
-  async function download() {
-    setDownloading(true);
-    try {
-      if (report.id === 'received') await downloadReceivedStock(query);
-      else if (report.id === 'issued') await downloadIssuedStock(query);
-      else if (report.id === 'counts') await downloadStockCounts(query);
-      else await downloadMovements(report.id === 'all' ? query : `${query}&report=${report.id}`);
-    } catch (err) {
-      toast.error('Download failed', (err as Error).message);
-    } finally {
-      setDownloading(false);
+  const showView = (v: ReportView) => setParam('view', v === 'cards' ? 'cards' : null);
+
+  // Tools are checked out to someone; stock is issued to them.
+  const recipientLabel = report.id === 'loans' ? 'Checked out to' : 'Issued to';
+
+  /** The filters that are set, in words, for the top of the PDF. */
+  function filterWords(): string[] {
+    const name = (list: Option[] | null | undefined, id: string) => (list ?? []).find((o) => o.id === id)?.name ?? id;
+    const words: string[] = [];
+    for (const f of report.filters) {
+      const v = params.get(f);
+      if (!v) continue;
+      if (f === 'supplierId') words.push(`Supplier: ${name(suppliers.data, v)}`);
+      else if (f === 'recipientId') words.push(`${recipientLabel}: ${v === '__none__' ? 'Not recorded' : name(recipients.data, v)}`);
+      else if (f === 'locationId') words.push(`Location: ${name(locations.data, v)}`);
+      else if (f === 'actorId') words.push(`Person: ${name(actors.data, v)}`);
+      else if (f === 'materialId') words.push(`Item: ${itemOptions.find((o) => o.value === v)?.label ?? v}`);
+      else if (f === 'q') words.push(`Search: "${v}"`);
     }
+    return words;
+  }
+
+  async function download(format: DownloadFormat) {
+    if (format === 'pdf') {
+      const words = filterWords();
+      const about = { title: `${report.label}, ${from === to ? formatDate(from) : `${formatDate(from)} to ${formatDate(to)}`}`, lines: words.length ? [words.join('  ·  ')] : [] };
+      if (report.id === 'received') await downloadReceivedStockPdf(query, about);
+      else if (report.id === 'issued') await downloadIssuedStockPdf(query, about);
+      else if (report.id === 'counts') await downloadStockCountsPdf(query, about);
+      else if (report.id !== 'other') await downloadMovementsPdf(query, report.id, about);
+      return;
+    }
+    if (report.id === 'received') await downloadReceivedStock(query);
+    else if (report.id === 'issued') await downloadIssuedStock(query);
+    else if (report.id === 'counts') await downloadStockCounts(query);
+    else await downloadMovements(report.id === 'all' ? query : `${query}&report=${report.id}`);
   }
 
   const filtersSet = report.filters.some((f) => params.get(f));
@@ -127,11 +159,7 @@ export function Movements() {
         description="The shop's records by report: choose what to see and the day, then narrow it down."
         actions={(
           <div className="flex gap-2 no-print">
-            {report.id !== 'other' && (
-              <Button variant="primary" size="sm" leadingIcon={<Icon.Download size={14} />} onClick={download} loading={downloading} disabled={badRange}>
-                Download as Excel
-              </Button>
-            )}
+            {report.id !== 'other' && <DownloadMenu onDownload={download} disabled={badRange} />}
             <Button variant="primary" size="sm" leadingIcon={<Icon.Print size={14} />} onClick={() => window.print()}>Print</Button>
           </div>
         )}
@@ -162,64 +190,61 @@ export function Movements() {
         </div>
       </div>
 
-      {/* The report's filters, two to a row (one on a phone). */}
-      <div className="mb-3 no-print">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {has('supplierId') && (
-            <Select value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)} aria-label="Filter by supplier">
+      <FilterBar onClear={filtersSet ? () => showReport(report.id) : undefined}>
+        {has('supplierId') && (
+          <Field label="Supplier" htmlFor="mv-supplier" className={FILTER_WIDTH}>
+            <Select id="mv-supplier" value={params.get('supplierId') ?? ''} onChange={(e) => setParam('supplierId', e.target.value)}>
               <option value="">All suppliers</option>
               {(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
-          )}
-          {has('recipientId') && (
-            <Select value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)} aria-label="Filter by who it was issued to">
-              <option value="">Issued to anyone</option>
+          </Field>
+        )}
+        {has('recipientId') && (
+          <Field label={recipientLabel} htmlFor="mv-recipient" className={FILTER_WIDTH}>
+            <Select id="mv-recipient" value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)}>
+              <option value="">Anyone</option>
               {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               <option value="__none__">Not recorded</option>
             </Select>
-          )}
-          {has('locationId') && (
-            <Select value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)} aria-label="Filter by location">
+          </Field>
+        )}
+        {has('locationId') && (
+          <Field label="Location" htmlFor="mv-location" className={FILTER_WIDTH}>
+            <Select id="mv-location" value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)}>
               <option value="">All locations</option>
               {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </Select>
-          )}
-          {has('entityType') && (
-            <Select value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)} aria-label="Filter by kind of change">
+          </Field>
+        )}
+        {has('entityType') && (
+          <Field label="Kind of change" htmlFor="mv-kind" className={FILTER_WIDTH}>
+            <Select id="mv-kind" value={params.get('entityType') ?? ''} onChange={(e) => setParam('entityType', e.target.value)}>
               <option value="">All changes</option>
               {Object.entries(ACTIVITY_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </Select>
-          )}
-          {has('actorId') && (
-            <Select value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)} aria-label="Filter by who did it">
+          </Field>
+        )}
+        {has('actorId') && (
+          <Field label="Person" htmlFor="mv-person" className={FILTER_WIDTH}>
+            <Select id="mv-person" value={params.get('actorId') ?? ''} onChange={(e) => setParam('actorId', e.target.value)}>
               <option value="">Everyone</option>
               {(actors.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </Select>
-          )}
-          {has('materialId') && (
-            <div>
-              <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
-            </div>
-          )}
-          {has('q') && (
-            <div className="relative">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder={SEARCH_HINT[report.id]} value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
-            </div>
-          )}
-        </div>
-        {filtersSet && (
-          <div className="flex justify-end mt-2">
-            <Button variant="ghost" size="sm" onClick={() => showReport(report.id)}>Reset filters</Button>
-          </div>
+          </Field>
         )}
-      </div>
+        {has('materialId') && (
+          <Field label="Item" htmlFor="movements-item" className={FILTER_WIDTH}>
+            <SearchSelect id="movements-item" value={params.get('materialId') ?? ''} onChange={(v) => setParam('materialId', v)} options={itemOptions} placeholder="All items" noMatchText="No item matches" />
+          </Field>
+        )}
+        {has('q') && <SearchField id="mv-search" value={search} onChange={setSearch} placeholder={SEARCH_HINT[report.id] ?? ''} />}
+      </FilterBar>
 
       <h2 className="hidden print:block text-h2 mb-2">{report.label}, {from === to ? from : `${from} to ${to}`}</h2>
       {badRange ? <ErrorState message="The start date is after the end date." /> : (
-        report.id === 'received' ? <ReceivedStockReport query={query} />
-          : report.id === 'issued' ? <IssuedStockReport query={query} />
-          : report.id === 'counts' ? <StockCountsReport query={query} />
+        report.id === 'received' ? <ReceivedStockReport query={query} view={view} onView={showView} />
+          : report.id === 'issued' ? <IssuedStockReport query={query} view={view} onView={showView} />
+          : report.id === 'counts' ? <StockCountsReport query={query} view={view} onView={showView} />
             : report.id === 'other' ? <OtherActivity query={query} />
               : <LedgerReport kind={report.id as LedgerReportKind} query={query} />
       )}

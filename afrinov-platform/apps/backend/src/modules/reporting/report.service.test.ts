@@ -19,6 +19,12 @@ beforeEach(() => {
   __stubState.current = null;
 });
 
+// Tools out on loan, per item (see tool-loans.ts); none unless a test lends some.
+const loans = vi.hoisted(() => ({ out: new Map<string, number>() }));
+vi.mock('../../shared/inventory/tool-loans.js', async () => {
+  const { Prisma } = await import('@prisma/client');
+  return { onLoanByMaterial: async () => new Map([...loans.out].map(([k, v]) => [k, new Prisma.Decimal(v)])) };
+});
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
     if (!__stubState.current) throw new Error('Stub prisma not initialised for this test');

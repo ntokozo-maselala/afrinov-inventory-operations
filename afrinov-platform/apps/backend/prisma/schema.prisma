@@ -108,6 +108,9 @@ model Material {
   unitOfMeasure String              @map("unit_of_measure")
   requiredStock Decimal             @default(0) @map("required_stock") @db.Decimal(18, 4)
   unitCost      Decimal?            @map("unit_cost") @db.Decimal(18, 4)
+  // A tool kept as one unit (a drill, a harness): its maker's serial number.
+  // Only tools have one; null for everything else.
+  serialNumber  String?             @unique @map("serial_number")
   active        Boolean             @default(true)
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")
@@ -384,6 +387,8 @@ model StockCountLine {
   materialId       String   @map("material_id")
   expectedQuantity Decimal  @map("expected_quantity") @db.Decimal(18, 4)
   countedQuantity  Decimal  @map("counted_quantity") @db.Decimal(18, 4)
+  // Why it differs, as the counter wrote it; also added to its adjustment's note.
+  note             String?
 
   material Material @relation(fields: [materialId], references: [id])
 
@@ -418,6 +423,14 @@ enum InventoryTransactionType {
   // Unused stock coming back from an issue. referenceType 'Return' and
   // referenceId = the issue's id; recipient and project are copied from it.
   RETURN
+  // A tool lent to a recipient (negative): it leaves its location but stays
+  // owned. Lines lent together share an issueId (the loan slip).
+  LOAN
+  // A lent tool coming back (positive). referenceType 'ToolLoan' and
+  // referenceId = the loan's id; recipient and project are copied from it.
+  // reasonCode DAMAGE when it came back damaged; LOSS when it was lost, with
+  // an ADJUSTMENT (LOSS) writing it off at the same time.
+  LOAN_RETURN
 }
 
 enum AdjustmentReasonCode {
@@ -441,8 +454,9 @@ model InventoryTransaction {
   referenceId   String?                  @map("reference_id")
   // Who received the stock (issues; copied onto their reversals).
   recipientId   String?                  @map("recipient_id")
-  // Issues: shared by every line one issue posted (an issue slip). Earlier
-  // issue lines carry their own id; reversals and other types carry none.
+  // Issues and tool loans: shared by every line one issue or check-out posted
+  // (the slip). Earlier issue lines carry their own id; reversals and other
+  // types carry none.
   issueId       String?                  @map("issue_id")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")

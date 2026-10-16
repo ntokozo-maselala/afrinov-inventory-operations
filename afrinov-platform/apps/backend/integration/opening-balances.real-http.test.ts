@@ -25,7 +25,7 @@ describe('opening balance import against a real database', () => {
 
   const material = (sku: string, balances: PlannedMaterial['balances'], extra: Partial<PlannedMaterial> = {}): PlannedMaterial => ({
     sku, name: `Opening item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each',
-    requiredStock: 10, unitCost: 42.05, oldProductIds: ['P-001'], balances, ...extra,
+    requiredStock: 10, unitCost: 42.05, serialNumber: null, oldProductIds: ['P-001'], balances, ...extra,
   });
 
   const plan = (materials: PlannedMaterial[]): MappedImport => ({

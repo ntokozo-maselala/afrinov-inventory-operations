@@ -43,6 +43,7 @@ import type {
   MockRecipient,
 } from './types';
 import type { ApiError } from '../api/client';
+import type { ReturnableLine } from '../api/types';
 
 interface Balance {
   materialId: string;
@@ -172,12 +173,18 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   // Materials
+  /** As MaterialService: only a tool has a serial number, and no two items share one. */
+  const checkSerial = (serialNumber: string, category: string | undefined, exceptId?: string) => {
+    if (category !== 'TOOLS') throw err('VALIDATION_ERROR', 'Only tools have a serial number');
+    const holder = state.materials.find((m) => m.id !== exceptId && m.serialNumber?.toLowerCase() === serialNumber.toLowerCase());
+    if (holder) throw err('CONFLICT', `Serial number "${serialNumber}" is already on ${holder.sku}`);
+  };
   if (method === 'GET' && p === '/materials') {
     let list = [...state.materials].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
     const cat = qs.category;
     const active = qs.active;
-    if (q) list = list.filter((m) => m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q));
+    if (q) list = list.filter((m) => m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q) || (m.serialNumber ?? '').toLowerCase().includes(q));
     if (cat) list = list.filter((m) => m.category === cat);
     if (active !== undefined) list = list.filter((m) => m.active === (active === 'true'));
     return list;
@@ -196,6 +203,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (state.materials.some((m) => m.sku === b.sku)) {
       throw err('CONFLICT', `SKU "${b.sku}" already exists`);
     }
+    const serialNumber = b.serialNumber?.trim() || null;
+    if (serialNumber) checkSerial(serialNumber, b.category);
     const created: MockMaterial = {
       id: nextId('mat'),
       sku: b.sku,
@@ -206,6 +215,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       requiredStock: String(b.requiredStock ?? 0),
       unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
       active: true,
+      serialNumber,
     };
     state.materials.push(created);
     return created;
@@ -214,13 +224,19 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/materials/'.length);
     const m = findMaterial(id);
     if (!m) throw err('NOT_FOUND', 'Material not found');
-    const b = body as Partial<MockMaterial>;
+    // As the server: null clears the description or the unit cost.
+    const b = body as Omit<Partial<MockMaterial>, 'description' | 'unitCost'> & { description?: string | null; unitCost?: number | string | null };
     if (b.name !== undefined) m.name = b.name;
-    if (b.description !== undefined) m.description = b.description;
+    if (b.description !== undefined) m.description = b.description ?? undefined;
     if (b.unitOfMeasure !== undefined) m.unitOfMeasure = b.unitOfMeasure;
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
-    if (b.unitCost !== undefined) m.unitCost = String(b.unitCost);
+    if (b.unitCost !== undefined) m.unitCost = b.unitCost === null ? undefined : String(b.unitCost);
     if (b.active !== undefined) m.active = b.active;
+    if (b.serialNumber !== undefined) {
+      const serialNumber = b.serialNumber?.trim() || null;
+      if (serialNumber) checkSerial(serialNumber, m.category, m.id);
+      m.serialNumber = serialNumber;
+    }
     return m;
   }
 
@@ -668,6 +684,9 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'POST' && p === '/inventory-issues') {
     return handleIssue((body as IssueBody) ?? {});
   }
+  if (method === 'GET' && p === '/tools') return listTools();
+  if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
+  if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
   if (method === 'POST' && p === '/inventory-transfers') {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
@@ -676,11 +695,15 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/stock-receipts') return listReceipts(qs);
   if (method === 'GET' && p === '/stock-counts') return listCounts(qs);
   if (method === 'POST' && p === '/stock-counts') {
-    return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> });
+    return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number; note?: string }> });
   }
   if (method === 'POST' && p === '/inventory-adjustments') {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
     return handleAdjustment(b);
+  }
+  if (method === 'GET' && p === '/inventory-returns/returnable') return handleReturnable(qs);
+  if (method === 'POST' && p === '/inventory-returns') {
+    return handleReturnMany((body as Parameters<typeof handleReturnMany>[0]) ?? {});
   }
   const returnMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/returns$/.exec(p) : null;
   if (returnMatch) {
@@ -1047,9 +1070,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'general.dateFormat': row('general.dateFormat', 'YYYY-MM-DD', 'enum', 'general', 'Date display format.', ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY']),
     'general.timeFormat': row('general.timeFormat', '24h', 'enum', 'general', 'Time display format.', ['24h', '12h']),
     'general.defaultPageSize': row('general.defaultPageSize', 25, 'number', 'general', 'Default rows per page in tables.'),
-    'general.defaultLandingPage': row('general.defaultLandingPage', 'dashboard', 'enum', 'general', 'Where to go after sign-in.', ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders']),
+    'general.defaultLandingPage': row('general.defaultLandingPage', 'by-role', 'enum', 'general', 'Where to go after sign-in. "By role" sends technicians to Issue stock and everyone else to the Dashboard.', ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders']),
 
     'inventory.urgentBelowPercent': row('inventory.urgentBelowPercent', 20, 'number', 'inventory', 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.'),
+    'inventory.toolOverdueDays': row('inventory.toolOverdueDays', 7, 'number', 'inventory', 'A tool checked out longer than this many days is overdue: flagged on the Tools page and counted on the Dashboard.'),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
@@ -1072,7 +1096,7 @@ function buildMockSettings(): Record<string, MockSetting> {
 const MOCK_SETTINGS: Record<string, MockSetting> = buildMockSettings();
 const MOCK_AUDIT: Array<{ id: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: string; actorId: string | null }> = [];
 /** Full count sheets (stock_count_lines): every item counted, with what the system had. */
-const MOCK_COUNT_LINES: Array<{ countId: string; materialId: string; expected: number; counted: number }> = [];
+const MOCK_COUNT_LINES: Array<{ countId: string; materialId: string; expected: number; counted: number; note: string | null }> = [];
 
 function validateMockSetting(key: string, raw: unknown): { value?: unknown; error?: string } {
   const def = MOCK_SETTINGS[key];
@@ -1234,6 +1258,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
   for (const t of totals.values()) {
     const material = findMaterial(t.materialId);
     if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (material.category === 'TOOLS') throw err('VALIDATION_ERROR', `${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
     if (!findLocation(t.locationId)) throw err('NOT_FOUND', 'Location not found');
     const balance = getBalance(t.materialId, t.locationId);
     if (balance < t.quantity) {
@@ -1266,6 +1291,128 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
       return id;
     }),
   };
+}
+
+// Tool loans, as the backend's ToolLoanService: a check-out takes a tool off
+// its location to a recipient (LOAN), a check-in brings it back (LOAN_RETURN),
+// and a lost tool comes back on paper and is written off (ADJUSTMENT, LOSS).
+interface ToolCheckOutBody { recipientId?: string; projectNumber?: string; note?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }
+interface ToolCheckInBody { lines?: Array<{ loanId: string; quantity: number; condition: 'GOOD' | 'DAMAGED' | 'LOST'; note?: string }> }
+
+const returnedOnLoan = (loanId: string) => state.transactions
+  .filter((t) => t.type === 'LOAN_RETURN' && t.referenceType === 'ToolLoan' && t.referenceId === loanId)
+  .reduce((a, t) => a + Number(t.quantity), 0);
+
+function listTools() {
+  const balances = computeBalances();
+  return state.materials
+    .filter((m) => m.category === 'TOOLS' && m.active)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((m) => {
+      const locations = balances
+        .filter((b) => b.materialId === m.id && b.quantity > 0)
+        .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))
+        .sort((a, b) => a.locationName.localeCompare(b.locationName));
+      const loans = state.transactions
+        .filter((t) => t.type === 'LOAN' && t.materialId === m.id)
+        .map((t) => ({ t, out: -Number(t.quantity) - returnedOnLoan(t.id) }))
+        .filter(({ out }) => out > 0)
+        .map(({ t, out }) => ({ t, out, daysOut: Math.floor((Date.now() - new Date(t.postedAt).getTime()) / 86_400_000) }))
+        .map(({ t, out, daysOut }) => ({
+          loanId: t.id, slipId: t.issueId ?? null, recipientId: t.recipientId ?? null,
+          recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
+          projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
+          quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
+          checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
+          daysOut, overdue: daysOut > Number(MOCK_SETTINGS['inventory.toolOverdueDays']?.value ?? 7),
+        }));
+      const inStore = locations.reduce((a, l) => a + Number(l.quantity), 0);
+      const onLoan = loans.reduce((a, l) => a + Number(l.out), 0);
+      return {
+        materialId: m.id, sku: m.sku, name: m.name, serialNumber: m.serialNumber ?? null, unitOfMeasure: m.unitOfMeasure,
+        inStore: String(inStore), onLoan: String(onLoan), owned: String(inStore + onLoan), locations, loans,
+      };
+    });
+}
+
+function handleToolCheckOut(b: ToolCheckOutBody): { slipId: string; loanIds: string[] } {
+  if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the tools are checked out to');
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool');
+  if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Check-out quantity must be positive');
+  const recipient = state.recipients.find((x) => x.id === b.recipientId);
+  if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
+  if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+  for (const l of lines) {
+    const key = `${l.materialId}|${l.locationId}`;
+    const t = totals.get(key);
+    if (t) t.quantity += l.quantity;
+    else totals.set(key, { ...l });
+  }
+  for (const t of totals.values()) {
+    const material = findMaterial(t.materialId);
+    if (!material) throw err('NOT_FOUND', 'Material not found');
+    if (material.category !== 'TOOLS') throw err('VALIDATION_ERROR', `${material.sku} is not a tool; issue it on Issue stock instead`);
+    const inStore = getBalance(t.materialId, t.locationId);
+    if (inStore < t.quantity) throw err('INSUFFICIENT_BALANCE', `Cannot check out ${t.quantity} × ${material.sku}: only ${inStore} in store there.`);
+  }
+  const slipId = nextId('loan');
+  const postedAt = new Date().toISOString();
+  const loanIds = lines.map((l) => {
+    const id = nextId('t');
+    state.transactions.push({
+      id, issueId: slipId, postedAt, type: 'LOAN', materialId: l.materialId, locationId: l.locationId, quantity: String(-l.quantity),
+      actorId: 'user-1', recipientId: b.recipientId, projectNumber: b.projectNumber, reasonNote: b.note?.trim() || undefined,
+    });
+    return id;
+  });
+  return { slipId, loanIds };
+}
+
+function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[] } {
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool to check in');
+  if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Check-in quantity must be positive');
+  if (lines.some((l) => l.condition === 'LOST' && !l.note?.trim())) throw err('VALIDATION_ERROR', 'Say what happened to a lost tool');
+  const asked = new Map<string, number>();
+  for (const l of lines) {
+    const loan = state.transactions.find((t) => t.id === l.loanId);
+    if (!loan) throw err('NOT_FOUND', 'Tool loan not found');
+    if (loan.type !== 'LOAN') throw err('INVALID_STATE', 'Only a tool check-out can be checked in');
+    asked.set(l.loanId, (asked.get(l.loanId) ?? 0) + l.quantity);
+  }
+  for (const [loanId, quantity] of asked) {
+    const loan = state.transactions.find((t) => t.id === loanId)!;
+    const out = -Number(loan.quantity) - returnedOnLoan(loanId);
+    if (quantity > out) throw err('VALIDATION_ERROR', `Cannot check in ${quantity} × ${findMaterial(loan.materialId)?.sku}: only ${out} still out on this loan.`);
+  }
+  const postedAt = new Date().toISOString();
+  const returnIds: string[] = [];
+  const writeOffIds: string[] = [];
+  for (const l of lines) {
+    const loan = state.transactions.find((t) => t.id === l.loanId)!;
+    const note = l.note?.trim() || undefined;
+    const back = nextId('t');
+    state.transactions.push({
+      id: back, postedAt, type: 'LOAN_RETURN', materialId: loan.materialId, locationId: loan.locationId, quantity: String(l.quantity),
+      actorId: 'user-1', recipientId: loan.recipientId, projectNumber: loan.projectNumber,
+      reasonCode: l.condition === 'DAMAGED' ? 'DAMAGE' : l.condition === 'LOST' ? 'LOSS' : undefined, reasonNote: note,
+      referenceType: 'ToolLoan', referenceId: loan.id,
+    });
+    returnIds.push(back);
+    if (l.condition === 'LOST') {
+      const writeOff = nextId('t');
+      const who = state.recipients.find((r) => r.id === loan.recipientId)?.name ?? 'an unknown recipient';
+      state.transactions.push({
+        id: writeOff, postedAt, type: 'ADJUSTMENT', materialId: loan.materialId, locationId: loan.locationId, quantity: String(-l.quantity),
+        actorId: 'user-1', recipientId: loan.recipientId, projectNumber: loan.projectNumber, reasonCode: 'LOSS',
+        reasonNote: `Lost on loan to ${who}: ${note}`, referenceType: 'ToolLoan', referenceId: loan.id,
+      });
+      writeOffIds.push(writeOff);
+    }
+  }
+  return { returnIds, writeOffIds };
 }
 
 function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number }): { outTransactionId: string; inTransactionId: string } {
@@ -1321,12 +1468,56 @@ function handleReturn(id: string, b: { quantity?: number; locationId?: string; r
   return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - qty) };
 }
 
+// Mirrors InventoryService.returnMany: each line as handleReturn, all-or-nothing.
+function handleReturnMany(b: { lines?: Array<{ issueTransactionId: string; quantity: number; locationId?: string }>; reason?: string }): { transactionIds: string[] } {
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item that is coming back');
+  if (lines.some((l) => !(Number(l.quantity) > 0))) throw err('VALIDATION_ERROR', 'Return quantity must be positive');
+  const before = state.transactions.length;
+  try {
+    return { transactionIds: lines.map((l) => handleReturn(l.issueTransactionId, { quantity: l.quantity, locationId: l.locationId, reason: b.reason }).transactionId) };
+  } catch (e) {
+    state.transactions.length = before;
+    throw e;
+  }
+}
+
+// Mirrors InventoryService.returnable: a recipient's unreversed issues in the
+// period, newest first, leaving out those fully returned.
+function handleReturnable(qs: Record<string, string | undefined>): ReturnableLine[] {
+  if (!qs.recipientId) throw err('VALIDATION_ERROR', 'Choose who is returning the stock');
+  const day = (iso: string) => iso.slice(0, 10);
+  return state.transactions
+    .filter((t) => t.type === 'ISSUE' && t.recipientId === qs.recipientId && !t.reversesId
+      && !state.transactions.some((r) => r.reversesId === t.id)
+      && (!qs.from || day(t.postedAt) >= qs.from) && (!qs.to || day(t.postedAt) <= qs.to))
+    .sort((a, b) => b.postedAt.localeCompare(a.postedAt))
+    .slice(0, 500)
+    .flatMap((t) => {
+      const issued = -Number(t.quantity);
+      const returned = returnedAgainst(t.id);
+      if (issued - returned <= 0) return [];
+      const m = findMaterial(t.materialId);
+      const l = findLocation(t.locationId);
+      return [{
+        issueTransactionId: t.id, issueId: t.issueId ?? null, postedAt: t.postedAt,
+        materialId: t.materialId, sku: m?.sku ?? '', name: m?.name ?? '', unitOfMeasure: m?.unitOfMeasure ?? '',
+        locationId: t.locationId, locationName: l?.name ?? '', locationActive: l?.active ?? false,
+        projectNumber: t.projectNumber ?? null,
+        issued: String(issued), returned: String(returned), outstanding: String(issued - returned),
+      }];
+    });
+}
+
 function handleReversal(id: string, b: { reason?: string } | undefined): { reversalIds: string[] } {
   const reason = b?.reason?.trim() ?? '';
   if (reason.length < 3) throw err('VALIDATION_ERROR', 'A reason is required to reverse a movement');
   const original = state.transactions.find((t) => t.id === id);
   if (!original) throw err('NOT_FOUND', 'InventoryTransaction not found');
   if (original.reversesId) throw err('INVALID_STATE', 'A reversal cannot itself be reversed. Record the movement again instead.');
+  if (original.type === 'LOAN' || original.type === 'LOAN_RETURN' || original.referenceType === 'ToolLoan') {
+    throw err('INVALID_STATE', 'Tool check-outs and check-ins are not reversed: check the tool in, or out, again instead.');
+  }
   if (original.type === 'ISSUE' && returnedAgainst(original.id) > 0) {
     throw err('INVALID_STATE', 'Part of this issue has been returned. Reverse the returns first.');
   }
@@ -1388,7 +1579,7 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
 }
 
 // Mirrors StockCountService.post: all or nothing, refused when stock moved since it was shown.
-function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number }> }) {
+function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number; note?: string }> }) {
   const lines = b.lines ?? [];
   if (!b.locationId || lines.length === 0) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
   if (lines.some((l) => !(l.countedQuantity >= 0) || !(l.expectedQuantity >= 0))) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
@@ -1404,7 +1595,7 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
   }
   const countId = nextId('count');
   const note = b.note?.trim();
-  for (const l of lines) MOCK_COUNT_LINES.push({ countId, materialId: l.materialId, expected: getBalance(l.materialId, b.locationId!), counted: l.countedQuantity });
+  for (const l of lines) MOCK_COUNT_LINES.push({ countId, materialId: l.materialId, expected: getBalance(l.materialId, b.locationId!), counted: l.countedQuantity, note: l.note?.trim() || null });
   const results = lines.map((l) => {
     const variance = l.countedQuantity - getBalance(l.materialId, b.locationId!);
     if (Math.abs(variance) < 0.00005) return { materialId: l.materialId, variance: '0', transactionId: null as string | null };
@@ -1412,7 +1603,7 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
     state.transactions.push({
       id, postedAt: new Date().toISOString(), type: 'ADJUSTMENT', materialId: l.materialId, locationId: b.locationId!,
       quantity: String(variance), actorId: 'user-1', reasonCode: 'COUNT_VARIANCE',
-      reasonNote: note ? `Stock count: ${note}` : 'Stock count', referenceType: 'StockCount', referenceId: countId,
+      reasonNote: [note, l.note?.trim()].some(Boolean) ? `Stock count: ${[note, l.note?.trim()].filter(Boolean).join(' — ')}` : 'Stock count', referenceType: 'StockCount', referenceId: countId,
     });
     return { materialId: l.materialId, variance: String(variance), transactionId: id as string | null };
   });
@@ -1524,6 +1715,13 @@ function lastSupplierOf(materialId: string): { name: string; receivedAt: string 
 }
 
 // Mirrors ReportingService.stockStatus.
+/** Units of a tool out on loan: lent less what came back (see the backend's tool-loans.ts). */
+function onLoanOf(materialId: string): number {
+  return -state.transactions
+    .filter((t) => t.materialId === materialId && (t.type === 'LOAN' || t.type === 'LOAN_RETURN'))
+    .reduce((a, t) => a + Number(t.quantity), 0);
+}
+
 function computeStockStatus(filter: { status?: StockStatus[]; category?: string }) {
   const balances = computeBalances();
   const bands = mockBands();
@@ -1533,10 +1731,11 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string 
     .map((m) => {
       const mine = balances.filter((b) => b.materialId === m.id);
       const onHand = mine.reduce((a, b) => a + b.quantity, 0);
-      const item = classifyItem(onHand, Number(m.requiredStock), bands);
+      const lent = onLoanOf(m.id);
+      const item = classifyItem(onHand + lent, Number(m.requiredStock), bands);
       return {
         materialId: m.id, sku: m.sku, name: m.name, category: m.category, unitOfMeasure: m.unitOfMeasure,
-        requiredStock: String(Number(m.requiredStock)), onHand: String(onHand),
+        requiredStock: String(Number(m.requiredStock)), onHand: String(onHand), onLoan: String(lent),
         percentOfRequired: item.percentOfRequired, status: item.status, reorderQuantity: String(item.reorderQuantity),
         unitCost: m.unitCost === undefined || m.unitCost === null ? null : String(m.unitCost),
         locations: mine
@@ -1612,7 +1811,7 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       locationType: l.type,
       quantity: String(b.quantity),
       ...(() => {
-        const item = classifyItem(totals.get(m.id) ?? 0, required, bands);
+        const item = classifyItem((totals.get(m.id) ?? 0) + onLoanOf(m.id), required, bands);
         return { belowThreshold: alertsOn && needsAttention(item.status), stockStatus: alertsOn ? item.status : null, percentOfRequired: item.percentOfRequired };
       })(),
     });
@@ -1662,6 +1861,7 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (qs.type && !qs.report && t.type !== qs.type) return false;
       if (qs.report === 'issued' && t.type !== 'ISSUE') return false;
       if (qs.report === 'transfers' && t.type !== 'TRANSFER_OUT') return false;
+      if (qs.report === 'loans' && t.type !== 'LOAN' && t.type !== 'LOAN_RETURN') return false;
       if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
       if (qs.locationId && t.locationId !== qs.locationId) return false;
@@ -1787,7 +1987,7 @@ function listCounts(qs: Record<string, string>) {
         .filter((l) => l.countId === a.entityId)
         .map((l) => {
           const m = findMaterial(l.materialId);
-          return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', expected: String(l.expected), counted: String(l.counted) };
+          return { materialId: l.materialId, sku: m?.sku ?? l.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '', expected: String(l.expected), counted: String(l.counted), note: l.note };
         })
         .sort((x, y) => x.name.localeCompare(y.name)),
     };
@@ -1820,7 +2020,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
-      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
+      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null, fromPurchaseOrder: !!gr?.purchaseOrderId };
     })(),
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,

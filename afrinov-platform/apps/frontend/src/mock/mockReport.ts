@@ -131,6 +131,10 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
     const id = k.split('|')[0]!;
     totalByMaterial.set(id, (totalByMaterial.get(id) ?? 0) + qty);
   }
+  // Tools out on loan are still owned.
+  for (const t of input.transactions) {
+    if (t.type === 'LOAN' || t.type === 'LOAN_RETURN') totalByMaterial.set(t.materialId, (totalByMaterial.get(t.materialId) ?? 0) - Number(t.quantity));
+  }
   const itemNeedsReorder = (m: MockMaterial) =>
     needsAttention(classifyItem(totalByMaterial.get(m.id) ?? 0, Number(m.requiredStock), input.bands).status);
 
