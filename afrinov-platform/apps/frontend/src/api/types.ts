@@ -41,6 +41,17 @@ export interface CurrentStockRow {
 }
 
 /** One ledger entry (GET /inventory-transactions). */
+/** An issue a recipient can still bring stock back from (GET /inventory-returns/returnable). Quantities are decimal strings. */
+export interface ReturnableLine {
+  issueTransactionId: string;
+  issueId: string | null;
+  postedAt: string;
+  materialId: string; sku: string; name: string; unitOfMeasure: string;
+  locationId: string; locationName: string; locationActive: boolean;
+  projectNumber: string | null;
+  issued: string; returned: string; outstanding: string;
+}
+
 export interface MovementRow {
   id: string;
   /** Paging cursor: pass as `before` to get the next, older rows. */

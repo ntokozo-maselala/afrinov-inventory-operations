@@ -15,7 +15,9 @@ import type { FastifyInstance } from 'fastify';
 
 const userPermissions = new Map<string, string[]>();
 
-const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedReverse, mockedReturn } = vi.hoisted(() => ({
+const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedReverse, mockedReturn, mockedReturnMany, mockedReturnable } = vi.hoisted(() => ({
+  mockedReturnMany: vi.fn(),
+  mockedReturnable: vi.fn(),
   mockedIssue: vi.fn(),
   mockedTransfer: vi.fn(),
   mockedAdjust: vi.fn(),
@@ -57,6 +59,8 @@ vi.mock('./inventory.service.js', () => ({
     issueSlips: mockedSlips,
     reverse: mockedReverse,
     returnToStock: mockedReturn,
+    returnMany: mockedReturnMany,
+    returnable: mockedReturnable,
   },
 }));
 
@@ -183,6 +187,55 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ transactionId: 'tx-r1', returnedQuantity: '3', returnableQuantity: '7' });
       expect(mockedReturn).toHaveBeenCalledWith({ issueTransactionId: 'tx-1', quantity: 3, locationId: OTHER_UUID, reason: 'Job done', actorId: 'user-admin' });
+    });
+  });
+
+  describe('POST /api/v1/inventory-returns', () => {
+    const body = { lines: [{ issueTransactionId: 'tx-1', quantity: 3 }, { issueTransactionId: 'tx-2', quantity: 1, locationId: OTHER_UUID }], reason: ' Job done ' };
+
+    it('returns 403 without the issue:inventory permission', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-returns', headers: authed('user-viewer', ['view:reports']), payload: body });
+      expect(res.statusCode).toBe(403);
+      expect(mockedReturnMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['there are no lines', { lines: [] }],
+      ['a quantity is not positive', { lines: [{ issueTransactionId: 'tx-1', quantity: 0 }] }],
+      ['a line has no issue', { lines: [{ quantity: 1 }] }],
+      ['a location is not a UUID', { lines: [{ issueTransactionId: 'tx-1', quantity: 1, locationId: 'A-1' }] }],
+    ])('returns 400 when %s', async (_case, payload) => {
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-returns', headers: authed(), payload });
+      expect(res.statusCode).toBe(400);
+      expect(mockedReturnMany).not.toHaveBeenCalled();
+    });
+
+    it('returns 201 and passes every line, the note and the actor through', async () => {
+      mockedReturnMany.mockResolvedValue({ transactionIds: ['tx-r1', 'tx-r2'] });
+      const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-returns', headers: authed(), payload: body });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ transactionIds: ['tx-r1', 'tx-r2'] });
+      expect(mockedReturnMany).toHaveBeenCalledWith({ ...body, reason: 'Job done', actorId: 'user-admin' });
+    });
+  });
+
+  describe('GET /api/v1/inventory-returns/returnable', () => {
+    it('needs view:reports', async () => {
+      const res = await app.inject({ method: 'GET', url: `/api/v1/inventory-returns/returnable?recipientId=${RECIPIENT_UUID}`, headers: authed('user-x', ['issue:inventory']) });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('returns 400 without a recipient', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/inventory-returns/returnable', headers: authed('user-v', ['view:reports']) });
+      expect(res.statusCode).toBe(400);
+      expect(mockedReturnable).not.toHaveBeenCalled();
+    });
+
+    it('passes the recipient and period through', async () => {
+      mockedReturnable.mockResolvedValue([]);
+      const res = await app.inject({ method: 'GET', url: `/api/v1/inventory-returns/returnable?recipientId=${RECIPIENT_UUID}&from=2026-09-16&to=2026-10-16`, headers: authed('user-v', ['view:reports']) });
+      expect(res.statusCode).toBe(200);
+      expect(mockedReturnable).toHaveBeenCalledWith({ recipientId: RECIPIENT_UUID, from: '2026-09-16', to: '2026-10-16' });
     });
   });
 

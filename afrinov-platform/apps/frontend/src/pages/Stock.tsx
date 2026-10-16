@@ -72,6 +72,12 @@ export function Stock() {
               <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
             </Link>
           </RoleGuard>
+          {/* The same people as issuing, as on the server. */}
+          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
+            <Link to="/stock/return">
+              <Button variant="primary" size="sm" leadingIcon={<Icon.Arrows size={14} />}>Return stock</Button>
+            </Link>
+          </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
             <Link to="/stock/count">
               <Button variant="primary" size="sm" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>

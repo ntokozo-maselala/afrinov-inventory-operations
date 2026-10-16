@@ -17,7 +17,7 @@ import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
+import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
@@ -335,6 +335,23 @@ export const OPERATIONS: Operation[] = [
       + '(default: where it was issued from). At most the issued quantity less earlier returns. '
       + 'Refused with 400 when that is exceeded and 409 INVALID_STATE for anything but an unreversed issue.',
     permissions: [P.IssueInventory], body: returnSchema, success: 201, errors: [400, 404, 409],
+  },
+  {
+    method: 'get', path: '/inventory-returns/returnable', tag: 'Stock movements',
+    summary: 'What a recipient can still bring back',
+    description: 'Their unreversed issues in the period (YYYY-MM-DD, the `to` day included), newest first, with the '
+      + 'quantity issued, already returned and still out; fully returned issues are left out. At most the latest '
+      + '500 issues are looked at. Refused with 400 without a recipient.',
+    permissions: [P.ViewReports], query: returnableQuerySchema, errors: [400],
+  },
+  {
+    method: 'post', path: '/inventory-returns', tag: 'Stock movements',
+    summary: 'Return several items at once',
+    description: 'Up to 100 lines, each against its own issue and optionally into another location, booked '
+      + 'all-or-nothing. Each line is a RETURN as from the single-issue route; lines for the same issue are checked '
+      + 'as one total. Refused with 400 when a line asks for more than is still out, 404 for an unknown issue and '
+      + '409 INVALID_STATE for anything but an unreversed issue.',
+    permissions: [P.IssueInventory], body: returnManySchema, success: 201, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',

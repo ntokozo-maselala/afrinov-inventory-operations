@@ -51,6 +51,7 @@ export function Recipients() {
   }
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('recipients:manage');
+  const canReturn = hasPermission('inventory:return');
   const [q, setQ] = useState('');
   const [type, setType] = useState<RecipientType | ''>('');
   const [showInactive, setShowInactive] = useState(false);
@@ -105,7 +106,7 @@ export function Recipients() {
           isLoading={recipients.loading}
           rowKey={(r) => r.id}
           rows={filtered}
-          columns={columns({ canManage, onEdit: setEditing, onSetActive: setActive, toolsOut })}
+          columns={columns({ canManage, canReturn, onEdit: setEditing, onSetActive: setActive, toolsOut })}
           emptyState={<EmptyState
             title={q || type ? 'No recipients match your filters' : 'No recipients yet'}
             description={q || type ? 'Try clearing your filters.' : 'Add the workers, machines, sites and contractors stock is issued to.'}
@@ -133,8 +134,9 @@ export function Recipients() {
   );
 }
 
-function columns({ canManage, onEdit, onSetActive, toolsOut }: {
+function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut }: {
   canManage: boolean;
+  canReturn: boolean;
   toolsOut: Map<string, number>;
   onEdit: (r: Recipient) => void;
   onSetActive: (r: Recipient, active: boolean) => void;
@@ -153,6 +155,11 @@ function columns({ canManage, onEdit, onSetActive, toolsOut }: {
       key: 'used', header: 'Stock used', width: '7rem',
       render: (r) => <Link to={`/reports/consumption?recipientId=${encodeURIComponent(r.id)}`} className="btn-link text-sm">This month</Link>,
     },
+    ...(canReturn ? [{
+      // Unused stock they are bringing back, against the issues it came from.
+      key: 'return', header: '', width: '8rem',
+      render: (r: Recipient) => <Link to={`/stock/return?recipientId=${encodeURIComponent(r.id)}`} className="btn-link text-sm">Return stock</Link>,
+    }] : []),
     { key: 'notes', header: 'Notes', render: (r) => r.notes || <span className="text-surface-300">—</span> },
     { key: 'status', header: 'Status', render: (r) => r.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '8rem' },
     ...(canManage ? [{

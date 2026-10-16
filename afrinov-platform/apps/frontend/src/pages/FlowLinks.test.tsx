@@ -4,12 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+const { mockGet, granted } = vi.hoisted(() => ({ mockGet: vi.fn(), granted: new Set<string>() }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ hasPermission: () => false }) }));
+vi.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ hasPermission: (p: string) => granted.has(p) }) }));
 
 const { Projects } = await import('./Projects');
 const { Recipients } = await import('./Recipients');
@@ -42,6 +42,15 @@ describe('links to stock used and deliveries', () => {
     page(<Recipients />);
     await screen.findByText('Sabelo');
     expect(screen.getByRole('link', { name: 'This month' })).toHaveAttribute('href', '/reports/consumption?recipientId=r-1');
+    expect(screen.queryByRole('link', { name: 'Return stock' })).not.toBeInTheDocument();
+  });
+
+  it('opens Return stock for a recipient, for those who can take returns', async () => {
+    granted.add('inventory:return');
+    page(<Recipients />);
+    await screen.findByText('Sabelo');
+    expect(screen.getByRole('link', { name: 'Return stock' })).toHaveAttribute('href', '/stock/return?recipientId=r-1');
+    granted.clear();
   });
 
   it("lists a supplier's deliveries from the last 12 months, and opens them in Movements", async () => {

@@ -97,6 +97,22 @@ export const returnSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 
+/** Several returns at the counter, each against its own issue (POST /inventory-returns). */
+export const returnManySchema = z.object({
+  lines: z.array(z.object({
+    issueTransactionId: z.string().min(1),
+    quantity: z.number().positive(),
+    locationId: z.string().uuid().optional(),
+  })).min(1).max(100),
+  reason: z.string().trim().max(500).optional(),
+});
+
+export const returnableQuerySchema = z.object({
+  recipientId: z.string().min(1),
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+
 export const reversalSchema = z.object({
   reason: z.string().trim().min(3).max(500),
 });
@@ -242,6 +258,31 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     }
     const { id } = req.params as { id: string };
     const result = await InventoryService.returnToStock({ issueTransactionId: id, ...parsed.data, actorId: actorId(req) });
+    return reply.code(201).send(result);
+  });
+
+  // What a recipient can still bring back, for the Return stock page.
+  app.get('/inventory-returns/returnable', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    const parsed = returnableQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Choose who is returning the stock', details: parsed.error.flatten() },
+      });
+    }
+    return InventoryService.returnable(parsed.data);
+  });
+
+  // Several items coming back at once, all-or-nothing. Same people as issuing.
+  app.post('/inventory-returns', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.IssueInventory);
+    const parsed = returnManySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid return payload', details: parsed.error.flatten() },
+      });
+    }
+    const result = await InventoryService.returnMany({ ...parsed.data, actorId: actorId(req) });
     return reply.code(201).send(result);
   });
 

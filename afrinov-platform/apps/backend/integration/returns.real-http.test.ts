@@ -93,3 +93,76 @@ describe('returns over real HTTP', () => {
     expect(await consumed()).toBe(0);
   });
 });
+
+interface Returnable { issueTransactionId: string; issued: string; returned: string; outstanding: string }
+
+describe('several returns at once over real HTTP', () => {
+  const run = runId();
+  let server: TestServer;
+  let api: ReturnType<typeof client>;
+  let materialId: string;
+  let rackId: string;
+  let recipientId: string;
+  let first: string;
+  let second: string;
+
+  async function onHand(): Promise<string> {
+    const { ledger, balance } = await ledgerAndBalance(materialId, rackId);
+    expect(balance).toBe(ledger);
+    return ledger;
+  }
+
+  async function returnable(): Promise<Returnable[]> {
+    const res = await api<Returnable[]>('GET', `/inventory-returns/returnable?recipientId=${recipientId}`);
+    expect(res.status).toBe(200);
+    return res.body;
+  }
+
+  beforeAll(async () => {
+    server = await startServer();
+    api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
+
+    const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-RETM-${run}`, name: `Return discs ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+    materialId = m.body.id;
+    const rack = await api<{ id: string }>('POST', '/locations', { name: `IT multi-return rack ${run}`, type: 'RACK' });
+    rackId = rack.body.id;
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT fitter ${run}`, type: 'WORKER' });
+    recipientId = recipient.body.id;
+    expect((await api('POST', '/inventory-adjustments', { materialId, locationId: rackId, quantity: 40, reasonCode: 'COUNT_VARIANCE' })).status).toBe(201);
+    const issue = async (quantity: number) => (await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+      recipientId, lines: [{ materialId, locationId: rackId, quantity }],
+    })).body.transactionIds[0]!;
+    first = await issue(10);
+    second = await issue(5);
+  });
+
+  afterAll(async () => {
+    await server?.close();
+  });
+
+  it("lists the recipient's issues with what is still out", async () => {
+    expect(await onHand()).toBe('25');
+    const rows = await returnable();
+    expect(rows.map((r) => [r.issueTransactionId, r.outstanding])).toEqual([[second, '5'], [first, '10']]);
+  });
+
+  it('books nothing when one line asks for more than is still out', async () => {
+    const res = await api<{ error: { message: string } }>('POST', '/inventory-returns', {
+      lines: [{ issueTransactionId: first, quantity: 4 }, { issueTransactionId: second, quantity: 6 }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/only 5 of the 5 issued/);
+    expect(await onHand()).toBe('25');
+    expect((await returnable()).map((r) => r.outstanding)).toEqual(['5', '10']);
+  });
+
+  it('books every line together, and drops an issue from the list once all of it is back', async () => {
+    const res = await api<{ transactionIds: string[] }>('POST', '/inventory-returns', {
+      lines: [{ issueTransactionId: first, quantity: 4 }, { issueTransactionId: second, quantity: 5 }], reason: 'Job done',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.transactionIds).toHaveLength(2);
+    expect(await onHand()).toBe('34');
+    expect((await returnable()).map((r) => [r.issueTransactionId, r.returned, r.outstanding])).toEqual([[first, '4', '6']]);
+  });
+});

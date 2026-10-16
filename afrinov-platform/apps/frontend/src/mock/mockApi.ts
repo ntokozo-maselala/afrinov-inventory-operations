@@ -43,6 +43,7 @@ import type {
   MockRecipient,
 } from './types';
 import type { ApiError } from '../api/client';
+import type { ReturnableLine } from '../api/types';
 
 interface Balance {
   materialId: string;
@@ -699,6 +700,10 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'POST' && p === '/inventory-adjustments') {
     const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
     return handleAdjustment(b);
+  }
+  if (method === 'GET' && p === '/inventory-returns/returnable') return handleReturnable(qs);
+  if (method === 'POST' && p === '/inventory-returns') {
+    return handleReturnMany((body as Parameters<typeof handleReturnMany>[0]) ?? {});
   }
   const returnMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/returns$/.exec(p) : null;
   if (returnMatch) {
@@ -1461,6 +1466,47 @@ function handleReturn(id: string, b: { quantity?: number; locationId?: string; r
     reasonNote: b.reason?.trim() || undefined, referenceType: 'Return', referenceId: issue.id,
   });
   return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - qty) };
+}
+
+// Mirrors InventoryService.returnMany: each line as handleReturn, all-or-nothing.
+function handleReturnMany(b: { lines?: Array<{ issueTransactionId: string; quantity: number; locationId?: string }>; reason?: string }): { transactionIds: string[] } {
+  const lines = b.lines ?? [];
+  if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item that is coming back');
+  if (lines.some((l) => !(Number(l.quantity) > 0))) throw err('VALIDATION_ERROR', 'Return quantity must be positive');
+  const before = state.transactions.length;
+  try {
+    return { transactionIds: lines.map((l) => handleReturn(l.issueTransactionId, { quantity: l.quantity, locationId: l.locationId, reason: b.reason }).transactionId) };
+  } catch (e) {
+    state.transactions.length = before;
+    throw e;
+  }
+}
+
+// Mirrors InventoryService.returnable: a recipient's unreversed issues in the
+// period, newest first, leaving out those fully returned.
+function handleReturnable(qs: Record<string, string | undefined>): ReturnableLine[] {
+  if (!qs.recipientId) throw err('VALIDATION_ERROR', 'Choose who is returning the stock');
+  const day = (iso: string) => iso.slice(0, 10);
+  return state.transactions
+    .filter((t) => t.type === 'ISSUE' && t.recipientId === qs.recipientId && !t.reversesId
+      && !state.transactions.some((r) => r.reversesId === t.id)
+      && (!qs.from || day(t.postedAt) >= qs.from) && (!qs.to || day(t.postedAt) <= qs.to))
+    .sort((a, b) => b.postedAt.localeCompare(a.postedAt))
+    .slice(0, 500)
+    .flatMap((t) => {
+      const issued = -Number(t.quantity);
+      const returned = returnedAgainst(t.id);
+      if (issued - returned <= 0) return [];
+      const m = findMaterial(t.materialId);
+      const l = findLocation(t.locationId);
+      return [{
+        issueTransactionId: t.id, issueId: t.issueId ?? null, postedAt: t.postedAt,
+        materialId: t.materialId, sku: m?.sku ?? '', name: m?.name ?? '', unitOfMeasure: m?.unitOfMeasure ?? '',
+        locationId: t.locationId, locationName: l?.name ?? '', locationActive: l?.active ?? false,
+        projectNumber: t.projectNumber ?? null,
+        issued: String(issued), returned: String(returned), outstanding: String(issued - returned),
+      }];
+    });
 }
 
 function handleReversal(id: string, b: { reason?: string } | undefined): { reversalIds: string[] } {
