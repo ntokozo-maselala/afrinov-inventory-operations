@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Stat } from '../components/Stat';
 import { Alert } from '../components/Alert';
+import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
@@ -270,6 +271,8 @@ export function Locations() {
   const [pendingStatus, setPendingStatus] = useState<Location | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
+  // Viewing is for everyone; adding, editing, (de)activating and deleting need the location permissions.
+  const canManage = usePermissions().hasPermission('locations:manage');
 
   const filtered = useMemo(() => {
     if (!locations.data) return [];
@@ -344,11 +347,11 @@ export function Locations() {
       <PageHeader
         title="Locations"
         description="Manage inventory storage and operational locations."
-        actions={
+        actions={canManage && (
           <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add location
           </Button>
-        }
+        )}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -384,6 +387,7 @@ export function Locations() {
           rowKey={(l) => l.id}
           rows={filtered}
           columns={columns({
+            canManage,
             onView: (l) => openView(l.id),
             onEdit: (l) => setDrawer({ mode: 'edit', location: l }),
             onToggleStatus: (l) => setPendingStatus(l),
@@ -394,7 +398,7 @@ export function Locations() {
             <EmptyState
               title={q || typeFilter || statusFilter ? 'No locations match your filters' : 'No locations yet'}
               description={q || typeFilter || statusFilter ? 'Try clearing your filters.' : 'Create your first location to start organising inventory.'}
-              action={!q && !typeFilter && !statusFilter ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first location</Button> : undefined}
+              action={!q && !typeFilter && !statusFilter && canManage ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first location</Button> : undefined}
             />
           }
         />
@@ -454,12 +458,14 @@ export function Locations() {
 }
 
 function columns({
+  canManage,
   onView,
   onEdit,
   onToggleStatus,
   onDelete,
   value,
 }: {
+  canManage: boolean;
   /** Formatted stock value at a location; null while unknown (loading, or no access to reports). */
   value: ((id: string) => string) | null;
   onView: (l: Location) => void;
@@ -482,15 +488,19 @@ function columns({
     { key: 'value', header: 'Value', align: 'right', render: (l) => value ? <span className="font-mono">{value(l.id)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     { key: 'updated', header: 'Updated', render: (l) => l.updatedAt ? <span className="text-meta">{formatDate(l.updatedAt)}</span> : <span className="text-surface-300">—</span>, width: '9rem' },
     {
-      key: 'actions', header: '', align: 'right', width: '16rem',
+      key: 'actions', header: '', align: 'right', width: canManage ? '16rem' : '5rem',
       render: (l) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="ghost" leadingIcon={<Icon.Eye size={12} />} onClick={() => onView(l)}>View</Button>
-          <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(l)}>Edit</Button>
-          <Button size="sm" variant="ghost" onClick={() => onToggleStatus(l)}>
-            {l.active ? 'Deactivate' : 'Activate'}
-          </Button>
-          <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onDelete(l)}>Delete</Button>
+          {canManage && (
+            <>
+              <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(l)}>Edit</Button>
+              <Button size="sm" variant="ghost" onClick={() => onToggleStatus(l)}>
+                {l.active ? 'Deactivate' : 'Activate'}
+              </Button>
+              <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onDelete(l)}>Delete</Button>
+            </>
+          )}
         </div>
       ),
     },

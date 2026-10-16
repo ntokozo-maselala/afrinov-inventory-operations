@@ -15,7 +15,8 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { Drawer } from '../components/Modal';
 import { MaterialForm, type CreatedMaterial } from '../components/MaterialForm';
-import { useCanManageMaterials } from '../hooks/usePermissions';
+import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import type { CurrentStockRow, Material } from '../api/types';
 
@@ -137,6 +138,10 @@ export function ReceiveStock() {
       setBusy(false);
     }
   }
+
+  // Reached by a typed or old link: say so rather than offer a form the server would refuse.
+  const allowed = usePermissions().hasPermission('inventory:receive');
+  if (!allowed) return <NoAccess title="Receive stock" action="receive stock" />;
 
   return (
     <div>

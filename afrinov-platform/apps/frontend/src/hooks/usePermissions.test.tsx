@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useHasRole, useIsAdmin, useCanManageMaterials, useCanManageProcurement, useCanApprove, useCanManageUsers, usePermissions, type RoleName } from './usePermissions';
+import { useHasRole, useIsAdmin, useCanManageMaterials, useCanManageProcurement, useCanApprove, useCanManageUsers, usePermissions, PERMISSION_ROLES, type RoleName } from './usePermissions';
 
 vi.mock('../api/client', () => ({
   api: { get: vi.fn() },
@@ -169,5 +169,45 @@ describe('inventory reversal permission', () => {
   it('denies reversal when signed out', () => {
     const { result } = renderWithUser(usePermissions, null);
     expect(result.current.hasPermission('inventory:reverse')).toBe(false);
+  });
+});
+
+// The role check sheet: what each role may do, as the server's RolePermissions
+// allows it. Written out in full so that a change to PERMISSION_ROLES has to be
+// made here too, on purpose.
+describe('usePermissions — the role check sheet', () => {
+  const EXPECTED: Record<Exclude<RoleName, 'ADMIN'>, string[]> = {
+    STORE_CONTROLLER: [
+      'materials:manage', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
+      'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage', 'racks:manage',
+      'projects:manage', 'recipients:manage', 'activity:view',
+    ],
+    PROCUREMENT: ['inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage'],
+    APPROVER: ['orders:approve'],
+    TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend'],
+    VIEWER: [],
+  };
+  const ALL = Object.keys(PERMISSION_ROLES);
+
+  it.each(Object.entries(EXPECTED))('%s holds exactly its permissions', (role, expected) => {
+    const { result } = renderWithUser(usePermissions, { roles: [role] });
+    expect(ALL.filter((p) => result.current.hasPermission(p)).sort()).toEqual([...expected].sort());
+  });
+
+  it('ADMIN holds every permission', () => {
+    const { result } = renderWithUser(usePermissions, { roles: ['ADMIN'] });
+    expect(ALL.every((p) => result.current.hasPermission(p))).toBe(true);
+  });
+
+  it('a user with two roles holds both sets', () => {
+    const { result } = renderWithUser(usePermissions, { roles: ['TECHNICIAN', 'PROCUREMENT'] });
+    expect(result.current.hasPermission('inventory:issue')).toBe(true);
+    expect(result.current.hasPermission('suppliers:manage')).toBe(true);
+    expect(result.current.hasPermission('inventory:transfer')).toBe(false);
+  });
+
+  it('refuses a permission it does not know, even to a store controller', () => {
+    const { result } = renderWithUser(usePermissions, { roles: ['STORE_CONTROLLER'] });
+    expect(result.current.hasPermission('inventory:anything')).toBe(false);
   });
 });

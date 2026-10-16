@@ -13,7 +13,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
 import { MaterialForm } from '../components/MaterialForm';
 import { useToast } from '../components/Toast';
-import { useCanManageMaterials, useHasRole } from '../hooks/usePermissions';
+import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
@@ -32,9 +32,11 @@ export function MaterialDetail() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [toggling, setToggling] = useState(false);
   const canManage = useCanManageMaterials();
-  // The same roles as the Receive and Issue buttons on the Stock page.
-  const canReceive = useHasRole(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']);
-  const canIssue = useHasRole(['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']);
+  // The same permissions as the Receive, Issue and Check out buttons elsewhere.
+  const { hasPermission } = usePermissions();
+  const canReceive = hasPermission('inventory:receive');
+  const canIssue = hasPermission('inventory:issue');
+  const canLend = hasPermission('tools:lend');
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
@@ -83,9 +85,8 @@ export function MaterialDetail() {
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
             <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
-            {active && canIssue && total > 0 && (isTool
-              ? <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>
-              : <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>)}
+            {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
+            {active && total > 0 && !isTool && canIssue && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
               ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
               : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}

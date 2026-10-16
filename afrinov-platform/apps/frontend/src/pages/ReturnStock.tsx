@@ -12,6 +12,8 @@ import { Alert } from '../components/Alert';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { RecipientSelect, type RecipientOption } from '../components/IssueFields';
+import { usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
@@ -98,6 +100,10 @@ export function ReturnStock() {
   }
 
   const loadError = recipients.error ?? locations.error;
+
+  // Reached by a typed or old link: say so rather than offer a form the server would refuse.
+  const allowed = usePermissions().hasPermission('inventory:return');
+  if (!allowed) return <NoAccess title="Return stock" action="book stock returns" />;
 
   return (
     <div>

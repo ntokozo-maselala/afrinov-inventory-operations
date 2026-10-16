@@ -11,6 +11,7 @@ import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
+import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { Alert } from '../components/Alert';
 import { PROCUREMENT_ENABLED } from '../config/features';
@@ -25,6 +26,8 @@ export function Suppliers() {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
+  // Adding needs create:supplier on the server (Procurement and Admin).
+  const canManage = usePermissions().hasPermission('suppliers:manage');
   const toast = useToast();
 
   const filtered = (suppliers.data ?? []).filter((s) => {
@@ -38,7 +41,7 @@ export function Suppliers() {
       <PageHeader
         title="Suppliers"
         description={PROCUREMENT_ENABLED ? 'Vendor master. Used to populate purchase orders and goods receipts.' : 'Vendor master. The companies your stock is bought from.'}
-        actions={<Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setAdding(true)}>Add supplier</Button>}
+        actions={canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setAdding(true)}>Add supplier</Button>}
       />
 
       <Toolbar
@@ -60,11 +63,11 @@ export function Suppliers() {
           rowKey={(s) => s.id}
           rows={filtered}
           columns={columns()}
-          emptyState={<EmptyState title={q ? 'No suppliers match your search' : 'No suppliers yet'} description={q ? 'Try a different search term.' : (PROCUREMENT_ENABLED ? 'Add a supplier to start creating purchase orders.' : 'Add a supplier to record where your stock comes from.')} action={!q && <Button variant="primary" onClick={() => setAdding(true)}>Add your first supplier</Button>} />}
+          emptyState={<EmptyState title={q ? 'No suppliers match your search' : 'No suppliers yet'} description={q ? 'Try a different search term.' : (PROCUREMENT_ENABLED ? 'Add a supplier to start creating purchase orders.' : 'Add a supplier to record where your stock comes from.')} action={!q && canManage && <Button variant="primary" onClick={() => setAdding(true)}>Add your first supplier</Button>} />}
         />
       )}
 
-      {adding && (
+      {adding && canManage && (
         <Drawer open onClose={() => setAdding(false)} title="Add supplier" description="Suppliers must have a unique name (case- and whitespace-insensitive)." width="md">
           <SupplierForm
             onCancel={() => setAdding(false)}

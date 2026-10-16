@@ -77,7 +77,7 @@ export function Materials() {
         title="Materials"
         description="Catalogue of stockable items. Each material has a category, unit of measure, and reorder threshold."
         actions={
-          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
+          <RoleGuard permission="materials:manage">
             <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setAdding(true)}>Add item</Button>
           </RoleGuard>
         }

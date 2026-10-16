@@ -8,7 +8,7 @@ vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => perms.canManageMaterials }));
+vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => perms.canManageMaterials, usePermissions: () => ({ hasPermission: () => true }) }));
 
 const { ReceiveStock } = await import('./ReceiveStock');
 const { ToastProvider } = await import('../components/Toast');

@@ -7,7 +7,7 @@ vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin, useHasRole: () => perms.receive }));
+vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin, useHasRole: () => perms.receive, usePermissions: () => ({ hasPermission: () => perms.receive }) }));
 vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload, downloadReorderListPdf: mockPdf }));
 
 const { StockStatus } = await import('./StockStatus');

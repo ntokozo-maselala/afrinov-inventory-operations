@@ -9,6 +9,10 @@ vi.mock('../api/client', () => ({
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 
+// Signed in as a store controller, who may do everything on these pages; tests that need another role set signedIn.roles.
+const { signedIn } = vi.hoisted(() => ({ signedIn: { roles: ['STORE_CONTROLLER'] as string[] } }));
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } }) }));
+
 const { StockCount } = await import('./StockCount');
 const { ToastProvider } = await import('../components/Toast');
 

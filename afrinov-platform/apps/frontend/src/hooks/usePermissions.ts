@@ -41,38 +41,48 @@ export function useCanManageUsers(): boolean {
   return useHasRole(['ADMIN']);
 }
 
-export function usePermissions(): { hasPermission: (permission: string) => boolean } {
-  const isAdmin = useIsAdmin();
-  const canManageMaterials = useCanManageMaterials();
-  const canManageProcurement = useCanManageProcurement();
-  const canApprove = useCanApprove();
-  const canManageUsers = useCanManageUsers();
-  // Same roles that can issue stock.
-  const canReturn = useHasRole(['STORE_CONTROLLER', 'TECHNICIAN']);
+/**
+ * Who may do what in the UI: each permission, the roles besides ADMIN that
+ * hold it, and (in the comment) the server permission it stands for. Keep this
+ * in step with RolePermissions in apps/backend/src/shared/permissions.ts: a
+ * button shown here that the server refuses is a dead end, and one hidden
+ * here that the server allows is a missing feature.
+ */
+export const PERMISSION_ROLES = {
+  'materials:manage': ['STORE_CONTROLLER'], // create:material, edit:material
+  'inventory:receive': ['STORE_CONTROLLER', 'PROCUREMENT'], // receive:inventory
+  'inventory:issue': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory
+  'inventory:return': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory (returns are booked by the people who issue)
+  'inventory:transfer': ['STORE_CONTROLLER'], // transfer:inventory
+  'inventory:adjust': ['STORE_CONTROLLER'], // adjust:inventory
+  'inventory:count': ['STORE_CONTROLLER'], // adjust:inventory (a count posts its differences as adjustments)
+  'inventory:reverse': ['STORE_CONTROLLER'], // reverse:inventory_transaction
+  'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
+  'locations:manage': ['STORE_CONTROLLER'], // create/edit/delete:location, manage:location_status
+  'racks:manage': ['STORE_CONTROLLER'], // manage:racks
+  'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // manage:projects
+  'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
+  'suppliers:manage': ['PROCUREMENT'], // create:supplier, edit:supplier
+  'activity:view': ['STORE_CONTROLLER'], // view:audit_log
+  'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order
+  'orders:approve': ['APPROVER'], // approve:purchase_order
+  'users:manage': [], // manage:users (ADMIN only)
+} as const satisfies Record<string, readonly RoleName[]>;
 
-  const hasPermission = (permission: string): boolean => {
-    if (isAdmin) return true;
+export type Permission = keyof typeof PERMISSION_ROLES;
 
-    switch (permission) {
-      case 'materials:manage':
-      case 'inventory:reverse':
-      case 'recipients:manage':
-        return canManageMaterials;
-      case 'inventory:return':
-      case 'tools:lend':
-        return canReturn;
-      case 'procurement:manage':
-        return canManageProcurement;
-      case 'orders:approve':
-        return canApprove;
-      case 'users:manage':
-        return canManageUsers;
-      default:
-        // Fail closed (K11): an unrecognised permission must never
-        // grant access. The server enforces permissions
-        // authoritatively; this is defence-in-depth for UI gating.
-        return false;
-    }
+export function usePermissions(): { hasPermission: (permission: Permission | string) => boolean } {
+  const { user } = useAuth();
+  const roles = (user?.roles ?? []).map((r) => r.toUpperCase() as RoleName);
+
+  const hasPermission = (permission: Permission | string): boolean => {
+    // ADMIN holds every permission on the server.
+    if (roles.includes('ADMIN')) return true;
+    // Fail closed (K11): an unrecognised permission must never grant access.
+    // The server enforces permissions authoritatively; this is
+    // defence-in-depth for UI gating.
+    const allowed: readonly RoleName[] | undefined = (PERMISSION_ROLES as Record<string, readonly RoleName[]>)[permission];
+    return !!allowed && allowed.some((r) => roles.includes(r));
   };
 
   return { hasPermission };

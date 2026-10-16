@@ -106,7 +106,7 @@ export function StockStatus() {
               disabled={!items.data || toReorder === 0}
             />
             {/* When the order arrives, it is booked on Receive stock. */}
-            <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']}>
+            <RoleGuard permission="inventory:receive">
               <Link to="/stock/receive" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.ArrowDown size={14} /> Receive stock
               </Link>
