@@ -82,6 +82,40 @@ describe('report PDF', () => {
     expect(wide).toContain('(TOOL-TORQUE-1/2)');
   });
 
+  // An item list as the reports print them: six columns, two of them text.
+  const itemColumns = [
+    { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Unit' },
+    { header: 'Used', align: 'right' as const }, { header: 'Value', align: 'right' as const }, { header: 'Last supplier', wrap: true },
+  ];
+
+  it('spans the page with an item list of six columns or more, even when its content is short', async () => {
+    const out = text(await buildPdf({ title: 'Items', lines: [], sections: [{ columns: itemColumns, rows: [['DISC', 'Disc', 'each', '4', 'R 10,00', 'Hydroscand']] }] }));
+    expect(leftEdge(out)).toBeCloseTo(56.7, 0);
+    expect(rightEdge(out)).toBeGreaterThan(780);
+    expect(rightEdge(out)).toBeLessThan(787);
+    // The spare width goes to the text columns: Item and Last supplier come out much wider than Code.
+    const [code, item] = cells(out).slice(0, 2).map(([, w]) => w);
+    expect(item!).toBeGreaterThan(3 * code!);
+  });
+
+  it('keeps a summary of five columns or fewer as wide as its content', async () => {
+    const columns = [{ header: 'Category' }, { header: 'Urgent', align: 'right' as const }, { header: 'Warning', align: 'right' as const }, { header: 'Items', align: 'right' as const }, { header: 'Value', align: 'right' as const }];
+    const out = text(await buildPdf({ title: 'Summary', lines: [], sections: [{ columns, rows: [['Tools', '2', '0', '2', 'R 7 700,00']] }] }));
+    expect(rightEdge(out)).toBeLessThan(400);
+  });
+
+  it('lines up the columns of tables that have the same columns, as one per category', async () => {
+    const out = text(await buildPdf({
+      title: 'Stock used', lines: [], sections: [
+        { heading: 'Consumables', columns: itemColumns, rows: [['GRIND-DISC-125', 'Grinding Disc 125 x 6mm', 'each', '40', 'R 1 280,00', '']] },
+        { heading: 'Fasteners', columns: itemColumns, rows: [['M16X40-88-HEX', 'M16 x 40 8.8 BLACK HEX SET SCREW', 'each', '70', 'R 315,00', '']] },
+      ],
+    }));
+    // Every cell of both tables starts at one of the same six column edges.
+    const edges = new Set(cells(out).map(([x]) => x.toFixed(1)));
+    expect(edges.size).toBe(itemColumns.length);
+  });
+
   it('swaps characters the PDF fonts cannot print', () => {
     expect(pdfText('R 1 234 − 5 → 6')).toBe('R 1 234 - 5 -> 6');
   });

@@ -491,6 +491,8 @@ describe('report export builders', () => {
     const buf = await buildInventoryPdf(fullReport);
     expect(buf.length).toBeGreaterThan(1000);
     expect(buf.slice(0, 4).toString()).toBe('%PDF');
+    // A4 landscape, as the other report PDFs: wider than it is tall.
+    expect(buf.toString('latin1')).toMatch(/\/MediaBox \[0 0 841\.89 595\.28\]/);
   });
 
   it('paginates the complete visible inventory page instead of truncating it', async () => {
