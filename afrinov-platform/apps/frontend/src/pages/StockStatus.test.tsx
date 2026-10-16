@@ -66,6 +66,7 @@ describe('StockStatus page', () => {
     expect(screen.getByText('Slugs 14mm')).toBeInTheDocument();
     expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
     expect(within(screen.getByText('Slugs 14mm').closest('tr')!).getByText('Not set')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Materials' })).toHaveAttribute('href', '/materials?view=no-required');
   });
 
   it('searches by item, code or location', async () => {

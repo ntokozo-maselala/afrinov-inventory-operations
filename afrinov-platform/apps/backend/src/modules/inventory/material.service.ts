@@ -18,10 +18,12 @@ export interface CreateMaterialInput {
 export interface UpdateMaterialInput {
   id: string;
   name?: string;
-  description?: string;
+  /** null clears it. */
+  description?: string | null;
   unitOfMeasure?: string;
   requiredStock?: number;
-  unitCost?: number;
+  /** null clears it. */
+  unitCost?: number | null;
   active?: boolean;
   serialNumber?: string | null;
 }

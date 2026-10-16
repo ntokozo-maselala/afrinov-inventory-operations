@@ -43,6 +43,20 @@ describe('Dashboard', () => {
     expect(screen.queryByLabelText('Time range')).not.toBeInTheDocument();
   });
 
+  it('opens the unpriced items from the stock value card, and links nowhere when all are priced', async () => {
+    const { unmount } = render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect((await screen.findByText('Stock value')).closest('a')).toHaveAttribute('href', '/materials?view=no-price');
+    unmount();
+
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-value') return { ...VALUE, total: { ...VALUE.total, unpriced: 0 } };
+      if (path === '/reports/low-stock' || path === '/tools') return [];
+      return { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} };
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect((await screen.findByText('Stock value')).closest('a')).toBeNull();
+  });
+
   it('counts the tools out on loan, and links to the overdue ones', async () => {
     const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2 });
     tools = [{ materialId: 'm-1', loans: [loan('2', false), loan('1', true)] }, { materialId: 'm-2', loans: [] }];
