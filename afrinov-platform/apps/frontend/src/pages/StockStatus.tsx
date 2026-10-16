@@ -6,18 +6,21 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
+import { useStatusBands } from '../hooks/useStatusBands';
+import { useIsAdmin } from '../hooks/usePermissions';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
-import { Input, Select } from '../components/Field';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
+import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
-import { Button } from '../components/Button';
+import { Alert } from '../components/Alert';
 import { Icon } from '../components/Icon';
+import { RoleGuard } from '../components/RoleGuard';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
-import { useToast } from '../components/Toast';
-import { downloadReorderList } from '../api/exportReorderList';
+import { DownloadMenu } from '../components/DownloadMenu';
+import { downloadReorderList, downloadReorderListPdf } from '../api/exportReorderList';
 import { CATEGORIES } from '../lib/categories';
 
 /** One item, as GET /reports/stock-status returns it. */
@@ -29,6 +32,8 @@ export interface StockStatusItem {
   unitOfMeasure: string;
   requiredStock: string;
   onHand: string;
+  /** Tools: out on loan, still owned; the status counts it with what is on hand. */
+  onLoan?: string;
   percentOfRequired: number | null;
   status: Status;
   reorderQuantity: string;
@@ -44,28 +49,19 @@ const VIEWS: Array<{ value: string; label: string }> = [
   { value: 'WARNING', label: 'Warning' },
   { value: 'OK', label: 'OK' },
   { value: 'NOT_SET', label: 'No Required Stock set' },
+  // Nothing on hand anywhere: the Dashboard's Out of stock card opens this.
+  { value: 'out', label: 'Out of stock' },
   { value: 'all', label: 'All items' },
 ];
 
 export function StockStatus() {
   const items = useApi<StockStatusItem[]>('/reports/stock-status');
+  const bands = useStatusBands();
+  const isAdmin = useIsAdmin();
   const [q, setQ] = useState('');
   const [params] = useSearchParams();
   const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'attention'));
   const [category, setCategory] = useState('');
-  const [downloading, setDownloading] = useState(false);
-  const toast = useToast();
-
-  async function download() {
-    setDownloading(true);
-    try {
-      await downloadReorderList();
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message);
-    } finally {
-      setDownloading(false);
-    }
-  }
 
   const counts = useMemo(() => {
     const c: Record<Status, number> = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0 };
@@ -73,11 +69,15 @@ export function StockStatus() {
     return c;
   }, [items.data]);
 
+  // What the download would hold: the items to re-order, in the chosen category if one is.
+  const toReorder = (items.data ?? []).filter((r) => needsAttention(r.status) && (!category || r.category === category)).length;
+
   const filtered = useMemo(() => {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return (items.data ?? []).filter((r) => {
       if (view === 'attention' && !needsAttention(r.status)) return false;
-      if (view !== 'attention' && view !== 'all' && r.status !== view) return false;
+      if (view === 'out' && num(r.onHand) > 0) return false;
+      if (view !== 'attention' && view !== 'all' && view !== 'out' && r.status !== view) return false;
       if (category && r.category !== category) return false;
       if (terms.length > 0) {
         const hay = `${r.sku} ${r.name} ${r.locations.map((l) => l.locationName).join(' ')}`.toLowerCase();
@@ -91,19 +91,26 @@ export function StockStatus() {
     <div>
       <PageHeader
         title="Stock status"
-        description="Each item's stock on hand, across all locations, against its Required Stock: urgent below 20%, warning below 40%, as the stock workbook's URGENCY column. The bands are under Settings → Inventory."
+        description={(
+          <>
+            Each item&apos;s stock on hand, across all locations, against its Required Stock: urgent below {bands.urgentBelowPercent}%,
+            warning below {bands.warningBelowPercent}%, as the stock workbook&apos;s URGENCY column. The bands are
+            under {isAdmin ? <Link to="/settings/inventory" className="btn-link">Settings → Inventory</Link> : 'Settings → Inventory'}.
+          </>
+        )}
         actions={(
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              leadingIcon={<Icon.Download size={14} />}
-              onClick={download}
-              loading={downloading}
-              disabled={!items.data || counts.URGENT + counts.WARNING === 0}
-            >
-              Download re-order list
-            </Button>
+            <DownloadMenu
+              label="Download re-order list"
+              onDownload={(format) => (format === 'pdf' ? downloadReorderListPdf : downloadReorderList)(category || undefined)}
+              disabled={!items.data || toReorder === 0}
+            />
+            {/* When the order arrives, it is booked on Receive stock. */}
+            <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']}>
+              <Link to="/stock/receive" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                <Icon.ArrowDown size={14} /> Receive stock
+              </Link>
+            </RoleGuard>
             {PROCUREMENT_ENABLED && (
               <Link to="/purchase-orders" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.Cart size={14} /> Create purchase order
@@ -129,27 +136,30 @@ export function StockStatus() {
         </div>
       )}
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search item, code or location…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search stock status" />
-            </div>
-            <Select className="sm:w-72" value={view} onChange={(e) => setView(e.target.value)} aria-label="Show">
-              {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
-            </Select>
-            <Select className="sm:w-60" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-              <option value="">All categories</option>
-              {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </Select>
-            {(q || view !== 'attention' || category) && (
-              <Button variant="ghost" size="sm" onClick={() => { setQ(''); setView('attention'); setCategory(''); }}>Clear</Button>
-            )}
-          </>
-        )}
-        right={<span className="text-meta">{items.loading ? 'Loading…' : `${filtered.length} of ${items.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || view !== 'attention' || category ? () => { setQ(''); setView('attention'); setCategory(''); } : undefined}
+        count={items.loading ? 'Loading…' : `${filtered.length} of ${items.data?.length ?? 0}`}
+      >
+        <SearchField id="ss-search" value={q} onChange={setQ} placeholder="Item, code or location…" />
+        <Field label="Show" htmlFor="ss-view" className={FILTER_WIDTH}>
+          <Select id="ss-view" value={view} onChange={(e) => setView(e.target.value)}>
+            {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+          </Select>
+        </Field>
+        <Field label="Category" htmlFor="ss-category" className={FILTER_WIDTH}>
+          <Select id="ss-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">All categories</option>
+            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
+
+      {view === 'NOT_SET' && counts.NOT_SET > 0 && (
+        <Alert tone="info" title="These items cannot be graded" className="mb-4">
+          They have no Required Stock, so there is nothing to compare their stock on hand with. Open an item to set it, or see them
+          all on <Link to="/materials?view=no-required" className="btn-link">Materials</Link>.
+        </Alert>
+      )}
 
       {items.error && <ErrorState message={items.error.message} onRetry={items.reload} />}
 
@@ -163,7 +173,7 @@ export function StockStatus() {
           emptyState={
             <EmptyState
               title={view === 'attention' ? 'Nothing needs re-ordering' : 'No items match'}
-              description={view === 'attention' ? 'Every item with a Required Stock has at least 40% of it on hand.' : 'Try another filter.'}
+              description={view === 'attention' ? `Every item with a Required Stock has at least ${bands.warningBelowPercent}% of it on hand.` : 'Try another filter.'}
             />
           }
         />
@@ -200,7 +210,12 @@ const COLUMNS: DataTableColumn<StockStatusItem>[] = [
     header: 'On hand',
     align: 'right',
     className: 'text-num',
-    render: (r) => <span className="font-mono">{formatNumber(num(r.onHand))} <span className="text-surface-500 text-xs">{r.unitOfMeasure}</span></span>,
+    render: (r) => (
+      <div>
+        <span className="font-mono">{formatNumber(num(r.onHand))} <span className="text-surface-500 text-xs">{r.unitOfMeasure}</span></span>
+        {num(r.onLoan ?? '0') > 0 && <div className="text-xs text-surface-500">+{formatNumber(num(r.onLoan!))} on loan</div>}
+      </div>
+    ),
     width: '8rem',
   },
   {

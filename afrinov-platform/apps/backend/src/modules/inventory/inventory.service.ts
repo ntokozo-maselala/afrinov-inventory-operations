@@ -59,19 +59,42 @@ export interface ReturnInput {
   actorId: string;
 }
 
+/** Several returns at the counter, each against its own issue, booked together. */
+export interface ReturnManyInput {
+  lines: Array<{ issueTransactionId: string; quantity: number | string | Decimal; locationId?: string }>;
+  /** One note for every line. */
+  reason?: string;
+  actorId: string;
+}
+
+/** An issue a recipient can still bring stock back from. Quantities are decimal strings. */
+export interface ReturnableLine {
+  issueTransactionId: string;
+  /** The issue slip the line was on. */
+  issueId: string | null;
+  postedAt: string;
+  materialId: string; sku: string; name: string; unitOfMeasure: string;
+  locationId: string; locationName: string; locationActive: boolean;
+  projectNumber: string | null;
+  issued: string; returned: string; outstanding: string;
+}
+
+/** The most issues the returnable list looks at, newest first. */
+export const RETURNABLE_LIMIT = 500;
+
 export interface GoodsReceiptPostInput {
   goodsReceiptId: string;
   actorId: string;
 }
 
-async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
+export async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
   if (!m.active) throw Errors.validation('Material is inactive');
   return m;
 }
 
-async function checkProjectActive(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+export async function checkProjectActive(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
   const p = await tx.project.findUnique({ where: { projectNumber } });
   if (!p) throw Errors.notFound('Project');
   if (!p.active) throw Errors.validation('Project is inactive');
@@ -85,13 +108,74 @@ async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): P
   return agg._sum.quantity ?? toDecimal(0);
 }
 
-async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
+/**
+ * Book one return against an issue, inside the caller's transaction: checks
+ * it is an unreversed issue with at least `qty` still out, posts the RETURN
+ * (keeping the issue's recipient and project), updates the balance and audits.
+ */
+async function bookReturn(tx: Prisma.TransactionClient, input: {
+  issueTransactionId: string; qty: Decimal; locationId?: string; reason?: string; actorId: string; postedAt: Date;
+}): Promise<{ transactionId: string; materialId: string; locationId: string; issued: Decimal; alreadyReturned: Decimal }> {
+  const issue = await tx.inventoryTransaction.findUnique({
+    where: { id: input.issueTransactionId },
+    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true } } },
+  });
+  if (!issue) throw Errors.notFound('InventoryTransaction');
+  if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
+    throw Errors.invalidState('Only an issue can have stock returned against it.');
+  }
+  if (issue.reversedBy) throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
+
+  const issued = issue.quantity.negated();
+  const alreadyReturned = await returnedAgainst(issue.id, tx);
+  const returnable = issued.minus(alreadyReturned);
+  if (input.qty.gt(returnable)) {
+    throw Errors.validation(
+      `Cannot return ${input.qty.toString()} × ${issue.material.sku}: only ${returnable.toString()} of the ${issued.toString()} issued is still out.`,
+      { issued: issued.toString(), returned: alreadyReturned.toString(), returnable: returnable.toString() },
+    );
+  }
+
+  const locationId = input.locationId ?? issue.locationId;
+  await checkLocationActive(locationId, tx);
+
+  const trx = await tx.inventoryTransaction.create({
+    data: {
+      postedAt: input.postedAt,
+      materialId: issue.materialId,
+      locationId,
+      type: InventoryTransactionType.RETURN,
+      quantity: input.qty,
+      actorId: input.actorId,
+      recipientId: issue.recipientId,
+      projectNumber: issue.projectNumber,
+      reasonNote: input.reason?.trim() || null,
+      referenceType: 'Return',
+      referenceId: issue.id,
+    },
+  });
+  await recomputeBalance(issue.materialId, locationId, tx);
+
+  await tx.auditLogEntry.create({
+    data: {
+      actorId: input.actorId,
+      action: 'RETURN',
+      entityType: 'InventoryTransaction',
+      entityId: issue.id,
+      after: { returnTransactionId: trx.id, quantity: input.qty.toString(), locationId } as Prisma.InputJsonValue,
+    },
+  });
+
+  return { transactionId: trx.id, materialId: issue.materialId, locationId, issued, alreadyReturned };
+}
+
+export async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
   const r = await tx.recipient.findUnique({ where: { id: recipientId } });
   if (!r) throw Errors.notFound('Recipient');
   if (!r.active) throw Errors.validation('Recipient is inactive');
 }
 
-async function checkLocationActive(locationId: string, tx: Prisma.TransactionClient): Promise<void> {
+export async function checkLocationActive(locationId: string, tx: Prisma.TransactionClient): Promise<void> {
   const l = await tx.location.findUnique({ where: { id: locationId } });
   if (!l) throw Errors.notFound('Location');
   if (!l.active) throw Errors.validation('Location is inactive');
@@ -120,9 +204,10 @@ export interface HistoryFilter {
   /**
    * A report on the Movements page: issued stock, transfers (one row per
    * transfer, its out leg) or write-offs (adjustments other than count
-   * differences, which belong to the stock-counts report). Overrides `type`.
+   * differences, which belong to the stock-counts report) or tool loans (tools
+   * checked out and back in). Overrides `type`.
    */
-  report?: 'issued' | 'transfers' | 'writeoffs';
+  report?: 'issued' | 'transfers' | 'writeoffs' | 'loans';
   /** Only the lines of these issue slips (used to fill in a page of slips). */
   issueIds?: string[];
   /** Paging cursor: the `cursor` of the last row already shown; returns older rows. */
@@ -141,6 +226,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
   if (filter.report === 'issued') where.type = InventoryTransactionType.ISSUE;
   if (filter.report === 'transfers') where.type = InventoryTransactionType.TRANSFER_OUT;
+  if (filter.report === 'loans') where.type = { in: [InventoryTransactionType.LOAN, InventoryTransactionType.LOAN_RETURN] };
   if (filter.report === 'writeoffs') {
     where.type = InventoryTransactionType.ADJUSTMENT;
     // NULL <> 'StockCount' is not true in SQL, so a plain `not` would drop unreferenced rows.
@@ -331,6 +417,10 @@ export const InventoryService = {
         if (original.reversesId) {
           throw Errors.invalidState('A reversal cannot itself be reversed. Record the movement again instead.');
         }
+        // Tool loans are put right by checking the tool in or out again, which keeps the loan's story whole.
+        if (original.type === InventoryTransactionType.LOAN || original.type === InventoryTransactionType.LOAN_RETURN || original.referenceType === 'ToolLoan') {
+          throw Errors.invalidState('Tool check-outs and check-ins are not reversed: check the tool in, or out, again instead.');
+        }
         // Receipts against a purchase order also moved the order's received
         // quantities, so they cannot be reversed here. Counter receipts
         // (no purchase order) can.
@@ -448,6 +538,7 @@ export const InventoryService = {
       const materials = new Map<string, Awaited<ReturnType<typeof checkMaterialActive>>>();
       for (const t of totals.values()) {
         const material = await checkMaterialActive(t.materialId, tx);
+        if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
         materials.set(t.materialId, material);
         await checkLocationActive(t.locationId, tx);
 
@@ -518,61 +609,90 @@ export const InventoryService = {
     if (!gtZero(qty)) throw Errors.validation('Return quantity must be positive');
 
     return prisma.$transaction(async (tx) => {
-      const issue = await tx.inventoryTransaction.findUnique({
-        where: { id: input.issueTransactionId },
-        include: { reversedBy: { select: { id: true } } },
-      });
-      if (!issue) throw Errors.notFound('InventoryTransaction');
-      if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
-        throw Errors.invalidState('Only an issue can have stock returned against it.');
-      }
-      if (issue.reversedBy) throw Errors.invalidState('This issue has been reversed, so there is nothing to return.');
-
-      const issued = issue.quantity.negated();
-      const alreadyReturned = await returnedAgainst(issue.id, tx);
-      const returnable = issued.minus(alreadyReturned);
-      if (qty.gt(returnable)) {
-        throw Errors.validation(
-          `Cannot return ${qty.toString()}: only ${returnable.toString()} of the ${issued.toString()} issued is still out.`,
-          { issued: issued.toString(), returned: alreadyReturned.toString(), returnable: returnable.toString() },
-        );
-      }
-
-      const locationId = input.locationId ?? issue.locationId;
-      await checkLocationActive(locationId, tx);
-
-      const trx = await tx.inventoryTransaction.create({
-        data: {
-          materialId: issue.materialId,
-          locationId,
-          type: InventoryTransactionType.RETURN,
-          quantity: qty,
-          actorId: input.actorId,
-          recipientId: issue.recipientId,
-          projectNumber: issue.projectNumber,
-          reasonNote: input.reason?.trim() || null,
-          referenceType: 'Return',
-          referenceId: issue.id,
-        },
-      });
-      await recomputeBalance(issue.materialId, locationId, tx);
-
-      await tx.auditLogEntry.create({
-        data: {
-          actorId: input.actorId,
-          action: 'RETURN',
-          entityType: 'InventoryTransaction',
-          entityId: issue.id,
-          after: { returnTransactionId: trx.id, quantity: qty.toString(), locationId } as Prisma.InputJsonValue,
-        },
-      });
-
+      const r = await bookReturn(tx, { ...input, qty, postedAt: new Date() });
       await dispatchDomainEvents([
-        { type: 'InventoryIncreased', materialId: issue.materialId, locationId, quantity: qty.toNumber() },
+        { type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: qty.toNumber() },
       ]);
+      const returned = r.alreadyReturned.plus(qty);
+      return { transactionId: r.transactionId, returnedQuantity: returned.toString(), returnableQuantity: r.issued.minus(returned).toString() };
+    });
+  },
 
-      const returned = alreadyReturned.plus(qty);
-      return { transactionId: trx.id, returnedQuantity: returned.toString(), returnableQuantity: issued.minus(returned).toString() };
+  /**
+   * Stock coming back at the counter, several lines at once, each against its
+   * own issue: booked all-or-nothing, as an issue is. The same issue on two
+   * lines is checked as one total, because each line counts the ones before it.
+   */
+  async returnMany(input: ReturnManyInput): Promise<{ transactionIds: string[] }> {
+    if (input.lines.length === 0) throw Errors.validation('Add at least one item that is coming back');
+    const lines = input.lines.map((l) => ({ ...l, qty: toDecimal(l.quantity) }));
+    if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Return quantity must be positive');
+
+    return prisma.$transaction(async (tx) => {
+      const postedAt = new Date();
+      const transactionIds: string[] = [];
+      const events: DomainEvent[] = [];
+      for (const l of lines) {
+        const r = await bookReturn(tx, { issueTransactionId: l.issueTransactionId, qty: l.qty, locationId: l.locationId, reason: input.reason, actorId: input.actorId, postedAt });
+        transactionIds.push(r.transactionId);
+        events.push({ type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: l.qty.toNumber() });
+      }
+      await dispatchDomainEvents(events);
+      return { transactionIds };
+    });
+  },
+
+  /**
+   * What a recipient can still bring back: their unreversed issues in the
+   * period, newest first, with what has come back so far, leaving out those
+   * fully returned. Consumables are mostly used up, so the period matters:
+   * without one this would be every issue they were ever given.
+   */
+  async returnable(filter: { recipientId: string; from?: string; to?: string }): Promise<ReturnableLine[]> {
+    const where: Prisma.InventoryTransactionWhereInput = {
+      type: InventoryTransactionType.ISSUE, recipientId: filter.recipientId, reversesId: null, reversedBy: null,
+    };
+    const postedAt = dayRange(filter.from, filter.to);
+    if (postedAt) where.postedAt = postedAt;
+    const issues = await prisma.inventoryTransaction.findMany({
+      where,
+      orderBy: [{ postedAt: 'desc' }, { id: 'desc' }],
+      take: RETURNABLE_LIMIT,
+      include: {
+        material: { select: { sku: true, name: true, unitOfMeasure: true } },
+        location: { select: { name: true, active: true } },
+      },
+    });
+    if (issues.length === 0) return [];
+
+    const returns = await prisma.inventoryTransaction.findMany({
+      where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: { in: issues.map((i) => i.id) } },
+      select: { referenceId: true, quantity: true },
+    });
+    const returnedBy = new Map<string, Decimal>();
+    for (const r of returns) returnedBy.set(r.referenceId!, (returnedBy.get(r.referenceId!) ?? toDecimal(0)).plus(r.quantity));
+
+    return issues.flatMap((i) => {
+      const issued = i.quantity.negated();
+      const returned = returnedBy.get(i.id) ?? toDecimal(0);
+      const outstanding = issued.minus(returned);
+      if (!gtZero(outstanding)) return [];
+      return [{
+        issueTransactionId: i.id,
+        issueId: i.issueId,
+        postedAt: i.postedAt.toISOString(),
+        materialId: i.materialId,
+        sku: i.material.sku,
+        name: i.material.name,
+        unitOfMeasure: i.material.unitOfMeasure,
+        locationId: i.locationId,
+        locationName: i.location.name,
+        locationActive: i.location.active,
+        projectNumber: i.projectNumber,
+        issued: issued.toString(),
+        returned: returned.toString(),
+        outstanding: outstanding.toString(),
+      }];
     });
   },
 

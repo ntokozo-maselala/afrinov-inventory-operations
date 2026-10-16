@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Select, Field, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -14,6 +15,7 @@ import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
+import { today } from '../lib/dates';
 
 interface UserOpt { id: string; name: string }
 
@@ -249,33 +251,27 @@ export function Projects() {
         title="Projects"
         description="Manage projects and their lifecycle. Inventory consumption is tracked per project number."
         actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add project
           </Button>
         }
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search number, name, client…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" />
-            </div>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            <label className="flex items-center gap-1.5 text-sm text-surface-700">
-              <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
-              Active only
-            </label>
-            {(q || statusFilter || !activeOnly) && (
-              <Button variant="ghost" size="sm" onClick={() => { setQ(''); setStatusFilter(''); setActiveOnly(true); }}>Clear</Button>
-            )}
-          </>
-        )}
-        right={<span className="text-meta">{projects.loading ? 'Loading…' : `${filtered.length} of ${projects.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || statusFilter || !activeOnly ? () => { setQ(''); setStatusFilter(''); setActiveOnly(true); } : undefined}
+        count={projects.loading ? 'Loading…' : `${filtered.length} of ${projects.data?.length ?? 0}`}
+      >
+        <SearchField id="projects-search" value={q} onChange={setQ} placeholder="Number, name, client…" />
+        <Field label="Status" htmlFor="projects-status" className={FILTER_WIDTH}>
+          <Select id="projects-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            {FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+        <label className="flex items-center gap-1.5 text-sm text-surface-700 pb-2">
+          <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
+          Active only
+        </label>
+      </FilterBar>
 
       {projects.error && <ErrorState message={projects.error.message} onRetry={projects.reload} />}
 
@@ -332,6 +328,14 @@ export function Projects() {
   );
 }
 
+/** Stock used on this project, from its start date when it has one that has passed, else this month. */
+function stockUsedLink(p: Project): string {
+  const q = new URLSearchParams({ projectNumber: p.projectNumber });
+  const start = p.startDate?.slice(0, 10);
+  if (start && start <= today()) { q.set('from', start); q.set('to', today()); }
+  return `/reports/consumption?${q.toString()}`;
+}
+
 function columns({ onEdit, onArchive }: { onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
   return [
     { key: 'num', header: 'Number', render: (p) => <span className="font-mono">{p.projectNumber}</span>, width: '10rem' },
@@ -341,6 +345,7 @@ function columns({ onEdit, onArchive }: { onEdit: (p: Project) => void; onArchiv
     { key: 'mgr', header: 'Manager', render: (p) => p.manager?.name ?? <span className="text-surface-300">—</span>, width: '12rem' },
     { key: 'status', header: 'Status', render: (p) => <Badge tone={STATUS_TONE[p.status]} dot>{p.status}</Badge>, width: '10rem' },
     { key: 'start', header: 'Start', render: (p) => p.startDate ? <span className="text-meta">{formatDate(p.startDate)}</span> : <span className="text-surface-300">—</span>, width: '10rem' },
+    { key: 'used', header: 'Stock used', render: (p) => <Link to={stockUsedLink(p)} className="btn-link text-sm">View</Link>, width: '7rem' },
     {
       key: 'actions', header: '', align: 'right', width: '12rem',
       render: (p) => (

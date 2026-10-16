@@ -3,7 +3,7 @@
 // receipt with no purchase order (POST /stock-receipts). Works whether or not
 // procurement is switched on.
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -71,6 +71,20 @@ export function ReceiveStock() {
   })), [activeMaterials, heldAt]);
   const loadError = suppliers.error ?? materials.error ?? locations.error;
   const loading = suppliers.loading || materials.loading || locations.loading;
+
+  // An item's page links here with ?materialId=: once the catalogue, locations
+  // and stock have loaded, the first line starts on that item, going where most
+  // of it is kept. If stock fails to load, the location is just left to choose.
+  const [params] = useSearchParams();
+  const [preset, setPreset] = useState(() => params.get('materialId'));
+  if (preset && materials.data && locations.data && (stock.data || stock.error)) {
+    setPreset(null);
+    if (materialById.has(preset)) {
+      const home = heldAt.get(preset)?.[0]?.locationId;
+      const locationId = home && activeLocations.some((l) => l.id === home) ? home : '';
+      setLines([{ ...emptyLine(locationId), materialId: preset }]);
+    }
+  }
 
   function update(key: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));

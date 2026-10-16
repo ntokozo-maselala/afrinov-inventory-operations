@@ -79,6 +79,11 @@ export const OpeningBalanceService = {
       if (taken.length > 0) {
         throw Errors.conflict(`${taken.length} SKUs already exist, e.g. ${taken.slice(0, 5).map((t) => t.sku).join(', ')}. Change them in the mapping file.`);
       }
+      const serials = plan.materials.map((m) => m.serialNumber).filter((x): x is string => !!x);
+      const serialTaken = serials.length === 0 ? [] : await tx.material.findMany({ where: { serialNumber: { in: serials, mode: 'insensitive' } }, select: { sku: true, serialNumber: true } });
+      if (serialTaken.length > 0) {
+        throw Errors.conflict(`${serialTaken.length} serial numbers are already on items, e.g. ${serialTaken.slice(0, 5).map((t) => `${t.serialNumber} (${t.sku})`).join(', ')}. Change them in the mapping file.`);
+      }
 
       const master = input.masterData ?? { projects: [], recipients: [], suppliers: [] };
       const projects = { created: 0, existing: 0 };
@@ -127,6 +132,7 @@ export const OpeningBalanceService = {
           unitOfMeasure: m.unitOfMeasure,
           requiredStock: toDecimal(m.requiredStock),
           unitCost: m.unitCost === null ? null : toDecimal(m.unitCost),
+          serialNumber: m.serialNumber,
           description: m.oldProductIds.length > 0 ? `Workbook Product ID: ${m.oldProductIds.join(', ')}` : null,
         })),
       });

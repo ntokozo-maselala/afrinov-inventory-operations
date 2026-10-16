@@ -2,10 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), perms: { activity: false } }));
+const { mockGet, perms, exports } = vi.hoisted(() => ({
+  mockGet: vi.fn(), perms: { activity: false },
+  exports: { excel: vi.fn(), received: vi.fn(), issued: vi.fn(), counts: vi.fn(), ledger: vi.fn() },
+}));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
+}));
+vi.mock('../api/exportMovements', () => ({ downloadMovements: exports.excel, downloadMovementsPdf: exports.ledger }));
+vi.mock('../api/exportReports', () => ({
+  downloadReceivedStock: exports.excel, downloadIssuedStock: exports.excel, downloadStockCounts: exports.excel,
+  downloadReceivedStockPdf: exports.received, downloadIssuedStockPdf: exports.issued, downloadStockCountsPdf: exports.counts,
 }));
 vi.mock('../hooks/usePermissions', () => ({
   usePermissions: () => ({ hasPermission: () => true }),
@@ -36,7 +44,7 @@ const COUNTS = [
   { id: 'c-3', cursor: 'c3', at: '2026-09-25T10:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 2, adjusted: 1, note: null,
     differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
     lines: [
-      { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7' },
+      { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7', note: '2 cracked' },
       { materialId: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitOfMeasure: 'pair', expected: '4', counted: '4' },
     ] },
   { id: 'c-2', cursor: 'c2', at: '2026-09-25T09:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 4, adjusted: 1, note: null,
@@ -44,7 +52,7 @@ const COUNTS = [
   { id: 'c-1', cursor: 'c1', at: '2026-09-25T08:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 3, adjusted: 0, note: null, differences: [], lines: [] },
 ];
 
-function renderAt(url: string, pages: Array<ReturnType<typeof row>[]> = [[row(1)]]) {
+function renderAt(url: string, pages: Array<Array<ReturnType<typeof row> & Record<string, unknown>>> = [[row(1)]]) {
   let page = 0;
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/inventory-transactions/summary')) return { total: 205, byType: {} };
@@ -102,12 +110,12 @@ describe('Movements page', () => {
     const expected = 'from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&report=writeoffs';
     expect(listCalls()[0]).toBe(`/inventory-transactions?${expected}&limit=100`);
     expect(mockGet).toHaveBeenCalledWith(`/inventory-transactions/summary?${expected}`);
-    expect(screen.queryByLabelText('Filter by supplier')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Supplier')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Search')).not.toBeInTheDocument();
   });
 
-  it('shows issued stock as issue slips, laid out like the Issue stock form, with what came back', async () => {
-    renderAt('/movements?report=issued&from=2026-09-25&recipientId=r-1&locationId=l-1&q=disc');
+  it('shows issued stock as issue slips when cards are chosen, laid out like the Issue stock form, with what came back', async () => {
+    renderAt('/movements?report=issued&view=cards&from=2026-09-25&recipientId=r-1&locationId=l-1&q=disc');
     const slip = await screen.findByRole('region', { name: 'Issue to Sabelo' });
     expect(within(slip).getByText('AFRI-1325')).toBeInTheDocument();
     const disc = within(slip).getByText('DISC-115').closest('tr')!;
@@ -115,7 +123,7 @@ describe('Movements page', () => {
     expect(within(disc).getByText('1')).toBeInTheDocument();
     expect(within(within(slip).getByText('GLOVE-L').closest('tr')!).getByText('Reversed')).toBeInTheDocument();
     expect(mockGet).toHaveBeenCalledWith('/inventory-issues?from=2026-09-25&to=2026-09-25&recipientId=r-1&locationId=l-1&q=disc&limit=50');
-    expect(screen.getByLabelText('Filter by who it was issued to')).toHaveValue('r-1');
+    expect(screen.getByLabelText('Issued to')).toHaveValue('r-1');
     expect(listCalls()).toHaveLength(0);
   });
 
@@ -135,8 +143,8 @@ describe('Movements page', () => {
     expect(listCalls()).toHaveLength(0);
   });
 
-  it('shows received stock as deliveries, laid out like the Receive stock form', async () => {
-    renderAt('/movements?report=received&from=2026-09-25&supplierId=s-1');
+  it('shows received stock as deliveries when cards are chosen, laid out like the Receive stock form', async () => {
+    renderAt('/movements?report=received&view=cards&from=2026-09-25&supplierId=s-1');
     const delivery = await screen.findByRole('region', { name: 'Delivery INV-2041' });
     expect(within(delivery).getByText('Hydroscand')).toBeInTheDocument();
     expect(within(delivery).getByText('Main Storeroom')).toBeInTheDocument();
@@ -145,15 +153,65 @@ describe('Movements page', () => {
     expect(listCalls()).toHaveLength(0);
   });
 
-  it('shows each count as its full sheet, and older counts by their differences', async () => {
-    renderAt('/movements?report=counts&from=2026-09-25');
+  it('shows each count as its full sheet when cards are chosen, and older counts by their differences', async () => {
+    renderAt('/movements?report=counts&view=cards&from=2026-09-25');
     const [sheet, older, clean] = await screen.findAllByRole('region', { name: 'Count at Boiler Shop' });
     const disc = within(sheet!).getByText('DISC-115').closest('tr')!;
-    expect([...disc.querySelectorAll('td')].slice(1).map((td) => td.textContent)).toEqual(['9', '7 each', '-2']);
+    expect([...disc.querySelectorAll('td')].slice(1).map((td) => td.textContent)).toEqual(['9', '7 each', '-2', '2 cracked']);
     expect(within(within(sheet!).getByText('GLOVE-L').closest('tr')!).getByText('✓')).toBeInTheDocument();
     expect(within(older!).getByText('Counted before full count sheets were kept: only the differences are shown.')).toBeInTheDocument();
     expect(within(older!).getByText('-2')).toBeInTheDocument();
     expect(within(clean!).getByText('No differences: everything counted matched the system.')).toBeInTheDocument();
+  });
+
+  const cells = (tr: HTMLElement) => [...tr.querySelectorAll('td')].map((td) => td.textContent);
+
+  it('shows received stock as a flat table by default, one row per item received', async () => {
+    renderAt('/movements?report=received&from=2026-09-25&supplierId=s-1');
+    const table = await screen.findByRole('table', { name: 'Received stock' });
+    const disc = within(table).getByText('DISC-115').closest('tr')!;
+    expect(cells(disc).slice(1)).toEqual(['Hydroscand', 'INV-2041', 'DISC-115 Cutting disc', 'Main Storeroom', '20 each', 'GR-2026-0007', 'Vusi']);
+    expect(screen.getByText('1 delivery, 1 line')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Table' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('region', { name: 'Delivery INV-2041' })).not.toBeInTheDocument();
+  });
+
+  it('shows issued stock as a flat table by default, each line with its slip, and opens a line to return or reverse it', async () => {
+    renderAt('/movements?report=issued&from=2026-09-25');
+    const table = await screen.findByRole('table', { name: 'Issued stock' });
+    const disc = within(table).getByText('DISC-115').closest('tr')!;
+    expect(cells(disc).slice(1)).toEqual(['Sabelo (Worker)', 'AFRI-1325', 'DISC-115 Cutting disc', 'Boiler Shop', '3 each', '1', 'Vusi']);
+    const gloves = within(table).getByText('GLOVE-L').closest('tr')!;
+    expect(within(gloves).getByText('Reversed')).toBeInTheDocument();
+    expect(cells(gloves)[2]).toBe('AFRI-1325');
+    expect(screen.getByText(/1 issue, 2 lines/)).toBeInTheDocument();
+    fireEvent.click(within(disc).getAllByRole('button')[0]!);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('shows stock counts as a flat table by default: sheet lines, older differences, and counts with none', async () => {
+    renderAt('/movements?report=counts&from=2026-09-25');
+    const table = await screen.findByRole('table', { name: 'Stock counts' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(4);
+    expect(cells(rows[0]!).slice(1)).toEqual(['Boiler Shop', 'DISC-115 Cutting disc', '9', '7 each', '-2', '2 cracked', 'Vusi']);
+    expect(cells(rows[1]!)[5]).toBe('✓');
+    expect(cells(rows[2]!).slice(2, 6)).toEqual(['DISC-115 Cutting disc', '—', '—', '-2 each']);
+    expect(cells(rows[2]!)[6]).toBe('Counted before full sheets were kept');
+    expect(cells(rows[3]!)[2]).toBe('No differences: everything counted matched the system');
+    expect(screen.getByText('3 counts, 4 lines')).toBeInTheDocument();
+  });
+
+  it('switches between table and cards, and keeps the choice when the report changes', async () => {
+    renderAt('/movements?report=received&from=2026-09-25');
+    await screen.findByRole('table', { name: 'Received stock' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
+    expect(await screen.findByRole('region', { name: 'Delivery INV-2041' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cards' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'issued' } });
+    expect(await screen.findByRole('region', { name: 'Issue to Sabelo' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
+    expect(await screen.findByRole('table', { name: 'Issued stock' })).toBeInTheDocument();
   });
 
   it('offers Other changes only to those who may see it', async () => {
@@ -170,6 +228,54 @@ describe('Movements page', () => {
     fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'other' } });
     expect(await screen.findByRole('link', { name: 'Added item WSHR-16 Flat washer' })).toHaveAttribute('href', '/materials/m-1');
     expect(mockGet).toHaveBeenCalledWith('/activity?from=2026-10-12&to=2026-10-12&limit=50');
-    expect(screen.queryByRole('button', { name: /Download as Excel/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('downloads the chosen report as a PDF that names its dates and filters', async () => {
+    for (const f of Object.values(exports)) f.mockReset().mockResolvedValue(undefined);
+    renderAt('/movements?report=received&from=2026-09-25&to=2026-09-30&supplierId=s-1');
+    await screen.findByText('GR-2026-0007', { exact: false });
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Hydroscand' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(exports.received).toHaveBeenCalledWith(
+      'from=2026-09-25&to=2026-09-30&supplierId=s-1',
+      { title: 'Received stock, 25 Sept 2026 to 30 Sept 2026', lines: ['Supplier: Hydroscand'] },
+    ));
+    expect(exports.excel).not.toHaveBeenCalled();
+  });
+
+  it('downloads a ledger report as a PDF of that report, and as Excel', async () => {
+    for (const f of Object.values(exports)) f.mockReset().mockResolvedValue(undefined);
+    renderAt('/movements?report=writeoffs&from=2026-10-05');
+    await screen.findByText('SKU-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(exports.ledger).toHaveBeenCalledWith('from=2026-10-05&to=2026-10-05', 'writeoffs', { title: 'Write-offs and adjustments, 05 Oct 2026', lines: [] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
+    await waitFor(() => expect(exports.excel).toHaveBeenCalledWith('from=2026-10-05&to=2026-10-05&report=writeoffs'));
+  });
+
+  it('lists tool loans, filtered by who has them, with the condition each came back in', async () => {
+    const lines = [
+      { ...row(1), type: 'LOAN', quantity: '-1', recipientName: 'Sabelo' },
+      { ...row(2), type: 'LOAN_RETURN', quantity: '1', recipientName: 'Sabelo', reasonCode: 'DAMAGE', reasonNote: 'Chuck damaged' },
+    ];
+    renderAt('/movements?report=loans&from=2026-10-05&recipientId=r-1', [lines]);
+    expect(await screen.findByText('Chuck damaged')).toBeInTheDocument();
+    expect(listCalls()[0]).toBe('/inventory-transactions?from=2026-10-05&to=2026-10-05&recipientId=r-1&report=loans&limit=100');
+    expect(screen.getByText('Checked out to', { selector: 'label' })).toBeInTheDocument();
+    expect(screen.getByText('Tool out')).toBeInTheDocument();
+    expect(screen.getByText('Damaged')).toBeInTheDocument();
+  });
+
+  it('labels each filter of the chosen report', async () => {
+    renderAt('/movements');
+    await screen.findByText('SKU-1');
+    for (const label of ['Location', 'Person', 'Item', 'Search']) {
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
   });
 });

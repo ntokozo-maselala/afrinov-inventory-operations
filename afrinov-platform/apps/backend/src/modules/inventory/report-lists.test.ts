@@ -79,8 +79,8 @@ describe('StockCountService.list', () => {
       { referenceId: 'c-2', materialId: 'm-1', material: material('DISC-115', 'Cutting disc'), quantity: { toString: () => '-2' } },
     ]);
     sheetFindMany.mockResolvedValue([
-      { countId: 'c-2', materialId: 'm-2', material: material('GLOVE-L', 'Welding gloves'), expectedQuantity: { toString: () => '4' }, countedQuantity: { toString: () => '4' } },
-      { countId: 'c-2', materialId: 'm-1', material: material('DISC-115', 'Cutting disc'), expectedQuantity: { toString: () => '9' }, countedQuantity: { toString: () => '7' } },
+      { countId: 'c-2', materialId: 'm-2', material: material('GLOVE-L', 'Welding gloves'), expectedQuantity: { toString: () => '4' }, countedQuantity: { toString: () => '4' }, note: null },
+      { countId: 'c-2', materialId: 'm-1', material: material('DISC-115', 'Cutting disc'), expectedQuantity: { toString: () => '9' }, countedQuantity: { toString: () => '7' }, note: '2 cracked' },
     ]);
     const counts = await StockCountService.list({ locationId: 'l-1' });
     expect(counts).toEqual([
@@ -89,8 +89,8 @@ describe('StockCountService.list', () => {
         countedByName: 'Vusi', counted: 4, adjusted: 1, note: 'Monthly',
         differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
         lines: [
-          { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7' },
-          { materialId: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitOfMeasure: 'each', expected: '4', counted: '4' },
+          { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7', note: '2 cracked' },
+          { materialId: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitOfMeasure: 'each', expected: '4', counted: '4', note: null },
         ],
       },
       // Counted before sheets were kept: differences only.
