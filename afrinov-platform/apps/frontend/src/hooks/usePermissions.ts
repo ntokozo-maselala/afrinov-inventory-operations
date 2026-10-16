@@ -62,7 +62,7 @@ export const PERMISSION_ROLES = {
   'racks:manage': ['STORE_CONTROLLER'], // manage:racks
   'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // manage:projects
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
-  'suppliers:manage': ['PROCUREMENT'], // create:supplier, edit:supplier
+  'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
   'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order
   'orders:approve': ['APPROVER'], // approve:purchase_order

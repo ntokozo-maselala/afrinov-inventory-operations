@@ -4,7 +4,7 @@ import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
 import { Button } from '../components/Button';
-import { Input, Field } from '../components/Field';
+import { Input } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
@@ -12,8 +12,7 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { usePermissions } from '../hooks/usePermissions';
-import { api, type ApiError } from '../api/client';
-import { Alert } from '../components/Alert';
+import { SupplierForm } from '../components/SupplierForm';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface Supplier {
@@ -89,61 +88,4 @@ function columns(): DataTableColumn<Supplier>[] {
     { key: 'phone', header: 'Phone', render: (s) => s.contactPhone ?? <span className="text-surface-300">—</span> },
     { key: 'status', header: 'Status', render: (s) => s.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '8rem' },
   ];
-}
-
-export function SupplierForm({ onCancel, onSaved, onError, onSuccess, initial }: {
-  onCancel: () => void;
-  onSaved: () => void;
-  onError: (e: ApiError) => void;
-  onSuccess: () => void;
-  initial?: Partial<Supplier>;
-}) {
-  const [name, setName] = useState(initial?.name ?? '');
-  const [contactName, setContact] = useState(initial?.contactName ?? '');
-  const [contactEmail, setEmail] = useState(initial?.contactEmail ?? '');
-  const [contactPhone, setPhone] = useState(initial?.contactPhone ?? '');
-  const [notes, setNotes] = useState(initial?.notes ?? '');
-  const [busy, setBusy] = useState(false);
-  const [validation, setValidation] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setValidation(null);
-    if (!name.trim()) { setValidation('Name is required.'); return; }
-    if (contactEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contactEmail)) { setValidation('Enter a valid email address.'); return; }
-    setBusy(true);
-    try {
-      await api.post('/suppliers', {
-        name: name.trim(),
-        contactName: contactName || undefined,
-        contactEmail: contactEmail || undefined,
-        contactPhone: contactPhone || undefined,
-        notes: notes || undefined,
-      });
-      onSuccess();
-      onSaved();
-    } catch (err) { onError(err as ApiError); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-4" noValidate>
-      <Field label="Name" htmlFor="sup-name" required error={validation && !name.trim() ? validation : null}>
-        <Input id="sup-name" value={name} onChange={(e) => setName(e.target.value)} required invalid={!!validation && !name.trim()} />
-      </Field>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Contact name" htmlFor="sup-contact"><Input id="sup-contact" value={contactName} onChange={(e) => setContact(e.target.value)} /></Field>
-        <Field label="Phone" htmlFor="sup-phone"><Input id="sup-phone" value={contactPhone} onChange={(e) => setPhone(e.target.value)} /></Field>
-      </div>
-      <Field label="Email" htmlFor="sup-email" error={validation && contactEmail ? validation : null}>
-        <Input id="sup-email" type="email" value={contactEmail} onChange={(e) => setEmail(e.target.value)} invalid={!!validation && !!contactEmail} />
-      </Field>
-      <Field label="Notes" htmlFor="sup-notes"><Input id="sup-notes" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
-      {validation && (validation !== 'Name is required.' || !name.trim()) && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
-      <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
-        <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
-        <Button variant="primary" type="submit" loading={busy}>Save supplier</Button>
-      </div>
-    </form>
-  );
 }

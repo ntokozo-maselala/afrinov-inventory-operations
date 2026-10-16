@@ -287,7 +287,7 @@ export const InventoryService = {
     const receiptIds = [...new Set(rows.filter((t) => t.referenceType === 'GoodsReceipt' && t.referenceId).map((t) => t.referenceId!))];
     const receipts = receiptIds.length === 0 ? [] : await prisma.goodsReceipt.findMany({
       where: { id: { in: receiptIds } },
-      select: { id: true, number: true, deliveryRef: true, supplier: { select: { name: true } } },
+      select: { id: true, number: true, deliveryRef: true, purchaseOrderId: true, supplier: { select: { name: true } } },
     });
     const receiptById = new Map(receipts.map((r) => [r.id, r]));
     const issueIds = rows.filter((t) => t.type === InventoryTransactionType.ISSUE).map((t) => t.id);
@@ -333,7 +333,8 @@ export const InventoryService = {
       otherLocationName: t.pairedWithId ? partnerLocation.get(t.pairedWithId) ?? null : null,
       ...(() => {
         const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
-        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null };
+        // fromPurchaseOrder: such a receipt also moved the order's received quantities, so it cannot be reversed here.
+        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null, fromPurchaseOrder: !!r?.purchaseOrderId };
       })(),
     }));
   },

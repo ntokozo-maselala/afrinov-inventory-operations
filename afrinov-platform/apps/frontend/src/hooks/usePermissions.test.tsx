@@ -180,7 +180,7 @@ describe('usePermissions — the role check sheet', () => {
     STORE_CONTROLLER: [
       'materials:manage', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
       'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage', 'racks:manage',
-      'projects:manage', 'recipients:manage', 'activity:view',
+      'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view',
     ],
     PROCUREMENT: ['inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage'],
     APPROVER: ['orders:approve'],

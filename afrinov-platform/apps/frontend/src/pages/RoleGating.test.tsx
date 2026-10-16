@@ -97,10 +97,10 @@ describe('setup pages', () => {
     expect(button('View')).toBeInTheDocument();
   });
 
-  it('a store controller cannot add suppliers: the server keeps that for Procurement', async () => {
+  it('a store controller can add suppliers, as the one who receives deliveries (ADR-018)', async () => {
     page(<Suppliers />, ['STORE_CONTROLLER']);
     await screen.findByText('Hydroscand');
-    expect(button('Add supplier')).not.toBeInTheDocument();
+    expect(button('Add supplier')).toBeInTheDocument();
   });
 });
 

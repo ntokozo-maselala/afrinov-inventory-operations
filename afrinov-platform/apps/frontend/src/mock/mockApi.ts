@@ -2020,7 +2020,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
-      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
+      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null, fromPurchaseOrder: !!gr?.purchaseOrderId };
     })(),
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,
