@@ -1,9 +1,9 @@
 // The PDF copy of a report, for sending by email or filing: A4 landscape, the
 // Afrinov logo centred at the top, then the report's title and what it covers,
 // its tables, each with its subtotal rows, and "Page X of Y" with when it was
-// made at the foot of every page. Item lists (tables of FULL_WIDTH_COLUMNS
-// columns or more) span the page, the spare width going to their text columns;
-// summaries stay as wide as their content, so each figure sits by its label.
+// made at the foot of every page. Every table spans the page, the spare width
+// going to its text columns (names, places, notes), so the figures stay together
+// on the right.
 // Tables with the same columns share their column widths, so a report's
 // per-category tables line up one under another. A table too wide for the page
 // spans it, and then only its text columns wrap. Built in the browser from the
@@ -19,7 +19,7 @@ export interface PdfColumn {
   align?: 'left' | 'right';
   /**
    * Text that may wrap onto more lines when the table is wider than the page,
-   * and that takes the spare width of an item list: names, places and notes.
+   * and that takes the table's spare width: names, places and notes.
    * Codes, dates, quantities and amounts never wrap.
    */
   wrap?: boolean;
@@ -60,11 +60,6 @@ const MARGIN = 12;
 const LOGO_HEIGHT = 24;
 const FONT_SIZE = 8;
 const CELL_PADDING = 1.5;
-/**
- * A table with this many columns or more is an item list and spans the page.
- * Fewer is a summary (by category, by project…), kept as wide as its content.
- */
-export const FULL_WIDTH_COLUMNS = 6;
 
 /**
  * The standard PDF fonts only carry Western European characters; swap the few
@@ -160,15 +155,12 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
     const natural = shared.get(signature(section)) ?? naturalWidths(section);
     const contentWidth = sum(natural);
     const fits = contentWidth <= available;
-    const itemList = section.columns.length >= FULL_WIDTH_COLUMNS;
     let widths: Array<number | 'auto' | 'wrap'>;
     if (!fits) {
       // Too wide for the page: it spans it, and only the text columns wrap.
       widths = section.columns.map((c) => (c.wrap ? 'auto' : 'wrap'));
-    } else if (!itemList) {
-      widths = natural;
     } else {
-      // An item list fills the page; the spare width goes to its text columns
+      // The table fills the page; the spare width goes to its text columns
       // (in proportion to their content), or to every column if it has none.
       const spare = available - contentWidth;
       const text = section.columns.flatMap((c, i) => (c.wrap ? [i] : []));
@@ -181,7 +173,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
     autoTable(doc, {
       startY: y,
       margin: { left: SIDE, right: SIDE, top: MARGIN, bottom: MARGIN + 6 },
-      tableWidth: !fits ? 'auto' : itemList ? available : contentWidth,
+      tableWidth: !fits ? 'auto' : available,
       theme: 'grid',
       head: [section.columns.map((c) => pdfText(c.header))],
       body: [

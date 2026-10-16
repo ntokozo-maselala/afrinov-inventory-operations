@@ -71,9 +71,9 @@ describe('report PDF', () => {
     expect(out).toContain('Page 2 of 2');
   });
 
-  it('makes a short table only as wide as its content, and a wide one span the page with only its text wrapping', async () => {
-    const short = text(await buildPdf({ title: 'Short', lines: [], sections: [{ columns: [{ header: 'Category' }, { header: 'Value', align: 'right' }], rows: [['Tools', 'R 7 700,00']] }] }));
-    expect(rightEdge(short)).toBeLessThan(200);
+  it('spans the page with a short table too, and wraps only the text of one too wide for it', async () => {
+    const short = text(await buildPdf({ title: 'Short', lines: [], sections: [{ columns: [{ header: 'Category', wrap: true }, { header: 'Value', align: 'right' }], rows: [['Tools', 'R 7 700,00']] }] }));
+    expect(rightEdge(short)).toBeGreaterThan(780);
     const long = 'A very long item name that keeps going '.repeat(8);
     const wide = text(await buildPdf({ title: 'Wide', lines: [], sections: [{ columns: [{ header: 'Code' }, { header: 'Item', wrap: true }], rows: [['TOOL-TORQUE-1/2', long]] }] }));
     // The page less its 20 mm side margins ends at about 785.
@@ -88,7 +88,7 @@ describe('report PDF', () => {
     { header: 'Used', align: 'right' as const }, { header: 'Value', align: 'right' as const }, { header: 'Last supplier', wrap: true },
   ];
 
-  it('spans the page with an item list of six columns or more, even when its content is short', async () => {
+  it('gives the spare width of a full-page table to its text columns', async () => {
     const out = text(await buildPdf({ title: 'Items', lines: [], sections: [{ columns: itemColumns, rows: [['DISC', 'Disc', 'each', '4', 'R 10,00', 'Hydroscand']] }] }));
     expect(leftEdge(out)).toBeCloseTo(56.7, 0);
     expect(rightEdge(out)).toBeGreaterThan(780);
@@ -98,10 +98,13 @@ describe('report PDF', () => {
     expect(item!).toBeGreaterThan(3 * code!);
   });
 
-  it('keeps a summary of five columns or fewer as wide as its content', async () => {
-    const columns = [{ header: 'Category' }, { header: 'Urgent', align: 'right' as const }, { header: 'Warning', align: 'right' as const }, { header: 'Items', align: 'right' as const }, { header: 'Value', align: 'right' as const }];
+  it('spans the page with a summary too, keeping its figures together on the right', async () => {
+    const columns = [{ header: 'Category', wrap: true }, { header: 'Urgent', align: 'right' as const }, { header: 'Warning', align: 'right' as const }, { header: 'Items', align: 'right' as const }, { header: 'Value', align: 'right' as const }];
     const out = text(await buildPdf({ title: 'Summary', lines: [], sections: [{ columns, rows: [['Tools', '2', '0', '2', 'R 7 700,00']] }] }));
-    expect(rightEdge(out)).toBeLessThan(400);
+    expect(rightEdge(out)).toBeGreaterThan(780);
+    // Category takes the spare width; the four figure columns stay narrow.
+    const widths = cells(out).slice(0, 5).map(([, w]) => w);
+    expect(widths[0]!).toBeGreaterThan(widths.slice(1).reduce((a, w) => a + w, 0));
   });
 
   it('lines up the columns of tables that have the same columns, as one per category', async () => {
