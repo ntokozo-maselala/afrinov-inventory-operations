@@ -12,6 +12,8 @@ import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { RecipientSelect, ProjectSelect, useIssueOptions } from '../components/IssueFields';
+import { usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
@@ -103,6 +105,10 @@ export function IssueStock() {
       setBusy(false);
     }
   }
+
+  // Reached by a typed or old link: say so rather than offer a form the server would refuse.
+  const allowed = usePermissions().hasPermission('inventory:issue');
+  if (!allowed) return <NoAccess title="Issue stock" action="issue stock" />;
 
   return (
     <div>

@@ -15,7 +15,9 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { Drawer } from '../components/Modal';
 import { MaterialForm, type CreatedMaterial } from '../components/MaterialForm';
-import { useCanManageMaterials } from '../hooks/usePermissions';
+import { SupplierForm } from '../components/SupplierForm';
+import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import type { CurrentStockRow, Material } from '../api/types';
 
@@ -48,6 +50,9 @@ export function ReceiveStock() {
   const [error, setError] = useState<string | null>(null);
   const [addingItem, setAddingItem] = useState(false);
   const canAddItem = useCanManageMaterials();
+  // A delivery from a new supplier is booked without leaving the page (ADR-018).
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const canAddSupplier = usePermissions().hasPermission('suppliers:manage');
   const toast = useToast();
 
   const activeSuppliers = useMemo(() => (suppliers.data ?? []).filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name)), [suppliers.data]);
@@ -138,6 +143,10 @@ export function ReceiveStock() {
     }
   }
 
+  // Reached by a typed or old link: say so rather than offer a form the server would refuse.
+  const allowed = usePermissions().hasPermission('inventory:receive');
+  if (!allowed) return <NoAccess title="Receive stock" action="receive stock" />;
+
   return (
     <div>
       <PageHeader
@@ -166,8 +175,17 @@ export function ReceiveStock() {
           </div>
           {!loading && activeSuppliers.length === 0 && (
             <Alert tone="info" title="No suppliers yet">
-              Add the supplier on the <Link to="/suppliers" className="btn-link">Suppliers</Link> page first.
+              {canAddSupplier
+                ? <>Add the supplier of this delivery with <button type="button" className="btn-link" onClick={() => setAddingSupplier(true)}>New supplier</button>.</>
+                : 'Ask a store controller or Procurement to add the supplier of this delivery.'}
             </Alert>
+          )}
+          {!loading && activeSuppliers.length > 0 && (
+            <p className="text-xs text-surface-500 -mt-3">
+              {canAddSupplier
+                ? <>Supplier not listed? <button type="button" className="btn-link" onClick={() => setAddingSupplier(true)}>New supplier</button></>
+                : 'Supplier not listed? Ask a store controller or Procurement to add it.'}
+            </p>
           )}
 
           <fieldset className="space-y-3">
@@ -245,6 +263,17 @@ export function ReceiveStock() {
             onCancel={() => setAddingItem(false)}
             onSaved={itemAdded}
             onError={(err) => toast.error('Could not add item', err.message)}
+          />
+        </Drawer>
+      )}
+
+      {addingSupplier && canAddSupplier && (
+        <Drawer open onClose={() => setAddingSupplier(false)} title="New supplier" description="Add the supplier, then carry on with this delivery. Names must be unique, ignoring case and spacing." width="md">
+          <SupplierForm
+            onCancel={() => setAddingSupplier(false)}
+            onSaved={(s) => { setAddingSupplier(false); suppliers.reload(); setSupplierId(s.id); }}
+            onSuccess={() => toast.success('Supplier added')}
+            onError={(err) => toast.error('Could not add supplier', err.message)}
           />
         </Drawer>
       )}

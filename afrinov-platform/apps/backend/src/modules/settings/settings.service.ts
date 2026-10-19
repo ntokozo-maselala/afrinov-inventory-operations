@@ -154,7 +154,8 @@ const ENUM = <T extends string>(opts: readonly T[]) => (v: unknown) => {
 const CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP'] as const;
 const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'] as const;
 const TIME_FORMATS = ['24h', '12h'] as const;
-const LANDING_PAGES = ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders'] as const;
+// 'by-role': each role where it works (technicians on Issue stock, everyone else on the Dashboard).
+const LANDING_PAGES = ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders'] as const;
 const THEMES = ['system', 'light', 'dark'] as const;
 const DENSITIES = ['comfortable', 'compact'] as const;
 
@@ -166,7 +167,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'general.dateFormat', type: 'enum', category: 'general', description: 'Date display format used throughout the application.', default: 'YYYY-MM-DD', enumOptions: DATE_FORMATS, validate: ENUM(DATE_FORMATS) },
   { key: 'general.timeFormat', type: 'enum', category: 'general', description: 'Time display format.', default: '24h', enumOptions: TIME_FORMATS, validate: ENUM(TIME_FORMATS) },
   { key: 'general.defaultPageSize', type: 'number', category: 'general', description: 'Default rows per page in tables.', default: 25, validate: POS_INT(5, 200) },
-  { key: 'general.defaultLandingPage', type: 'enum', category: 'general', description: 'Where to go after sign-in.', default: 'dashboard', enumOptions: LANDING_PAGES, validate: ENUM(LANDING_PAGES) },
+  { key: 'general.defaultLandingPage', type: 'enum', category: 'general', description: 'Where to go after sign-in. "By role" sends technicians to Issue stock and everyone else to the Dashboard.', default: 'by-role', enumOptions: LANDING_PAGES, validate: ENUM(LANDING_PAGES) },
 
   // ── Inventory ──────────────────────────────────────────────────────────
   { key: 'inventory.urgentBelowPercent', type: 'number', category: 'inventory', description: 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.', default: 20, validate: NON_NEG(100) },

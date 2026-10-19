@@ -68,6 +68,8 @@ export interface MovementRow {
   recipientName?: string | null;
   returnedQuantity?: string | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
+  /** A receipt against a purchase order: it cannot be reversed from the movement, only on the order. */
+  fromPurchaseOrder?: boolean;
   /** A transfer's other leg: where the stock went to (or came from). */
   otherLocationName?: string | null;
 }

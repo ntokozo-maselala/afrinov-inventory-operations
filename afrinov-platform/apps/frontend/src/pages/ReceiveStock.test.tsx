@@ -2,17 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockPost, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), perms: { canManageMaterials: true } }));
+const { mockGet, mockPost, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), perms: { canManageMaterials: true, canAddSupplier: true } }));
 
 vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => perms.canManageMaterials }));
+vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => perms.canManageMaterials, usePermissions: () => ({ hasPermission: (p: string) => p !== 'suppliers:manage' || perms.canAddSupplier }) }));
 
 const { ReceiveStock } = await import('./ReceiveStock');
 const { ToastProvider } = await import('../components/Toast');
 
+let addedSuppliers: Array<{ id: string; name: string; active: boolean }> = [];
 let addedMaterials: Array<{ id: string; sku: string; name: string; unitOfMeasure: string; active: boolean }> = [];
 
 function renderPage(url = '/stock/receive') {
@@ -20,6 +21,7 @@ function renderPage(url = '/stock/receive') {
     if (path.startsWith('/suppliers')) return [
       { id: 's-1', name: 'Hydroscand', active: true },
       { id: 's-old', name: 'Closed Ltd', active: false },
+      ...addedSuppliers,
     ];
     if (path.startsWith('/materials')) return [
       { id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', active: true },
@@ -149,6 +151,42 @@ describe('ReceiveStock page', () => {
     await ready();
     expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
     expect(screen.getByText('Item not listed? Ask a store controller to add it.')).toBeInTheDocument();
+  });
+});
+
+describe('ReceiveStock with a new supplier (ADR-018)', () => {
+  beforeEach(() => {
+    perms.canManageMaterials = true;
+    perms.canAddSupplier = true;
+    addedMaterials = [];
+    addedSuppliers = [];
+    mockGet.mockReset();
+    mockPost.mockReset();
+  });
+
+  it('adds the supplier from the page and chooses it for the delivery', async () => {
+    mockPost.mockImplementation(async (path: string, body: { name: string }) => {
+      if (path === '/suppliers') { addedSuppliers = [{ id: 's-new', name: body.name, active: true }]; return { id: 's-new', name: body.name }; }
+      return { number: 'GR-1' };
+    });
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'New supplier' }));
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Kenflex' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save supplier' }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/suppliers', expect.objectContaining({ name: 'Kenflex' })));
+    await waitFor(() => expect(screen.getByLabelText(/^Supplier/)).toHaveValue('s-new'));
+    expect(screen.queryByRole('button', { name: 'Save supplier' })).not.toBeInTheDocument();
+  });
+
+  it('tells someone who cannot add suppliers whom to ask, instead of a dead-end link', async () => {
+    perms.canAddSupplier = false;
+    renderPage();
+    await ready();
+    expect(screen.queryByRole('button', { name: 'New supplier' })).not.toBeInTheDocument();
+    expect(screen.getByText('Supplier not listed? Ask a store controller or Procurement to add it.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Suppliers' })).not.toBeInTheDocument();
   });
 });
 

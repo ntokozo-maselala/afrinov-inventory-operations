@@ -1070,7 +1070,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'general.dateFormat': row('general.dateFormat', 'YYYY-MM-DD', 'enum', 'general', 'Date display format.', ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY']),
     'general.timeFormat': row('general.timeFormat', '24h', 'enum', 'general', 'Time display format.', ['24h', '12h']),
     'general.defaultPageSize': row('general.defaultPageSize', 25, 'number', 'general', 'Default rows per page in tables.'),
-    'general.defaultLandingPage': row('general.defaultLandingPage', 'dashboard', 'enum', 'general', 'Where to go after sign-in.', ['dashboard', 'inventory', 'low-stock', 'movements', 'purchase-orders']),
+    'general.defaultLandingPage': row('general.defaultLandingPage', 'by-role', 'enum', 'general', 'Where to go after sign-in. "By role" sends technicians to Issue stock and everyone else to the Dashboard.', ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders']),
 
     'inventory.urgentBelowPercent': row('inventory.urgentBelowPercent', 20, 'number', 'inventory', 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.'),
     'inventory.toolOverdueDays': row('inventory.toolOverdueDays', 7, 'number', 'inventory', 'A tool checked out longer than this many days is overdue: flagged on the Tools page and counted on the Dashboard.'),
@@ -2020,7 +2020,7 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
     ...(() => {
       const gr = t.referenceType === 'GoodsReceipt' ? state.goodsReceipts.find((g) => g.id === t.referenceId) : undefined;
-      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null };
+      return { receiptNumber: gr?.number ?? null, supplierName: gr ? findSupplier(gr.supplierId)?.name ?? null : null, deliveryRef: gr?.deliveryRef ?? null, fromPurchaseOrder: !!gr?.purchaseOrderId };
     })(),
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,

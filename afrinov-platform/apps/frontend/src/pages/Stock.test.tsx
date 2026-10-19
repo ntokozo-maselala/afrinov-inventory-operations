@@ -9,6 +9,10 @@ vi.mock('../api/client', () => ({
 }));
 vi.mock('../components/RoleGuard', () => ({ RoleGuard: () => null }));
 
+// Signed in as a store controller, who may do everything on these pages; tests that need another role set signedIn.roles.
+const { signedIn } = vi.hoisted(() => ({ signedIn: { roles: ['STORE_CONTROLLER'] as string[] } }));
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } }) }));
+
 const { Stock } = await import('./Stock');
 const { ToastProvider } = await import('../components/Toast');
 

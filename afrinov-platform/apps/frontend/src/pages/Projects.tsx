@@ -13,6 +13,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
+import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
@@ -215,6 +216,8 @@ export function Projects() {
   const [archive, setArchive] = useState<Project | null>(null);
   const [archiving, setArchiving] = useState(false);
   const toast = useToast();
+  // Adding, editing and archiving need manage:projects on the server.
+  const canManage = usePermissions().hasPermission('projects:manage');
 
   const filtered = useMemo(() => {
     if (!projects.data) return [];
@@ -250,11 +253,11 @@ export function Projects() {
       <PageHeader
         title="Projects"
         description="Manage projects and their lifecycle. Inventory consumption is tracked per project number."
-        actions={
+        actions={canManage && (
           <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add project
           </Button>
-        }
+        )}
       />
 
       <FilterBar
@@ -282,6 +285,7 @@ export function Projects() {
           rowKey={(p) => p.projectNumber}
           rows={filtered}
           columns={columns({
+            canManage,
             onEdit: (p) => setDrawer({ mode: 'edit', project: p }),
             onArchive: (p) => setArchive(p),
           })}
@@ -289,7 +293,7 @@ export function Projects() {
             <EmptyState
               title={q || statusFilter ? 'No projects match your filters' : 'No projects yet'}
               description={q || statusFilter ? 'Try clearing your filters.' : 'Create your first project to start linking inventory consumption.'}
-              action={!q && !statusFilter ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first project</Button> : undefined}
+              action={!q && !statusFilter && canManage ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first project</Button> : undefined}
             />
           }
         />
@@ -336,7 +340,7 @@ function stockUsedLink(p: Project): string {
   return `/reports/consumption?${q.toString()}`;
 }
 
-function columns({ onEdit, onArchive }: { onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
+function columns({ canManage, onEdit, onArchive }: { canManage: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
   return [
     { key: 'num', header: 'Number', render: (p) => <span className="font-mono">{p.projectNumber}</span>, width: '10rem' },
     { key: 'name', header: 'Name', render: (p) => <span className="font-medium">{p.name ?? <span className="text-surface-300">—</span>}</span> },
@@ -346,14 +350,14 @@ function columns({ onEdit, onArchive }: { onEdit: (p: Project) => void; onArchiv
     { key: 'status', header: 'Status', render: (p) => <Badge tone={STATUS_TONE[p.status]} dot>{p.status}</Badge>, width: '10rem' },
     { key: 'start', header: 'Start', render: (p) => p.startDate ? <span className="text-meta">{formatDate(p.startDate)}</span> : <span className="text-surface-300">—</span>, width: '10rem' },
     { key: 'used', header: 'Stock used', render: (p) => <Link to={stockUsedLink(p)} className="btn-link text-sm">View</Link>, width: '7rem' },
-    {
-      key: 'actions', header: '', align: 'right', width: '12rem',
-      render: (p) => (
+    ...(canManage ? [{
+      key: 'actions', header: '', align: 'right' as const, width: '12rem',
+      render: (p: Project) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(p)}>Edit</Button>
           <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onArchive(p)} disabled={!p.active}>Archive</Button>
         </div>
       ),
-    },
+    }] : []),
   ];
 }

@@ -12,6 +12,7 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { RoleGuard } from '../components/RoleGuard';
+import { usePermissions } from '../hooks/usePermissions';
 import { formatNumber } from '../lib/format';
 import { StockActionForm, type StockActionKind } from '../components/StockActionForm';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
@@ -35,6 +36,7 @@ export function Stock() {
   const [category, setCategory] = useState(() => (CATEGORIES.some((c) => c.value === params.get('category')) ? params.get('category')! : ''));
   const [status, setStatus] = useState(() => (STATUS_OPTIONS.some((o) => o.value === params.get('status')) ? params.get('status')! : ''));
   const [action, setAction] = useState<{ kind: StockActionKind; row: CurrentStockRow } | null>(null);
+  const { hasPermission } = usePermissions();
   const toast = useToast();
 
   const filtered = useMemo(() => {
@@ -60,30 +62,15 @@ export function Stock() {
       <PageHeader
         title="Stock"
         description="Current on-hand quantities across all locations. Source of truth is the inventory transaction ledger."
+        // Receive, Issue, Return and Count are in the Store menu. On a phone the
+        // menu folds into a drawer (below md), so the most frequent action stays
+        // one tap away here.
         actions={
-          <div className="flex flex-wrap gap-2">
-          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']}>
-            <Link to="/stock/receive">
-              <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowDown size={14} />}>Receive stock</Button>
-            </Link>
-          </RoleGuard>
-          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
-            <Link to="/stock/issue">
+          <RoleGuard permission="inventory:issue">
+            <Link to="/stock/issue" className="md:hidden">
               <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
             </Link>
           </RoleGuard>
-          {/* The same people as issuing, as on the server. */}
-          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
-            <Link to="/stock/return">
-              <Button variant="primary" size="sm" leadingIcon={<Icon.Arrows size={14} />}>Return stock</Button>
-            </Link>
-          </RoleGuard>
-          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>
-            <Link to="/stock/count">
-              <Button variant="primary" size="sm" leadingIcon={<Icon.Check size={14} />}>Count stock</Button>
-            </Link>
-          </RoleGuard>
-          </div>
         }
       />
 
@@ -113,7 +100,7 @@ export function Stock() {
           isLoading={stock.loading}
           rowKey={(r) => `${r.materialId}-${r.locationId}`}
           rows={filtered}
-          columns={columns({ onAction: (kind, row) => setAction({ kind, row }) })}
+          columns={columns({ onAction: (kind, row) => setAction({ kind, row }), canTransfer: hasPermission('inventory:transfer'), canAdjust: hasPermission('inventory:adjust') })}
           emptyState={(
             <EmptyState
               title={activeFilters ? 'No stock matches your filters' : 'No stock yet'}
@@ -152,7 +139,11 @@ function actionTitle(kind: StockActionKind, row: CurrentStockRow): string {
   }[kind];
 }
 
-function columns({ onAction }: { onAction: (kind: StockActionKind, row: CurrentStockRow) => void }): DataTableColumn<CurrentStockRow>[] {
+function columns({ onAction, canTransfer, canAdjust }: {
+  onAction: (kind: StockActionKind, row: CurrentStockRow) => void;
+  canTransfer: boolean;
+  canAdjust: boolean;
+}): DataTableColumn<CurrentStockRow>[] {
   return [
     { key: 'sku', header: 'SKU', render: (r) => <Link to={`/materials/${r.materialId}`} className="btn-link text-mono">{r.materialSku}</Link>, width: '8rem' },
     { key: 'name', header: 'Material', render: (r) => <span className="line-clamp-1" title={r.materialName}>{r.materialName}</span> },
@@ -162,17 +153,16 @@ function columns({ onAction }: { onAction: (kind: StockActionKind, row: CurrentS
     { key: 'uom', header: 'UoM', render: (r) => r.unitOfMeasure, width: '6rem' },
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span>, width: '8rem' },
     { key: 'status', header: 'Status', render: (r) => statusBadge(r), width: '10rem' },
-    {
-      key: 'actions', header: '', align: 'right', width: '11rem',
-      render: (r) => (
-        <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
-          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-            <Button size="sm" variant="secondary" onClick={() => onAction('transfer', r)}>Transfer</Button>
-            <Button size="sm" variant="ghost" onClick={() => onAction('adjust', r)}>Adjust</Button>
-          </div>
-        </RoleGuard>
+    // Each button only for those the server lets do it; no column for those who can do neither.
+    ...(canTransfer || canAdjust ? [{
+      key: 'actions', header: '', align: 'right' as const, width: '11rem',
+      render: (r: CurrentStockRow) => (
+        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+          {canTransfer && <Button size="sm" variant="secondary" onClick={() => onAction('transfer', r)}>Transfer</Button>}
+          {canAdjust && <Button size="sm" variant="ghost" onClick={() => onAction('adjust', r)}>Adjust</Button>}
+        </div>
       ),
-    },
+    }] : []),
   ];
 }
 

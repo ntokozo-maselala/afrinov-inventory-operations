@@ -14,6 +14,8 @@ import { ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
+import { usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import type { CountRecord, CurrentStockRow, Material } from '../api/types';
 import { formatDateTime } from '../lib/format';
@@ -186,6 +188,10 @@ export function StockCount() {
   }
 
   const loadError = locations.error ?? materials.error;
+
+  // Reached by a typed or old link: say so rather than offer a form the server would refuse.
+  const allowed = usePermissions().hasPermission('inventory:count');
+  if (!allowed) return <NoAccess title="Count stock" action="post stock counts" />;
 
   return (
     <div className="print-area">

@@ -100,6 +100,10 @@ describe('receiving stock over real HTTP (procurement off)', () => {
   });
 
   it('can reverse a counter receipt booked by mistake', async () => {
+    // The movement says it came from no purchase order, so the detail panel offers Reverse.
+    const history = await api<Array<{ id: string; fromPurchaseOrder?: boolean }>>('GET', `/inventory-transactions?materialId=${glovesId}`);
+    expect(history.body.find((t) => t.id === firstReceipt.transactionIds[1])?.fromPurchaseOrder).toBe(false);
+
     const reversed = await api<{ reversalIds: string[] }>('POST', `/inventory-transactions/${firstReceipt.transactionIds[1]}/reversal`, {
       reason: 'Gloves were for another branch',
     });

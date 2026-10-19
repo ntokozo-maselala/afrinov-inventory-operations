@@ -13,6 +13,13 @@ describe('RolePermissions', () => {
     expect(ALL_PERMISSION_CODES).not.toContain('update:inventory_transaction');
   });
 
+  it('lets store controllers add and edit suppliers, as well as procurement (ADR-018)', () => {
+    for (const code of [PermissionCode.CreateSupplier, PermissionCode.EditSupplier]) {
+      const roles = Object.entries(RolePermissions).filter(([, p]) => p.includes(code)).map(([role]) => role).sort();
+      expect(roles).toEqual(['ADMIN', 'PROCUREMENT', 'STORE_CONTROLLER']);
+    }
+  });
+
   it('only references known permission codes', () => {
     const valid = new Set<string>(ALL_PERMISSION_CODES);
     for (const [role, perms] of Object.entries(RolePermissions)) {
