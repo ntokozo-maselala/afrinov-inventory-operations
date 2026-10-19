@@ -68,6 +68,7 @@ export const PERMISSION_ROLES = {
   'orders:approve': ['APPROVER'], // approve:purchase_order (within the user's approval limit)
   'orders:view': ['STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER'], // view:purchase_order
   'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order
+  'receipts:view': ['STORE_CONTROLLER', 'PROCUREMENT'], // view:goods_receipt
   'users:manage': [], // manage:users (ADMIN only)
 } as const satisfies Record<string, readonly RoleName[]>;
 

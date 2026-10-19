@@ -14,6 +14,8 @@ import { api, type ApiError } from '../api/client';
 import { formatDate, formatNumber } from '../lib/format';
 import { Alert } from '../components/Alert';
 import type { Material } from '../api/types';
+import { usePermissions } from '../hooks/usePermissions';
+import { NoAccess } from '../components/NoAccess';
 
 interface GR {
   id: string; number: string; status: string; deliveryRef?: string;
@@ -32,7 +34,17 @@ const STATUS_OPTIONS = [
   { value: 'POSTED', label: 'Posted' },
 ];
 
+// Only the roles the server lets view receipts see the page; a typed or old
+// link to it says so instead of showing a list that fails to load.
 export function GoodsReceipts() {
+  const { hasPermission } = usePermissions();
+  if (!hasPermission('receipts:view')) {
+    return <NoAccess title="Goods receipts" action="view goods receipts" section={{ label: 'Purchase orders', to: '/purchase-orders' }} />;
+  }
+  return <GoodsReceiptsList canReceive={hasPermission('inventory:receive')} />;
+}
+
+function GoodsReceiptsList({ canReceive }: { canReceive: boolean }) {
   const grs = useApi<GR[]>('/goods-receipts');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
@@ -65,7 +77,7 @@ export function GoodsReceipts() {
       <PageHeader
         title="Goods receipts"
         description="Record incoming stock. Receipts that are still SUBMITTED can be posted; posted receipts are immutable."
-        actions={<Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setCreating(true)}>New receipt</Button>}
+        actions={canReceive && <Button variant="primary" leadingIcon={<Icon.Plus />} onClick={() => setCreating(true)}>New receipt</Button>}
       />
 
       <Toolbar
@@ -92,12 +104,12 @@ export function GoodsReceipts() {
           isLoading={grs.loading}
           rowKey={(r) => r.id}
           rows={filtered}
-          columns={columns({ onPost: postOne })}
+          columns={columns({ onPost: canReceive ? postOne : undefined })}
           emptyState={<EmptyState title={q || status ? 'No receipts match' : 'No goods receipts yet'} description={q || status ? 'Try clearing filters.' : 'When stock arrives, record it here to update on-hand quantities.'} />}
         />
       )}
 
-      {creating && (
+      {creating && canReceive && (
         <CreateGRDrawer
           open
           onClose={() => setCreating(false)}
@@ -109,8 +121,9 @@ export function GoodsReceipts() {
   );
 }
 
-function columns({ onPost }: { onPost: (id: string) => void }): DataTableColumn<GR>[] {
-  return [
+/** onPost is left out for roles that cannot post receipts: no Post column then. */
+function columns({ onPost }: { onPost?: (id: string) => void }): DataTableColumn<GR>[] {
+  const cols: DataTableColumn<GR>[] = [
     { key: 'num', header: 'Receipt', className: 'text-mono', render: (r) => r.number, width: '10rem' },
     { key: 'sup', header: 'Supplier', render: (r) => r.supplier?.name ?? '—' },
     { key: 'ref', header: 'Delivery ref', render: (r) => r.deliveryRef ?? <span className="text-surface-300">—</span> },
@@ -118,8 +131,11 @@ function columns({ onPost }: { onPost: (id: string) => void }): DataTableColumn<
     { key: 'lines', header: 'Lines', align: 'right', render: (r) => formatNumber(r.lines.length), width: '5rem' },
     { key: 'units', header: 'Units', align: 'right', className: 'text-num', render: (r) => <span className="font-mono">{formatNumber(r.lines.reduce((a, l) => a + Number(l.quantity), 0))}</span>, width: '6rem' },
     { key: 'status', header: 'Status', render: (r) => <GoodsReceiptStatusBadge status={r.status} />, width: '9rem' },
-    { key: 'act', header: '', align: 'right', render: (r) => r.status === 'SUBMITTED' ? <Button size="sm" variant="secondary" onClick={() => onPost(r.id)}>Post</Button> : null, width: '6rem' },
   ];
+  if (onPost) {
+    cols.push({ key: 'act', header: '', align: 'right', render: (r) => r.status === 'SUBMITTED' ? <Button size="sm" variant="secondary" onClick={() => onPost(r.id)}>Post</Button> : null, width: '6rem' });
+  }
+  return cols;
 }
 
 interface CreateGRProps {

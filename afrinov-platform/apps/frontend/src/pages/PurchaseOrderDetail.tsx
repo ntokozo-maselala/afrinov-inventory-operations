@@ -275,7 +275,7 @@ export function PurchaseOrderDetail() {
 
               <section>
                 <SectionHeader title="Goods receipts" description="Receipts posted against this purchase order." />
-                <RelatedReceipts receipts={fresh.goodsReceipts ?? []} />
+                <RelatedReceipts receipts={fresh.goodsReceipts ?? []} canViewReceipts={hasPermission('receipts:view')} />
               </section>
 
               <section>
@@ -729,9 +729,9 @@ function OrderTotals({ po, totals, onAddPrices }: { po: PO; totals: PoTotals; on
   );
 }
 
-function RelatedReceipts({ receipts }: { receipts: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }> }) {
+function RelatedReceipts({ receipts, canViewReceipts }: { receipts: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }>; canViewReceipts: boolean }) {
   if (receipts.length === 0) {
-    return <EmptyState title="No receipts yet" description="Receipts will appear here when stock arrives against this PO." action={<Link to="/goods-receipts" className="btn-secondary btn-sm">Go to receipts</Link>} />;
+    return <EmptyState title="No receipts yet" description="Receipts will appear here when stock arrives against this PO." action={canViewReceipts ? <Link to="/goods-receipts" className="btn-secondary btn-sm">Go to receipts</Link> : undefined} />;
   }
   return (
     <DataTable
