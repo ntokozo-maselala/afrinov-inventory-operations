@@ -130,14 +130,14 @@ describe('only the actions each role may take', () => {
     await screen.findByText('Hydraulic pump');
     expect(button('Edit')).toBeInTheDocument();
     expect(button('Cancel PO')).toBeInTheDocument();
-    expect(button('Receive all outstanding')).not.toBeInTheDocument();
+    expect(button('Receive delivery')).not.toBeInTheDocument();
   });
 
   it('a store controller receives an approved order, and edits nothing', async () => {
     current.po = order('APPROVED');
     page(['STORE_CONTROLLER']);
     await screen.findByText('Hydraulic pump');
-    expect(button('Receive all outstanding')).toBeInTheDocument();
+    expect(button('Receive delivery')).toBeInTheDocument();
     expect(button('Edit')).not.toBeInTheDocument();
   });
 });

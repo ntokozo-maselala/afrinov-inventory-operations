@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -13,12 +13,15 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { api, type ApiError } from '../api/client';
 import { Alert } from '../components/Alert';
-import { Field, Select, Textarea } from '../components/Field';
+import { Field, Input, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
 import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
 import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
+import {
+  EveryLineInto, OrderReceiptRow, checkReceiptLines, receiptLinesBody, receiptLinesFromOrder, type ReceiptLineDraft,
+} from '../components/OrderReceiptLines';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -85,13 +88,11 @@ interface HistoryEntry {
 
 interface LocationOpt { id: string; name: string }
 
-interface ReceiveDraft { locationId: string; deliveryNotes: string }
 interface ReasonDraft { reason: string }
 
 type ActionDraft =
   | { kind: 'submit' }
   | { kind: 'approve' }
-  | { kind: 'receive'; draft: ReceiveDraft }
   | { kind: 'close'; draft: ReasonDraft }
   | { kind: 'cancel'; draft: ReasonDraft };
 
@@ -128,7 +129,10 @@ export function PurchaseOrderDetail() {
   const toast = useToast();
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('procurement:manage');
-  const canReceive = hasPermission('orders:receive');
+  // Receive delivery is for those who receive orders (not the buyer who raised
+  // it), and posts a goods receipt, so needs the server's permission for that too.
+  const canReceive = hasPermission('orders:receive') && hasPermission('inventory:receive');
+  const [receiving, setReceiving] = useState(false);
   const editOrder = () => navigate(`/purchase-orders/${id}/edit`);
 
   function reload() { po.reload(); history.reload(); approval.reload(); }
@@ -153,10 +157,7 @@ export function PurchaseOrderDetail() {
     setBusy(true);
     try {
       let payload: Record<string, unknown> = {};
-      if (draft.kind === 'receive') {
-        if (!draft.draft.locationId) { toast.error('Select a receive-into location'); setBusy(false); return; }
-        payload = { locationId: draft.draft.locationId, deliveryNotes: draft.draft.deliveryNotes || undefined };
-      } else if (draft.kind === 'close') {
+      if (draft.kind === 'close') {
         payload = draft.draft.reason.trim() ? { reason: draft.draft.reason.trim() } : {};
       } else if (draft.kind === 'cancel') {
         if (!draft.draft.reason.trim()) { toast.error('A cancellation reason is required'); setBusy(false); return; }
@@ -182,12 +183,25 @@ export function PurchaseOrderDetail() {
     if (!fresh) return null;
     if (isSubmittable(fresh.status)) return canManage ? { kind: 'submit', label: 'Submit for approval' } : null;
     if (isApprovable(fresh.status)) return approval.data?.canApprove ? { kind: 'approve', label: 'Approve' } : null;
-    if (isReceivable(fresh.status) && canReceive) return { kind: 'receive', label: 'Receive all outstanding' };
+    if (isReceivable(fresh.status) && canReceive) return { kind: 'receive', label: 'Receive delivery' };
     return null;
   }, [fresh, approval.data, canReceive, canManage]);
 
   function openPrimary(kind: PrimaryKind) {
-    setDraft(kind === 'receive' ? { kind, draft: { locationId: '', deliveryNotes: '' } } : { kind });
+    if (kind === 'receive') setReceiving(true);
+    else setDraft({ kind });
+  }
+
+  // Receive stock links here with ?receive=1 for a delivery against this order:
+  // the dialog opens once the order has loaded, and the link is tidied away.
+  const [params, setParams] = useSearchParams();
+  const [receiveRequested, setReceiveRequested] = useState(() => params.has('receive'));
+  useEffect(() => {
+    if (params.has('receive')) setParams((p) => { p.delete('receive'); return p; }, { replace: true });
+  }, [params, setParams]);
+  if (receiveRequested && fresh) {
+    setReceiveRequested(false);
+    if (canReceive && isReceivable(fresh.status)) setReceiving(true);
   }
 
   return (
@@ -294,6 +308,14 @@ export function PurchaseOrderDetail() {
       )}
 
       {po.loading && !fresh && <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>}
+
+      {receiving && fresh && (
+        <ReceiveDeliveryDialog
+          po={fresh}
+          onClose={() => setReceiving(false)}
+          onReceived={(number) => { setReceiving(false); reload(); toast.success(`Received on ${number}`, `${fresh.number} is credited with what arrived.`); }}
+        />
+      )}
 
       {draft && (
         <ActionDialog
@@ -406,8 +428,6 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   onConfirm: () => void;
   onChangeDraft: (next: ActionDraft) => void;
 }) {
-  const locations = useApi<LocationOpt[]>(draft.kind === 'receive' ? '/locations' : null);
-
   if (draft.kind === 'submit') {
     const unpriced = po ? po.lines.filter((l) => l.unitPrice === null || l.unitPrice === undefined).length : 0;
     return (
@@ -438,34 +458,6 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
         confirmLabel="Approve"
         loading={busy}
       />
-    );
-  }
-
-  if (draft.kind === 'receive') {
-    const d = draft.draft;
-    const upd = (patch: Partial<ReceiveDraft>) => onChangeDraft({ kind: 'receive', draft: { ...d, ...patch } });
-    const ready = d.locationId.trim().length > 0;
-    return (
-      <Modal open onClose={onClose} title="Receive all outstanding?" description={po ? `Everything still outstanding on ${po.number} is received into the chosen location. For a partial delivery, record a goods receipt instead.` : ''} size="md"
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button variant="primary" onClick={onConfirm} loading={busy} disabled={!ready}>Receive</Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <Field label="Receive into location" htmlFor="po-deliver-loc" required help="Inventory is recorded at this location via RECEIPT transactions." error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
-            <Select id="po-deliver-loc" value={d.locationId} onChange={(e) => upd({ locationId: e.target.value })}>
-              <option value="">— select location —</option>
-              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </Select>
-          </Field>
-          <Field label="Delivery notes" htmlFor="po-deliver-notes">
-            <Textarea id="po-deliver-notes" rows={2} value={d.deliveryNotes} onChange={(e) => upd({ deliveryNotes: e.target.value })} placeholder="Optional" />
-          </Field>
-        </div>
-      </Modal>
     );
   }
 
@@ -505,6 +497,72 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
       <Field label="Reason" htmlFor="po-cancel-reason" required help="A reason is required for the audit trail.">
         <Textarea id="po-cancel-reason" rows={3} value={d.reason} onChange={(e) => upd({ reason: e.target.value })} placeholder="e.g. Supplier out of stock" />
       </Field>
+    </Modal>
+  );
+}
+
+// ── Receive delivery ─────────────────────────────────────────────────────
+// What arrived on one delivery, line by line, posted as a goods receipt
+// against this order: the same form as Goods receipts, so a partial delivery
+// needs no other page.
+function ReceiveDeliveryDialog({ po, onClose, onReceived }: { po: PO; onClose: () => void; onReceived: (receiptNumber: string) => void }) {
+  const locations = useApi<LocationOpt[]>('/locations');
+  const [lines, setLines] = useState<ReceiptLineDraft[]>(() => receiptLinesFromOrder(po));
+  const [deliveryRef, setDeliveryRef] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const update = (i: number, patch: Partial<ReceiptLineDraft>) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+
+  async function receive() {
+    setProblem(null);
+    const checked = checkReceiptLines(lines, true);
+    if ('problem' in checked) { setProblem(checked.problem); return; }
+    setBusy(true);
+    try {
+      const created = await api.post<{ id: string; number: string }>('/goods-receipts', {
+        supplierId: po.supplierId,
+        purchaseOrderId: po.id,
+        deliveryRef: deliveryRef.trim() || undefined,
+        lines: receiptLinesBody(checked.lines),
+      });
+      await api.post(`/goods-receipts/${created.id}/post`);
+      onReceived(created.number);
+    } catch (err) {
+      setProblem((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open onClose={() => { if (!busy) onClose(); }} size="lg" title="Receive delivery"
+      description={`What arrived from ${po.supplier.name} against ${po.number}. Lines left at 0 stay outstanding.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="primary" onClick={() => void receive()} loading={busy}>Receive</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Delivery note / invoice no." htmlFor="po-rcv-ref" help="e.g. the Tax Invoice number">
+          <Input id="po-rcv-ref" value={deliveryRef} onChange={(e) => setDeliveryRef(e.target.value)} maxLength={120} />
+        </Field>
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span className="field-label">What arrived</span>
+            <EveryLineInto locations={locations.data ?? []} onChoose={(locationId) => setLines((ls) => ls.map((l) => ({ ...l, locationId })))} />
+          </div>
+          {locations.error && <p className="text-meta text-danger-700">Couldn&rsquo;t load locations. Close and reopen to try again.</p>}
+          {lines.length === 0 && <p className="text-meta italic">Nothing is outstanding on this order.</p>}
+          <div className="space-y-2">
+            {lines.map((l, i) => <OrderReceiptRow key={l.purchaseOrderLineId} line={l} index={i} locations={locations.data ?? []} onChange={(patch) => update(i, patch)} />)}
+          </div>
+        </div>
+        {problem && <Alert tone="danger" title="Cannot receive">{problem}</Alert>}
+        <p className="text-meta">A delivery with no order is booked on <Link to="/stock/receive" className="btn-link">Receive stock</Link>.</p>
+      </div>
     </Modal>
   );
 }
