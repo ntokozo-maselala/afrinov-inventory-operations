@@ -22,6 +22,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
+import { defaultVatRate, withTotals } from './po-pricing.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -188,15 +189,21 @@ export const SupplierService = {
 
 export interface CreatePOInput {
   supplierId: string;
+  /** unitPrice excludes VAT, in the supplier's currency. */
   lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>;
   notes?: string;
   expectedDeliveryDate?: string;
+  /** Percent. Left out: the VAT setting for rand suppliers, 0 for other currencies. */
+  vatRate?: number;
 }
 
 export interface UpdatePOInput {
   id: string;
   notes?: string;
   expectedDeliveryDate?: string | null;
+  vatRate?: number;
+  /** New unit prices by line id; null clears one. */
+  linePrices?: Array<{ lineId: string; unitPrice: number | null }>;
 }
 
 export interface ReceiveInput {
@@ -227,11 +234,12 @@ function toDateOnly(iso: string): Date {
 
 export const PurchaseOrderService = {
   async list(filter: { status?: PurchaseOrderStatus } = {}) {
-    return prisma.purchaseOrder.findMany({
+    const orders = await prisma.purchaseOrder.findMany({
       where: filter,
       include: { supplier: true, lines: { include: { material: true } } },
       orderBy: { createdAt: 'desc' },
     });
+    return orders.map(withTotals);
   },
 
   async getById(id: string) {
@@ -249,7 +257,7 @@ export const PurchaseOrderService = {
       },
     });
     if (!po) throw Errors.notFound('PurchaseOrder');
-    return po;
+    return withTotals(po);
   },
 
   async create(input: CreatePOInput, actorId: string) {
@@ -257,6 +265,8 @@ export const PurchaseOrderService = {
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
     if (!supplier.active) throw Errors.validation(`${supplier.name} is inactive. Reactivate the supplier to order from them.`);
+    const currency = supplier.currency ?? 'ZAR';
+    const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate'));
 
     return prisma.$transaction(async (tx) => {
       // Serialize PO-number generation so two concurrent creates cannot
@@ -272,11 +282,14 @@ export const PurchaseOrderService = {
           expectedDeliveryDate: input.expectedDeliveryDate ? toDateOnly(input.expectedDeliveryDate) : null,
           createdById: actorId,
           status: 'DRAFT',
+          currency,
+          vatRate,
           lines: {
             create: input.lines.map((l) => ({
               materialId: l.materialId,
               orderedQty: l.orderedQty,
               receivedQty: 0,
+              unitPrice: l.unitPrice ?? null,
             })),
           },
         },
@@ -288,7 +301,7 @@ export const PurchaseOrderService = {
   async update(input: UpdatePOInput, actorId: string) {
     const allowEditAfterApproval = await SettingsService.getValue<boolean>('purchaseOrders.allowEditAfterApproval');
     return prisma.$transaction(async (tx) => {
-      const po = await tx.purchaseOrder.findUnique({ where: { id: input.id } });
+      const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (!isEditable(po.status, allowEditAfterApproval)) {
         throw Errors.invalidState(`Purchase order in status ${po.status} is no longer editable`, { status: po.status });
@@ -300,6 +313,14 @@ export const PurchaseOrderService = {
           ? null
           : toDateOnly(input.expectedDeliveryDate);
       }
+      if (input.vatRate !== undefined) data.vatRate = input.vatRate;
+      const priceChanges: Array<{ lineId: string; before: string | null; after: string | null }> = [];
+      for (const p of input.linePrices ?? []) {
+        const line = po.lines.find((l) => l.id === p.lineId);
+        if (!line) throw Errors.validation(`Line ${p.lineId} is not on purchase order ${po.number}`);
+        await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { unitPrice: p.unitPrice } });
+        priceChanges.push({ lineId: line.id, before: line.unitPrice?.toString() ?? null, after: p.unitPrice === null ? null : String(p.unitPrice) });
+      }
       const after = await tx.purchaseOrder.update({ where: { id: input.id }, data });
       await tx.auditLogEntry.create({
         data: {
@@ -307,8 +328,8 @@ export const PurchaseOrderService = {
           action: 'UPDATE',
           entityType: 'PurchaseOrder',
           entityId: input.id,
-          before: { notes: po.notes, expectedDeliveryDate: po.expectedDeliveryDate },
-          after: { notes: after.notes, expectedDeliveryDate: after.expectedDeliveryDate },
+          before: { notes: po.notes, expectedDeliveryDate: po.expectedDeliveryDate, vatRate: po.vatRate?.toString() ?? null, unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.before })) },
+          after: { notes: after.notes, expectedDeliveryDate: after.expectedDeliveryDate, vatRate: after.vatRate?.toString() ?? null, unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.after })) },
         },
       });
       return after;

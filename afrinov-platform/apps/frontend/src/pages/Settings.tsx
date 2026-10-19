@@ -331,6 +331,7 @@ function labelForKey(key: string): string {
     .replace(/^./, (c) => c.toUpperCase())
     .replace(/\bUom\b/, 'UoM')
     .replace(/\bPo\b/, 'PO')
+    .replace(/^Vat Rate$/, 'VAT rate (%)')
     .trim();
 }
 

@@ -134,12 +134,13 @@ export function SettingsInventory() {
 
 // ── Purchase orders ───────────────────────────────────────────────────
 export function SettingsPurchaseOrders() {
-  const { draft, setDraft, save, saving } = useSettings();
+  const { draft, setDraft, errors, save, saving } = useSettings();
   const toast = useToast();
   const items = useCategorySettings('purchase_orders');
   const requireApproval = useSetting('purchaseOrders.requireApprovalBeforeProcessing');
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
+  const vatRate = useSetting('purchaseOrders.vatRate');
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
@@ -147,6 +148,14 @@ export function SettingsPurchaseOrders() {
       <p className="text-xs text-surface-500 -mt-2 pl-11">When on, submitting a PO routes it through <code>PENDING_APPROVAL</code>. When off, submission auto-approves.</p>
       <BooleanField def={allowCancellation} value={Boolean(draft['purchaseOrders.allowCancellation'])} onChange={(v) => setDraft('purchaseOrders.allowCancellation', v)} />
       <BooleanField def={allowEditAfterApproval} value={Boolean(draft['purchaseOrders.allowEditAfterApproval'])} onChange={(v) => setDraft('purchaseOrders.allowEditAfterApproval', v)} />
+      {vatRate && (
+        <NumberField
+          def={vatRate}
+          value={Number(draft['purchaseOrders.vatRate'] ?? 15)}
+          onChange={(v) => setDraft('purchaseOrders.vatRate', v)}
+          error={errors['purchaseOrders.vatRate'] ?? null}
+        />
+      )}
       <SaveBar items={items} onSave={async () => {
         try {
           const r = await save();

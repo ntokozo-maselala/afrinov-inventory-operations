@@ -25,9 +25,9 @@ interface PO {
   closedAt?: Date | null; closedById?: string | null; closeReason?: string | null;
   lines: POL[];
 }
-interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal }
+interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal; unitPrice?: number | null }
 interface Loc { id: string; name: string; active: boolean }
-interface Sup { id: string; name: string; active: boolean }
+interface Sup { id: string; name: string; active: boolean; currency?: string }
 interface Mat { id: string; sku: string; name: string; active: boolean }
 interface TxRow { id: string; materialId: string; locationId: string; type: TxType; quantity: Prisma.Decimal; referenceType: string | null; referenceId: string | null; actorId: string; postedAt: Date }
 interface BalRow { materialId: string; locationId: string; quantity: Prisma.Decimal }
@@ -81,10 +81,10 @@ function makePrisma(): unknown {
       count: async () => db.pos.size,
       create: async ({ data, include }: { data: Record<string, unknown>; include?: { lines?: boolean } }) => {
         const id = nextPOId();
-        const createLines = (data.lines as { create?: Array<{ materialId: string; orderedQty: Prisma.Decimal | number }> } | undefined)?.create ?? [];
+        const createLines = (data.lines as { create?: Array<{ materialId: string; orderedQty: Prisma.Decimal | number; unitPrice?: number | null }> } | undefined)?.create ?? [];
         const lines: POL[] = createLines.map((c) => {
           const lid = nextLineId();
-          const pol: POL = { id: lid, purchaseOrderId: id, materialId: c.materialId, orderedQty: c.orderedQty instanceof Prisma.Decimal ? c.orderedQty : new Prisma.Decimal(c.orderedQty), receivedQty: new Prisma.Decimal(0) };
+          const pol: POL = { id: lid, purchaseOrderId: id, materialId: c.materialId, orderedQty: c.orderedQty instanceof Prisma.Decimal ? c.orderedQty : new Prisma.Decimal(c.orderedQty), receivedQty: new Prisma.Decimal(0), unitPrice: c.unitPrice ?? null };
           db.lines.set(lid, pol);
           return pol;
         });
@@ -384,5 +384,65 @@ describe('PurchaseOrderService lifecycle', () => {
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
     await expect(PurchaseOrderService.cancel({ id: po.id, reason: 'no' }, 'user-1')).rejects.toThrow(/disabled/i);
     await SettingsService.set('purchaseOrders.allowCancellation', true, 'user-1');
+  });
+});
+
+describe('PurchaseOrderService prices and VAT (procurement roadmap Phase 2)', () => {
+  it('keeps the unit prices, the supplier currency and the VAT setting on a rand order', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const { SettingsService } = await import('../settings/settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('purchaseOrders.vatRate', 15, 'user-1');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 3, unitPrice: 12.5 }] }, 'user-1');
+    expect(po).toMatchObject({ currency: 'ZAR', vatRate: 15 });
+    const read = await PurchaseOrderService.getById(po.id);
+    expect(read.lines[0]).toMatchObject({ subtotal: '37.50', vat: '5.63', net: '43.13' });
+    expect(read.totals).toEqual({ subtotal: '37.50', vat: '5.63', net: '43.13', unpricedLines: 0 });
+  });
+
+  it('starts a foreign-currency order at 0% VAT', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.suppliers.set('sup-eu', { id: 'sup-eu', name: 'HS SRL', active: true, currency: 'EUR' });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-eu', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }] }, 'user-1');
+    expect(po).toMatchObject({ currency: 'EUR', vatRate: 0 });
+  });
+
+  it('takes a VAT rate given on the order over the default', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.suppliers.set('sup-eu', { id: 'sup-eu', name: 'HS SRL', active: true, currency: 'EUR' });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-eu', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
+    expect(po.vatRate).toBe(15);
+  });
+
+  it('leaves lines without a price out of the totals, and counts them', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-2', { id: 'mat-2', sku: 'B-1', name: 'Bolt', active: true });
+    const po = await PurchaseOrderService.create({
+      supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 2, unitPrice: 10 }, { materialId: 'mat-2', orderedQty: 5 }],
+    }, 'user-1');
+    const read = await PurchaseOrderService.getById(po.id);
+    expect(read.lines[1]).toMatchObject({ subtotal: null, vat: null, net: null });
+    expect(read.totals).toEqual({ subtotal: '20.00', vat: '3.00', net: '23.00', unpricedLines: 1 });
+  });
+
+  it('changes line prices and the VAT rate while the order is editable, and logs both', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 4 }] }, 'user-1');
+    const lineId = (await PurchaseOrderService.getById(po.id)).lines[0]!.id;
+    await PurchaseOrderService.update({ id: po.id, vatRate: 0, linePrices: [{ lineId, unitPrice: 2.5 }] }, 'user-2');
+    const read = await PurchaseOrderService.getById(po.id);
+    expect(read.totals).toEqual({ subtotal: '10.00', vat: '0.00', net: '10.00', unpricedLines: 0 });
+    const entry = db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id).pop()!;
+    expect(entry.before).toMatchObject({ vatRate: '15', unitPrices: [{ lineId, unitPrice: null }] });
+    expect(entry.after).toMatchObject({ vatRate: '0', unitPrices: [{ lineId, unitPrice: '2.5' }] });
+  });
+
+  it('refuses a price for a line on another order', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const a = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
+    const b = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
+    const otherLine = (await PurchaseOrderService.getById(b.id)).lines[0]!.id;
+    await expect(PurchaseOrderService.update({ id: a.id, linePrices: [{ lineId: otherLine, unitPrice: 1 }] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 });

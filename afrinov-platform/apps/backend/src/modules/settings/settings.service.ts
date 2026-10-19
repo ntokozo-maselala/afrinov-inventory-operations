@@ -180,6 +180,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'purchaseOrders.requireApprovalBeforeProcessing', type: 'boolean', category: 'purchase_orders', description: 'When on, submitting a purchase order moves it to PENDING_APPROVAL; when off, submission auto-approves.', default: true },
   { key: 'purchaseOrders.allowCancellation', type: 'boolean', category: 'purchase_orders', description: 'Allow cancelling purchase orders before delivery.', default: true },
   { key: 'purchaseOrders.allowEditAfterApproval', type: 'boolean', category: 'purchase_orders', description: 'Allow editing a purchase order once it has been approved.', default: true },
+  { key: 'purchaseOrders.vatRate', type: 'number', category: 'purchase_orders', description: 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.', default: 15, validate: NON_NEG(100) },
 
   // ── Notifications ──────────────────────────────────────────────────────
   { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },

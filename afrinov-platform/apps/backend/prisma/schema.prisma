@@ -303,6 +303,10 @@ model PurchaseOrder {
   supplierId String              @map("supplier_id")
   status     PurchaseOrderStatus @default(DRAFT)
   notes      String?
+  // Copied from the supplier and the VAT setting when the order is raised, so
+  // later changes to either don't rewrite it. vatRate is a percentage (15.00).
+  currency   String              @default("ZAR")
+  vatRate    Decimal             @default(15) @map("vat_rate") @db.Decimal(5, 2)
   createdById String             @map("created_by_id")
   createdAt  DateTime            @default(now()) @map("created_at")
   updatedAt  DateTime            @updatedAt @map("updated_at")
@@ -351,6 +355,8 @@ model PurchaseOrderLine {
   materialId      String        @map("material_id")
   orderedQty      Decimal       @map("ordered_qty") @db.Decimal(18, 4)
   receivedQty     Decimal       @default(0) @map("received_qty") @db.Decimal(18, 4)
+  // Excluding VAT, in the order's currency. Null on lines raised before prices were kept.
+  unitPrice       Decimal?      @map("unit_price") @db.Decimal(18, 4)
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   material      Material      @relation(fields: [materialId], references: [id])

@@ -17,14 +17,17 @@ import { Drawer } from '../components/Modal';
 import { Alert } from '../components/Alert';
 import { useCanManageProcurement } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
+import { formatMoney, formatRate, priceLines, type PoTotals } from '../lib/poMoney';
 
 interface PO {
   id: string; number: string; status: string;
   supplier: { name: string };
   createdAt: string;
+  currency?: string;
+  totals?: PoTotals;
   lines: Array<{ id: string; material: { sku: string; name: string }; orderedQty: string; receivedQty: string }>;
 }
-interface Supplier { id: string; name: string; active: boolean }
+interface Supplier { id: string; name: string; active: boolean; currency?: string }
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -128,9 +131,24 @@ function columns(): DataTableColumn<PO>[] {
     { key: 'created', header: 'Created', render: (p) => <span className="text-meta">{formatDate(p.createdAt)}</span>, width: '9rem' },
     { key: 'lines', header: 'Lines', align: 'right', render: (p) => formatNumber(p.lines.length), width: '5rem' },
     { key: 'units', header: 'Units', align: 'right', className: 'text-num', render: (p) => <span className="font-mono">{formatNumber(p.lines.reduce((a, l) => a + Number(l.orderedQty), 0))}</span>, width: '6rem' },
+    {
+      key: 'total', header: 'Total', align: 'right', className: 'text-num', width: '10rem',
+      render: (p) => {
+        if (!p.totals) return <span className="text-surface-300">—</span>;
+        if (p.totals.unpricedLines === p.lines.length) return <span className="text-meta">No prices</span>;
+        return (
+          <span className="whitespace-nowrap">
+            <span className="font-mono">{formatMoney(p.totals.net, p.currency)}</span>
+            {p.totals.unpricedLines > 0 && <span className="block text-meta text-warning-700">{p.totals.unpricedLines} unpriced</span>}
+          </span>
+        );
+      },
+    },
     { key: 'status', header: 'Status', render: (p) => <PurchaseOrderStatusBadge status={p.status} />, width: '11rem' },
   ];
 }
+
+interface DraftLine { materialId: string; orderedQty: string; unitPrice: string }
 
 interface CreateProps {
   open: boolean;
@@ -144,13 +162,28 @@ interface CreateProps {
 function CreatePODrawer({ open, onClose, suppliers, materials, onError, onSuccess }: CreateProps) {
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<Array<{ materialId: string; orderedQty: string }>>([]);
+  const [lines, setLines] = useState<Array<DraftLine>>([]);
+  // null until the buyer types a rate: then it follows the supplier's currency.
+  const [vatOverride, setVatOverride] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
+  const settings = useApi<Record<string, unknown>>('/settings/values?keys=purchaseOrders.vatRate');
+  const settingRate = Number(settings.data?.['purchaseOrders.vatRate'] ?? 15);
+  const supplier = suppliers.find((s) => s.id === supplierId);
+  const currency = supplier?.currency ?? 'ZAR';
+  const vatRate = vatOverride ?? String(currency === 'ZAR' ? settingRate : 0);
+  const preview = priceLines(lines.filter((l) => l.materialId && Number(l.orderedQty) > 0), Number(vatRate) || 0);
 
-  function addLine() { setLines((l) => [...l, { materialId: '', orderedQty: '' }]); }
-  function updateLine(i: number, patch: Partial<{ materialId: string; orderedQty: string }>) {
+  function addLine() { setLines((l) => [...l, { materialId: '', orderedQty: '', unitPrice: '' }]); }
+  function updateLine(i: number, patch: Partial<DraftLine>) {
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  }
+  function chooseMaterial(i: number, materialId: string) {
+    // Starts from the item's unit cost; the buyer types the quoted price over it.
+    const cost = materials.find((m) => m.id === materialId)?.unitCost;
+    setLines((l) => l.map((row, idx) => (idx === i
+      ? { ...row, materialId, unitPrice: row.unitPrice || (cost ? String(Number(cost)) : '') }
+      : row)));
   }
   function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
 
@@ -160,12 +193,20 @@ function CreatePODrawer({ open, onClose, suppliers, materials, onError, onSucces
     if (!supplierId) { setValidation('Select a supplier.'); return; }
     const validLines = lines.filter((l) => l.materialId && Number(l.orderedQty) > 0);
     if (validLines.length === 0) { setValidation('Add at least one line with a positive quantity.'); return; }
+    if (validLines.some((l) => l.unitPrice.trim() !== '' && !(Number(l.unitPrice) >= 0))) { setValidation('A unit price must be 0 or more, or left blank.'); return; }
+    const rate = Number(vatRate);
+    if (vatRate.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 100) { setValidation('VAT rate must be between 0 and 100.'); return; }
     setBusy(true);
     try {
       const created = await api.post<PO>('/purchase-orders', {
         supplierId,
         notes: notes || undefined,
-        lines: validLines.map((l) => ({ materialId: l.materialId, orderedQty: Number(l.orderedQty) })),
+        vatRate: rate,
+        lines: validLines.map((l) => ({
+          materialId: l.materialId,
+          orderedQty: Number(l.orderedQty),
+          ...(l.unitPrice.trim() !== '' ? { unitPrice: Number(l.unitPrice) } : {}),
+        })),
       });
       await api.post(`/purchase-orders/${created.id}/submit`);
       onSuccess();
@@ -184,12 +225,20 @@ function CreatePODrawer({ open, onClose, suppliers, materials, onError, onSucces
       <form onSubmit={submit} className="space-y-4" noValidate>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Supplier" htmlFor="po-sup" required error={validation && !supplierId ? validation : null}>
-            <Select id="po-sup" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} invalid={!!validation && !supplierId}>
+            <Select id="po-sup" value={supplierId} onChange={(e) => { setSupplierId(e.target.value); setVatOverride(null); }} invalid={!!validation && !supplierId}>
               <option value="">— select —</option>
               {suppliers.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
           <Field label="Notes" htmlFor="po-notes"><Input id="po-notes" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="VAT rate (%)" htmlFor="po-vat" help={currency === 'ZAR' ? `Rand orders start at ${formatRate(settingRate)}.` : `${currency} orders start at 0%.`}>
+            <Input id="po-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatOverride(e.target.value)} />
+          </Field>
+          <Field label="Currency" htmlFor="po-currency" help="From the supplier.">
+            <Input id="po-currency" value={currency} readOnly disabled />
+          </Field>
         </div>
 
         <div>
@@ -201,21 +250,36 @@ function CreatePODrawer({ open, onClose, suppliers, materials, onError, onSucces
           <div className="space-y-2">
             {lines.map((l, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-start">
-                <div className="col-span-12 sm:col-span-7">
-                  <Select value={l.materialId} onChange={(e) => updateLine(i, { materialId: e.target.value })} aria-label={`Line ${i + 1} material`}>
+                <div className="col-span-12 sm:col-span-6">
+                  <Select value={l.materialId} onChange={(e) => chooseMaterial(i, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
                     {materials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
-                <div className="col-span-7 sm:col-span-3">
+                <div className="col-span-4 sm:col-span-2">
                   <Input type="number" min="0.0001" step="0.0001" placeholder="Qty" value={l.orderedQty} onChange={(e) => updateLine(i, { orderedQty: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
                 </div>
                 <div className="col-span-5 sm:col-span-2">
+                  <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Unit price" value={l.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} aria-label={`Line ${i + 1} unit price`} className="text-right" />
+                </div>
+                <div className="col-span-3 sm:col-span-2">
                   <Button size="sm" variant="danger" type="button" onClick={() => removeLine(i)} className="w-full">Remove</Button>
                 </div>
               </div>
             ))}
           </div>
+          {lines.length > 0 && (
+            <dl className="mt-3 ml-auto text-sm grid grid-cols-2 gap-x-6 gap-y-1 w-full sm:w-72" aria-label="Order total">
+              <dt className="text-surface-500">Subtotal</dt><dd className="text-right font-mono">{formatMoney(preview.totals.subtotal, currency)}</dd>
+              <dt className="text-surface-500">VAT {formatRate(Number(vatRate) || 0)}</dt><dd className="text-right font-mono">{formatMoney(preview.totals.vat, currency)}</dd>
+              <dt className="font-semibold">Total</dt><dd className="text-right font-mono font-semibold">{formatMoney(preview.totals.net, currency)}</dd>
+              {preview.totals.unpricedLines > 0 && (
+                <dd className="col-span-2 text-meta text-warning-700 text-right">
+                  {preview.totals.unpricedLines === 1 ? '1 line has' : `${preview.totals.unpricedLines} lines have`} no price yet; prices can be added before approval.
+                </dd>
+              )}
+            </dl>
+          )}
         </div>
 
         {validation && supplierId && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
