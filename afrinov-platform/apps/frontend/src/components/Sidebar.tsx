@@ -6,6 +6,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@radix-ui/react-tooltip
 import { Icon } from './Icon';
 import { useAppShell } from '../hooks/useAppShell';
 import { cn } from '../lib/cn';
+import { isNavItemActive } from '../hooks/useNavGroups';
 
 interface NavItem {
   to: string;
@@ -15,6 +16,7 @@ interface NavItem {
   badge?: ReactNode;
   children?: NavItem[];
   exact?: boolean;
+  excludes?: string[];
 }
 
 interface NavGroup {
@@ -44,14 +46,8 @@ function NavItemComponent({
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = item.children && item.children.length > 0;
-  const isActive = item.exact || item.end
-    ? location.pathname === item.to
-    : location.pathname.startsWith(item.to);
-  const isChildActive = hasChildren && item.children!.some((child) =>
-    child.exact || child.end
-      ? location.pathname === child.to
-      : location.pathname.startsWith(child.to)
-  );
+  const isActive = isNavItemActive(item, location.pathname);
+  const isChildActive = hasChildren && item.children!.some((child) => isNavItemActive(child, location.pathname));
 
   const baseClass = isCollapsed
     ? 'flex justify-center items-center py-2.5 mx-0 rounded text-sm transition-colors'
@@ -128,7 +124,7 @@ function NavItemComponent({
         <TooltipTrigger asChild>
           <NavLink
             to={item.to}
-            end={item.end}
+            end={item.end || !isActive}
             onClick={onNavigate}
             className={cn(baseClass, stateClass, 'relative')}
             aria-label={item.label}
@@ -178,7 +174,7 @@ function NavItemComponent({
   return (
     <NavLink
       to={item.to}
-      end={item.end}
+      end={item.end || !isActive}
       onClick={onNavigate}
       className={cn(baseClass, stateClass)}
     >
