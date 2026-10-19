@@ -209,6 +209,7 @@ export interface MockMovementRow {
   supplierName?: string | null;
   deliveryRef?: string | null;
   fromPurchaseOrder?: boolean;
+  returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
   returnedQuantity?: string | null;
 }
 

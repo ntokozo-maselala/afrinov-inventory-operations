@@ -216,8 +216,10 @@ function supplierNameForSku(report: ReportResult, sku: string): string {
 // ─── PDF ─────────────────────────────────────────────────────────────────
 
 const PAGE_MARGIN = 36;
-const PAGE_WIDTH = 595.28; // A4 portrait, points
-const PAGE_HEIGHT = 841.89;
+// A4 landscape, in points, as every other report PDF: the inventory table has
+// seven columns, which portrait squeezed. Pages added later keep the layout.
+const PAGE_WIDTH = 841.89;
+const PAGE_HEIGHT = 595.28;
 const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
 
 export async function buildInventoryPdf(report: ReportResult): Promise<Buffer> {
@@ -225,6 +227,7 @@ export async function buildInventoryPdf(report: ReportResult): Promise<Buffer> {
     try {
       const doc = new PDFDocument({
         size: 'A4',
+        layout: 'landscape',
         margins: { top: PAGE_MARGIN, left: PAGE_MARGIN, right: PAGE_MARGIN, bottom: PAGE_MARGIN },
         info: {
           Title: 'Afrinov Inventory Report',

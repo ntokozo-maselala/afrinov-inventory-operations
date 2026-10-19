@@ -1,11 +1,14 @@
 // The PDF copy of a report, for sending by email or filing: A4 landscape, the
 // Afrinov logo centred at the top, then the report's title and what it covers,
 // its tables, each with its subtotal rows, and "Page X of Y" with when it was
-// made at the foot of every page. Each table is as wide as its content, from the
-// left margin; only one too wide for the page spans it, and then only its text
-// columns wrap. Built in the browser from the same data the page shows, so live
-// and frontend-only mode give the same file. jsPDF loads only when a PDF is
-// asked for.
+// made at the foot of every page. Every table spans the page, the spare width
+// going to its text columns (names, places, notes), so the figures stay together
+// on the right.
+// Tables with the same columns share their column widths, so a report's
+// per-category tables line up one under another. A table too wide for the page
+// spans it, and then only its text columns wrap. Built in the browser from the
+// same data the page shows, so live and frontend-only mode give the same file.
+// jsPDF loads only when a PDF is asked for.
 import { triggerDownload } from '../api/exportReport';
 import type { jsPDF } from 'jspdf';
 import { formatDateTime } from './format';
@@ -15,8 +18,9 @@ export interface PdfColumn {
   header: string;
   align?: 'left' | 'right';
   /**
-   * Text that may wrap onto more lines when the table is wider than the page:
-   * names, places and notes. Codes, dates, quantities and amounts never wrap.
+   * Text that may wrap onto more lines when the table is wider than the page,
+   * and that takes the table's spare width: names, places and notes.
+   * Codes, dates, quantities and amounts never wrap.
    */
   wrap?: boolean;
 }
@@ -70,12 +74,36 @@ export function pdfText(s: string): string {
     .replace(/\u2265/g, '>=');
 }
 
+/** Tables with the same column headers are the same kind of table, e.g. one per category. */
+const signature = (table: PdfTable) => table.columns.map((c) => c.header).join('\u0000');
+const sum = (ws: number[]) => ws.reduce((a, w) => a + w, 0);
+
 export async function buildPdf(report: PdfReport, generatedAt = new Date()): Promise<ArrayBuffer> {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
+  const available = pageWidth - 2 * SIDE;
   const finalY = () => (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+
+  // How wide each column is with nothing wrapped: its widest cell, header and totals in bold.
+  const measure = (s: string, bold: boolean) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    doc.setFontSize(FONT_SIZE);
+    return doc.getTextWidth(pdfText(s));
+  };
+  const naturalWidths = (table: PdfTable) => table.columns.map((c, i) => Math.max(
+    measure(c.header, true),
+    ...table.rows.map((r) => measure(r[i] ?? '', false)),
+    ...(table.totals ?? []).map((r) => measure(r[i] ?? '', true)),
+  ) + 2 * CELL_PADDING + 0.5);
+  // Tables of the same kind share the widest of their widths, so their columns line up.
+  const shared = new Map<string, number[]>();
+  for (const table of report.sections) {
+    const widths = naturalWidths(table);
+    const before = shared.get(signature(table));
+    shared.set(signature(table), before ? before.map((w, i) => Math.max(w, widths[i] ?? 0)) : widths);
+  }
 
   drawLogo(doc, pageWidth / 2, MARGIN - 2, LOGO_HEIGHT);
   const titleY = MARGIN - 2 + LOGO_HEIGHT + 9;
@@ -88,7 +116,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
   doc.setTextColor(...MUTED);
   let y = titleY + 6;
   for (const line of report.lines) {
-    for (const wrapped of doc.splitTextToSize(pdfText(line), pageWidth - 2 * SIDE) as string[]) {
+    for (const wrapped of doc.splitTextToSize(pdfText(line), available) as string[]) {
       doc.text(wrapped, SIDE, y);
       y += 4.5;
     }
@@ -110,7 +138,7 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(...MUTED);
-      for (const wrapped of doc.splitTextToSize(pdfText(section.note), pageWidth - 2 * SIDE) as string[]) {
+      for (const wrapped of doc.splitTextToSize(pdfText(section.note), available) as string[]) {
         doc.text(wrapped, SIDE, y + 2);
         y += 4.5;
       }
@@ -124,25 +152,28 @@ export async function buildPdf(report: PdfReport, generatedAt = new Date()): Pro
       y += 10;
       continue;
     }
-    // How wide each column is with nothing wrapped: its widest cell, header and totals in bold.
-    const measure = (s: string, bold: boolean) => {
-      doc.setFont('helvetica', bold ? 'bold' : 'normal');
-      doc.setFontSize(FONT_SIZE);
-      return doc.getTextWidth(pdfText(s));
-    };
-    const natural = section.columns.map((c, i) => Math.max(
-      measure(c.header, true),
-      ...section.rows.map((r) => measure(r[i] ?? '', false)),
-      ...(section.totals ?? []).map((r) => measure(r[i] ?? '', true)),
-    ) + 2 * CELL_PADDING + 0.5);
-    const contentWidth = natural.reduce((sum, w) => sum + w, 0);
-    const fits = contentWidth <= pageWidth - 2 * SIDE;
-    const columnStyles: Record<number, { halign: 'left' | 'right'; cellWidth: 'wrap' | 'auto' }> = {};
-    section.columns.forEach((c, i) => { columnStyles[i] = { halign: c.align ?? 'left', cellWidth: c.wrap && !fits ? 'auto' : 'wrap' }; });
+    const natural = shared.get(signature(section)) ?? naturalWidths(section);
+    const contentWidth = sum(natural);
+    const fits = contentWidth <= available;
+    let widths: Array<number | 'auto' | 'wrap'>;
+    if (!fits) {
+      // Too wide for the page: it spans it, and only the text columns wrap.
+      widths = section.columns.map((c) => (c.wrap ? 'auto' : 'wrap'));
+    } else {
+      // The table fills the page; the spare width goes to its text columns
+      // (in proportion to their content), or to every column if it has none.
+      const spare = available - contentWidth;
+      const text = section.columns.flatMap((c, i) => (c.wrap ? [i] : []));
+      const growing = new Set(text.length > 0 ? text : section.columns.map((_, i) => i));
+      const growingWidth = sum(natural.filter((_, i) => growing.has(i)));
+      widths = natural.map((w, i) => (growing.has(i) ? w + (spare * w) / growingWidth : w));
+    }
+    const columnStyles: Record<number, { halign: 'left' | 'right'; cellWidth: number | 'auto' | 'wrap' }> = {};
+    section.columns.forEach((c, i) => { columnStyles[i] = { halign: c.align ?? 'left', cellWidth: widths[i] ?? 'auto' }; });
     autoTable(doc, {
       startY: y,
       margin: { left: SIDE, right: SIDE, top: MARGIN, bottom: MARGIN + 6 },
-      tableWidth: fits ? contentWidth : 'auto',
+      tableWidth: !fits ? 'auto' : available,
       theme: 'grid',
       head: [section.columns.map((c) => pdfText(c.header))],
       body: [

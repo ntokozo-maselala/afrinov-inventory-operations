@@ -57,6 +57,7 @@ describe('historyWhere', () => {
     expect(historyWhere({ report: 'issued', type: 'RECEIPT' }).type).toBe('ISSUE');
     expect(historyWhere({ report: 'transfers' }).type).toBe('TRANSFER_OUT');
     expect(historyWhere({ report: 'loans' }).type).toEqual({ in: ['LOAN', 'LOAN_RETURN'] });
+    expect(historyWhere({ report: 'returned', recipientId: 'r-1' })).toMatchObject({ type: 'RETURN', recipientId: 'r-1' });
     const writeoffs = historyWhere({ report: 'writeoffs', q: 'disc' });
     expect(writeoffs.type).toBe('ADJUSTMENT');
     // Unreferenced adjustments must stay in: NULL <> 'StockCount' is not true in SQL.
@@ -89,5 +90,22 @@ describe('queryHistory paging', () => {
 
   it('refuses a cursor it did not issue', async () => {
     await expect(InventoryService.queryHistory({ before: 'nonsense' })).rejects.toThrow(/Invalid paging cursor/);
+  });
+
+  it('says which issue each return came back from: its date, slip and location', async () => {
+    const back = {
+      id: 'ret-1', postedAt: new Date('2026-10-03T09:00:00Z'), type: 'RETURN', materialId: 'm-1', locationId: 'l-2', quantity: '3', actorId: 'u-1',
+      recipientId: 'r-1', reasonCode: null, reasonNote: 'Job done', projectNumber: 'AFRI-1325', referenceType: 'Return', referenceId: 'iss-1',
+      reversesId: null, pairedWithId: null, issueId: null,
+      material: { sku: 'DISC', name: 'Disc', unitOfMeasure: 'each' }, location: { name: 'B-2' }, actor: { name: 'Vusi' },
+      recipient: { name: 'Sabelo', type: 'WORKER' }, reversedBy: null,
+    };
+    findMany.mockReset()
+      .mockResolvedValueOnce([back])
+      .mockResolvedValueOnce([{ id: 'iss-1', postedAt: new Date('2026-09-28T07:30:00Z'), issueId: 'slip-9', location: { name: 'A-1' } }]);
+    const [row] = await InventoryService.queryHistory({ report: 'returned' });
+    expect(findMany.mock.calls[1]![0].where).toEqual({ id: { in: ['iss-1'] } });
+    expect(row!.returnOf).toEqual({ id: 'iss-1', postedAt: '2026-09-28T07:30:00.000Z', issueId: 'slip-9', locationName: 'A-1' });
+    expect(row!.locationName).toBe('B-2');
   });
 });

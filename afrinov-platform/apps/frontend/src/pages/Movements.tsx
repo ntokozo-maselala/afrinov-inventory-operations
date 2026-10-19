@@ -34,12 +34,14 @@ import { today } from '../lib/dates';
 import { formatDate } from '../lib/format';
 
 type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
-type ReportId = 'all' | 'received' | 'issued' | 'counts' | 'transfers' | 'writeoffs' | 'loans' | 'other';
+type ReportId = 'all' | 'received' | 'issued' | 'returned' | 'counts' | 'transfers' | 'writeoffs' | 'loans' | 'other';
 
 const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'all', label: 'All movements', filters: ['locationId', 'actorId', 'materialId', 'q'] },
   { id: 'received', label: 'Received stock', filters: ['supplierId', 'locationId', 'q'] },
   { id: 'issued', label: 'Issued stock', filters: ['recipientId', 'locationId', 'actorId', 'materialId', 'q'] },
+  // Dated when the stock came back, so a return shows in its own period even when the issue was earlier.
+  { id: 'returned', label: 'Returned stock', filters: ['recipientId', 'locationId', 'materialId', 'q'] },
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
   { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
@@ -50,6 +52,7 @@ const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
 const SEARCH_HINT: Partial<Record<ReportId, string>> = {
   all: 'Search item, location, project, recipient…',
   issued: 'Search item, location, project, recipient…',
+  returned: 'Search item, location, project, who returned it…',
   received: 'Search delivery note, supplier, item…',
 };
 
@@ -114,8 +117,8 @@ export function Movements() {
 
   const showView = (v: ReportView) => setParam('view', v === 'cards' ? 'cards' : null);
 
-  // Tools are checked out to someone; stock is issued to them.
-  const recipientLabel = report.id === 'loans' ? 'Checked out to' : 'Issued to';
+  // Tools are checked out to someone; stock is issued to them, and returned by them.
+  const recipientLabel = report.id === 'loans' ? 'Checked out to' : report.id === 'returned' ? 'Returned by' : 'Issued to';
 
   /** The filters that are set, in words, for the top of the PDF. */
   function filterWords(): string[] {

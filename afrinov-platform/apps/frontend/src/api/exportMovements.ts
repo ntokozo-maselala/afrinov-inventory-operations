@@ -80,7 +80,7 @@ const typeLabel = (m: MovementRow) => {
 /** Each ledger report's columns, as the page shows them. */
 const condition = (m: MovementRow) => (m.type !== 'LOAN_RETURN' ? '' : m.reasonCode === 'DAMAGE' ? 'Damaged' : m.reasonCode === 'LOSS' ? 'Lost' : 'Good');
 
-const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans', Array<PdfColumn & { cell: (m: MovementRow) => string }>> = {
+const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', Array<PdfColumn & { cell: (m: MovementRow) => string }>> = {
   all: [
     { header: 'When', cell: (m) => formatDateTime(m.postedAt) },
     { header: 'Type', cell: typeLabel },
@@ -128,13 +128,27 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans', Array<PdfColum
     { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
     { header: 'By', cell: (m) => m.actorName },
   ],
+  returned: [
+    { header: 'When', cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Code', cell: (m) => m.materialSku },
+    { header: 'Item', wrap: true, cell: (m) => m.materialName },
+    { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
+    { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
+    { header: 'Returned by', wrap: true, cell: (m) => m.recipientName ?? '' },
+    { header: 'Project', cell: (m) => m.projectNumber ?? '' },
+    { header: 'Back into', wrap: true, cell: (m) => m.locationName },
+    { header: 'From the issue of', wrap: true, cell: (m) => (m.returnOf ? `${formatDateTime(m.returnOf.postedAt)}, ${m.returnOf.locationName}` : '') },
+    { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
+    { header: 'By', cell: (m) => m.actorName },
+  ],
 };
 
 /**
- * A ledger report (all movements, transfers, or write-offs and adjustments) as
+ * A ledger report (all movements, transfers, write-offs and adjustments, tool
+ * loans or returned stock) as
  * a PDF, with the page's columns, for the same day or range and filters.
  */
-export async function downloadMovementsPdf(query: string, kind: 'all' | 'transfers' | 'writeoffs' | 'loans', about: PdfAbout): Promise<void> {
+export async function downloadMovementsPdf(query: string, kind: 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', about: PdfAbout): Promise<void> {
   const path = `/inventory-transactions?${query}${kind === 'all' ? '' : `&report=${kind}`}`;
   const rows: MovementRow[] = [];
   for (let before = ''; ;) {

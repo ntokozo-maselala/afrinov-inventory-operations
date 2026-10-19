@@ -31,6 +31,7 @@ export function movementsFilename(from: string | undefined, to: string | undefin
 function reference(m: MovementRow): string {
   if (m.receiptNumber) return [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ');
   if (m.referenceType === 'StockCount') return 'Stock count';
+  if (m.returnOf) return `Return of the issue of ${m.returnOf.postedAt.slice(0, 10)} from ${m.returnOf.locationName}`;
   return m.referenceType ?? '';
 }
 

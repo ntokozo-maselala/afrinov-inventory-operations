@@ -484,6 +484,15 @@ describe('mock API mutation flows', () => {
       expect(await out()).toEqual([[a, '4']]);
       await expect(api.get('/inventory-returns/returnable')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     });
+
+    it('lists returns in the Returned stock report, each naming the issue it came back from', async () => {
+      const a = await issue('mat-1', 'loc-1', 6);
+      await api.post('/inventory-returns', { lines: [{ issueTransactionId: a, quantity: 2 }] });
+      const rows = await api.get<Array<{ type: string; quantity: string; returnOf: { id: string; locationName: string } | null }>>('/inventory-transactions?report=returned&recipientId=rcp-1');
+      expect(rows.every((r) => r.type === 'RETURN')).toBe(true);
+      const mine = rows.find((r) => r.returnOf?.id === a);
+      expect(mine).toMatchObject({ quantity: '2', returnOf: { id: a } });
+    });
   });
 
   describe('counting stock at a location', () => {

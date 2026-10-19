@@ -21,7 +21,7 @@ function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilte
     actorId: q['actorId'],
     recipientId: q['recipientId'],
     q: q['q'],
-    report: (['issued', 'transfers', 'writeoffs', 'loans'] as const).find((r) => r === q['report']),
+    report: (['issued', 'transfers', 'writeoffs', 'loans', 'returned'] as const).find((r) => r === q['report']),
   };
 }
 
@@ -34,7 +34,7 @@ async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>)
   ]);
   return [
     f.from || f.to ? `${f.from ?? 'the start'} to ${f.to ?? 'today'}` : 'All dates',
-    f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments', loans: 'tool loans' }[f.report] : null,
+    f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments', loans: 'tool loans', returned: 'returned stock' }[f.report] : null,
     f.type ? `type ${f.type.replace(/_/g, ' ').toLowerCase()}` : null,
     material ? `item ${material.sku}` : null,
     location ? `at ${location.name}` : null,
