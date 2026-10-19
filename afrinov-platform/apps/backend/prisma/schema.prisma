@@ -215,6 +215,7 @@ model Project {
 
   manager             User?     @relation("ProjectManager", fields: [managerId], references: [id])
   inventoryTransactions InventoryTransaction[]
+  purchaseOrders      PurchaseOrder[]
   racks               Rack[]
 
   @@index([status])
@@ -307,6 +308,24 @@ model PurchaseOrder {
   // later changes to either don't rewrite it. vatRate is a percentage (15.00).
   currency   String              @default("ZAR")
   vatRate    Decimal             @default(15) @map("vat_rate") @db.Decimal(5, 2)
+  // ── Order details from the template's Inputs sheet ───────────────────────
+  // Optional: general store stock is bought without a project.
+  projectNumber      String?  @map("project_number")
+  // Copied from the supplier when the order is raised; editable on the order.
+  paymentTerms       String?  @map("payment_terms")
+  paymentMilestone   String?  @map("payment_milestone")
+  settlementDiscount Decimal  @default(0) @map("settlement_discount") @db.Decimal(5, 2)
+  shippingTerms      String?  @map("shipping_terms")
+  penaltiesApply     Boolean  @default(false) @map("penalties_apply")
+  // DELIVERY: the supplier delivers to the address below. COLLECTION: Afrinov collects.
+  deliveryMethod       String  @default("DELIVERY") @map("delivery_method")
+  deliveryTo           String? @map("delivery_to")
+  deliveryAddress      String? @map("delivery_address")
+  deliveryCountry      String? @map("delivery_country")
+  deliveryContactName  String? @map("delivery_contact_name")
+  deliveryContactPhone String? @map("delivery_contact_phone")
+  // Who at Afrinov the supplier deals with; typed, so it need not be a user.
+  afrinovContact       String? @map("afrinov_contact")
   createdById String             @map("created_by_id")
   createdAt  DateTime            @default(now()) @map("created_at")
   updatedAt  DateTime            @updatedAt @map("updated_at")
@@ -335,6 +354,7 @@ model PurchaseOrder {
   closeReason          String?   @map("close_reason")
 
   supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  project      Project?            @relation(fields: [projectNumber], references: [projectNumber])
   createdBy    User                @relation("PO_CreatedBy", fields: [createdById], references: [id])
   approvedBy   User?               @relation("PO_ApprovedBy", fields: [approvedById], references: [id])
   shippedBy    User?               @relation("PO_ShippedBy", fields: [shippedById], references: [id])
@@ -346,6 +366,7 @@ model PurchaseOrder {
 
   @@index([status])
   @@index([supplierId])
+  @@index([projectNumber])
   @@map("purchase_orders")
 }
 
@@ -357,6 +378,8 @@ model PurchaseOrderLine {
   receivedQty     Decimal       @default(0) @map("received_qty") @db.Decimal(18, 4)
   // Excluding VAT, in the order's currency. Null on lines raised before prices were kept.
   unitPrice       Decimal?      @map("unit_price") @db.Decimal(18, 4)
+  // When this line is due; the order's expected date when not set.
+  deliveryDate    DateTime?     @map("delivery_date") @db.Date
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   material      Material      @relation(fields: [materialId], references: [id])

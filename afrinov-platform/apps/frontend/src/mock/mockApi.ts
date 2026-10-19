@@ -141,6 +141,37 @@ function supplierFields(b: Partial<Record<keyof MockSupplier, unknown>>): Partia
   return out;
 }
 
+// The order details on the template's Inputs sheet, as the server takes them.
+type PoDetailsBody = Partial<Record<
+  'projectNumber' | 'paymentTerms' | 'paymentMilestone' | 'shippingTerms' | 'deliveryTo' | 'deliveryAddress'
+  | 'deliveryCountry' | 'deliveryContactName' | 'deliveryContactPhone' | 'afrinovContact', string | null
+>> & { settlementDiscount?: number; penaltiesApply?: boolean; deliveryMethod?: 'DELIVERY' | 'COLLECTION' };
+
+/** The details sent, blanks as null; fields left out stay out. */
+function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
+  const out: Record<string, unknown> = {};
+  for (const k of ['projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
+    'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact'] as const) {
+    if (b[k] !== undefined) out[k] = (typeof b[k] === 'string' ? b[k]!.trim() : '') || null;
+  }
+  if (b.settlementDiscount !== undefined) out.settlementDiscount = String(b.settlementDiscount);
+  if (b.penaltiesApply !== undefined) out.penaltiesApply = b.penaltiesApply;
+  if (b.deliveryMethod !== undefined) out.deliveryMethod = b.deliveryMethod;
+  return out as Partial<MockPurchaseOrder>;
+}
+
+function assertProjectOpen(projectNumber: string) {
+  const project = state.projects.find((p) => p.projectNumber === projectNumber);
+  if (!project) throw err('VALIDATION_ERROR', `No project ${projectNumber}`);
+  if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
+}
+
+function projectRef(projectNumber: string | null | undefined) {
+  if (!projectNumber) return null;
+  const p = state.projects.find((x) => x.projectNumber === projectNumber);
+  return { projectNumber, name: p?.name ?? null };
+}
+
 // Order money as the server works it out (po-pricing.ts).
 function withPoTotals<T extends { vatRate?: string; currency?: string; lines: Array<{ orderedQty: string; unitPrice?: string | null }> }>(po: T) {
   const rate = Number(po.vatRate ?? 15);
@@ -420,9 +451,12 @@ function route(method: string, path: string, body?: unknown): unknown {
 
   // Purchase Orders
   if (method === 'GET' && p === '/purchase-orders') {
-    const list = [...state.purchaseOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const list = [...state.purchaseOrders]
+      .filter((po) => !qs.projectNumber || po.projectNumber === qs.projectNumber)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return list.map((po) => withPoTotals({
       ...po,
+      project: projectRef(po.projectNumber),
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     }));
@@ -439,17 +473,30 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     return withPoTotals({
       ...po,
+      project: projectRef(po.projectNumber),
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     });
   }
   if (method === 'POST' && p === '/purchase-orders') {
-    const b = body as { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
+    const b = body as PoDetailsBody & { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number; deliveryDate?: string }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
     if (!b.supplierId || !b.lines || b.lines.length === 0) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     const supplier = findSupplier(b.supplierId);
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
+    if (b.projectNumber) assertProjectOpen(b.projectNumber);
+    // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
+    const details = poDetails(b);
+    if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
+    details.deliveryMethod = b.deliveryMethod ?? 'DELIVERY';
+    if (details.deliveryMethod === 'DELIVERY') {
+      for (const k of ['deliveryTo', 'deliveryAddress', 'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone'] as const) {
+        if (b[k] === undefined) details[k] = (MOCK_SETTINGS[`purchaseOrders.${k}`]?.value as string) || null;
+      }
+    }
+    if (b.afrinovContact === undefined) details.afrinovContact = 'Admin User';
     const po: MockPurchaseOrder = {
+      ...details,
       id: nextId('po'),
       number: `PO-2026-${String(state.purchaseOrders.length + 1).padStart(4, '0')}`,
       supplierId: b.supplierId,
@@ -463,6 +510,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       lines: b.lines.map((l) => ({
         id: nextId('pol'), materialId: l.materialId, orderedQty: String(l.orderedQty), receivedQty: '0',
         unitPrice: l.unitPrice === undefined ? null : String(l.unitPrice),
+        deliveryDate: l.deliveryDate ?? null,
       })),
     };
     state.purchaseOrders.push(po);
@@ -567,7 +615,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
-    const b = (body as { notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number; linePrices?: Array<{ lineId: string; unitPrice: number | null }> }) ?? {};
+    const b = (body as PoDetailsBody & {
+      notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number;
+      linePrices?: Array<{ lineId: string; unitPrice: number | null }>;
+      lineDeliveryDates?: Array<{ lineId: string; deliveryDate: string | null }>;
+    }) ?? {};
     for (const lp of b.linePrices ?? []) {
       if (!po.lines.some((l) => l.id === lp.lineId)) throw err('VALIDATION_ERROR', `Line ${lp.lineId} is not on purchase order ${po.number}`);
     }
@@ -578,6 +630,13 @@ function route(method: string, path: string, body?: unknown): unknown {
       const line = po.lines.find((l) => l.id === lp.lineId)!;
       line.unitPrice = lp.unitPrice === null ? null : String(lp.unitPrice);
     }
+    for (const ld of b.lineDeliveryDates ?? []) {
+      const line = po.lines.find((l) => l.id === ld.lineId);
+      if (!line) throw err('VALIDATION_ERROR', `Line ${ld.lineId} is not on purchase order ${po.number}`);
+      line.deliveryDate = ld.deliveryDate;
+    }
+    if (b.projectNumber) assertProjectOpen(b.projectNumber);
+    Object.assign(po, poDetails(b));
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before: null, after: b as Record<string, unknown>, createdAt: new Date().toISOString() });
     return po;
@@ -1137,6 +1196,11 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
     'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
     'purchaseOrders.allowEditAfterApproval': row('purchaseOrders.allowEditAfterApproval', true, 'boolean', 'purchase_orders', 'Allow editing a purchase order once it has been approved.'),
+    'purchaseOrders.deliveryTo': row('purchaseOrders.deliveryTo', 'Afrinov (PTY) Ltd', 'string', 'purchase_orders', 'Who goods are delivered to, on new purchase orders.'),
+    'purchaseOrders.deliveryAddress': row('purchaseOrders.deliveryAddress', '10 Lime Street, Icon Industrial Park\nSunderland Ridge, Centurion 0157', 'string', 'purchase_orders', 'Delivery address on new purchase orders. One line per address line.'),
+    'purchaseOrders.deliveryCountry': row('purchaseOrders.deliveryCountry', 'South Africa', 'string', 'purchase_orders', 'Delivery country on new purchase orders.'),
+    'purchaseOrders.deliveryContactName': row('purchaseOrders.deliveryContactName', '', 'string', 'purchase_orders', 'Who receives deliveries at the delivery address, on new purchase orders.'),
+    'purchaseOrders.deliveryContactPhone': row('purchaseOrders.deliveryContactPhone', '', 'string', 'purchase_orders', 'Phone number for that person.'),
     'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 
     'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),

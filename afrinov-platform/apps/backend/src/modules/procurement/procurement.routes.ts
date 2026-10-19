@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
-import { PurchaseOrderService, SupplierService } from './procurement.service.js';
+import { DELIVERY_METHODS, PurchaseOrderService, SupplierService } from './procurement.service.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
 import { SUPPLIER_CURRENCIES } from './supplier-fields.js';
 import { PermissionCode } from '../../shared/permissions.js';
@@ -41,35 +41,58 @@ export const updateSupplierSchema = z.object({
   active: z.boolean().optional(),
 });
 
+const vatRate = z.number().min(0).max(100);
+const unitPrice = z.number().nonnegative().max(1e12);
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD');
+const text = (max: number) => z.string().max(max).nullable().optional();
+
+// The template's order details. Text fields take null (or blank) to clear.
+const orderDetails = {
+  projectNumber: text(64),
+  paymentTerms: text(100),
+  paymentMilestone: text(200),
+  settlementDiscount: z.number().min(0).max(100).optional(),
+  shippingTerms: text(200),
+  penaltiesApply: z.boolean().optional(),
+  deliveryMethod: z.enum(DELIVERY_METHODS).optional(),
+  deliveryTo: text(200),
+  deliveryAddress: text(500),
+  deliveryCountry: text(100),
+  deliveryContactName: text(200),
+  deliveryContactPhone: text(50),
+  afrinovContact: text(200),
+};
+
 export const createPOSchema = z.object({
   supplierId: supplierIdSchema,
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().optional(),
   vatRate: z.number().min(0).max(100).optional(),
+  ...orderDetails,
   lines: z
     .array(
       z.object({
         materialId: z.string().uuid(),
         orderedQty: z.number().positive(),
         unitPrice: z.number().nonnegative().max(1e12).optional(),
+        deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').optional(),
       }),
     )
     .min(1),
 });
-
-const vatRate = z.number().min(0).max(100);
-const unitPrice = z.number().nonnegative().max(1e12);
 
 export const updatePOSchema = z.object({
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().nullable().optional(),
   vatRate: vatRate.optional(),
   linePrices: z.array(z.object({ lineId: z.string().uuid(), unitPrice: unitPrice.nullable() })).max(500).optional(),
+  lineDeliveryDates: z.array(z.object({ lineId: z.string().uuid(), deliveryDate: day.nullable() })).max(500).optional(),
+  ...orderDetails,
 });
 
 export const PO_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED', 'CANCELLED'] as const;
 
-export const listPOQuerySchema = z.object({ status: z.enum(PO_STATUSES).optional() });
+export const listPOQuerySchema = z.object({ status: z.enum(PO_STATUSES).optional(), projectNumber: z.string().max(64).optional() });
 
 export const receiveSchema = z.object({
   locationId: z.string().uuid(),
@@ -156,7 +179,7 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Unknown purchase order status', details: parsed.error.flatten() },
       });
     }
-    return PurchaseOrderService.list({ status: parsed.data.status });
+    return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber });
   });
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewPurchaseOrder);

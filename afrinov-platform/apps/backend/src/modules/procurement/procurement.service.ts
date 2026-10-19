@@ -187,23 +187,87 @@ export const SupplierService = {
   },
 };
 
-export interface CreatePOInput {
+export const DELIVERY_METHODS = ['DELIVERY', 'COLLECTION'] as const;
+export type DeliveryMethod = (typeof DELIVERY_METHODS)[number];
+
+/** The order details on the template's Inputs sheet. On update, null clears a text field. */
+export interface OrderDetailsInput {
+  projectNumber?: string | null;
+  paymentTerms?: string | null;
+  paymentMilestone?: string | null;
+  /** Percent. */
+  settlementDiscount?: number;
+  shippingTerms?: string | null;
+  penaltiesApply?: boolean;
+  deliveryMethod?: DeliveryMethod;
+  deliveryTo?: string | null;
+  deliveryAddress?: string | null;
+  deliveryCountry?: string | null;
+  deliveryContactName?: string | null;
+  deliveryContactPhone?: string | null;
+  afrinovContact?: string | null;
+}
+
+export interface CreatePOInput extends OrderDetailsInput {
   supplierId: string;
-  /** unitPrice excludes VAT, in the supplier's currency. */
-  lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>;
+  /** unitPrice excludes VAT, in the supplier's currency. deliveryDate defaults to the order's expected date. */
+  lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number; deliveryDate?: string }>;
   notes?: string;
   expectedDeliveryDate?: string;
   /** Percent. Left out: the VAT setting for rand suppliers, 0 for other currencies. */
   vatRate?: number;
 }
 
-export interface UpdatePOInput {
+export interface UpdatePOInput extends OrderDetailsInput {
   id: string;
   notes?: string;
   expectedDeliveryDate?: string | null;
   vatRate?: number;
   /** New unit prices by line id; null clears one. */
   linePrices?: Array<{ lineId: string; unitPrice: number | null }>;
+  /** New delivery dates by line id; null falls back to the order's expected date. */
+  lineDeliveryDates?: Array<{ lineId: string; deliveryDate: string | null }>;
+}
+
+const DETAIL_TEXT_FIELDS = [
+  'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
+  'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact',
+] as const;
+
+/** Trims multi-line text (an address) line by line, keeping the line breaks. */
+function cleanLines(s: string | null | undefined): string | null {
+  if (s === null || s === undefined) return null;
+  const lines = s.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return lines.length ? lines.join('\n') : null;
+}
+
+async function assertProjectOpen(projectNumber: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
+  const project = await client.project.findUnique({ where: { projectNumber } });
+  if (!project) throw Errors.validation(`No project ${projectNumber}`);
+  if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
+}
+
+const dayOf = (d: Date | null | undefined): string | null => (d ? d.toISOString().slice(0, 10) : null);
+
+/** Decimals and dates as plain JSON for the audit log. */
+function jsonValue(v: unknown): unknown {
+  if (v instanceof Date) return v.toISOString();
+  if (v instanceof Prisma.Decimal) return v.toString();
+  return v ?? null;
+}
+
+/** The details sent, tidied, as columns. Fields left out are left out. */
+function detailsData(input: OrderDetailsInput): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const k of DETAIL_TEXT_FIELDS) {
+    if (input[k] === undefined) continue;
+    data[k] = k === 'deliveryAddress' ? cleanLines(input[k]) : k === 'paymentTerms' ? cleanPaymentTerms(input[k]) : cleanText(input[k]);
+  }
+  if (input.projectNumber !== undefined) data.projectNumber = cleanText(input.projectNumber);
+  if (input.settlementDiscount !== undefined) data.settlementDiscount = input.settlementDiscount;
+  if (input.penaltiesApply !== undefined) data.penaltiesApply = input.penaltiesApply;
+  if (input.deliveryMethod !== undefined) data.deliveryMethod = input.deliveryMethod;
+  return data;
 }
 
 export interface ReceiveInput {
@@ -233,10 +297,10 @@ function toDateOnly(iso: string): Date {
 }
 
 export const PurchaseOrderService = {
-  async list(filter: { status?: PurchaseOrderStatus } = {}) {
+  async list(filter: { status?: PurchaseOrderStatus; projectNumber?: string } = {}) {
     const orders = await prisma.purchaseOrder.findMany({
       where: filter,
-      include: { supplier: true, lines: { include: { material: true } } },
+      include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return orders.map(withTotals);
@@ -247,6 +311,7 @@ export const PurchaseOrderService = {
       where: { id },
       include: {
         supplier: true,
+        project: { select: { projectNumber: true, name: true } },
         createdBy: { select: { id: true, name: true, email: true } },
         approvedBy: { select: { id: true, name: true, email: true } },
         deliveredBy: { select: { id: true, name: true, email: true } },
@@ -267,6 +332,30 @@ export const PurchaseOrderService = {
     if (!supplier.active) throw Errors.validation(`${supplier.name} is inactive. Reactivate the supplier to order from them.`);
     const currency = supplier.currency ?? 'ZAR';
     const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate'));
+    if (input.projectNumber) await assertProjectOpen(input.projectNumber);
+
+    // Details left out are filled as the template fills them: payment terms
+    // from the supplier, the delivery block from Settings (unless the goods
+    // are collected), the Afrinov contact from whoever raises the order.
+    const details = detailsData(input);
+    if (input.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
+    const method = input.deliveryMethod ?? 'DELIVERY';
+    if (method === 'DELIVERY') {
+      const defaults = await SettingsService.getValues([
+        'purchaseOrders.deliveryTo', 'purchaseOrders.deliveryAddress', 'purchaseOrders.deliveryCountry',
+        'purchaseOrders.deliveryContactName', 'purchaseOrders.deliveryContactPhone',
+      ]);
+      for (const k of ['deliveryTo', 'deliveryAddress', 'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone'] as const) {
+        if (input[k] === undefined) {
+          const v = defaults[`purchaseOrders.${k}`];
+          details[k] = k === 'deliveryAddress' ? cleanLines(v as string) : cleanText(v as string);
+        }
+      }
+    }
+    if (input.afrinovContact === undefined) {
+      const actor = await prisma.user.findUnique({ where: { id: actorId } });
+      details.afrinovContact = actor?.name ?? null;
+    }
 
     return prisma.$transaction(async (tx) => {
       // Serialize PO-number generation so two concurrent creates cannot
@@ -284,12 +373,15 @@ export const PurchaseOrderService = {
           status: 'DRAFT',
           currency,
           vatRate,
+          ...details,
+          deliveryMethod: method,
           lines: {
             create: input.lines.map((l) => ({
               materialId: l.materialId,
               orderedQty: l.orderedQty,
               receivedQty: 0,
               unitPrice: l.unitPrice ?? null,
+              deliveryDate: l.deliveryDate ? toDateOnly(l.deliveryDate) : null,
             })),
           },
         },
@@ -314,6 +406,8 @@ export const PurchaseOrderService = {
           : toDateOnly(input.expectedDeliveryDate);
       }
       if (input.vatRate !== undefined) data.vatRate = input.vatRate;
+      if (input.projectNumber) await assertProjectOpen(input.projectNumber, tx);
+      Object.assign(data, detailsData(input));
       const priceChanges: Array<{ lineId: string; before: string | null; after: string | null }> = [];
       for (const p of input.linePrices ?? []) {
         const line = po.lines.find((l) => l.id === p.lineId);
@@ -321,15 +415,34 @@ export const PurchaseOrderService = {
         await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { unitPrice: p.unitPrice } });
         priceChanges.push({ lineId: line.id, before: line.unitPrice?.toString() ?? null, after: p.unitPrice === null ? null : String(p.unitPrice) });
       }
+      const dateChanges: Array<{ lineId: string; before: string | null; after: string | null }> = [];
+      for (const d of input.lineDeliveryDates ?? []) {
+        const line = po.lines.find((l) => l.id === d.lineId);
+        if (!line) throw Errors.validation(`Line ${d.lineId} is not on purchase order ${po.number}`);
+        const next = d.deliveryDate === null ? null : toDateOnly(d.deliveryDate);
+        await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { deliveryDate: next } });
+        dateChanges.push({ lineId: line.id, before: dayOf(line.deliveryDate), after: dayOf(next) });
+      }
       const after = await tx.purchaseOrder.update({ where: { id: input.id }, data });
+      // Only what was sent goes in the log, so each entry reads as the change made.
+      const changed = Object.keys(data) as Array<keyof typeof po & keyof typeof after>;
+      const pick = (o: Record<string, unknown>) => Object.fromEntries(changed.map((k) => [k, jsonValue(o[k])]));
       await tx.auditLogEntry.create({
         data: {
           actorId,
           action: 'UPDATE',
           entityType: 'PurchaseOrder',
           entityId: input.id,
-          before: { notes: po.notes, expectedDeliveryDate: po.expectedDeliveryDate, vatRate: po.vatRate?.toString() ?? null, unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.before })) },
-          after: { notes: after.notes, expectedDeliveryDate: after.expectedDeliveryDate, vatRate: after.vatRate?.toString() ?? null, unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.after })) },
+          before: {
+            ...pick(po as unknown as Record<string, unknown>),
+            ...(priceChanges.length ? { unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.before })) } : {}),
+            ...(dateChanges.length ? { deliveryDates: dateChanges.map((c) => ({ lineId: c.lineId, deliveryDate: c.before })) } : {}),
+          } as Prisma.InputJsonValue,
+          after: {
+            ...pick(after as unknown as Record<string, unknown>),
+            ...(priceChanges.length ? { unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.after })) } : {}),
+            ...(dateChanges.length ? { deliveryDates: dateChanges.map((c) => ({ lineId: c.lineId, deliveryDate: c.after })) } : {}),
+          } as Prisma.InputJsonValue,
         },
       });
       return after;

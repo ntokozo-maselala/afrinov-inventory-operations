@@ -141,6 +141,13 @@ export function SettingsPurchaseOrders() {
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
   const vatRate = useSetting('purchaseOrders.vatRate');
+  const deliveryDefaults = [
+    useSetting('purchaseOrders.deliveryTo'),
+    useSetting('purchaseOrders.deliveryAddress'),
+    useSetting('purchaseOrders.deliveryCountry'),
+    useSetting('purchaseOrders.deliveryContactName'),
+    useSetting('purchaseOrders.deliveryContactPhone'),
+  ];
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
@@ -156,6 +163,19 @@ export function SettingsPurchaseOrders() {
           error={errors['purchaseOrders.vatRate'] ?? null}
         />
       )}
+      {deliveryDefaults.some(Boolean) && (
+        <h3 className="text-sm font-semibold text-surface-900 pt-2">Delivery on new orders</h3>
+      )}
+      {deliveryDefaults.map((def) => def && (
+        <TextField
+          key={def.key}
+          def={def}
+          value={(draft[def.key] as string) ?? ''}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+          multiline={def.key === 'purchaseOrders.deliveryAddress'}
+        />
+      ))}
       <SaveBar items={items} onSave={async () => {
         try {
           const r = await save();

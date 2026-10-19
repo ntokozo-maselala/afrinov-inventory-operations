@@ -79,6 +79,29 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('purchase order details', () => {
+    type Detailed = Record<string, unknown> & { lines: Array<{ id: string; deliveryDate?: string | null }> };
+
+    it('fills the delivery block from Settings and the terms from the supplier', async () => {
+      await api.patch('/suppliers/sup-1', { paymentTerms: '30 DAYS NETT' });
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });
+      expect(await api.get<Detailed>(`/purchase-orders/${po.id}`)).toMatchObject({
+        paymentTerms: '30 DAYS NETT', deliveryMethod: 'DELIVERY', deliveryTo: 'Afrinov (PTY) Ltd', deliveryCountry: 'South Africa',
+      });
+    });
+
+    it('refuses an unknown project, and edits details and a line date', async () => {
+      const bad = await api.post('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'NOPE', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }).catch((x: unknown) => x);
+      expect(isApiError(bad) && (bad as ApiError).code).toBe('VALIDATION_ERROR');
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', shippingTerms: 'FOB', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });
+      const lineId = (await api.get<Detailed>(`/purchase-orders/${po.id}`)).lines[0]!.id;
+      await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: null, penaltiesApply: true, lineDeliveryDates: [{ lineId, deliveryDate: '2026-12-01' }] });
+      const read = await api.get<Detailed>(`/purchase-orders/${po.id}`);
+      expect(read).toMatchObject({ shippingTerms: null, penaltiesApply: true });
+      expect(read.lines[0]!.deliveryDate).toBe('2026-12-01');
+    });
+  });
+
   describe('POST /materials (create)', () => {
     it('creates a material and returns it', async () => {
       const result = await api.post<{ id: string; sku: string; name: string; active: boolean }>('/materials', {

@@ -253,4 +253,38 @@ describe('receiving stock over real HTTP', () => {
       expect(res.status).toBe(400);
     });
   });
+
+  describe('order details', () => {
+    interface Detailed { id: string; projectNumber: string | null; deliveryMethod: string; deliveryTo: string | null; shippingTerms: string | null; penaltiesApply: boolean; lines: Array<{ id: string; deliveryDate: string | null }> }
+
+    it('keeps the project, terms and a line delivery date, and filters by project', async () => {
+      const project = await api<{ projectNumber: string }>('POST', '/projects', { projectNumber: `IT-PO-${run}`, name: `IT project ${run}` });
+      expect([200, 201]).toContain(project.status);
+      const created = await api<{ id: string }>('POST', '/purchase-orders', {
+        supplierId, projectNumber: `IT-PO-${run}`, shippingTerms: 'Delivered to site', penaltiesApply: true,
+        lines: [{ materialId, orderedQty: 2, deliveryDate: '2026-11-02' }],
+      });
+      expect(created.status).toBe(201);
+      const order = (await api<Detailed>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(order).toMatchObject({ projectNumber: `IT-PO-${run}`, shippingTerms: 'Delivered to site', penaltiesApply: true, deliveryMethod: 'DELIVERY' });
+      expect(order.lines[0]!.deliveryDate?.slice(0, 10)).toBe('2026-11-02');
+      const listed = (await api<Detailed[]>('GET', `/purchase-orders?projectNumber=IT-PO-${run}`)).body;
+      expect(listed.map((o) => o.id)).toEqual([created.body.id]);
+    });
+
+    it('refuses an unknown project', async () => {
+      const res = await api<{ error: { code: string } }>('POST', '/purchase-orders', { supplierId, projectNumber: `NOPE-${run}`, lines: [{ materialId, orderedQty: 1 }] });
+      expect(res.status).toBe(400);
+    });
+
+    it('clears a detail and changes a line delivery date', async () => {
+      const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, shippingTerms: 'FOB', lines: [{ materialId, orderedQty: 1 }] });
+      const lineId = (await api<Detailed>('GET', `/purchase-orders/${created.body.id}`)).body.lines[0]!.id;
+      const res = await api('PATCH', `/purchase-orders/${created.body.id}`, { shippingTerms: null, lineDeliveryDates: [{ lineId, deliveryDate: '2026-12-01' }] });
+      expect(res.status).toBe(200);
+      const order = (await api<Detailed>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(order.shippingTerms).toBeNull();
+      expect(order.lines[0]!.deliveryDate?.slice(0, 10)).toBe('2026-12-01');
+    });
+  });
 });

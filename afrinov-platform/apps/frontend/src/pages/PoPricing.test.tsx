@@ -129,7 +129,7 @@ describe('Purchase order detail', () => {
     detailPage();
     await screen.findByText('Cutting disc');
     fireEvent.click(screen.getByRole('button', { name: 'Add prices' }));
-    fireEvent.change(screen.getByLabelText(/BOLT-M16/), { target: { value: '4.2' } });
+    fireEvent.change(screen.getByLabelText('BOLT-M16 unit price'), { target: { value: '4.2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockPatch).toHaveBeenCalled());
     const body = mockPatch.mock.calls[0]![1] as Record<string, unknown>;

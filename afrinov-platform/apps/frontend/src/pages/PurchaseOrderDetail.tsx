@@ -16,6 +16,9 @@ import { Alert } from '../components/Alert';
 import { Field, Input, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
+import {
+  PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
+} from '../components/PurchaseOrderDetailsFields';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -34,8 +37,10 @@ interface POLine {
   subtotal?: string | null;
   vat?: string | null;
   net?: string | null;
+  /** When this line is due; the order's expected date when null. */
+  deliveryDate?: string | null;
 }
-interface PO {
+interface PO extends OrderDetails {
   id: string;
   number: string;
   status: POStatus;
@@ -218,8 +223,9 @@ export function PurchaseOrderDetail() {
                 <dt className="text-surface-500">Currency</dt><dd className="col-span-2">{fresh.currency ?? 'ZAR'}</dd>
                 <dt className="text-surface-500">VAT</dt><dd className="col-span-2">{formatRate(fresh.vatRate)}</dd>
                 {fresh.totals && (<><dt className="text-surface-500">Total</dt><dd className="col-span-2 text-num font-semibold">{formatMoney(fresh.totals.net, fresh.currency)}</dd></>)}
-                {fresh.notes && (<><dt className="text-surface-500">Notes</dt><dd className="col-span-2 whitespace-pre-wrap">{fresh.notes}</dd></>)}
+                {fresh.notes && (<><dt className="text-surface-500">Remarks</dt><dd className="col-span-2 whitespace-pre-wrap">{fresh.notes}</dd></>)}
               </dl>
+              <OrderDetailsSummary po={fresh} />
             </aside>
 
             <div className="lg:col-span-2 space-y-6">
@@ -229,7 +235,7 @@ export function PurchaseOrderDetail() {
                   ariaLabel="Purchase order line items"
                   rows={fresh.lines}
                   rowKey={(l) => l.id}
-                  columns={lineColumns(fresh.currency ?? 'ZAR')}
+                  columns={lineColumns(fresh)}
                 />
                 {fresh.totals && <OrderTotals po={fresh} totals={fresh.totals} onAddPrices={editable ? () => setEditing(true) : undefined} />}
               </section>
@@ -378,6 +384,10 @@ function EditDrawer({ po, onClose, onSaved, onError }: {
   const [prices, setPrices] = useState<Record<string, string>>(
     () => Object.fromEntries(po.lines.map((l) => [l.id, l.unitPrice === null || l.unitPrice === undefined ? '' : String(Number(l.unitPrice))])),
   );
+  const [dates, setDates] = useState<Record<string, string>>(
+    () => Object.fromEntries(po.lines.map((l) => [l.id, l.deliveryDate?.slice(0, 10) ?? ''])),
+  );
+  const [details, setDetails] = useState<OrderDetailsDraft>(() => draftFromOrder(po));
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
@@ -388,18 +398,25 @@ function EditDrawer({ po, onClose, onSaved, onError }: {
     if (vatRate.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 100) { setValidation('VAT rate must be between 0 and 100.'); return; }
     const badPrice = po.lines.find((l) => prices[l.id]!.trim() !== '' && !(Number(prices[l.id]) >= 0));
     if (badPrice) { setValidation(`Enter a price of 0 or more for ${badPrice.material.sku}, or leave it blank.`); return; }
-    // Only the lines whose price changed are sent.
+    const detailsProblem = checkDetails(details);
+    if (detailsProblem) { setValidation(detailsProblem); return; }
+    // Only the lines whose price or date changed are sent.
     const linePrices = po.lines
       .map((l) => ({ lineId: l.id, before: l.unitPrice === null || l.unitPrice === undefined ? null : Number(l.unitPrice), after: prices[l.id]!.trim() === '' ? null : Number(prices[l.id]) }))
       .filter((p) => p.before !== p.after)
       .map(({ lineId, after }) => ({ lineId, unitPrice: after }));
+    const lineDeliveryDates = po.lines
+      .filter((l) => (l.deliveryDate?.slice(0, 10) ?? '') !== dates[l.id])
+      .map((l) => ({ lineId: l.id, deliveryDate: dates[l.id] || null }));
     setBusy(true);
     try {
       await api.patch(`/purchase-orders/${po.id}`, {
         notes: notes.trim() || undefined,
         expectedDeliveryDate: expectedDeliveryDate || null,
+        ...detailsBody(details, 'edit'),
         ...(rate !== Number(po.vatRate ?? 15) ? { vatRate: rate } : {}),
         ...(linePrices.length > 0 ? { linePrices } : {}),
+        ...(lineDeliveryDates.length > 0 ? { lineDeliveryDates } : {}),
       });
       await onSaved(`PO ${po.number} updated`);
     } catch (err) {
@@ -412,29 +429,35 @@ function EditDrawer({ po, onClose, onSaved, onError }: {
   }
 
   return (
-    <Drawer open onClose={onClose} title={`Edit ${po.number}`} description={`Prices exclude VAT, in ${po.currency ?? 'ZAR'}. Materials and quantities are not editable here.`} width="md">
-      <form onSubmit={submit} className="space-y-4" noValidate>
+    <Drawer open onClose={onClose} title={`Edit ${po.number}`} description={`Prices exclude VAT, in ${po.currency ?? 'ZAR'}. Materials and quantities are not editable here.`} width="lg">
+      <form onSubmit={submit} className="space-y-6" noValidate>
         <fieldset className="space-y-2">
-          <legend className="field-label">Unit prices</legend>
+          <legend className="text-eyebrow mb-1">Lines</legend>
+          <div className="hidden sm:grid grid-cols-12 gap-2 text-meta"><span className="col-span-6" /><span className="col-span-3">Unit price</span><span className="col-span-3">Delivery date</span></div>
           {po.lines.map((l) => (
-            <div key={l.id} className="grid grid-cols-3 gap-2 items-center">
-              <label htmlFor={`po-edit-price-${l.id}`} className="col-span-2 text-sm min-w-0">
+            <div key={l.id} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-12 sm:col-span-6 text-sm min-w-0">
                 <span className="text-mono text-xs">{l.material.sku}</span> {l.material.name}
                 <span className="text-meta"> · {formatNumber(Number(l.orderedQty))} {l.material.unitOfMeasure}</span>
-              </label>
-              <Input id={`po-edit-price-${l.id}`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
-                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right" />
+              </div>
+              <Input id={`po-edit-price-${l.id}`} aria-label={`${l.material.sku} unit price`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
+                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-6 sm:col-span-3" />
+              <Input id={`po-edit-date-${l.id}`} aria-label={`${l.material.sku} delivery date`} type="date" value={dates[l.id] ?? ''}
+                onChange={(e) => setDates((d) => ({ ...d, [l.id]: e.target.value }))} className="col-span-6 sm:col-span-3" />
             </div>
           ))}
         </fieldset>
-        <Field label="VAT rate (%)" htmlFor="po-edit-vat" help={(po.currency ?? 'ZAR') === 'ZAR' ? 'Rand orders start at the VAT setting.' : 'Orders in other currencies start at 0%.'}>
-          <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
-        </Field>
-        <Field label="Expected delivery date" htmlFor="po-edit-expected">
-          <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
-        </Field>
-        <Field label="Notes" htmlFor="po-edit-notes">
-          <Textarea id="po-edit-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="VAT rate (%)" htmlFor="po-edit-vat" help={(po.currency ?? 'ZAR') === 'ZAR' ? 'Rand orders start at the VAT setting.' : 'Orders in other currencies start at 0%.'}>
+            <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
+          </Field>
+          <Field label="Expected delivery" htmlFor="po-edit-expected" help="Lines without their own date are due then.">
+            <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
+          </Field>
+        </div>
+        <PurchaseOrderDetailsFields value={details} onChange={setDetails} idPrefix="po-edit" />
+        <Field label="Remarks" htmlFor="po-edit-notes">
+          <Textarea id="po-edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
         <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
@@ -548,7 +571,15 @@ function kindLabel(kind: ActionDraft['kind']): string {
   return ({ approve: 'approved', receive: 'received', close: 'closed', cancel: 'cancelled' } as const)[kind];
 }
 
-function lineColumns(currency: string): DataTableColumn<POLine>[] {
+/** A line still owed after its delivery date, on an order that can be received. */
+export function isLate(line: POLine, po: Pick<PO, 'status' | 'expectedDeliveryDate'>, today = new Date().toISOString().slice(0, 10)): boolean {
+  const due = (line.deliveryDate ?? po.expectedDeliveryDate)?.slice(0, 10);
+  if (!due || !isReceivable(po.status)) return false;
+  return due < today && Number(line.receivedQty) < Number(line.orderedQty);
+}
+
+function lineColumns(po: PO): DataTableColumn<POLine>[] {
+  const currency = po.currency ?? 'ZAR';
   const none = <span className="text-surface-300">—</span>;
   return [
     { key: 'sku', header: 'SKU', className: 'text-mono', render: (l) => <Link to={`/materials/${l.materialId}`} className="btn-link text-mono text-xs">{l.material.sku}</Link>, width: '9rem' },
@@ -556,11 +587,59 @@ function lineColumns(currency: string): DataTableColumn<POLine>[] {
     { key: 'ordered', header: 'Ordered', align: 'right', className: 'text-num', render: (l) => <span className="font-mono whitespace-nowrap">{formatNumber(Number(l.orderedQty))} <span className="text-meta">{l.material.unitOfMeasure}</span></span>, width: '7rem' },
     { key: 'received', header: 'Received', align: 'right', className: 'text-num', render: (l) => <span className="font-mono text-success-700">{formatNumber(Number(l.receivedQty))}</span>, width: '6rem' },
     { key: 'outstanding', header: 'Outstanding', align: 'right', className: 'text-num', render: (l) => <span className="font-mono text-surface-500">{formatNumber(Number(l.orderedQty) - Number(l.receivedQty))}</span>, width: '7rem' },
+    {
+      key: 'due', header: 'Due', width: '8rem',
+      render: (l) => {
+        const due = l.deliveryDate ?? po.expectedDeliveryDate;
+        if (!due) return none;
+        return (
+          <span className="whitespace-nowrap text-meta">
+            {formatDate(due)}
+            {isLate(l, po) && <Badge tone="danger" className="ml-1">Late</Badge>}
+          </span>
+        );
+      },
+    },
     { key: 'price', header: 'Unit price', align: 'right', className: 'text-num', render: (l) => (l.unitPrice === null || l.unitPrice === undefined ? <span className="text-warning-700">No price</span> : <span className="font-mono whitespace-nowrap">{formatMoney(l.unitPrice, currency)}</span>), width: '8rem' },
     { key: 'subtotal', header: 'Subtotal', align: 'right', className: 'text-num', render: (l) => (l.subtotal ? <span className="font-mono whitespace-nowrap">{formatMoney(l.subtotal, currency)}</span> : none), width: '8rem' },
     { key: 'vat', header: 'VAT', align: 'right', className: 'text-num', render: (l) => (l.vat ? <span className="font-mono whitespace-nowrap">{formatMoney(l.vat, currency)}</span> : none), width: '7rem' },
     { key: 'net', header: 'Net value', align: 'right', className: 'text-num', render: (l) => (l.net ? <span className="font-mono whitespace-nowrap font-semibold">{formatMoney(l.net, currency)}</span> : none), width: '8rem' },
   ];
+}
+
+/** The order details from the template's Inputs sheet, under the summary. */
+function OrderDetailsSummary({ po }: { po: PO }) {
+  const none = <span className="text-surface-300">—</span>;
+  const collection = po.deliveryMethod === 'COLLECTION';
+  const contact = [po.deliveryContactName, po.deliveryContactPhone].filter(Boolean).join(', ');
+  return (
+    <>
+      <h3 className="text-sm font-semibold text-surface-900 pt-2 border-t border-surface-200">Order details</h3>
+      <dl className="text-sm grid grid-cols-3 gap-y-2">
+        <dt className="text-surface-500">Project</dt>
+        <dd className="col-span-2">{po.projectNumber
+          ? <Link to={`/purchase-orders?project=${encodeURIComponent(po.projectNumber)}`} className="btn-link" title="All orders for this project">{po.projectNumber}{po.project?.name ? ` — ${po.project.name}` : ''}</Link>
+          : <span className="text-meta">No project</span>}</dd>
+        <dt className="text-surface-500">Payment terms</dt><dd className="col-span-2">{po.paymentTerms ?? none}</dd>
+        <dt className="text-surface-500">Milestone</dt><dd className="col-span-2">{po.paymentMilestone ?? <span className="text-meta">N/A</span>}</dd>
+        <dt className="text-surface-500">Settlement discount</dt><dd className="col-span-2">{formatRate(po.settlementDiscount ?? 0)}</dd>
+        <dt className="text-surface-500">Shipping terms</dt><dd className="col-span-2">{po.shippingTerms ?? none}</dd>
+        <dt className="text-surface-500">Penalties</dt><dd className="col-span-2">{po.penaltiesApply ? <Badge tone="warning">Apply to this order</Badge> : 'None'}</dd>
+        <dt className="text-surface-500">Afrinov contact</dt><dd className="col-span-2">{po.afrinovContact ?? none}</dd>
+      </dl>
+      <h3 className="text-sm font-semibold text-surface-900 pt-2 border-t border-surface-200">{collection ? 'Collection' : 'Delivery'}</h3>
+      <dl className="text-sm grid grid-cols-3 gap-y-2">
+        {collection
+          ? (<><dt className="text-surface-500">Method</dt><dd className="col-span-2">Collected by Afrinov</dd></>)
+          : (<>
+            <dt className="text-surface-500">Deliver to</dt><dd className="col-span-2">{po.deliveryTo ?? none}</dd>
+            <dt className="text-surface-500">Address</dt>
+            <dd className="col-span-2 whitespace-pre-line">{[po.deliveryAddress, po.deliveryCountry].filter(Boolean).join('\n') || none}</dd>
+          </>)}
+        <dt className="text-surface-500">Contact</dt><dd className="col-span-2">{contact || none}</dd>
+      </dl>
+    </>
+  );
 }
 
 /** The order's totals under the lines, as at the foot of the template's Order sheet. */

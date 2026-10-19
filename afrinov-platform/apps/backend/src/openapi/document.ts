@@ -437,7 +437,7 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createPOSchema, success: 201, errors: [404],
   },
   {
-    method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update notes, expected delivery, VAT rate or line prices',
+    method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices or delivery dates',
     procurement: true, permissions: [P.CreatePurchaseOrder], body: updatePOSchema, errors: [404, 409],
   },
   {
