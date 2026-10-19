@@ -1,8 +1,10 @@
 // Reads the stock workbook (AFRI-03A-08-IAM-02) that the platform replaces:
 // the four Main sheets (one row per item and location, with Brought Forward,
-// IN, OUT, Current Stock and Required Stock) and the four Summary sheets
-// (which carry the unit price). Header rows are found by their titles, not by
-// position, because the sheets do not agree on where the header sits.
+// IN, OUT, Current Stock and Required Stock), the four Summary sheets (which
+// carry the unit price) and the Tools Main register (one row per tool or set
+// of identical tools, with its rack and how many the store owns). Header rows
+// are found by their titles, not by position, because the sheets do not agree
+// on where the header sits.
 //
 // Nothing here writes anywhere; see workbook-analysis.ts for the checks.
 import ExcelJS from 'exceljs';
@@ -13,7 +15,8 @@ export interface CategorySheets {
   /** Prefix for the new SKUs, e.g. CON-0001. */
   skuPrefix: string;
   main: string;
-  summary: string;
+  /** The sheet with the unit prices; the Tools register has none. */
+  summary: string | null;
 }
 
 // Sheet names exactly as they appear in the workbook (the Fasteners Main name
@@ -23,6 +26,7 @@ export const CATEGORY_SHEETS: CategorySheets[] = [
   { category: 'FASTENERS_SLUGS_INSULATION', skuPrefix: 'FSI', main: 'Fasteners, Slugs & Insluation M', summary: 'FS&I Stock Summary' },
   { category: 'TOOLING_PPE_ELECTRICAL', skuPrefix: 'TPE', main: 'Tooling, PPE & Electrical Main', summary: 'TP&E Stock Summary' },
   { category: 'PROJECT_MATERIAL', skuPrefix: 'PRJ', main: 'Project Material Main', summary: 'Project Stock Summary' },
+  { category: 'TOOLS', skuPrefix: 'TL', main: 'Tools Main', summary: null },
 ];
 
 /** A cell as read: the shown value, or null when blank. `raw` keeps text that is not a number. */
@@ -175,7 +179,47 @@ function readMain(ws: ExcelJS.Worksheet, sheets: CategorySheets): MainRow[] {
   return out;
 }
 
-function readSummary(ws: ExcelJS.Worksheet, sheets: CategorySheets): { rows: SummaryRow[]; total: number | null } {
+/**
+ * The Tools register: Tool Type, Rack, Required Tools, Tools Issued, IN, OUT.
+ * "Required Tools" is typed in and is how many the store owns; "Tools Issued"
+ * is a formula (Required Tools - OUT), so despite its name it is how many are
+ * in store. OUT and IN add up the Check Out and Check In rows of Tools Issued.
+ * The owned count is both the opening quantity and the Required Stock, so a
+ * tool lost or scrapped later shows on Stock status.
+ */
+function readTools(ws: ExcelJS.Worksheet, sheets: CategorySheets): MainRow[] {
+  let header: { row: number; columns: Map<string, number> } | null = null;
+  for (let r = 1; r <= Math.min(10, ws.rowCount) && !header; r++) {
+    const columns = new Map<string, number>();
+    ws.getRow(r).eachCell((cell, c) => { const t = textOf(cell.value); if (t) columns.set(norm(t), c); });
+    if (columns.has('tool type')) header = { row: r, columns };
+  }
+  if (!header) return [];
+  const c = header.columns;
+  const out: MainRow[] = [];
+  for (let r = header.row + 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const name = textOf(cellAt(row, col(c, 'Tool Type')));
+    if (!name) continue;
+    const owned = numberOf(cellAt(row, col(c, 'Required Tools')));
+    out.push({
+      category: sheets.category,
+      sheet: sheets.main,
+      row: r,
+      productId: null,
+      name,
+      location: textOf(cellAt(row, col(c, 'Rack'))),
+      broughtForward: { value: null },
+      currentStock: owned,
+      in: numberOf(cellAt(row, col(c, 'IN'))),
+      out: numberOf(cellAt(row, col(c, 'OUT'))),
+      requiredStock: owned,
+    });
+  }
+  return out;
+}
+
+function readSummary(ws: ExcelJS.Worksheet, sheets: CategorySheets & { summary: string }): { rows: SummaryRow[]; total: number | null } {
   const header = findHeader(ws);
   if (!header) return { rows: [], total: null };
   const c = header.columns;
@@ -210,11 +254,12 @@ export function readWorkbookSheets(wb: ExcelJS.Workbook): WorkbookRead {
   const result: WorkbookRead = { mainRows: [], summaryRows: [], summaryTotals: {}, summaryRowTotals: {}, missingSheets: [] };
   for (const sheets of CATEGORY_SHEETS) {
     const main = wb.getWorksheet(sheets.main);
-    if (main) result.mainRows.push(...readMain(main, sheets));
+    if (main) result.mainRows.push(...(sheets.category === 'TOOLS' ? readTools(main, sheets) : readMain(main, sheets)));
     else result.missingSheets.push(sheets.main);
+    if (sheets.summary === null) continue;
     const summary = wb.getWorksheet(sheets.summary);
     if (summary) {
-      const { rows, total } = readSummary(summary, sheets);
+      const { rows, total } = readSummary(summary, { ...sheets, summary: sheets.summary });
       result.summaryRows.push(...rows);
       if (total !== null) result.summaryTotals[sheets.category] = total;
       result.summaryRowTotals[sheets.category] = rows

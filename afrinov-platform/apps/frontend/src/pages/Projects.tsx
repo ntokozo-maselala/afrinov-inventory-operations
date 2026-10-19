@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Select, Field, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -249,33 +249,27 @@ export function Projects() {
         title="Projects"
         description="Manage projects and their lifecycle. Inventory consumption is tracked per project number."
         actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add project
           </Button>
         }
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search number, name, client…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search projects" />
-            </div>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            <label className="flex items-center gap-1.5 text-sm text-surface-700">
-              <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
-              Active only
-            </label>
-            {(q || statusFilter || !activeOnly) && (
-              <Button variant="ghost" size="sm" onClick={() => { setQ(''); setStatusFilter(''); setActiveOnly(true); }}>Clear</Button>
-            )}
-          </>
-        )}
-        right={<span className="text-meta">{projects.loading ? 'Loading…' : `${filtered.length} of ${projects.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || statusFilter || !activeOnly ? () => { setQ(''); setStatusFilter(''); setActiveOnly(true); } : undefined}
+        count={projects.loading ? 'Loading…' : `${filtered.length} of ${projects.data?.length ?? 0}`}
+      >
+        <SearchField id="projects-search" value={q} onChange={setQ} placeholder="Number, name, client…" />
+        <Field label="Status" htmlFor="projects-status" className={FILTER_WIDTH}>
+          <Select id="projects-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            {FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+        <label className="flex items-center gap-1.5 text-sm text-surface-700 pb-2">
+          <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
+          Active only
+        </label>
+      </FilterBar>
 
       {projects.error && <ErrorState message={projects.error.message} onRetry={projects.reload} />}
 

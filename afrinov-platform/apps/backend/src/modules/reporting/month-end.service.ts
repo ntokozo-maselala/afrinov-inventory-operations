@@ -13,6 +13,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { classifyItem, getStatusBands, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
 import { ConsumptionService, parseRange } from './consumption.service.js';
 
 export interface MonthEndItem {
@@ -136,6 +137,8 @@ export const MonthEndService = {
       SettingsService.getValue<string>('general.defaultCurrency'),
       ConsumptionService.report({ from, to }),
     ]);
+    // Tools out on loan at the end are still owned, so they count towards Required Stock.
+    const onLoan = await onLoanByMaterial(prisma, undefined, new Date(end.getTime() - 1));
     const locationNames = new Map(
       (await prisma.location.findMany({ where: { id: { in: [...new Set(balances.map((b) => b.locationId))] } }, select: { id: true, name: true } }))
         .map((l) => [l.id, l.name]),
@@ -164,7 +167,9 @@ export const MonthEndService = {
         const current = round4((held.get(m.id) ?? []).reduce((a, r) => a + r.quantity, 0));
         const required = Number(m.requiredStock);
         const unitCost = m.unitCost === null ? null : Number(m.unitCost);
-        const s = classifyItem(current, required, bands);
+        // Current Stock is what is on the shelf; a tool out on loan still counts as owned.
+        const owned = round4(current + Number(onLoan.get(m.id) ?? 0));
+        const s = classifyItem(owned, required, bands);
         return {
           sku: m.sku,
           name: m.name,
@@ -173,8 +178,8 @@ export const MonthEndService = {
           currentStock: current,
           unitCost,
           value: unitCost === null ? null : round2(current * unitCost),
-          percentOfRequired: s.percentOfRequired === null ? null : round4(current / required),
-          reorderQuantity: required > 0 ? round4(required - current) : null,
+          percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
+          reorderQuantity: required > 0 ? round4(required - owned) : null,
           status: s.status,
         };
       });

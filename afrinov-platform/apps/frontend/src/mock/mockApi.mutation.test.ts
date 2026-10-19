@@ -527,4 +527,42 @@ describe('mock API mutation flows', () => {
         .rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
+
+  describe('tools', () => {
+    interface Tool { materialId: string; inStore: string; onLoan: string; owned: string; loans: Array<{ loanId: string; out: string; recipientName: string }> }
+    const wrench = async () => (await api.get<Tool[]>('/tools')).find((t) => t.materialId === 'mat-12')!;
+    const status = async () => (await api.get<Array<{ materialId: string; onHand: string; onLoan: string; status: string }>>('/reports/stock-status')).find((r) => r.materialId === 'mat-12')!;
+
+    beforeEach(async () => {
+      // Three torque wrenches (Required Stock 1) into the Main Storeroom.
+      await api.post('/stock-receipts', { supplierId: 'sup-1', deliveryRef: 'T-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 3 }] });
+    });
+
+    it('lends a tool off the shelf, still owned, and takes it back', async () => {
+      await api.post('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 2 }] });
+      let t = await wrench();
+      expect([t.inStore, t.onLoan, t.owned, t.loans[0]?.recipientName]).toEqual(['1', '2', '3', 'Sabelo']);
+      expect(await status()).toMatchObject({ onHand: '1', onLoan: '2', status: 'OK' });
+      await api.post('/tools/check-in', { lines: [{ loanId: t.loans[0]!.loanId, quantity: 2, condition: 'DAMAGED', note: 'Ratchet slips' }] });
+      t = await wrench();
+      expect([t.inStore, t.onLoan, t.loans]).toEqual(['3', '0', []]);
+    });
+
+    it('writes off a tool lost on loan, and refuses more back than is out', async () => {
+      await api.post('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 1 }] });
+      const loanId = (await wrench()).loans[0]!.loanId;
+      await expect(api.post('/tools/check-in', { lines: [{ loanId, quantity: 2, condition: 'GOOD' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(api.post('/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await api.post('/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST', note: 'Left on site' }] });
+      expect((await wrench()).owned).toBe('2');
+    });
+
+    it('refuses more than is in store, issuing a tool, and reversing a loan', async () => {
+      await expect(api.post('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 4 }] }))
+        .rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
+      await expect(issue('mat-12', 'loc-1', 1)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      const { loanIds } = await api.post<{ loanIds: string[] }>('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 1 }] });
+      await expect(api.post(`/inventory-transactions/${loanIds[0]}/reversal`, { reason: 'Wrong person' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    });
+  });
 });

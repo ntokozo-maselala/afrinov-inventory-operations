@@ -43,6 +43,8 @@ const movementTone: Record<string, Tone> = {
   TRANSFER_IN: 'info',
   ADJUSTMENT: 'warning',
   RETURN: 'success',
+  LOAN: 'info',
+  LOAN_RETURN: 'info',
 };
 
 const movementLabel: Record<string, string> = {
@@ -52,6 +54,8 @@ const movementLabel: Record<string, string> = {
   TRANSFER_IN: 'Transfer in',
   ADJUSTMENT: 'Adjustment',
   RETURN: 'Return',
+  LOAN: 'Tool out',
+  LOAN_RETURN: 'Tool back',
 };
 
 export function MovementBadge({ type }: MovementBadgeProps) {

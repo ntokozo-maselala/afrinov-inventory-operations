@@ -162,7 +162,10 @@ const fakeTx = {
     },
   },
   material: {
-    findUnique: async () => ({ id: 'mat-1', requiredStock: new Prisma.Decimal(5), active: true }),
+    // An id starting "tool" is a tool.
+    findUnique: async ({ where }: { where: { id: string } }) => ({
+      id: where.id, sku: where.id.toUpperCase(), category: where.id.startsWith('tool') ? 'TOOLS' : 'CONSUMABLES', requiredStock: new Prisma.Decimal(5), active: true,
+    }),
   },
   location: {
     findUnique: async () => ({ id: 'loc-1', active: true }),
@@ -315,6 +318,11 @@ describe('InventoryService — ADR-002 invariants', () => {
     await expect(
       issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 100, actorId: 'u' }),
     ).rejects.toThrow(/available/);
+  });
+
+  it('refuses to issue a tool: tools are checked out', async () => {
+    await InventoryService.adjust({ materialId: 'tool-1', locationId: 'loc-1', quantity: 2, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    await expect(issueOne({ materialId: 'tool-1', locationId: 'loc-1', quantity: 1, actorId: 'u' })).rejects.toThrow(/is a tool: check it out on the Tools page/);
   });
 
   it('transfer moves stock atomically: out & in both land, paired together', async () => {
@@ -747,6 +755,13 @@ describe('InventoryService — ADR-002 invariants', () => {
       await expect(
         InventoryService.reverse({ transactionId: reversalIds[0]!, reason: 'Undo', actorId: 'u' }),
       ).rejects.toThrow(/cannot itself be reversed/);
+    });
+
+    it('refuses to reverse a tool check-out, a check-in or a tool written off as lost on loan', async () => {
+      for (const [id, type, referenceType] of [['loan', 'LOAN', null], ['back', 'LOAN_RETURN', 'ToolLoan'], ['lost', 'ADJUSTMENT', 'ToolLoan']] as const) {
+        trxRows.push({ id, materialId: 'tool-1', locationId: 'loc-1', type, quantity: new Prisma.Decimal(1), actorId: 'u', postedAt: new Date(), referenceType, referenceId: 'loan' });
+        await expect(InventoryService.reverse({ transactionId: id, reason: 'Wrong person', actorId: 'u' })).rejects.toThrow(/check the tool in, or out, again/);
+      }
     });
 
     it('refuses to reverse stock received against a purchase order', async () => {

@@ -35,9 +35,9 @@ export function IssueStock() {
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
 
-  // Only items with stock can be issued.
+  // Only items with stock can be issued, and tools are lent on the Tools page instead.
   const available = useMemo(
-    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0)
+    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS')
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
     [stock.data],
   );
@@ -94,7 +94,7 @@ export function IssueStock() {
     <div>
       <PageHeader
         title="Issue stock"
-        description="Record stock leaving the store: who took it, for which project, and which items."
+        description={<>Record stock leaving the store: who took it, for which project, and which items. Tools are lent, not issued: check them out on <Link to="/tools" className="btn-link">Tools</Link>.</>}
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Issue stock' }]}
       />
 

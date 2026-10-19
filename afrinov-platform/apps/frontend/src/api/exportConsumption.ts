@@ -1,10 +1,13 @@
 // Download the stock-used (consumption) report as Excel. Live: the backend's
 // GET /reports/consumption/export. Frontend-only mode builds the same two
-// sheets here from the mock report.
+// sheets here from the mock report. The PDF copy is built here in both modes.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
 import type { ConsumptionReport } from './reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
+import { downloadPdf, type PdfTable } from '../lib/pdf';
+import { formatDate, formatNumber } from '../lib/format';
+import { formatCurrency } from '../lib/currency';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -73,4 +76,80 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
     for (const l of r.lines) wl.addRow([new Date(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, l.quantity, l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy]);
   }
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+/**
+ * Stock used as a PDF, for the same selection as the page: the totals by
+ * category, by project and by who it was issued to, then each item used.
+ * `filters` says in words what the selection is, e.g. "Project: P-104 · Mall".
+ */
+export async function downloadConsumptionPdf(query: string, filters: string[]): Promise<void> {
+  const r = await api.get<ConsumptionReport>(`/reports/consumption?${query}`);
+  const params = new URLSearchParams(query);
+  const money = (n: number) => formatCurrency(n, r.currency);
+  const period = `${formatDate(r.from)} to ${formatDate(r.to)}`;
+  const order = CATEGORIES.map((c) => c.value);
+  const categories = [...new Set(r.items.map((i) => i.category))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+  const nothing = 'Nothing was issued for this selection in this period.';
+
+  const sections: PdfTable[] = [{
+    heading: 'By category',
+    columns: [{ header: 'Category', wrap: true }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
+    rows: r.byCategory.map((c) => [categoryLabel(c.category), formatNumber(c.items), money(c.value)]),
+    totals: [['Total', formatNumber(r.total.items), money(r.total.value)]],
+    empty: nothing,
+  }];
+  if (!params.get('projectNumber')) {
+    sections.push({
+      heading: 'By project',
+      columns: [{ header: 'Project' }, { header: 'Name', wrap: true }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
+      rows: r.byProject.map((p) => [p.projectNumber ?? 'No project', p.projectName ?? '', formatNumber(p.items), money(p.value)]),
+      totals: [['Total', '', formatNumber(r.total.items), money(r.total.value)]],
+      empty: nothing,
+    });
+  }
+  sections.push({
+    heading: 'By who it was issued to',
+    columns: [{ header: 'Issued to', wrap: true }, { header: 'Type' }, { header: 'Issues', align: 'right' }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
+    rows: r.byRecipient.map((x) => [x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', formatNumber(x.issues), formatNumber(x.items), money(x.value)]),
+    totals: [['Total', '', '', formatNumber(r.total.items), money(r.total.value)]],
+    empty: nothing,
+  });
+  for (const category of categories) {
+    const group = r.items.filter((i) => i.category === category);
+    sections.push({
+      heading: `${categoryLabel(category)}: by item (${group.length})`,
+      columns: [
+        { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Unit' },
+        { header: 'Issued', align: 'right' }, { header: 'Returned', align: 'right' }, { header: 'Used', align: 'right' },
+        { header: 'Unit price', align: 'right' }, { header: 'Value', align: 'right' },
+      ],
+      rows: group.map((i) => [
+        i.sku, i.name, i.unitOfMeasure, formatNumber(i.issued), i.returned ? formatNumber(i.returned) : '-', formatNumber(i.used),
+        i.unitCost === null ? '-' : money(i.unitCost), i.value === null ? '-' : money(i.value),
+      ]),
+      totals: [['', `Subtotal ${categoryLabel(category)}`, '', '', '', '', '', money(r.byCategory.find((c) => c.category === category)?.value ?? 0)]],
+    });
+  }
+  if (r.lines) {
+    sections.push({
+      heading: `Issued to ${r.byRecipient[0]?.name ?? 'the recipient'}, issue by issue`,
+      columns: [
+        { header: 'Date' }, { header: 'Issue/Return' }, { header: 'Code' }, { header: 'Item', wrap: true },
+        { header: 'Quantity', align: 'right' }, { header: 'Unit' }, { header: 'Project' }, { header: 'Issued by' },
+      ],
+      rows: r.lines.map((l) => [formatDate(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, formatNumber(l.quantity), l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy]),
+    });
+  }
+
+  const project = params.get('projectNumber');
+  await downloadPdf({
+    title: `Stock used, ${period}`,
+    lines: [
+      ...(filters.length ? [filters.join('  ·  ')] : ['All projects, everyone, all categories']),
+      'Used = issued - returned; reversed issues and returns are left out. Value = used x unit price now, excl. VAT.',
+    ],
+    sections,
+    notes: r.total.unpriced > 0 ? [`${r.total.unpriced} item${r.total.unpriced === 1 ? ' has' : 's have'} no unit price and ${r.total.unpriced === 1 ? 'is' : 'are'} not in the values.`] : [],
+  }, `afrinov-consumption${project ? `-${project.replace(/[^A-Za-z0-9-]+/g, '-')}` : ''}-${r.from}-to-${r.to}.pdf`);
 }

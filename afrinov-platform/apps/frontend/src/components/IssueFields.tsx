@@ -1,4 +1,5 @@
-// Recipient and project pickers shared by every screen that issues stock.
+// Recipient and project pickers shared by every screen that issues stock or
+// lends tools.
 // Issued To is required (ADR-008); the project is optional but chosen from the
 // project list, so consumption reports are not split by typing variations.
 import { Field, Select } from './Field';
@@ -30,8 +31,10 @@ export function useIssueOptions(): {
   };
 }
 
-export function RecipientSelect({ id, value, onChange, recipients, invalid, disabled }: {
+export function RecipientSelect({ id, value, onChange, recipients, invalid, disabled, label = 'Issued to', help = 'Who is receiving the stock: a worker, machine, site or contractor.' }: {
   id: string;
+  label?: string;
+  help?: string;
   value: string;
   onChange: (id: string) => void;
   recipients: RecipientOption[];
@@ -39,7 +42,7 @@ export function RecipientSelect({ id, value, onChange, recipients, invalid, disa
   disabled?: boolean;
 }) {
   return (
-    <Field label="Issued to" htmlFor={id} required help="Who is receiving the stock: a worker, machine, site or contractor.">
+    <Field label={label} htmlFor={id} required help={help}>
       <Select id={id} required value={value} onChange={(e) => onChange(e.target.value)} invalid={invalid} disabled={disabled}>
         <option value="">— choose —</option>
         {TYPE_GROUP.map(([type, label]) => {
@@ -55,15 +58,16 @@ export function RecipientSelect({ id, value, onChange, recipients, invalid, disa
   );
 }
 
-export function ProjectSelect({ id, value, onChange, projects, disabled }: {
+export function ProjectSelect({ id, value, onChange, projects, disabled, help = 'Link the issue to a project so it shows in consumption reports.' }: {
   id: string;
+  help?: string;
   value: string;
   onChange: (projectNumber: string) => void;
   projects: ProjectOption[];
   disabled?: boolean;
 }) {
   return (
-    <Field label="Project (optional)" htmlFor={id} help="Link the issue to a project so it shows in consumption reports.">
+    <Field label="Project (optional)" htmlFor={id} help={help}>
       <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
         <option value="">No project</option>
         {projects.map((p) => (

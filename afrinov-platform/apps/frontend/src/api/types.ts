@@ -7,6 +7,27 @@ export interface Material {
   id: string; sku: string; name: string; description?: string | null;
   category: string; unitOfMeasure: string; requiredStock: string;
   unitCost?: string | null; active: boolean;
+  /** Tools kept as one unit: the serial number. */
+  serialNumber?: string | null;
+}
+
+/** A tool lent and not yet all back (GET /tools). */
+export interface OpenLoan {
+  loanId: string; slipId: string | null; recipientId: string | null; recipientName: string | null; projectNumber: string | null;
+  locationId: string; locationName: string;
+  /** How many were lent, and how many of them are still out. */
+  quantity: string; out: string;
+  checkedOutAt: string; checkedOutBy: string; note: string | null;
+  /** Whole days out, and whether that is past Settings > Inventory's overdue days. */
+  daysOut: number; overdue: boolean;
+}
+
+/** A tool with what is in store where, what is out, and with whom (GET /tools). */
+export interface ToolRow {
+  materialId: string; sku: string; name: string; serialNumber: string | null; unitOfMeasure: string;
+  inStore: string; onLoan: string; owned: string;
+  locations: Array<{ locationId: string; locationName: string; quantity: string }>;
+  loans: OpenLoan[];
 }
 
 /** One item at one location (GET /reports/current-stock). */
@@ -73,5 +94,5 @@ export interface CountRecord {
   counted: number; adjusted: number; note: string | null;
   differences: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; quantity: string }>;
   /** Every item counted, matched or not, with what the system had. Empty for counts posted before sheets were kept. */
-  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string }>;
+  lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string; note?: string | null }>;
 }

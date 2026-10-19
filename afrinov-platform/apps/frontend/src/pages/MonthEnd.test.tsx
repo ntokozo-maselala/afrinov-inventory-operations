@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
+const { mockGet, mockDownload, mockPdf } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn() }));
 vi.mock('../api/client', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api/client')>(), api: { get: mockGet },
 }));
-vi.mock('../api/exportMonthEnd', () => ({ downloadMonthEnd: mockDownload }));
+vi.mock('../api/exportMonthEnd', () => ({ downloadMonthEnd: mockDownload, downloadMonthEndPdf: mockPdf }));
 
 const { MonthEnd, lastMonth } = await import('./MonthEnd');
 const { ToastProvider } = await import('../components/Toast');
@@ -22,6 +22,11 @@ const REPORT = {
 const SEPT = '/reports/month-end?from=2026-09-01&to=2026-09-30';
 const renderPage = (url = '/reports/stock-report') => render(<MemoryRouter initialEntries={[url]}><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
 const download = () => screen.getByRole('button', { name: 'Download stock report' });
+/** Open the Download menu and choose a format. */
+const downloadAs = (format: 'Excel (.xlsx)' | 'PDF (.pdf)') => {
+  fireEvent.click(download());
+  fireEvent.click(screen.getByRole('menuitem', { name: format }));
+};
 
 describe('lastMonth', () => {
   it('gives the month just ended, across a year end and a leap February', () => {
@@ -37,6 +42,7 @@ describe('Stock report page', () => {
     vi.setSystemTime(new Date('2026-10-09T12:00:00Z'));
     mockGet.mockReset().mockResolvedValue(REPORT);
     mockDownload.mockReset().mockResolvedValue(undefined);
+    mockPdf.mockReset().mockResolvedValue(undefined);
   });
   afterEach(() => vi.useRealTimers());
 
@@ -47,8 +53,10 @@ describe('Stock report page', () => {
     expect(overview.getByText('Consumables')).toBeInTheDocument();
     expect(screen.getByText('Stock as at the end of 2026-09-30; stock used from 2026-09-01 to 2026-09-30.')).toBeInTheDocument();
     expect(mockGet).toHaveBeenCalledWith(SEPT);
-    fireEvent.click(download());
+    downloadAs('Excel (.xlsx)');
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith({ from: '2026-09-01', to: '2026-09-30' }));
+    downloadAs('PDF (.pdf)');
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith({ from: '2026-09-01', to: '2026-09-30' }));
   });
 
   it('opens on the dates in the address, and says when stock is as it stands now', async () => {
@@ -70,7 +78,7 @@ describe('Stock report page', () => {
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-13' } });
     await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-09-07&to=2026-09-13'));
     await waitFor(() => expect(download()).toBeEnabled());
-    fireEvent.click(download());
+    downloadAs('Excel (.xlsx)');
     await waitFor(() => expect(mockDownload).toHaveBeenCalledWith({ from: '2026-09-07', to: '2026-09-13' }));
   });
 
@@ -95,6 +103,7 @@ describe('Stock report loading and failures', () => {
     vi.setSystemTime(new Date('2026-10-09T12:00:00Z'));
     mockGet.mockReset().mockResolvedValue(REPORT);
     mockDownload.mockReset().mockResolvedValue(undefined);
+    mockPdf.mockReset().mockResolvedValue(undefined);
   });
   afterEach(() => vi.useRealTimers());
 
@@ -131,7 +140,7 @@ describe('Stock report loading and failures', () => {
     renderPage();
     await screen.findByLabelText('Stock report overview');
     const button = download();
-    fireEvent.click(button);
+    downloadAs('Excel (.xlsx)');
     expect(button).toBeDisabled();
     fireEvent.click(button);
     expect(mockDownload).toHaveBeenCalledTimes(1);
@@ -140,7 +149,7 @@ describe('Stock report loading and failures', () => {
     expect(notifications.getByText('Download failed')).toBeInTheDocument();
     expect(notifications.getByText('Network unavailable')).toBeInTheDocument();
     expect(button).toBeEnabled();
-    fireEvent.click(button);
+    downloadAs('Excel (.xlsx)');
     await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(button).toBeEnabled());
   });

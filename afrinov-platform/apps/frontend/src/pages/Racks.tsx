@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
-import { Toolbar } from '../components/Toolbar';
+import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Button } from '../components/Button';
 import { Input, Select, Field, Textarea } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
@@ -217,27 +217,23 @@ export function Racks() {
         title="Racks"
         description="The racks in each workshop and the projects they are set aside for. Stock is not counted against these records: to hold stock on a rack, add it under Locations with the type Rack."
         actions={
-          <Button variant="primary" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setDrawer({ mode: 'add' })}>
             Add rack
           </Button>
         }
       />
 
-      <Toolbar
-        left={(
-          <>
-            <div className="relative w-full sm:w-64">
-              <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-              <Input className="pl-8" placeholder="Search rack code, name, or location…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search racks" />
-            </div>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            {(q || statusFilter) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setStatusFilter(''); }}>Clear</Button>}
-          </>
-        )}
-        right={<span className="text-meta">{racks.loading ? 'Loading…' : `${filtered.length} of ${racks.data?.length ?? 0}`}</span>}
-      />
+      <FilterBar
+        onClear={q || statusFilter ? () => { setQ(''); setStatusFilter(''); } : undefined}
+        count={racks.loading ? 'Loading…' : `${filtered.length} of ${racks.data?.length ?? 0}`}
+      >
+        <SearchField id="racks-search" value={q} onChange={setQ} placeholder="Rack code, name or location…" />
+        <Field label="Status" htmlFor="racks-status" className={FILTER_WIDTH}>
+          <Select id="racks-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
 
       {racks.error && <ErrorState message={racks.error.message} onRetry={racks.reload} />}
 

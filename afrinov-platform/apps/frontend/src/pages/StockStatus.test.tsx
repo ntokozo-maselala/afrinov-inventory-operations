@@ -2,9 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
-vi.mock('../api/client', () => ({ api: { get: mockGet } }));
-vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload }));
+const { mockGet, mockDownload, mockPdf, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), mockPdf: vi.fn(), perms: { admin: false } }));
+vi.mock('../api/client', () => ({
+  api: { get: mockGet },
+  isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
+}));
+vi.mock('../hooks/usePermissions', () => ({ useIsAdmin: () => perms.admin }));
+vi.mock('../api/exportReorderList', () => ({ downloadReorderList: mockDownload, downloadReorderListPdf: mockPdf }));
 
 const { StockStatus } = await import('./StockStatus');
 const { ToastProvider } = await import('../components/Toast');
@@ -25,9 +29,17 @@ const ROWS = [
 
 describe('StockStatus page', () => {
   beforeEach(() => {
-    mockGet.mockReset().mockResolvedValue(ROWS);
+    perms.admin = false;
+    mockGet.mockReset().mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : ROWS));
     mockDownload.mockReset().mockResolvedValue(undefined);
+    mockPdf.mockReset().mockResolvedValue(undefined);
   });
+
+  /** Open the Download menu and choose a format. */
+  function downloadAs(format: 'Excel (.xlsx)' | 'PDF (.pdf)') {
+    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: format }));
+  }
 
   function renderPage() {
     render(<MemoryRouter><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
@@ -59,19 +71,31 @@ describe('StockStatus page', () => {
   it('searches by item, code or location', async () => {
     renderPage();
     await screen.findByText('Grinding disc');
-    fireEvent.change(screen.getByLabelText('Search stock status'), { target: { value: 'stores' } });
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'stores' } });
     expect(screen.getByText('Flap disc')).toBeInTheDocument();
     expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
   });
 
-  it('downloads the re-order list, and reports a failure', async () => {
+  it('downloads the re-order list as Excel or PDF, and reports a failure', async () => {
     renderPage();
     await screen.findByText('Grinding disc');
-    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1));
+    downloadAs('Excel (.xlsx)');
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(undefined));
+    downloadAs('PDF (.pdf)');
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith(undefined));
     mockDownload.mockRejectedValueOnce(new Error('Request failed (500)'));
-    fireEvent.click(screen.getByRole('button', { name: 'Download re-order list' }));
+    downloadAs('Excel (.xlsx)');
     expect(await screen.findByText('Request failed (500)')).toBeInTheDocument();
+  });
+
+  it('downloads the re-order list for the chosen category, and none for a category with nothing to re-order', async () => {
+    renderPage();
+    await screen.findByText('Grinding disc');
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CONSUMABLES' } });
+    downloadAs('PDF (.pdf)');
+    await waitFor(() => expect(mockPdf).toHaveBeenCalledWith('CONSUMABLES'));
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'TOOLS' } });
+    expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled();
   });
 
   it('offers no download when nothing needs re-ordering', async () => {
@@ -81,9 +105,46 @@ describe('StockStatus page', () => {
     expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled();
   });
 
+  it('shows a tool out on loan beside what is on hand', async () => {
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : [{ ...row('TL-1', 'Torque wrench', 'WARNING', '0', '10', 20, '8'), category: 'TOOLS', onLoan: '2' }]));
+    renderPage();
+    expect(await screen.findByText('+2 on loan')).toBeInTheDocument();
+  });
+
   it('opens on the view a link asks for', async () => {
     render(<MemoryRouter initialEntries={['/reports/stock-status?view=OK']}><ToastProvider><StockStatus /></ToastProvider></MemoryRouter>);
     expect(await screen.findByText('Cutting disc')).toBeInTheDocument();
     expect(screen.queryByText('Grinding disc')).not.toBeInTheDocument();
+  });
+
+  it('says the bands as set under Settings, and links there for an admin', async () => {
+    perms.admin = true;
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+      ? { 'inventory.urgentBelowPercent': 25, 'inventory.warningBelowPercent': 50 }
+      : ROWS));
+    renderPage();
+    expect(await screen.findByText(/urgent below 25%/)).toBeInTheDocument();
+    expect(screen.getByText(/warning below 50%/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings → Inventory' })).toHaveAttribute('href', '/settings/inventory');
+  });
+
+  it('falls back to 20% and 40% when the bands cannot be read, without a link for others', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/settings/values')) throw { code: 'INTERNAL_ERROR', message: 'down' };
+      return ROWS;
+    });
+    renderPage();
+    expect(await screen.findByText(/urgent below 20%/)).toBeInTheDocument();
+    expect(screen.getByText(/warning below 40%/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Settings → Inventory' })).not.toBeInTheDocument();
+  });
+
+  it('labels its search and filters', async () => {
+    renderPage();
+    await screen.findByText('Grinding disc');
+    for (const label of ['Search', 'Show', 'Category']) {
+      expect(screen.getByText(label, { selector: 'label' })).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
   });
 });

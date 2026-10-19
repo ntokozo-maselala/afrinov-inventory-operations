@@ -45,4 +45,6 @@ export const Icon = {
   Print: (p: IconProps) => (<svg {...base(p)}><path d="M4 6V2h8v4M4 11H2V7h12v4h-2M4 11h8v3H4z" /></svg>),
   Tag: (p: IconProps) => (<svg {...base(p)}><path d="M1.5 7.5V2h5.5l7 7-5.5 5.5-7-7Z" /><circle cx="4.5" cy="4.5" r="0.8" /></svg>),
   ChevronRight: (p: IconProps) => (<svg {...base(p)}><path d="M5 12 10 8 5 4" /></svg>),
+  Wrench: (p: IconProps) => (<svg {...base(p)}><path d="M10.5 2.5a3 3 0 0 0-2.8 4L2.5 11.7a1.2 1.2 0 0 0 1.8 1.8l5.2-5.2a3 3 0 0 0 4-2.8l-1.7 1.7-1.6-.4-.4-1.6z" /></svg>),
+  ChevronDown: (p: IconProps) => (<svg {...base(p)}><path d="M4 6 8 10 12 6" /></svg>),
 };
