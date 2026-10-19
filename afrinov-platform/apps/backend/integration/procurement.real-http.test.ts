@@ -154,22 +154,40 @@ describe('receiving stock over real HTTP', () => {
       await expectStock('4');
     });
 
-    it('rolls back a receipt that would exceed the ordered quantity', async () => {
-      const tooMuch = await receive(order, 7); // 4 already received + 7 > 10 ordered
-      const res = await api<{ error: { code: string } }>('POST', `/goods-receipts/${tooMuch.id}/post`);
+    it('refuses to record a receipt for more than is outstanding', async () => {
+      // 4 of 10 received: 6 outstanding.
+      const res = await api<{ error: { code: string; message: string } }>('POST', '/goods-receipts', {
+        purchaseOrderId: order.id, supplierId, deliveryRef: `DN-${run}-over`,
+        lines: [{ materialId, locationId, quantity: 7, purchaseOrderLineId: order.lines[0]!.id }],
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/would exceed what is still outstanding/);
+      expect(await prisma.goodsReceipt.count({ where: { deliveryRef: `DN-${run}-over` } })).toBe(0);
+      await expectStock('4');
+    });
+
+    // Two receipts each within what is outstanding when recorded can still be
+    // too much together: the second is refused at posting, and rolls back.
+    it('rolls back a receipt that would exceed the ordered quantity when posted', async () => {
+      const first = await receive(order, 3);
+      const second = await receive(order, 4); // each within the 6 outstanding; 4 + 3 + 4 > 10
+      expect((await api('POST', `/goods-receipts/${first.id}/post`)).status).toBe(200);
+      await expectStock('7');
+
+      const res = await api<{ error: { code: string } }>('POST', `/goods-receipts/${second.id}/post`);
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
 
       // Nothing from the failed posting survives.
-      await expectStock('4');
-      expect(await prisma.inventoryTransaction.count({ where: { referenceId: tooMuch.id } })).toBe(0);
-      const stillOpen = await api<GoodsReceipt>('GET', `/goods-receipts/${tooMuch.id}`);
+      await expectStock('7');
+      expect(await prisma.inventoryTransaction.count({ where: { referenceId: second.id } })).toBe(0);
+      const stillOpen = await api<GoodsReceipt>('GET', `/goods-receipts/${second.id}`);
       expect(stillOpen.body.status).toBe('SUBMITTED');
-      expect(Number((await getOrder(order.id)).lines[0]!.receivedQty)).toBe(4);
+      expect(Number((await getOrder(order.id)).lines[0]!.receivedQty)).toBe(7);
     });
 
     it('receiving the remainder fully receives the order', async () => {
-      const rest = await receive(order, 6);
+      const rest = await receive(order, 3);
       const posted = await api('POST', `/goods-receipts/${rest.id}/post`);
       expect(posted.status).toBe(200);
 
