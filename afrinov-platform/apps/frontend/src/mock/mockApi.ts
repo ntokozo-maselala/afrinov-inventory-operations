@@ -1231,6 +1231,9 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.deliveryCountry': row('purchaseOrders.deliveryCountry', 'South Africa', 'string', 'purchase_orders', 'Delivery country on new purchase orders.'),
     'purchaseOrders.deliveryContactName': row('purchaseOrders.deliveryContactName', '', 'string', 'purchase_orders', 'Who receives deliveries at the delivery address, on new purchase orders.'),
     'purchaseOrders.deliveryContactPhone': row('purchaseOrders.deliveryContactPhone', '', 'string', 'purchase_orders', 'Phone number for that person.'),
+    'purchaseOrders.companyVatNumber': row('purchaseOrders.companyVatNumber', '4010288142', 'string', 'purchase_orders', "Afrinov's VAT number, printed on every purchase order."),
+    'purchaseOrders.invoiceEmail': row('purchaseOrders.invoiceEmail', 'accounts@afrinov.co.za', 'string', 'purchase_orders', 'Where suppliers send invoices, printed under the order lines.'),
+    'purchaseOrders.codeOfConduct': row('purchaseOrders.codeOfConduct', '', 'string', 'purchase_orders', 'The supplier code of conduct printed on every purchase order. Leave blank to leave it off.'),
     'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 
     'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),

@@ -186,6 +186,10 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'purchaseOrders.deliveryCountry', type: 'string', category: 'purchase_orders', description: 'Delivery country on new purchase orders.', default: 'South Africa', validate: isLength(0, 100) },
   { key: 'purchaseOrders.deliveryContactName', type: 'string', category: 'purchase_orders', description: 'Who receives deliveries at the delivery address, on new purchase orders.', default: '', validate: isLength(0, 200) },
   { key: 'purchaseOrders.deliveryContactPhone', type: 'string', category: 'purchase_orders', description: 'Phone number for that person.', default: '', validate: isLength(0, 50) },
+  // Printed on the purchase order document, as on the template's Order sheet.
+  { key: 'purchaseOrders.companyVatNumber', type: 'string', category: 'purchase_orders', description: "Afrinov's VAT number, printed on every purchase order.", default: '4010288142', validate: isLength(0, 30) },
+  { key: 'purchaseOrders.invoiceEmail', type: 'string', category: 'purchase_orders', description: 'Where suppliers send invoices, printed under the order lines.', default: 'accounts@afrinov.co.za', validate: isLength(0, 200) },
+  { key: 'purchaseOrders.codeOfConduct', type: 'string', category: 'purchase_orders', description: 'The supplier code of conduct printed on every purchase order. Leave blank to leave it off.', default: '', validate: isLength(0, 4000) },
 
   // ── Notifications ──────────────────────────────────────────────────────
   { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },

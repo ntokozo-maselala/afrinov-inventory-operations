@@ -238,7 +238,7 @@ export function parsePath(d: string): PathOp[] {
 }
 
 /** The Afrinov logo as vector shapes, so it stays sharp in print: centred on `centre`, its top at `y`, `height` mm tall. */
-function drawLogo(doc: jsPDF, centre: number, y: number, height: number) {
+export function drawLogo(doc: jsPDF, centre: number, y: number, height: number) {
   const shapes = LOGO_PATHS.map(parsePath);
   const xs: number[] = [];
   const ys: number[] = [];

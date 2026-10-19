@@ -14,6 +14,8 @@ vi.mock('../api/client', () => ({
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 vi.mock('../auth', () => ({ useAuth: () => ({ user: { name: 'Someone', roles: signedIn.roles } }) }));
+// The document itself is checked in lib/poDocument.test.ts; here only that the page asks for it.
+vi.mock('../lib/poDocument', async (original) => ({ ...(await original<object>()), downloadPoDocument: vi.fn() }));
 
 const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
@@ -84,6 +86,26 @@ describe('approving by value', () => {
     current.approval = approval({ approvers: [] });
     page(['PROCUREMENT']);
     expect(await screen.findByText(/Nobody has a high enough approval limit/)).toBeInTheDocument();
+  });
+});
+
+describe('the purchase order document', () => {
+  it('lets anyone who can open the order download it, with the company details from Settings', async () => {
+    const { downloadPoDocument } = await import('../lib/poDocument');
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders/po-1') return current.po;
+      if (path === '/purchase-orders/po-1/approval') return current.approval;
+      if (path.startsWith('/settings/values')) return { 'general.companyName': 'Afrinov', 'purchaseOrders.companyVatNumber': '4010288142' };
+      return [];
+    });
+    page(['APPROVER']);
+    await screen.findByText('Hydraulic pump');
+    fireEvent.click(button('Download PDF')!);
+    await waitFor(() => expect(downloadPoDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 'PO-2026-0007' }),
+      expect.objectContaining({ name: 'Afrinov', vatNumber: '4010288142' }),
+    ));
+    expect(mockGet).toHaveBeenCalledWith(expect.stringMatching(/^\/settings\/values\?keys=.*purchaseOrders\.companyVatNumber/));
   });
 });
 

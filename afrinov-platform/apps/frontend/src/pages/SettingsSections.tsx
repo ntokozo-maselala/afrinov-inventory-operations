@@ -149,6 +149,11 @@ export function SettingsPurchaseOrders() {
     useSetting('purchaseOrders.deliveryContactName'),
     useSetting('purchaseOrders.deliveryContactPhone'),
   ];
+  const documentDefaults = [
+    useSetting('purchaseOrders.companyVatNumber'),
+    useSetting('purchaseOrders.invoiceEmail'),
+    useSetting('purchaseOrders.codeOfConduct'),
+  ];
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
@@ -175,6 +180,17 @@ export function SettingsPurchaseOrders() {
           onChange={(v) => setDraft(def.key, v)}
           error={errors[def.key] ?? null}
           multiline={def.key === 'purchaseOrders.deliveryAddress'}
+        />
+      ))}
+      <h3 className="text-sm font-semibold text-surface-900 pt-2">Printed on the purchase order</h3>
+      {documentDefaults.map((def) => (
+        <TextField
+          key={def.key}
+          def={def}
+          value={(draft[def.key] as string) ?? ''}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+          multiline={def.key === 'purchaseOrders.codeOfConduct'}
         />
       ))}
       <SaveBar items={items} onSave={async () => {
