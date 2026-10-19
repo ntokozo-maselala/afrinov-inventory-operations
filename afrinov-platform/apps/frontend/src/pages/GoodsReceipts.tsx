@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -16,12 +17,17 @@ import { Alert } from '../components/Alert';
 import type { Material } from '../api/types';
 import { usePermissions } from '../hooks/usePermissions';
 import { NoAccess } from '../components/NoAccess';
+import {
+  EveryLineInto, OrderReceiptRow, checkReceiptLines, receiptLinesBody, receiptLinesFromOrder,
+  type OrderForReceipt, type ReceiptLineDraft,
+} from '../components/OrderReceiptLines';
 
 interface GR {
   id: string; number: string; status: string; deliveryRef?: string;
   supplier: { name: string }; supplierId?: string;
   receivedAt: string;
   purchaseOrderId?: string;
+  purchaseOrder?: { id: string; number: string } | null;
   lines: Array<{ id: string; material: { sku: string; name: string }; location: { name: string }; quantity: string }>;
 }
 interface PO { id: string; number: string; status: string; supplierId?: string; supplier: { name: string }; }
@@ -126,6 +132,12 @@ function columns({ onPost }: { onPost?: (id: string) => void }): DataTableColumn
   const cols: DataTableColumn<GR>[] = [
     { key: 'num', header: 'Receipt', className: 'text-mono', render: (r) => r.number, width: '10rem' },
     { key: 'sup', header: 'Supplier', render: (r) => r.supplier?.name ?? '—' },
+    {
+      key: 'po', header: 'Order', width: '9rem',
+      render: (r) => r.purchaseOrder
+        ? <Link to={`/purchase-orders/${r.purchaseOrder.id}`} className="btn-link text-mono">{r.purchaseOrder.number}</Link>
+        : <span className="text-meta">Counter receipt</span>,
+    },
     { key: 'ref', header: 'Delivery ref', render: (r) => r.deliveryRef ?? <span className="text-surface-300">—</span> },
     { key: 'when', header: 'Received', render: (r) => <span className="text-meta">{formatDate(r.receivedAt)}</span>, width: '8rem' },
     { key: 'lines', header: 'Lines', align: 'right', render: (r) => formatNumber(r.lines.length), width: '5rem' },
@@ -143,18 +155,7 @@ interface CreateGRProps {
   onError: (e: ApiError) => void; onSuccess: () => void;
 }
 
-interface DraftLine {
-  materialId: string; locationId: string; quantity: string;
-  /** Set when the line comes from a purchase order: the order line it credits. */
-  purchaseOrderLineId?: string;
-  /** For order lines: what the order still expects, shown beside the quantity. */
-  outstanding?: number; label?: string; unit?: string;
-}
-
-interface OrderDetail {
-  id: string; number: string; supplierId: string; supplier: { name: string };
-  lines: Array<{ id: string; materialId: string; orderedQty: string; receivedQty: string; material: { sku: string; name: string; unitOfMeasure: string } }>;
-}
+type DraftLine = ReceiptLineDraft;
 
 function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   const suppliers = useApi<Supplier[]>('/suppliers');
@@ -177,23 +178,16 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   const fromOrder = !!poId;
 
   // A receipt against an order credits the order's lines, so the lines come
-  // from the order, each with what is still outstanding filled in. Typing them
-  // by hand used to book the stock without crediting the order.
+  // from the order, each with what is still outstanding filled in.
   async function chooseOrder(id: string) {
     setPoId(id);
     setValidation(null);
     if (!id) { setLines([]); return; }
     setLoadingOrder(true);
     try {
-      const order = await api.get<OrderDetail>(`/purchase-orders/${id}`);
+      const order = await api.get<OrderForReceipt>(`/purchase-orders/${id}`);
       setSupplierId(order.supplierId);
-      setLines(order.lines
-        .map((l) => ({ l, outstanding: Number(l.orderedQty) - Number(l.receivedQty) }))
-        .filter(({ outstanding }) => outstanding > 0)
-        .map(({ l, outstanding }) => ({
-          materialId: l.materialId, locationId: '', quantity: String(outstanding), purchaseOrderLineId: l.id,
-          outstanding, label: `${l.material.sku} — ${l.material.name}`, unit: l.material.unitOfMeasure,
-        })));
+      setLines(receiptLinesFromOrder(order));
     } catch (err) { onError(err as ApiError); setPoId(''); }
     finally { setLoadingOrder(false); }
   }
@@ -210,21 +204,15 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
     setValidation(null);
     if (!supplierId) { setValidation('Select a supplier.'); return; }
     // Order lines left at 0 are not in this delivery.
-    const validLines = lines.filter((l) => l.materialId && Number(l.quantity) > 0);
-    if (validLines.length === 0) { setValidation(fromOrder ? 'Enter what arrived on at least one line.' : 'Add at least one complete line.'); return; }
-    if (validLines.some((l) => !l.locationId)) { setValidation('Choose where each line is going.'); return; }
-    const over = validLines.find((l) => l.outstanding !== undefined && Number(l.quantity) > l.outstanding);
-    if (over) { setValidation(`${over.label}: only ${formatNumber(over.outstanding!)} ${over.unit ?? ''} is still outstanding.`); return; }
+    const checked = checkReceiptLines(lines, fromOrder);
+    if ('problem' in checked) { setValidation(checked.problem); return; }
     setBusy(true);
     try {
       const created = await api.post<GR>('/goods-receipts', {
         supplierId,
         purchaseOrderId: poId || undefined,
         deliveryRef: deliveryRef || undefined,
-        lines: validLines.map((l) => ({
-          materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity),
-          ...(l.purchaseOrderLineId ? { purchaseOrderLineId: l.purchaseOrderLineId } : {}),
-        })),
+        lines: receiptLinesBody(checked.lines),
       });
       await api.post(`/goods-receipts/${created.id}/post`);
       onSuccess();
@@ -257,10 +245,7 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <span className="field-label">{fromOrder ? 'What arrived' : 'Lines'}</span>
             {fromOrder ? (
-              <Select value="" onChange={(e) => everyLineInto(e.target.value)} aria-label="Receive every line into" className="sm:w-56">
-                <option value="">Receive every line into…</option>
-                {locations.data?.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
-              </Select>
+              <EveryLineInto locations={locations.data ?? []} onChoose={everyLineInto} />
             ) : (
               <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
             )}
@@ -268,20 +253,15 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
           {loadingOrder && <p className="text-meta">Loading the order…</p>}
           {!loadingOrder && lines.length === 0 && <p className="text-meta italic">{fromOrder ? 'Nothing is outstanding on this order.' : 'No lines yet.'}</p>}
           <div className="space-y-2">
-            {lines.map((l, i) => (
-              <div key={l.purchaseOrderLineId ?? i} className="grid grid-cols-12 gap-2 items-start">
+            {lines.map((l, i) => l.purchaseOrderLineId ? (
+              <OrderReceiptRow key={l.purchaseOrderLineId} line={l} index={i} locations={locations.data ?? []} onChange={(patch) => updateLine(i, patch)} />
+            ) : (
+              <div key={i} className="grid grid-cols-12 gap-2 items-start">
                 <div className="col-span-12 sm:col-span-5">
-                  {l.purchaseOrderLineId ? (
-                    <div className="text-sm pt-1.5">
-                      {l.label}
-                      <div className="text-meta">{formatNumber(l.outstanding!)} {l.unit} outstanding</div>
-                    </div>
-                  ) : (
-                    <Select value={l.materialId} onChange={(e) => updateLine(i, { materialId: e.target.value })} aria-label={`Line ${i + 1} material`}>
-                      <option value="">Material…</option>
-                      {materials.data?.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
-                    </Select>
-                  )}
+                  <Select value={l.materialId} onChange={(e) => updateLine(i, { materialId: e.target.value })} aria-label={`Line ${i + 1} material`}>
+                    <option value="">Material…</option>
+                    {materials.data?.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                  </Select>
                 </div>
                 <div className="col-span-7 sm:col-span-3">
                   <Select value={l.locationId} onChange={(e) => updateLine(i, { locationId: e.target.value })} aria-label={`Line ${i + 1} location`}>
@@ -290,12 +270,10 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
                   </Select>
                 </div>
                 <div className="col-span-5 sm:col-span-2">
-                  <Input type="number" min="0" max={l.outstanding} step="0.0001" placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
+                  <Input type="number" min="0" step="0.0001" placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
                 </div>
                 <div className="col-span-12 sm:col-span-2">
-                  {l.purchaseOrderLineId
-                    ? <Button size="sm" variant="ghost" type="button" onClick={() => updateLine(i, { quantity: '0' })} className="w-full">None came</Button>
-                    : <Button size="sm" variant="danger" type="button" onClick={() => removeLine(i)} className="w-full">Remove</Button>}
+                  <Button size="sm" variant="danger" type="button" onClick={() => removeLine(i)} className="w-full">Remove</Button>
                 </div>
               </div>
             ))}
