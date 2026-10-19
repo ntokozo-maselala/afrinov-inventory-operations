@@ -14,12 +14,7 @@ import { Icon } from '../components/Icon';
 import { usePermissions } from '../hooks/usePermissions';
 import { SupplierForm } from '../components/SupplierForm';
 import { PROCUREMENT_ENABLED } from '../config/features';
-
-interface Supplier {
-  id: string; name: string; contactName?: string;
-  contactEmail?: string; contactPhone?: string; notes?: string;
-  active: boolean;
-}
+import type { Supplier } from '../api/types';
 
 export function Suppliers() {
   const suppliers = useApi<Supplier[]>('/suppliers');
@@ -32,7 +27,7 @@ export function Suppliers() {
   const filtered = (suppliers.data ?? []).filter((s) => {
     const needle = q.trim().toLowerCase();
     if (!needle) return true;
-    return `${s.name} ${s.contactName ?? ''} ${s.contactEmail ?? ''}`.toLowerCase().includes(needle);
+    return `${s.vendorCode ?? ''} ${s.name} ${s.contactName ?? ''} ${s.contactEmail ?? ''} ${s.services ?? ''}`.toLowerCase().includes(needle);
   });
 
   return (
@@ -47,7 +42,7 @@ export function Suppliers() {
         left={(
           <div className="relative w-full sm:w-64">
             <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
-            <Input className="pl-8" placeholder="Search suppliers…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search suppliers" />
+            <Input className="pl-8" placeholder="Search name, code or service…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search suppliers" />
           </div>
         )}
         right={<span className="text-meta">{suppliers.loading ? 'Loading…' : `${filtered.length} of ${suppliers.data?.length ?? 0}`}</span>}
@@ -82,10 +77,32 @@ export function Suppliers() {
 
 function columns(): DataTableColumn<Supplier>[] {
   return [
-    { key: 'name', header: 'Name', render: (s) => <Link to={`/suppliers/${s.id}`} className="btn-link">{s.name}</Link> },
-    { key: 'contact', header: 'Contact', render: (s) => s.contactName ?? <span className="text-surface-300">—</span> },
-    { key: 'email', header: 'Email', render: (s) => s.contactEmail ? <a href={`mailto:${s.contactEmail}`} className="text-meta hover:text-brand-600">{s.contactEmail}</a> : <span className="text-surface-300">—</span> },
+    { key: 'code', header: 'Code', className: 'text-mono', width: '6rem', render: (s) => s.vendorCode ?? <span className="text-surface-300">—</span> },
+    {
+      key: 'name', header: 'Name', render: (s) => (
+        <div>
+          <Link to={`/suppliers/${s.id}`} className="btn-link">{s.name}</Link>
+          {s.services && <div className="text-meta">{s.services}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'contact', header: 'Contact', render: (s) => (s.contactName || s.contactEmail) ? (
+        <div>
+          {s.contactName && <div>{s.contactName}</div>}
+          {s.contactEmail && <a href={`mailto:${s.contactEmail}`} className="text-meta hover:text-brand-600">{s.contactEmail}</a>}
+        </div>
+      ) : <span className="text-surface-300">—</span>,
+    },
     { key: 'phone', header: 'Phone', render: (s) => s.contactPhone ?? <span className="text-surface-300">—</span> },
+    {
+      key: 'terms', header: 'Payment terms', render: (s) => (
+        <span className="whitespace-nowrap">
+          {s.paymentTerms ?? <span className="text-surface-300">—</span>}
+          {s.currency && s.currency !== 'ZAR' && <Badge tone="neutral" className="ml-2">{s.currency}</Badge>}
+        </span>
+      ),
+    },
     { key: 'status', header: 'Status', render: (s) => s.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '8rem' },
   ];
 }

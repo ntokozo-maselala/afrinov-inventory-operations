@@ -32,6 +32,7 @@ import { createProjectSchema, updateProjectSchema } from '../modules/operations/
 import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
 import {
   createSupplierSchema,
+  updateSupplierSchema,
   createPOSchema,
   updatePOSchema,
   listPOQuerySchema,
@@ -411,7 +412,14 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/suppliers', tag: 'Suppliers', summary: 'Create a supplier', permissions: [P.CreateSupplier],
+    description: 'Names are unique ignoring case, and so are vendor codes. Refused with 409 when either is taken.',
     body: createSupplierSchema, success: 201, errors: [409],
+  },
+  { method: 'get', path: '/suppliers/:id', tag: 'Suppliers', summary: 'Get a supplier', errors: [404] },
+  {
+    method: 'patch', path: '/suppliers/:id', tag: 'Suppliers', summary: 'Update, deactivate or reactivate a supplier',
+    description: 'Suppliers are deactivated, never deleted, so receipts and purchase orders keep their names. Null or an empty string clears an optional field.',
+    permissions: [P.EditSupplier], body: updateSupplierSchema, errors: [404, 409],
   },
 
   // Purchase orders and goods receipts (PROCUREMENT_ENABLED)

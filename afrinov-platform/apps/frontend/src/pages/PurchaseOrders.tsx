@@ -24,7 +24,7 @@ interface PO {
   createdAt: string;
   lines: Array<{ id: string; material: { sku: string; name: string }; orderedQty: string; receivedQty: string }>;
 }
-interface Supplier { id: string; name: string; }
+interface Supplier { id: string; name: string; active: boolean }
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
@@ -186,7 +186,7 @@ function CreatePODrawer({ open, onClose, suppliers, materials, onError, onSucces
           <Field label="Supplier" htmlFor="po-sup" required error={validation && !supplierId ? validation : null}>
             <Select id="po-sup" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} invalid={!!validation && !supplierId}>
               <option value="">— select —</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {suppliers.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
           <Field label="Notes" htmlFor="po-notes"><Input id="po-notes" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>

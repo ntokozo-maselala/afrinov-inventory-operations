@@ -172,6 +172,14 @@ model Supplier {
   contactEmail String?         @map("contact_email")
   contactPhone String?         @map("contact_phone")
   notes        String?
+  // From the vendor list in the AFRI-0000_x purchase order template.
+  // vendorCode is the template's "V001"; stored upper-case.
+  vendorCode   String?         @unique @map("vendor_code")
+  address      String?
+  currency     String          @default("ZAR")
+  paymentTerms String?         @map("payment_terms")
+  website      String?
+  services     String?
   active       Boolean         @default(true)
   createdAt    DateTime        @default(now()) @map("created_at")
 

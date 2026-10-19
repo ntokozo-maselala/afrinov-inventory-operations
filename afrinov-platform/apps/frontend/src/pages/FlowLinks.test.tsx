@@ -24,7 +24,7 @@ describe('links to stock used and deliveries', () => {
     mockGet.mockReset().mockImplementation(async (path: string) => {
       if (path.startsWith('/projects')) return [project('AFRI-1325', '2026-03-01T00:00:00.000Z'), project('AFRI-2000', '2099-01-01'), project('AFRI-3000', null)];
       if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo', type: 'WORKER', active: true }];
-      if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydroscand', active: true }];
+      if (path === '/suppliers/s-1') return { id: 's-1', name: 'Hydroscand', active: true };
       return [];
     });
   });

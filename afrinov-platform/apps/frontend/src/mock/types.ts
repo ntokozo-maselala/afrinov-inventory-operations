@@ -79,6 +79,12 @@ export interface MockSupplier {
   contactEmail?: string;
   contactPhone?: string;
   notes?: string;
+  vendorCode?: string;
+  address?: string;
+  currency?: string;
+  paymentTerms?: string;
+  website?: string;
+  services?: string;
   active: boolean;
 }
 

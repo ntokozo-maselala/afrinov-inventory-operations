@@ -27,7 +27,7 @@ interface PO {
 }
 interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal }
 interface Loc { id: string; name: string; active: boolean }
-interface Sup { id: string; name: string }
+interface Sup { id: string; name: string; active: boolean }
 interface Mat { id: string; sku: string; name: string; active: boolean }
 interface TxRow { id: string; materialId: string; locationId: string; type: TxType; quantity: Prisma.Decimal; referenceType: string | null; referenceId: string | null; actorId: string; postedAt: Date }
 interface BalRow { materialId: string; locationId: string; quantity: Prisma.Decimal }
@@ -200,7 +200,7 @@ beforeEach(() => {
   db.audit.length = 0;
   db.settings.clear();
   poCounter = 0; lineCounter = 0; txCounter = 0; auditCounter = 0;
-  db.suppliers.set('sup-1', { id: 'sup-1', name: 'Acme' });
+  db.suppliers.set('sup-1', { id: 'sup-1', name: 'Acme', active: true });
   db.materials.set('mat-1', { id: 'mat-1', sku: 'A-1', name: 'Widget', active: true });
   db.locations.set('loc-1', { id: 'loc-1', name: 'Main', active: true });
 });
@@ -216,6 +216,13 @@ describe('PurchaseOrderService lifecycle', () => {
     const submitted = await PurchaseOrderService.submit(created.id, 'user-1');
     expect(submitted?.status).toBe('PENDING_APPROVAL');
     expect(db.audit.find((a) => a.action === 'PO_SUBMIT')).toBeDefined();
+  });
+
+  it('refuses a new order for an inactive supplier', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.suppliers.set('sup-1', { id: 'sup-1', name: 'Acme', active: false });
+    await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Acme is inactive. Reactivate the supplier to order from them.' });
   });
 
   it('approve records approver and timestamp', async () => {

@@ -11,6 +11,21 @@ export interface Material {
   serialNumber?: string | null;
 }
 
+/** A supplier (GET /suppliers). The vendor fields follow the AFRI-0000_x purchase order template. */
+export interface Supplier {
+  id: string; name: string; active: boolean;
+  contactName?: string | null; contactEmail?: string | null; contactPhone?: string | null; notes?: string | null;
+  /** The template's "V001". */
+  vendorCode?: string | null;
+  address?: string | null;
+  /** ZAR, USD, EUR or GBP. */
+  currency?: string;
+  paymentTerms?: string | null;
+  website?: string | null;
+  /** What the supplier provides, e.g. "Compressor hire". */
+  services?: string | null;
+}
+
 /** A tool lent and not yet all back (GET /tools). */
 export interface OpenLoan {
   loanId: string; slipId: string | null; recipientId: string | null; recipientName: string | null; projectNumber: string | null;

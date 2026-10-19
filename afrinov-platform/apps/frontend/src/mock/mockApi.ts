@@ -123,6 +123,32 @@ function findSupplier(id: string): MockSupplier | undefined {
   return state.suppliers.find((s) => s.id === id);
 }
 
+// The optional supplier fields sent in a body, tidied the way the server does.
+// Fields left out stay out; null or blank text clears one.
+function supplierFields(b: Partial<Record<keyof MockSupplier, unknown>>): Partial<MockSupplier> {
+  const out: Partial<MockSupplier> = {};
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim() : undefined);
+  for (const k of ['contactName', 'contactEmail', 'contactPhone', 'notes', 'address', 'website', 'services'] as const) {
+    if (k in b) out[k] = text(b[k]);
+  }
+  if ('vendorCode' in b) out.vendorCode = text(b.vendorCode)?.replace(/\s/g, '').toUpperCase();
+  if ('paymentTerms' in b) {
+    const t = text(b.paymentTerms);
+    out.paymentTerms = t && /^c\.?o\.?d\.?$/i.test(t) ? 'C.O.D' : t;
+  }
+  if (typeof b.currency === 'string') out.currency = b.currency;
+  return out;
+}
+
+function assertSupplierFree(name: string | undefined, vendorCode: string | undefined, exceptId?: string) {
+  const others = state.suppliers.filter((s) => s.id !== exceptId);
+  if (name !== undefined && others.some((s) => s.name.trim().toLowerCase() === name.trim().toLowerCase())) {
+    throw err('CONFLICT', `Supplier "${name.trim()}" already exists`);
+  }
+  const clash = vendorCode ? others.find((s) => s.vendorCode === vendorCode) : undefined;
+  if (clash) throw err('CONFLICT', `Vendor code ${vendorCode} is already used by ${clash.name}`);
+}
+
 // ── API surface ─────────────────────────────────────────────────────────────
 
 export interface MockApi {
@@ -354,27 +380,34 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/suppliers') {
     let list = [...state.suppliers].sort((a, b) => a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
-    if (q) list = list.filter((s) => s.name.toLowerCase().includes(q));
+    if (q) list = list.filter((s) => `${s.name} ${s.contactName ?? ''} ${s.vendorCode ?? ''} ${s.services ?? ''}`.toLowerCase().includes(q));
     return list;
   }
   if (method === 'POST' && p === '/suppliers') {
     const b = body as Partial<MockSupplier>;
-    if (!b.name) throw err('VALIDATION_ERROR', 'Name required');
-    const norm = b.name.trim().toLowerCase();
-    if (state.suppliers.some((s) => s.name.trim().toLowerCase() === norm)) {
-      throw err('CONFLICT', `Supplier "${b.name}" already exists`);
-    }
-    const created: MockSupplier = {
-      id: nextId('sup'),
-      name: b.name.trim(),
-      contactName: b.contactName,
-      contactEmail: b.contactEmail,
-      contactPhone: b.contactPhone,
-      notes: b.notes,
-      active: true,
-    };
+    if (!b.name?.trim()) throw err('VALIDATION_ERROR', 'Name required');
+    const fields = supplierFields(b);
+    assertSupplierFree(b.name, fields.vendorCode);
+    const created: MockSupplier = { id: nextId('sup'), name: b.name.trim(), currency: 'ZAR', ...fields, active: true };
     state.suppliers.push(created);
     return created;
+  }
+  if (method === 'GET' && /^\/suppliers\/[^/]+$/.test(p)) {
+    const s = findSupplier(decodeURIComponent(p.slice('/suppliers/'.length)));
+    if (!s) throw err('NOT_FOUND', 'Supplier not found');
+    return s;
+  }
+  if (method === 'PATCH' && /^\/suppliers\/[^/]+$/.test(p)) {
+    const s = findSupplier(decodeURIComponent(p.slice('/suppliers/'.length)));
+    if (!s) throw err('NOT_FOUND', 'Supplier not found');
+    const b = body as Partial<MockSupplier>;
+    if (b.name !== undefined && !b.name.trim()) throw err('VALIDATION_ERROR', 'Name is required');
+    const fields = supplierFields(b);
+    assertSupplierFree(b.name, fields.vendorCode, s.id);
+    // A new object, so the seed rows stay as they were for the next reset.
+    const updated: MockSupplier = { ...s, ...fields, ...(b.name !== undefined ? { name: b.name.trim() } : {}), ...(b.active !== undefined ? { active: b.active } : {}) };
+    state.suppliers = state.suppliers.map((x) => (x.id === s.id ? updated : x));
+    return updated;
   }
 
   // Purchase Orders
@@ -405,7 +438,9 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'POST' && p === '/purchase-orders') {
     const b = body as { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number }>; notes?: string; expectedDeliveryDate?: string };
     if (!b.supplierId || !b.lines || b.lines.length === 0) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
-    if (!findSupplier(b.supplierId)) throw err('NOT_FOUND', 'Supplier not found');
+    const supplier = findSupplier(b.supplierId);
+    if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
+    if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
     const po: MockPurchaseOrder = {
       id: nextId('po'),
       number: `PO-2026-${String(state.purchaseOrders.length + 1).padStart(4, '0')}`,
