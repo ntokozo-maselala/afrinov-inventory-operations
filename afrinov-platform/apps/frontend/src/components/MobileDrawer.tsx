@@ -87,7 +87,7 @@ export function MobileDrawer() {
   return (
     <div className="fixed inset-0 z-[60] flex" role="dialog" aria-modal="true" aria-label="Navigation">
       <div
-        className="absolute inset-0 bg-surface-900/50 dark:bg-surface-900/50"
+        className="absolute inset-0 bg-black/50"
         aria-hidden="true"
         onClick={closeMobile}
       />

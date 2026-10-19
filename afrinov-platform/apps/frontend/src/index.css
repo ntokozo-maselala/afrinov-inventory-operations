@@ -135,11 +135,11 @@
   --chart-brand-500: rgb(var(--color-brand-500));
 
   /* Chart palette (semantic, theme-aware) */
-  --chart-1: rgb(var(--color-info-500) / <alpha-value>);
-  --chart-2: rgb(var(--color-brand-500) / <alpha-value>);
-  --chart-3: rgb(var(--color-warning-500) / <alpha-value>);
-  --chart-4: rgb(var(--color-success-500) / <alpha-value>);
-  --chart-5: rgb(var(--color-danger-500) / <alpha-value>);
+  --chart-1: rgb(var(--color-info-500));
+  --chart-2: rgb(var(--color-brand-500));
+  --chart-3: rgb(var(--color-warning-500));
+  --chart-4: rgb(var(--color-success-500));
+  --chart-5: rgb(var(--color-danger-500));
 }
 
 .dark {
@@ -157,11 +157,11 @@
   --chart-brand-500: rgb(var(--color-brand-500));
 
   /* Chart palette (semantic, theme-aware) */
-  --chart-1: rgb(var(--color-info-500) / <alpha-value>);
-  --chart-2: rgb(var(--color-brand-500) / <alpha-value>);
-  --chart-3: rgb(var(--color-warning-500) / <alpha-value>);
-  --chart-4: rgb(var(--color-success-500) / <alpha-value>);
-  --chart-5: rgb(var(--color-danger-500) / <alpha-value>);
+  --chart-1: rgb(var(--color-info-500));
+  --chart-2: rgb(var(--color-brand-500));
+  --chart-3: rgb(var(--color-warning-500));
+  --chart-4: rgb(var(--color-success-500));
+  --chart-5: rgb(var(--color-danger-500));
 }
 
 /* ── Base layer ─────────────────────────────────────────────────────── */
@@ -192,11 +192,11 @@
 @layer components {
   /* Surfaces */
   .surface-card { @apply rounded-md border border-surface-200 bg-surface-0 shadow-card; }
-  .dark .surface-card { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .dark .surface-card { background-color: rgb(var(--color-surface-0)); border-color: rgb(var(--color-surface-200)); }
   .surface-panel { @apply rounded-md border border-surface-200 bg-surface-0; }
-  .dark .surface-panel { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .dark .surface-panel { background-color: rgb(var(--color-surface-0)); border-color: rgb(var(--color-surface-200)); }
   .surface-muted { @apply rounded-md border border-surface-200 bg-surface-100; }
-  .dark .surface-muted { background-color: rgb(var(--color-surface-100) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .dark .surface-muted { background-color: rgb(var(--color-surface-100)); border-color: rgb(var(--color-surface-200)); }
 
   /* Typography */
   .text-meta    { @apply text-xs text-surface-500; }
@@ -208,27 +208,27 @@
   .btn { @apply inline-flex items-center justify-center gap-1.5 rounded font-medium text-sm leading-5 px-3 py-1.5 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed select-none; }
   .btn-primary { @apply btn bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700; }
   .btn-secondary { @apply btn bg-surface-0 text-surface-800 border border-surface-200 hover:bg-surface-50 active:bg-surface-100; }
-  .dark .btn-secondary { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); color: rgb(var(--color-surface-800) / <alpha-value>); }
-  .dark .btn-secondary:hover { background-color: rgb(var(--color-surface-100) / <alpha-value>); }
-  .dark .btn-secondary:active { background-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .dark .btn-secondary { background-color: rgb(var(--color-surface-0)); border-color: rgb(var(--color-surface-200)); color: rgb(var(--color-surface-800)); }
+  .dark .btn-secondary:hover { background-color: rgb(var(--color-surface-100)); }
+  .dark .btn-secondary:active { background-color: rgb(var(--color-surface-200)); }
   .btn-ghost { @apply btn text-surface-700 hover:bg-surface-100; }
-  .dark .btn-ghost { color: rgb(var(--color-surface-700) / <alpha-value>); }
-  .dark .btn-ghost:hover { background-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .dark .btn-ghost { color: rgb(var(--color-surface-700)); }
+  .dark .btn-ghost:hover { background-color: rgb(var(--color-surface-100)); }
   .btn-danger { @apply btn bg-danger-500 text-white hover:bg-danger-600 active:bg-danger-700; }
   .btn-link { @apply inline-flex items-center text-brand-600 hover:text-brand-700 hover:underline text-sm font-medium; }
   .btn-sm { @apply px-2 py-1 text-xs; }
   .btn-icon { @apply p-1.5 rounded text-surface-500 hover:bg-surface-100 hover:text-surface-800; }
-  .dark .btn-icon { color: rgb(var(--color-surface-500) / <alpha-value>); }
-  .dark .btn-icon:hover { background-color: rgb(var(--color-surface-100) / <alpha-value>); color: rgb(var(--color-surface-800) / <alpha-value>); }
+  .dark .btn-icon { color: rgb(var(--color-surface-500)); }
+  .dark .btn-icon:hover { background-color: rgb(var(--color-surface-100)); color: rgb(var(--color-surface-800)); }
 
   /* Inputs */
   .input { @apply block w-full rounded border border-surface-200 bg-surface-0 px-2.5 py-1.5 text-sm text-surface-800 placeholder:text-surface-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-surface-100 disabled:text-surface-500; }
-  .dark .input { background-color: rgb(var(--color-surface-0) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); color: rgb(var(--color-surface-800) / <alpha-value>); }
-  .dark .input::placeholder { color: rgb(var(--color-surface-400) / <alpha-value>); }
-  .dark .input:disabled { background-color: rgb(var(--color-surface-100) / <alpha-value>); color: rgb(var(--color-surface-500) / <alpha-value>); }
+  .dark .input { background-color: rgb(var(--color-surface-0)); border-color: rgb(var(--color-surface-200)); color: rgb(var(--color-surface-800)); }
+  .dark .input::placeholder { color: rgb(var(--color-surface-400)); }
+  .dark .input:disabled { background-color: rgb(var(--color-surface-100)); color: rgb(var(--color-surface-500)); }
   .input-error { @apply border-danger-500 focus:border-danger-500 focus:ring-danger-100; }
   .select { @apply input pr-8 appearance-none; }
-  .dark .select { background-color: rgb(var(--color-surface-0) / <alpha-value>); }
+  .dark .select { background-color: rgb(var(--color-surface-0)); }
   /* The open list is drawn by the browser, which on Windows keeps it white; colour the options to match. */
   .dark .select option { background-color: rgb(var(--color-surface-0)); color: rgb(var(--color-surface-800)); }
   /* Group headings in the list (Workers, Machines…): the same ground, in the muted label grey. */
@@ -239,45 +239,45 @@
   /* Badges */
   .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
   .badge-neutral  { @apply badge bg-surface-100 text-surface-700; }
-  .dark .badge-neutral { background-color: rgb(var(--color-surface-100) / <alpha-value>); color: rgb(var(--color-surface-700) / <alpha-value>); }
+  .dark .badge-neutral { background-color: rgb(var(--color-surface-100)); color: rgb(var(--color-surface-700)); }
   .badge-success  { @apply badge bg-success-50 text-success-700; }
-  .dark .badge-success { background-color: rgb(var(--color-success-50) / <alpha-value>); color: rgb(var(--color-success-700) / <alpha-value>); }
+  .dark .badge-success { background-color: rgb(var(--color-success-50)); color: rgb(var(--color-success-700)); }
   .badge-warning  { @apply badge bg-warning-50 text-warning-700; }
-  .dark .badge-warning { background-color: rgb(var(--color-warning-50) / <alpha-value>); color: rgb(var(--color-warning-700) / <alpha-value>); }
+  .dark .badge-warning { background-color: rgb(var(--color-warning-50)); color: rgb(var(--color-warning-700)); }
   .badge-danger   { @apply badge bg-danger-50  text-danger-700; }
-  .dark .badge-danger { background-color: rgb(var(--color-danger-50) / <alpha-value>); color: rgb(var(--color-danger-700) / <alpha-value>); }
+  .dark .badge-danger { background-color: rgb(var(--color-danger-50)); color: rgb(var(--color-danger-700)); }
   .badge-info     { @apply badge bg-info-50    text-info-700; }
-  .dark .badge-info { background-color: rgb(var(--color-info-50) / <alpha-value>); color: rgb(var(--color-info-700) / <alpha-value>); }
+  .dark .badge-info { background-color: rgb(var(--color-info-50)); color: rgb(var(--color-info-700)); }
   .badge-brand    { @apply badge bg-brand-50   text-brand-700; }
-  .dark .badge-brand { background-color: rgb(var(--color-brand-50) / <alpha-value>); color: rgb(var(--color-brand-700) / <alpha-value>); }
+  .dark .badge-brand { background-color: rgb(var(--color-brand-50)); color: rgb(var(--color-brand-700)); }
 
   .dot { @apply inline-block h-1.5 w-1.5 rounded-full; }
 
   /* Tables */
   .table { @apply min-w-full text-sm; }
   .table th { @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-surface-500 bg-surface-50 border-b border-surface-200; }
-  .dark .table th { background-color: rgb(var(--color-surface-50) / <alpha-value>); color: rgb(var(--color-surface-500) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .dark .table th { background-color: rgb(var(--color-surface-50)); color: rgb(var(--color-surface-500)); border-color: rgb(var(--color-surface-200)); }
   .table td { @apply px-3 py-2 text-surface-800 border-b border-surface-100; }
-  .dark .table td { color: rgb(var(--color-surface-800) / <alpha-value>); border-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .dark .table td { color: rgb(var(--color-surface-800)); border-color: rgb(var(--color-surface-100)); }
   .table tr:hover td { @apply bg-surface-50; }
-  .dark .table tr:hover td { background-color: rgb(var(--color-surface-100) / <alpha-value>); }
+  .dark .table tr:hover td { background-color: rgb(var(--color-surface-100)); }
   .table-compact th { @apply py-1.5; }
   .table-compact td { @apply py-1.5; }
 
   /* Form fields */
   .field { @apply space-y-1; }
   .field-label { @apply block text-sm font-medium text-surface-800; }
-  .dark .field-label { color: rgb(var(--color-surface-800) / <alpha-value>); }
+  .dark .field-label { color: rgb(var(--color-surface-800)); }
   .field-required::after { content: ' *'; @apply text-brand-500; }
   .field-help { @apply text-xs text-surface-500; }
-  .dark .field-help { color: rgb(var(--color-surface-500) / <alpha-value>); }
+  .dark .field-help { color: rgb(var(--color-surface-500)); }
   .field-error { @apply text-xs text-danger-600; }
 
   /* Misc */
   .divider { @apply h-px bg-surface-200; }
-  .dark .divider { background-color: rgb(var(--color-surface-200) / <alpha-value>); }
+  .dark .divider { background-color: rgb(var(--color-surface-200)); }
   .kbd { @apply inline-flex items-center px-1.5 py-0.5 rounded border border-surface-200 bg-surface-50 text-[0.6875rem] text-surface-600 font-mono; }
-  .dark .kbd { background-color: rgb(var(--color-surface-50) / <alpha-value>); border-color: rgb(var(--color-surface-200) / <alpha-value>); color: rgb(var(--color-surface-600) / <alpha-value>); }
+  .dark .kbd { background-color: rgb(var(--color-surface-50)); border-color: rgb(var(--color-surface-200)); color: rgb(var(--color-surface-600)); }
 
   /* Dark mode shadow overrides — light-mode shadows are too subtle on dark surfaces. */
   .dark .shadow-card { box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2); }
