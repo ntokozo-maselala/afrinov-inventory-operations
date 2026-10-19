@@ -211,22 +211,22 @@ export function SettingsPurchaseOrders() {
 }
 
 // ── Notifications ─────────────────────────────────────────────────────
+// "Alert when purchase orders need approval or reach a new state"
+// (notifications.enablePurchaseOrderNotifications) is not shown: nothing sends
+// or shows those alerts yet, and approvers find their orders on the Dashboard.
+// Its key stays on the server, so it can come back with the alerts.
 export function SettingsNotifications() {
   const { draft, setDraft, save, saving } = useSettings();
   const toast = useToast();
   const items = useCategorySettings('notifications');
   const inApp = useSetting('notifications.enableInAppNotifications');
   const lowStock = useSetting('notifications.enableLowStockNotifications');
-  const po = useSetting('notifications.enablePurchaseOrderNotifications');
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <>
       <SectionPanel title="Notifications" description="Operational alerts. Disabling a category silences that alert type across the application.">
         <BooleanField def={inApp} value={Boolean(draft['notifications.enableInAppNotifications'])} onChange={(v) => setDraft('notifications.enableInAppNotifications', v)} />
         <BooleanField def={lowStock} value={Boolean(draft['notifications.enableLowStockNotifications'])} onChange={(v) => setDraft('notifications.enableLowStockNotifications', v)} />
-        {PROCUREMENT_ENABLED && (
-          <BooleanField def={po} value={Boolean(draft['notifications.enablePurchaseOrderNotifications'])} onChange={(v) => setDraft('notifications.enablePurchaseOrderNotifications', v)} />
-        )}
         <SaveBar items={items} onSave={async () => {
           try {
             const r = await save();
