@@ -11,6 +11,7 @@ import { GlobalPreferencesApplier } from './GlobalPreferencesApplier';
 import { useNavGroups } from '../hooks/useNavGroups';
 import { TooltipProvider } from './ui/tooltip';
 import type { ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -27,6 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function AppShellInner({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const isDashboard = useLocation().pathname === '/';
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -42,14 +44,14 @@ function AppShellInner({ children }: { children: ReactNode }) {
   return (
     // The shell is pinned to the viewport and only the content column scrolls,
     // so the sidebar never moves when the page is scrolled.
-    <div className="h-[100dvh] flex flex-col overflow-hidden bg-surface-50 text-surface-800 dark:bg-surface-50 dark:text-surface-800">
+    <div className={`h-[100dvh] flex flex-col overflow-hidden bg-surface-50 text-surface-800 dark:bg-surface-50 dark:text-surface-800 ${isDashboard ? 'dark' : ''}`}>
       <DevModeBanner />
       <div className="flex flex-1 min-h-0">
         <DesktopSidebar />
         <MobileDrawer />
         <div id="app-scroll-container" className="flex-1 min-w-0 flex flex-col overflow-y-auto">
           <AppHeader user={user} onLogout={logout} />
-          <PageContainer>{children}</PageContainer>
+          <PageContainer maxWidth={isDashboard ? 'full' : 'lg'}>{children}</PageContainer>
           <footer className="px-4 sm:px-6 lg:px-8 py-4 text-center text-xs text-surface-400 border-t border-surface-200 dark:text-surface-400 dark:border-surface-200">
             Afrinov IMS · prototype
           </footer>
