@@ -14,6 +14,7 @@ import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
+import { DashboardLocationDonut, DashboardValueBarChart } from './DashboardCharts';
 import './Dashboard.css';
 
 /** GET /reports/stock-value: current stock on hand, valued per category. */
@@ -119,7 +120,6 @@ export function Dashboard() {
         <header className="dashboard-heading">
           <div>
             <div className="dashboard-eyebrow"><span aria-hidden="true" /> inventory overview</div>
-            <h1></h1>
             <p>Current stock position, valuation and operational exceptions.</p>
           </div>
           <div className="dashboard-heading-actions">
@@ -205,7 +205,7 @@ export function Dashboard() {
           <section className="dashboard-panel dashboard-value-panel" aria-label="Stock value by category">
             <div className="dashboard-panel-heading">
               <div>
-                <span className="dashboard-section-kicker">Valuation · current on hand</span>
+                <span className="dashboard-section-kicker">Category mix · current on hand</span>
                 <h2>Stock value by category</h2>
                 <p>On hand × unit cost · excluding VAT</p>
               </div>
@@ -219,23 +219,7 @@ export function Dashboard() {
             {valueLoading && !value ? (
               <div className="dashboard-chart-skeleton" aria-label="Loading category values"><span /><span /><span /><span /></div>
             ) : value && value.categories.length > 0 ? (
-              <ol className="dashboard-category-chart">
-                {[...value.categories].sort((a, b) => b.value - a.value).map((category, index) => {
-                  const share = Math.max(0, Math.min(100, category.share * 100));
-                  return (
-                    <li key={category.category} className="dashboard-category-row" title={`${categoryLabel(category.category)}: ${formatCurrency(category.value, value.currency)}`}>
-                      <div className="dashboard-category-meta">
-                        <div><strong>{categoryLabel(category.category)}</strong><span>{formatNumber(category.items)} items · {formatNumber(category.itemsInStock)} in stock</span></div>
-                        <div className="dashboard-category-number"><strong>{formatCurrency(category.value, value.currency)}</strong><span>{Math.round(share)}%</span></div>
-                      </div>
-                      <div className="dashboard-bar-track" role="progressbar" aria-label={`${categoryLabel(category.category)} share of stock value`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share)}>
-                        <div className={`dashboard-category-bar ${index === 0 ? 'dashboard-category-bar-primary' : ''}`} style={{ width: `${share}%` }} />
-                      </div>
-                      {category.unpriced > 0 && <span className="dashboard-category-unpriced">{formatNumber(category.unpriced)} in stock without a price</span>}
-                    </li>
-                  );
-                })}
-              </ol>
+              <DashboardValueBarChart categories={value.categories} currency={value.currency} />
             ) : (
               <div className="dashboard-chart-empty">No priced stock is available for category comparison.</div>
             )}
@@ -246,29 +230,14 @@ export function Dashboard() {
             <div className="dashboard-panel-heading">
               <div>
                 <span className="dashboard-section-kicker">Distribution · current on hand</span>
-                <h2>Value by location</h2>
-                <p>Share of priced stock value</p>
+                <h2>Stock value by location</h2>
+                <p>Portfolio share of current priced value</p>
               </div>
             </div>
             {loading && !report ? (
               <div className="dashboard-chart-skeleton" aria-label="Loading location values"><span /><span /><span /></div>
             ) : report?.byLocation?.length ? (
-              <ol className="dashboard-location-chart">
-                {[...report.byLocation].sort((a, b) => b.inventoryValue - a.inventoryValue).slice(0, 6).map((location, index) => {
-                  const share = Math.max(0, Math.min(100, location.share * 100));
-                  return (
-                    <li key={location.locationId}>
-                      <div className="dashboard-location-meta">
-                        <div><strong>{location.locationName}</strong><span>{formatNumber(location.quantity)} units on hand</span></div>
-                        <div><strong>{formatCurrency(location.inventoryValue, report.currency)}</strong><span>{Math.round(share)}%</span></div>
-                      </div>
-                      <div className="dashboard-bar-track" role="progressbar" aria-label={`${location.locationName} share of stock value`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share)}>
-                        <div className={`dashboard-location-bar ${index === 0 ? 'dashboard-location-bar-primary' : ''}`} style={{ width: `${share}%` }} />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
+              <DashboardLocationDonut locations={report.byLocation} currency={report.currency} />
             ) : (
               <div className="dashboard-chart-empty">No location value data is available.</div>
             )}

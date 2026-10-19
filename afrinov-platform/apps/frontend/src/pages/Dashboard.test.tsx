@@ -38,10 +38,9 @@ describe('Dashboard', () => {
   it('shows the stock value per category, with a total, and the status counts', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const table = within(await screen.findByLabelText('Stock value by category'));
-    expect(await table.findByText('Consumables')).toBeInTheDocument();
-    expect(table.getByText('1 in stock without a price')).toBeInTheDocument();
+    expect(await table.findByRole('img', { name: /Consumables .*75%/ })).toBeInTheDocument();
+    expect(table.getByText('Unpriced: 1 in Consumables')).toBeInTheDocument();
     expect(table.getByText('All categories')).toBeInTheDocument();
-    expect(table.getByText('75%')).toBeInTheDocument();
 
     expect(screen.getByText('10 of 14')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^Urgent/ })).toHaveAttribute('href', '/reports/stock-status?view=URGENT');
@@ -105,9 +104,9 @@ describe('Dashboard analytics', () => {
     });
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(await screen.findByRole('region', { name: 'Stock health' })).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: 'Consumables share of stock value' })).toHaveAttribute('aria-valuenow', '75');
+    expect(screen.getByRole('img', { name: /Current stock value by category: Consumables .*75%/ })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Stock value by location' })).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: 'Central Store share of stock value' })).toHaveAttribute('aria-valuenow', '60');
+    expect(screen.getByRole('img', { name: /Central Store 60%; Workshop 40%/ })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Urgent: 2, Warning: 1, In range: 9, No reorder level: 2' })).toBeInTheDocument();
     expect(screen.getByText('On hand × unit cost · excluding VAT')).toBeInTheDocument();
   });
