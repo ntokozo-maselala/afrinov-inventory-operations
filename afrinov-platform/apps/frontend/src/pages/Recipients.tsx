@@ -143,7 +143,7 @@ function columns({ canManage, onEdit, onSetActive, toolsOut }: {
     { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'type', header: 'Type', render: (r) => <Badge tone={TYPE_TONE[r.type]}>{RECIPIENT_TYPE_LABEL[r.type]}</Badge>, width: '9rem' },
     {
-      key: 'tools', header: 'Tools out', align: 'right' as const, width: '7rem',
+      key: 'tools', header: 'Tools checked out', align: 'right' as const, width: '9rem',
       render: (r) => (toolsOut.get(r.id)
         ? <Link to={`/tools?q=${encodeURIComponent(r.name)}`} className="btn-link font-mono">{toolsOut.get(r.id)}</Link>
         : <span className="text-surface-300">—</span>),

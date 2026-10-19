@@ -240,7 +240,7 @@ export const ToolLoanService = {
       const byId = new Map(loans.map((l) => [l.id, l]));
       for (const id of loanIds) {
         const loan = byId.get(id);
-        if (!loan) throw Errors.notFound('Tool loan');
+        if (!loan) throw Errors.notFound('Tool check-out');
         if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out can be checked in');
       }
       await lock(tx, loans.map((l) => `${l.materialId}:${l.locationId}`));
@@ -253,7 +253,7 @@ export const ToolLoanService = {
         const loan = byId.get(id)!;
         const out = loan.quantity.negated().minus(returned.get(id) ?? 0);
         if (qty.gt(out)) {
-          throw Errors.validation(`Cannot check in ${qty.toString()} × ${loan.material.sku}: only ${out.toString()} still out on this loan.`, { loanId: id, out: out.toString() });
+          throw Errors.validation(`Cannot check in ${qty.toString()} × ${loan.material.sku}: only ${out.toString()} still checked out.`, { loanId: id, out: out.toString() });
         }
         await checkLocationActive(loan.locationId, tx);
       }
@@ -292,7 +292,7 @@ export const ToolLoanService = {
               recipientId: loan.recipientId,
               projectNumber: loan.projectNumber,
               reasonCode: AdjustmentReasonCode.LOSS,
-              reasonNote: `Lost on loan to ${loan.recipient?.name ?? 'an unknown recipient'}: ${l.note}`,
+              reasonNote: `Lost while checked out to ${loan.recipient?.name ?? 'an unknown recipient'}: ${l.note}`,
               referenceType: TOOL_LOAN_REFERENCE,
               referenceId: loan.id,
             },

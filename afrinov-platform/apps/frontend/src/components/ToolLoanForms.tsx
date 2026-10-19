@@ -150,7 +150,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
     setError(null);
     const lines = tool.loans.filter((l) => Number(back[l.loanId]?.quantity) > 0);
     if (lines.length === 0) { setError('Enter how many came back.'); return; }
-    if (lines.some(tooMany)) { setError('Some loans get back more than is out.'); return; }
+    if (lines.some(tooMany)) { setError('Some check-outs get back more than is out.'); return; }
     if (lines.some((l) => back[l.loanId]!.condition === 'LOST' && !back[l.loanId]!.note.trim())) { setError('Say what happened to a lost tool.'); return; }
     setBusy(true);
     try {
@@ -175,7 +175,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
         const b = back[l.loanId]!;
         return (
           <fieldset key={l.loanId} className="surface-muted rounded p-3 space-y-3">
-            <legend className="sr-only">Loan to {l.recipientName ?? 'not recorded'}</legend>
+            <legend className="sr-only">Checked out to {l.recipientName ?? 'not recorded'}</legend>
             <div className="text-sm">
               <span className="font-medium text-surface-900">{l.recipientName ?? 'Not recorded'}</span>
               <span className="text-surface-600"> · {formatNumber(Number(l.out))} out since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>

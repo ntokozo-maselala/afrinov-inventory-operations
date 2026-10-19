@@ -36,7 +36,7 @@ function toolsCard(tools: ToolRow[]) {
   const out = loans.reduce((n, l) => n + Number(l.out), 0);
   const overdue = loans.filter((l) => l.overdue).reduce((n, l) => n + Number(l.out), 0);
   return {
-    label: 'Tools out', value: formatNumber(out),
+    label: 'Tools checked out', value: formatNumber(out),
     tone: overdue > 0 ? 'danger' as const : 'neutral' as const,
     note: out === 0 ? 'all in store' : overdue > 0 ? `${formatNumber(overdue)} overdue` : 'none overdue',
     to: overdue > 0 ? '/tools?view=overdue' : '/tools?view=out',

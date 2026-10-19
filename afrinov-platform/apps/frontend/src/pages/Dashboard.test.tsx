@@ -61,7 +61,7 @@ describe('Dashboard', () => {
     const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2 });
     tools = [{ materialId: 'm-1', loans: [loan('2', false), loan('1', true)] }, { materialId: 'm-2', loans: [] }];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    const card = (await screen.findByText('Tools out')).closest('a')!;
+    const card = (await screen.findByText('Tools checked out')).closest('a')!;
     expect(card).toHaveAttribute('href', '/tools?view=overdue');
     expect(card).toHaveTextContent('3');
     expect(card).toHaveTextContent('1 overdue');

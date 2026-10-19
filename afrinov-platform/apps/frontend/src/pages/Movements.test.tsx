@@ -266,7 +266,7 @@ describe('Movements page', () => {
     expect(await screen.findByText('Chuck damaged')).toBeInTheDocument();
     expect(listCalls()[0]).toBe('/inventory-transactions?from=2026-10-05&to=2026-10-05&recipientId=r-1&report=loans&limit=100');
     expect(screen.getByText('Checked out to', { selector: 'label' })).toBeInTheDocument();
-    expect(screen.getByText('Tool out')).toBeInTheDocument();
+    expect(screen.getByText('Check out')).toBeInTheDocument();
     expect(screen.getByText('Damaged')).toBeInTheDocument();
   });
 
