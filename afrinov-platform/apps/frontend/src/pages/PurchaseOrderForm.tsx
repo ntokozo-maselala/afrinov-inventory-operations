@@ -8,8 +8,14 @@
 // Create & submit for approval in one go. Edit: prices, delivery dates, VAT,
 // details and remarks while the order is editable; materials and quantities
 // are fixed once raised.
+//
+// The re-order list, a supplier's page and an item's page link to the new
+// form with what to order: ?supplierId=…&materialIds=a,b. The supplier and
+// lines are filled in, prices from unit cost and quantities up to Required
+// Stock where it is set. Without a supplier, the items' last supplier is
+// suggested when they share one.
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -34,6 +40,7 @@ const ORDERS = { label: 'Purchase orders', to: '/purchase-orders' };
 
 interface Supplier { id: string; name: string; active: boolean; currency?: string; vendorCode?: string | null; paymentTerms?: string | null }
 interface DraftLine { materialId: string; orderedQty: string; unitPrice: string; deliveryDate: string }
+interface ReorderRow { materialId: string; reorderQuantity: string; lastSupplier?: { id: string } | null }
 
 const SETTING_KEYS = [
   'purchaseOrders.vatRate', 'purchaseOrders.deliveryTo', 'purchaseOrders.deliveryAddress', 'purchaseOrders.deliveryCountry',
@@ -103,6 +110,33 @@ function NewPurchaseOrderForm() {
     // Payment terms follow the supplier, as the template looks them up.
     setDetails((d) => ({ ...d, paymentTerms: suppliers.find((s) => s.id === id)?.paymentTerms ?? '' }));
   }
+  // What the link asked for, applied once the suppliers, items and (for the
+  // quantities) stock status have loaded. Unknown or inactive ones are skipped.
+  const [params] = useSearchParams();
+  const [preset, setPreset] = useState(() => {
+    const ids = (params.get('materialIds') ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    const sup = params.get('supplierId') ?? '';
+    return ids.length > 0 || sup ? { supplierId: sup, materialIds: [...new Set(ids)] } : null;
+  });
+  const [filledFromLink, setFilledFromLink] = useState(false);
+  const reorder = useApi<ReorderRow[]>(preset && preset.materialIds.length > 0 ? '/reports/stock-status' : null);
+  if (preset && suppliersReq.data && materialsReq.data && (preset.materialIds.length === 0 || reorder.data || reorder.error)) {
+    setPreset(null);
+    const asked = (reorder.data ?? []).filter((r) => preset.materialIds.includes(r.materialId));
+    const lastSuppliers = [...new Set(asked.map((r) => r.lastSupplier?.id ?? ''))];
+    const suggested = preset.supplierId || (lastSuppliers.length === 1 ? lastSuppliers[0]! : '');
+    if (suppliers.some((s) => s.id === suggested && s.active)) chooseSupplier(suggested);
+    const toOrder = new Map(asked.map((r) => [r.materialId, Number(r.reorderQuantity)]));
+    const presetLines = preset.materialIds
+      .map((id) => materials.find((m) => m.id === id && m.active))
+      .filter((m): m is Material => !!m)
+      .map((m) => {
+        const qty = toOrder.get(m.id) ?? 0;
+        return { materialId: m.id, orderedQty: qty > 0 ? String(qty) : '', unitPrice: m.unitCost ? String(Number(m.unitCost)) : '', deliveryDate: '' };
+      });
+    if (presetLines.length > 0) { setLines(presetLines); setFilledFromLink(true); }
+  }
+
   function addLine() { setLines((l) => [...l, { materialId: '', orderedQty: '', unitPrice: '', deliveryDate: '' }]); }
   function updateLine(i: number, patch: Partial<DraftLine>) {
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
@@ -198,6 +232,9 @@ function NewPurchaseOrderForm() {
             <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
           </div>
           {lines.length === 0 && <p className="text-meta italic">No lines yet.</p>}
+          {filledFromLink && (
+            <p className="text-meta mb-2">Filled in from what needs ordering: quantities bring each item up to its Required Stock, and prices start from unit cost. Change them to what you are ordering.</p>
+          )}
           <div className="hidden md:grid grid-cols-12 gap-2 text-meta mb-1">
             <span className="col-span-5">Material</span><span className="col-span-2">Quantity</span><span className="col-span-2">Unit price</span><span className="col-span-2">Delivery date</span>
           </div>

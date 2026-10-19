@@ -21,7 +21,7 @@ export interface StockStatusRow {
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
   /** Who it last came from: the most recent posted goods receipt with this item. */
-  lastSupplier: { name: string; receivedAt: string } | null;
+  lastSupplier: { id: string; name: string; receivedAt: string } | null;
 }
 
 export interface StockValueReport {
@@ -56,16 +56,16 @@ async function totalsByMaterial(materialIds?: string[]): Promise<Map<string, Pri
 }
 
 /** The supplier of each item's most recent posted goods receipt (counter or purchase order). */
-async function lastSuppliers(materialIds: string[]): Promise<Map<string, { name: string; receivedAt: string }>> {
-  const out = new Map<string, { name: string; receivedAt: string }>();
+async function lastSuppliers(materialIds: string[]): Promise<Map<string, { id: string; name: string; receivedAt: string }>> {
+  const out = new Map<string, { id: string; name: string; receivedAt: string }>();
   if (materialIds.length === 0) return out;
   const lines = await prisma.goodsReceiptLine.findMany({
     where: { materialId: { in: materialIds }, goodsReceipt: { status: 'POSTED' } },
-    select: { materialId: true, goodsReceipt: { select: { receivedAt: true, supplier: { select: { name: true } } } } },
+    select: { materialId: true, goodsReceipt: { select: { receivedAt: true, supplier: { select: { id: true, name: true } } } } },
     orderBy: { goodsReceipt: { receivedAt: 'desc' } },
   });
   for (const l of lines) {
-    if (!out.has(l.materialId)) out.set(l.materialId, { name: l.goodsReceipt.supplier.name, receivedAt: l.goodsReceipt.receivedAt.toISOString() });
+    if (!out.has(l.materialId)) out.set(l.materialId, { id: l.goodsReceipt.supplier.id, name: l.goodsReceipt.supplier.name, receivedAt: l.goodsReceipt.receivedAt.toISOString() });
   }
   return out;
 }

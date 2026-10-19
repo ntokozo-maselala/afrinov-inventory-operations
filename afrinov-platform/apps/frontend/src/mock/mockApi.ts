@@ -1908,13 +1908,13 @@ function mockBands(): StatusBands {
 }
 
 // The supplier of the latest posted goods receipt with this item, as the backend reports it.
-function lastSupplierOf(materialId: string): { name: string; receivedAt: string } | null {
+function lastSupplierOf(materialId: string): { id: string; name: string; receivedAt: string } | null {
   const latest = state.goodsReceipts
     .filter((g) => g.status === 'POSTED' && g.lines.some((l) => l.materialId === materialId))
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
   if (!latest) return null;
   const name = state.suppliers.find((s) => s.id === latest.supplierId)?.name;
-  return name ? { name, receivedAt: new Date(latest.receivedAt).toISOString() } : null;
+  return name ? { id: latest.supplierId, name, receivedAt: new Date(latest.receivedAt).toISOString() } : null;
 }
 
 // Mirrors ReportingService.stockStatus.

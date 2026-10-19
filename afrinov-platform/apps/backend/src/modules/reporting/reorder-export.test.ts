@@ -32,7 +32,7 @@ describe('re-order list export', () => {
     const ws = await read([
       row('TPE-1', 'TOOLING_PPE_ELECTRICAL', 'WARNING', 30, 100, '4.2'),
       row('CON-1', 'CONSUMABLES', 'URGENT', 11, 100, '42.05', {
-        lastSupplier: { name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' },
+        lastSupplier: { id: 'sup-1', name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' },
       }),
       row('CON-2', 'CONSUMABLES', 'WARNING', 10, 50, null),
     ]);
