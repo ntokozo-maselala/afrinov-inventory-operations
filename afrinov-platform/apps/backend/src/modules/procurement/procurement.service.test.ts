@@ -89,8 +89,14 @@ function makePrisma(): unknown {
         return po;
       },
       count: async () => db.pos.size,
-      findMany: async ({ where }: { where?: { number?: { startsWith?: string } } } = {}) =>
-        [...db.pos.values()].filter((p) => !where?.number?.startsWith || p.number.startsWith(where.number.startsWith)),
+      findMany: async ({ where, include, orderBy }: { where?: { number?: { startsWith?: string }; status?: POStatus }; include?: { lines?: unknown }; orderBy?: { createdAt?: 'asc' | 'desc' } } = {}) => {
+        const rows = [...db.pos.values()]
+          .filter((p) => !where?.number?.startsWith || p.number.startsWith(where.number.startsWith))
+          .filter((p) => !where?.status || p.status === where.status)
+          .map((p) => (include?.lines ? { ...p, lines: [...db.lines.values()].filter((l) => l.purchaseOrderId === p.id) } : p));
+        if (orderBy?.createdAt) rows.sort((a, b) => (a.createdAt.getTime() - b.createdAt.getTime()) * (orderBy.createdAt === 'asc' ? 1 : -1));
+        return rows;
+      },
       create: async ({ data, include }: { data: Record<string, unknown>; include?: { lines?: boolean } }) => {
         const id = nextPOId();
         const createLines = (data.lines as { create?: Array<{ materialId: string; orderedQty: Prisma.Decimal | number; unitPrice?: number | null; deliveryDate?: Date | null }> } | undefined)?.create ?? [];
@@ -596,6 +602,22 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect(asOna.reason).toMatch(/your approval limit is/);
     expect(await PurchaseOrderService.approval(id, 'u-sb')).toMatchObject({ canApprove: true, reason: null });
     expect(await PurchaseOrderService.approval(id, 'user-1')).toMatchObject({ canApprove: false, reason: null, myLimit: null });
+  });
+
+  it('lists the orders waiting for an approver: within their limit and priced, oldest first', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const newer = await submitted(1000);
+    const older = await submitted(2000);
+    const over = await submitted(600000); // R690 000 with VAT: over Ona's limit
+    db.pos.get(older)!.createdAt = new Date('2026-01-01');
+    db.pos.get(newer)!.createdAt = new Date('2026-02-01');
+    const unpriced = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
+    await PurchaseOrderService.submit(unpriced.id, 'user-1');
+    await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 5 }] }, 'user-1'); // a draft
+
+    expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((p) => p.id)).toEqual([older, newer]);
+    expect((await PurchaseOrderService.awaitingApproval('u-sb')).map((p) => p.id)).toEqual([older, newer, over]);
+    expect(await PurchaseOrderService.awaitingApproval('user-1')).toEqual([]);
   });
 
   it('sends an approved order back for approval when an edit takes it past the approver\'s limit', async () => {

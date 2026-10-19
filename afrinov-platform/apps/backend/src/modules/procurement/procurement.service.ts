@@ -318,6 +318,22 @@ export const PurchaseOrderService = {
     return orders.map(withTotals);
   },
 
+  /**
+   * The orders pending approval this user may approve now, by the same rule as
+   * Approve: every line priced and the total within their limit. Oldest first,
+   * as they have waited longest. Empty for anyone who may not approve.
+   */
+  async awaitingApproval(actorId: string) {
+    const me = (await listApprovers()).find((a) => a.id === actorId);
+    if (!me) return [];
+    const orders = await prisma.purchaseOrder.findMany({
+      where: { status: 'PENDING_APPROVAL' },
+      include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return orders.filter((po) => !approvalBlock(po, me.approvalLimit)).map(withTotals);
+  },
+
   async getById(id: string) {
     const po = await prisma.purchaseOrder.findUnique({
       where: { id },

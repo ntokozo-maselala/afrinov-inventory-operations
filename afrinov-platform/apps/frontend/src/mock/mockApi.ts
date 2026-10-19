@@ -484,9 +484,14 @@ function route(method: string, path: string, body?: unknown): unknown {
 
   // Purchase Orders
   if (method === 'GET' && p === '/purchase-orders') {
+    // As the server: ?awaitingMyApproval=true is the pending orders the signed-in
+    // user may approve now, oldest first.
+    const awaiting = qs.awaitingMyApproval === 'true';
     const list = [...state.purchaseOrders]
       .filter((po) => !qs.projectNumber || po.projectNumber === qs.projectNumber)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      .filter((po) => !qs.status || po.status === qs.status)
+      .filter((po) => !awaiting || mockApproval(po).canApprove)
+      .sort((a, b) => (awaiting ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt)));
     return list.map((po) => withPoTotals({
       ...po,
       project: projectRef(po.projectNumber),

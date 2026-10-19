@@ -92,7 +92,12 @@ export const updatePOSchema = z.object({
 
 export const PO_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED', 'CANCELLED'] as const;
 
-export const listPOQuerySchema = z.object({ status: z.enum(PO_STATUSES).optional(), projectNumber: z.string().max(64).optional() });
+export const listPOQuerySchema = z.object({
+  status: z.enum(PO_STATUSES).optional(),
+  projectNumber: z.string().max(64).optional(),
+  /** Only the orders pending approval that the signed-in user may approve now, oldest first. */
+  awaitingMyApproval: z.enum(['true', 'false']).optional(),
+});
 
 export const receiveSchema = z.object({
   locationId: z.string().uuid(),
@@ -179,6 +184,7 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Unknown purchase order status', details: parsed.error.flatten() },
       });
     }
+    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req));
     return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber });
   });
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
