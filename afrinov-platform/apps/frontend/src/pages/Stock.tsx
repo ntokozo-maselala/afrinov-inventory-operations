@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { StockStatusBadge } from '../components/StockStatusBadge';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
@@ -29,9 +29,11 @@ const STATUS_OPTIONS = [
 
 export function Stock() {
   const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
-  const [q, setQ] = useState('');
-  const [category, setCategory] = useState('');
-  const [status, setStatus] = useState('');
+  // Other pages link here with ?q=, ?category= or ?status= (an item's page sends its SKU).
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(() => params.get('q') ?? '');
+  const [category, setCategory] = useState(() => (CATEGORIES.some((c) => c.value === params.get('category')) ? params.get('category')! : ''));
+  const [status, setStatus] = useState(() => (STATUS_OPTIONS.some((o) => o.value === params.get('status')) ? params.get('status')! : ''));
   const [action, setAction] = useState<{ kind: StockActionKind; row: CurrentStockRow } | null>(null);
   const toast = useToast();
 
@@ -68,6 +70,12 @@ export function Stock() {
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
             <Link to="/stock/issue">
               <Button variant="primary" size="sm" leadingIcon={<Icon.ArrowRight size={14} />}>Issue stock</Button>
+            </Link>
+          </RoleGuard>
+          {/* The same people as issuing, as on the server. */}
+          <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'TECHNICIAN']}>
+            <Link to="/stock/return">
+              <Button variant="primary" size="sm" leadingIcon={<Icon.Arrows size={14} />}>Return stock</Button>
             </Link>
           </RoleGuard>
           <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER']}>

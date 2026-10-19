@@ -9,6 +9,7 @@ vi.mock('../api/client', () => ({
 }));
 vi.mock('../hooks/usePermissions', () => ({
   useCanManageMaterials: () => perms.manage,
+  useHasRole: () => perms.manage,
   usePermissions: () => ({ hasPermission: () => perms.manage }),
 }));
 
@@ -125,5 +126,50 @@ describe('MaterialDetail editing', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Set one' })).not.toBeInTheDocument();
+  });
+});
+
+describe('MaterialDetail links', () => {
+  beforeEach(() => {
+    perms.manage = true;
+    material = { ...DISC };
+    stock = STOCK;
+    mockGet.mockReset();
+    mockPatch.mockReset();
+  });
+
+  const href = (name: string | RegExp) => screen.getByRole('link', { name }).getAttribute('href');
+
+  it('opens Stock on this item, Receive and Issue with it chosen, and its full history', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: 'Edit' });
+    expect(href('View in stock')).toBe('/stock?q=DISC-115');
+    expect(href('Receive')).toBe('/stock/receive?materialId=m-1');
+    expect(href('Issue')).toBe('/stock/issue?materialId=m-1');
+    expect(href(/All movements/)).toMatch(/^\/movements\?report=all&materialId=m-1&from=\d{4}-\d\d-\d\d&to=\d{4}-\d\d-\d\d$/);
+  });
+
+  it('sends a tool to Tools to be checked out, not to Issue', async () => {
+    material = { ...DISC, category: 'TOOLS' };
+    renderPage();
+    await screen.findByRole('button', { name: 'Edit' });
+    expect(href('Check out')).toBe('/tools?q=DISC-115');
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+
+  it('offers Receive stock when nothing is on hand, and no Issue', async () => {
+    stock = [];
+    renderPage();
+    expect(await screen.findByText('No stock recorded')).toBeInTheDocument();
+    expect(href('Receive stock')).toBe('/stock/receive?materialId=m-1');
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+
+  it('offers no Receive or Issue for an inactive item', async () => {
+    material = { ...DISC, active: false };
+    renderPage();
+    await screen.findByRole('button', { name: 'Reactivate' });
+    expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
   });
 });

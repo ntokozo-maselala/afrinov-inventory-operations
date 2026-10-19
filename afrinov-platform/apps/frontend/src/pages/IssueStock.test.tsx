@@ -26,9 +26,9 @@ async function respond(path: string) {
   return [];
 }
 
-function renderPage() {
+function renderPage(url = '/stock/issue') {
   if (!mockGet.getMockImplementation()) mockGet.mockImplementation(respond);
-  render(<MemoryRouter><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[url]}><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
 }
 
 async function ready() {
@@ -80,6 +80,11 @@ describe('IssueStock page', () => {
         { materialId: 'm-2', locationId: 'l-1', quantity: 2 },
       ],
     }));
+
+    // The confirmation stays on the page, with the way to today's slip for them.
+    const slip = await screen.findByRole('link', { name: 'See the issue slip in Movements' });
+    expect(slip.getAttribute('href')).toMatch(/^\/movements\?report=issued&view=cards&recipientId=r-1&from=(\d{4}-\d\d-\d\d)&to=\1$/);
+    expect(screen.getAllByText('Issued 2 items to Sabelo').length).toBeGreaterThan(0);
   });
 
   it('asks for a recipient before sending anything', async () => {
@@ -162,5 +167,24 @@ describe('IssueStock page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.getByRole('option', { name: /Sabelo/ })).toBeInTheDocument());
     expect(screen.queryByText("Couldn't load recipients and projects")).not.toBeInTheDocument();
+  });
+});
+
+describe('IssueStock linked from an item', () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+    mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1'] });
+  });
+
+  it('starts the first line on the item in ?materialId=', async () => {
+    renderPage('/stock/issue?materialId=m-1');
+    await ready();
+    expect(await screen.findByText('On hand at A-1: 10 each')).toBeInTheDocument();
+  });
+
+  it('ignores an item that cannot be issued here, such as a tool', async () => {
+    renderPage('/stock/issue?materialId=m-4');
+    await ready();
+    expect(screen.queryByText(/On hand at/)).not.toBeInTheDocument();
   });
 });

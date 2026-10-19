@@ -34,9 +34,10 @@ export function Consumption() {
     : range.from > range.to ? 'The start date is after the end date.'
       : range.from > today ? 'Choose a period that has started.'
         : null;
-  const [project, setProject] = useState('');
-  const [category, setCategory] = useState('');
-  const [recipient, setRecipient] = useState('');
+  // The Projects and Recipients pages link here with ?projectNumber= or ?recipientId=.
+  const [project, setProject] = useState(() => params.get('projectNumber') ?? '');
+  const [category, setCategory] = useState(() => params.get('category') ?? '');
+  const [recipient, setRecipient] = useState(() => params.get('recipientId') ?? '');
 
   /** Set one end of the period, keeping the other where it is. */
   function setDate(key: 'from' | 'to', value: string) {

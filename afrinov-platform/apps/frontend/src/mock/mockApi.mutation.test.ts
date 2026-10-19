@@ -463,6 +463,27 @@ describe('mock API mutation flows', () => {
       await expect(api.post(`/inventory-transactions/${issueId}/returns`, { quantity: 1 }))
         .rejects.toMatchObject({ code: 'INVALID_STATE' });
     });
+
+    it('lists what a recipient still has out, and returns several lines all-or-nothing', async () => {
+      const start = await onHand();
+      const a = await issue('mat-1', 'loc-1', 6);
+      const b = await issue('mat-1', 'loc-1', 3);
+      type Row = { issueTransactionId: string; outstanding: string };
+      const out = async () => (await api.get<Row[]>('/inventory-returns/returnable?recipientId=rcp-1'))
+        .filter((r) => r.issueTransactionId === a || r.issueTransactionId === b)
+        .map((r) => [r.issueTransactionId, r.outstanding]);
+      expect(await out()).toEqual([[b, '3'], [a, '6']]);
+
+      await expect(api.post('/inventory-returns', { lines: [{ issueTransactionId: a, quantity: 2 }, { issueTransactionId: b, quantity: 4 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(await onHand()).toBe(start - 9);
+
+      const res = await api.post<{ transactionIds: string[] }>('/inventory-returns', { lines: [{ issueTransactionId: a, quantity: 2 }, { issueTransactionId: b, quantity: 3 }], reason: 'Job done' });
+      expect(res.transactionIds).toHaveLength(2);
+      expect(await onHand()).toBe(start - 4);
+      expect(await out()).toEqual([[a, '4']]);
+      await expect(api.get('/inventory-returns/returnable')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    });
   });
 
   describe('counting stock at a location', () => {

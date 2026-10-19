@@ -137,3 +137,13 @@ describe('Consumption page', () => {
     expect(screen.queryByLabelText('Issued to Sabelo')).not.toBeInTheDocument();
   });
 });
+
+describe('Consumption linked from a project or recipient', () => {
+  beforeEach(() => { mockGet.mockReset(); });
+
+  it('narrows to the project and recipient in the address', async () => {
+    renderPage('/reports/consumption?projectNumber=AFRI-1325&recipientId=r-1');
+    await waitFor(() => expect(lastReportCall()).toContain('projectNumber=AFRI-1325'));
+    expect(lastReportCall()).toContain('recipientId=r-1');
+  });
+});

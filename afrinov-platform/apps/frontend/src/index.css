@@ -231,6 +231,8 @@
   .dark .select { background-color: rgb(var(--color-surface-0) / <alpha-value>); }
   /* The open list is drawn by the browser, which on Windows keeps it white; colour the options to match. */
   .dark .select option { background-color: rgb(var(--color-surface-0)); color: rgb(var(--color-surface-800)); }
+  /* Group headings in the list (Workers, Machines…): the same ground, in the muted label grey. */
+  .dark .select optgroup { background-color: rgb(var(--color-surface-0)); color: rgb(var(--color-surface-500)); }
   .textarea { @apply input min-h-[80px] resize-y; }
   .checkbox { @apply h-4 w-4 rounded border-surface-300 text-brand-500 focus:ring-brand-100; }
 

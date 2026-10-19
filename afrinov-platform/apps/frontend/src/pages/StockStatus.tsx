@@ -15,6 +15,7 @@ import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Alert } from '../components/Alert';
 import { Icon } from '../components/Icon';
+import { RoleGuard } from '../components/RoleGuard';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
@@ -48,6 +49,8 @@ const VIEWS: Array<{ value: string; label: string }> = [
   { value: 'WARNING', label: 'Warning' },
   { value: 'OK', label: 'OK' },
   { value: 'NOT_SET', label: 'No Required Stock set' },
+  // Nothing on hand anywhere: the Dashboard's Out of stock card opens this.
+  { value: 'out', label: 'Out of stock' },
   { value: 'all', label: 'All items' },
 ];
 
@@ -73,7 +76,8 @@ export function StockStatus() {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return (items.data ?? []).filter((r) => {
       if (view === 'attention' && !needsAttention(r.status)) return false;
-      if (view !== 'attention' && view !== 'all' && r.status !== view) return false;
+      if (view === 'out' && num(r.onHand) > 0) return false;
+      if (view !== 'attention' && view !== 'all' && view !== 'out' && r.status !== view) return false;
       if (category && r.category !== category) return false;
       if (terms.length > 0) {
         const hay = `${r.sku} ${r.name} ${r.locations.map((l) => l.locationName).join(' ')}`.toLowerCase();
@@ -101,6 +105,12 @@ export function StockStatus() {
               onDownload={(format) => (format === 'pdf' ? downloadReorderListPdf : downloadReorderList)(category || undefined)}
               disabled={!items.data || toReorder === 0}
             />
+            {/* When the order arrives, it is booked on Receive stock. */}
+            <RoleGuard roles={['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT']}>
+              <Link to="/stock/receive" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                <Icon.ArrowDown size={14} /> Receive stock
+              </Link>
+            </RoleGuard>
             {PROCUREMENT_ENABLED && (
               <Link to="/purchase-orders" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.Cart size={14} /> Create purchase order
