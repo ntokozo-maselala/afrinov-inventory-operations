@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
@@ -13,17 +13,36 @@ import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
+import { formatCurrency } from '../lib/currency';
 import { MaterialForm } from '../components/MaterialForm';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
 import type { Material } from '../api/types';
 
+const hasPrice = (m: Material) => m.unitCost !== null && m.unitCost !== undefined && m.unitCost !== '';
+
+// Which items to show. Read from ?view= so other pages can link straight to,
+// say, the active items still without a price.
+const VIEWS: Array<{ value: string; label: string; match: (m: Material) => boolean }> = [
+  { value: '', label: 'All items', match: () => true },
+  { value: 'active', label: 'Active', match: (m) => m.active },
+  { value: 'inactive', label: 'Inactive', match: (m) => !m.active },
+  { value: 'no-price', label: 'No unit price', match: (m) => m.active && !hasPrice(m) },
+  { value: 'no-required', label: 'No Required Stock', match: (m) => m.active && !(Number(m.requiredStock) > 0) },
+];
 
 export function Materials() {
   const mats = useApi<Material[]>('/materials');
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
+  const [params, setParams] = useSearchParams();
+  const view = VIEWS.find((v) => v.value === (params.get('view') ?? '')) ?? VIEWS[0]!;
+  const setView = (value: string) => setParams((p) => {
+    const next = new URLSearchParams(p);
+    if (value) next.set('view', value); else next.delete('view');
+    return next;
+  }, { replace: true });
   const [adding, setAdding] = useState(false);
   const toast = useToast();
   const canManage = useCanManageMaterials();
@@ -41,6 +60,7 @@ export function Materials() {
     if (!mats.data) return [];
     const needle = q.trim().toLowerCase();
     return mats.data.filter((m) => {
+      if (!view.match(m)) return false;
       if (category && m.category !== category) return false;
       if (needle) {
         const hay = `${m.sku} ${m.name} ${m.serialNumber ?? ''}`.toLowerCase();
@@ -48,7 +68,8 @@ export function Materials() {
       }
       return true;
     });
-  }, [mats.data, q, category]);
+  }, [mats.data, q, category, view]);
+  const filtering = !!(q || category || view.value);
 
   return (
     <div>
@@ -63,10 +84,15 @@ export function Materials() {
       />
 
       <FilterBar
-        onClear={q || category ? () => { setQ(''); setCategory(''); } : undefined}
+        onClear={filtering ? () => { setQ(''); setCategory(''); setView(''); } : undefined}
         count={mats.loading ? 'Loading…' : `${filtered.length} of ${mats.data?.length ?? 0}`}
       >
         <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder="SKU, name or serial number…" />
+        <Field label="Show" htmlFor="materials-view" className={FILTER_WIDTH}>
+          <Select id="materials-view" value={view.value} onChange={(e) => setView(e.target.value)}>
+            {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+          </Select>
+        </Field>
         <Field label="Category" htmlFor="materials-category" className={FILTER_WIDTH}>
           <Select id="materials-category" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">All categories</option>
@@ -84,7 +110,7 @@ export function Materials() {
           rowKey={(m) => m.id}
           rows={filtered}
           columns={columns()}
-          emptyState={<EmptyState title={q || category ? 'No materials match' : 'No materials yet'} description={q || category ? 'Try clearing filters.' : 'Add materials to start tracking inventory.'} action={!q && !category && canManage ? <Button variant="primary" onClick={() => setAdding(true)}>Add your first item</Button> : undefined} />}
+          emptyState={<EmptyState title={filtering ? 'No materials match' : 'No materials yet'} description={filtering ? 'Try clearing filters.' : 'Add materials to start tracking inventory.'} action={!filtering && canManage ? <Button variant="primary" onClick={() => setAdding(true)}>Add your first item</Button> : undefined} />}
         />
       )}
 
@@ -117,6 +143,7 @@ function columns(): DataTableColumn<Material>[] {
     { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{categoryLabel(m.category)}</span> },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },
+    { key: 'cost', header: 'Unit cost', align: 'right', className: 'text-num', render: (m) => (hasPrice(m) ? <span className="font-mono">{formatCurrency(Number(m.unitCost), 'ZAR')}</span> : <span className="text-surface-400" title="No unit price">—</span>), width: '8rem' },
     { key: 'status', header: 'Status', render: (m) => m.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '7rem' },
   ];
 }

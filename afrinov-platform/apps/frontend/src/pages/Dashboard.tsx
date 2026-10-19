@@ -60,6 +60,8 @@ export function Dashboard() {
       {
         label: 'Stock value', value: formatCurrency(value.total.value, value.currency), tone: 'success' as const,
         note: value.total.unpriced > 0 ? `${value.total.unpriced} item${value.total.unpriced === 1 ? '' : 's'} in stock without a price` : 'excl. VAT',
+        // Unpriced items leave the value short; the card opens the list to price them.
+        to: value.total.unpriced > 0 ? '/materials?view=no-price' : undefined,
       },
       { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, to: '/stock' },
       { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },

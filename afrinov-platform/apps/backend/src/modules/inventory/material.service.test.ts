@@ -66,3 +66,21 @@ describe('MaterialService serial numbers', () => {
     expect((await MaterialService.update({ id: m.id, serialNumber: null }, 'admin')).serialNumber).toBeNull();
   });
 });
+
+describe('MaterialService update', () => {
+  it('sets and clears the unit cost and description, and audits each change', async () => {
+    const m = await MaterialService.create({ sku: 'CON-1', name: 'Disc', category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 12.5, description: 'Thin' }, 'admin');
+    const priced = await MaterialService.update({ id: m.id, unitCost: 14, requiredStock: 40 }, 'admin');
+    expect(priced).toMatchObject({ unitCost: 14, requiredStock: 40, description: 'Thin' });
+    const cleared = await MaterialService.update({ id: m.id, unitCost: null, description: null }, 'admin');
+    expect(cleared.unitCost).toBeNull();
+    expect(cleared.description).toBeNull();
+    expect(db.audit.filter((a) => a.entityId === m.id).map((a) => a.action)).toEqual(['CREATE', 'UPDATE', 'UPDATE']);
+  });
+
+  it('deactivates and reactivates an item', async () => {
+    const m = await MaterialService.create({ sku: 'CON-2', name: 'Glove', category: 'CONSUMABLES', unitOfMeasure: 'pair' }, 'admin');
+    expect((await MaterialService.update({ id: m.id, active: false }, 'admin')).active).toBe(false);
+    expect((await MaterialService.update({ id: m.id, active: true }, 'admin')).active).toBe(true);
+  });
+});

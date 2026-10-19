@@ -13,6 +13,7 @@ import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Field, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
+import { Alert } from '../components/Alert';
 import { Icon } from '../components/Icon';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { formatNumber } from '../lib/format';
@@ -142,6 +143,13 @@ export function StockStatus() {
           </Select>
         </Field>
       </FilterBar>
+
+      {view === 'NOT_SET' && counts.NOT_SET > 0 && (
+        <Alert tone="info" title="These items cannot be graded" className="mb-4">
+          They have no Required Stock, so there is nothing to compare their stock on hand with. Open an item to set it, or see them
+          all on <Link to="/materials?view=no-required" className="btn-link">Materials</Link>.
+        </Alert>
+      )}
 
       {items.error && <ErrorState message={items.error.message} onRetry={items.reload} />}
 

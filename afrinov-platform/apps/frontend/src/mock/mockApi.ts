@@ -223,12 +223,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/materials/'.length);
     const m = findMaterial(id);
     if (!m) throw err('NOT_FOUND', 'Material not found');
-    const b = body as Partial<MockMaterial>;
+    // As the server: null clears the description or the unit cost.
+    const b = body as Omit<Partial<MockMaterial>, 'description' | 'unitCost'> & { description?: string | null; unitCost?: number | string | null };
     if (b.name !== undefined) m.name = b.name;
-    if (b.description !== undefined) m.description = b.description;
+    if (b.description !== undefined) m.description = b.description ?? undefined;
     if (b.unitOfMeasure !== undefined) m.unitOfMeasure = b.unitOfMeasure;
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
-    if (b.unitCost !== undefined) m.unitCost = String(b.unitCost);
+    if (b.unitCost !== undefined) m.unitCost = b.unitCost === null ? undefined : String(b.unitCost);
     if (b.active !== undefined) m.active = b.active;
     if (b.serialNumber !== undefined) {
       const serialNumber = b.serialNumber?.trim() || null;
