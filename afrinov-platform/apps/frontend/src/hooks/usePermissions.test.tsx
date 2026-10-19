@@ -180,10 +180,11 @@ describe('usePermissions — the role check sheet', () => {
     STORE_CONTROLLER: [
       'materials:manage', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
       'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage', 'racks:manage',
-      'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view',
+      'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:view', 'orders:receive',
     ],
-    PROCUREMENT: ['inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage'],
-    APPROVER: ['orders:approve'],
+    PROCUREMENT: ['inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view'],
+    // Approvers open the orders they approve (procurement roadmap Phase 4).
+    APPROVER: ['orders:approve', 'orders:view'],
     TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend'],
     VIEWER: [],
   };

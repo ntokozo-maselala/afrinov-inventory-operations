@@ -35,6 +35,7 @@ beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
     if (path === '/purchase-orders') return [PRICED, UNPRICED];
     if (path === '/purchase-orders/po-1') return PRICED;
+    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
     if (path === '/suppliers') return SUPPLIERS;
     if (path === '/materials') return MATERIALS;
@@ -128,7 +129,7 @@ describe('Purchase order detail', () => {
   it('adds a missing price from the Edit drawer, sending only what changed', async () => {
     detailPage();
     await screen.findByText('Cutting disc');
-    fireEvent.click(screen.getByRole('button', { name: 'Add prices' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add prices' })[0]!);
     fireEvent.change(screen.getByLabelText('BOLT-M16 unit price'), { target: { value: '4.2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockPatch).toHaveBeenCalled());

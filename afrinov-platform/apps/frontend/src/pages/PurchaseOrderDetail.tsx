@@ -16,6 +16,7 @@ import { Alert } from '../components/Alert';
 import { Field, Input, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
+import { usePermissions } from '../hooks/usePermissions';
 import {
   PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
 } from '../components/PurchaseOrderDetailsFields';
@@ -117,12 +118,16 @@ export function PurchaseOrderDetail() {
   const path = id ? `/purchase-orders/${id}` : null;
   const po = useApi<PO>(path);
   const history = useApi<HistoryEntry[]>(id ? `/purchase-orders/${id}/history` : null);
+  const approval = useApi<ApprovalView>(id ? `/purchase-orders/${id}/approval` : null);
   const [draft, setDraft] = useState<ActionDraft | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { hasPermission } = usePermissions();
+  const canManage = hasPermission('procurement:manage');
+  const canReceive = hasPermission('orders:receive');
 
-  function reload() { po.reload(); history.reload(); }
+  function reload() { po.reload(); history.reload(); approval.reload(); }
 
   async function performAction() {
     if (!po.data || !draft) return;
@@ -150,15 +155,16 @@ export function PurchaseOrderDetail() {
   }
 
   const fresh = po.data;
-  const cancellable = fresh ? isCancellable(fresh.status) : false;
-  const editable = fresh ? isEditable(fresh.status) : false;
-  const closable = fresh ? isClosable(fresh.status) : false;
+  // Each action shows only to those the server lets do it; Approve also needs a limit that covers the order.
+  const cancellable = fresh ? canManage && isCancellable(fresh.status) : false;
+  const editable = fresh ? canManage && isEditable(fresh.status) : false;
+  const closable = fresh ? canManage && isClosable(fresh.status) : false;
   const primary: { kind: 'approve' | 'receive'; label: string } | null = useMemo(() => {
     if (!fresh) return null;
-    if (isApprovable(fresh.status)) return { kind: 'approve', label: 'Approve' };
-    if (isReceivable(fresh.status)) return { kind: 'receive', label: 'Receive all outstanding' };
+    if (isApprovable(fresh.status)) return approval.data?.canApprove ? { kind: 'approve', label: 'Approve' } : null;
+    if (isReceivable(fresh.status) && canReceive) return { kind: 'receive', label: 'Receive all outstanding' };
     return null;
-  }, [fresh]);
+  }, [fresh, approval.data, canReceive]);
 
   function openPrimary(kind: 'approve' | 'receive') {
     setDraft(kind === 'approve' ? { kind } : { kind, draft: { locationId: '', deliveryNotes: '' } });
@@ -196,6 +202,9 @@ export function PurchaseOrderDetail() {
       {fresh && (
         <div className="space-y-6">
           <LifecycleTracker status={fresh.status} />
+          {isApprovable(fresh.status) && approval.data && (
+            <ApprovalPanel view={approval.data} onAddPrices={canManage ? () => setEditing(true) : undefined} />
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <aside className="lg:col-span-1 surface-card p-4 space-y-3">
@@ -605,6 +614,39 @@ function lineColumns(po: PO): DataTableColumn<POLine>[] {
     { key: 'vat', header: 'VAT', align: 'right', className: 'text-num', render: (l) => (l.vat ? <span className="font-mono whitespace-nowrap">{formatMoney(l.vat, currency)}</span> : none), width: '7rem' },
     { key: 'net', header: 'Net value', align: 'right', className: 'text-num', render: (l) => (l.net ? <span className="font-mono whitespace-nowrap font-semibold">{formatMoney(l.net, currency)}</span> : none), width: '8rem' },
   ];
+}
+
+/** GET /purchase-orders/:id/approval */
+interface ApprovalView extends PoTotals {
+  currency: string;
+  canApprove: boolean;
+  /** Why the reader can't approve it, when they may approve orders. */
+  reason: string | null;
+  myLimit: string | null;
+  approvers: Array<{ id: string; name: string; approvalLimit: string | null }>;
+}
+
+/** Who can sign this order off, by approval limit, as the template picks its approver. */
+function ApprovalPanel({ view, onAddPrices }: { view: ApprovalView; onAddPrices?: () => void }) {
+  const limit = (l: string | null) => (l === null ? 'no limit' : `up to ${formatMoney(l, 'ZAR')}`);
+  if (view.unpricedLines > 0) {
+    return (
+      <Alert tone="warning" title="Waiting for prices">
+        {view.unpricedLines === 1 ? '1 line has' : `${view.unpricedLines} lines have`} no price, so the order total isn&rsquo;t known and it can&rsquo;t be approved yet.
+        {onAddPrices && <> <button type="button" className="btn-link" onClick={onAddPrices}>Add prices</button></>}
+      </Alert>
+    );
+  }
+  const names = view.approvers.map((a) => `${a.name} (${limit(a.approvalLimit)})`);
+  return (
+    <Alert tone={view.canApprove ? 'success' : 'info'} title={`Approval for ${formatMoney(view.net, view.currency)} including VAT`}>
+      {view.canApprove && <>You can approve this order. </>}
+      {!view.canApprove && view.reason && <>{view.reason} </>}
+      {names.length > 0
+        ? <>Can approve it: {names.join(', ')}.</>
+        : <>Nobody has a high enough approval limit. An admin can raise one under Settings → Users &amp; permissions.</>}
+    </Alert>
+  );
 }
 
 /** The order details from the template's Inputs sheet, under the summary. */

@@ -254,6 +254,36 @@ describe('receiving stock over real HTTP', () => {
     });
   });
 
+  describe('approval by value', () => {
+    it('lets an approver with a limit open and approve orders within it, and refuses one over it', async () => {
+      const email = `it-approver-${run}@afrinov.local`;
+      const password = `It-${run}-approver`;
+      const created = await api<{ id: string }>('POST', '/users', { email, name: `IT Approver ${run}`, password, roleNames: ['APPROVER'] });
+      expect(created.status).toBe(201);
+      expect((await api('PATCH', `/users/${created.body.id}`, { approvalLimit: 1000 })).status).toBe(200);
+      const approver = client(server.port, await login(server.port, email, password));
+
+      const order = async (price: number) => {
+        const res = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: price }] });
+        await api('POST', `/purchase-orders/${res.body.id}/submit`);
+        return res.body.id;
+      };
+      const small = await order(800); // R920 with VAT
+      const large = await order(900); // R1 035 with VAT
+      // With approval switched off in Settings, submitting approves: nothing to check here.
+      if ((await api<{ status: string }>('GET', `/purchase-orders/${small}`)).body.status !== 'PENDING_APPROVAL') return;
+
+      expect((await approver('GET', `/purchase-orders/${small}`)).status).toBe(200);
+      const view = await approver<{ canApprove: boolean; net: string }>('GET', `/purchase-orders/${large}/approval`);
+      expect(view.body).toMatchObject({ canApprove: false, net: '1035.00' });
+
+      const refused = await approver<{ error: { code: string; message: string } }>('POST', `/purchase-orders/${large}/approve`);
+      expect(refused.status).toBe(403);
+      expect(refused.body.error.message).toMatch(/approval limit/);
+      expect((await approver('POST', `/purchase-orders/${small}/approve`)).status).toBe(200);
+    });
+  });
+
   describe('order details', () => {
     interface Detailed { id: string; projectNumber: string | null; deliveryMethod: string; deliveryTo: string | null; shippingTerms: string | null; penaltiesApply: boolean; lines: Array<{ id: string; deliveryDate: string | null }> }
 

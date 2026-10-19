@@ -22,7 +22,8 @@ import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
-import { defaultVatRate, withTotals } from './po-pricing.js';
+import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
+import { approvalBlock, approversFor, listApprovers, whoToAsk } from './po-approval.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -423,6 +424,17 @@ export const PurchaseOrderService = {
         await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { deliveryDate: next } });
         dateChanges.push({ lineId: line.id, before: dayOf(line.deliveryDate), after: dayOf(next) });
       }
+      // An approved order whose new total is past its approver's limit (or has
+      // lost a price) goes back for approval; the edit can't raise the amount
+      // someone signed off.
+      if (po.status === 'APPROVED' && po.approvedById && (priceChanges.length > 0 || input.vatRate !== undefined)) {
+        const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
+        const approver = await tx.user.findUnique({ where: { id: po.approvedById }, select: { approvalLimit: true } });
+        const vat = input.vatRate ?? po.vatRate;
+        if (approvalBlock({ currency: po.currency, vatRate: vat, lines }, approver?.approvalLimit ?? null)) {
+          Object.assign(data, { status: 'PENDING_APPROVAL', approvedAt: null, approvedById: null });
+        }
+      }
       const after = await tx.purchaseOrder.update({ where: { id: input.id }, data });
       // Only what was sent goes in the log, so each entry reads as the change made.
       const changed = Object.keys(data) as Array<keyof typeof po & keyof typeof after>;
@@ -503,13 +515,38 @@ export const PurchaseOrderService = {
     });
   },
 
+  /** Who may approve this order, and whether the asking user can. */
+  async approval(id: string, actorId: string) {
+    const po = await prisma.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
+    if (!po) throw Errors.notFound('PurchaseOrder');
+    const approvers = await listApprovers();
+    const me = approvers.find((a) => a.id === actorId);
+    const block = me ? approvalBlock(po, me.approvalLimit) : null;
+    return {
+      ...orderTotals(po.lines, po.vatRate ?? 0),
+      currency: po.currency,
+      canApprove: !!me && po.status === 'PENDING_APPROVAL' && !block,
+      reason: me ? block?.message ?? null : null,
+      myLimit: me?.approvalLimit ?? null,
+      approvers: approversFor(po, approvers),
+    };
+  },
+
   async approve(id: string, actorId: string) {
     return prisma.$transaction(async (tx) => {
-      const po = await tx.purchaseOrder.findUnique({ where: { id } });
+      const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot approve a PO in status ${po.status}`, { status: po.status });
+      }
+      // The approver's limit must cover the order total (rand, including VAT).
+      const actor = await tx.user.findUnique({ where: { id: actorId }, select: { approvalLimit: true } });
+      const block = approvalBlock(po, actor?.approvalLimit ?? null);
+      if (block?.code === 'UNPRICED') throw Errors.validation(block.message);
+      if (block) {
+        const names = approversFor(po, await listApprovers()).map((a) => a.name);
+        throw Errors.forbidden(`${block.message} ${whoToAsk(names)}`);
       }
       const now = new Date();
       const result = await tx.purchaseOrder.updateMany({

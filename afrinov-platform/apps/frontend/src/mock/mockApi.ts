@@ -172,6 +172,28 @@ function projectRef(projectNumber: string | null | undefined) {
   return { projectNumber, name: p?.name ?? null };
 }
 
+// Approval by value as the server works it out (po-approval.ts), for the
+// signed-in mock user (user-1, an admin without a limit).
+function mockApproval(po: MockPurchaseOrder) {
+  const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
+  const currency = po.currency ?? 'ZAR';
+  const within = (limit: string | null | undefined) => limit == null || (currency === 'ZAR' && Number(totals.net) <= Number(limit));
+  const approvers = mockUsers
+    .filter((u) => u.active && u.roles.some((r) => r.role.name === 'ADMIN' || r.role.name === 'APPROVER'))
+    .map((u) => ({ id: u.id, name: u.name, approvalLimit: u.approvalLimit ?? null }));
+  const me = approvers.find((a) => a.id === 'user-1');
+  const unpriced = totals.unpricedLines > 0;
+  const n = totals.unpricedLines;
+  const reason = unpriced
+    ? `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.`
+    : me && !within(me.approvalLimit) ? 'This order is over your approval limit.' : null;
+  return {
+    ...totals, currency, myLimit: me?.approvalLimit ?? null, reason,
+    canApprove: !!me && po.status === 'PENDING_APPROVAL' && !unpriced && within(me.approvalLimit),
+    approvers: unpriced ? [] : approvers.filter((a) => within(a.approvalLimit)),
+  };
+}
+
 // Order money as the server works it out (po-pricing.ts).
 function withPoTotals<T extends { vatRate?: string; currency?: string; lines: Array<{ orderedQty: string; unitPrice?: string | null }> }>(po: T) {
   const rate = Number(po.vatRate ?? 15);
@@ -461,6 +483,11 @@ function route(method: string, path: string, body?: unknown): unknown {
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     }));
   }
+  if (method === 'GET' && /^\/purchase-orders\/[^/]+\/approval$/.test(p)) {
+    const po = state.purchaseOrders.find((x) => x.id === p.slice('/purchase-orders/'.length, -'/approval'.length));
+    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    return mockApproval(po);
+  }
   if (method === 'GET' && /^\/purchase-orders\/[^/]+\/history$/.test(p)) {
     const id = p.slice('/purchase-orders/'.length, -'/history'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
@@ -532,6 +559,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
+    const check = mockApproval(po);
+    if (check.unpricedLines > 0) throw err('VALIDATION_ERROR', check.reason!);
+    if (!check.canApprove) throw err('FORBIDDEN', check.reason ?? 'You cannot approve this order.');
     const before = { status: po.status };
     po.status = 'APPROVED';
     po.approvedAt = new Date().toISOString();
@@ -1074,7 +1104,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'PATCH' && p.startsWith('/users/') && p.split('/').length === 3) {
     const id = p.slice('/users/'.length);
-    const b = body as { name?: string; active?: boolean; roleNames?: string[] };
+    const b = body as { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null };
     return mockUsersApi.update(id, b);
   }
 
@@ -1760,6 +1790,8 @@ interface MockAdminUser {
   active: boolean;
   createdAt: string;
   roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' } }>;
+  /** Largest order (rand, incl. VAT) they may approve; null: no limit. */
+  approvalLimit?: string | null;
 }
 const SEED_USERS: MockAdminUser[] = [
   { id: 'user-1', email: 'admin@afrinov.local', name: 'System Administrator (dev)', active: true, createdAt: new Date('2026-01-01').toISOString(), roles: [{ role: { name: 'ADMIN' } }] },
@@ -1803,12 +1835,13 @@ const mockUsersApi = {
     recordAudit('CREATE', created.id, null, { email: created.email, name: created.name, roles: b.roleNames });
     return created;
   },
-  update(id: string, b: { name?: string; active?: boolean; roleNames?: string[] }): MockAdminUser {
+  update(id: string, b: { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null }): MockAdminUser {
     const u = mockUsers.find((x) => x.id === id);
     if (!u) throw err('NOT_FOUND', 'User not found');
     const before = { name: u.name, active: u.active, roles: u.roles.map((r) => r.role.name) };
     if (b.name !== undefined) u.name = b.name;
     if (b.active !== undefined) u.active = b.active;
+    if (b.approvalLimit !== undefined) u.approvalLimit = b.approvalLimit === null ? null : String(b.approvalLimit);
     if (b.roleNames !== undefined) {
       u.roles = b.roleNames.map((r) => ({ role: { name: r as MockAdminUser['roles'][number]['role']['name'] } }));
     }

@@ -84,7 +84,8 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.ManageProjects,
     PermissionCode.ViewReports,
   ],
-  APPROVER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewReports],
+  // Approvers open the orders they approve (procurement roadmap Phase 4).
+  APPROVER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
   TECHNICIAN: [
     PermissionCode.IssueInventory,
     PermissionCode.CheckOutTool,

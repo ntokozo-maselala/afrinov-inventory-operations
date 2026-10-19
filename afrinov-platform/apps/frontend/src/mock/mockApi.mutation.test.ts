@@ -79,6 +79,30 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('purchase order approval by value', () => {
+    async function submitted(lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>) {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines });
+      await api.post(`/purchase-orders/${po.id}/submit`, {});
+      return po.id;
+    }
+
+    it('refuses to approve while a line has no price', async () => {
+      const id = await submitted([{ materialId: 'mat-1', orderedQty: 1 }]);
+      expect((await api.get<{ canApprove: boolean; unpricedLines: number }>(`/purchase-orders/${id}/approval`))).toMatchObject({ canApprove: false, unpricedLines: 1 });
+      const e = await api.post(`/purchase-orders/${id}/approve`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('VALIDATION_ERROR');
+    });
+
+    it('refuses an order over the signed-in user\'s limit', async () => {
+      await api.patch('/users/user-1', { approvalLimit: 100 });
+      const id = await submitted([{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }]); // R115 with VAT
+      expect(await api.get<{ canApprove: boolean }>(`/purchase-orders/${id}/approval`)).toMatchObject({ canApprove: false });
+      const e = await api.post(`/purchase-orders/${id}/approve`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('FORBIDDEN');
+      await api.patch('/users/user-1', { approvalLimit: null });
+    });
+  });
+
   describe('purchase order details', () => {
     type Detailed = Record<string, unknown> & { lines: Array<{ id: string; deliveryDate?: string | null }> };
 
@@ -296,7 +320,8 @@ describe('mock API mutation flows', () => {
     function makeDraftPO() {
       return api.post<{ id: string }>('/purchase-orders', {
         supplierId: 'sup-1',
-        lines: [{ materialId: 'mat-1', orderedQty: 5 }],
+        // Priced: an order with unpriced lines can't be approved.
+        lines: [{ materialId: 'mat-1', orderedQty: 5, unitPrice: 4.5 }],
       });
     }
 

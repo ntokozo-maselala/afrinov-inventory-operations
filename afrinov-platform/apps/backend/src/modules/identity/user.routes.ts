@@ -15,6 +15,8 @@ export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
   active: z.boolean().optional(),
   roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1).optional(),
+  // Largest purchase order (rand, incl. VAT) the user may approve; null: no limit.
+  approvalLimit: z.number().nonnegative().max(1e12).nullable().optional(),
 });
 
 function actorId(req: unknown): string {

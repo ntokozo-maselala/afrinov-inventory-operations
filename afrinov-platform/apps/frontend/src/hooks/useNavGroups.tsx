@@ -70,7 +70,7 @@ export function useNavGroups(): NavGroup[] {
     ...(PROCUREMENT_ENABLED ? [{
       title: 'Procurement',
       items: [
-        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart /> },
+        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'] },
         { to: '/goods-receipts', label: 'Goods receipts', icon: <Icon.Truck /> },
       ],
     }] : []),

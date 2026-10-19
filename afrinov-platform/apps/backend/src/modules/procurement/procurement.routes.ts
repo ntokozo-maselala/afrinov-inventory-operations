@@ -223,6 +223,12 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     return PurchaseOrderService.submit(id, actorId(req));
   });
 
+  // Who may approve this order (by limit), and whether the asking user can.
+  app.get('/purchase-orders/:id/approval', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewPurchaseOrder);
+    return PurchaseOrderService.approval((req.params as { id: string }).id, actorId(req));
+  });
+
   app.post('/purchase-orders/:id/approve', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ApprovePurchaseOrder);
     const id = (req.params as { id: string }).id;
