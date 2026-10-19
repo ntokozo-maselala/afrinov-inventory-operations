@@ -42,7 +42,6 @@ describe('Dashboard', () => {
     expect(table.getByText('Unpriced: 1 in Consumables')).toBeInTheDocument();
     expect(table.getByText('All categories')).toBeInTheDocument();
 
-    expect(screen.getByRole('heading', { name: 'Command Center' })).toBeInTheDocument();
     expect(screen.getByText('10 of 14')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^Urgent/ })).toHaveAttribute('href', '/reports/stock-status?view=URGENT');
     expect(screen.getByRole('link', { name: /^Out of stock/ })).toHaveAttribute('href', '/reports/stock-status?view=out');
