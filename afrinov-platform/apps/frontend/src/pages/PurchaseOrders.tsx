@@ -10,7 +10,7 @@ import { PurchaseOrderStatusBadge } from '../components/Badge';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { formatDate, formatNumber } from '../lib/format';
-import { useCanManageProcurement } from '../hooks/usePermissions';
+import { useCanManageProcurement, usePermissions } from '../hooks/usePermissions';
 import { formatMoney, type PoTotals } from '../lib/poMoney';
 import { useAuth } from '../auth';
 import { revisionLabel } from '../lib/poDocument';
@@ -28,6 +28,9 @@ interface PO {
 /** Orders a buyer still has to finish or chase: the default view for Procurement. */
 const OPEN_WORK = 'DRAFT,PENDING_APPROVAL';
 
+/** Orders the signed-in user may approve now: priced and within their limit (server-side). */
+export const MINE = 'mine';
+
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: OPEN_WORK, label: 'Draft & pending approval' },
@@ -41,21 +44,28 @@ const STATUS_OPTIONS = [
 ];
 
 export function PurchaseOrders() {
-  const pos = useApi<PO[]>('/purchase-orders');
   const { user } = useAuth();
+  const canApprove = usePermissions().hasPermission('orders:approve');
   const [q, setQ] = useState('');
   // The filters live in the URL (?status=, ?project=) so a view can be linked
   // to and survives Back from an order.
   const [params, setParams] = useSearchParams();
   const roles = (user?.roles ?? []).map((r) => r.toUpperCase());
   const project = params.get('project') ?? '';
-  // Buyers land on their drafts and orders awaiting approval; everyone else,
-  // and a link to one project's orders, on all statuses.
+  // Buyers land on their drafts and orders awaiting approval, approvers on the
+  // orders waiting for them; everyone else, and a link to one project's
+  // orders, on all statuses.
   const buyer = roles.includes('PROCUREMENT') && !roles.includes('ADMIN');
-  const defaultStatus = buyer && !project ? OPEN_WORK : '';
+  const approver = canApprove && !buyer && !roles.includes('ADMIN');
+  const landingStatus = buyer ? OPEN_WORK : approver ? MINE : '';
+  const defaultStatus = project ? '' : landingStatus;
   const rawStatus = params.get('status');
-  const status = rawStatus === null ? defaultStatus : rawStatus === 'all' ? '' : rawStatus;
-  const statuses = status ? status.split(',') : [];
+  const requested = rawStatus === null ? defaultStatus : rawStatus === 'all' ? '' : rawStatus;
+  const status = requested === MINE && !canApprove ? '' : requested;
+  const mine = status === MINE;
+  const statuses = status && !mine ? status.split(',') : [];
+  // "Waiting for my approval" depends on the approver's limit, so the server picks those.
+  const pos = useApi<PO[]>(mine ? '/purchase-orders?awaitingMyApproval=true' : '/purchase-orders');
   const setParam = (key: string, v: string | null) => setParams((p) => { if (v === null) p.delete(key); else p.set(key, v); return p; }, { replace: true });
   const setStatus = (v: string) => setParam('status', v === defaultStatus ? null : v || 'all');
   const setProject = (v: string) => setParam('project', v || null);
@@ -63,9 +73,10 @@ export function PurchaseOrders() {
   const projectOptions = [...new Set((pos.data ?? []).map((p) => p.projectNumber).filter((n): n is string => !!n)), ...(project ? [project] : [])]
     .filter((n, i, all) => all.indexOf(n) === i).sort();
   // A link may name a combination the list doesn't offer; show it rather than a blank select.
-  const statusOptions = status && !STATUS_OPTIONS.some((o) => o.value === status)
-    ? [...STATUS_OPTIONS, { value: status, label: statuses.map((s) => STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s).join(' & ') }]
-    : STATUS_OPTIONS;
+  const offered = canApprove ? [STATUS_OPTIONS[0]!, { value: MINE, label: 'Waiting for my approval' }, ...STATUS_OPTIONS.slice(1)] : STATUS_OPTIONS;
+  const statusOptions = status && !offered.some((o) => o.value === status)
+    ? [...offered, { value: status, label: statuses.map((s) => STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s).join(' & ') }]
+    : offered;
 
   const needle = q.trim().toLowerCase();
   const filtered = (pos.data ?? []).filter((p) => {
@@ -102,7 +113,7 @@ export function PurchaseOrders() {
               <option value="">All projects</option>
               {projectOptions.map((n) => <option key={n} value={n}>{n}</option>)}
             </Select>
-            {(q || status || project) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setParams((p) => { p.delete('project'); if (buyer) p.set('status', 'all'); else p.delete('status'); return p; }, { replace: true }); }}>Clear</Button>}
+            {(q || status || project) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setParams((p) => { p.delete('project'); if (landingStatus) p.set('status', 'all'); else p.delete('status'); return p; }, { replace: true }); }}>Clear</Button>}
           </>
         )}
         right={<span className="text-meta">{pos.loading ? 'Loading…' : `${filtered.length} of ${pos.data?.length ?? 0}`}</span>}
@@ -117,7 +128,12 @@ export function PurchaseOrders() {
           rowKey={(p) => p.id}
           rows={filtered}
           columns={columns()}
-          emptyState={(pos.data?.length ?? 0) > 0 || q || project ? (
+          emptyState={mine && !q && !project ? (
+            <EmptyState
+              title="Nothing is waiting for your approval"
+              description="Orders within your limit appear here once they are submitted and priced."
+            />
+          ) : (pos.data?.length ?? 0) > 0 || q || project ? (
             <EmptyState
               title={status === OPEN_WORK && !q && !project ? 'No drafts or orders awaiting approval' : 'No POs match your filters'}
               description="Try another status, or clear the filters."

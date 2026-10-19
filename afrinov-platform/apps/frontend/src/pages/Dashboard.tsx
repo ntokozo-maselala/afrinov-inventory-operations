@@ -15,6 +15,9 @@ import type { ToolRow } from '../api/types';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { categoryLabel } from '../lib/categories';
+import { WaitingForApproval } from '../components/WaitingForApproval';
+import { usePermissions } from '../hooks/usePermissions';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 /** GET /reports/stock-value: the stock on hand now, valued per category. */
 export interface StockValue {
@@ -45,6 +48,8 @@ function toolsCard(tools: ToolRow[]) {
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');
 
   // Everything here is stock as it stands now, so there is no date range.
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
@@ -163,6 +168,8 @@ export function Dashboard() {
           <Button variant="secondary" size="sm" onClick={handleRefresh}>Retry</Button>
         </div>
       )}
+
+      {canApprove && <WaitingForApproval />}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-6 gap-4">
         {valueLoading && !kpis

@@ -32,6 +32,13 @@ describe('landingPathFor', () => {
     }
   });
 
+  it('by role, sends someone who only approves to the orders waiting for them', () => {
+    expect(landingPathFor('by-role', ['APPROVER'])).toBe('/purchase-orders?status=mine');
+    expect(landingPathFor('by-role', ['APPROVER', 'STORE_CONTROLLER'])).toBe('/');
+    features.procurement = false;
+    expect(landingPathFor('by-role', ['APPROVER'])).toBe('/');
+  });
+
   it('falls back to the dashboard for purchase orders when procurement is disabled', () => {
     features.procurement = false;
     expect(landingPathFor('purchase-orders')).toBe('/');
