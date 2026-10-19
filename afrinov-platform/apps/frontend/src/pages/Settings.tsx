@@ -333,6 +333,7 @@ function labelForKey(key: string): string {
     .replace(/\bPo\b/, 'PO')
     .replace(/^Vat Rate$/, 'VAT rate (%)')
     .replace(/^Company Vat Number$/, 'Company VAT number')
+    .replace(/^First Number$/, 'First AFRI number')
     .trim();
 }
 

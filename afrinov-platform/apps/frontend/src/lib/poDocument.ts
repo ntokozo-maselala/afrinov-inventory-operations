@@ -26,6 +26,8 @@ export interface PoDocumentLine {
 
 export interface PoDocumentOrder {
   number: string;
+  /** Raised each time the order is changed after approval. */
+  revision?: number;
   status: string;
   createdAt: string;
   expectedDeliveryDate?: string | null;
@@ -86,9 +88,15 @@ export function documentStamp(status: string): string | null {
   return null;
 }
 
-export function documentFilename(po: Pick<PoDocumentOrder, 'number' | 'status'>): string {
+/** "Rev 00", "Rev 01", … as on the template. */
+export function revisionLabel(revision: number | null | undefined): string {
+  return `Rev ${String(revision ?? 0).padStart(2, '0')}`;
+}
+
+export function documentFilename(po: Pick<PoDocumentOrder, 'number' | 'status' | 'revision'>): string {
   const stamp = documentStamp(po.status);
-  return `${po.number}${stamp === 'CANCELLED' ? '-cancelled' : stamp ? '-draft' : ''}.pdf`;
+  const rev = po.revision ? `-rev${String(po.revision).padStart(2, '0')}` : '';
+  return `${po.number}${rev}${stamp === 'CANCELLED' ? '-cancelled' : stamp ? '-draft' : ''}.pdf`;
 }
 
 type Pair = [string, string];
@@ -176,6 +184,10 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   doc.text('PURCHASE ORDER', pageWidth - SIDE, TOP + 4, { align: 'right' });
   doc.setFontSize(12);
   doc.text(pdfText(po.number), pageWidth - SIDE, TOP + 11, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  doc.text(revisionLabel(po.revision), pageWidth - SIDE, TOP + 16, { align: 'right' });
 
   // Two columns of details: supplier and delivery on the left, the order on the right.
   const half = (width - 6) / 2;
@@ -315,7 +327,7 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    doc.text(pdfText(`${po.number} · ${company.name} · Printed ${formatDate(generatedAt.toISOString())}`), SIDE, pageHeight - BOTTOM + 7);
+    doc.text(pdfText(`${po.number} ${revisionLabel(po.revision)} · ${company.name} · Printed ${formatDate(generatedAt.toISOString())}`), SIDE, pageHeight - BOTTOM + 7);
     doc.text(`Page ${p} of ${pages}`, pageWidth - SIDE, pageHeight - BOTTOM + 7, { align: 'right' });
   }
   return doc.output('arraybuffer');

@@ -89,6 +89,14 @@ describe('approving by value', () => {
   });
 });
 
+describe('the revision', () => {
+  it('shows the order\'s revision next to its supplier', async () => {
+    current.po = { ...order('APPROVED'), revision: 2 } as typeof current.po;
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('Rev 02 · Supplier: Hydac')).toBeInTheDocument();
+  });
+});
+
 describe('the purchase order document', () => {
   it('lets anyone who can open the order download it, with the company details from Settings', async () => {
     const { downloadPoDocument } = await import('../lib/poDocument');

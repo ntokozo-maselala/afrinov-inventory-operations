@@ -142,6 +142,7 @@ export function SettingsPurchaseOrders() {
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
   const vatRate = useSetting('purchaseOrders.vatRate');
+  const firstNumber = useSetting('purchaseOrders.firstNumber');
   const deliveryDefaults = [
     useSetting('purchaseOrders.deliveryTo'),
     useSetting('purchaseOrders.deliveryAddress'),
@@ -169,6 +170,12 @@ export function SettingsPurchaseOrders() {
           error={errors['purchaseOrders.vatRate'] ?? null}
         />
       )}
+      <NumberField
+        def={firstNumber}
+        value={Number(draft['purchaseOrders.firstNumber'] ?? 1)}
+        onChange={(v) => setDraft('purchaseOrders.firstNumber', v)}
+        error={errors['purchaseOrders.firstNumber'] ?? null}
+      />
       {deliveryDefaults.some(Boolean) && (
         <h3 className="text-sm font-semibold text-surface-900 pt-2">Delivery on new orders</h3>
       )}

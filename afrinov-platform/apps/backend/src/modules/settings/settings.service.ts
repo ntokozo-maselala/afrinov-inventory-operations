@@ -186,6 +186,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'purchaseOrders.deliveryCountry', type: 'string', category: 'purchase_orders', description: 'Delivery country on new purchase orders.', default: 'South Africa', validate: isLength(0, 100) },
   { key: 'purchaseOrders.deliveryContactName', type: 'string', category: 'purchase_orders', description: 'Who receives deliveries at the delivery address, on new purchase orders.', default: '', validate: isLength(0, 200) },
   { key: 'purchaseOrders.deliveryContactPhone', type: 'string', category: 'purchase_orders', description: 'Phone number for that person.', default: '', validate: isLength(0, 50) },
+  { key: 'purchaseOrders.firstNumber', type: 'number', category: 'purchase_orders', description: 'The first AFRI number the app issues: set it to one past the last purchase order number issued from the workbook. The app always continues after the highest AFRI number it has issued.', default: 1, validate: POS_INT(1, 999999) },
   // Printed on the purchase order document, as on the template's Order sheet.
   { key: 'purchaseOrders.companyVatNumber', type: 'string', category: 'purchase_orders', description: "Afrinov's VAT number, printed on every purchase order.", default: '4010288142', validate: isLength(0, 30) },
   { key: 'purchaseOrders.invoiceEmail', type: 'string', category: 'purchase_orders', description: 'Where suppliers send invoices, printed under the order lines.', default: 'accounts@afrinov.co.za', validate: isLength(0, 200) },

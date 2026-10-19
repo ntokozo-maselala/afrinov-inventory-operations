@@ -17,7 +17,7 @@ import { Field, Input, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
-import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument } from '../lib/poDocument';
+import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
 import {
   PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
 } from '../components/PurchaseOrderDetailsFields';
@@ -45,6 +45,8 @@ interface POLine {
 interface PO extends OrderDetails {
   id: string;
   number: string;
+  /** Raised each time the order is changed after approval. */
+  revision?: number;
   status: POStatus;
   currency?: string;
   /** Percent, e.g. "15". */
@@ -190,7 +192,7 @@ export function PurchaseOrderDetail() {
     <div>
       <PageHeader
         title={fresh?.number ?? (po.loading ? 'Loading…' : 'Purchase order')}
-        description={fresh ? `Supplier: ${fresh.supplier?.name}` : ''}
+        description={fresh ? `${revisionLabel(fresh.revision)} · Supplier: ${fresh.supplier?.name}` : ''}
         breadcrumb={[{ label: 'Purchase orders', to: '/purchase-orders' }, { label: fresh?.number ?? 'PO' }]}
         actions={fresh && (
           <div className="flex flex-wrap items-center gap-2">

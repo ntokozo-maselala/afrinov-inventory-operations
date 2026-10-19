@@ -14,7 +14,7 @@ type POStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED'
 type TxType = 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT';
 
 interface PO {
-  id: string; number: string; supplierId: string; status: POStatus;
+  id: string; number: string; revision?: number; supplierId: string; status: POStatus;
   notes: string | null; createdById: string; createdAt: Date; updatedAt: Date;
   expectedDeliveryDate: Date | null;
   approvedAt: Date | null; approvedById: string | null;
@@ -89,6 +89,8 @@ function makePrisma(): unknown {
         return po;
       },
       count: async () => db.pos.size,
+      findMany: async ({ where }: { where?: { number?: { startsWith?: string } } } = {}) =>
+        [...db.pos.values()].filter((p) => !where?.number?.startsWith || p.number.startsWith(where.number.startsWith)),
       create: async ({ data, include }: { data: Record<string, unknown>; include?: { lines?: boolean } }) => {
         const id = nextPOId();
         const createLines = (data.lines as { create?: Array<{ materialId: string; orderedQty: Prisma.Decimal | number; unitPrice?: number | null; deliveryDate?: Date | null }> } | undefined)?.create ?? [];
@@ -100,7 +102,8 @@ function makePrisma(): unknown {
         });
         const { lines: _ignored, ...rest } = data;
         void _ignored;
-        const po: PO = { ...(rest as Omit<PO, 'id' | 'createdAt' | 'updatedAt'>), id, lines, createdAt: new Date(), updatedAt: new Date() };
+        // Column defaults Postgres would fill.
+        const po: PO = { revision: 0, ...(rest as Omit<PO, 'id' | 'createdAt' | 'updatedAt'>), id, lines, createdAt: new Date(), updatedAt: new Date() };
         db.pos.set(id, po);
         return include?.lines ? { ...po, lines } : po;
       },
@@ -604,5 +607,63 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
     await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 450000 }] }, 'user-1'); // R517 500
     expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null, approvedAt: null });
+  });
+});
+
+describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 6)', () => {
+  const line = [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }];
+
+  it('numbers new orders AFRI-0001, AFRI-0002, …, past older PO-YYYY numbers', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.pos.set('old', { id: 'old', number: 'PO-2026-0009' } as never);
+    const a = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
+    const b = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
+    expect([a.number, b.number]).toEqual(['AFRI-0001', 'AFRI-0002']);
+  });
+
+  it('starts at the number in Settings, then carries on from the highest issued', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const { SettingsService } = await import('../settings/settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('purchaseOrders.firstNumber', 412, 'user-1');
+    expect((await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1')).number).toBe('AFRI-0412');
+    expect((await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1')).number).toBe('AFRI-0413');
+    // A lower setting never reuses a number.
+    await SettingsService.set('purchaseOrders.firstNumber', 5, 'user-1');
+    expect((await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1')).number).toBe('AFRI-0414');
+    await SettingsService.set('purchaseOrders.firstNumber', 1, 'user-1');
+  });
+
+  it('keeps revision 0 while the order is a draft, whatever is edited', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
+    await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Ex works' }, 'user-1');
+    expect(db.pos.get(po.id)!.revision).toBe(0);
+  });
+
+  it('raises the revision each time an approved order is changed, and logs it', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'u-sb');
+    await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Ex works' }, 'user-1');
+    expect(db.pos.get(po.id)!.revision).toBe(1);
+    await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Delivered to site' }, 'user-1');
+    expect(db.pos.get(po.id)!.revision).toBe(2);
+    const entry = db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id).pop()!;
+    expect(entry.before).toEqual({ shippingTerms: 'Ex works', revision: 1 });
+    expect(entry.after).toEqual({ shippingTerms: 'Delivered to site', revision: 2 });
+  });
+
+  it('raises no revision and writes no log for a save that changes nothing', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', shippingTerms: 'FOB', lines: line }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'u-sb');
+    const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === po.id)!.id;
+    const logged = db.audit.length;
+    await PurchaseOrderService.update({ id: po.id, shippingTerms: 'FOB', vatRate: 15, linePrices: [{ lineId, unitPrice: 10 }] }, 'user-1');
+    expect(db.pos.get(po.id)!.revision).toBe(0);
+    expect(db.audit.length).toBe(logged);
   });
 });

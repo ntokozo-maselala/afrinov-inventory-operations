@@ -254,6 +254,17 @@ describe('receiving stock over real HTTP', () => {
     });
   });
 
+  describe('numbers and revisions', () => {
+    it('numbers new orders AFRI-NNNN and raises the revision when an approved order changes', async () => {
+      const order = await approvedOrder(2);
+      const read = await api<{ number: string; revision: number }>('GET', `/purchase-orders/${order.id}`);
+      expect(read.body.number).toMatch(/^AFRI-\d{4,}$/);
+      expect(read.body.revision).toBe(0);
+      expect((await api('PATCH', `/purchase-orders/${order.id}`, { shippingTerms: `Rev test ${run}` })).status).toBe(200);
+      expect((await api<{ revision: number }>('GET', `/purchase-orders/${order.id}`)).body.revision).toBe(1);
+    });
+  });
+
   describe('approval by value', () => {
     it('lets an approver with a limit open and approve orders within it, and refuses one over it', async () => {
       const email = `it-approver-${run}@afrinov.local`;

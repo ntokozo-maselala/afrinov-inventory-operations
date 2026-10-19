@@ -3,7 +3,7 @@
 // writes its pages uncompressed.
 import { describe, it, expect } from 'vitest';
 import {
-  buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, type PoDocumentOrder,
+  buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, revisionLabel, type PoDocumentOrder,
 } from './poDocument';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
@@ -37,6 +37,25 @@ describe('documentStamp and documentFilename', () => {
     expect(documentFilename({ number: 'PO-2026-0007', status: 'APPROVED' })).toBe('PO-2026-0007.pdf');
     expect(documentFilename({ number: 'PO-2026-0007', status: 'DRAFT' })).toBe('PO-2026-0007-draft.pdf');
     expect(documentFilename({ number: 'PO-2026-0007', status: 'CANCELLED' })).toBe('PO-2026-0007-cancelled.pdf');
+  });
+});
+
+describe('revisions', () => {
+  it('labels the revision as the template does', () => {
+    expect(revisionLabel(0)).toBe('Rev 00');
+    expect(revisionLabel(undefined)).toBe('Rev 00');
+    expect(revisionLabel(3)).toBe('Rev 03');
+  });
+
+  it('puts a revised order\'s revision in its file name', () => {
+    expect(documentFilename({ number: 'AFRI-0412', status: 'APPROVED', revision: 0 })).toBe('AFRI-0412.pdf');
+    expect(documentFilename({ number: 'AFRI-0412', status: 'APPROVED', revision: 2 })).toBe('AFRI-0412-rev02.pdf');
+  });
+
+  it('prints the revision under the order number and in the footer', async () => {
+    const out = text(await buildPoDocument(order({ number: 'AFRI-0412', revision: 1 }), COMPANY));
+    expect(out).toContain('Rev 01');
+    expect(out).toContain('AFRI-0412 Rev 01');
   });
 });
 

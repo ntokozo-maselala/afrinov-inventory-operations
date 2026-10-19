@@ -172,6 +172,17 @@ function projectRef(projectNumber: string | null | undefined) {
   return { projectNumber, name: p?.name ?? null };
 }
 
+// AFRI-0001, AFRI-0002, …: one past the highest AFRI number, never below the
+// purchaseOrders.firstNumber setting, as the server numbers them.
+function nextPoNumber(): string {
+  const highest = state.purchaseOrders.reduce((max, p) => {
+    const n = /^AFRI-(\d+)$/.exec(p.number);
+    return n ? Math.max(max, Number(n[1])) : max;
+  }, 0);
+  const first = Number(MOCK_SETTINGS['purchaseOrders.firstNumber']?.value ?? 1) || 1;
+  return `AFRI-${String(Math.max(highest + 1, first)).padStart(4, '0')}`;
+}
+
 // Approval by value as the server works it out (po-approval.ts), for the
 // signed-in mock user (user-1, an admin without a limit).
 function mockApproval(po: MockPurchaseOrder) {
@@ -525,7 +536,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po: MockPurchaseOrder = {
       ...details,
       id: nextId('po'),
-      number: `PO-2026-${String(state.purchaseOrders.length + 1).padStart(4, '0')}`,
+      number: nextPoNumber(),
+      revision: 0,
       supplierId: b.supplierId,
       status: 'DRAFT',
       notes: b.notes,
@@ -653,6 +665,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     for (const lp of b.linePrices ?? []) {
       if (!po.lines.some((l) => l.id === lp.lineId)) throw err('VALIDATION_ERROR', `Line ${lp.lineId} is not on purchase order ${po.number}`);
     }
+    // To tell whether anything changed: an approved order changed gets a new revision.
+    const snapshot = (x: MockPurchaseOrder) => JSON.stringify({ ...x, history: undefined, notes: x.notes || undefined });
+    const before = snapshot(po);
     if (b.notes !== undefined) po.notes = b.notes ?? undefined;
     if (b.expectedDeliveryDate !== undefined) po.expectedDeliveryDate = b.expectedDeliveryDate ?? null;
     if (b.vatRate !== undefined) po.vatRate = String(b.vatRate);
@@ -667,6 +682,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
     Object.assign(po, poDetails(b));
+    if (po.status === 'APPROVED' && snapshot(po) !== before) po.revision = (po.revision ?? 0) + 1;
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before: null, after: b as Record<string, unknown>, createdAt: new Date().toISOString() });
     return po;
@@ -1231,6 +1247,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.deliveryCountry': row('purchaseOrders.deliveryCountry', 'South Africa', 'string', 'purchase_orders', 'Delivery country on new purchase orders.'),
     'purchaseOrders.deliveryContactName': row('purchaseOrders.deliveryContactName', '', 'string', 'purchase_orders', 'Who receives deliveries at the delivery address, on new purchase orders.'),
     'purchaseOrders.deliveryContactPhone': row('purchaseOrders.deliveryContactPhone', '', 'string', 'purchase_orders', 'Phone number for that person.'),
+    'purchaseOrders.firstNumber': row('purchaseOrders.firstNumber', 1, 'number', 'purchase_orders', 'The first AFRI number the app issues: set it to one past the last purchase order number issued from the workbook. The app always continues after the highest AFRI number it has issued.'),
     'purchaseOrders.companyVatNumber': row('purchaseOrders.companyVatNumber', '4010288142', 'string', 'purchase_orders', "Afrinov's VAT number, printed on every purchase order."),
     'purchaseOrders.invoiceEmail': row('purchaseOrders.invoiceEmail', 'accounts@afrinov.co.za', 'string', 'purchase_orders', 'Where suppliers send invoices, printed under the order lines.'),
     'purchaseOrders.codeOfConduct': row('purchaseOrders.codeOfConduct', '', 'string', 'purchase_orders', 'The supplier code of conduct printed on every purchase order. Leave blank to leave it off.'),

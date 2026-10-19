@@ -109,6 +109,8 @@ export interface MockPurchaseOrder {
   currency?: string;
   /** Percent, as a string like the server's Decimal. */
   vatRate?: string;
+  /** Raised each time the order is changed after approval. */
+  revision?: number;
   // The template's order details (see PurchaseOrderDetailsFields).
   projectNumber?: string | null;
   paymentTerms?: string | null;
