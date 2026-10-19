@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -8,19 +8,17 @@ import { PurchaseOrderStatusBadge, Badge, GoodsReceiptStatusBadge } from '../com
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Modal, Drawer } from '../components/Modal';
+import { Modal } from '../components/Modal';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { api, type ApiError } from '../api/client';
 import { Alert } from '../components/Alert';
-import { Field, Input, Select, Textarea } from '../components/Field';
+import { Field, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
 import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
-import {
-  PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
-} from '../components/PurchaseOrderDetailsFields';
+import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -91,6 +89,7 @@ interface ReceiveDraft { locationId: string; deliveryNotes: string }
 interface ReasonDraft { reason: string }
 
 type ActionDraft =
+  | { kind: 'submit' }
   | { kind: 'approve' }
   | { kind: 'receive'; draft: ReceiveDraft }
   | { kind: 'close'; draft: ReasonDraft }
@@ -110,6 +109,7 @@ function statusLabel(s: POStatus): string {
 
 function isCancellable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
 function isEditable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
+function isSubmittable(s: POStatus): boolean { return s === 'DRAFT'; }
 function isApprovable(s: POStatus): boolean { return s === 'PENDING_APPROVAL'; }
 function isReceivable(s: POStatus): boolean { return s === 'APPROVED' || s === 'PARTIALLY_RECEIVED'; }
 function isClosable(s: POStatus): boolean { return s === 'PARTIALLY_RECEIVED' || s === 'RECEIVED'; }
@@ -123,12 +123,13 @@ export function PurchaseOrderDetail() {
   const history = useApi<HistoryEntry[]>(id ? `/purchase-orders/${id}/history` : null);
   const approval = useApi<ApprovalView>(id ? `/purchase-orders/${id}/approval` : null);
   const [draft, setDraft] = useState<ActionDraft | null>(null);
-  const [editing, setEditing] = useState(false);
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('procurement:manage');
   const canReceive = hasPermission('orders:receive');
+  const editOrder = () => navigate(`/purchase-orders/${id}/edit`);
 
   function reload() { po.reload(); history.reload(); approval.reload(); }
 
@@ -177,15 +178,16 @@ export function PurchaseOrderDetail() {
   const cancellable = fresh ? canManage && isCancellable(fresh.status) : false;
   const editable = fresh ? canManage && isEditable(fresh.status) : false;
   const closable = fresh ? canManage && isClosable(fresh.status) : false;
-  const primary: { kind: 'approve' | 'receive'; label: string } | null = useMemo(() => {
+  const primary: { kind: PrimaryKind; label: string } | null = useMemo(() => {
     if (!fresh) return null;
+    if (isSubmittable(fresh.status)) return canManage ? { kind: 'submit', label: 'Submit for approval' } : null;
     if (isApprovable(fresh.status)) return approval.data?.canApprove ? { kind: 'approve', label: 'Approve' } : null;
     if (isReceivable(fresh.status) && canReceive) return { kind: 'receive', label: 'Receive all outstanding' };
     return null;
-  }, [fresh, approval.data, canReceive]);
+  }, [fresh, approval.data, canReceive, canManage]);
 
-  function openPrimary(kind: 'approve' | 'receive') {
-    setDraft(kind === 'approve' ? { kind } : { kind, draft: { locationId: '', deliveryNotes: '' } });
+  function openPrimary(kind: PrimaryKind) {
+    setDraft(kind === 'receive' ? { kind, draft: { locationId: '', deliveryNotes: '' } } : { kind });
   }
 
   return (
@@ -203,7 +205,7 @@ export function PurchaseOrderDetail() {
               </Button>
             )}
             {editable && (
-              <Button variant="secondary" leadingIcon={<Icon.Edit size={14} />} onClick={() => setEditing(true)}>Edit</Button>
+              <Button variant="secondary" leadingIcon={<Icon.Edit size={14} />} onClick={editOrder}>Edit</Button>
             )}
             <Button
               variant="secondary" leadingIcon={<Icon.Download size={14} />} onClick={() => void downloadDocument()} loading={printing}
@@ -227,7 +229,7 @@ export function PurchaseOrderDetail() {
         <div className="space-y-6">
           <LifecycleTracker status={fresh.status} />
           {isApprovable(fresh.status) && approval.data && (
-            <ApprovalPanel view={approval.data} onAddPrices={canManage ? () => setEditing(true) : undefined} />
+            <ApprovalPanel view={approval.data} onAddPrices={canManage ? editOrder : undefined} />
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -270,7 +272,7 @@ export function PurchaseOrderDetail() {
                   rowKey={(l) => l.id}
                   columns={lineColumns(fresh)}
                 />
-                {fresh.totals && <OrderTotals po={fresh} totals={fresh.totals} onAddPrices={editable ? () => setEditing(true) : undefined} />}
+                {fresh.totals && <OrderTotals po={fresh} totals={fresh.totals} onAddPrices={editable ? editOrder : undefined} />}
               </section>
 
               <section>
@@ -292,15 +294,6 @@ export function PurchaseOrderDetail() {
       )}
 
       {po.loading && !fresh && <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>}
-
-      {editing && fresh && (
-        <EditDrawer
-          po={fresh}
-          onClose={() => setEditing(false)}
-          onSaved={async (msg) => { setEditing(false); reload(); toast.success(msg); }}
-          onError={(err) => toast.error('Could not save changes', err.message)}
-        />
-      )}
 
       {draft && (
         <ActionDialog
@@ -404,104 +397,6 @@ function labelForAction(action: string): string {
   } as Record<string, string>)[action] ?? action;
 }
 
-// ── Edit drawer ───────────────────────────────────────────────────────────
-function EditDrawer({ po, onClose, onSaved, onError }: {
-  po: PO;
-  onClose: () => void;
-  onSaved: (msg: string) => void | Promise<void>;
-  onError: (e: ApiError) => void;
-}) {
-  const [notes, setNotes] = useState(po.notes ?? '');
-  const [expectedDeliveryDate, setExpected] = useState(po.expectedDeliveryDate?.slice(0, 10) ?? '');
-  const [vatRate, setVatRate] = useState(String(Number(po.vatRate ?? 15)));
-  const [prices, setPrices] = useState<Record<string, string>>(
-    () => Object.fromEntries(po.lines.map((l) => [l.id, l.unitPrice === null || l.unitPrice === undefined ? '' : String(Number(l.unitPrice))])),
-  );
-  const [dates, setDates] = useState<Record<string, string>>(
-    () => Object.fromEntries(po.lines.map((l) => [l.id, l.deliveryDate?.slice(0, 10) ?? ''])),
-  );
-  const [details, setDetails] = useState<OrderDetailsDraft>(() => draftFromOrder(po));
-  const [busy, setBusy] = useState(false);
-  const [validation, setValidation] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setValidation(null);
-    const rate = Number(vatRate);
-    if (vatRate.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 100) { setValidation('VAT rate must be between 0 and 100.'); return; }
-    const badPrice = po.lines.find((l) => prices[l.id]!.trim() !== '' && !(Number(prices[l.id]) >= 0));
-    if (badPrice) { setValidation(`Enter a price of 0 or more for ${badPrice.material.sku}, or leave it blank.`); return; }
-    const detailsProblem = checkDetails(details);
-    if (detailsProblem) { setValidation(detailsProblem); return; }
-    // Only the lines whose price or date changed are sent.
-    const linePrices = po.lines
-      .map((l) => ({ lineId: l.id, before: l.unitPrice === null || l.unitPrice === undefined ? null : Number(l.unitPrice), after: prices[l.id]!.trim() === '' ? null : Number(prices[l.id]) }))
-      .filter((p) => p.before !== p.after)
-      .map(({ lineId, after }) => ({ lineId, unitPrice: after }));
-    const lineDeliveryDates = po.lines
-      .filter((l) => (l.deliveryDate?.slice(0, 10) ?? '') !== dates[l.id])
-      .map((l) => ({ lineId: l.id, deliveryDate: dates[l.id] || null }));
-    setBusy(true);
-    try {
-      await api.patch(`/purchase-orders/${po.id}`, {
-        notes: notes.trim() || undefined,
-        expectedDeliveryDate: expectedDeliveryDate || null,
-        ...detailsBody(details, 'edit'),
-        ...(rate !== Number(po.vatRate ?? 15) ? { vatRate: rate } : {}),
-        ...(linePrices.length > 0 ? { linePrices } : {}),
-        ...(lineDeliveryDates.length > 0 ? { lineDeliveryDates } : {}),
-      });
-      await onSaved(`PO ${po.number} updated`);
-    } catch (err) {
-      const e = err as ApiError;
-      if (e.code === 'INVALID_STATE') setValidation(e.message);
-      else if (e.code === 'VALIDATION_ERROR') setValidation('Please correct the highlighted fields.');
-      else setValidation('We couldn\u2019t save the changes. Please try again.');
-      onError(e);
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <Drawer open onClose={onClose} title={`Edit ${po.number}`} description={`Prices exclude VAT, in ${po.currency ?? 'ZAR'}. Materials and quantities are not editable here.`} width="lg">
-      <form onSubmit={submit} className="space-y-6" noValidate>
-        <fieldset className="space-y-2">
-          <legend className="text-eyebrow mb-1">Lines</legend>
-          <div className="hidden sm:grid grid-cols-12 gap-2 text-meta"><span className="col-span-6" /><span className="col-span-3">Unit price</span><span className="col-span-3">Delivery date</span></div>
-          {po.lines.map((l) => (
-            <div key={l.id} className="grid grid-cols-12 gap-2 items-center">
-              <div className="col-span-12 sm:col-span-6 text-sm min-w-0">
-                <span className="text-mono text-xs">{l.material.sku}</span> {l.material.name}
-                <span className="text-meta"> · {formatNumber(Number(l.orderedQty))} {l.material.unitOfMeasure}</span>
-              </div>
-              <Input id={`po-edit-price-${l.id}`} aria-label={`${l.material.sku} unit price`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
-                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-6 sm:col-span-3" />
-              <Input id={`po-edit-date-${l.id}`} aria-label={`${l.material.sku} delivery date`} type="date" value={dates[l.id] ?? ''}
-                onChange={(e) => setDates((d) => ({ ...d, [l.id]: e.target.value }))} className="col-span-6 sm:col-span-3" />
-            </div>
-          ))}
-        </fieldset>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="VAT rate (%)" htmlFor="po-edit-vat" help={(po.currency ?? 'ZAR') === 'ZAR' ? 'Rand orders start at the VAT setting.' : 'Orders in other currencies start at 0%.'}>
-            <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
-          </Field>
-          <Field label="Expected delivery" htmlFor="po-edit-expected" help="Lines without their own date are due then.">
-            <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
-          </Field>
-        </div>
-        <PurchaseOrderDetailsFields value={details} onChange={setDetails} idPrefix="po-edit" />
-        <Field label="Remarks" htmlFor="po-edit-notes">
-          <Textarea id="po-edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-        {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
-        <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
-          <Button variant="ghost" type="button" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="primary" type="submit" loading={busy}>Save changes</Button>
-        </div>
-      </form>
-    </Drawer>
-  );
-}
-
 // ── Action dialog (lifted state) ─────────────────────────────────────────
 function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   draft: ActionDraft;
@@ -512,6 +407,25 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   onChangeDraft: (next: ActionDraft) => void;
 }) {
   const locations = useApi<LocationOpt[]>(draft.kind === 'receive' ? '/locations' : null);
+
+  if (draft.kind === 'submit') {
+    const unpriced = po ? po.lines.filter((l) => l.unitPrice === null || l.unitPrice === undefined).length : 0;
+    return (
+      <ConfirmDialog
+        open
+        onClose={onClose}
+        onConfirm={onConfirm}
+        title="Submit for approval?"
+        description={po
+          ? `Send ${po.number} to an approver. ${unpriced > 0
+            ? `${unpriced === 1 ? '1 line has' : `${unpriced} lines have`} no price yet; it can't be approved until every line is priced.`
+            : 'It can still be edited while it waits.'}`
+          : ''}
+        confirmLabel="Submit"
+        loading={busy}
+      />
+    );
+  }
 
   if (draft.kind === 'approve') {
     return (
@@ -595,13 +509,16 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
   );
 }
 
-function primaryIcon(kind: 'approve' | 'receive'): React.ReactNode {
+type PrimaryKind = 'submit' | 'approve' | 'receive';
+
+function primaryIcon(kind: PrimaryKind): React.ReactNode {
+  if (kind === 'submit') return <Icon.ArrowRight size={14} />;
   if (kind === 'approve') return <Icon.Check size={14} />;
   return <Icon.Box size={14} />;
 }
 
 function kindLabel(kind: ActionDraft['kind']): string {
-  return ({ approve: 'approved', receive: 'received', close: 'closed', cancel: 'cancelled' } as const)[kind];
+  return ({ submit: 'submitted for approval', approve: 'approved', receive: 'received', close: 'closed', cancel: 'cancelled' } as const)[kind];
 }
 
 /** A line still owed after its delivery date, on an order that can be received. */

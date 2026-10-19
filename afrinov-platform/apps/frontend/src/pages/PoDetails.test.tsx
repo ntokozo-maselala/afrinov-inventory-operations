@@ -15,6 +15,7 @@ vi.mock('../auth', () => ({ useAuth: () => ({ user: { name: 'Thandi Buyer', role
 const { PurchaseOrders } = await import('./PurchaseOrders');
 const { PurchaseOrderDetail, isLate } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
+const { NewPurchaseOrder, EditPurchaseOrder } = await import('./PurchaseOrderForm');
 
 const SUPPLIERS = [{ id: 's-1', name: 'Hydac', vendorCode: 'V006', active: true, currency: 'ZAR', paymentTerms: '30 DAYS NETT' }];
 const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: null, active: true }];
@@ -52,24 +53,29 @@ beforeEach(() => {
     if (path.startsWith('/settings/values')) return SETTINGS;
     return [];
   });
-  mockPost.mockReset().mockResolvedValue({ id: 'po-9' });
+  mockPost.mockReset().mockResolvedValue({ id: 'po-1', number: 'PO-2026-0001' });
   mockPatch.mockReset().mockResolvedValue({});
 });
 
-const listPage = (url = '/purchase-orders') => render(
-  <MemoryRouter initialEntries={[url]}><ToastProvider><Routes><Route path="/purchase-orders" element={<PurchaseOrders />} /></Routes></ToastProvider></MemoryRouter>,
-);
-const detailPage = () => render(
-  <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
-    <ToastProvider><Routes><Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} /></Routes></ToastProvider>
+// The order routes as App.tsx has them, so links and buttons really navigate.
+const appAt = (url: string) => render(
+  <MemoryRouter initialEntries={[url]}>
+    <ToastProvider>
+      <Routes>
+        <Route path="/purchase-orders" element={<PurchaseOrders />} />
+        <Route path="/purchase-orders/new" element={<NewPurchaseOrder />} />
+        <Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} />
+        <Route path="/purchase-orders/:id/edit" element={<EditPurchaseOrder />} />
+      </Routes>
+    </ToastProvider>
   </MemoryRouter>,
 );
+const listPage = (url = '/purchase-orders') => appAt(url);
+const detailPage = () => appAt('/purchase-orders/po-1');
 
 describe('New purchase order: the template details', () => {
   async function openForm() {
-    listPage();
-    await screen.findByText('PO-2026-0001');
-    fireEvent.click(screen.getByRole('button', { name: 'New purchase order' }));
+    appAt('/purchase-orders/new');
     await waitFor(() => expect(screen.getByLabelText('Deliver to')).toHaveValue('Afrinov (PTY) Ltd'));
   }
 
@@ -163,7 +169,7 @@ describe('Purchase order detail: the template details', () => {
     detailPage();
     await screen.findByText('Cutting disc');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Shipping terms'), { target: { value: '' } });
+    fireEvent.change(await screen.findByLabelText('Shipping terms'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('DISC-115 delivery date'), { target: { value: '2026-02-01' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockPatch).toHaveBeenCalled());

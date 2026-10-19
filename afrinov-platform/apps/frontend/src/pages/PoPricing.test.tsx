@@ -15,6 +15,7 @@ vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: ['PROCUREMENT'] } }
 const { PurchaseOrders } = await import('./PurchaseOrders');
 const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
+const { NewPurchaseOrder, EditPurchaseOrder } = await import('./PurchaseOrderForm');
 
 const material = (id: string, sku: string, unitCost: string | null) => ({ id, sku, name: `Item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost, active: true });
 const SUPPLIERS = [{ id: 's-za', name: 'Hydac', active: true, currency: 'ZAR' }, { id: 's-eu', name: 'HS SRL', active: true, currency: 'EUR' }];
@@ -42,16 +43,25 @@ beforeEach(() => {
     if (path.startsWith('/settings/values')) return { 'purchaseOrders.vatRate': 15 };
     return [];
   });
-  mockPost.mockReset().mockResolvedValue({ id: 'po-9' });
+  mockPost.mockReset().mockResolvedValue({ id: 'po-1', number: 'PO-2026-0001' });
   mockPatch.mockReset().mockResolvedValue({});
 });
 
-const listPage = () => render(<MemoryRouter><ToastProvider><PurchaseOrders /></ToastProvider></MemoryRouter>);
-const detailPage = () => render(
-  <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
-    <ToastProvider><Routes><Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} /></Routes></ToastProvider>
+// The order routes as App.tsx has them, so links and buttons really navigate.
+const appAt = (url: string) => render(
+  <MemoryRouter initialEntries={[url]}>
+    <ToastProvider>
+      <Routes>
+        <Route path="/purchase-orders" element={<PurchaseOrders />} />
+        <Route path="/purchase-orders/new" element={<NewPurchaseOrder />} />
+        <Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} />
+        <Route path="/purchase-orders/:id/edit" element={<EditPurchaseOrder />} />
+      </Routes>
+    </ToastProvider>
   </MemoryRouter>,
 );
+const listPage = () => appAt('/purchase-orders');
+const detailPage = () => appAt('/purchase-orders/po-1');
 const money = (n: string) => new RegExp(n.replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.'));
 
 describe('Purchase orders list', () => {
@@ -68,7 +78,8 @@ describe('New purchase order', () => {
   async function openForm() {
     listPage();
     await screen.findByText('PO-2026-0001');
-    fireEvent.click(screen.getByRole('button', { name: 'New purchase order' }));
+    fireEvent.click(screen.getByRole('link', { name: 'New purchase order' }));
+    await screen.findByRole('heading', { name: 'New purchase order' });
   }
 
   it('starts the price at the item unit cost, and sends prices and the VAT rate', async () => {
@@ -126,11 +137,11 @@ describe('Purchase order detail', () => {
     expect(screen.getByText(/1 line has no price and is not in the total/)).toBeInTheDocument();
   });
 
-  it('adds a missing price from the Edit drawer, sending only what changed', async () => {
+  it('adds a missing price on the Edit page, sending only what changed', async () => {
     detailPage();
     await screen.findByText('Cutting disc');
     fireEvent.click(screen.getAllByRole('button', { name: 'Add prices' })[0]!);
-    fireEvent.change(screen.getByLabelText('BOLT-M16 unit price'), { target: { value: '4.2' } });
+    fireEvent.change(await screen.findByLabelText('BOLT-M16 unit price'), { target: { value: '4.2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockPatch).toHaveBeenCalled());
     const body = mockPatch.mock.calls[0]![1] as Record<string, unknown>;
@@ -142,7 +153,7 @@ describe('Purchase order detail', () => {
     detailPage();
     await screen.findByText('Cutting disc');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('VAT rate (%)'), { target: { value: '0' } });
+    fireEvent.change(await screen.findByLabelText('VAT rate (%)'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/purchase-orders/po-1', expect.objectContaining({ vatRate: 0 })));
     expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('linePrices');

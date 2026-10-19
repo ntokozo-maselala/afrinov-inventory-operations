@@ -22,6 +22,8 @@ const Suppliers = importPage(() => import('./pages/Suppliers').then(m => ({ defa
 const SupplierDetail = importPage(() => import('./pages/SupplierDetail').then(m => ({ default: m.SupplierDetail })));
 const PurchaseOrders = importPage(() => import('./pages/PurchaseOrders').then(m => ({ default: m.PurchaseOrders })));
 const PurchaseOrderDetail = importPage(() => import('./pages/PurchaseOrderDetail').then(m => ({ default: m.PurchaseOrderDetail })));
+const NewPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.NewPurchaseOrder })));
+const EditPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.EditPurchaseOrder })));
 const GoodsReceipts = importPage(() => import('./pages/GoodsReceipts').then(m => ({ default: m.GoodsReceipts })));
 const StockStatus = importPage(() => import('./pages/StockStatus').then(m => ({ default: m.StockStatus })));
 const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ default: m.Consumption })));
@@ -127,7 +129,9 @@ export function App() {
         {PROCUREMENT_ENABLED ? (
           <>
             <Route path="/purchase-orders" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrders /></Suspense>} />
+            <Route path="/purchase-orders/new" element={<Suspense fallback={<PageSkeleton />}><NewPurchaseOrder /></Suspense>} />
             <Route path="/purchase-orders/:id" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrderDetail /></Suspense>} />
+            <Route path="/purchase-orders/:id/edit" element={<Suspense fallback={<PageSkeleton />}><EditPurchaseOrder /></Suspense>} />
             <Route path="/goods-receipts" element={<Suspense fallback={<PageSkeleton />}><GoodsReceipts /></Suspense>} />
           </>
         ) : (
