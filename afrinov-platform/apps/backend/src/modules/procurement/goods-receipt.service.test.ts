@@ -7,9 +7,11 @@
 //   - getById() success and not-found
 //   - post() delegates to InventoryService.postGoodsReceipt and re-reads
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 interface Sup { id: string; name: string; active: boolean }
-interface PO { id: string; number: string; status: string }
+interface POL { id: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal; material: { sku: string } }
+interface PO { id: string; number: string; status: string; supplierId?: string; lines?: POL[] }
 interface GRL { id: string; goodsReceiptId: string; materialId: string; locationId: string; quantity: number; purchaseOrderLineId: string | null }
 interface GR { id: string; number: string; purchaseOrderId: string | null; supplierId: string; deliveryRef: string | null; status: 'DRAFT' | 'SUBMITTED' | 'POSTED'; receivedById: string; lines: GRL[]; receivedAt: Date }
 
@@ -97,7 +99,10 @@ beforeEach(() => {
   grCounter = 0;
   db.suppliers.set('sup-1', { id: 'sup-1', name: 'Hydroscand', active: true });
   db.suppliers.set('sup-inactive', { id: 'sup-inactive', name: 'Closed Supplier', active: false });
-  db.purchaseOrders.set('po-1', { id: 'po-1', number: 'PO-2026-0001', status: 'APPROVED' });
+  db.purchaseOrders.set('po-1', {
+    id: 'po-1', number: 'PO-2026-0001', status: 'APPROVED', supplierId: 'sup-1',
+    lines: [{ id: 'pol-1', materialId: 'mat-1', orderedQty: new Prisma.Decimal(50), receivedQty: new Prisma.Decimal(10), material: { sku: 'M16X40-88-HEX' } }],
+  });
   db.materials.set('mat-1', { id: 'mat-1', sku: 'M16X40-88-HEX', name: 'M16 x 40 8.8 BLACK HEX SET SCREW' });
   db.locations.set('loc-1', { id: 'loc-1', name: 'Main Storeroom' });
 });
@@ -135,6 +140,49 @@ describe('GoodsReceiptService', () => {
       );
       expect(result.purchaseOrderId).toBe('po-1');
       expect(result.deliveryRef).toBe('INVOICE-123');
+    });
+
+    // A receipt against an order credits the order's lines (procurement workflow Phase 1).
+    describe('against a purchase order', () => {
+      const receive = async (lines: Array<{ materialId: string; quantity: number; purchaseOrderLineId?: string }>, over: Record<string, unknown> = {}) => {
+        const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+        return GoodsReceiptService.create(
+          { supplierId: 'sup-1', purchaseOrderId: 'po-1', lines: lines.map((l) => ({ locationId: 'loc-1', ...l })), ...over },
+          'user-1',
+        );
+      };
+
+      it('refuses a line that does not name its order line', async () => {
+        await expect(receive([{ materialId: 'mat-1', quantity: 5 }]))
+          .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Every line of a receipt against PO-2026-0001 must name the order line it is for.' });
+        expect(db.goodsReceipts).toHaveLength(0);
+      });
+
+      it('refuses an order line from somewhere else, or for another item', async () => {
+        await expect(receive([{ materialId: 'mat-1', quantity: 5, purchaseOrderLineId: 'pol-elsewhere' }]))
+          .rejects.toMatchObject({ message: 'A line is not on PO-2026-0001.' });
+        await expect(receive([{ materialId: 'mat-other', quantity: 5, purchaseOrderLineId: 'pol-1' }]))
+          .rejects.toMatchObject({ message: 'That line of PO-2026-0001 is for M16X40-88-HEX, not the item given.' });
+      });
+
+      it('refuses more than is still outstanding, counting every line for the same order line', async () => {
+        // Ordered 50, 10 received: 40 outstanding.
+        await expect(receive([{ materialId: 'mat-1', quantity: 25, purchaseOrderLineId: 'pol-1' }, { materialId: 'mat-1', quantity: 16, purchaseOrderLineId: 'pol-1' }]))
+          .rejects.toMatchObject({ message: 'Receiving 41 of M16X40-88-HEX would exceed what is still outstanding on PO-2026-0001 (40).' });
+        await expect(receive([{ materialId: 'mat-1', quantity: 40, purchaseOrderLineId: 'pol-1' }])).resolves.toMatchObject({ purchaseOrderId: 'po-1' });
+      });
+
+      it("refuses another supplier's delivery against the order", async () => {
+        db.suppliers.set('sup-2', { id: 'sup-2', name: 'Other', active: true });
+        await expect(receive([{ materialId: 'mat-1', quantity: 5, purchaseOrderLineId: 'pol-1' }], { supplierId: 'sup-2' }))
+          .rejects.toMatchObject({ message: "PO-2026-0001 is with another supplier. Choose the order's supplier, or another order." });
+      });
+
+      it('refuses order lines on a receipt with no order', async () => {
+        const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+        await expect(GoodsReceiptService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, purchaseOrderLineId: 'pol-1' }] }, 'user-1'))
+          .rejects.toMatchObject({ message: 'These lines belong to a purchase order: choose the order the delivery is for.' });
+      });
     });
 
     it.each(['DRAFT', 'PENDING_APPROVAL', 'RECEIVED', 'CLOSED', 'CANCELLED'])(

@@ -115,6 +115,18 @@ describe('receiving stock over real HTTP', () => {
       order = await approvedOrder(10);
     });
 
+    // Lines without their order line used to book the stock but leave the
+    // order showing it as owed (procurement workflow Phase 1).
+    it('refuses a receipt against an order whose lines do not name their order line', async () => {
+      const res = await api<{ error: { code: string; message: string } }>('POST', '/goods-receipts', {
+        purchaseOrderId: order.id, supplierId, deliveryRef: `DN-${run}-x`,
+        lines: [{ materialId, locationId, quantity: 1 }],
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/must name the order line/);
+      await expectStock('0');
+    });
+
     it('posting a receipt adds its quantity to stock and part-receives the order', async () => {
       const receipt = await receive(order, 4);
       const posted = await api<GoodsReceipt>('POST', `/goods-receipts/${receipt.id}/post`);

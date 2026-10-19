@@ -835,6 +835,22 @@ export const InventoryService = {
         }
       }
 
+      // A receipt against an order must credit the order line each line is
+      // for; otherwise the order keeps showing the goods as owed and they can
+      // be received again. Checked before anything is written (it is also
+      // checked when the receipt is recorded).
+      for (const line of gr.lines) {
+        if (gr.purchaseOrderId && !line.purchaseOrderLineId) {
+          throw Errors.validation('Every line of a receipt against a purchase order must name the order line it is for.');
+        }
+        if (line.purchaseOrderLineId) {
+          const poLine = await tx.purchaseOrderLine.findUnique({ where: { id: line.purchaseOrderLineId } });
+          if (!poLine || poLine.purchaseOrderId !== gr.purchaseOrderId) {
+            throw Errors.validation('A receipt line names an order line that is not on its purchase order.');
+          }
+        }
+      }
+
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);
         await tx.inventoryTransaction.create({

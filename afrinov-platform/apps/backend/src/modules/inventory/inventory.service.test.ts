@@ -956,16 +956,45 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(goodsReceipts.get('gr-1')?.status).toBe('POSTED');
     });
 
-    it('skips PO line check gracefully when the PO line is missing from DB', async () => {
+    // Booking the stock without crediting the order left the goods showing as
+    // owed, so they could be received again (procurement workflow Phase 1).
+    it('refuses to post a line whose order line is missing, rather than booking it uncredited', async () => {
       goodsReceipts.set('gr-1', {
         id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
         lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-missing' }],
       });
       purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
 
-      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+      await expect(InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }))
+        .rejects.toThrow(/not on its purchase order/);
+      expect(trxRows).toHaveLength(0);
+    });
 
-      expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(1);
+    it('refuses to post a line against an order that names no order line', async () => {
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: null }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await expect(InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }))
+        .rejects.toThrow(/must name the order line/);
+      expect(trxRows).toHaveLength(0);
+    });
+
+    it('refuses a line naming another order\'s line', async () => {
+      purchaseOrderLines.set('pol-9', {
+        id: 'pol-9', purchaseOrderId: 'po-other', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(9), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(3), purchaseOrderLineId: 'pol-9' }],
+      });
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await expect(InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' }))
+        .rejects.toThrow(/not on its purchase order/);
     });
 
     it.each(['CANCELLED', 'CLOSED', 'DRAFT'])('refuses to post against a purchase order that is now %s', async (status) => {
