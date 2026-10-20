@@ -180,6 +180,44 @@ describe('Purchase order detail: the template details', () => {
   });
 });
 
+describe('line delivery dates follow the expected delivery', () => {
+  it('fills each line with the expected delivery until the line is given its own date', async () => {
+    appAt('/purchase-orders/new');
+    await waitFor(() => expect(screen.getByLabelText('Deliver to')).toHaveValue('Afrinov (PTY) Ltd'));
+    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText('Expected delivery'), { target: { value: '2026-11-10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    expect(screen.getByLabelText('Line 1 delivery date')).toHaveValue('2026-11-10');
+
+    fireEvent.change(screen.getByLabelText('Line 1 delivery date'), { target: { value: '2026-12-01' } });
+    fireEvent.change(screen.getByLabelText('Expected delivery'), { target: { value: '2026-11-25' } });
+    expect(screen.getByLabelText('Line 1 delivery date')).toHaveValue('2026-12-01');
+    expect(screen.getByLabelText('Line 2 delivery date')).toHaveValue('2026-11-25');
+
+    for (const n of [1, 2]) {
+      fireEvent.change(screen.getByLabelText(`Line ${n} material`), { target: { value: 'm-1' } });
+      fireEvent.change(screen.getByLabelText(`Line ${n} quantity`), { target: { value: '1' } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(mockPost.mock.calls[0]![1]).toMatchObject({
+      expectedDeliveryDate: '2026-11-25',
+      lines: [{ materialId: 'm-1', orderedQty: 1, deliveryDate: '2026-12-01' }, { materialId: 'm-1', orderedQty: 1 }],
+    });
+  });
+
+  it('on Edit, a line set back to the expected delivery follows it again', async () => {
+    appAt('/purchase-orders/po-1/edit');
+    const date = await screen.findByLabelText('DISC-115 delivery date');
+    expect(date).toHaveValue('2026-01-05');
+    fireEvent.change(date, { target: { value: '2026-01-10' } }); // the order's expected delivery
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
+    expect(mockPatch.mock.calls[0]![1]).toMatchObject({ lineDeliveryDates: [{ lineId: 'l-1', deliveryDate: null }] });
+  });
+});
+
 describe('isLate', () => {
   const po = { status: 'APPROVED' as const, expectedDeliveryDate: '2026-03-01' };
   it('uses the line date, or the order date when the line has none', () => {

@@ -75,10 +75,9 @@ describe('Purchase orders list', () => {
 });
 
 describe('New purchase order', () => {
+  // Opened from the menu's New purchase order, which links here.
   async function openForm() {
-    listPage();
-    await screen.findByText('PO-2026-0001');
-    fireEvent.click(screen.getByRole('link', { name: 'New purchase order' }));
+    appAt('/purchase-orders/new');
     await screen.findByRole('heading', { name: 'New purchase order' });
   }
 
