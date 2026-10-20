@@ -17,6 +17,7 @@ import { Field, Input, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
+import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
 import {
   PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
 } from '../components/PurchaseOrderDetailsFields';
@@ -44,6 +45,8 @@ interface POLine {
 interface PO extends OrderDetails {
   id: string;
   number: string;
+  /** Raised each time the order is changed after approval. */
+  revision?: number;
   status: POStatus;
   currency?: string;
   /** Percent, e.g. "15". */
@@ -129,6 +132,21 @@ export function PurchaseOrderDetail() {
 
   function reload() { po.reload(); history.reload(); approval.reload(); }
 
+  // The order as the supplier receives it, laid out like the template's Order sheet.
+  const [printing, setPrinting] = useState(false);
+  async function downloadDocument() {
+    if (!po.data) return;
+    setPrinting(true);
+    try {
+      const values = await api.get<Record<string, unknown>>(`/settings/values?keys=${PO_DOCUMENT_SETTINGS.join(',')}`);
+      await downloadPoDocument(po.data, companyFromSettings(values));
+    } catch (err) {
+      toast.error('Could not make the PDF', (err as ApiError).message ?? String(err));
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   async function performAction() {
     if (!po.data || !draft) return;
     setBusy(true);
@@ -174,7 +192,7 @@ export function PurchaseOrderDetail() {
     <div>
       <PageHeader
         title={fresh?.number ?? (po.loading ? 'Loading…' : 'Purchase order')}
-        description={fresh ? `Supplier: ${fresh.supplier?.name}` : ''}
+        description={fresh ? `${revisionLabel(fresh.revision)} · Supplier: ${fresh.supplier?.name}` : ''}
         breadcrumb={[{ label: 'Purchase orders', to: '/purchase-orders' }, { label: fresh?.number ?? 'PO' }]}
         actions={fresh && (
           <div className="flex flex-wrap items-center gap-2">
@@ -187,6 +205,12 @@ export function PurchaseOrderDetail() {
             {editable && (
               <Button variant="secondary" leadingIcon={<Icon.Edit size={14} />} onClick={() => setEditing(true)}>Edit</Button>
             )}
+            <Button
+              variant="secondary" leadingIcon={<Icon.Download size={14} />} onClick={() => void downloadDocument()} loading={printing}
+              title={documentStamp(fresh.status) ? 'Marked as a draft until the order is approved' : 'The purchase order to send to the supplier'}
+            >
+              Download PDF
+            </Button>
             {closable && (
               <Button variant="secondary" onClick={() => setDraft({ kind: 'close', draft: { reason: '' } })}>Close PO</Button>
             )}

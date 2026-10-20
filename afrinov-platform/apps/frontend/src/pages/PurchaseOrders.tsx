@@ -19,12 +19,13 @@ import { useCanManageProcurement } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatMoney, formatRate, priceLines, type PoTotals } from '../lib/poMoney';
 import { useAuth } from '../auth';
+import { revisionLabel } from '../lib/poDocument';
 import {
   PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetailsDraft,
 } from '../components/PurchaseOrderDetailsFields';
 
 interface PO {
-  id: string; number: string; status: string;
+  id: string; number: string; revision?: number; status: string;
   supplier: { name: string };
   projectNumber?: string | null;
   createdAt: string;
@@ -145,7 +146,15 @@ export function PurchaseOrders() {
 
 function columns(): DataTableColumn<PO>[] {
   return [
-    { key: 'num', header: 'PO', render: (p) => <Link to={`/purchase-orders/${p.id}`} className="btn-link text-mono">{p.number}</Link>, width: '10rem' },
+    {
+      key: 'num', header: 'PO', width: '10rem',
+      render: (p) => (
+        <span className="whitespace-nowrap">
+          <Link to={`/purchase-orders/${p.id}`} className="btn-link text-mono">{p.number}</Link>
+          {!!p.revision && <span className="text-meta ml-1">{revisionLabel(p.revision)}</span>}
+        </span>
+      ),
+    },
     {
       key: 'sup', header: 'Supplier', render: (p) => (
         <div>

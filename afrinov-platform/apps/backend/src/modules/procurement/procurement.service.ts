@@ -257,6 +257,17 @@ function jsonValue(v: unknown): unknown {
   return v ?? null;
 }
 
+/** Whether a stored value and a new one are the same: decimals by value, dates by instant. */
+function sameValue(stored: unknown, next: unknown): boolean {
+  const norm = (v: unknown) => {
+    if (v === undefined || v === null) return null;
+    if (v instanceof Date) return v.toISOString();
+    if (v instanceof Prisma.Decimal || typeof v === 'number') return new Prisma.Decimal(v as Prisma.Decimal.Value).toString();
+    return v;
+  };
+  return norm(stored) === norm(next);
+}
+
 /** The details sent, tidied, as columns. Fields left out are left out. */
 function detailsData(input: OrderDetailsInput): Record<string, unknown> {
   const data: Record<string, unknown> = {};
@@ -424,10 +435,23 @@ export const PurchaseOrderService = {
         await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { deliveryDate: next } });
         dateChanges.push({ lineId: line.id, before: dayOf(line.deliveryDate), after: dayOf(next) });
       }
+      // The form sends every field; keep only what actually changes, so the
+      // log reads as the change made and an unchanged save raises no revision.
+      for (const k of Object.keys(data) as Array<keyof typeof data>) {
+        if (sameValue((po as unknown as Record<string, unknown>)[k], data[k])) delete data[k];
+      }
+      const realPrices = priceChanges.filter((c) => c.before === null ? c.after !== null : c.after === null || !new Prisma.Decimal(c.before).equals(c.after));
+      const realDates = dateChanges.filter((c) => c.before !== c.after);
+      priceChanges.splice(0, priceChanges.length, ...realPrices);
+      dateChanges.splice(0, dateChanges.length, ...realDates);
+      const anyChange = Object.keys(data).length > 0 || priceChanges.length > 0 || dateChanges.length > 0;
+      // Changing an approved order makes a new revision, as the template's
+      // "Rev 01", so the supplier can tell the copies apart.
+      if (po.status === 'APPROVED' && anyChange) data.revision = po.revision + 1;
       // An approved order whose new total is past its approver's limit (or has
       // lost a price) goes back for approval; the edit can't raise the amount
       // someone signed off.
-      if (po.status === 'APPROVED' && po.approvedById && (priceChanges.length > 0 || input.vatRate !== undefined)) {
+      if (po.status === 'APPROVED' && po.approvedById && (priceChanges.length > 0 || 'vatRate' in data)) {
         const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
         const approver = await tx.user.findUnique({ where: { id: po.approvedById }, select: { approvalLimit: true } });
         const vat = input.vatRate ?? po.vatRate;
@@ -436,7 +460,8 @@ export const PurchaseOrderService = {
         }
       }
       const after = await tx.purchaseOrder.update({ where: { id: input.id }, data });
-      // Only what was sent goes in the log, so each entry reads as the change made.
+      if (!anyChange) return after;
+      // Only what changed goes in the log, so each entry reads as the change made.
       const changed = Object.keys(data) as Array<keyof typeof po & keyof typeof after>;
       const pick = (o: Record<string, unknown>) => Object.fromEntries(changed.map((k) => [k, jsonValue(o[k])]));
       await tx.auditLogEntry.create({
@@ -735,10 +760,23 @@ function isEditable(status: PurchaseOrderStatus, allowEditAfterApproval = true):
   return status === 'DRAFT' || status === 'PENDING_APPROVAL';
 }
 
+/**
+ * The next number in the template's style, AFRI-0001, AFRI-0002, …: one past
+ * the highest AFRI number issued, and never below the purchaseOrders.firstNumber
+ * setting, which is set past the last number issued from the workbook. Older
+ * PO-YYYY-NNNN numbers are left as they are. Callers hold the
+ * afrinov:po-number advisory lock, so two orders never get the same number.
+ */
 async function generatePONumber(tx: Prisma.TransactionClient): Promise<string> {
-  const year = new Date().getFullYear();
-  const count = await tx.purchaseOrder.count({
-    where: { createdAt: { gte: new Date(`${year}-01-01T00:00:00Z`) } },
-  });
-  return `PO-${year}-${String(count + 1).padStart(4, '0')}`;
+  const issued = await tx.purchaseOrder.findMany({ where: { number: { startsWith: 'AFRI-' } }, select: { number: true } });
+  const highest = issued.reduce((max, { number }) => {
+    const n = /^AFRI-(\d+)$/.exec(number);
+    return n ? Math.max(max, Number(n[1])) : max;
+  }, 0);
+  const first = Number(await SettingsService.getValue<number>('purchaseOrders.firstNumber', tx)) || 1;
+  return formatPONumber(Math.max(highest + 1, first));
+}
+
+export function formatPONumber(n: number): string {
+  return `AFRI-${String(n).padStart(4, '0')}`;
 }

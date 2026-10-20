@@ -142,12 +142,18 @@ export function SettingsPurchaseOrders() {
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
   const vatRate = useSetting('purchaseOrders.vatRate');
+  const firstNumber = useSetting('purchaseOrders.firstNumber');
   const deliveryDefaults = [
     useSetting('purchaseOrders.deliveryTo'),
     useSetting('purchaseOrders.deliveryAddress'),
     useSetting('purchaseOrders.deliveryCountry'),
     useSetting('purchaseOrders.deliveryContactName'),
     useSetting('purchaseOrders.deliveryContactPhone'),
+  ];
+  const documentDefaults = [
+    useSetting('purchaseOrders.companyVatNumber'),
+    useSetting('purchaseOrders.invoiceEmail'),
+    useSetting('purchaseOrders.codeOfConduct'),
   ];
   if (items.length === 0) return <PanelSkeleton />;
   return (
@@ -164,6 +170,12 @@ export function SettingsPurchaseOrders() {
           error={errors['purchaseOrders.vatRate'] ?? null}
         />
       )}
+      <NumberField
+        def={firstNumber}
+        value={Number(draft['purchaseOrders.firstNumber'] ?? 1)}
+        onChange={(v) => setDraft('purchaseOrders.firstNumber', v)}
+        error={errors['purchaseOrders.firstNumber'] ?? null}
+      />
       {deliveryDefaults.some(Boolean) && (
         <h3 className="text-sm font-semibold text-surface-900 pt-2">Delivery on new orders</h3>
       )}
@@ -175,6 +187,17 @@ export function SettingsPurchaseOrders() {
           onChange={(v) => setDraft(def.key, v)}
           error={errors[def.key] ?? null}
           multiline={def.key === 'purchaseOrders.deliveryAddress'}
+        />
+      ))}
+      <h3 className="text-sm font-semibold text-surface-900 pt-2">Printed on the purchase order</h3>
+      {documentDefaults.map((def) => (
+        <TextField
+          key={def.key}
+          def={def}
+          value={(draft[def.key] as string) ?? ''}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+          multiline={def.key === 'purchaseOrders.codeOfConduct'}
         />
       ))}
       <SaveBar items={items} onSave={async () => {

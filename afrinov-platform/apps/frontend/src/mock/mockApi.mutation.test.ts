@@ -79,6 +79,26 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('purchase order numbers and revisions', () => {
+    it('numbers new orders AFRI-NNNN, from the setting, past the demo PO-2026 orders', async () => {
+      const a = await api.post<{ number: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });
+      const b = await api.post<{ number: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });
+      expect([a.number, b.number]).toEqual(['AFRI-0001', 'AFRI-0002']);
+    });
+
+    it('raises the revision when an approved order changes, not for a draft or an unchanged save', async () => {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 2 }] });
+      await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'FOB' });
+      expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(0);
+      await api.post(`/purchase-orders/${po.id}/submit`, {});
+      await api.post(`/purchase-orders/${po.id}/approve`, {});
+      await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'FOB' });
+      expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(0);
+      await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'Ex works' });
+      expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(1);
+    });
+  });
+
   describe('purchase order approval by value', () => {
     async function submitted(lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>) {
       const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines });

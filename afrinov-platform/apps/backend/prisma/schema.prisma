@@ -304,6 +304,8 @@ enum PurchaseOrderStatus {
 model PurchaseOrder {
   id         String              @id @default(uuid())
   number     String              @unique
+  // As the template's "Rev 00": raised each time the order is changed after approval.
+  revision   Int                 @default(0)
   supplierId String              @map("supplier_id")
   status     PurchaseOrderStatus @default(DRAFT)
   notes      String?
