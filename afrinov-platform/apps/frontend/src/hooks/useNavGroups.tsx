@@ -71,7 +71,7 @@ export function useNavGroups(): NavGroup[] {
       title: 'Procurement',
       items: [
         { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'] },
-        { to: '/goods-receipts', label: 'Goods receipts', icon: <Icon.Truck /> },
+        { to: '/goods-receipts', label: 'Goods receipts', icon: <Icon.Truck />, permissions: ['receipts:view'] },
       ],
     }] : []),
     {
