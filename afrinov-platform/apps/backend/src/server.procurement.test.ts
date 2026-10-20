@@ -52,11 +52,11 @@ describe('procurement switch', () => {
 });
 
 describe('isProcurementEnabled', () => {
-  it('is off unless PROCUREMENT_ENABLED is "true"', () => {
-    expect(isProcurementEnabled({})).toBe(false);
-    expect(isProcurementEnabled({ PROCUREMENT_ENABLED: 'false' })).toBe(false);
-    expect(isProcurementEnabled({ PROCUREMENT_ENABLED: '1' })).toBe(false);
+  it('is on unless PROCUREMENT_ENABLED is "false"', () => {
+    expect(isProcurementEnabled({})).toBe(true);
+    expect(isProcurementEnabled({ PROCUREMENT_ENABLED: '' })).toBe(true);
     expect(isProcurementEnabled({ PROCUREMENT_ENABLED: 'true' })).toBe(true);
-    expect(isProcurementEnabled({ PROCUREMENT_ENABLED: 'TRUE' })).toBe(true);
+    expect(isProcurementEnabled({ PROCUREMENT_ENABLED: 'false' })).toBe(false);
+    expect(isProcurementEnabled({ PROCUREMENT_ENABLED: 'FALSE' })).toBe(false);
   });
 });

@@ -98,7 +98,7 @@ the API docs are off unless `API_DOCS_ENABLED=true`.
 | `CORS_ALLOW_ANY` | No | — | `true` allows any origin. Throwaway demos only |
 | `RATE_LIMIT_AUTH` | No | `5` | Login requests per minute per IP |
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
-| `PROCUREMENT_ENABLED` | No | `false` | `true` turns on purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
+| `PROCUREMENT_ENABLED` | No | `true` | `false` turns off purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
 | `API_DOCS_ENABLED` | No | On, except in production | `true` or `false` to serve the API docs at `/api/docs` |
 | `SEED_ADMIN_PASSWORD` | In production | Random | Admin password the seed sets when it first creates the account |
 | `SEED_ADMIN_EMAIL` | No | `admin@afrinov.local` | Account used by the integration tests and diagnostic scripts |
@@ -207,7 +207,7 @@ needs an `Authorization: Bearer <token>` header, using the token returned by
 | Auth | `/auth/login`, `/auth/me` |
 | Users | `/users`, `/users/lookup` |
 | Inventory | `/materials`, `/locations`, `/racks`, `/stock-items`, `/inventory-transactions` (with `/:id/returns` and `/:id/reversal`), `/inventory-issues`, `/inventory-transfers`, `/inventory-adjustments`, `/stock-counts`, `/stock-receipts` |
-| Procurement | `/suppliers`; `/purchase-orders` and `/goods-receipts` only when `PROCUREMENT_ENABLED=true` |
+| Procurement | `/suppliers`; `/purchase-orders` and `/goods-receipts` unless `PROCUREMENT_ENABLED=false` |
 | Projects and recipients | `/projects`, `/recipients` |
 | Reports | `/reports/current-stock`, `/reports/movement-history`, `/reports/stock-status`, `/reports/stock-value`, `/reports/low-stock`, `/reports/reorder-list/export`, `/reports/project-consumption/:projectNumber`, `/reports/consumption` (+ `/export`), `/reports/month-end` (+ `/export`), `/reports/inventory` (+ `/export`) |
 | Settings | `/settings` |

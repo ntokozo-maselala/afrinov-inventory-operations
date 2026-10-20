@@ -78,11 +78,11 @@ export function loadConfig(): AppConfig {
 
 /**
  * Whether the procurement module (purchase orders and goods receipts) is
- * enabled. Off unless `PROCUREMENT_ENABLED=true`; when off, its API routes are
+ * enabled. On unless `PROCUREMENT_ENABLED=false`; when off, its API routes are
  * not registered and respond 404. Supplier routes are unaffected.
  */
 export function isProcurementEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.PROCUREMENT_ENABLED ?? '').toLowerCase() === 'true';
+  return String(env.PROCUREMENT_ENABLED ?? '').toLowerCase() !== 'false';
 }
 
 /**
