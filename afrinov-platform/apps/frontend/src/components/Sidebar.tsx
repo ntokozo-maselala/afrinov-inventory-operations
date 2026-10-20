@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Logo } from './Logo';
@@ -46,8 +46,8 @@ function NavItemComponent({
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = item.children && item.children.length > 0;
-  const isActive = isNavItemActive(item, location.pathname, location.search);
-  const isChildActive = hasChildren && item.children!.some((child) => isNavItemActive(child, location.pathname, location.search));
+  const isActive = isNavItemActive(item, location.pathname);
+  const isChildActive = hasChildren && item.children!.some((child) => isNavItemActive(child, location.pathname));
 
   const baseClass = isCollapsed
     ? 'flex justify-center items-center py-2.5 mx-0 rounded text-sm transition-colors'
@@ -122,15 +122,15 @@ function NavItemComponent({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Link
+          <NavLink
             to={item.to}
-            aria-current={isActive ? 'page' : undefined}
+            end={item.end || !isActive}
             onClick={onNavigate}
             className={cn(baseClass, stateClass, 'relative')}
             aria-label={item.label}
           >
             {content}
-          </Link>
+          </NavLink>
         </TooltipTrigger>
         <TooltipContent side="right" align="center" sideOffset={8} className="bg-surface-900 text-surface-50 text-xs px-2 py-1 rounded">
           {item.label}
@@ -172,14 +172,14 @@ function NavItemComponent({
   }
 
   return (
-    <Link
+    <NavLink
       to={item.to}
-      aria-current={isActive ? 'page' : undefined}
+      end={item.end || !isActive}
       onClick={onNavigate}
       className={cn(baseClass, stateClass)}
     >
       {content}
-    </Link>
+    </NavLink>
   );
 }
 

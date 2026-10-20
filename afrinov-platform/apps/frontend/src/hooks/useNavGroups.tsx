@@ -12,30 +12,14 @@ export interface NavItem {
   permissions?: string[];
   children?: NavItem[];
   exact?: boolean;
-  /**
-   * Pages under `to` that have their own entry, so this one isn't highlighted there too.
-   * An entry with a query ("/purchase-orders?status=mine") excludes only that view.
-   */
+  /** Pages under `to` that have their own entry, so this one isn't highlighted there too. */
   excludes?: string[];
 }
 
-/** Whether the URL is `target`: its path, and every parameter of its query if it has one. */
-function isView(target: string, pathname: string, search: string): boolean {
-  const [path, query] = target.split('?');
-  if (pathname !== path) return false;
-  const have = new URLSearchParams(search);
-  return [...new URLSearchParams(query)].every(([k, v]) => have.get(k) === v);
-}
-
-/**
- * Whether a menu entry is the page being shown. An entry whose link has a
- * query is a view of a list ("Approval status"), highlighted only on
- * that view.
- */
-export function isNavItemActive(item: Pick<NavItem, 'to' | 'end' | 'exact' | 'excludes'>, pathname: string, search = ''): boolean {
-  if (item.to.includes('?')) return isView(item.to, pathname, search);
+/** Whether a menu entry is the page being shown. */
+export function isNavItemActive(item: Pick<NavItem, 'to' | 'end' | 'exact' | 'excludes'>, pathname: string): boolean {
   if (item.exact || item.end) return pathname === item.to;
-  if (item.excludes?.some((p) => (p.includes('?') ? isView(p, pathname, search) : pathname === p || pathname.startsWith(`${p}/`)))) return false;
+  if (item.excludes?.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return false;
   return pathname.startsWith(item.to);
 }
 
@@ -95,10 +79,8 @@ export function useNavGroups(): NavGroup[] {
     ...(PROCUREMENT_ENABLED ? [{
       title: 'Procurement',
       items: [
-        // Highlighted on an order's page too, but not on the new-order page or the approval queue, which have their own entries.
-        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new', '/purchase-orders?status=mine'] },
-        // The orders the signed-in approver can approve now (priced, within their limit), as on the Dashboard card.
-        { to: '/purchase-orders?status=mine', label: 'Approval status', icon: <Icon.Check />, permissions: ['orders:approve'] },
+        // Highlighted on an order's page too, but not on the new-order page, which has its own entry.
+        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new'] },
         { to: '/purchase-orders/new', label: 'New purchase order', icon: <Icon.Plus />, permissions: ['procurement:manage'] },
       ],
     }] : []),
