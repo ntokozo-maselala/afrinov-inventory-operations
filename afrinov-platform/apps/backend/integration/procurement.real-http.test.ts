@@ -227,4 +227,30 @@ describe('receiving stock over real HTTP', () => {
       await expectStock('20');
     });
   });
+
+  describe('prices and VAT', () => {
+    interface Priced { id: string; currency: string; vatRate: string; lines: Array<{ id: string; unitPrice: string | null; net: string | null }>; totals: { subtotal: string; vat: string; net: string; unpricedLines: number } }
+
+    it('keeps the unit price and returns line and order totals', async () => {
+      const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 3, unitPrice: 12.5 }] });
+      expect(created.status).toBe(201);
+      const order = (await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(order).toMatchObject({ currency: 'ZAR', lines: [{ net: '43.13' }], totals: { subtotal: '37.50', vat: '5.63', net: '43.13', unpricedLines: 0 } });
+      expect(Number(order.vatRate)).toBe(15);
+    });
+
+    it('adds a missing price and changes the VAT rate while the order is a draft', async () => {
+      const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 4 }] });
+      const lineId = (await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body.lines[0]!.id;
+      const res = await api('PATCH', `/purchase-orders/${created.body.id}`, { vatRate: 0, linePrices: [{ lineId, unitPrice: 2.5 }] });
+      expect(res.status).toBe(200);
+      const order = (await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(order.totals).toEqual({ subtotal: '10.00', vat: '0.00', net: '10.00', unpricedLines: 0 });
+    });
+
+    it('refuses a VAT rate over 100', async () => {
+      const res = await api('POST', '/purchase-orders', { supplierId, vatRate: 150, lines: [{ materialId, orderedQty: 1 }] });
+      expect(res.status).toBe(400);
+    });
+  });
 });

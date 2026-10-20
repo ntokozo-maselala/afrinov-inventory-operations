@@ -15,6 +15,7 @@ import { api, type ApiError } from '../api/client';
 import { Alert } from '../components/Alert';
 import { Field, Input, Select, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
+import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -28,11 +29,20 @@ interface POLine {
   material: { sku: string; name: string; unitOfMeasure: string };
   orderedQty: string;
   receivedQty: string;
+  /** Excluding VAT; null when the line has no price. */
+  unitPrice?: string | null;
+  subtotal?: string | null;
+  vat?: string | null;
+  net?: string | null;
 }
 interface PO {
   id: string;
   number: string;
   status: POStatus;
+  currency?: string;
+  /** Percent, e.g. "15". */
+  vatRate?: string;
+  totals?: PoTotals;
   notes?: string | null;
   supplierId: string;
   supplier: { name: string };
@@ -205,19 +215,23 @@ export function PurchaseOrderDetail() {
                 )}
                 <dt className="text-surface-500">Lines</dt><dd className="col-span-2 text-num">{formatNumber(fresh.lines.length)}</dd>
                 <dt className="text-surface-500">Units</dt><dd className="col-span-2 text-num">{formatNumber(fresh.lines.reduce((a, l) => a + Number(l.orderedQty), 0))}</dd>
+                <dt className="text-surface-500">Currency</dt><dd className="col-span-2">{fresh.currency ?? 'ZAR'}</dd>
+                <dt className="text-surface-500">VAT</dt><dd className="col-span-2">{formatRate(fresh.vatRate)}</dd>
+                {fresh.totals && (<><dt className="text-surface-500">Total</dt><dd className="col-span-2 text-num font-semibold">{formatMoney(fresh.totals.net, fresh.currency)}</dd></>)}
                 {fresh.notes && (<><dt className="text-surface-500">Notes</dt><dd className="col-span-2 whitespace-pre-wrap">{fresh.notes}</dd></>)}
               </dl>
             </aside>
 
             <div className="lg:col-span-2 space-y-6">
               <section>
-                <SectionHeader title="Line items" description="Ordered and received quantities per material." />
+                <SectionHeader title="Line items" description="Quantities ordered and received, and prices excluding VAT." />
                 <DataTable
                   ariaLabel="Purchase order line items"
                   rows={fresh.lines}
                   rowKey={(l) => l.id}
-                  columns={lineColumns()}
+                  columns={lineColumns(fresh.currency ?? 'ZAR')}
                 />
+                {fresh.totals && <OrderTotals po={fresh} totals={fresh.totals} onAddPrices={editable ? () => setEditing(true) : undefined} />}
               </section>
 
               <section>
@@ -360,17 +374,32 @@ function EditDrawer({ po, onClose, onSaved, onError }: {
 }) {
   const [notes, setNotes] = useState(po.notes ?? '');
   const [expectedDeliveryDate, setExpected] = useState(po.expectedDeliveryDate?.slice(0, 10) ?? '');
+  const [vatRate, setVatRate] = useState(String(Number(po.vatRate ?? 15)));
+  const [prices, setPrices] = useState<Record<string, string>>(
+    () => Object.fromEntries(po.lines.map((l) => [l.id, l.unitPrice === null || l.unitPrice === undefined ? '' : String(Number(l.unitPrice))])),
+  );
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setValidation(null);
+    const rate = Number(vatRate);
+    if (vatRate.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 100) { setValidation('VAT rate must be between 0 and 100.'); return; }
+    const badPrice = po.lines.find((l) => prices[l.id]!.trim() !== '' && !(Number(prices[l.id]) >= 0));
+    if (badPrice) { setValidation(`Enter a price of 0 or more for ${badPrice.material.sku}, or leave it blank.`); return; }
+    // Only the lines whose price changed are sent.
+    const linePrices = po.lines
+      .map((l) => ({ lineId: l.id, before: l.unitPrice === null || l.unitPrice === undefined ? null : Number(l.unitPrice), after: prices[l.id]!.trim() === '' ? null : Number(prices[l.id]) }))
+      .filter((p) => p.before !== p.after)
+      .map(({ lineId, after }) => ({ lineId, unitPrice: after }));
     setBusy(true);
     try {
       await api.patch(`/purchase-orders/${po.id}`, {
         notes: notes.trim() || undefined,
         expectedDeliveryDate: expectedDeliveryDate || null,
+        ...(rate !== Number(po.vatRate ?? 15) ? { vatRate: rate } : {}),
+        ...(linePrices.length > 0 ? { linePrices } : {}),
       });
       await onSaved(`PO ${po.number} updated`);
     } catch (err) {
@@ -383,8 +412,24 @@ function EditDrawer({ po, onClose, onSaved, onError }: {
   }
 
   return (
-    <Drawer open onClose={onClose} title={`Edit ${po.number}`} description="Update notes and expected delivery date. Line items are not editable here." width="md">
+    <Drawer open onClose={onClose} title={`Edit ${po.number}`} description={`Prices exclude VAT, in ${po.currency ?? 'ZAR'}. Materials and quantities are not editable here.`} width="md">
       <form onSubmit={submit} className="space-y-4" noValidate>
+        <fieldset className="space-y-2">
+          <legend className="field-label">Unit prices</legend>
+          {po.lines.map((l) => (
+            <div key={l.id} className="grid grid-cols-3 gap-2 items-center">
+              <label htmlFor={`po-edit-price-${l.id}`} className="col-span-2 text-sm min-w-0">
+                <span className="text-mono text-xs">{l.material.sku}</span> {l.material.name}
+                <span className="text-meta"> · {formatNumber(Number(l.orderedQty))} {l.material.unitOfMeasure}</span>
+              </label>
+              <Input id={`po-edit-price-${l.id}`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
+                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right" />
+            </div>
+          ))}
+        </fieldset>
+        <Field label="VAT rate (%)" htmlFor="po-edit-vat" help={(po.currency ?? 'ZAR') === 'ZAR' ? 'Rand orders start at the VAT setting.' : 'Orders in other currencies start at 0%.'}>
+          <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
+        </Field>
         <Field label="Expected delivery date" htmlFor="po-edit-expected">
           <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
         </Field>
@@ -503,15 +548,40 @@ function kindLabel(kind: ActionDraft['kind']): string {
   return ({ approve: 'approved', receive: 'received', close: 'closed', cancel: 'cancelled' } as const)[kind];
 }
 
-function lineColumns(): DataTableColumn<POLine>[] {
+function lineColumns(currency: string): DataTableColumn<POLine>[] {
+  const none = <span className="text-surface-300">—</span>;
   return [
-    { key: 'sku', header: 'SKU', className: 'text-mono', render: (l) => <Link to={`/materials/${l.materialId}`} className="btn-link text-mono text-xs">{l.material.sku}</Link>, width: '10rem' },
+    { key: 'sku', header: 'SKU', className: 'text-mono', render: (l) => <Link to={`/materials/${l.materialId}`} className="btn-link text-mono text-xs">{l.material.sku}</Link>, width: '9rem' },
     { key: 'name', header: 'Material', render: (l) => l.material.name },
-    { key: 'ordered', header: 'Ordered', align: 'right', className: 'text-num', render: (l) => <span className="font-mono">{formatNumber(Number(l.orderedQty))}</span>, width: '7rem' },
-    { key: 'received', header: 'Received', align: 'right', className: 'text-num', render: (l) => <span className="font-mono text-success-700">{formatNumber(Number(l.receivedQty))}</span>, width: '7rem' },
-    { key: 'outstanding', header: 'Outstanding', align: 'right', className: 'text-num', render: (l) => <span className="font-mono text-surface-500">{formatNumber(Number(l.orderedQty) - Number(l.receivedQty))}</span>, width: '8rem' },
-    { key: 'uom', header: 'UoM', render: (l) => l.material.unitOfMeasure, width: '5rem' },
+    { key: 'ordered', header: 'Ordered', align: 'right', className: 'text-num', render: (l) => <span className="font-mono whitespace-nowrap">{formatNumber(Number(l.orderedQty))} <span className="text-meta">{l.material.unitOfMeasure}</span></span>, width: '7rem' },
+    { key: 'received', header: 'Received', align: 'right', className: 'text-num', render: (l) => <span className="font-mono text-success-700">{formatNumber(Number(l.receivedQty))}</span>, width: '6rem' },
+    { key: 'outstanding', header: 'Outstanding', align: 'right', className: 'text-num', render: (l) => <span className="font-mono text-surface-500">{formatNumber(Number(l.orderedQty) - Number(l.receivedQty))}</span>, width: '7rem' },
+    { key: 'price', header: 'Unit price', align: 'right', className: 'text-num', render: (l) => (l.unitPrice === null || l.unitPrice === undefined ? <span className="text-warning-700">No price</span> : <span className="font-mono whitespace-nowrap">{formatMoney(l.unitPrice, currency)}</span>), width: '8rem' },
+    { key: 'subtotal', header: 'Subtotal', align: 'right', className: 'text-num', render: (l) => (l.subtotal ? <span className="font-mono whitespace-nowrap">{formatMoney(l.subtotal, currency)}</span> : none), width: '8rem' },
+    { key: 'vat', header: 'VAT', align: 'right', className: 'text-num', render: (l) => (l.vat ? <span className="font-mono whitespace-nowrap">{formatMoney(l.vat, currency)}</span> : none), width: '7rem' },
+    { key: 'net', header: 'Net value', align: 'right', className: 'text-num', render: (l) => (l.net ? <span className="font-mono whitespace-nowrap font-semibold">{formatMoney(l.net, currency)}</span> : none), width: '8rem' },
   ];
+}
+
+/** The order's totals under the lines, as at the foot of the template's Order sheet. */
+function OrderTotals({ po, totals, onAddPrices }: { po: PO; totals: PoTotals; onAddPrices?: () => void }) {
+  const currency = po.currency ?? 'ZAR';
+  return (
+    <div className="mt-3 flex flex-col items-end gap-2">
+      <dl className="surface-card p-4 text-sm grid grid-cols-2 gap-x-6 gap-y-1 w-full sm:w-80" aria-label="Order total">
+        <dt className="text-surface-500">Subtotal</dt><dd className="text-right font-mono">{formatMoney(totals.subtotal, currency)}</dd>
+        <dt className="text-surface-500">VAT {formatRate(po.vatRate)}</dt><dd className="text-right font-mono">{formatMoney(totals.vat, currency)}</dd>
+        <dt className="font-semibold text-surface-900 border-t border-surface-200 pt-1">Total</dt>
+        <dd className="text-right font-mono font-semibold border-t border-surface-200 pt-1">{formatMoney(totals.net, currency)}</dd>
+      </dl>
+      {totals.unpricedLines > 0 && (
+        <p className="text-meta text-warning-700">
+          {totals.unpricedLines === 1 ? '1 line has no price and is' : `${totals.unpricedLines} lines have no price and are`} not in the total.
+          {onAddPrices && <> <button type="button" className="btn-link" onClick={onAddPrices}>Add prices</button></>}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function RelatedReceipts({ receipts }: { receipts: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }> }) {

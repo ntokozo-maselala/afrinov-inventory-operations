@@ -93,6 +93,8 @@ export interface MockPurchaseOrderLine {
   materialId: string;
   orderedQty: string;
   receivedQty: string;
+  /** Excluding VAT; null when no price was given. */
+  unitPrice?: string | null;
 }
 
 export interface MockPurchaseOrder {
@@ -102,6 +104,9 @@ export interface MockPurchaseOrder {
   status: PurchaseOrderStatus;
   notes?: string;
   createdAt: string;
+  currency?: string;
+  /** Percent, as a string like the server's Decimal. */
+  vatRate?: string;
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
   approvedBy?: MockUser | null;

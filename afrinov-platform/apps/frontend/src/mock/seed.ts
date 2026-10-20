@@ -50,9 +50,11 @@ export const SEED_PURCHASE_ORDERS: MockPurchaseOrder[] = [
     status: 'APPROVED',
     notes: 'Standing monthly fasteners order',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
+    currency: 'ZAR',
+    vatRate: '15',
     lines: [
-      { id: 'pol-1', materialId: 'mat-1', orderedQty: '200', receivedQty: '0' },
-      { id: 'pol-2', materialId: 'mat-3', orderedQty: '500', receivedQty: '0' },
+      { id: 'pol-1', materialId: 'mat-1', orderedQty: '200', receivedQty: '0', unitPrice: '4.50' },
+      { id: 'pol-2', materialId: 'mat-3', orderedQty: '500', receivedQty: '0', unitPrice: '0.85' },
     ],
   },
   {
@@ -62,6 +64,9 @@ export const SEED_PURCHASE_ORDERS: MockPurchaseOrder[] = [
     status: 'PARTIALLY_RECEIVED',
     notes: 'Bearings for Boiler Shop rebuild',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(),
+    // Raised before prices were kept: no unit price on its line.
+    currency: 'ZAR',
+    vatRate: '15',
     lines: [
       { id: 'pol-3', materialId: 'mat-4', orderedQty: '50', receivedQty: '25' },
     ],

@@ -24,6 +24,7 @@ import {
 import { buildReport } from './mockReport';
 import type { ReportQuery as MockReportQuery } from '../api/reportTypes';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
+import { priceLines } from '../lib/poMoney';
 import { computeConsumption } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import type {
@@ -138,6 +139,13 @@ function supplierFields(b: Partial<Record<keyof MockSupplier, unknown>>): Partia
   }
   if (typeof b.currency === 'string') out.currency = b.currency;
   return out;
+}
+
+// Order money as the server works it out (po-pricing.ts).
+function withPoTotals<T extends { vatRate?: string; currency?: string; lines: Array<{ orderedQty: string; unitPrice?: string | null }> }>(po: T) {
+  const rate = Number(po.vatRate ?? 15);
+  const { lines, totals } = priceLines(po.lines, rate);
+  return { ...po, currency: po.currency ?? 'ZAR', vatRate: String(rate), lines, totals };
 }
 
 function assertSupplierFree(name: string | undefined, vendorCode: string | undefined, exceptId?: string) {
@@ -413,7 +421,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Purchase Orders
   if (method === 'GET' && p === '/purchase-orders') {
     const list = [...state.purchaseOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return list.map((po) => ({
+    return list.map((po) => withPoTotals({
       ...po,
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
@@ -429,14 +437,14 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    return {
+    return withPoTotals({
       ...po,
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
-    };
+    });
   }
   if (method === 'POST' && p === '/purchase-orders') {
-    const b = body as { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number }>; notes?: string; expectedDeliveryDate?: string };
+    const b = body as { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
     if (!b.supplierId || !b.lines || b.lines.length === 0) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     const supplier = findSupplier(b.supplierId);
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
@@ -449,8 +457,13 @@ function route(method: string, path: string, body?: unknown): unknown {
       notes: b.notes,
       expectedDeliveryDate: b.expectedDeliveryDate ?? null,
       createdAt: new Date().toISOString(),
+      currency: supplier.currency ?? 'ZAR',
+      vatRate: String(b.vatRate ?? ((supplier.currency ?? 'ZAR') === 'ZAR' ? Number(MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15) : 0)),
       history: [],
-      lines: b.lines.map((l) => ({ id: nextId('pol'), materialId: l.materialId, orderedQty: String(l.orderedQty), receivedQty: '0' })),
+      lines: b.lines.map((l) => ({
+        id: nextId('pol'), materialId: l.materialId, orderedQty: String(l.orderedQty), receivedQty: '0',
+        unitPrice: l.unitPrice === undefined ? null : String(l.unitPrice),
+      })),
     };
     state.purchaseOrders.push(po);
     return { ...po, supplier: findSupplier(po.supplierId), lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })) };
@@ -554,9 +567,17 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
-    const b = (body as { notes?: string | null; expectedDeliveryDate?: string | null }) ?? {};
+    const b = (body as { notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number; linePrices?: Array<{ lineId: string; unitPrice: number | null }> }) ?? {};
+    for (const lp of b.linePrices ?? []) {
+      if (!po.lines.some((l) => l.id === lp.lineId)) throw err('VALIDATION_ERROR', `Line ${lp.lineId} is not on purchase order ${po.number}`);
+    }
     if (b.notes !== undefined) po.notes = b.notes ?? undefined;
     if (b.expectedDeliveryDate !== undefined) po.expectedDeliveryDate = b.expectedDeliveryDate ?? null;
+    if (b.vatRate !== undefined) po.vatRate = String(b.vatRate);
+    for (const lp of b.linePrices ?? []) {
+      const line = po.lines.find((l) => l.id === lp.lineId)!;
+      line.unitPrice = lp.unitPrice === null ? null : String(lp.unitPrice);
+    }
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before: null, after: b as Record<string, unknown>, createdAt: new Date().toISOString() });
     return po;
@@ -1116,6 +1137,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
     'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
     'purchaseOrders.allowEditAfterApproval': row('purchaseOrders.allowEditAfterApproval', true, 'boolean', 'purchase_orders', 'Allow editing a purchase order once it has been approved.'),
+    'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 
     'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),
     'notifications.enableLowStockNotifications': row('notifications.enableLowStockNotifications', true, 'boolean', 'notifications', 'Generate alerts when materials fall below their reorder threshold.'),

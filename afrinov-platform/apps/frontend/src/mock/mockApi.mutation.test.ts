@@ -56,6 +56,29 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('purchase order prices and VAT', () => {
+    type Priced = { id: string; currency: string; vatRate: string; lines: Array<{ id: string; net: string | null }>; totals: { net: string; unpricedLines: number } };
+
+    it('keeps prices and works out the totals at the VAT setting for rand suppliers', async () => {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 3, unitPrice: 12.5 }, { materialId: 'mat-2', orderedQty: 1 }] });
+      const read = await api.get<Priced>(`/purchase-orders/${po.id}`);
+      expect(read).toMatchObject({ currency: 'ZAR', vatRate: '15', totals: { net: '43.13', unpricedLines: 1 } });
+    });
+
+    it('starts a foreign-currency order at 0%', async () => {
+      await api.patch('/suppliers/sup-2', { currency: 'EUR' });
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-2', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }] });
+      expect(await api.get<Priced>(`/purchase-orders/${po.id}`)).toMatchObject({ currency: 'EUR', vatRate: '0', totals: { net: '100.00' } });
+    });
+
+    it('edits a line price and the VAT rate', async () => {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 4 }] });
+      const lineId = (await api.get<Priced>(`/purchase-orders/${po.id}`)).lines[0]!.id;
+      await api.patch(`/purchase-orders/${po.id}`, { vatRate: 0, linePrices: [{ lineId, unitPrice: 2.5 }] });
+      expect((await api.get<Priced>(`/purchase-orders/${po.id}`)).totals).toMatchObject({ net: '10.00', unpricedLines: 0 });
+    });
+  });
+
   describe('POST /materials (create)', () => {
     it('creates a material and returns it', async () => {
       const result = await api.post<{ id: string; sku: string; name: string; active: boolean }>('/materials', {

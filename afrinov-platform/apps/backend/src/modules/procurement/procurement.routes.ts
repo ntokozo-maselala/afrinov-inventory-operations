@@ -45,20 +45,26 @@ export const createPOSchema = z.object({
   supplierId: supplierIdSchema,
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().optional(),
+  vatRate: z.number().min(0).max(100).optional(),
   lines: z
     .array(
       z.object({
         materialId: z.string().uuid(),
         orderedQty: z.number().positive(),
-        unitPrice: z.number().nonnegative().optional(),
+        unitPrice: z.number().nonnegative().max(1e12).optional(),
       }),
     )
     .min(1),
 });
 
+const vatRate = z.number().min(0).max(100);
+const unitPrice = z.number().nonnegative().max(1e12);
+
 export const updatePOSchema = z.object({
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().nullable().optional(),
+  vatRate: vatRate.optional(),
+  linePrices: z.array(z.object({ lineId: z.string().uuid(), unitPrice: unitPrice.nullable() })).max(500).optional(),
 });
 
 export const PO_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED', 'CANCELLED'] as const;
