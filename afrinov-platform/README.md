@@ -23,17 +23,16 @@ the disagreement is logged in
 
 ## What's intentionally NOT in this platform yet
 
-- **Tool check-out/check-in** — tools are issued like other material; the
-  check-out state machine is planned.
 - **Document Management** — delivery-note references are text
   (`deliveryRef`); no file uploads.
 - **Multi-tenancy / multi-site** — single site only (matches
   `sap-not-to-copy.md`).
 - **Observability infrastructure** — structured logging via pino and health
   checks are in place; metrics, tracing and alerting are not.
-- **Procurement by default** — purchase orders and goods receipts exist but
-  are switched off unless `PROCUREMENT_ENABLED=true` (backend) and
-  `VITE_PROCUREMENT_ENABLED=true` (frontend).
+
+Purchase orders and goods receipts are on by default. Set
+`PROCUREMENT_ENABLED=false` (backend) and `VITE_PROCUREMENT_ENABLED=false`
+(frontend) to switch them off (ADR-019).
 
 ## Quick start (local dev)
 

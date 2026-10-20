@@ -250,7 +250,7 @@ The steps are in Cutover and go-live below.
 
 These are built only once the business asks for them (see Open decisions).
 
-- Procurement switched on with the simplified purchase-order flow
+- ~~Procurement switched on with the simplified purchase-order flow~~ Done: aligned to the purchase order template and on by default (ADR-019; `procurement-alignment-roadmap.md`, `procurement-workflow-roadmap.md`)
 - Low-stock email alerts to the buyer
 - Office asset register (from the Office Device List)
 - Scrap sales log (kg per metal, rand value)
@@ -346,7 +346,7 @@ The biggest risk is the storemen finding the app slower than typing a row in Exc
 | Who can be "Issued To"? | Workers only, or also machines, sites and contractors as in the Employees sheet | Start of Phase 1 |
 | Is the period rollover a real process? | Confirm with the store; if yes, replace it with a monthly report and periodic stock counts | Start of Phase 3 |
 | Urgency bands | Keep 20% and 40%, or change | Start of Phase 3 |
-| Are purchase orders wanted in v1? | Keep procurement off and use direct receive, or switch on the simplified flow | Before Phase 6 |
+| Are purchase orders wanted in v1? | Decided: yes. Procurement is on by default, aligned to the purchase order template; direct receive stays for deliveries not against an order | Decided 2026-10-20 |
 | Office devices and scrap sales | Build in Phase 6, or keep in a separate small sheet | Before Phase 6 |
 | Who signs off go-live? | Store manager, operations manager, or both | Start of Phase 4 |
 | Hosting | Where production runs and who pays for it | Start of Phase 0 |

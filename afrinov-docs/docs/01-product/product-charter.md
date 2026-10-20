@@ -45,7 +45,7 @@ See `00-governance/assumptions-register.md`.
 
 ## Success metrics
 - 100% of current spreadsheet categories represented in the new system.
-  *(Five categories exist; the import loads four — Tools are not imported.)*
+  *(Five categories exist; the import loads all five, Tools from the Tools Main register.)*
 - Zero un-traceable stock changes (every balance change has a transaction record).
 - Time to answer "what's our current stock of X and where" reduced from
   "open the right workbook and find the row" to a direct query.
@@ -57,8 +57,9 @@ Orders, Goods Receipts, Stock Issues, Stock Transfers, Stock Adjustments,
 Reporting. See `product-roadmap.md` for sequencing.
 
 *Implementation status:* all of these exist in the platform; purchase
-orders and goods receipts against them are switched off by default
-(`PROCUREMENT_ENABLED`) and stock arrives through counter receipts. The
+orders and goods receipts against them are on by default and can be
+switched off (`PROCUREMENT_ENABLED=false`, ADR-019), in which case stock
+arrives through counter receipts. The
 live delivery plan is `workbook-replacement-roadmap.md` at the repository
 root.
 

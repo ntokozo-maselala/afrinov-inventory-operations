@@ -28,7 +28,7 @@ And the material's InventoryBalance increases by 60
 ```
 Automated by: `integration/procurement.real-http.test.ts` ("posting a
 receipt adds its quantity to stock and part-receives the order"). Needs
-`PROCUREMENT_ENABLED=true`. The order must be APPROVED (or already
+procurement on (the default). The order must be APPROVED (or already
 PARTIALLY_RECEIVED), not merely "open".
 
 **Scenario: Adjustment requires a reason (BR-006)**

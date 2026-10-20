@@ -41,11 +41,11 @@ Traceable to Business Requirements (see `requirements-traceability-matrix.md`).
 - **FR-PROC-002** The system shall allow authorised users to create a
   Purchase Order against a supplier with one or more material lines and
   quantities. *(→ BR-014)*
-  *Status:* Implemented behind `PROCUREMENT_ENABLED` (off by default).
+  *Status:* Implemented; on by default, behind `PROCUREMENT_ENABLED` (ADR-019).
 - **FR-PROC-003** The system shall allow a Goods Receipt to be matched
   against an open Purchase Order, updating the PO's received quantity and
   status. *(→ BR-014)*
-  *Status:* Implemented behind `PROCUREMENT_ENABLED`; only APPROVED or PARTIALLY_RECEIVED orders.
+  *Status:* Implemented (on by default); only APPROVED or PARTIALLY_RECEIVED orders.
 - **FR-PROC-004** The system shall allow a Goods Receipt to be recorded
   without a Purchase Order (ad hoc receipt), consistent with current
   practice, subject to permission. *(→ BR-003)*

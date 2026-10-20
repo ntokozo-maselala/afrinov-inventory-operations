@@ -16,17 +16,17 @@ Seven phases that bring purchase orders in the app up to the **AFRI-0000_x R0 - 
 | 4 | Approval by value | `feature/po-approval` | `5855cef` | Shipped |
 | 5 | Printable purchase order | `feature/po-document` | `975c21f` | Shipped |
 | 6 | Numbers and revisions | `feature/po-numbers` | `5b46fc6` | Shipped |
-| 7 | Switch on everywhere | | | Not started |
+| 7 | Switch on everywhere | `feature/procurement-on-by-default` | `930b7c4` | In review |
 
 Sizes used below: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
 ## How to run this
 
-### Where things stand (19 October 2026)
+### Where things stand (20 October 2026)
 
-- Each phase is one branch and pull request, built on the one before: Phase 1 on `feature/returned-stock-report`, Phase 2 on Phase 1, and so on. Merge them in order.
+- Phases 1 to 6 are in `main` (PRs #46 to #49 and the ones after), as is the [Procurement Workflow Roadmap](procurement-workflow-roadmap.md).
 - Procurement is back in scope. It was taken out of the Platform Flow Roadmap on 12 October.
-- It is switched on **locally only**, through `PROCUREMENT_ENABLED` and `VITE_PROCUREMENT_ENABLED` in the two `.env` files. Everywhere else it stays hidden until Phase 7.
+- Phase 7 is in review: `feature/procurement-on-by-default` turns procurement on by default (ADR-019). Until it is merged, procurement is on only where the two `.env` files turn it on.
 - The new real-HTTP tests in `apps/backend/integration/` have not run on a developer machine (they need `SEED_ADMIN_PASSWORD`); they run in the `integration` job in CI.
 
 ### Before release, on every database
@@ -167,15 +167,15 @@ The template's number is its file name (`AFRI-0000_x`) and it carries a revision
 
 ## Phase 7: Switch procurement on everywhere
 
-**Not started.** Size S. Config and docs. Needs Phases 1 to 6.
+**In review** (`feature/procurement-on-by-default`, `docs/bring-up-to-date`). Size S. Config and docs. Needs Phases 1 to 6.
 
 Procurement is shown only where both `.env` files turn it on. Staging, production and anyone else's machine still hide it.
 
-- [ ] **7.1 Turn the switch on by default.** Change the default to on in `config.ts` and `features.ts`, set `PROCUREMENT_ENABLED` in `docker-compose.yml` and the deployed environments, and update both `.env.example` files. Keep the switch so it can be turned off again.
+- [x] **7.1 Turn the switch on by default.** *Done in code (ADR-019); still to check: the deployed environments do not set either variable to `false`.* Change the default to on in `config.ts` and `features.ts`, set `PROCUREMENT_ENABLED` in `docker-compose.yml` and the deployed environments, and update both `.env.example` files. Keep the switch so it can be turned off again.
   Files: `backend/src/shared/config.ts`, `frontend/src/config/features.ts`, `docker-compose.yml`, `.env.example`
 - [ ] **7.2 Check roles end to end.** Sign in as Procurement, Approver (each level), Store controller and Viewer, and walk an order from draft to closed. Add the procurement actions to the role check sheet test. Rerun the seed where permissions changed.
   Files: `hooks/usePermissions.test.tsx`, `pages/RoleGating.test.tsx`, `db/seed.ts`
-- [ ] **7.3 Update the docs and retire the workbook.** Update the README, `task_context.md`, the product roadmap's Milestone 3 and `workbook-replacement-roadmap.md`. Tell buyers the date from which orders are raised in the app only.
+- [ ] **7.3 Update the docs and retire the workbook.** *Docs updated (README, `task_context.md`, the product roadmap's Milestone 3, `workbook-replacement-roadmap.md` and `afrinov-docs/`); still to do: tell buyers the date from which orders are raised in the app only.* Update the README, `task_context.md`, the product roadmap's Milestone 3 and `workbook-replacement-roadmap.md`. Tell buyers the date from which orders are raised in the app only.
 
 **Done when:**
 - Every environment shows Purchase orders and Goods receipts.

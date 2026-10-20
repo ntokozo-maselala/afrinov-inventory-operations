@@ -45,11 +45,10 @@ validate with; it is on by default except in production
 /api/v1/health, /api/v1/health/ready      (also served at /health, /health/ready)
 ```
 
-Purchase-order and goods-receipt routes are registered only when
-`PROCUREMENT_ENABLED=true`; otherwise they return 404.
+Purchase-order and goods-receipt routes are registered unless
+`PROCUREMENT_ENABLED=false`, in which case they return 404.
 
-**Planned (no endpoint):** `/tools/check-out`, `/tools/check-in`,
-`/roles` (roles are assigned through `/users`). Full method and permission
+**Planned (no endpoint):** `/roles` (roles are assigned through `/users`). Full method and permission
 detail is in `resource-model.md`.
 
 ## Evidence

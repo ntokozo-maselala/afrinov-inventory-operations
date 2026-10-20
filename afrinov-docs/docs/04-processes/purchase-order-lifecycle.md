@@ -1,10 +1,19 @@
 # Process: Purchase Order Lifecycle
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** a7a7360, 2026-10-20
 
-Available only when `PROCUREMENT_ENABLED=true` (backend) and
-`VITE_PROCUREMENT_ENABLED=true` (frontend). Pages: Purchase orders
-(`/purchase-orders`, `/purchase-orders/:id`) and Goods receipts.
+On unless switched off: `PROCUREMENT_ENABLED=false` (backend) and
+`VITE_PROCUREMENT_ENABLED=false` (frontend) hide it (ADR-019, which
+supersedes ADR-012). The order follows the AFRI-0000_x purchase order
+template ("Item Description" workbook): its Inputs sheet for what is entered,
+its Order sheet for the copy the supplier receives, and its vendor list for
+suppliers (`supplier-management.md`).
+
+Pages: Purchase orders (`/purchase-orders`), New purchase order
+(`/purchase-orders/new`), the order (`/purchase-orders/:id`) and Edit
+(`/purchase-orders/:id/edit`). There is no Goods receipts page any more:
+deliveries are received from the order's page, and `/goods-receipts/*`
+redirects to Purchase orders.
 
 ## States
 `DRAFT → PENDING_APPROVAL → APPROVED → PARTIALLY_RECEIVED → RECEIVED → CLOSED`,
@@ -13,37 +22,131 @@ with `CANCELLED` before anything is received (ADR-007; full rules in
 `REJECTED` status.
 
 ## Steps
-1. **Draft** (`POST /purchase-orders`): supplier and material lines with
-   ordered quantities; number `PO-YYYY-NNNN`.
-2. **Submit** (`POST /:id/submit`): to `PENDING_APPROVAL`, or straight to
-   `APPROVED` when approval is turned off in settings.
-3. **Approve** (`POST /:id/approve`, APPROVER or ADMIN).
-4. **Send:** outside the system (email/phone); no status records it.
-5. **Receive:** goods receipts post against the order, or
-   `POST /:id/receive` books everything outstanding to one location;
-   the order moves to `PARTIALLY_RECEIVED` or `RECEIVED`.
+1. **Raise** (`POST /purchase-orders`, PROCUREMENT or ADMIN) on the New
+   purchase order page: supplier, lines (material, quantity, unit price
+   excluding VAT, optional delivery date), VAT rate, expected delivery and
+   the template's order details (below). **Save draft** keeps it as a
+   `DRAFT` to finish later, for example once the quote arrives;
+   **Create & submit** raises and submits it in one go.
+   The order can also be started from where the need shows: the re-order
+   list on Stock status, an item's page and a supplier's page link to
+   `/purchase-orders/new?supplierId=…&materialIds=…`, which fills in the
+   supplier and lines, prices from each item's unit cost and quantities up to
+   Required Stock where it is set. Without a supplier, the items' last
+   supplier is suggested when they share one.
+2. **Submit** (`POST /:id/submit`): from `DRAFT` to `PENDING_APPROVAL`, or
+   straight to `APPROVED` when `purchaseOrders.requireApprovalBeforeProcessing`
+   is off.
+3. **Approve** (`POST /:id/approve`, APPROVER or ADMIN), by order value (see
+   *Approval*). `GET /:id/approval` tells the order's page who may approve it
+   and whether the signed-in user can.
+4. **Send:** download the order document (PDF) from the order's page and
+   send it outside the system (email or phone); no status records it.
+5. **Receive** from the order's page, as deliveries arrive (see *Receiving*).
+   The order moves to `PARTIALLY_RECEIVED` or `RECEIVED`.
 6. **Close** (`POST /:id/close`): from `PARTIALLY_RECEIVED` or `RECEIVED`;
    a reason is required when closing short.
 7. **Cancel** (`POST /:id/cancel`): from `DRAFT`, `PENDING_APPROVAL` or
-   `APPROVED`, with a reason, when the cancellation setting allows it.
+   `APPROVED`, with a reason, when `purchaseOrders.allowCancellation` allows it.
+
+## Numbers and revisions
+- New orders are numbered in the template's style, `AFRI-0001`, `AFRI-0002`,
+  …: one past the highest AFRI number issued, and never below the
+  `purchaseOrders.firstNumber` setting, which is set past the last number
+  issued from the workbook. Older `PO-YYYY-NNNN` numbers stay as they are.
+  An advisory lock keeps two orders from getting the same number.
+- Changing an `APPROVED` order raises its revision (the template's "Rev 01"),
+  so the supplier can tell the copies apart. A save that changes nothing
+  raises no revision.
+
+## Prices and VAT
+Worked out in one place (`po-pricing.ts`) so every screen and the document
+agree. Per line, as on the template: subtotal = unit price × quantity,
+VAT = subtotal × rate, net = subtotal + VAT, each rounded to cents (half up);
+the order totals are the sums of the lines. Lines without a price are left
+out of the totals and counted as unpriced.
+
+A new order's VAT rate is the `purchaseOrders.vatRate` setting for a rand
+(`ZAR`) supplier and 0% for a supplier in another currency, and can be
+changed on the order.
+
+## Approval
+As on the template, where the approver is chosen by the order total. Each
+user who may approve has an approval limit (Settings → Users): the largest
+order total, in rand including VAT, they may approve. No limit means any
+order.
+- Every line must have a price before approval, or the total is not known.
+- An order in another currency needs an approver without a limit, since
+  limits are in rand.
+- When the signed-in approver's limit is too low, Approve is refused with the
+  names of the approvers whose limit covers the order.
+- If an approved order is edited so that its total is past its approver's
+  limit, or a line loses its price, it goes back to `PENDING_APPROVAL`.
+- Approvers land on the Purchase orders list filtered to the orders waiting
+  for them (`/purchase-orders?status=mine`, from
+  `GET /purchase-orders?awaitingMyApproval=true`). The Dashboard shows
+  "Waiting for your approval": the orders they can approve now, oldest
+  first, and how many more are pending but need prices or a higher limit.
+
+## Order details (the template's Inputs sheet)
+Project number, payment terms, payment milestone, settlement discount (%),
+shipping terms, whether penalties apply, delivery method (`DELIVERY` or
+`COLLECTION`), the delivery block (deliver to, address, country, contact
+name and phone) and the Afrinov contact. Left out on a new order, they are
+filled as the template fills them: payment terms from the supplier, the
+delivery block from the `purchaseOrders.delivery*` settings (unless the
+goods are collected), and the Afrinov contact from whoever raises the order.
+A project number must be an open project.
+
+## The order document (the template's Order sheet)
+An A4 PDF built in the browser from the order as the server returns it, so
+the copy matches the screen: logo and order number, supplier and delivery
+details beside the order details, the lines with subtotal, VAT and net, the
+order total, remarks, where to send invoices
+(`purchaseOrders.invoiceEmail`), the company VAT number
+(`purchaseOrders.companyVatNumber`), the code of conduct
+(`purchaseOrders.codeOfConduct`), and the originator, authorization and
+supplier acceptance blocks. An order not yet approved is marked "Draft, not
+for issue" on every page; a cancelled one "Cancelled".
+
+## Receiving
+- On the order's page, **Receive** books what arrived, line by line and to a
+  location, as a goods receipt that is posted at once (`POST /goods-receipts`
+  then `POST /goods-receipts/:id/post`). Each receipt credits the order's
+  lines, so a part delivery leaves the rest showing as owed.
+- `POST /:id/receive` books everything still outstanding to one location.
+- On Receive stock, choosing a supplier with open orders (`APPROVED` or
+  `PARTIALLY_RECEIVED`) asks whether the delivery is against one of them and
+  links to *Receive against AFRI-…* on that order (`?receive=1`), shown to
+  those who may receive orders. A delivery not against an order is booked as
+  a counter receipt (`goods-receiving.md`).
 
 ## Business rules
-- Lines cannot be edited after creation in any state. Notes and the
-  expected delivery date can be edited in `DRAFT` and `PENDING_APPROVAL`,
-  and in `APPROVED` when `purchaseOrders.allowEditAfterApproval` is on.
+- Materials and quantities are fixed once the order is raised. Prices, line
+  delivery dates, VAT, order details, remarks and expected delivery can be
+  edited in `DRAFT` and `PENDING_APPROVAL`, and in `APPROVED` when
+  `purchaseOrders.allowEditAfterApproval` is on.
+- A line without its own delivery date is due on the order's expected
+  delivery.
 - An order cannot be cancelled once anything has been received.
-- Received quantity per line is always ≤ ordered quantity. An authorised
-  over-receipt override is **Planned** — it does not exist; over-receipt is
-  refused.
-- Each transition is written to the audit log (except creation) and shown
-  as the order's history (`GET /:id/history`).
+- Received quantity per line is always ≤ ordered quantity. Over-receipt is
+  refused when the receipt is recorded and rolls back if it is posted; an
+  authorised override is **Planned**.
+- An inactive supplier cannot be ordered from.
+- Each transition and each edit is written to the audit log, with only the
+  fields that changed, and shown as the order's history (`GET /:id/history`).
 
 ## Outputs
-PurchaseOrder record with lifecycle timestamps and actors, driving Goods
-Receipt matching in `goods-receiving.md`.
+PurchaseOrder record with lifecycle timestamps and actors, totals, revision
+and approver; the order document; goods receipts and RECEIPT movements in
+the ledger (`goods-receiving.md`).
 
 ## Evidence
-- `afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts:97-224`
-- `afrinov-platform/apps/backend/src/modules/procurement/procurement.service.ts:138-455`
-- `afrinov-platform/apps/backend/src/modules/inventory/inventory.service.ts:573-592` — over-receipt refused
-- `afrinov-platform/apps/frontend/src/App.tsx:125-136`
+- `afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts`
+- `afrinov-platform/apps/backend/src/modules/procurement/procurement.service.ts` (`create`, `update`, `submit`, `approve`, `receive`, next number)
+- `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`, `po-pricing.ts`
+- `afrinov-platform/apps/backend/src/modules/procurement/goods-receipt.service.ts`
+- `afrinov-platform/apps/backend/src/modules/settings/settings.service.ts` (`purchaseOrders.*`)
+- `afrinov-platform/apps/frontend/src/pages/PurchaseOrderForm.tsx`, `PurchaseOrderDetail.tsx`, `PurchaseOrders.tsx`
+- `afrinov-platform/apps/frontend/src/lib/poDocument.ts`, `components/WaitingForApproval.tsx`
+- `afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx` (open orders)

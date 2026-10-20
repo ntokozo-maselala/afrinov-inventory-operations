@@ -9,4 +9,4 @@ journeys in `01-product/user-journeys.md`, run for real by the actual
 people who will use the system day to day — not just engineering.
 
 *Unverified / Planned:* no staging environment or UAT record exists in the
-repository; the tool check-out journey cannot be run (not built).
+repository; the tool check-out journey can now be run on the Tools page.

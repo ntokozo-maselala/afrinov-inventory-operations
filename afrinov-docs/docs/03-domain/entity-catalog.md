@@ -129,9 +129,11 @@ detail is in `07-data/database-schema.md`.
 Supporting entities; see `07-data/database-schema.md` and
 `07-data/audit-model.md`.
 
-## Tool (Material subtype behaviour) — Planned
+## Tool (Material subtype behaviour)
 - **Purpose:** a Material in the Tools category with check-out tracking.
-- **Attributes:** currentHolder, currentStatus. **Not in the schema.**
+- **Attributes:** `serialNumber` (unique, for a tool kept as one unit). There
+  is no holder or status column: who has a tool is derived from its open
+  `LOAN` movements less their `LOAN_RETURN`s (`shared/inventory/tool-loans.ts`).
 - **AS-IS source:** `Tools Main`/`Tools Issued` with `Check In/Out` column.
 
 ## Evidence

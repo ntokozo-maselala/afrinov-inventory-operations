@@ -28,12 +28,12 @@
 | Material master management | Core | Yes | Implemented |
 | Location master management | Core | Yes | Implemented (no merge tooling) |
 | Supplier master management | Core | Yes | Partly (create only) |
-| Purchase order management | Core | Yes | Implemented, off by default |
+| Purchase order management | Core | Yes | Implemented, on by default (ADR-019) |
 | Goods receipt | Core | Yes | Implemented |
 | Stock issue | Core | Yes | Implemented |
 | Stock transfer | Core | Yes | Implemented |
 | Stock adjustment | Core | Yes | Implemented (plus stock counts, reversals) |
-| Tool check-out/in | Core (category-specific) | Yes | **Planned** |
+| Tool check-out/in | Core (category-specific) | Yes | Implemented (`04-processes/tool-loans.md`) |
 | Reorder alerting | Supporting | Yes | Implemented (in-product) |
 | Reporting & analytics | Supporting | Yes | Implemented |
 | Project consumption reference | Supporting | Yes | Implemented (projects are a full master) |

@@ -5,7 +5,7 @@
 ## Domains identified
 | Domain | Responsibility | Backend module | Status |
 |---|---|---|---|
-| Procurement | Suppliers, purchase orders, goods receipts | `procurement/` | Implemented; purchase orders and goods receipts switched off unless `PROCUREMENT_ENABLED=true` |
+| Procurement | Suppliers, purchase orders, goods receipts | `procurement/` | Implemented; purchase orders and goods receipts on unless `PROCUREMENT_ENABLED=false` |
 | Inventory | Materials, locations, racks, ledger, balances, counts | `inventory/` | Implemented |
 | Operations | Projects and recipients ("Issued To") | `operations/` | Implemented: projects are a full master record, not reference-only |
 | Reporting | Read-only reports and Excel/PDF exports | `reporting/` | Implemented |

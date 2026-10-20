@@ -38,11 +38,9 @@ A single-item issue is also available from the Stock page.
    and project, so consumption reports net it out; balance recomputed;
    `RETURN` audit entry.
 
-## Steps — Tool check-out — **Planned**
-Not implemented: there is no tool state, check-out or check-in endpoint or
-page. Tools are issued and returned like any other material. The intended
-flow: search for tool; confirm `IN_STORE`; select recipient and optional
-project; state becomes `CHECKED_OUT` with a holder; check-in reverses it.
+## Tools
+Tools are not issued: they are checked out and back in on the Tools page
+(`tool-loans.md`). Issuing a tool is refused.
 
 ## Business rules
 - Stock can never go below zero. This is a fixed rule with **no override**
@@ -51,7 +49,7 @@ project; state becomes `CHECKED_OUT` with a holder; check-in reverses it.
 - Every issue names an active recipient (ADR-008).
 - An issue with returns against it cannot be reversed until the returns are
   reversed.
-- Tools cannot be checked out twice — **Planned** with the tool feature.
+- A tool cannot be checked out beyond what is on the shelf (`tool-loans.md`).
 
 ## Exceptions
 - Urgent need exceeding available stock → refused with

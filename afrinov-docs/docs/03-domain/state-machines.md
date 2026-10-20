@@ -11,12 +11,16 @@ DRAFT -> PENDING_APPROVAL -> APPROVED -> PARTIALLY_RECEIVED -> RECEIVED -> CLOSE
                                    PARTIALLY_RECEIVED -> CLOSED (closing short, reason required)
 DRAFT -> APPROVED  (submit, when the approval setting is off)
 APPROVED / PARTIALLY_RECEIVED -> RECEIVED  ("receive everything outstanding")
+APPROVED -> PENDING_APPROVAL  (an edit takes the total past the approver's limit, or unprices a line)
 ```
 Rules, as enforced:
 - **Submit** (`DRAFT` only, at least one line) → `PENDING_APPROVAL`; or
   straight to `APPROVED` when `purchaseOrders.requireApprovalBeforeProcessing`
   is false.
-- **Approve**: `PENDING_APPROVAL` → `APPROVED`.
+- **Approve**: `PENDING_APPROVAL` → `APPROVED`, only when every line has a
+  price and the order total (rand, including VAT) is within the approver's
+  limit; an order in another currency needs an approver without a limit
+  (`04-processes/purchase-order-lifecycle.md`).
 - **Receive**: goods receipts may be posted only against `APPROVED` or
   `PARTIALLY_RECEIVED` orders. Posting sets `RECEIVED` when every line's
   received quantity reaches its ordered quantity, otherwise
@@ -27,9 +31,12 @@ Rules, as enforced:
   required when any line is short.
 - **Cancel**: `DRAFT`, `PENDING_APPROVAL` or `APPROVED` → `CANCELLED`, with
   a reason, and only while `purchaseOrders.allowCancellation` is on.
-- **Edit**: notes and expected delivery date only, in `DRAFT` or
-  `PENDING_APPROVAL`, and also `APPROVED` when
-  `purchaseOrders.allowEditAfterApproval` is on. Lines are never editable.
+- **Edit**: prices, line delivery dates, VAT, order details, notes and
+  expected delivery date, in `DRAFT` or `PENDING_APPROVAL`, and also
+  `APPROVED` when `purchaseOrders.allowEditAfterApproval` is on. Materials
+  and quantities are never editable. Changing an `APPROVED` order raises its
+  revision; if the new total is past its approver's limit, or a line loses
+  its price, it goes back to `PENDING_APPROVAL`.
 - Every transition is guarded by `WHERE status = <expected>`; a concurrent
   change returns 409 CONFLICT.
 - There is no reject transition; an approver cannot reject an order (they

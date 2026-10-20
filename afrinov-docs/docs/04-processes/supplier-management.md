@@ -1,39 +1,62 @@
 # Process: Supplier Management
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** a7a7360, 2026-10-20
 
 ## Inputs
-A new supplier to buy from, or an update to an existing one.
+A new supplier to buy from, or an update to an existing one. The supplier
+master follows the vendor list in the AFRI-0000_x purchase order template
+("Item Description" workbook).
 
 ## Note on AS-IS
-No supplier master exists — `Supplier Name` is retyped per transaction
-(e.g. `Hydroscand` with inconsistent trailing whitespace), so
-supplier-level reporting is not possible today. *Unverified* (workbook
-observation). The import does not read supplier names from the workbook;
-the buyer types them into `master-data.xlsx`
-(`07-data/migration-strategy.md`).
+The stock workbook has no supplier master — `Supplier Name` is retyped per
+transaction (e.g. `Hydroscand` with inconsistent trailing whitespace), so
+supplier-level reporting is not possible there. *Unverified* (workbook
+observation). The purchase order template's vendor list is the nearest thing
+to one, and is what the import reads.
 
 ## Steps
-1. Suppliers page: create a supplier — name (required), contact name,
-   email, phone, notes (`POST /api/v1/suppliers`, `create:supplier`:
-   PROCUREMENT, ADMIN). A `CREATE` audit entry is written.
-2. The supplier is selectable on counter receipts and, when procurement is
-   on, on purchase orders and goods receipts. Inactive suppliers are
-   refused on receipts.
-3. Update / deactivate: **Planned** — no endpoint exists, although the
-   `edit:supplier` permission and the `active` column do (TD-013).
+1. **Add** on the Suppliers page, or from Receive stock when a delivery
+   comes from a new supplier (`POST /api/v1/suppliers`, `create:supplier`:
+   PROCUREMENT, STORE_CONTROLLER, ADMIN — ADR-018). Fields: name (required),
+   vendor code, contact name, email, phone, address, currency (`ZAR`, `USD`,
+   `EUR`, `GBP`; rand by default), payment terms, website, services and
+   notes. A `CREATE` audit entry is written.
+2. **Edit, deactivate or reactivate** on the supplier's page
+   (`PATCH /api/v1/suppliers/:id`, `edit:supplier`). Only the fields that
+   change are written, as an `UPDATE` audit entry.
+3. **Import the vendor list** (`npm run import:suppliers`, backend). A dry
+   run by default: it reads the template's vendor list, compares it with the
+   suppliers already in the app and writes a report to `import-reports/`
+   without touching the database. With `--apply` (plus the database name
+   typed back and the acting user) it creates the new suppliers and fills
+   empty fields on existing ones, in one transaction. Nothing already typed
+   in the app is overwritten, so it is safe to run again.
+4. The supplier is selectable on counter receipts and on purchase orders.
+   Its currency sets a new order's default VAT (the VAT setting for rand,
+   0% otherwise) and its payment terms fill the order's
+   (`purchase-order-lifecycle.md`). A supplier's page lists its orders and
+   links to a new order for it.
 
 ## Business rules
-- Supplier names are unique ignoring case: checked by the service (friendly
-  409) and enforced by a case-insensitive unique index. Surrounding spaces
-  are trimmed on create.
+- Supplier names are unique ignoring case and spacing: checked by the service
+  (friendly 409) and enforced by a case-insensitive unique index.
+- Vendor codes are unique, letters, digits and dashes only, stored upper case
+  without spaces (`v001 ` → `V001`).
+- Text is tidied the same way by the API and the import, so both store the
+  same spelling: payment terms `COD` / `c.o.d` → `C.O.D`, `30 Days Nett` →
+  `30 DAYS NETT`; currency words (`EUROS`, `Rand`) → codes; stray separators
+  trimmed from websites.
+- Inactive suppliers are refused on receipts and cannot be ordered from;
+  the list shows active suppliers first.
 
 ## Outputs
 Supplier record, available for receipt and PO selection.
 
 ## Evidence
-- `afrinov-platform/apps/frontend/src/pages/Suppliers.tsx`
-- `afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts:10-16,78-95`
-- `afrinov-platform/apps/backend/src/modules/procurement/procurement.service.ts:33-70`
-- `afrinov-platform/apps/backend/prisma/migrations/20260101000002_supplier_name_uniqueness/migration.sql:16`
-- `afrinov-platform/apps/backend/src/modules/inventory/stock-receipt.service.ts:49-51`
+- `afrinov-platform/apps/frontend/src/pages/Suppliers.tsx`, `SupplierDetail.tsx`, `components/SupplierForm.tsx`
+- `afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts` (supplier schemas and routes)
+- `afrinov-platform/apps/backend/src/modules/procurement/procurement.service.ts` (`SupplierService`)
+- `afrinov-platform/apps/backend/src/modules/procurement/supplier-fields.ts`
+- `afrinov-platform/apps/backend/scripts/import-suppliers.ts`, `src/modules/migration/vendor-list.ts`
+- `afrinov-platform/apps/backend/prisma/migrations/20260101000013_supplier_template_fields/migration.sql`
+- `afrinov-platform/apps/backend/src/shared/permissions.ts` (ADR-018)

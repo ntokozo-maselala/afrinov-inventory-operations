@@ -37,8 +37,8 @@ the no-negative-stock rule against the current balance, inserts
 `inventory_transactions` rows, recomputes the affected balance rows, and in
 some cases writes an audit entry and dispatches in-process domain events.
 
-There is no tool check-out/check-in component; that capability is
-**Planned** (see `04-processes/stock-issuing.md`). There are no separate
+Tool check-out and check-in live in the inventory module
+(`tool.routes.ts`, `tool-loan.service.ts`; see `04-processes/tool-loans.md`). There are no separate
 `application/`, `domain/` or `persistence/` folders: rules live in the
 service files.
 

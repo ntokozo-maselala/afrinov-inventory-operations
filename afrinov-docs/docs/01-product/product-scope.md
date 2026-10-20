@@ -14,13 +14,13 @@
 - **Inventory balances** — current on-hand quantity per material per
   location, derived from transactions.
 - **Purchase orders** — creation and tracking through to goods receipt.
-  *Built; switched off by default (`PROCUREMENT_ENABLED`).*
+  *Built; on by default, can be switched off (`PROCUREMENT_ENABLED=false`).*
 - **Goods receipt** — recording delivery against a PO or ad hoc, updating stock.
 - **Stock issue** — recording material/tool leaving stores to a person and,
   where applicable, a project. *Built: to a recipient (worker, machine, site
   or contractor), with returns.*
 - **Tool check-out/check-in** — distinct from consumable issue, tracking
-  which tool is with which person. ***Planned** — not built.*
+  which tool is with which person. *Built (`04-processes/tool-loans.md`).*
 - **Project reference** — recording which project (`AFRI-####`) a movement
   relates to, without building full project management. *Built as a project
   master (name, status, manager, client, dates) with CRUD — more than a
