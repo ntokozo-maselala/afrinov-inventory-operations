@@ -9,14 +9,18 @@ import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { PurchaseOrderStatusBadge, Badge } from '../components/Badge';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
+import { Button } from '../components/Button';
+import { Drawer } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Icon } from '../components/Icon';
+import { useToast } from '../components/Toast';
+import { SupplierForm } from '../components/SupplierForm';
+import { usePermissions } from '../hooks/usePermissions';
+import { api, type ApiError } from '../api/client';
+import type { Supplier } from '../api/types';
 import { formatDate, formatNumber } from '../lib/format';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
-interface Supplier {
-  id: string; name: string; contactName?: string;
-  contactEmail?: string; contactPhone?: string; notes?: string;
-  active: boolean;
-}
 interface PO {
   id: string; number: string; status: string; supplierId: string;
   createdAt: string; supplier: { id?: string; name: string };
@@ -25,10 +29,15 @@ interface PO {
 
 export function SupplierDetail() {
   const { id } = useParams<{ id: string }>();
-  // Reuse the suppliers list endpoint to find the supplier; lightweight.
-  const suppliers = useApi<Supplier[]>('/suppliers');
-  const supplier = suppliers.data?.find((s) => s.id === id);
+  const supplierReq = useApi<Supplier>(id ? `/suppliers/${encodeURIComponent(id)}` : null);
+  const supplier = supplierReq.data;
   const pos = useApi<PO[]>(PROCUREMENT_ENABLED ? '/purchase-orders' : null);
+  // Editing needs edit:supplier on the server (Store controller and Procurement, ADR-018).
+  const canManage = usePermissions().hasPermission('suppliers:manage');
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   // Filter POs by the supplier's stable id. Filtering by name is
   // unreliable (case/whitespace variations, duplicate names).
@@ -43,26 +52,73 @@ export function SupplierDetail() {
     [id],
   );
 
+  async function setActive(active: boolean) {
+    if (!supplier) return;
+    setToggling(true);
+    try {
+      await api.patch(`/suppliers/${supplier.id}`, { active });
+      toast.success(active ? `${supplier.name} reactivated` : `${supplier.name} deactivated`);
+      setConfirmDeactivate(false);
+      supplierReq.reload();
+    } catch (err) {
+      toast.error(active ? 'Could not reactivate supplier' : 'Could not deactivate supplier', (err as ApiError).message);
+    } finally {
+      setToggling(false);
+    }
+  }
+
+  const dash = <span className="text-surface-300">—</span>;
+  const website = supplier?.website
+    ? (/^https?:\/\//i.test(supplier.website) ? supplier.website : `https://${supplier.website}`)
+    : null;
+
   return (
     <div>
       <PageHeader
-        title={supplier?.name ?? (suppliers.loading ? 'Loading…' : 'Supplier')}
+        title={supplier?.name ?? (supplierReq.loading ? 'Loading…' : 'Supplier')}
+        description={supplier ? [supplier.vendorCode, supplier.services].filter(Boolean).join(' · ') : ''}
         breadcrumb={[{ label: 'Suppliers', to: '/suppliers' }, { label: supplier?.name ?? 'Supplier' }]}
-        actions={supplier && (supplier.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>)}
+        actions={supplier && (
+          <>
+            {supplier.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
+            {canManage && (supplier.active
+              ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
+              : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
+            {canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Edit size={12} />} onClick={() => setEditing(true)}>Edit</Button>}
+          </>
+        )}
       />
 
-      {suppliers.error && <ErrorState message={suppliers.error.message} onRetry={suppliers.reload} />}
+      {supplierReq.error && (supplierReq.error.code === 'NOT_FOUND'
+        ? <EmptyState title="Supplier not found" description="It may have been deleted or the link is incorrect." />
+        : <ErrorState message={supplierReq.error.message} onRetry={supplierReq.reload} />)}
 
       {supplier && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <aside className="lg:col-span-1 surface-card p-4 space-y-3">
-            <h2 className="text-h3 text-surface-900">Contact</h2>
-            <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
-              <dt className="text-surface-500">Contact</dt><dd className="col-span-2">{supplier.contactName ?? '—'}</dd>
-              <dt className="text-surface-500">Email</dt><dd className="col-span-2">{supplier.contactEmail ? <a className="text-brand-600 hover:underline" href={`mailto:${supplier.contactEmail}`}>{supplier.contactEmail}</a> : '—'}</dd>
-              <dt className="text-surface-500">Phone</dt><dd className="col-span-2">{supplier.contactPhone ?? '—'}</dd>
-              {supplier.notes && (<><dt className="text-surface-500">Notes</dt><dd className="col-span-2">{supplier.notes}</dd></>)}
-            </dl>
+          <aside className="lg:col-span-1 space-y-4">
+            <section className="surface-card p-4 space-y-3">
+              <h2 className="text-h3 text-surface-900">Contact</h2>
+              <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
+                <dt className="text-surface-500">Contact</dt><dd className="col-span-2">{supplier.contactName ?? dash}</dd>
+                <dt className="text-surface-500">Email</dt><dd className="col-span-2 break-words">{supplier.contactEmail ? <a className="text-brand-600 hover:underline" href={`mailto:${supplier.contactEmail}`}>{supplier.contactEmail}</a> : dash}</dd>
+                <dt className="text-surface-500">Phone</dt><dd className="col-span-2">{supplier.contactPhone ?? dash}</dd>
+                <dt className="text-surface-500">Address</dt><dd className="col-span-2 whitespace-pre-line">{supplier.address ?? dash}</dd>
+                <dt className="text-surface-500">Website</dt><dd className="col-span-2 break-words">{website ? <a className="text-brand-600 hover:underline" href={website} target="_blank" rel="noreferrer">{supplier.website}</a> : dash}</dd>
+              </dl>
+            </section>
+            <section className="surface-card p-4 space-y-3">
+              <h2 className="text-h3 text-surface-900">Purchasing</h2>
+              <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
+                <dt className="text-surface-500">Vendor code</dt><dd className="col-span-2 text-mono">{supplier.vendorCode ?? dash}</dd>
+                <dt className="text-surface-500">Currency</dt><dd className="col-span-2">{supplier.currency ?? 'ZAR'}</dd>
+                <dt className="text-surface-500">Payment terms</dt><dd className="col-span-2">{supplier.paymentTerms ?? dash}</dd>
+                <dt className="text-surface-500">Supplies</dt><dd className="col-span-2">{supplier.services ?? dash}</dd>
+                {supplier.notes && (<><dt className="text-surface-500">Notes</dt><dd className="col-span-2">{supplier.notes}</dd></>)}
+              </dl>
+              {canManage && !supplier.vendorCode && (
+                <p className="text-meta">No vendor code yet · <button type="button" className="btn-link" onClick={() => setEditing(true)}>Add one</button></p>
+              )}
+            </section>
           </aside>
 
           <div className="lg:col-span-2 space-y-6">
@@ -98,15 +154,38 @@ export function SupplierDetail() {
         </div>
       )}
 
-      {!supplier && !suppliers.loading && !suppliers.error && (
-        <EmptyState title="Supplier not found" description="It may have been deleted or the link is incorrect." />
-      )}
-
-      {suppliers.loading && !supplier && (
+      {supplierReq.loading && !supplier && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="surface-card p-4 h-40"><Skeleton h={120} /></div>
           <div className="lg:col-span-2 surface-card p-4 h-72"><Skeleton h={240} /></div>
         </div>
+      )}
+
+      {editing && supplier && canManage && (
+        <Drawer open onClose={() => setEditing(false)} title={`Edit ${supplier.name}`} description="Changes apply from now on. Deliveries already booked keep the supplier they were booked with." width="md">
+          <SupplierForm
+            initial={supplier}
+            onCancel={() => setEditing(false)}
+            onSaved={(s) => { setEditing(false); supplierReq.reload(); toast.success(`${s.name} saved`); }}
+            onError={(err) => toast.error('Could not save supplier', err.message)}
+            onSuccess={() => undefined}
+          />
+        </Drawer>
+      )}
+
+      {confirmDeactivate && supplier && (
+        <ConfirmDialog
+          open
+          onClose={() => setConfirmDeactivate(false)}
+          onConfirm={() => void setActive(false)}
+          title={`Deactivate ${supplier.name}?`}
+          description={PROCUREMENT_ENABLED
+            ? 'While the supplier is inactive, no stock can be received from them and no new purchase orders raised. Orders already raised and their history stay. You can reactivate them at any time.'
+            : 'While the supplier is inactive, no stock can be received from them. Their delivery history stays. You can reactivate them at any time.'}
+          confirmLabel="Deactivate"
+          destructive
+          loading={toggling}
+        />
       )}
     </div>
   );

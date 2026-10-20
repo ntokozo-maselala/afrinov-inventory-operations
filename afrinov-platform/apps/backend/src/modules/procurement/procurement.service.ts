@@ -21,6 +21,7 @@ import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance } from '../../shared/inventory/balances.js';
+import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -28,44 +29,160 @@ export interface CreateSupplierInput {
   contactEmail?: string;
   contactPhone?: string;
   notes?: string;
+  vendorCode?: string;
+  address?: string;
+  currency?: string;
+  paymentTerms?: string;
+  website?: string;
+  services?: string;
+}
+
+/** Fields left out are unchanged; null clears an optional one. */
+export interface UpdateSupplierInput {
+  id: string;
+  name?: string;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  notes?: string | null;
+  vendorCode?: string | null;
+  address?: string | null;
+  currency?: string;
+  paymentTerms?: string | null;
+  website?: string | null;
+  services?: string | null;
+  active?: boolean;
+}
+
+async function assertSupplierNameFree(name: string, exceptId?: string): Promise<void> {
+  const clash = await prisma.supplier.findFirst({
+    where: { name: { equals: name, mode: 'insensitive' }, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+  });
+  if (clash) throw Errors.conflict(`Supplier "${clash.name}" already exists`);
+}
+
+async function assertVendorCodeFree(code: string, exceptId?: string): Promise<void> {
+  const clash = await prisma.supplier.findFirst({
+    where: { vendorCode: code, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+  });
+  if (clash) throw Errors.conflict(`Vendor code ${code} is already used by ${clash.name}`);
+}
+
+// Two requests saving the same name or vendor code at once: the unique index wins.
+function rethrowSupplierClash(err: unknown): never {
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+    throw Errors.conflict('Another supplier already has this name or vendor code');
+  }
+  throw err;
 }
 
 export const SupplierService = {
   async list(q?: string) {
     return prisma.supplier.findMany({
       where: q
-        ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { contactName: { contains: q, mode: 'insensitive' } }] }
+        ? {
+          OR: [
+            { name: { contains: q, mode: 'insensitive' } },
+            { contactName: { contains: q, mode: 'insensitive' } },
+            { vendorCode: { contains: q, mode: 'insensitive' } },
+            { services: { contains: q, mode: 'insensitive' } },
+          ],
+        }
         : {},
       orderBy: [{ active: 'desc' }, { name: 'asc' }],
     });
   },
 
-  async create(input: CreateSupplierInput, actorId: string) {
-    const normalized = input.name.trim().toLowerCase();
-    const existing = await prisma.supplier.findFirst({
-      where: { name: { equals: normalized, mode: 'insensitive' } },
-    });
-    if (existing) throw Errors.conflict(`Supplier "${input.name}" already exists`);
+  async getById(id: string) {
+    const supplier = await prisma.supplier.findUnique({ where: { id } });
+    if (!supplier) throw Errors.notFound('Supplier');
+    return supplier;
+  },
 
-    const created = await prisma.supplier.create({
-      data: {
-        name: input.name.trim(),
-        contactName: input.contactName ?? null,
-        contactEmail: input.contactEmail ?? null,
-        contactPhone: input.contactPhone ?? null,
-        notes: input.notes ?? null,
-      },
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'CREATE',
-        entityType: 'Supplier',
-        entityId: created.id,
-        after: created as unknown as Prisma.InputJsonValue,
-      },
-    });
-    return created;
+  async create(input: CreateSupplierInput, actorId: string) {
+    const name = cleanText(input.name);
+    if (!name) throw Errors.validation('Name is required');
+    await assertSupplierNameFree(name);
+    const vendorCode = cleanVendorCode(input.vendorCode);
+    if (vendorCode) await assertVendorCodeFree(vendorCode);
+
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const created = await tx.supplier.create({
+          data: {
+            name,
+            contactName: cleanText(input.contactName),
+            contactEmail: cleanText(input.contactEmail),
+            contactPhone: cleanText(input.contactPhone),
+            notes: cleanText(input.notes),
+            vendorCode,
+            address: cleanText(input.address),
+            currency: input.currency ?? 'ZAR',
+            paymentTerms: cleanPaymentTerms(input.paymentTerms),
+            website: cleanWebsite(input.website),
+            services: cleanText(input.services),
+          },
+        });
+        await tx.auditLogEntry.create({
+          data: {
+            actorId,
+            action: 'CREATE',
+            entityType: 'Supplier',
+            entityId: created.id,
+            after: created as unknown as Prisma.InputJsonValue,
+          },
+        });
+        return created;
+      });
+    } catch (err) {
+      rethrowSupplierClash(err);
+    }
+  },
+
+  async update(input: UpdateSupplierInput, actorId: string) {
+    const before = await prisma.supplier.findUnique({ where: { id: input.id } });
+    if (!before) throw Errors.notFound('Supplier');
+    const data: Prisma.SupplierUpdateInput = {};
+    if (input.name !== undefined) {
+      const name = cleanText(input.name);
+      if (!name) throw Errors.validation('Name is required');
+      await assertSupplierNameFree(name, input.id);
+      data.name = name;
+    }
+    if (input.vendorCode !== undefined) {
+      const code = cleanVendorCode(input.vendorCode);
+      if (code) await assertVendorCodeFree(code, input.id);
+      data.vendorCode = code;
+    }
+    if (input.contactName !== undefined) data.contactName = cleanText(input.contactName);
+    if (input.contactEmail !== undefined) data.contactEmail = cleanText(input.contactEmail);
+    if (input.contactPhone !== undefined) data.contactPhone = cleanText(input.contactPhone);
+    if (input.notes !== undefined) data.notes = cleanText(input.notes);
+    if (input.address !== undefined) data.address = cleanText(input.address);
+    if (input.currency !== undefined) data.currency = input.currency;
+    if (input.paymentTerms !== undefined) data.paymentTerms = cleanPaymentTerms(input.paymentTerms);
+    if (input.website !== undefined) data.website = cleanWebsite(input.website);
+    if (input.services !== undefined) data.services = cleanText(input.services);
+    if (input.active !== undefined) data.active = input.active;
+
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const after = await tx.supplier.update({ where: { id: input.id }, data });
+        await tx.auditLogEntry.create({
+          data: {
+            actorId,
+            action: 'UPDATE',
+            entityType: 'Supplier',
+            entityId: input.id,
+            before: before as unknown as Prisma.InputJsonValue,
+            after: after as unknown as Prisma.InputJsonValue,
+          },
+        });
+        return after;
+      });
+    } catch (err) {
+      rethrowSupplierClash(err);
+    }
   },
 };
 
@@ -139,6 +256,7 @@ export const PurchaseOrderService = {
     if (input.lines.length === 0) throw Errors.validation('Purchase order must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
+    if (!supplier.active) throw Errors.validation(`${supplier.name} is inactive. Reactivate the supplier to order from them.`);
 
     return prisma.$transaction(async (tx) => {
       // Serialize PO-number generation so two concurrent creates cannot

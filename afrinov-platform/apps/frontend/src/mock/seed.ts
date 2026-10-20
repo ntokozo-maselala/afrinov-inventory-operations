@@ -21,10 +21,10 @@ export const SEED_LOCATIONS: MockLocation[] = [
 ];
 
 export const SEED_SUPPLIERS: MockSupplier[] = [
-  { id: 'sup-1', name: 'Hydroscand', contactName: 'Jan Smit', contactEmail: 'orders@hydroscand.co.za', contactPhone: '+27 11 555 0101', active: true },
-  { id: 'sup-2', name: 'Bearings International', contactName: 'T. Naidoo', contactEmail: 'sales@bearings.co.za', contactPhone: '+27 11 555 0145', active: true },
-  { id: 'sup-3', name: 'Engineering Fasteners (Pty) Ltd', contactEmail: 'sales@engfast.co.za', contactPhone: '+27 11 555 0177', active: true },
-  { id: 'sup-4', name: 'Local Steel Supplies', contactName: 'Mike P.', contactPhone: '+27 11 555 0190', active: true },
+  { id: 'sup-1', name: 'Hydroscand', vendorCode: 'V007', contactName: 'Jan Smit', contactEmail: 'orders@hydroscand.co.za', contactPhone: '+27 11 555 0101', address: '14 Hose Street, Germiston', currency: 'ZAR', paymentTerms: '30 DAYS NETT', services: 'Hydraulic pipes, fittings and hoses', active: true },
+  { id: 'sup-2', name: 'Bearings International', vendorCode: 'V159', contactName: 'T. Naidoo', contactEmail: 'sales@bearings.co.za', contactPhone: '+27 11 555 0145', currency: 'ZAR', paymentTerms: 'C.O.D', services: 'Bearings and seals', active: true },
+  { id: 'sup-3', name: 'Engineering Fasteners (Pty) Ltd', vendorCode: 'V009', contactEmail: 'sales@engfast.co.za', contactPhone: '+27 11 555 0177', currency: 'ZAR', paymentTerms: 'C.O.D', services: 'Fasteners', active: true },
+  { id: 'sup-4', name: 'Local Steel Supplies', contactName: 'Mike P.', contactPhone: '+27 11 555 0190', currency: 'ZAR', active: true },
 ];
 
 export const SEED_MATERIALS: MockMaterial[] = [

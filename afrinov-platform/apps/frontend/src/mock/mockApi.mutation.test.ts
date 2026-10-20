@@ -31,6 +31,31 @@ describe('mock API mutation flows', () => {
     resetMockState();
   });
 
+  describe('suppliers (vendor fields, edit, deactivate)', () => {
+    it('adds a supplier with a vendor code, tidied, and ZAR by default', async () => {
+      const s = await api.post<{ id: string; vendorCode: string; currency: string; paymentTerms: string }>('/suppliers', { name: 'Fast Flame', vendorCode: ' v003', paymentTerms: 'cod' });
+      expect(s).toMatchObject({ vendorCode: 'V003', currency: 'ZAR', paymentTerms: 'C.O.D' });
+      expect(await api.get(`/suppliers/${s.id}`)).toMatchObject({ name: 'Fast Flame' });
+    });
+
+    it('refuses a vendor code another supplier has', async () => {
+      const e = await api.post('/suppliers', { name: 'Someone else', vendorCode: 'V007' }).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('CONFLICT');
+    });
+
+    it('edits only the fields sent, and clears one with null', async () => {
+      const after = await api.patch<Record<string, unknown>>('/suppliers/sup-1', { paymentTerms: 'C.O.D', address: null });
+      expect(after).toMatchObject({ name: 'Hydroscand', vendorCode: 'V007', paymentTerms: 'C.O.D' });
+      expect(after.address).toBeUndefined();
+    });
+
+    it('takes no new purchase orders for an inactive supplier', async () => {
+      await api.patch('/suppliers/sup-1', { active: false });
+      const e = await api.post('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('VALIDATION_ERROR');
+    });
+  });
+
   describe('POST /materials (create)', () => {
     it('creates a material and returns it', async () => {
       const result = await api.post<{ id: string; sku: string; name: string; active: boolean }>('/materials', {

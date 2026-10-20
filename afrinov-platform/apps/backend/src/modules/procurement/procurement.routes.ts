@@ -3,16 +3,42 @@ import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
 import { PurchaseOrderService, SupplierService } from './procurement.service.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
+import { SUPPLIER_CURRENCIES } from './supplier-fields.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
 
+const supplierCurrency = z.enum(SUPPLIER_CURRENCIES);
+const vendorCode = z.string().trim().max(20).regex(/^[A-Za-z0-9-]*$/, 'Letters, digits and dashes only');
+
 export const createSupplierSchema = z.object({
-  name: z.string().min(1),
-  contactName: z.string().optional(),
+  name: z.string().trim().min(1).max(200),
+  contactName: z.string().max(200).optional(),
   contactEmail: z.string().email().optional(),
-  contactPhone: z.string().optional(),
-  notes: z.string().optional(),
+  contactPhone: z.string().max(50).optional(),
+  notes: z.string().max(2000).optional(),
+  vendorCode: vendorCode.optional(),
+  address: z.string().max(500).optional(),
+  currency: supplierCurrency.optional(),
+  paymentTerms: z.string().max(100).optional(),
+  website: z.string().max(200).optional(),
+  services: z.string().max(500).optional(),
+});
+
+// Fields left out are unchanged; null (or an empty string) clears an optional one.
+export const updateSupplierSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  contactName: z.string().max(200).nullable().optional(),
+  contactEmail: z.union([z.string().email(), z.literal('')]).nullable().optional(),
+  contactPhone: z.string().max(50).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  vendorCode: vendorCode.nullable().optional(),
+  address: z.string().max(500).nullable().optional(),
+  currency: supplierCurrency.optional(),
+  paymentTerms: z.string().max(100).nullable().optional(),
+  website: z.string().max(200).nullable().optional(),
+  services: z.string().max(500).nullable().optional(),
+  active: z.boolean().optional(),
 });
 
 export const createPOSchema = z.object({
@@ -91,6 +117,23 @@ export async function supplierRoutes(app: FastifyInstance): Promise<void> {
     }
     const created = await SupplierService.create(parsed.data, actorId(req));
     return reply.code(201).send(created);
+  });
+
+  app.get('/suppliers/:id', { preHandler: [app.authenticate] }, async (req) => {
+    return SupplierService.getById((req.params as { id: string }).id);
+  });
+
+  // Edit, deactivate or reactivate. Suppliers are never deleted: receipts and
+  // purchase orders keep pointing at them.
+  app.patch('/suppliers/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.EditSupplier);
+    const parsed = updateSupplierSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid supplier payload', details: parsed.error.flatten() },
+      });
+    }
+    return SupplierService.update({ id: (req.params as { id: string }).id, ...parsed.data }, actorId(req));
   });
 }
 
