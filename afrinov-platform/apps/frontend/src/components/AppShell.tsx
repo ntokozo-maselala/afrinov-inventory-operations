@@ -53,7 +53,7 @@ function AppShellInner({ children }: { children: ReactNode }) {
           <AppHeader user={user} onLogout={logout} />
           <PageContainer maxWidth={isDashboard ? 'full' : 'lg'}>{children}</PageContainer>
           <footer className="px-4 sm:px-6 lg:px-8 py-4 text-center text-xs text-surface-400 border-t border-surface-200 dark:text-surface-400 dark:border-surface-200">
-            Afrinov IMS · prototype
+            Afrinov IMS © 2026. All rights reserved.
           </footer>
         </div>
       </div>
