@@ -154,8 +154,7 @@ export function Login() {
           </div>
 
           <div className="text-xs text-white/60">
-            &copy; {new Date().getFullYear()} Afrinov. Demo build — credentials are configured for
-            demonstration only.
+            &copy; {new Date().getFullYear()} Afrinov. All rights reserved.
           </div>
         </aside>
 
