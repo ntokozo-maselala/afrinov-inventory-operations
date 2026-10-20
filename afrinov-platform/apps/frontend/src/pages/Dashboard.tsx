@@ -14,7 +14,6 @@ import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
-import { WaitingForApproval } from '../components/WaitingForApproval';
 import { usePermissions } from '../hooks/usePermissions';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { DashboardLocationDonut, DashboardValueBarChart } from './DashboardCharts';
@@ -33,6 +32,24 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
   LOW_STOCK: 'warning',
   OUT_OF_STOCK: 'danger',
 };
+
+/**
+ * The orders the signed-in approver can approve now (every line priced, the
+ * total within their limit, as the server decides), and how many more are
+ * pending but need prices or a higher limit. Links to their approval queue.
+ */
+function approvalCard(mine: unknown[], pending: unknown[] | null) {
+  const others = pending ? Math.max(0, pending.length - mine.length) : 0;
+  const more = others === 1 ? '1 more needs prices or a higher limit' : `${formatNumber(others)} more need prices or a higher limit`;
+  return {
+    label: 'Pending Approvals', value: formatNumber(mine.length),
+    tone: mine.length > 0 ? 'warning' as const : 'neutral' as const,
+    note: mine.length > 0
+      ? (others > 0 ? `waiting for you · ${more}` : 'waiting for your approval')
+      : (others > 0 ? more : 'nothing waiting for you'),
+    to: '/purchase-orders?status=mine',
+  };
+}
 
 /** Tools out on loan and how many are overdue, linking to the Tools page. */
 function toolsCard(tools: ToolRow[]) {
@@ -63,6 +80,9 @@ export function Dashboard() {
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
   const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
   const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
+  // Only for those who may approve: the queue the server picks for them, and every pending order.
+  const { data: mine, loading: mineLoading, error: mineError, reload: reloadMine } = useApi<unknown[]>(canApprove ? '/purchase-orders?awaitingMyApproval=true' : null);
+  const { data: pending, reload: reloadPending } = useApi<unknown[]>(canApprove ? '/purchase-orders?status=PENDING_APPROVAL' : null);
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -84,8 +104,13 @@ export function Dashboard() {
       { label: 'Warning', value: formatNumber(status.WARNING), tone: status.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
       { label: 'Out of stock', value: formatNumber(status.outOfStock), tone: status.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
       loanCard,
+      ...(!canApprove ? [] : mineError
+        ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
+        : mine
+          ? [approvalCard(mine, pending)]
+          : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [
@@ -114,11 +139,15 @@ export function Dashboard() {
     reloadLowStock();
     reloadValue();
     reloadTools();
-  }, [reload, reloadLowStock, reloadValue, reloadTools]);
+    if (canApprove) { reloadMine(); reloadPending(); }
+  }, [reload, reloadLowStock, reloadValue, reloadTools, canApprove, reloadMine, reloadPending]);
 
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
   const dataError = error ?? valueError;
+  // Approvers get a seventh card, Pending Approvals, so the row has seven columns.
+  const kpiCount = canApprove ? 7 : 6;
+  const kpiGridClass = canApprove ? 'dashboard-kpis dashboard-kpis-7' : 'dashboard-kpis';
 
   return (
     <div className="dashboard-theme">
@@ -146,14 +175,12 @@ export function Dashboard() {
           </div>
         )}
 
-        {canApprove && <WaitingForApproval />}
-
         {valueLoading && !kpis ? (
-          <div className="dashboard-kpis" aria-label="Loading dashboard metrics">
-            {Array.from({ length: 6 }).map((_, index) => <div key={index} className="dashboard-skeleton-card" />)}
+          <div className={kpiGridClass} aria-label="Loading dashboard metrics">
+            {Array.from({ length: kpiCount }).map((_, index) => <div key={index} className="dashboard-skeleton-card" />)}
           </div>
         ) : kpis ? (
-          <section className="dashboard-kpis" aria-label="Inventory summary">
+          <section className={kpiGridClass} aria-label="Inventory summary">
             {kpis.map((kpi, index) => {
               const content = (
                 <>
