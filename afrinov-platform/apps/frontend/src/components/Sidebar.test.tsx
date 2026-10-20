@@ -331,7 +331,8 @@ describe('New purchase order in the menu', () => {
 
   it.each([
     ['PROCUREMENT', ['Purchase orders', 'New purchase order']],
-    ['APPROVER', ['Purchase orders']],
+    ['APPROVER', ['Purchase orders', 'Waiting for my approval']],
+    ['ADMIN', ['Purchase orders', 'Waiting for my approval', 'New purchase order']],
     ['STORE_CONTROLLER', ['Purchase orders']],
   ])('shows a %s only the Procurement entries they can use', (role, expected) => {
     signedIn.roles = [role];
@@ -345,5 +346,13 @@ describe('New purchase order in the menu', () => {
     expect(active('/purchase-orders/po-1')).toEqual(['Purchase orders']);
     expect(active('/purchase-orders/po-1/edit')).toEqual(['Purchase orders']);
     expect(active('/purchase-orders/new')).toEqual(['New purchase order']);
+  });
+
+  it('highlights Waiting for my approval only on the approval queue', () => {
+    const items = useNavGroups().find((g) => g.title === 'Procurement')!.items;
+    const active = (pathname: string, search = '') => items.filter((i) => isNavItemActive(i, pathname, search)).map((i) => i.label);
+    expect(active('/purchase-orders', '?status=mine')).toEqual(['Waiting for my approval']);
+    expect(active('/purchase-orders', '?status=PENDING_APPROVAL')).toEqual(['Purchase orders']);
+    expect(active('/purchase-orders/po-1', '?status=mine')).toEqual(['Purchase orders']);
   });
 });

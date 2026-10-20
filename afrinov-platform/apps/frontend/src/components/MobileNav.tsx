@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAppShell } from '../hooks/useAppShell';
 import { Icon } from './Icon';
@@ -27,7 +27,7 @@ interface MobileNavItemProps {
 
 function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: MobileNavItemProps) {
   const location = useLocation();
-  const isActive = isNavItemActive(item, location.pathname);
+  const isActive = isNavItemActive(item, location.pathname, location.search);
   const hasChildren = item.children && item.children.length > 0;
 
   const handleClick = () => {
@@ -56,26 +56,26 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
         </button>
         <div className="pl-8 space-y-0.5 border-l border-surface-200 dark:border-surface-200 mt-1">
           {item.children!.map((child) => (
-            <NavLink
+            <Link
               key={child.to}
               to={child.to}
-              end={child.end}
+              aria-current={isNavItemActive(child, location.pathname, location.search) ? 'page' : undefined}
               onClick={onNavigate}
               className={`flex items-center gap-3 px-3 py-2 rounded text-sm ${prefersReducedMotion ? 'transition-none' : 'transition-colors'} ${
-                isNavItemActive(child, location.pathname)
+                isNavItemActive(child, location.pathname, location.search)
                   ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
                   : 'text-surface-700 hover:bg-surface-100 dark:text-surface-700 dark:hover:bg-surface-100'
               }`}
             >
               <span aria-hidden="true" className={`shrink-0 h-5 w-5 flex items-center justify-center ${
-                isNavItemActive(child, location.pathname)
+                isNavItemActive(child, location.pathname, location.search)
                     ? 'text-brand-600 dark:text-brand-300'
                     : 'text-surface-400 dark:text-surface-400'
               }`}>
                 {child.icon}
               </span>
               <span className="flex-1 truncate">{child.label}</span>
-            </NavLink>
+            </Link>
           ))}
         </div>
       </div>
@@ -83,9 +83,9 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
   }
 
   return (
-    <NavLink
+    <Link
       to={item.to}
-      end={item.end || !isActive}
+      aria-current={isActive ? 'page' : undefined}
       onClick={onNavigate}
       className={`flex items-center gap-3 px-3 py-2.5 rounded text-sm ${prefersReducedMotion ? 'transition-none' : 'transition-colors'} ${
         isActive
@@ -99,7 +99,7 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
         {item.icon}
       </span>
       <span className="flex-1 truncate">{item.label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
