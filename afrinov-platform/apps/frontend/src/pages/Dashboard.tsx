@@ -115,7 +115,7 @@ export function Dashboard() {
   const dataError = error ?? valueError;
 
   return (
-    <div className="dashboard-theme dark">
+    <div className="dashboard-theme">
       <div className="dashboard-content">
         <header className="dashboard-heading">
           <div>
