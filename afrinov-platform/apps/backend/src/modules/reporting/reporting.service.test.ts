@@ -115,7 +115,7 @@ function makePrisma(): unknown {
       findMany: async ({ where }: { where: { materialId: { in: string[] }; goodsReceipt: { status: string } } }) => db.receipts
         .filter((r) => where.materialId.in.includes(r.materialId) && r.status === where.goodsReceipt.status)
         .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime())
-        .map((r) => ({ materialId: r.materialId, goodsReceipt: { receivedAt: r.receivedAt, supplier: { name: r.supplier } } })),
+        .map((r) => ({ materialId: r.materialId, goodsReceipt: { receivedAt: r.receivedAt, supplier: { id: `sup-${r.supplier}`, name: r.supplier } } })),
     },
   };
 }
@@ -299,7 +299,7 @@ describe('ReportingService', () => {
       ];
       const { ReportingService } = await import('./reporting.service.js');
       const rows = await ReportingService.stockStatus();
-      expect(rows.find((r) => r.sku === 'SKU-001')?.lastSupplier).toEqual({ name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' });
+      expect(rows.find((r) => r.sku === 'SKU-001')?.lastSupplier).toEqual({ id: 'sup-Hydroscand', name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' });
       expect(rows.find((r) => r.sku === 'SKU-002')?.lastSupplier).toBeNull();
     });
 

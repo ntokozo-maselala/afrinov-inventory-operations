@@ -2,12 +2,18 @@
 // Required Stock, graded URGENT / WARNING / OK as the stock workbook's
 // URGENCY column does, with the re-order quantity. GET /reports/stock-status.
 // The bands are settings (Settings → Inventory).
+//
+// A buyer ticks items and chooses Order these: a new purchase order opens
+// with them filled in, from their last supplier. Items from other suppliers
+// stay ticked for the next order.
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
-import { useIsAdmin } from '../hooks/usePermissions';
+import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
+import { Button } from '../components/Button';
+import { Modal } from '../components/Modal';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
 import { Field, Select } from '../components/Field';
@@ -40,7 +46,7 @@ export interface StockStatusItem {
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
   /** The supplier of the latest posted goods receipt with this item. */
-  lastSupplier: { name: string; receivedAt: string } | null;
+  lastSupplier: { id: string; name: string; receivedAt: string } | null;
 }
 
 const VIEWS: Array<{ value: string; label: string }> = [
@@ -54,8 +60,50 @@ const VIEWS: Array<{ value: string; label: string }> = [
   { value: 'all', label: 'All items' },
 ];
 
+const TICKED_KEY = 'stockStatus.toOrder';
+
+function readTicked(): string[] {
+  try { return JSON.parse(sessionStorage.getItem(TICKED_KEY) ?? '[]') as string[]; } catch { return []; }
+}
+function saveTicked(ids: string[]) {
+  try { sessionStorage.setItem(TICKED_KEY, JSON.stringify(ids)); } catch { /* the ticks just aren't kept */ }
+}
+
+/** The ticked items grouped by their last supplier; items never delivered have none. */
+interface SupplierGroup { supplierId: string | null; name: string; items: StockStatusItem[] }
+function bySupplier(items: StockStatusItem[]): SupplierGroup[] {
+  const groups = new Map<string, SupplierGroup>();
+  for (const r of items) {
+    const key = r.lastSupplier?.id ?? '';
+    const g = groups.get(key) ?? { supplierId: r.lastSupplier?.id ?? null, name: r.lastSupplier?.name ?? 'No supplier yet', items: [] };
+    g.items.push(r);
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => (a.supplierId === null ? 1 : b.supplierId === null ? -1 : a.name.localeCompare(b.name)));
+}
+
 export function StockStatus() {
   const items = useApi<StockStatusItem[]>('/reports/stock-status');
+  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canOrder = PROCUREMENT_ENABLED && hasPermission('procurement:manage');
+  // Kept for this tab, so the items left after one order are still ticked on return.
+  const [tickedIds, setTickedIds] = useState<string[]>(() => (canOrder ? readTicked() : []));
+  const [choosing, setChoosing] = useState<SupplierGroup[] | null>(null);
+  function setTicked(ids: string[]) { setTickedIds(ids); saveTicked(ids); }
+  const ticked = (items.data ?? []).filter((r) => tickedIds.includes(r.materialId));
+
+  function orderFrom(group: SupplierGroup) {
+    const ids = group.items.map((r) => r.materialId);
+    setTicked(tickedIds.filter((id) => !ids.includes(id)));
+    const qs = new URLSearchParams({ ...(group.supplierId ? { supplierId: group.supplierId } : {}), materialIds: ids.join(',') });
+    navigate(`/purchase-orders/new?${qs.toString()}`);
+  }
+  function orderTicked() {
+    const groups = bySupplier(ticked);
+    if (groups.length === 1) orderFrom(groups[0]!);
+    else setChoosing(groups);
+  }
   const bands = useStatusBands();
   const isAdmin = useIsAdmin();
   const [q, setQ] = useState('');
@@ -111,9 +159,9 @@ export function StockStatus() {
                 <Icon.ArrowDown size={14} /> Receive stock
               </Link>
             </RoleGuard>
-            {PROCUREMENT_ENABLED && (
-              <Link to="/purchase-orders" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                <Icon.Cart size={14} /> Create purchase order
+            {canOrder && (
+              <Link to="/purchase-orders/new" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                <Icon.Cart size={14} /> New purchase order
               </Link>
             )}
           </div>
@@ -161,6 +209,16 @@ export function StockStatus() {
         </Alert>
       )}
 
+      {canOrder && ticked.length > 0 && (
+        <div className="surface-card p-3 mb-4 flex flex-wrap items-center justify-between gap-2" role="region" aria-label="Items to order">
+          <span className="text-sm text-surface-700">
+            {ticked.length} item{ticked.length === 1 ? '' : 's'} ticked to order
+            <button type="button" className="btn-link ml-3" onClick={() => setTicked([])}>Untick all</button>
+          </span>
+          <Button variant="primary" size="sm" leadingIcon={<Icon.Cart size={14} />} onClick={orderTicked}>Order these</Button>
+        </div>
+      )}
+
       {items.error && <ErrorState message={items.error.message} onRetry={items.reload} />}
 
       {!items.error && (
@@ -169,7 +227,7 @@ export function StockStatus() {
           isLoading={items.loading}
           rowKey={(r) => r.materialId}
           rows={filtered}
-          columns={COLUMNS}
+          columns={canOrder ? [tickColumn(filtered, tickedIds, setTicked), ...COLUMNS] : COLUMNS}
           emptyState={
             <EmptyState
               title={view === 'attention' ? 'Nothing needs re-ordering' : 'No items match'}
@@ -178,8 +236,50 @@ export function StockStatus() {
           }
         />
       )}
+
+      {choosing && (
+        <Modal
+          open onClose={() => setChoosing(null)} title="Which supplier?" size="md"
+          description="One purchase order is to one supplier. The ticked items were last delivered by these; the rest stay ticked for the next order."
+          footer={<Button variant="ghost" onClick={() => setChoosing(null)}>Cancel</Button>}
+        >
+          <ul className="space-y-2">
+            {choosing.map((g) => (
+              <li key={g.supplierId ?? 'none'}>
+                <button type="button" className="btn-secondary w-full justify-between" onClick={() => { setChoosing(null); orderFrom(g); }}>
+                  <span>{g.name}</span>
+                  <span className="text-meta">{g.items.length} item{g.items.length === 1 ? '' : 's'}: {g.items.map((r) => r.sku).join(', ')}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
     </div>
   );
+}
+
+/** A tick per row, and one in the heading for every row shown. */
+function tickColumn(shown: StockStatusItem[], tickedIds: string[], setTicked: (ids: string[]) => void): DataTableColumn<StockStatusItem> {
+  const allShown = shown.length > 0 && shown.every((r) => tickedIds.includes(r.materialId));
+  return {
+    key: 'tick',
+    width: '2.5rem',
+    header: (
+      <input
+        type="checkbox" aria-label="Tick every item shown" checked={allShown}
+        onChange={() => setTicked(allShown
+          ? tickedIds.filter((id) => !shown.some((r) => r.materialId === id))
+          : [...new Set([...tickedIds, ...shown.map((r) => r.materialId)])])}
+      />
+    ),
+    render: (r) => (
+      <input
+        type="checkbox" aria-label={`Order ${r.sku}`} checked={tickedIds.includes(r.materialId)}
+        onChange={(e) => setTicked(e.target.checked ? [...tickedIds, r.materialId] : tickedIds.filter((id) => id !== r.materialId))}
+      />
+    ),
+  };
 }
 
 const num = (s: string | null | undefined) => {

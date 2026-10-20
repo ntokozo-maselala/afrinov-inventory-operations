@@ -19,6 +19,7 @@ import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
 import { categoryLabel } from '../lib/categories';
+import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 
 
@@ -37,6 +38,7 @@ export function MaterialDetail() {
   const canReceive = hasPermission('inventory:receive');
   const canIssue = hasPermission('inventory:issue');
   const canLend = hasPermission('tools:lend');
+  const canOrder = PROCUREMENT_ENABLED && hasPermission('procurement:manage');
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
@@ -85,6 +87,7 @@ export function MaterialDetail() {
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
             <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
+            {active && canOrder && <Link to={`/purchase-orders/new?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
             {active && total > 0 && !isTool && canIssue && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
