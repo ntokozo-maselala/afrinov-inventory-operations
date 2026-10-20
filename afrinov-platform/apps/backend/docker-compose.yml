@@ -42,8 +42,8 @@ services:
       # Comma-separated allow-list. Required in production; CORS is disabled
       # when unset.
       CORS_ORIGIN: ${CORS_ORIGIN:-}
-      # Purchase orders and goods receipts are off unless this is "true".
-      PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-false}
+      # Purchase orders and goods receipts are on unless this is "false".
+      PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-true}
       # API docs at /api/docs. Off in production unless this is "true".
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
       # Password for the admin account the seed creates on first start. The

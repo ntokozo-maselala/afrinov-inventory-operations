@@ -12,9 +12,9 @@ const getEnv = (name: string): string | undefined => {
 
 /**
  * Whether the procurement module (purchase orders and goods receipts) is
- * shown. Default: `false`. Set `VITE_PROCUREMENT_ENABLED=true` to show it, and
- * `PROCUREMENT_ENABLED=true` on the backend to register its API routes.
+ * shown. Default: `true`. Set `VITE_PROCUREMENT_ENABLED=false` to hide it, and
+ * `PROCUREMENT_ENABLED=false` on the backend to drop its API routes.
  * Suppliers are not part of this switch.
  */
 export const PROCUREMENT_ENABLED: boolean =
-  String(getEnv('VITE_PROCUREMENT_ENABLED') ?? '').toLowerCase() === 'true';
+  String(getEnv('VITE_PROCUREMENT_ENABLED') ?? '').toLowerCase() !== 'false';

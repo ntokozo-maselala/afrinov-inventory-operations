@@ -232,7 +232,7 @@ checks the permission it needs.
 ---
 
 ### ADR-012 — Procurement is off by default, behind a feature switch
-**Date:** 2026-10-06 (commit 1e70c23) · **Status:** Inferred from code
+**Date:** 2026-10-06 (commit 1e70c23) · **Status:** Superseded by ADR-019
 
 **Decision:** Purchase-order and goods-receipt routes and pages exist only
 when `PROCUREMENT_ENABLED=true` (backend) and `VITE_PROCUREMENT_ENABLED=true`
@@ -328,3 +328,27 @@ supplier yet, so `edit:supplier` has nothing to apply to until one is built.
 
 **Evidence:** `afrinov-platform/apps/backend/src/shared/permissions.ts`,
 `afrinov-platform/apps/frontend/src/hooks/usePermissions.ts` (`suppliers:manage`).
+
+---
+
+### ADR-019 — Procurement is on by default
+**Date:** 2026-10-20 · **Status:** Accepted
+
+**Context:** ADR-012 kept purchase orders and goods receipts off unless both
+switches were set to `true`. The purchase order work aligned to the Item
+Description template (suppliers, pricing and VAT, approval by order value,
+order numbers, receiving against an order) is now in main, and procurement
+is in scope again. With the old default, every fresh setup and deployment
+had to remember two settings before purchase orders appeared.
+
+**Decision:** `PROCUREMENT_ENABLED` (backend) and `VITE_PROCUREMENT_ENABLED`
+(frontend) are on unless set to `false`. The switch stays, so a deployment
+can still turn procurement off. Supersedes ADR-012.
+
+**Consequences:** Purchase orders show in the menu, dashboard and settings
+without configuration. A deployment that wants procurement off must now set
+both variables to `false`, and keep the two in step.
+
+**Evidence:** `afrinov-platform/apps/backend/src/shared/config.ts`
+(`isProcurementEnabled`), `afrinov-platform/apps/frontend/src/config/features.ts`,
+`afrinov-platform/apps/backend/docker-compose.yml`.
