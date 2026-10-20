@@ -133,7 +133,7 @@ describe('tool loans over real HTTP', () => {
   it('refuses to check in more than is still out on a loan', async () => {
     const res = await api<{ error: { message: string } }>('POST', '/tools/check-in', { lines: [{ loanId: drillLoanId, quantity: 1, condition: 'GOOD' }] });
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/only 0 still out/);
+    expect(res.body.error.message).toMatch(/only 0 still checked out/);
     expect(await onShelf(drillId)).toBe('3');
   });
 

@@ -132,7 +132,7 @@ describe('ToolLoanService', () => {
       ['1', 'DAMAGE', 'Blade bent', 'ToolLoan', loanId, 'r-bukho'],
     ]);
     await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 2, condition: 'GOOD' }] }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('only 1 still out') });
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('only 1 still checked out') });
     await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD' }] });
     scraper = await tool('m-scraper');
     expect([scraper.inStore, scraper.onLoan, scraper.loans]).toEqual(['11', '0', []]);
@@ -145,7 +145,7 @@ describe('ToolLoanService', () => {
     const { writeOffIds } = await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'LOST', note: 'Left on site' }] });
     expect(writeOffIds).toHaveLength(1);
     const writeOff = db.ledger.find((r) => r.id === writeOffIds[0])!;
-    expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.reasonNote]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'Lost on loan to Sabelo: Left on site']);
+    expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.reasonNote]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'Lost while checked out to Sabelo: Left on site']);
     const drill = await tool('m-drill');
     expect([drill.inStore, drill.onLoan, drill.owned]).toEqual(['0', '0', '0']);
   });

@@ -114,7 +114,7 @@ export function IssueStock() {
     <div>
       <PageHeader
         title="Issue stock"
-        description={<>Record stock leaving the store: who took it, for which project, and which items. Tools are lent, not issued: check them out on <Link to="/tools" className="btn-link">Tools</Link>.</>}
+        description={<>Record stock leaving the store: who took it, for which project, and which items. Tools are checked out, not issued: do that on <Link to="/tools" className="btn-link">Tools</Link>.</>}
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Issue stock' }]}
       />
 
