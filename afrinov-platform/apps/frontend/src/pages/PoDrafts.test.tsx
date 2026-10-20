@@ -161,7 +161,12 @@ describe('Finding drafts in the list', () => {
     auth.roles = ['STORE_CONTROLLER'];
     appAt('/purchase-orders');
     expect(await screen.findByText('AFRI-0104')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'New purchase order' })).not.toBeInTheDocument();
+  });
+
+  it('has no New purchase order button: the menu has it', async () => {
+    appAt('/purchase-orders');
+    await screen.findByText('AFRI-0101');
+    expect(screen.queryByRole('link', { name: /New purchase order/ })).not.toBeInTheDocument();
   });
 
   it('takes the status from the link', async () => {

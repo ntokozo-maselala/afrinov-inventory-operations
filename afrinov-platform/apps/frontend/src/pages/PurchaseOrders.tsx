@@ -94,9 +94,6 @@ export function PurchaseOrders() {
       <PageHeader
         title="Purchase orders"
         description="The full procurement workflow — from draft through to receipt."
-        actions={canManage
-          ? <Link to="/purchase-orders/new" className="btn-primary"><Icon.Plus />New purchase order</Link>
-          : undefined}
       />
 
       <Toolbar

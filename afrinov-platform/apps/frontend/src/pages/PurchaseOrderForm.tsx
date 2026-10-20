@@ -47,6 +47,16 @@ const SETTING_KEYS = [
   'purchaseOrders.deliveryContactName', 'purchaseOrders.deliveryContactPhone',
 ];
 
+/**
+ * A line's delivery date as the form shows it: its own date, or the order's
+ * expected delivery when it has none, so the lines follow the order's date
+ * until one is changed. Only a date of its own is saved with the line; the
+ * rest stay "due on the expected delivery" on the server.
+ */
+function shownLineDate(own: string, expected: string): string { return own || expected; }
+/** What to keep for a line when its date is changed: nothing if it matches the order's. */
+function ownLineDate(picked: string, expected: string): string { return picked === expected ? '' : picked; }
+
 function checkVat(vatRate: string): string | null {
   const rate = Number(vatRate);
   return vatRate.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 100 ? 'VAT rate must be between 0 and 100.' : null;
@@ -218,7 +228,7 @@ function NewPurchaseOrderForm() {
             <Field label="VAT rate (%)" htmlFor="po-vat" help={currency === 'ZAR' ? `Rand orders start at ${formatRate(settingRate)}.` : `${currency} orders start at 0%.`}>
               <Input id="po-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatOverride(e.target.value)} />
             </Field>
-            <Field label="Expected delivery" htmlFor="po-expected" help="Lines without their own date are due then.">
+            <Field label="Expected delivery" htmlFor="po-expected" help="Each line is due then, unless you change its date.">
               <Input id="po-expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} />
             </Field>
           </div>
@@ -254,7 +264,13 @@ function NewPurchaseOrderForm() {
                   <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Unit price" value={l.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} aria-label={`Line ${i + 1} unit price`} className="text-right" />
                 </div>
                 <div className="col-span-4 md:col-span-2">
-                  <Input type="date" value={l.deliveryDate} onChange={(e) => updateLine(i, { deliveryDate: e.target.value })} aria-label={`Line ${i + 1} delivery date`} title="Delivery date (blank: the expected delivery)" />
+                  <Input
+                    type="date" value={shownLineDate(l.deliveryDate, expected)}
+                    onChange={(e) => updateLine(i, { deliveryDate: ownLineDate(e.target.value, expected) })}
+                    aria-label={`Line ${i + 1} delivery date`}
+                    title={l.deliveryDate ? 'This line’s own delivery date' : 'The expected delivery, until changed for this line'}
+                    className={l.deliveryDate ? undefined : 'text-surface-500'}
+                  />
                 </div>
                 <div className="col-span-12 md:col-span-1 flex md:justify-center">
                   <Button size="sm" variant="ghost" type="button" onClick={() => removeLine(i)} aria-label={`Remove line ${i + 1}`} leadingIcon={<Icon.Trash size={14} />}><span className="md:hidden">Remove</span></Button>
@@ -401,8 +417,10 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
               </div>
               <Input id={`po-edit-price-${l.id}`} aria-label={`${l.material.sku} unit price`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
                 onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-6 sm:col-span-3" />
-              <Input id={`po-edit-date-${l.id}`} aria-label={`${l.material.sku} delivery date`} type="date" value={dates[l.id] ?? ''}
-                onChange={(e) => setDates((d) => ({ ...d, [l.id]: e.target.value }))} className="col-span-6 sm:col-span-3" />
+              <Input id={`po-edit-date-${l.id}`} aria-label={`${l.material.sku} delivery date`} type="date" value={shownLineDate(dates[l.id] ?? '', expectedDeliveryDate)}
+                onChange={(e) => setDates((d) => ({ ...d, [l.id]: ownLineDate(e.target.value, expectedDeliveryDate) }))}
+                title={dates[l.id] ? 'This line’s own delivery date' : 'The expected delivery, until changed for this line'}
+                className={`col-span-6 sm:col-span-3 ${dates[l.id] ? '' : 'text-surface-500'}`} />
             </div>
           ))}
         </fieldset>
@@ -410,7 +428,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
           <Field label="VAT rate (%)" htmlFor="po-edit-vat" help={(po.currency ?? 'ZAR') === 'ZAR' ? 'Rand orders start at the VAT setting.' : 'Orders in other currencies start at 0%.'}>
             <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
           </Field>
-          <Field label="Expected delivery" htmlFor="po-edit-expected" help="Lines without their own date are due then.">
+          <Field label="Expected delivery" htmlFor="po-edit-expected" help="Each line is due then, unless you change its date.">
             <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
           </Field>
         </div>
