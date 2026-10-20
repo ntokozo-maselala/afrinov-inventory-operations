@@ -42,7 +42,7 @@ function approvalCard(mine: unknown[], pending: unknown[] | null) {
   const others = pending ? Math.max(0, pending.length - mine.length) : 0;
   const more = others === 1 ? '1 more needs prices or a higher limit' : `${formatNumber(others)} more need prices or a higher limit`;
   return {
-    label: 'Approval status', value: formatNumber(mine.length),
+    label: 'Pending Approvals', value: formatNumber(mine.length),
     tone: mine.length > 0 ? 'warning' as const : 'neutral' as const,
     note: mine.length > 0
       ? (others > 0 ? `waiting for you · ${more}` : 'waiting for your approval')
@@ -105,10 +105,10 @@ export function Dashboard() {
       { label: 'Out of stock', value: formatNumber(status.outOfStock), tone: status.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
       loanCard,
       ...(!canApprove ? [] : mineError
-        ? [{ label: 'Approval status', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
+        ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
         : mine
           ? [approvalCard(mine, pending)]
-          : [{ label: 'Approval status', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
+          : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
   }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending]);
 
@@ -145,7 +145,7 @@ export function Dashboard() {
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
   const dataError = error ?? valueError;
-  // Approvers get a seventh card, Approval status, so the row has seven columns.
+  // Approvers get a seventh card, Pending Approvals, so the row has seven columns.
   const kpiCount = canApprove ? 7 : 6;
   const kpiGridClass = canApprove ? 'dashboard-kpis dashboard-kpis-7' : 'dashboard-kpis';
 

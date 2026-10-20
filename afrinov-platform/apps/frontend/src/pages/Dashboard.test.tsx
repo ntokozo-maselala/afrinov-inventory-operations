@@ -116,7 +116,7 @@ describe('Dashboard analytics', () => {
   });
 });
 
-describe('Dashboard: approval status card', () => {
+describe('Dashboard: pending approvals card', () => {
   const order = (id: string, number: string, net: string) => ({
     id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' },
     totals: { subtotal: net, vat: '0.00', net, unpricedLines: 0 },
@@ -132,7 +132,7 @@ describe('Dashboard: approval status card', () => {
     });
   });
 
-  const approvalCard = async () => (await screen.findByText('Approval status')).closest('a')!;
+  const approvalCard = async () => (await screen.findByText('Pending Approvals')).closest('a')!;
 
   it('shows a card with the orders the approver can approve, and counts the others', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
@@ -154,7 +154,7 @@ describe('Dashboard: approval status card', () => {
     auth.roles = ['STORE_CONTROLLER'];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await screen.findByText('Stock value by category');
-    expect(screen.queryByText('Approval status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pending Approvals')).not.toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
   });
 });
