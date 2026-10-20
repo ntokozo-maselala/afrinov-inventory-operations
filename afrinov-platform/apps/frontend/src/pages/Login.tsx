@@ -147,7 +147,7 @@ export function Login() {
             </p>
             <ul className="text-sm text-white/80 space-y-2 pt-2">
               <li className="flex items-center gap-2"><Icon.Check size={14} /> Real-time stock balances and movements</li>
-              {PROCUREMENT_ENABLED && <li className="flex items-center gap-2"><Icon.Check size={14} /> Procurement, goods receipts, and approvals</li>}
+              {PROCUREMENT_ENABLED && <li className="flex items-center gap-2"><Icon.Check size={14} /> Purchase orders, approvals and deliveries</li>}
               <li className="flex items-center gap-2"><Icon.Check size={14} /> Rack and location management</li>
               <li className="flex items-center gap-2"><Icon.Check size={14} /> Reports, audit trail, and policy controls</li>
             </ul>

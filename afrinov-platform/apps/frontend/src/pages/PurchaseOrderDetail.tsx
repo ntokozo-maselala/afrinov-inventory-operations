@@ -291,7 +291,7 @@ export function PurchaseOrderDetail() {
 
               <section>
                 <SectionHeader title="Goods receipts" description="Receipts posted against this purchase order." />
-                <RelatedReceipts receipts={fresh.goodsReceipts ?? []} canViewReceipts={hasPermission('receipts:view')} />
+                <RelatedReceipts receipts={fresh.goodsReceipts ?? []} />
               </section>
 
               <section>
@@ -503,8 +503,7 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
 
 // ── Receive delivery ─────────────────────────────────────────────────────
 // What arrived on one delivery, line by line, posted as a goods receipt
-// against this order: the same form as Goods receipts, so a partial delivery
-// needs no other page.
+// against this order. A partial delivery needs no other page.
 function ReceiveDeliveryDialog({ po, onClose, onReceived }: { po: PO; onClose: () => void; onReceived: (receiptNumber: string) => void }) {
   const locations = useApi<LocationOpt[]>('/locations');
   const [lines, setLines] = useState<ReceiptLineDraft[]>(() => receiptLinesFromOrder(po));
@@ -704,9 +703,9 @@ function OrderTotals({ po, totals, onAddPrices }: { po: PO; totals: PoTotals; on
   );
 }
 
-function RelatedReceipts({ receipts, canViewReceipts }: { receipts: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }>; canViewReceipts: boolean }) {
+function RelatedReceipts({ receipts }: { receipts: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }> }) {
   if (receipts.length === 0) {
-    return <EmptyState title="No receipts yet" description="Receipts will appear here when stock arrives against this PO." action={canViewReceipts ? <Link to="/goods-receipts" className="btn-secondary btn-sm">Go to receipts</Link> : undefined} />;
+    return <EmptyState title="No receipts yet" description="Deliveries booked with Receive delivery appear here." />;
   }
   return (
     <DataTable

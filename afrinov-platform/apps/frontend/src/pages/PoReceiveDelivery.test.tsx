@@ -1,7 +1,6 @@
 // One way to receive, whatever arrives (procurement workflow Phase 4):
 // Receive delivery on the order's page books part of an order, Receive stock
-// asks whether a delivery is against one of the supplier's open orders, and a
-// receipt links to its order.
+// asks whether a delivery is against one of the supplier's open orders.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -16,7 +15,6 @@ vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: true }));
 
 const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ReceiveStock } = await import('./ReceiveStock');
-const { GoodsReceipts } = await import('./GoodsReceipts');
 const { ToastProvider } = await import('../components/Toast');
 
 const ORDER = {
@@ -144,10 +142,3 @@ describe('Receive stock with open orders', () => {
   });
 });
 
-describe('Goods receipts list', () => {
-  it('links each receipt to its order, or says it was a counter receipt', async () => {
-    render(<MemoryRouter><ToastProvider><GoodsReceipts /></ToastProvider></MemoryRouter>);
-    expect(await screen.findByRole('link', { name: 'AFRI-0412' })).toHaveAttribute('href', '/purchase-orders/po-1');
-    expect(within(screen.getByText('GR-2026-0002').closest('tr')!).getByText('Counter receipt')).toBeInTheDocument();
-  });
-});
