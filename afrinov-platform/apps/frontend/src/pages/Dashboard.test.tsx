@@ -29,21 +29,26 @@ describe('Dashboard', () => {
       if (path === '/reports/stock-value') return VALUE;
       if (path === '/reports/low-stock') return [];
       if (path === '/tools') return tools;
-      return { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} };
+      return {
+        generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {},
+        byLocation: [
+          { locationId: 'l-1', locationName: 'Central Store', locationType: 'STORE', quantity: 20, inventoryValue: 6000, share: 0.6 },
+          { locationId: 'l-2', locationName: 'Workshop', locationType: 'STORE', quantity: 10, inventoryValue: 4000, share: 0.4 },
+        ],
+      };
     });
   });
 
   it('shows the stock value per category, with a total, and the status counts', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const table = within(await screen.findByLabelText('Stock value by category'));
-    expect(table.getByText('Consumables')).toBeInTheDocument();
-    expect(table.getByText('1 in stock without a price')).toBeInTheDocument();
+    expect(await table.findByRole('img', { name: /Consumables .*75%/ })).toBeInTheDocument();
+    expect(table.getByText('Unpriced: 1 in Consumables')).toBeInTheDocument();
     expect(table.getByText('All categories')).toBeInTheDocument();
-    expect(table.getByText('75%')).toBeInTheDocument();
 
     expect(screen.getByText('10 of 14')).toBeInTheDocument();
-    expect(screen.getByText('Urgent').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=URGENT');
-    expect(screen.getByText('Out of stock').closest('a')).toHaveAttribute('href', '/reports/stock-status?view=out');
+    expect(screen.getByRole('link', { name: /^Urgent/ })).toHaveAttribute('href', '/reports/stock-status?view=URGENT');
+    expect(screen.getByRole('link', { name: /^Out of stock/ })).toHaveAttribute('href', '/reports/stock-status?view=out');
     expect(screen.queryByLabelText('Time range')).not.toBeInTheDocument();
   });
 
@@ -65,7 +70,7 @@ describe('Dashboard', () => {
     const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2 });
     tools = [{ materialId: 'm-1', loans: [loan('2', false), loan('1', true)] }, { materialId: 'm-2', loans: [] }];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    const card = (await screen.findByText('Tools out')).closest('a')!;
+    const card = (await screen.findByText('Tools checked out')).closest('a')!;
     expect(card).toHaveAttribute('href', '/tools?view=overdue');
     expect(card).toHaveTextContent('3');
     expect(card).toHaveTextContent('1 overdue');
@@ -81,10 +86,33 @@ describe('Dashboard items table', () => {
       return { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [line(1), line(2)], inventoryTotal: 340, kpis: {} };
     });
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    expect(await screen.findByText(/Showing the first 2 of 340 lines/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'See them all on Stock' })).toHaveAttribute('href', '/stock');
+    expect(await screen.findByText(/Showing 2 of 340 lines/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'See all on Stock' })).toHaveAttribute('href', '/stock');
     const section = within(screen.getByRole('region', { name: 'Inventory items' }));
-    expect(section.getByRole('button', { name: 'View all' }).closest('a')).toHaveAttribute('href', '/stock');
+    expect(section.getByRole('link', { name: 'View stock' })).toHaveAttribute('href', '/stock');
+  });
+});
+
+describe('Dashboard analytics', () => {
+  it('shows current category valuation and the backend stock-health bands', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-value') return VALUE;
+      if (path === '/reports/low-stock' || path === '/tools') return [];
+      return {
+        generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {},
+        byLocation: [
+          { locationId: 'l-1', locationName: 'Central Store', locationType: 'STORE', quantity: 20, inventoryValue: 6000, share: 0.6 },
+          { locationId: 'l-2', locationName: 'Workshop', locationType: 'STORE', quantity: 10, inventoryValue: 4000, share: 0.4 },
+        ],
+      };
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByRole('region', { name: 'Stock health' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Current stock value by category: Consumables .*75%/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Stock value by location' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Central Store 60%; Workshop 40%/ })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Urgent: 2, Warning: 1, In range: 9, No reorder level: 2' })).toBeInTheDocument();
+    expect(screen.getByText('On hand × unit cost · excluding VAT')).toBeInTheDocument();
   });
 });
 

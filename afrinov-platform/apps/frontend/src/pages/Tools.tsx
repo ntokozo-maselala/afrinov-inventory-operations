@@ -21,7 +21,7 @@ import type { ToolRow } from '../api/types';
 
 const VIEWS = [
   { value: 'all', label: 'All tools' },
-  { value: 'out', label: 'Out now' },
+  { value: 'out', label: 'Checked out' },
   { value: 'overdue', label: 'Overdue' },
   { value: 'in', label: 'In store' },
 ];
@@ -115,7 +115,7 @@ export function Tools() {
     <div>
       <PageHeader
         title="Tools"
-        description="Tools are lent, not used up: check one out to the person taking it, and back in when it returns. New tools come in through Receive stock."
+        description="Tools are checked out, not used up: check one out to the person taking it, and check it back in when it returns. New tools come in through Receive stock."
         actions={canLend && (
           <Button variant="primary" size="sm" leadingIcon={<Icon.Wrench size={14} />} onClick={() => setCheckingOut({})} disabled={!all.some((t) => Number(t.inStore) > 0)}>
             Check out tools
@@ -155,7 +155,7 @@ export function Tools() {
         </Drawer>
       )}
       {checkingIn && (
-        <Drawer open onClose={() => setCheckingIn(null)} title={`Check in: ${checkingIn.name}`} description="How many came back from each loan, and in what condition. A lost tool is written off." width="md">
+        <Drawer open onClose={() => setCheckingIn(null)} title={`Check in: ${checkingIn.name}`} description="How many came back from each check-out, and in what condition. A lost tool is written off." width="md">
           <CheckInForm tool={checkingIn} onCancel={() => setCheckingIn(null)} onDone={done} />
         </Drawer>
       )}

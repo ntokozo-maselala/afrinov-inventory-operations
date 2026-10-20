@@ -109,7 +109,7 @@ describe('StockStatus page', () => {
   it('shows a tool out on loan beside what is on hand', async () => {
     mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : [{ ...row('TL-1', 'Torque wrench', 'WARNING', '0', '10', 20, '8'), category: 'TOOLS', onLoan: '2' }]));
     renderPage();
-    expect(await screen.findByText('+2 on loan')).toBeInTheDocument();
+    expect(await screen.findByText('+2 checked out')).toBeInTheDocument();
   });
 
   it('opens on the view a link asks for', async () => {

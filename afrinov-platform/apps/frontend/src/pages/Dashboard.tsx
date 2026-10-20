@@ -1,25 +1,27 @@
 import { useMemo, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { PageHeader } from '../components/PageHeader';
+import { Link } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { EmptyState } from '../components/EmptyState';
+import { StockStatusBadge } from '../components/StockStatusBadge';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { formatNumber, formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
+import { categoryLabel } from '../lib/categories';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import type { ToolRow } from '../api/types';
-import { StockStatusBadge } from '../components/StockStatusBadge';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { categoryLabel } from '../lib/categories';
 import { WaitingForApproval } from '../components/WaitingForApproval';
 import { usePermissions } from '../hooks/usePermissions';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { DashboardLocationDonut, DashboardValueBarChart } from './DashboardCharts';
+import './Dashboard.css';
 
-/** GET /reports/stock-value: the stock on hand now, valued per category. */
+/** GET /reports/stock-value: current stock on hand, valued per category. */
 export interface StockValue {
   currency: string;
   categories: Array<{ category: string; items: number; itemsInStock: number; value: number; unpriced: number; share: number }>;
@@ -33,108 +35,77 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
   OUT_OF_STOCK: 'danger',
 };
 
-/** Tools out on loan and how many of them are overdue, linking to the Tools page. */
+/** Tools out on loan and how many are overdue, linking to the Tools page. */
 function toolsCard(tools: ToolRow[]) {
-  const loans = tools.flatMap((t) => t.loans);
-  const out = loans.reduce((n, l) => n + Number(l.out), 0);
-  const overdue = loans.filter((l) => l.overdue).reduce((n, l) => n + Number(l.out), 0);
+  const loans = tools.flatMap((tool) => tool.loans);
+  const out = loans.reduce((count, loan) => count + Number(loan.out), 0);
+  const overdue = loans.filter((loan) => loan.overdue).reduce((count, loan) => count + Number(loan.out), 0);
   return {
-    label: 'Tools out', value: formatNumber(out),
+    label: 'Tools checked out', value: formatNumber(out),
     tone: overdue > 0 ? 'danger' as const : 'neutral' as const,
     note: out === 0 ? 'all in store' : overdue > 0 ? `${formatNumber(overdue)} overdue` : 'none overdue',
     to: overdue > 0 ? '/tools?view=overdue' : '/tools?view=out',
   };
 }
 
-export function Dashboard() {
-  const navigate = useNavigate();
-  const { hasPermission } = usePermissions();
-  const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');
+const HEALTH_SEGMENTS = [
+  { key: 'URGENT', label: 'Urgent', color: 'bg-danger-500', text: 'text-danger-300' },
+  { key: 'WARNING', label: 'Warning', color: 'bg-warning-500', text: 'text-warning-300' },
+  { key: 'OK', label: 'In range', color: 'bg-success-500', text: 'text-success-300' },
+  { key: 'NOT_SET', label: 'No reorder level', color: 'bg-surface-400', text: 'text-surface-300' },
+] as const;
 
-  // Everything here is stock as it stands now, so there is no date range.
+export function Dashboard() {
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
-  const { data: lowStock, loading: lowStockLoading, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
+  const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
+  const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
   const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
-  const { data: tools, reload: reloadTools } = useApi<ToolRow[]>('/tools');
 
   const kpis = useMemo(() => {
     if (!value) return null;
-    const s = value.status;
+    const status = value.status;
+    const loanCard = toolsError
+      ? { label: 'Tools out', value: 'Unavailable', tone: 'neutral' as const, note: 'Loan data could not be loaded', to: undefined }
+      : tools
+        ? toolsCard(tools)
+        : { label: 'Tools out', value: toolsLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: toolsLoading ? 'Loading loan data' : 'Loan data unavailable', to: undefined };
+
     return [
       {
         label: 'Stock value', value: formatCurrency(value.total.value, value.currency), tone: 'success' as const,
-        note: value.total.unpriced > 0 ? `${value.total.unpriced} item${value.total.unpriced === 1 ? '' : 's'} in stock without a price` : 'excl. VAT',
-        // Unpriced items leave the value short; the card opens the list to price them.
+        note: value.total.unpriced > 0 ? `${formatNumber(value.total.unpriced)} in stock without a price · excl. VAT` : 'Current on hand · excl. VAT',
         to: value.total.unpriced > 0 ? '/materials?view=no-price' : undefined,
       },
-      { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, to: '/stock' },
-      { label: 'Urgent', value: formatNumber(s.URGENT), tone: s.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
-      { label: 'Warning', value: formatNumber(s.WARNING), tone: s.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
-      { label: 'Out of stock', value: formatNumber(s.outOfStock), tone: s.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
-      toolsCard(tools ?? []),
+      { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, note: 'active catalogue items', to: '/stock' },
+      { label: 'Urgent', value: formatNumber(status.URGENT), tone: status.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
+      { label: 'Warning', value: formatNumber(status.WARNING), tone: status.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
+      { label: 'Out of stock', value: formatNumber(status.outOfStock), tone: status.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
+      loanCard,
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading]);
 
-  const attentionItems = useMemo(() => {
-    if (!lowStock) return [];
-    return lowStock.slice(0, 5);
-  }, [lowStock]);
-
-  const hasAttention = (lowStock?.length ?? 0) > 0;
-
+  const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [
+    { key: 'sku', header: 'SKU', render: (row) => <span className="font-mono text-xs text-surface-400">{row.sku}</span> },
     {
-      key: 'sku',
-      header: 'SKU',
-      render: (row) => <span className="font-mono text-xs">{row.sku}</span>,
-    },
-    {
-      key: 'name',
-      header: 'Item',
-      render: (row) => (
+      key: 'name', header: 'Item', render: (row) => (
         <div>
-          <div className="text-sm font-medium text-surface-900">{row.name}</div>
-          {row.description && <div className="text-xs text-surface-500 truncate max-w-xs">{row.description}</div>}
+          <Link to={`/materials/${row.materialId}`} className="text-sm font-medium text-surface-800 hover:text-brand-300">{row.name}</Link>
+          {row.description && <div className="max-w-xs truncate text-xs text-surface-400">{row.description}</div>}
         </div>
       ),
     },
+    { key: 'category', header: 'Category', render: (row) => <span className="text-sm text-surface-400">{categoryLabel(row.category)}</span> },
+    { key: 'location', header: 'Location', render: (row) => <span className="text-sm text-surface-400">{row.locationName}</span> },
+    { key: 'quantity', header: 'Qty', align: 'right', render: (row) => <span className="font-mono text-sm text-surface-700">{formatNumber(row.quantity)}</span> },
+    { key: 'value', header: 'Value', align: 'right', render: (row) => <span className="font-mono text-sm text-surface-700">{formatCurrency(row.inventoryValue, report?.currency ?? 'ZAR')}</span> },
     {
-      key: 'category',
-      header: 'Category',
-      render: (row) => <span className="text-sm text-surface-600">{row.category}</span>,
-    },
-    {
-      key: 'location',
-      header: 'Location',
-      render: (row) => <span className="text-sm text-surface-600">{row.locationName}</span>,
-    },
-    {
-      key: 'quantity',
-      header: 'Qty',
-      align: 'right',
-      render: (row) => <span className="text-sm text-surface-900">{formatNumber(row.quantity)}</span>,
-    },
-    {
-      key: 'value',
-      header: 'Value',
-      align: 'right',
-      render: (row) => <span className="text-sm text-surface-900">{formatCurrency(row.inventoryValue, report?.currency ?? 'ZAR')}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      align: 'center',
-      render: (row) => (
-        <Badge tone={STATUS_TONE[row.status] ?? 'neutral'} dot>
-          {LOCATION_STATUS_LABEL[row.status] ?? row.status}
-        </Badge>
+      key: 'status', header: 'Status', align: 'center', render: (row) => (
+        <Badge tone={STATUS_TONE[row.status] ?? 'neutral'} dot>{LOCATION_STATUS_LABEL[row.status] ?? row.status}</Badge>
       ),
     },
   ], [report?.currency]);
-
-  const rows = report?.inventory ?? [];
-  const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
 
   const handleRefresh = useCallback(() => {
     reload();
@@ -143,31 +114,35 @@ export function Dashboard() {
     reloadTools();
   }, [reload, reloadLowStock, reloadValue, reloadTools]);
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Inventory Dashboard"
-        description="Stock on hand now: its value per category, and the items that need re-ordering."
-        meta={
-          report && !loading ? (
-            <span className="text-xs text-surface-500">
-              Updated {formatDateTime(report.generatedAt)}
-            </span>
-          ) : null
-        }
-        actions={
-          <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading}>
-            Refresh
-          </Button>
-        }
-      />
+  const inventoryRows = report?.inventory ?? [];
+  const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
+  const dataError = error ?? valueError;
 
-      {(error ?? valueError) && (
-        <div className="surface-card p-4 flex items-center justify-between">
-          <span className="text-sm text-danger-600">{(error ?? valueError)?.message ?? 'Failed to load dashboard data.'}</span>
-          <Button variant="secondary" size="sm" onClick={handleRefresh}>Retry</Button>
-        </div>
-      )}
+  return (
+    <div className="dashboard-theme">
+      <div className="dashboard-content">
+        <header className="dashboard-heading">
+          <div>
+            <div className="dashboard-eyebrow"><span aria-hidden="true" /> inventory overview</div>
+            <p>Current stock position, valuation and operational exceptions.</p>
+          </div>
+          <div className="dashboard-heading-actions">
+            <div className="dashboard-updated" aria-live="polite">
+              <span className="dashboard-live-dot" aria-hidden="true" />
+              <span>{report && !loading ? `Updated ${formatDateTime(report.generatedAt)}` : 'Live stock snapshot'}</span>
+            </div>
+            <Button variant="secondary" size="sm" onClick={handleRefresh} loading={loading || valueLoading} aria-label="Refresh dashboard data">
+              <RefreshIcon /> Refresh
+            </Button>
+          </div>
+        </header>
+
+        {dataError && (
+          <div className="dashboard-alert" role="alert">
+            <div><strong>Some dashboard data could not be loaded.</strong><span>{dataError.message || 'Check your connection and try again.'}</span></div>
+            <Button variant="secondary" size="sm" onClick={handleRefresh}>Retry</Button>
+          </div>
+        )}
 
       {canApprove && <WaitingForApproval />}
 
@@ -182,172 +157,168 @@ export function Dashboard() {
           : kpis?.map((kpi) => {
               const body = (
                 <>
-                  <span className="text-xs text-surface-500 mb-1">{kpi.label}</span>
-                  <span className={`text-xl font-semibold ${kpi.tone === 'brand' ? 'text-brand-700' : kpi.tone === 'success' ? 'text-success-700' : kpi.tone === 'warning' ? 'text-warning-700' : kpi.tone === 'danger' ? 'text-danger-700' : 'text-surface-900'}`}>
-                    {kpi.value}
-                  </span>
-                  {kpi.note && <span className="text-xs text-surface-500 mt-1">{kpi.note}</span>}
+                  <span className="dashboard-kpi-label">{kpi.label}</span>
+                  <span className={`dashboard-kpi-value dashboard-kpi-${kpi.tone}`}>{kpi.value}</span>
+                  <span className="dashboard-kpi-note">{kpi.note}</span>
                 </>
               );
+              const classes = `dashboard-kpi-card dashboard-kpi-enter dashboard-kpi-delay-${index + 1}`;
               return kpi.to
-                ? <Link key={kpi.label} to={kpi.to} className="surface-card p-4 flex flex-col hover:border-brand-300">{body}</Link>
-                : <div key={kpi.label} className="surface-card p-4 flex flex-col">{body}</div>;
+                ? <Link key={kpi.label} to={kpi.to} className={classes}>{content}<span className="dashboard-kpi-arrow" aria-hidden="true">↗</span></Link>
+                : <div key={kpi.label} className={classes}>{content}</div>;
             })}
-      </div>
-
-      {value && (
-        <section aria-label="Stock value by category">
-          <h2 className="text-h2 text-surface-900 mb-3">Stock value by category</h2>
-          <div className="surface-card overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Category</th>
-                  <th scope="col" className="text-right">Items</th>
-                  <th scope="col" className="text-right">In stock</th>
-                  <th scope="col" className="text-right">Value excl. VAT</th>
-                  <th scope="col" className="w-1/4">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {value.categories.map((c) => (
-                  <tr key={c.category}>
-                    <td className="text-sm font-medium text-surface-900">
-                      {categoryLabel(c.category)}
-                      {c.unpriced > 0 && <span className="block text-xs text-surface-500">{c.unpriced} in stock without a price</span>}
-                    </td>
-                    <td className="text-right font-mono text-sm">{formatNumber(c.items)}</td>
-                    <td className="text-right font-mono text-sm">{formatNumber(c.itemsInStock)}</td>
-                    <td className="text-right font-mono text-sm">{formatCurrency(c.value, value.currency)}</td>
-                    <td>
-                      <div className="flex items-center gap-2" title={`${Math.round(c.share * 100)}% of the stock value`}>
-                        <div className="h-2 flex-1 rounded bg-surface-100">
-                          <div className="h-2 rounded bg-brand-500" style={{ width: `${Math.round(c.share * 100)}%` }} />
-                        </div>
-                        <span className="text-xs text-surface-500 w-9 text-right">{Math.round(c.share * 100)}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="font-semibold">
-                  <td>All categories</td>
-                  <td className="text-right font-mono text-sm">{formatNumber(value.total.items)}</td>
-                  <td className="text-right font-mono text-sm">{formatNumber(value.total.itemsInStock)}</td>
-                  <td className="text-right font-mono text-sm">{formatCurrency(value.total.value, value.currency)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          <p className="text-xs text-surface-500 mt-2">
-            On hand across all locations × unit price, added up row by row as the stock workbook&rsquo;s Summary sheets do.
-          </p>
-        </section>
-      )}
-
-      {hasAttention && (
-        <section aria-label="Attention required">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-h2 text-surface-900">Attention Required</h2>
-            <Link to="/reports/stock-status">
-              <Button variant="secondary" size="sm">View all</Button>
-            </Link>
-          </div>
-          <div className="surface-card overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">SKU</th>
-                  <th scope="col">Material</th>
-                  <th scope="col">Where</th>
-                  <th scope="col" className="text-right">On Hand</th>
-                  <th scope="col" className="text-right">Required</th>
-                  <th scope="col" className="text-right">Re-order qty</th>
-                  <th scope="col" className="text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lowStockLoading ? (
-                  Array.from({ length: 3 }).map((_, r) => (
-                    <tr key={`__skel_${r}`} className="animate-pulse">
-                      {Array.from({ length: 7 }).map((_, c) => (
-                        <td key={c}><div className="h-3 w-3/4 bg-surface-100 rounded" /></td>
-                      ))}
-                    </tr>
-                  ))
-                ) : attentionItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-0">
-                      <EmptyState title="No items need attention" description={`Every item with a Required Stock has at least ${warningBelowPercent}% of it on hand.`} />
-                    </td>
-                  </tr>
-                ) : (
-                  attentionItems.map((item, i) => {
-                    const onHand = Number(item.onHand) || 0;
-                    const required = Number(item.requiredStock) || 0;
-                    const reorder = Number(item.reorderQuantity) || 0;
-                    return (
-                      <tr key={`${item.materialId}-${i}`} className="cursor-pointer" onClick={() => navigate(`/materials/${item.materialId}`)}>
-                        <td>
-                          <span className="font-mono text-xs">{item.sku}</span>
-                        </td>
-                        <td>
-                          <span className="text-sm font-medium text-surface-900">{item.name}</span>
-                        </td>
-                        <td>
-                          <span className="text-sm text-surface-600">{item.locations.map((l) => l.locationName).join(', ') || '—'}</span>
-                        </td>
-                        <td className="text-right">
-                          <span className={`font-mono text-sm ${onHand <= 0 ? 'text-danger-600 font-medium' : 'text-surface-900'}`}>{formatNumber(onHand)}</span>
-                        </td>
-                        <td className="text-right">
-                          <span className="font-mono text-sm text-surface-500">{formatNumber(required)}</span>
-                        </td>
-                        <td className="text-right">
-                          <span className="font-mono text-sm font-medium">{formatNumber(reorder)}</span>
-                        </td>
-                        <td className="text-center">
-                          <StockStatusBadge status={item.status} percent={item.percentOfRequired} />
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      <section aria-label="Inventory items">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-h2 text-surface-900">Inventory Items</h2>
-          <Link to="/stock">
-            <Button variant="secondary" size="sm">View all</Button>
-          </Link>
-        </div>
-        {report && report.inventoryTotal > rows.length && (
-          <p className="text-xs text-surface-500 mb-2">
-            Showing the first {formatNumber(rows.length)} of {formatNumber(report.inventoryTotal)} lines. <Link to="/stock" className="btn-link">See them all on Stock</Link>.
-          </p>
+          </section>
+        ) : (
+          <section className="dashboard-panel dashboard-unavailable" aria-label="Inventory summary">
+            <EmptyState title="Inventory summary unavailable" description="The stock value report did not return data. Refresh to try again." />
+          </section>
         )}
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={rowKey}
-          emptyState={
-            <EmptyState
-              title="No inventory items found"
-              description="There are no items matching the current filters."
-            />
-          }
-          isLoading={loading}
-          loadingRows={8}
-          ariaLabel="Inventory items"
-        />
-      </section>
+
+        <section className="dashboard-panel dashboard-readiness" aria-label="Stock health">
+          <div className="dashboard-readiness-heading">
+            <div>
+              <span className="dashboard-section-kicker">Threshold coverage</span>
+              <h2>Stock health</h2>
+              <p>Active items compared with their required stock levels</p>
+            </div>
+            {value && <div className="dashboard-readiness-count"><strong>{formatNumber(value.status.URGENT + value.status.WARNING)}</strong><span>need attention</span></div>}
+          </div>
+          {valueLoading && !value ? (
+            <div className="dashboard-health-skeleton" aria-label="Loading stock health"><span /><span /><span /></div>
+          ) : value && value.total.items > 0 ? (
+            <>
+              <div className="dashboard-health-bar" role="img" aria-label={HEALTH_SEGMENTS.map((segment) => `${segment.label}: ${value.status[segment.key]}`).join(', ')}>
+                {HEALTH_SEGMENTS.map((segment) => {
+                  const count = value.status[segment.key];
+                  const share = count / value.total.items * 100;
+                  return count > 0 ? <span key={segment.key} className={segment.color} style={{ width: `${share}%` }} title={`${segment.label}: ${formatNumber(count)}`} /> : null;
+                })}
+              </div>
+              <ul className="dashboard-health-legend">
+                {HEALTH_SEGMENTS.map((segment) => (
+                  <li key={segment.key}>
+                    <span className={`dashboard-legend-dot ${segment.color}`} aria-hidden="true" />
+                    <span className={segment.text}>{segment.label}</span>
+                    <strong>{formatNumber(value.status[segment.key])}</strong>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <div className="dashboard-health-empty">No active items are available to assess.</div>
+          )}
+        </section>
+
+        <div className="dashboard-analysis-grid">
+          <section className="dashboard-panel dashboard-value-panel" aria-label="Stock value by category">
+            <div className="dashboard-panel-heading">
+              <div>
+                <span className="dashboard-section-kicker">Category mix · current on hand</span>
+                <h2>Stock value by category</h2>
+                <p>On hand × unit cost · excluding VAT</p>
+              </div>
+              {value && (
+                <div className="dashboard-total">
+                  <span>All categories</span>
+                  <strong>{formatCurrency(value.total.value, value.currency)}</strong>
+                </div>
+              )}
+            </div>
+            {valueLoading && !value ? (
+              <div className="dashboard-chart-skeleton" aria-label="Loading category values"><span /><span /><span /><span /></div>
+            ) : value && value.categories.length > 0 ? (
+              <DashboardValueBarChart categories={value.categories} currency={value.currency} />
+            ) : (
+              <div className="dashboard-chart-empty">No priced stock is available for category comparison.</div>
+            )}
+            {value?.total.unpriced ? <p className="dashboard-panel-footnote">Unpriced stock is excluded from the valuation total.</p> : null}
+          </section>
+
+          <section className="dashboard-panel dashboard-location-panel" aria-label="Stock value by location">
+            <div className="dashboard-panel-heading">
+              <div>
+                <span className="dashboard-section-kicker">Distribution · current on hand</span>
+                <h2>Stock value by location</h2>
+                <p>Portfolio share of current priced value</p>
+              </div>
+            </div>
+            {loading && !report ? (
+              <div className="dashboard-chart-skeleton" aria-label="Loading location values"><span /><span /><span /></div>
+            ) : report?.byLocation?.length ? (
+              <DashboardLocationDonut locations={report.byLocation} currency={report.currency} />
+            ) : (
+              <div className="dashboard-chart-empty">No location value data is available.</div>
+            )}
+          </section>
+
+          <section className="dashboard-panel dashboard-attention" aria-label="Attention required">
+            <div className="dashboard-panel-heading dashboard-attention-heading">
+              <div>
+                <span className="dashboard-section-kicker">Priority queue</span>
+                <h2>Current exceptions</h2>
+                <p>Items below configured stock thresholds</p>
+              </div>
+              <div className="dashboard-attention-actions">
+                {lowStock && <Badge tone={lowStock.length > 0 ? 'warning' : 'success'} dot>{formatNumber(lowStock.length)} active</Badge>}
+                <Link to="/reports/stock-status" className="dashboard-panel-link">View all <span aria-hidden="true">→</span></Link>
+              </div>
+            </div>
+            {lowStockError && !lowStock ? (
+              <div className="dashboard-inline-error" role="alert">Shortage information could not be loaded. Use Refresh to retry.</div>
+            ) : lowStockLoading && !lowStock ? (
+              <div className="dashboard-table-loading" aria-label="Loading stock exceptions"><span /><span /><span /></div>
+            ) : attentionItems.length === 0 ? (
+              <div className="dashboard-clear-state"><span aria-hidden="true">✓</span><div><strong>No items need attention</strong><p>Every item with a Required Stock is above the warning threshold of {warningBelowPercent}%.</p></div></div>
+            ) : (
+              <ol className="dashboard-exception-list">
+                {attentionItems.map((item, index) => (
+                  <li key={item.materialId}>
+                    <span className="dashboard-exception-index">{String(index + 1).padStart(2, '0')}</span>
+                    <div className="dashboard-exception-body">
+                      <div className="dashboard-exception-topline">
+                        <Link to={`/materials/${item.materialId}`} className="dashboard-item-link"><span>{item.name}</span><small>{item.sku}</small></Link>
+                        <StockStatusBadge status={item.status} percent={item.percentOfRequired} />
+                      </div>
+                      <div className="dashboard-exception-detail">
+                        <span title={item.locations.map((location) => location.locationName).join(', ')}>{item.locations.map((location) => location.locationName).join(', ') || 'No location'}</span>
+                        <span>{formatNumber(Number(item.onHand) || 0)} / {formatNumber(Number(item.requiredStock) || 0)} {item.unitOfMeasure}</span>
+                      </div>
+                      <div className="dashboard-exception-order">Re-order {formatNumber(Number(item.reorderQuantity) || 0)} {item.unitOfMeasure}</div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </div>
+
+        <section className="dashboard-inventory-section" aria-label="Inventory items">
+          <div className="dashboard-panel-heading">
+            <div>
+              <span className="dashboard-section-kicker">Live catalogue · first 200 lines</span>
+              <h2>Inventory items</h2>
+              <p>Current quantities and value by location</p>
+            </div>
+            <Link to="/stock" className="dashboard-panel-link">View stock <span aria-hidden="true">→</span></Link>
+          </div>
+          {report && report.inventoryTotal > inventoryRows.length && (
+            <p className="dashboard-inventory-count">Showing {formatNumber(inventoryRows.length)} of {formatNumber(report.inventoryTotal)} lines. <Link to="/stock">See all on Stock</Link>.</p>
+          )}
+          <DataTable
+            columns={columns}
+            rows={inventoryRows}
+            rowKey={rowKey}
+            emptyState={<EmptyState title="No inventory items found" description="There are no active items matching this report." />}
+            isLoading={loading}
+            loadingRows={8}
+            ariaLabel="Inventory items"
+          />
+        </section>
+      </div>
     </div>
   );
+}
+
+function RefreshIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M16.2 8A6.5 6.5 0 0 0 4.5 5.5L3 7" /><path d="M3 3.8V7h3.2M3.8 12A6.5 6.5 0 0 0 15.5 14.5L17 13" /><path d="M17 16.2V13h-3.2" /></svg>;
 }

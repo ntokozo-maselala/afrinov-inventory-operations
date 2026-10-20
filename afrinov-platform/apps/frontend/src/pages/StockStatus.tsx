@@ -213,7 +213,7 @@ const COLUMNS: DataTableColumn<StockStatusItem>[] = [
     render: (r) => (
       <div>
         <span className="font-mono">{formatNumber(num(r.onHand))} <span className="text-surface-500 text-xs">{r.unitOfMeasure}</span></span>
-        {num(r.onLoan ?? '0') > 0 && <div className="text-xs text-surface-500">+{formatNumber(num(r.onLoan!))} on loan</div>}
+        {num(r.onLoan ?? '0') > 0 && <div className="text-xs text-surface-500">+{formatNumber(num(r.onLoan!))} checked out</div>}
       </div>
     ),
     width: '8rem',

@@ -1578,14 +1578,14 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
   const asked = new Map<string, number>();
   for (const l of lines) {
     const loan = state.transactions.find((t) => t.id === l.loanId);
-    if (!loan) throw err('NOT_FOUND', 'Tool loan not found');
+    if (!loan) throw err('NOT_FOUND', 'Tool check-out not found');
     if (loan.type !== 'LOAN') throw err('INVALID_STATE', 'Only a tool check-out can be checked in');
     asked.set(l.loanId, (asked.get(l.loanId) ?? 0) + l.quantity);
   }
   for (const [loanId, quantity] of asked) {
     const loan = state.transactions.find((t) => t.id === loanId)!;
     const out = -Number(loan.quantity) - returnedOnLoan(loanId);
-    if (quantity > out) throw err('VALIDATION_ERROR', `Cannot check in ${quantity} × ${findMaterial(loan.materialId)?.sku}: only ${out} still out on this loan.`);
+    if (quantity > out) throw err('VALIDATION_ERROR', `Cannot check in ${quantity} × ${findMaterial(loan.materialId)?.sku}: only ${out} still checked out.`);
   }
   const postedAt = new Date().toISOString();
   const returnIds: string[] = [];
@@ -1607,7 +1607,7 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
       state.transactions.push({
         id: writeOff, postedAt, type: 'ADJUSTMENT', materialId: loan.materialId, locationId: loan.locationId, quantity: String(-l.quantity),
         actorId: 'user-1', recipientId: loan.recipientId, projectNumber: loan.projectNumber, reasonCode: 'LOSS',
-        reasonNote: `Lost on loan to ${who}: ${note}`, referenceType: 'ToolLoan', referenceId: loan.id,
+        reasonNote: `Lost while checked out to ${who}: ${note}`, referenceType: 'ToolLoan', referenceId: loan.id,
       });
       writeOffIds.push(writeOff);
     }

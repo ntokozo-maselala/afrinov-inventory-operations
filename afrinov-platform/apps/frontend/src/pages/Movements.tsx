@@ -45,7 +45,7 @@ const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
   { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
-  { id: 'loans', label: 'Tool loans', filters: ['recipientId', 'materialId', 'locationId'] },
+  { id: 'loans', label: 'Tools check in/out', filters: ['recipientId', 'materialId', 'locationId'] },
   { id: 'other', label: 'Other changes', filters: ['entityType', 'actorId'] },
 ];
 
