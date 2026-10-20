@@ -79,6 +79,20 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('goods receipts against an order (workflow Phase 1)', () => {
+    it('refuses lines that do not name their order line, and credits the order when they do', async () => {
+      const po = await api.get<{ id: string; supplierId: string; lines: Array<{ id: string; materialId: string }> }>('/purchase-orders/po-1');
+      const line = po.lines[0]!;
+      const bad = await api.post('/goods-receipts', { purchaseOrderId: po.id, supplierId: po.supplierId, lines: [{ materialId: line.materialId, locationId: 'loc-1', quantity: 1 }] }).catch((x: unknown) => x);
+      expect(isApiError(bad) && (bad as ApiError).code).toBe('VALIDATION_ERROR');
+      const gr = await api.post<{ id: string }>('/goods-receipts', { purchaseOrderId: po.id, supplierId: po.supplierId, lines: [{ materialId: line.materialId, locationId: 'loc-1', quantity: 1, purchaseOrderLineId: line.id }] });
+      await api.post(`/goods-receipts/${gr.id}/post`, {});
+      const after = await api.get<{ status: string; lines: Array<{ id: string; receivedQty: string }> }>('/purchase-orders/po-1');
+      expect(after.status).toBe('PARTIALLY_RECEIVED');
+      expect(after.lines.find((l) => l.id === line.id)!.receivedQty).toBe('1');
+    });
+  });
+
   describe('purchase order numbers and revisions', () => {
     it('numbers new orders AFRI-NNNN, from the setting, past the demo PO-2026 orders', async () => {
       const a = await api.post<{ number: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });

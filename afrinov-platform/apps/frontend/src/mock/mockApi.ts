@@ -722,6 +722,23 @@ function route(method: string, path: string, body?: unknown): unknown {
       const po = state.purchaseOrders.find((p) => p.id === b.purchaseOrderId);
       if (!po) throw err('NOT_FOUND', 'Purchase order not found');
       if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive against a purchase order in status ${po.status}`);
+      // As the server: every line names its order line, on this order, within what is outstanding.
+      if (po.supplierId !== b.supplierId) throw err('VALIDATION_ERROR', `${po.number} is with another supplier. Choose the order's supplier, or another order.`);
+      const receiving = new Map<string, number>();
+      for (const l of b.lines) {
+        if (!l.purchaseOrderLineId) throw err('VALIDATION_ERROR', `Every line of a receipt against ${po.number} must name the order line it is for.`);
+        const pol = po.lines.find((x) => x.id === l.purchaseOrderLineId);
+        if (!pol) throw err('VALIDATION_ERROR', `A line is not on ${po.number}.`);
+        if (pol.materialId !== l.materialId) throw err('VALIDATION_ERROR', `That line of ${po.number} is for another item.`);
+        receiving.set(pol.id, (receiving.get(pol.id) ?? 0) + Number(l.quantity));
+      }
+      for (const [id, qty] of receiving) {
+        const pol = po.lines.find((x) => x.id === id)!;
+        const outstanding = Number(pol.orderedQty) - Number(pol.receivedQty);
+        if (qty > outstanding) throw err('VALIDATION_ERROR', `Receiving ${qty} would exceed what is still outstanding on ${po.number} (${outstanding}).`);
+      }
+    } else if (b.lines.some((l) => l.purchaseOrderLineId)) {
+      throw err('VALIDATION_ERROR', 'These lines belong to a purchase order: choose the order the delivery is for.');
     }
     const gr: MockGoodsReceipt = {
       id: nextId('gr'),

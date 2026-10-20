@@ -127,6 +127,19 @@ interface CreateGRProps {
   onError: (e: ApiError) => void; onSuccess: () => void;
 }
 
+interface DraftLine {
+  materialId: string; locationId: string; quantity: string;
+  /** Set when the line comes from a purchase order: the order line it credits. */
+  purchaseOrderLineId?: string;
+  /** For order lines: what the order still expects, shown beside the quantity. */
+  outstanding?: number; label?: string; unit?: string;
+}
+
+interface OrderDetail {
+  id: string; number: string; supplierId: string; supplier: { name: string };
+  lines: Array<{ id: string; materialId: string; orderedQty: string; receivedQty: string; material: { sku: string; name: string; unitOfMeasure: string } }>;
+}
+
 function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const materials = useApi<Material[]>('/materials');
@@ -135,35 +148,67 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
   const [supplierId, setSupplierId] = useState('');
   const [poId, setPoId] = useState('');
   const [deliveryRef, setDeliveryRef] = useState('');
-  const [lines, setLines] = useState<Array<{ materialId: string; locationId: string; quantity: string }>>([]);
+  const [lines, setLines] = useState<DraftLine[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loadingOrder, setLoadingOrder] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
-  // Suggested POs for the selected supplier in non-terminal states.
+  // Orders that can still be received, for the chosen supplier if there is one.
   // Match by stable supplierId; names can collide across suppliers.
   const eligiblePOs = (pos.data ?? [])
     .filter((p) => !supplierId || p.supplierId === supplierId)
     .filter((p) => ['APPROVED', 'PARTIALLY_RECEIVED'].includes(p.status));
+  const fromOrder = !!poId;
+
+  // A receipt against an order credits the order's lines, so the lines come
+  // from the order, each with what is still outstanding filled in. Typing them
+  // by hand used to book the stock without crediting the order.
+  async function chooseOrder(id: string) {
+    setPoId(id);
+    setValidation(null);
+    if (!id) { setLines([]); return; }
+    setLoadingOrder(true);
+    try {
+      const order = await api.get<OrderDetail>(`/purchase-orders/${id}`);
+      setSupplierId(order.supplierId);
+      setLines(order.lines
+        .map((l) => ({ l, outstanding: Number(l.orderedQty) - Number(l.receivedQty) }))
+        .filter(({ outstanding }) => outstanding > 0)
+        .map(({ l, outstanding }) => ({
+          materialId: l.materialId, locationId: '', quantity: String(outstanding), purchaseOrderLineId: l.id,
+          outstanding, label: `${l.material.sku} — ${l.material.name}`, unit: l.material.unitOfMeasure,
+        })));
+    } catch (err) { onError(err as ApiError); setPoId(''); }
+    finally { setLoadingOrder(false); }
+  }
 
   function addLine() { setLines((l) => [...l, { materialId: '', locationId: '', quantity: '' }]); }
-  function updateLine(i: number, patch: Partial<{ materialId: string; locationId: string; quantity: string }>) {
+  function updateLine(i: number, patch: Partial<DraftLine>) {
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   }
   function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
+  function everyLineInto(locationId: string) { setLines((l) => l.map((row) => ({ ...row, locationId }))); }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setValidation(null);
     if (!supplierId) { setValidation('Select a supplier.'); return; }
-    const validLines = lines.filter((l) => l.materialId && l.locationId && Number(l.quantity) > 0);
-    if (validLines.length === 0) { setValidation('Add at least one complete line.'); return; }
+    // Order lines left at 0 are not in this delivery.
+    const validLines = lines.filter((l) => l.materialId && Number(l.quantity) > 0);
+    if (validLines.length === 0) { setValidation(fromOrder ? 'Enter what arrived on at least one line.' : 'Add at least one complete line.'); return; }
+    if (validLines.some((l) => !l.locationId)) { setValidation('Choose where each line is going.'); return; }
+    const over = validLines.find((l) => l.outstanding !== undefined && Number(l.quantity) > l.outstanding);
+    if (over) { setValidation(`${over.label}: only ${formatNumber(over.outstanding!)} ${over.unit ?? ''} is still outstanding.`); return; }
     setBusy(true);
     try {
       const created = await api.post<GR>('/goods-receipts', {
         supplierId,
         purchaseOrderId: poId || undefined,
         deliveryRef: deliveryRef || undefined,
-        lines: validLines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity) })),
+        lines: validLines.map((l) => ({
+          materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity),
+          ...(l.purchaseOrderLineId ? { purchaseOrderLineId: l.purchaseOrderLineId } : {}),
+        })),
       });
       await api.post(`/goods-receipts/${created.id}/post`);
       onSuccess();
@@ -175,16 +220,16 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
     <Drawer open={open} onClose={onClose} title="New goods receipt" description="The receipt will be created and immediately posted, writing receipt transactions to the inventory ledger." width="lg">
       <form onSubmit={submit} className="space-y-4" noValidate>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Supplier" htmlFor="gr-sup" required error={validation && !supplierId ? validation : null}>
-            <Select id="gr-sup" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} invalid={!!validation && !supplierId}>
-              <option value="">— select —</option>
-              {suppliers.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          <Field label="Purchase order" htmlFor="gr-po" help={fromOrder ? 'The order is credited with what you receive.' : 'Choose the order this delivery is for, if any.'}>
+            <Select id="gr-po" value={poId} onChange={(e) => void chooseOrder(e.target.value)} disabled={loadingOrder}>
+              <option value="">No purchase order</option>
+              {eligiblePOs.map((p) => <option key={p.id} value={p.id}>{p.number} · {p.supplier?.name}</option>)}
             </Select>
           </Field>
-          <Field label="Link to PO (optional)" htmlFor="gr-po" help="Linking will update received quantities on the PO.">
-            <Select id="gr-po" value={poId} onChange={(e) => setPoId(e.target.value)}>
-              <option value="">— none —</option>
-              {eligiblePOs.map((p) => <option key={p.id} value={p.id}>{p.number}</option>)}
+          <Field label="Supplier" htmlFor="gr-sup" required help={fromOrder ? "The order's supplier." : undefined} error={validation && !supplierId ? validation : null}>
+            <Select id="gr-sup" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} invalid={!!validation && !supplierId} disabled={fromOrder}>
+              <option value="">— select —</option>
+              {suppliers.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
         </div>
@@ -193,19 +238,34 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
         </Field>
 
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="field-label">Lines</span>
-            <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span className="field-label">{fromOrder ? 'What arrived' : 'Lines'}</span>
+            {fromOrder ? (
+              <Select value="" onChange={(e) => everyLineInto(e.target.value)} aria-label="Receive every line into" className="sm:w-56">
+                <option value="">Receive every line into…</option>
+                {locations.data?.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+              </Select>
+            ) : (
+              <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
+            )}
           </div>
-          {lines.length === 0 && <p className="text-meta italic">No lines yet.</p>}
+          {loadingOrder && <p className="text-meta">Loading the order…</p>}
+          {!loadingOrder && lines.length === 0 && <p className="text-meta italic">{fromOrder ? 'Nothing is outstanding on this order.' : 'No lines yet.'}</p>}
           <div className="space-y-2">
             {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-start">
+              <div key={l.purchaseOrderLineId ?? i} className="grid grid-cols-12 gap-2 items-start">
                 <div className="col-span-12 sm:col-span-5">
-                  <Select value={l.materialId} onChange={(e) => updateLine(i, { materialId: e.target.value })} aria-label={`Line ${i + 1} material`}>
-                    <option value="">Material…</option>
-                    {materials.data?.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
-                  </Select>
+                  {l.purchaseOrderLineId ? (
+                    <div className="text-sm pt-1.5">
+                      {l.label}
+                      <div className="text-meta">{formatNumber(l.outstanding!)} {l.unit} outstanding</div>
+                    </div>
+                  ) : (
+                    <Select value={l.materialId} onChange={(e) => updateLine(i, { materialId: e.target.value })} aria-label={`Line ${i + 1} material`}>
+                      <option value="">Material…</option>
+                      {materials.data?.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                    </Select>
+                  )}
                 </div>
                 <div className="col-span-7 sm:col-span-3">
                   <Select value={l.locationId} onChange={(e) => updateLine(i, { locationId: e.target.value })} aria-label={`Line ${i + 1} location`}>
@@ -214,10 +274,12 @@ function CreateGRDrawer({ open, onClose, onError, onSuccess }: CreateGRProps) {
                   </Select>
                 </div>
                 <div className="col-span-5 sm:col-span-2">
-                  <Input type="number" min="0.0001" step="0.0001" placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
+                  <Input type="number" min="0" max={l.outstanding} step="0.0001" placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
                 </div>
                 <div className="col-span-12 sm:col-span-2">
-                  <Button size="sm" variant="danger" type="button" onClick={() => removeLine(i)} className="w-full">Remove</Button>
+                  {l.purchaseOrderLineId
+                    ? <Button size="sm" variant="ghost" type="button" onClick={() => updateLine(i, { quantity: '0' })} className="w-full">None came</Button>
+                    : <Button size="sm" variant="danger" type="button" onClick={() => removeLine(i)} className="w-full">Remove</Button>}
                 </div>
               </div>
             ))}
