@@ -14,7 +14,6 @@ import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
-import { categoryLabel } from '../lib/categories';
 import { WaitingForApproval } from '../components/WaitingForApproval';
 import { usePermissions } from '../hooks/usePermissions';
 import { PROCUREMENT_ENABLED } from '../config/features';
@@ -56,6 +55,9 @@ const HEALTH_SEGMENTS = [
 ] as const;
 
 export function Dashboard() {
+  const { hasPermission } = usePermissions();
+  const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');
+
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
@@ -144,18 +146,16 @@ export function Dashboard() {
           </div>
         )}
 
-      {canApprove && <WaitingForApproval />}
+        {canApprove && <WaitingForApproval />}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-6 gap-4">
-        {valueLoading && !kpis
-          ? Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="surface-card p-4 animate-pulse">
-                <div className="h-3 w-20 bg-surface-100 rounded mb-3" />
-                <div className="h-6 w-24 bg-surface-100 rounded" />
-              </div>
-            ))
-          : kpis?.map((kpi) => {
-              const body = (
+        {valueLoading && !kpis ? (
+          <div className="dashboard-kpis" aria-label="Loading dashboard metrics">
+            {Array.from({ length: 6 }).map((_, index) => <div key={index} className="dashboard-skeleton-card" />)}
+          </div>
+        ) : kpis ? (
+          <section className="dashboard-kpis" aria-label="Inventory summary">
+            {kpis.map((kpi, index) => {
+              const content = (
                 <>
                   <span className="dashboard-kpi-label">{kpi.label}</span>
                   <span className={`dashboard-kpi-value dashboard-kpi-${kpi.tone}`}>{kpi.value}</span>
