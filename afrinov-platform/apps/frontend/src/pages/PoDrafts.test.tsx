@@ -158,7 +158,7 @@ describe('Finding drafts in the list', () => {
   });
 
   it('opens everyone else on all statuses', async () => {
-    auth.roles = ['APPROVER'];
+    auth.roles = ['STORE_CONTROLLER'];
     appAt('/purchase-orders');
     expect(await screen.findByText('AFRI-0104')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'New purchase order' })).not.toBeInTheDocument();

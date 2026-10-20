@@ -14,6 +14,9 @@ import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
 import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
+import { WaitingForApproval } from '../components/WaitingForApproval';
+import { usePermissions } from '../hooks/usePermissions';
+import { PROCUREMENT_ENABLED } from '../config/features';
 import { DashboardLocationDonut, DashboardValueBarChart } from './DashboardCharts';
 import './Dashboard.css';
 
@@ -52,6 +55,9 @@ const HEALTH_SEGMENTS = [
 ] as const;
 
 export function Dashboard() {
+  const { hasPermission } = usePermissions();
+  const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');
+
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
@@ -139,6 +145,8 @@ export function Dashboard() {
             <Button variant="secondary" size="sm" onClick={handleRefresh}>Retry</Button>
           </div>
         )}
+
+        {canApprove && <WaitingForApproval />}
 
         {valueLoading && !kpis ? (
           <div className="dashboard-kpis" aria-label="Loading dashboard metrics">

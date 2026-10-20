@@ -317,6 +317,10 @@ describe('receiving stock over real HTTP', () => {
       expect((await approver('GET', `/purchase-orders/${small}`)).status).toBe(200);
       const view = await approver<{ canApprove: boolean; net: string }>('GET', `/purchase-orders/${large}/approval`);
       expect(view.body).toMatchObject({ canApprove: false, net: '1035.00' });
+      const waiting = await approver<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true');
+      expect(waiting.status).toBe(200);
+      expect(waiting.body.map((p) => p.id)).toContain(small);
+      expect(waiting.body.map((p) => p.id)).not.toContain(large);
 
       const refused = await approver<{ error: { code: string; message: string } }>('POST', `/purchase-orders/${large}/approve`);
       expect(refused.status).toBe(403);

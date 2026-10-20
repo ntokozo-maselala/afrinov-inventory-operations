@@ -4,6 +4,10 @@ import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
 vi.mock('../api/client', () => ({ api: { get: mockGet } }));
+// Signed in as a store controller unless a test says otherwise; procurement on.
+const auth = vi.hoisted(() => ({ roles: ['STORE_CONTROLLER'] as string[] }));
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: auth.roles } }) }));
+vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: true }));
 
 const { Dashboard } = await import('./Dashboard');
 
@@ -109,5 +113,44 @@ describe('Dashboard analytics', () => {
     expect(screen.getByRole('img', { name: /Central Store 60%; Workshop 40%/ })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Urgent: 2, Warning: 1, In range: 9, No reorder level: 2' })).toBeInTheDocument();
     expect(screen.getByText('On hand × unit cost · excluding VAT')).toBeInTheDocument();
+  });
+});
+
+describe('Dashboard: waiting for your approval', () => {
+  const order = (id: string, number: string, net: string) => ({
+    id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' },
+    totals: { subtotal: net, vat: '0.00', net, unpricedLines: 0 },
+  });
+  beforeEach(() => {
+    auth.roles = ['APPROVER'];
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [order('po-1', 'AFRI-0101', '920.00')];
+      if (path === '/purchase-orders?status=PENDING_APPROVAL') return [order('po-1', 'AFRI-0101', '920.00'), order('po-2', 'AFRI-0102', '9000.00'), order('po-3', 'AFRI-0103', '1.00')];
+      if (path === '/reports/stock-value') return VALUE;
+      if (path === '/tools') return [];
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+  });
+
+  it('lists the orders the approver can approve, and counts the others', async () => {
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await screen.findByRole('region', { name: 'Waiting for your approval' });
+    expect(await within(card).findByRole('link', { name: 'AFRI-0101' })).toHaveAttribute('href', '/purchase-orders/po-1');
+    expect(within(card).queryByText('AFRI-0102')).not.toBeInTheDocument();
+    expect(await within(card).findByRole('link', { name: '2 more orders need prices or a higher limit' })).toHaveAttribute('href', '/purchase-orders?status=PENDING_APPROVAL');
+  });
+
+  it('says when nothing is waiting', async () => {
+    mockGet.mockImplementation(async (path: string) => (path === '/reports/stock-value' ? VALUE : path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : []));
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText('Nothing is waiting for your approval.')).toBeInTheDocument();
+  });
+
+  it('is not shown to those who do not approve', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByText('Stock value by category');
+    expect(screen.queryByRole('region', { name: 'Waiting for your approval' })).not.toBeInTheDocument();
+    expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
   });
 });
