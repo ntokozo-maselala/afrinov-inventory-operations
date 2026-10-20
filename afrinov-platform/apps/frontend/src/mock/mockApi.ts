@@ -689,6 +689,11 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   // Goods Receipts
+  // As the server: the order a receipt is against, by number, for a link to it.
+  const orderRef = (id?: string) => {
+    const po = id ? state.purchaseOrders.find((x) => x.id === id) : undefined;
+    return po ? { id: po.id, number: po.number } : null;
+  };
   if (method === 'GET' && p === '/goods-receipts') {
     return state.goodsReceipts
       .slice()
@@ -696,6 +701,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       .map((g) => ({
         ...g,
         supplier: findSupplier(g.supplierId),
+        purchaseOrder: orderRef(g.purchaseOrderId),
         lines: g.lines.map((l) => ({ ...l, material: findMaterial(l.materialId), location: findLocation(l.locationId) })),
       }));
   }
@@ -706,6 +712,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     return {
       ...g,
       supplier: findSupplier(g.supplierId),
+      purchaseOrder: orderRef(g.purchaseOrderId),
       lines: g.lines.map((l) => ({ ...l, material: findMaterial(l.materialId), location: findLocation(l.locationId) })),
     };
   }

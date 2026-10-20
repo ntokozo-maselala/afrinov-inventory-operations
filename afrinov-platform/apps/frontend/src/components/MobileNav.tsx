@@ -2,6 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAppShell } from '../hooks/useAppShell';
 import { Icon } from './Icon';
+import { isNavItemActive } from '../hooks/useNavGroups';
 
 interface MobileNavItemProps {
   item: {
@@ -10,6 +11,7 @@ interface MobileNavItemProps {
     end?: boolean;
     icon: ReactNode;
     exact?: boolean;
+    excludes?: string[];
     children?: Array<{
       to: string;
       label: string;
@@ -25,9 +27,7 @@ interface MobileNavItemProps {
 
 function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: MobileNavItemProps) {
   const location = useLocation();
-  const isActive = item.exact || item.end
-    ? location.pathname === item.to
-    : location.pathname.startsWith(item.to);
+  const isActive = isNavItemActive(item, location.pathname);
   const hasChildren = item.children && item.children.length > 0;
 
   const handleClick = () => {
@@ -62,17 +62,13 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
               end={child.end}
               onClick={onNavigate}
               className={`flex items-center gap-3 px-3 py-2 rounded text-sm ${prefersReducedMotion ? 'transition-none' : 'transition-colors'} ${
-                (child.exact || child.end
-                  ? location.pathname === child.to
-                  : location.pathname.startsWith(child.to))
+                isNavItemActive(child, location.pathname)
                   ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'
                   : 'text-surface-700 hover:bg-surface-100 dark:text-surface-700 dark:hover:bg-surface-100'
               }`}
             >
               <span aria-hidden="true" className={`shrink-0 h-5 w-5 flex items-center justify-center ${
-                (child.exact || child.end
-                  ? location.pathname === child.to
-                  : location.pathname.startsWith(child.to))
+                isNavItemActive(child, location.pathname)
                     ? 'text-brand-600 dark:text-brand-300'
                     : 'text-surface-400 dark:text-surface-400'
               }`}>
@@ -89,7 +85,7 @@ function MobileNavItem({ item, onNavigate, prefersReducedMotion = false }: Mobil
   return (
     <NavLink
       to={item.to}
-      end={item.end}
+      end={item.end || !isActive}
       onClick={onNavigate}
       className={`flex items-center gap-3 px-3 py-2.5 rounded text-sm ${prefersReducedMotion ? 'transition-none' : 'transition-colors'} ${
         isActive

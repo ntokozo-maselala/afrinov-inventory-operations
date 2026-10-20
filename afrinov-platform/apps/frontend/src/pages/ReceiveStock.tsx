@@ -1,7 +1,9 @@
 // Receive stock at the store counter: the supplier, the delivery note or
 // invoice number, and any number of items, booked all-or-nothing as a goods
 // receipt with no purchase order (POST /stock-receipts). Works whether or not
-// procurement is switched on.
+// procurement is switched on. When it is, and the supplier has orders still to
+// deliver, it first asks whether this delivery is against one: that delivery
+// is received from the order's page, so the order is credited.
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -20,9 +22,15 @@ import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
 import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import type { CurrentStockRow, Material } from '../api/types';
+import { PROCUREMENT_ENABLED } from '../config/features';
+import { formatDate } from '../lib/format';
 
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean }
+interface OpenOrder {
+  id: string; number: string; status: string; supplierId: string; expectedDeliveryDate?: string | null;
+  lines: Array<{ orderedQty: string; receivedQty: string }>;
+}
 
 interface Line { key: number; materialId: string; locationId: string; quantity: string }
 
@@ -52,8 +60,16 @@ export function ReceiveStock() {
   const canAddItem = useCanManageMaterials();
   // A delivery from a new supplier is booked without leaving the page (ADR-018).
   const [addingSupplier, setAddingSupplier] = useState(false);
-  const canAddSupplier = usePermissions().hasPermission('suppliers:manage');
+  const { hasPermission } = usePermissions();
+  const canAddSupplier = hasPermission('suppliers:manage');
   const toast = useToast();
+  // The supplier's orders that can still be received, for those who receive
+  // orders on the order's page (so the link never leads to a page without it).
+  const orders = useApi<OpenOrder[]>(PROCUREMENT_ENABLED && hasPermission('orders:receive') ? '/purchase-orders' : null);
+  const openOrders = (orders.data ?? []).filter((o) => supplierId && o.supplierId === supplierId && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(o.status));
+  // Answered "not against an order" for this supplier: a counter receipt as before.
+  const [counterFor, setCounterFor] = useState<string | null>(null);
+  const askAboutOrders = openOrders.length > 0 && counterFor !== supplierId;
 
   const activeSuppliers = useMemo(() => (suppliers.data ?? []).filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name)), [suppliers.data]);
   const activeMaterials = useMemo(() => (materials.data ?? []).filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name)), [materials.data]);
@@ -117,6 +133,7 @@ export function ReceiveStock() {
     setError(null);
     const filled = lines.filter((l) => l.materialId || l.quantity);
     if (!supplierId) { setError('Choose the supplier.'); return; }
+    if (askAboutOrders) { setError('This supplier has open purchase orders. Choose the order this delivery is for, or say it is not against an order.'); return; }
     if (!deliveryRef.trim()) { setError('Enter the delivery note or invoice number.'); return; }
     if (filled.length === 0) { setError('Add at least one item.'); return; }
     if (filled.some((l) => !l.materialId || !l.locationId || !(Number(l.quantity) > 0))) {
@@ -144,14 +161,16 @@ export function ReceiveStock() {
   }
 
   // Reached by a typed or old link: say so rather than offer a form the server would refuse.
-  const allowed = usePermissions().hasPermission('inventory:receive');
+  const allowed = hasPermission('inventory:receive');
   if (!allowed) return <NoAccess title="Receive stock" action="receive stock" />;
 
   return (
     <div>
       <PageHeader
         title="Receive stock"
-        description="Record a delivery from a supplier: the delivery note or invoice number, and the items received."
+        description={PROCUREMENT_ENABLED
+          ? 'Record a delivery from a supplier: the delivery note or invoice number, and the items received. A delivery against a purchase order is received from the order.'
+          : 'Record a delivery from a supplier: the delivery note or invoice number, and the items received.'}
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Receive stock' }]}
       />
 
@@ -179,6 +198,34 @@ export function ReceiveStock() {
                 ? <>Add the supplier of this delivery with <button type="button" className="btn-link" onClick={() => setAddingSupplier(true)}>New supplier</button>.</>
                 : 'Ask a store controller or Procurement to add the supplier of this delivery.'}
             </Alert>
+          )}
+          {askAboutOrders && (
+            <div className="rounded border border-brand-200 bg-brand-50 p-3 space-y-2" role="group" aria-labelledby="rcv-orders-q">
+              <p id="rcv-orders-q" className="text-sm font-semibold text-surface-900">Is this delivery against a purchase order?</p>
+              <p className="text-meta">
+                {activeSuppliers.find((x) => x.id === supplierId)?.name} has {openOrders.length === 1 ? 'an open order' : `${openOrders.length} open orders`}.
+                A delivery against one is received from the order, so the order is credited with what arrived.
+              </p>
+              <ul className="space-y-1.5">
+                {openOrders.map((o) => {
+                  const owed = o.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty)).length;
+                  return (
+                    <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <Link to={`/purchase-orders/${o.id}?receive=1`} className="btn-secondary btn-sm">Receive against {o.number}</Link>
+                      <span className="text-meta">
+                        {owed} line{owed === 1 ? '' : 's'} outstanding{o.expectedDeliveryDate ? ` · expected ${formatDate(o.expectedDeliveryDate)}` : ''}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <Button type="button" variant="ghost" size="sm" onClick={() => { setCounterFor(supplierId); setError(null); }}>No, it isn&rsquo;t against an order</Button>
+            </div>
+          )}
+          {openOrders.length > 0 && !askAboutOrders && (
+            <p className="text-xs text-surface-500 -mt-3">
+              Booked as a counter receipt, not against an order. <button type="button" className="btn-link" onClick={() => setCounterFor(null)}>It is against an order</button>
+            </p>
           )}
           {!loading && activeSuppliers.length > 0 && (
             <p className="text-xs text-surface-500 -mt-3">

@@ -12,6 +12,15 @@ export interface NavItem {
   permissions?: string[];
   children?: NavItem[];
   exact?: boolean;
+  /** Pages under `to` that have their own entry, so this one isn't highlighted there too. */
+  excludes?: string[];
+}
+
+/** Whether a menu entry is the page being shown. */
+export function isNavItemActive(item: Pick<NavItem, 'to' | 'end' | 'exact' | 'excludes'>, pathname: string): boolean {
+  if (item.exact || item.end) return pathname === item.to;
+  if (item.excludes?.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return false;
+  return pathname.startsWith(item.to);
 }
 
 export interface NavGroup {
@@ -70,7 +79,9 @@ export function useNavGroups(): NavGroup[] {
     ...(PROCUREMENT_ENABLED ? [{
       title: 'Procurement',
       items: [
-        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'] },
+        // Highlighted on an order's page too, but not on the new-order page, which has its own entry.
+        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new'] },
+        { to: '/purchase-orders/new', label: 'New purchase order', icon: <Icon.Plus />, permissions: ['procurement:manage'] },
         { to: '/goods-receipts', label: 'Goods receipts', icon: <Icon.Truck />, permissions: ['receipts:view'] },
       ],
     }] : []),

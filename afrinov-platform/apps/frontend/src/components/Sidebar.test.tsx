@@ -2,7 +2,7 @@
 // Tests the core logic and behavior of the sidebar navigation system
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { useNavGroups } from '../hooks/useNavGroups';
+import { useNavGroups, isNavItemActive } from '../hooks/useNavGroups';
 
 // Signed in through the auth mock, so the real permission table decides what
 // each role sees. ADMIN sees everything unless a test sets other roles.
@@ -324,5 +324,26 @@ describe('Reduced motion support', () => {
     
     expect(getTransitionDuration(true)).toBe('0ms');
     expect(getTransitionDuration(false)).toBe('150ms');
+  });
+});
+describe('New purchase order in the menu', () => {
+  afterEach(() => { signedIn.roles = ['ADMIN']; });
+
+  it.each([
+    ['PROCUREMENT', ['Purchase orders', 'New purchase order', 'Goods receipts']],
+    ['APPROVER', ['Purchase orders']],
+    ['STORE_CONTROLLER', ['Purchase orders', 'Goods receipts']],
+  ])('shows a %s only the Procurement entries they can use', (role, expected) => {
+    signedIn.roles = [role];
+    expect(useLabelsIn('Procurement')).toEqual(expected);
+  });
+
+  it('highlights Purchase orders on an order, but only New purchase order on the new-order page', () => {
+    const items = useNavGroups().find((g) => g.title === 'Procurement')!.items;
+    const active = (pathname: string) => items.filter((i) => isNavItemActive(i, pathname)).map((i) => i.label);
+    expect(active('/purchase-orders')).toEqual(['Purchase orders']);
+    expect(active('/purchase-orders/po-1')).toEqual(['Purchase orders']);
+    expect(active('/purchase-orders/po-1/edit')).toEqual(['Purchase orders']);
+    expect(active('/purchase-orders/new')).toEqual(['New purchase order']);
   });
 });
