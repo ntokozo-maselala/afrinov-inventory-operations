@@ -141,6 +141,59 @@ function supplierFields(b: Partial<Record<keyof MockSupplier, unknown>>): Partia
   return out;
 }
 
+// The order details on the template's Inputs sheet, as the server takes them.
+type PoDetailsBody = Partial<Record<
+  'projectNumber' | 'paymentTerms' | 'paymentMilestone' | 'shippingTerms' | 'deliveryTo' | 'deliveryAddress'
+  | 'deliveryCountry' | 'deliveryContactName' | 'deliveryContactPhone' | 'afrinovContact', string | null
+>> & { settlementDiscount?: number; penaltiesApply?: boolean; deliveryMethod?: 'DELIVERY' | 'COLLECTION' };
+
+/** The details sent, blanks as null; fields left out stay out. */
+function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
+  const out: Record<string, unknown> = {};
+  for (const k of ['projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
+    'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact'] as const) {
+    if (b[k] !== undefined) out[k] = (typeof b[k] === 'string' ? b[k]!.trim() : '') || null;
+  }
+  if (b.settlementDiscount !== undefined) out.settlementDiscount = String(b.settlementDiscount);
+  if (b.penaltiesApply !== undefined) out.penaltiesApply = b.penaltiesApply;
+  if (b.deliveryMethod !== undefined) out.deliveryMethod = b.deliveryMethod;
+  return out as Partial<MockPurchaseOrder>;
+}
+
+function assertProjectOpen(projectNumber: string) {
+  const project = state.projects.find((p) => p.projectNumber === projectNumber);
+  if (!project) throw err('VALIDATION_ERROR', `No project ${projectNumber}`);
+  if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
+}
+
+function projectRef(projectNumber: string | null | undefined) {
+  if (!projectNumber) return null;
+  const p = state.projects.find((x) => x.projectNumber === projectNumber);
+  return { projectNumber, name: p?.name ?? null };
+}
+
+// Approval by value as the server works it out (po-approval.ts), for the
+// signed-in mock user (user-1, an admin without a limit).
+function mockApproval(po: MockPurchaseOrder) {
+  const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
+  const currency = po.currency ?? 'ZAR';
+  const within = (limit: string | null | undefined) => limit == null || (currency === 'ZAR' && Number(totals.net) <= Number(limit));
+  const approvers = mockUsers
+    .filter((u) => u.active && u.roles.some((r) => r.role.name === 'ADMIN' || r.role.name === 'APPROVER'))
+    .map((u) => ({ id: u.id, name: u.name, approvalLimit: u.approvalLimit ?? null }));
+  const me = approvers.find((a) => a.id === 'user-1');
+  const unpriced = totals.unpricedLines > 0;
+  const n = totals.unpricedLines;
+  const reason = unpriced
+    ? `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.`
+    : me && !within(me.approvalLimit) ? 'This order is over your approval limit.' : null;
+  return {
+    ...totals, currency, myLimit: me?.approvalLimit ?? null, reason,
+    canApprove: !!me && po.status === 'PENDING_APPROVAL' && !unpriced && within(me.approvalLimit),
+    approvers: unpriced ? [] : approvers.filter((a) => within(a.approvalLimit)),
+  };
+}
+
 // Order money as the server works it out (po-pricing.ts).
 function withPoTotals<T extends { vatRate?: string; currency?: string; lines: Array<{ orderedQty: string; unitPrice?: string | null }> }>(po: T) {
   const rate = Number(po.vatRate ?? 15);
@@ -420,12 +473,20 @@ function route(method: string, path: string, body?: unknown): unknown {
 
   // Purchase Orders
   if (method === 'GET' && p === '/purchase-orders') {
-    const list = [...state.purchaseOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const list = [...state.purchaseOrders]
+      .filter((po) => !qs.projectNumber || po.projectNumber === qs.projectNumber)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return list.map((po) => withPoTotals({
       ...po,
+      project: projectRef(po.projectNumber),
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     }));
+  }
+  if (method === 'GET' && /^\/purchase-orders\/[^/]+\/approval$/.test(p)) {
+    const po = state.purchaseOrders.find((x) => x.id === p.slice('/purchase-orders/'.length, -'/approval'.length));
+    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    return mockApproval(po);
   }
   if (method === 'GET' && /^\/purchase-orders\/[^/]+\/history$/.test(p)) {
     const id = p.slice('/purchase-orders/'.length, -'/history'.length);
@@ -439,17 +500,30 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     return withPoTotals({
       ...po,
+      project: projectRef(po.projectNumber),
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     });
   }
   if (method === 'POST' && p === '/purchase-orders') {
-    const b = body as { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
+    const b = body as PoDetailsBody & { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number; deliveryDate?: string }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
     if (!b.supplierId || !b.lines || b.lines.length === 0) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     const supplier = findSupplier(b.supplierId);
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
+    if (b.projectNumber) assertProjectOpen(b.projectNumber);
+    // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
+    const details = poDetails(b);
+    if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
+    details.deliveryMethod = b.deliveryMethod ?? 'DELIVERY';
+    if (details.deliveryMethod === 'DELIVERY') {
+      for (const k of ['deliveryTo', 'deliveryAddress', 'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone'] as const) {
+        if (b[k] === undefined) details[k] = (MOCK_SETTINGS[`purchaseOrders.${k}`]?.value as string) || null;
+      }
+    }
+    if (b.afrinovContact === undefined) details.afrinovContact = 'Admin User';
     const po: MockPurchaseOrder = {
+      ...details,
       id: nextId('po'),
       number: `PO-2026-${String(state.purchaseOrders.length + 1).padStart(4, '0')}`,
       supplierId: b.supplierId,
@@ -463,6 +537,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       lines: b.lines.map((l) => ({
         id: nextId('pol'), materialId: l.materialId, orderedQty: String(l.orderedQty), receivedQty: '0',
         unitPrice: l.unitPrice === undefined ? null : String(l.unitPrice),
+        deliveryDate: l.deliveryDate ?? null,
       })),
     };
     state.purchaseOrders.push(po);
@@ -484,6 +559,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
+    const check = mockApproval(po);
+    if (check.unpricedLines > 0) throw err('VALIDATION_ERROR', check.reason!);
+    if (!check.canApprove) throw err('FORBIDDEN', check.reason ?? 'You cannot approve this order.');
     const before = { status: po.status };
     po.status = 'APPROVED';
     po.approvedAt = new Date().toISOString();
@@ -567,7 +645,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
-    const b = (body as { notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number; linePrices?: Array<{ lineId: string; unitPrice: number | null }> }) ?? {};
+    const b = (body as PoDetailsBody & {
+      notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number;
+      linePrices?: Array<{ lineId: string; unitPrice: number | null }>;
+      lineDeliveryDates?: Array<{ lineId: string; deliveryDate: string | null }>;
+    }) ?? {};
     for (const lp of b.linePrices ?? []) {
       if (!po.lines.some((l) => l.id === lp.lineId)) throw err('VALIDATION_ERROR', `Line ${lp.lineId} is not on purchase order ${po.number}`);
     }
@@ -578,6 +660,13 @@ function route(method: string, path: string, body?: unknown): unknown {
       const line = po.lines.find((l) => l.id === lp.lineId)!;
       line.unitPrice = lp.unitPrice === null ? null : String(lp.unitPrice);
     }
+    for (const ld of b.lineDeliveryDates ?? []) {
+      const line = po.lines.find((l) => l.id === ld.lineId);
+      if (!line) throw err('VALIDATION_ERROR', `Line ${ld.lineId} is not on purchase order ${po.number}`);
+      line.deliveryDate = ld.deliveryDate;
+    }
+    if (b.projectNumber) assertProjectOpen(b.projectNumber);
+    Object.assign(po, poDetails(b));
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before: null, after: b as Record<string, unknown>, createdAt: new Date().toISOString() });
     return po;
@@ -1015,7 +1104,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'PATCH' && p.startsWith('/users/') && p.split('/').length === 3) {
     const id = p.slice('/users/'.length);
-    const b = body as { name?: string; active?: boolean; roleNames?: string[] };
+    const b = body as { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null };
     return mockUsersApi.update(id, b);
   }
 
@@ -1137,6 +1226,11 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
     'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
     'purchaseOrders.allowEditAfterApproval': row('purchaseOrders.allowEditAfterApproval', true, 'boolean', 'purchase_orders', 'Allow editing a purchase order once it has been approved.'),
+    'purchaseOrders.deliveryTo': row('purchaseOrders.deliveryTo', 'Afrinov (PTY) Ltd', 'string', 'purchase_orders', 'Who goods are delivered to, on new purchase orders.'),
+    'purchaseOrders.deliveryAddress': row('purchaseOrders.deliveryAddress', '10 Lime Street, Icon Industrial Park\nSunderland Ridge, Centurion 0157', 'string', 'purchase_orders', 'Delivery address on new purchase orders. One line per address line.'),
+    'purchaseOrders.deliveryCountry': row('purchaseOrders.deliveryCountry', 'South Africa', 'string', 'purchase_orders', 'Delivery country on new purchase orders.'),
+    'purchaseOrders.deliveryContactName': row('purchaseOrders.deliveryContactName', '', 'string', 'purchase_orders', 'Who receives deliveries at the delivery address, on new purchase orders.'),
+    'purchaseOrders.deliveryContactPhone': row('purchaseOrders.deliveryContactPhone', '', 'string', 'purchase_orders', 'Phone number for that person.'),
     'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 
     'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),
@@ -1696,6 +1790,8 @@ interface MockAdminUser {
   active: boolean;
   createdAt: string;
   roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' } }>;
+  /** Largest order (rand, incl. VAT) they may approve; null: no limit. */
+  approvalLimit?: string | null;
 }
 const SEED_USERS: MockAdminUser[] = [
   { id: 'user-1', email: 'admin@afrinov.local', name: 'System Administrator (dev)', active: true, createdAt: new Date('2026-01-01').toISOString(), roles: [{ role: { name: 'ADMIN' } }] },
@@ -1739,12 +1835,13 @@ const mockUsersApi = {
     recordAudit('CREATE', created.id, null, { email: created.email, name: created.name, roles: b.roleNames });
     return created;
   },
-  update(id: string, b: { name?: string; active?: boolean; roleNames?: string[] }): MockAdminUser {
+  update(id: string, b: { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null }): MockAdminUser {
     const u = mockUsers.find((x) => x.id === id);
     if (!u) throw err('NOT_FOUND', 'User not found');
     const before = { name: u.name, active: u.active, roles: u.roles.map((r) => r.role.name) };
     if (b.name !== undefined) u.name = b.name;
     if (b.active !== undefined) u.active = b.active;
+    if (b.approvalLimit !== undefined) u.approvalLimit = b.approvalLimit === null ? null : String(b.approvalLimit);
     if (b.roleNames !== undefined) {
       u.roles = b.roleNames.map((r) => ({ role: { name: r as MockAdminUser['roles'][number]['role']['name'] } }));
     }

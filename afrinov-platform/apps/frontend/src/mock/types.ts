@@ -95,6 +95,8 @@ export interface MockPurchaseOrderLine {
   receivedQty: string;
   /** Excluding VAT; null when no price was given. */
   unitPrice?: string | null;
+  /** YYYY-MM-DD; null: the order's expected date. */
+  deliveryDate?: string | null;
 }
 
 export interface MockPurchaseOrder {
@@ -107,6 +109,20 @@ export interface MockPurchaseOrder {
   currency?: string;
   /** Percent, as a string like the server's Decimal. */
   vatRate?: string;
+  // The template's order details (see PurchaseOrderDetailsFields).
+  projectNumber?: string | null;
+  paymentTerms?: string | null;
+  paymentMilestone?: string | null;
+  settlementDiscount?: string;
+  shippingTerms?: string | null;
+  penaltiesApply?: boolean;
+  deliveryMethod?: 'DELIVERY' | 'COLLECTION';
+  deliveryTo?: string | null;
+  deliveryAddress?: string | null;
+  deliveryCountry?: string | null;
+  deliveryContactName?: string | null;
+  deliveryContactPhone?: string | null;
+  afrinovContact?: string | null;
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
   approvedBy?: MockUser | null;

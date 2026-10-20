@@ -19,6 +19,7 @@ import { api, FRONTEND_ONLY, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
+import { formatCurrency } from '../lib/currency';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
 // Hide "Purchase orders" as a landing page while procurement is off, unless it
@@ -141,6 +142,13 @@ export function SettingsPurchaseOrders() {
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
   const vatRate = useSetting('purchaseOrders.vatRate');
+  const deliveryDefaults = [
+    useSetting('purchaseOrders.deliveryTo'),
+    useSetting('purchaseOrders.deliveryAddress'),
+    useSetting('purchaseOrders.deliveryCountry'),
+    useSetting('purchaseOrders.deliveryContactName'),
+    useSetting('purchaseOrders.deliveryContactPhone'),
+  ];
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
@@ -156,6 +164,19 @@ export function SettingsPurchaseOrders() {
           error={errors['purchaseOrders.vatRate'] ?? null}
         />
       )}
+      {deliveryDefaults.some(Boolean) && (
+        <h3 className="text-sm font-semibold text-surface-900 pt-2">Delivery on new orders</h3>
+      )}
+      {deliveryDefaults.map((def) => def && (
+        <TextField
+          key={def.key}
+          def={def}
+          value={(draft[def.key] as string) ?? ''}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+          multiline={def.key === 'purchaseOrders.deliveryAddress'}
+        />
+      ))}
       <SaveBar items={items} onSave={async () => {
         try {
           const r = await save();
@@ -247,7 +268,12 @@ interface AdminUser {
   active: boolean;
   createdAt: string;
   roles: { role: { name: RoleName } }[];
+  /** Largest purchase order (rand, incl. VAT) they may approve; null: no limit. */
+  approvalLimit?: string | null;
 }
+
+/** Roles that may approve purchase orders, so have an approval limit. */
+const APPROVING_ROLES: RoleName[] = ['ADMIN', 'APPROVER'];
 
 interface UserFormProps {
   initial?: Partial<AdminUser>;
@@ -264,9 +290,12 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
   const [confirm, setConfirm] = useState('');
   const [roles, setRoles] = useState<RoleName[]>(initial?.roles?.map((r) => r.role.name) ?? ['VIEWER']);
   const [active, setActive] = useState(initial?.active ?? true);
+  // Blank: no limit.
+  const [limit, setLimit] = useState(initial?.approvalLimit == null ? '' : String(Number(initial.approvalLimit)));
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const approves = PROCUREMENT_ENABLED && roles.some((r) => APPROVING_ROLES.includes(r));
 
   function toggleRole(r: RoleName): void {
     setRoles((prev) => prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]);
@@ -285,6 +314,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       if (password !== confirm) errs.confirm = 'Passwords do not match.';
     }
     if (roles.length === 0) errs.roles = 'Select at least one role.';
+    if (approves && limit.trim() !== '' && !(Number(limit) >= 0)) errs.approvalLimit = 'Enter an amount of 0 or more, or leave it blank for no limit.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       setValidation('Please correct the highlighted fields.');
@@ -292,11 +322,14 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
     }
     setBusy(true);
     try {
+      const approvalLimit = approves && limit.trim() !== '' ? Number(limit) : null;
       if (isEdit && initial?.id) {
-        await api.patch(`/users/${initial.id}`, { name: name.trim(), active, roleNames: roles });
+        await api.patch(`/users/${initial.id}`, { name: name.trim(), active, roleNames: roles, ...(PROCUREMENT_ENABLED ? { approvalLimit } : {}) });
         onSaved(`User ${name.trim()} updated.`);
       } else {
-        await api.post('/users', { name: name.trim(), email: email.trim().toLowerCase(), password, roleNames: roles });
+        const created = await api.post<{ id: string }>('/users', { name: name.trim(), email: email.trim().toLowerCase(), password, roleNames: roles });
+        // New users start without a limit; a limit is set in a second step.
+        if (approvalLimit !== null) await api.patch(`/users/${created.id}`, { approvalLimit });
         onSaved(`User ${name.trim()} created.`);
       }
     } catch (err) {
@@ -356,6 +389,12 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
           ))}
         </div>
       </Field>
+      {approves && (
+        <Field label="Approval limit (R, including VAT)" htmlFor="usr-limit" error={fieldErrors.approvalLimit}
+          help="The largest purchase order this person may approve. Leave blank for no limit. Orders in other currencies need someone without a limit.">
+          <Input id="usr-limit" type="number" min="0" step="0.01" inputMode="decimal" placeholder="No limit" value={limit} onChange={(e) => setLimit(e.target.value)} invalid={!!fieldErrors.approvalLimit} />
+        </Field>
+      )}
       {isEdit && (
         <Field label="Status" htmlFor="usr-active" help="Inactive users cannot sign in but their historical records are preserved.">
           <Select id="usr-active" value={active ? 'ACTIVE' : 'INACTIVE'} onChange={(e) => setActive(e.target.value === 'ACTIVE')}>
@@ -428,6 +467,11 @@ export function SettingsUsers() {
                   {u.roles.length === 0 && <span className="text-xs text-surface-400">No roles</span>}
                   {u.roles.map((r) => <Badge key={r.role.name} tone={r.role.name === 'ADMIN' ? 'brand' : 'neutral'}>{ROLE_LABEL[r.role.name]}</Badge>)}
                 </div>
+                {PROCUREMENT_ENABLED && u.roles.some((r) => APPROVING_ROLES.includes(r.role.name)) && (
+                  <div className="text-xs text-surface-500 mt-1">
+                    Approves orders {u.approvalLimit == null ? 'of any value' : `up to ${formatCurrency(Number(u.approvalLimit), 'ZAR')}`}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => setDrawer({ mode: 'edit', user: u })}>Edit</Button>

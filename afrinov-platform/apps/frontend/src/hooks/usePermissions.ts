@@ -65,7 +65,9 @@ export const PERMISSION_ROLES = {
   'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
   'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order
-  'orders:approve': ['APPROVER'], // approve:purchase_order
+  'orders:approve': ['APPROVER'], // approve:purchase_order (within the user's approval limit)
+  'orders:view': ['STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER'], // view:purchase_order
+  'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order
   'users:manage': [], // manage:users (ADMIN only)
 } as const satisfies Record<string, readonly RoleName[]>;
 

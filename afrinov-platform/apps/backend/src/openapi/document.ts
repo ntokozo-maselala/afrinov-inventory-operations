@@ -153,7 +153,7 @@ export const OPERATIONS: Operation[] = [
     body: createUserSchema, success: 201, errors: [409],
   },
   {
-    method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate or change roles',
+    method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate, change roles or set an approval limit',
     permissions: [P.ManageUsers], body: updateUserSchema, errors: [404],
   },
 
@@ -437,7 +437,7 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createPOSchema, success: 201, errors: [404],
   },
   {
-    method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update notes, expected delivery, VAT rate or line prices',
+    method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices or delivery dates',
     procurement: true, permissions: [P.CreatePurchaseOrder], body: updatePOSchema, errors: [404, 409],
   },
   {
@@ -451,7 +451,12 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/purchase-orders/:id/approve', tag: 'Purchase orders', summary: 'Approve a submitted order',
-    procurement: true, permissions: [P.ApprovePurchaseOrder], errors: [404, 409],
+    description: 'Every line needs a price (400), and the order total in rand including VAT must be within the approver\'s limit (403, naming who can approve it). Orders in other currencies need an approver without a limit.',
+    procurement: true, permissions: [P.ApprovePurchaseOrder], errors: [400, 403, 404, 409],
+  },
+  {
+    method: 'get', path: '/purchase-orders/:id/approval', tag: 'Purchase orders', summary: 'Who may approve this order, and whether you can',
+    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',

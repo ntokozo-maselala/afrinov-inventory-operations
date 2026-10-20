@@ -79,6 +79,53 @@ describe('mock API mutation flows', () => {
     });
   });
 
+  describe('purchase order approval by value', () => {
+    async function submitted(lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>) {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines });
+      await api.post(`/purchase-orders/${po.id}/submit`, {});
+      return po.id;
+    }
+
+    it('refuses to approve while a line has no price', async () => {
+      const id = await submitted([{ materialId: 'mat-1', orderedQty: 1 }]);
+      expect((await api.get<{ canApprove: boolean; unpricedLines: number }>(`/purchase-orders/${id}/approval`))).toMatchObject({ canApprove: false, unpricedLines: 1 });
+      const e = await api.post(`/purchase-orders/${id}/approve`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('VALIDATION_ERROR');
+    });
+
+    it('refuses an order over the signed-in user\'s limit', async () => {
+      await api.patch('/users/user-1', { approvalLimit: 100 });
+      const id = await submitted([{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }]); // R115 with VAT
+      expect(await api.get<{ canApprove: boolean }>(`/purchase-orders/${id}/approval`)).toMatchObject({ canApprove: false });
+      const e = await api.post(`/purchase-orders/${id}/approve`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('FORBIDDEN');
+      await api.patch('/users/user-1', { approvalLimit: null });
+    });
+  });
+
+  describe('purchase order details', () => {
+    type Detailed = Record<string, unknown> & { lines: Array<{ id: string; deliveryDate?: string | null }> };
+
+    it('fills the delivery block from Settings and the terms from the supplier', async () => {
+      await api.patch('/suppliers/sup-1', { paymentTerms: '30 DAYS NETT' });
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });
+      expect(await api.get<Detailed>(`/purchase-orders/${po.id}`)).toMatchObject({
+        paymentTerms: '30 DAYS NETT', deliveryMethod: 'DELIVERY', deliveryTo: 'Afrinov (PTY) Ltd', deliveryCountry: 'South Africa',
+      });
+    });
+
+    it('refuses an unknown project, and edits details and a line date', async () => {
+      const bad = await api.post('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'NOPE', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }).catch((x: unknown) => x);
+      expect(isApiError(bad) && (bad as ApiError).code).toBe('VALIDATION_ERROR');
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', shippingTerms: 'FOB', lines: [{ materialId: 'mat-1', orderedQty: 1 }] });
+      const lineId = (await api.get<Detailed>(`/purchase-orders/${po.id}`)).lines[0]!.id;
+      await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: null, penaltiesApply: true, lineDeliveryDates: [{ lineId, deliveryDate: '2026-12-01' }] });
+      const read = await api.get<Detailed>(`/purchase-orders/${po.id}`);
+      expect(read).toMatchObject({ shippingTerms: null, penaltiesApply: true });
+      expect(read.lines[0]!.deliveryDate).toBe('2026-12-01');
+    });
+  });
+
   describe('POST /materials (create)', () => {
     it('creates a material and returns it', async () => {
       const result = await api.post<{ id: string; sku: string; name: string; active: boolean }>('/materials', {
@@ -273,7 +320,8 @@ describe('mock API mutation flows', () => {
     function makeDraftPO() {
       return api.post<{ id: string }>('/purchase-orders', {
         supplierId: 'sup-1',
-        lines: [{ materialId: 'mat-1', orderedQty: 5 }],
+        // Priced: an order with unpriced lines can't be approved.
+        lines: [{ materialId: 'mat-1', orderedQty: 5, unitPrice: 4.5 }],
       });
     }
 

@@ -181,6 +181,11 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'purchaseOrders.allowCancellation', type: 'boolean', category: 'purchase_orders', description: 'Allow cancelling purchase orders before delivery.', default: true },
   { key: 'purchaseOrders.allowEditAfterApproval', type: 'boolean', category: 'purchase_orders', description: 'Allow editing a purchase order once it has been approved.', default: true },
   { key: 'purchaseOrders.vatRate', type: 'number', category: 'purchase_orders', description: 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.', default: 15, validate: NON_NEG(100) },
+  { key: 'purchaseOrders.deliveryTo', type: 'string', category: 'purchase_orders', description: 'Who goods are delivered to, on new purchase orders.', default: 'Afrinov (PTY) Ltd', validate: isLength(0, 200) },
+  { key: 'purchaseOrders.deliveryAddress', type: 'string', category: 'purchase_orders', description: 'Delivery address on new purchase orders. One line per address line.', default: '10 Lime Street, Icon Industrial Park\nSunderland Ridge, Centurion 0157', validate: isLength(0, 500) },
+  { key: 'purchaseOrders.deliveryCountry', type: 'string', category: 'purchase_orders', description: 'Delivery country on new purchase orders.', default: 'South Africa', validate: isLength(0, 100) },
+  { key: 'purchaseOrders.deliveryContactName', type: 'string', category: 'purchase_orders', description: 'Who receives deliveries at the delivery address, on new purchase orders.', default: '', validate: isLength(0, 200) },
+  { key: 'purchaseOrders.deliveryContactPhone', type: 'string', category: 'purchase_orders', description: 'Phone number for that person.', default: '', validate: isLength(0, 50) },
 
   // ── Notifications ──────────────────────────────────────────────────────
   { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },

@@ -45,12 +45,14 @@ export interface UpdateUserInput {
   name?: string;
   active?: boolean;
   roleNames?: string[];
+  /** Largest purchase order (rand, incl. VAT) the user may approve; null: no limit. */
+  approvalLimit?: number | null;
 }
 
 export const UserService = {
   async list() {
     return prisma.user.findMany({
-      select: { id: true, email: true, name: true, active: true, createdAt: true, roles: { include: { role: true } } },
+      select: { id: true, email: true, name: true, active: true, approvalLimit: true, createdAt: true, roles: { include: { role: true } } },
       orderBy: { name: 'asc' },
     });
   },
@@ -64,7 +66,7 @@ export const UserService = {
   async getById(id: string) {
     const u = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, email: true, name: true, active: true, createdAt: true, roles: { include: { role: true } } },
+      select: { id: true, email: true, name: true, active: true, approvalLimit: true, createdAt: true, roles: { include: { role: true } } },
     });
     if (!u) throw Errors.notFound('User');
     return u;
@@ -105,6 +107,7 @@ export const UserService = {
     const data: Prisma.UserUpdateInput = {};
     if (input.name !== undefined) data.name = input.name;
     if (input.active !== undefined) data.active = input.active;
+    if (input.approvalLimit !== undefined) data.approvalLimit = input.approvalLimit;
 
     let nextRoles: Role[] | undefined;
     if (input.roleNames !== undefined) {
@@ -139,11 +142,13 @@ export const UserService = {
           name: before.name,
           active: before.active,
           roles: before.roles.map((r) => r.role.name),
+          approvalLimit: before.approvalLimit?.toString() ?? null,
         } as Prisma.InputJsonValue,
         after: {
           name: updated.name,
           active: updated.active,
           roles: updated.roles.map((r) => r.role.name),
+          approvalLimit: updated.approvalLimit?.toString() ?? null,
         } as Prisma.InputJsonValue,
       },
     });
