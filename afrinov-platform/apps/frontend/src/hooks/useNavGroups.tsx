@@ -29,7 +29,7 @@ function isView(target: string, pathname: string, search: string): boolean {
 
 /**
  * Whether a menu entry is the page being shown. An entry whose link has a
- * query is a view of a list ("Waiting for my approval"), highlighted only on
+ * query is a view of a list ("Approval status"), highlighted only on
  * that view.
  */
 export function isNavItemActive(item: Pick<NavItem, 'to' | 'end' | 'exact' | 'excludes'>, pathname: string, search = ''): boolean {
@@ -98,7 +98,7 @@ export function useNavGroups(): NavGroup[] {
         // Highlighted on an order's page too, but not on the new-order page or the approval queue, which have their own entries.
         { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new', '/purchase-orders?status=mine'] },
         // The orders the signed-in approver can approve now (priced, within their limit), as on the Dashboard card.
-        { to: '/purchase-orders?status=mine', label: 'Waiting for my approval', icon: <Icon.Check />, permissions: ['orders:approve'] },
+        { to: '/purchase-orders?status=mine', label: 'Approval status', icon: <Icon.Check />, permissions: ['orders:approve'] },
         { to: '/purchase-orders/new', label: 'New purchase order', icon: <Icon.Plus />, permissions: ['procurement:manage'] },
       ],
     }] : []),

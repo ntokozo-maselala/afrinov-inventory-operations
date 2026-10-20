@@ -225,6 +225,7 @@ a.dashboard-kpi-card:hover {
 .dashboard-kpi-delay-4 { animation-delay: 105ms; }
 .dashboard-kpi-delay-5 { animation-delay: 140ms; }
 .dashboard-kpi-delay-6 { animation-delay: 175ms; }
+.dashboard-kpi-delay-7 { animation-delay: 210ms; }
 
 @keyframes dashboard-kpi-arrive {
   from { opacity: 0; transform: translateY(7px); }
@@ -452,6 +453,7 @@ a.dashboard-kpi-card:hover {
 @media (min-width: 1024px) {
   .dashboard-theme { margin-inline: -2rem; padding-inline: 2rem; }
   .dashboard-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.85rem; }
+  .dashboard-kpis-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 }
 
 @media (max-width: 1023px) {

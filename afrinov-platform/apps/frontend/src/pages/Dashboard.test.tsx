@@ -116,7 +116,7 @@ describe('Dashboard analytics', () => {
   });
 });
 
-describe('Dashboard: waiting for your approval', () => {
+describe('Dashboard: approval status card', () => {
   const order = (id: string, number: string, net: string) => ({
     id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' },
     totals: { subtotal: net, vat: '0.00', net, unpricedLines: 0 },
@@ -132,25 +132,29 @@ describe('Dashboard: waiting for your approval', () => {
     });
   });
 
-  it('lists the orders the approver can approve, and counts the others', async () => {
+  const approvalCard = async () => (await screen.findByText('Approval status')).closest('a')!;
+
+  it('shows a card with the orders the approver can approve, and counts the others', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    const card = await screen.findByRole('region', { name: 'Waiting for your approval' });
-    expect(await within(card).findByRole('link', { name: 'AFRI-0101' })).toHaveAttribute('href', '/purchase-orders/po-1');
-    expect(within(card).queryByText('AFRI-0102')).not.toBeInTheDocument();
-    expect(await within(card).findByRole('link', { name: '2 more orders need prices or a higher limit' })).toHaveAttribute('href', '/purchase-orders?status=PENDING_APPROVAL');
+    const card = await approvalCard();
+    expect(card).toHaveAttribute('href', '/purchase-orders?status=mine');
+    expect(await within(card).findByText('1')).toBeInTheDocument();
+    expect(await within(card).findByText('waiting for you · 2 more need prices or a higher limit')).toBeInTheDocument();
   });
 
   it('says when nothing is waiting', async () => {
     mockGet.mockImplementation(async (path: string) => (path === '/reports/stock-value' ? VALUE : path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : []));
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    expect(await screen.findByText('Nothing is waiting for your approval.')).toBeInTheDocument();
+    const card = await approvalCard();
+    expect(await within(card).findByText('nothing waiting for you')).toBeInTheDocument();
+    expect(within(card).getByText('0')).toBeInTheDocument();
   });
 
   it('is not shown to those who do not approve', async () => {
     auth.roles = ['STORE_CONTROLLER'];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await screen.findByText('Stock value by category');
-    expect(screen.queryByRole('region', { name: 'Waiting for your approval' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Approval status')).not.toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
   });
 });
