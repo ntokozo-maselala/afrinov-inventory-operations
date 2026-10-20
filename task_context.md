@@ -72,8 +72,8 @@ database; CI runs them on every backend pull request.
   ADMIN pass any check.
 - **Purchase orders** go DRAFT → PENDING_APPROVAL → APPROVED →
   PARTIALLY_RECEIVED → RECEIVED → CLOSED, or CANCELLED (ADR-007). Procurement
-  is off by default: `PROCUREMENT_ENABLED` (backend) and
-  `VITE_PROCUREMENT_ENABLED` (frontend).
+  is on by default; `PROCUREMENT_ENABLED=false` (backend) and
+  `VITE_PROCUREMENT_ENABLED=false` (frontend) switch it off (ADR-019).
 - **Settings** come from the catalog in `settings.service.ts`. Removing a key
   there retires it; the seed deletes its row.
 - **Production builds** of the frontend fail if `VITE_FRONTEND_ONLY` or

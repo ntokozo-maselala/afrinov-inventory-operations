@@ -31,8 +31,8 @@ issues. Quantities in `details` are strings.
 Business-rule violations return a specific code and a human-readable
 message naming the item (SKU) and quantities. The original intent to name
 the location in the message (e.g. "from D-1") is not implemented; the
-location id is in `details`. "Tool already checked out" is **Planned** with
-the tool feature.
+location id is in `details`. Checking out more of a tool than is on the shelf
+is refused with the same insufficient-balance error.
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/shared/errors.ts:2-33`

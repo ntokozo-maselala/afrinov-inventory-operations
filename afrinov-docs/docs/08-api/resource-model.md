@@ -15,8 +15,8 @@ permission is required (see `authorization.md`).
 | Location | `locations` | `GET /locations` (q, type, active), `GET /locations/:id` — auth; `POST` — create:location; `PATCH /:id` — edit:location; `PATCH /:id/status` — manage:location_status; `DELETE /:id` (only when unused) — delete:location |
 | Rack | `racks` | `GET /racks` (q, locationId, projectNumber, status), `GET /racks/:id` — auth; `POST`, `PATCH /:id`, `DELETE /:id` (archive) — manage:racks |
 | Supplier | `suppliers` | `GET /suppliers` (q) — auth; `POST /suppliers` — create:supplier. Update/deactivate **Planned** |
-| PurchaseOrder | `purchase_orders` (+lines) | Only when `PROCUREMENT_ENABLED=true`. `GET /purchase-orders` (status), `GET /:id`, `GET /:id/history` — view:purchase_order; `POST` and `PATCH /:id` — create:purchase_order; `POST /:id/submit` — submit:purchase_order; `/approve` — approve:purchase_order; `/receive` — receive:purchase_order; `/close` — close:purchase_order; `/cancel` — cancel:purchase_order |
-| GoodsReceipt | `goods_receipts` (+lines) | Only when `PROCUREMENT_ENABLED=true`. `GET /goods-receipts`, `GET /:id` — view:goods_receipt; `POST /goods-receipts`, `POST /:id/post` — receive:inventory |
+| PurchaseOrder | `purchase_orders` (+lines) | Unless `PROCUREMENT_ENABLED=false`. `GET /purchase-orders` (status, projectNumber, awaitingMyApproval), `GET /:id`, `GET /:id/history`, `GET /:id/approval` — view:purchase_order; `POST` and `PATCH /:id` — create:purchase_order; `POST /:id/submit` — submit:purchase_order; `/approve` — approve:purchase_order; `/receive` — receive:purchase_order; `/close` — close:purchase_order; `/cancel` — cancel:purchase_order |
+| GoodsReceipt | `goods_receipts` (+lines) | Unless `PROCUREMENT_ENABLED=false`. `GET /goods-receipts`, `GET /:id` — view:goods_receipt; `POST /goods-receipts`, `POST /:id/post` — receive:inventory |
 | StockReceipt (action) | `goods_receipts` (POSTED) + `inventory_transactions` | `POST /stock-receipts` (supplier, delivery/invoice number, date, 1–50 lines) — receive:inventory. Always available |
 | InventoryTransaction | `inventory_transactions` | `GET /inventory-transactions` (materialId, type, from, to, projectNumber, limit) — auth. Read-only; no update or delete route |
 | InventoryIssue (action) | inserts ISSUE rows | `POST /inventory-issues` (recipient, optional project, 1–50 lines) — issue:inventory |
@@ -25,7 +25,7 @@ permission is required (see `authorization.md`).
 | InventoryTransfer (action) | inserts two linked rows | `POST /inventory-transfers` — transfer:inventory |
 | InventoryAdjustment (action) | inserts an ADJUSTMENT row | `POST /inventory-adjustments` — adjust:inventory |
 | StockCount (action) | inserts COUNT_VARIANCE adjustments | `POST /stock-counts` (location, 1–2000 lines) — adjust:inventory |
-| ToolCheckOut / ToolCheckIn (action) | — | **Planned** |
+| ToolCheckOut / ToolCheckIn (action) | `inventory_transactions` (`LOAN`, `LOAN_RETURN`) | `GET /tools` — signed in; `POST /tools/check-out` — checkout:tool; `POST /tools/check-in` — checkin:tool |
 | Project | `projects` | `GET /projects` (q, status, active), `GET /projects/:projectNumber` — auth; `POST`, `PATCH`, `DELETE` (archive) — manage:projects |
 | Recipient | `recipients` | `GET /recipients` (q, type, active), `GET /recipients/:id` — auth; `POST`, `PATCH /:id` (incl. active) — manage:recipients |
 | Report: CurrentStock | derived | `GET /reports/current-stock` (category, locationId, materialId) — view:reports |

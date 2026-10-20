@@ -5,8 +5,8 @@
 ```
 +----------------------------+
 | Procurement Context        |   backend module: procurement/
-|                            |   (purchase orders and goods receipts are off
-| Supplier                   |    unless PROCUREMENT_ENABLED=true)
+|                            |   (purchase orders and goods receipts are on
+| Supplier                   |    unless PROCUREMENT_ENABLED=false)
 | PurchaseOrder (+lines)     |
 | GoodsReceipt (+lines)      |
 +--------------+-------------+

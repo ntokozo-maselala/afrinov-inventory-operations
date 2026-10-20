@@ -14,13 +14,13 @@ Tests are listed in `11-testing/test-traceability.md`.
 | BR-005 (transfer stock) | FR-INV-004 | Inventory | `04-processes/stock-transfer.md` | `/inventory-transfers` | `modules/inventory/inventory.service.ts` | Implemented |
 | BR-006 (correct stock counts) | FR-INV-005 | Inventory | `04-processes/stock-adjustment.md` | `/inventory-adjustments`, `/stock-counts`, `/inventory-transactions/:id/reversal` | `modules/inventory/inventory.service.ts`, `modules/inventory/stock-count.service.ts` | Implemented |
 | BR-007 (low-stock alert) | FR-INV-007 | Inventory | `04-processes/reporting-and-controls.md` | `/reports/stock-status`, `/reports/low-stock`, `/reports/reorder-list/export` | `shared/inventory/stock-status.ts` | Implemented (% bands) |
-| BR-008 (tool check-out tracking) | FR-INV-008 | Inventory | `03-domain/state-machines.md` | — | — | **Planned** |
+| BR-008 (tool check-out tracking) | FR-INV-008 | Inventory | `04-processes/tool-loans.md` | `POST /tools/check-out`, `/tools/check-in` | `modules/inventory/tool-loan.service.ts` | Implemented |
 | BR-009 (stock value / movement reporting) | FR-REP-001, FR-REP-003 | Reporting | `04-processes/reporting-and-controls.md` | `/reports/stock-value`, `/reports/month-end`, `/reports/inventory` | `modules/reporting/` | Implemented |
 | BR-010 (consumption per project) | FR-REP-004 | Reporting/Operations | `04-processes/reporting-and-controls.md` | `/reports/consumption`, `/reports/project-consumption/:projectNumber` | `modules/reporting/consumption.service.ts` | Implemented |
 | BR-011 (role-based restriction) | FR-SEC-002 | Identity & Access | `10-security/access-control.md` | all mutating routes | `shared/permissions.ts`, `shared/authorization.ts` | Implemented |
 | BR-012 (audit trail) | FR-SEC-001, FR-SEC-003 | Identity & Access | `07-data/audit-model.md` | `/audit` | services' audit writes, `modules/audit/audit.routes.ts` | Partly (TD-006, TD-008) |
 | BR-013 (supplier master) | FR-PROC-001 | Procurement | `03-domain/entity-catalog.md` | `/suppliers` | `modules/procurement/procurement.service.ts` | Partly (no edit; TD-013) |
-| BR-014 (PO lifecycle) | FR-PROC-002, FR-PROC-003 | Procurement | `04-processes/purchase-order-lifecycle.md` | `/purchase-orders` | `modules/procurement/procurement.service.ts` | Implemented, off by default |
+| BR-014 (PO lifecycle) | FR-PROC-002, FR-PROC-003 | Procurement | `04-processes/purchase-order-lifecycle.md` | `/purchase-orders` | `modules/procurement/procurement.service.ts` | Implemented, on by default (ADR-019) |
 
 Downstream: each Functional Requirement maps to an API endpoint
 (`08-api/resource-model.md`), a UI page (`09-frontend/page-inventory.md`),

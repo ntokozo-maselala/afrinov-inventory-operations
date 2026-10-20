@@ -34,7 +34,10 @@ item and location: Brought Forward, IN, OUT, Current Stock, Required Stock)
 and the matching **Summary** sheets (unit price) for four categories:
 Consumables, Fasteners/Slugs/Insulation, Tooling/PPE/Electrical and
 Project Material. It also reads the `Project No.` and `Employees` lists.
-Tools are not imported. *Unverified:* whether this workbook is the same
+Tools are imported from the `Tools Main` register (one row per tool or set
+of identical tools; "Required Tools" is how many the store owns), with a
+serial number suggested for a single tool from the end of its name.
+*Unverified:* whether this workbook is the same
 dataset as `07__July_2026_Report.xlsm` described in
 `02-business-analysis/current-state-as-is.md`.
 

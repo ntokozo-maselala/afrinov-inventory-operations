@@ -15,5 +15,6 @@ do not proceed to Milestone 2 (Procurement) until this review is complete.
 
 *Unverified:* no record of this review's outcome is in the repository.
 Implementation has continued past Milestone 2 (`01-product/product-roadmap.md`);
-procurement is built but switched off by default, which is consistent with
-this gate not having cleared Procurement.
+procurement was built behind a switch that was off by default; it has since
+been aligned to the purchase order template and turned on by default
+(ADR-019). *Unverified:* whether this gate formally cleared Procurement.

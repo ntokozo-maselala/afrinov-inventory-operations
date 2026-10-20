@@ -35,7 +35,7 @@ below its required threshold.
 
 **BR-008** The organisation must be able to track which tools are currently
 checked out, and to whom.
-*Status:* **Planned** — no tool check-out tracking exists.
+*Status:* Implemented — Tools page and `/tools` check-out/check-in (`04-processes/tool-loans.md`).
 
 **BR-009** The organisation must be able to report stock value and
 movement, per category and overall.
@@ -59,7 +59,7 @@ suppliers rather than re-typing supplier names per transaction.
 
 **BR-014** The organisation must be able to track purchase orders from
 creation through to receipt.
-*Status:* Implemented behind `PROCUREMENT_ENABLED` (off by default).
+*Status:* Implemented; on by default, behind `PROCUREMENT_ENABLED` (ADR-019).
 
 Implementation status is traced to code and tests in
 `requirements-traceability-matrix.md` and `11-testing/test-traceability.md`.

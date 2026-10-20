@@ -40,7 +40,7 @@ location is picked by the user, not defaulted.
    with procurement switched on. Today the controller downloads the re-order
    list from the Stock status page instead.
 
-## 4. Technician checks out a tool — **Planned**
+## 4. Technician checks out a tool
 1. Vincent needs the Ryobi drill.
 2. Opens Tools screen, checks it's currently "in stores", checks it out to
    himself, optionally against a project.
@@ -48,8 +48,9 @@ location is picked by the user, not defaulted.
    until he checks it back in — replacing the `Check In/Out` column on
    `Tools Issued`, but now queryable ("what does Vincent currently have?").
 
-*Not implemented:* there is no tool check-out; tools are issued and
-returned like other material.
+*Implemented* on the Tools page (`/tools`): a check-out records a `LOAN`
+movement to the recipient, and the check-in says whether the tool came
+back in good order, damaged or lost (`04-processes/tool-loans.md`).
 
 ## 5. Manager reviews monthly position
 1. Opens Reporting, filters by category and date range.

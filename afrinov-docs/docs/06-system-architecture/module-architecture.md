@@ -29,8 +29,8 @@ afrinov-platform/apps/backend/
 There is no `suppliers/` module (suppliers live in `procurement/`), no
 `documents/` module (document management is **Planned**), and no
 `infrastructure/` folder (bootstrap is `server.ts`). The procurement
-routes for purchase orders and goods receipts are registered only when
-`PROCUREMENT_ENABLED=true`; supplier routes are always registered.
+routes for purchase orders and goods receipts are registered unless
+`PROCUREMENT_ENABLED=false`; supplier routes are always registered.
 
 ## Module boundary rule
 *Intended:* a module depends only on another module's public interface and

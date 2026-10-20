@@ -33,7 +33,7 @@ afrinov-platform/apps/frontend/src/
   goods receipts; `VITE_FRONTEND_ONLY` swaps the API client for the mock;
   `VITE_DEMO_AUTH_ENABLED` enables a single demo login. A production build
   refuses to run with either demo flag on.
-- **Planned:** a Tools (check-out/check-in) area; no such page exists.
+- Tools (`/tools`): check-out and check-in (`04-processes/tool-loans.md`).
 
 ## Evidence
 - `afrinov-platform/apps/frontend/package.json`

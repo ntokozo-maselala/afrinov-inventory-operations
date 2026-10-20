@@ -4,7 +4,7 @@
 
 Each transaction lists the API operation that implements it, or **Planned**
 when no code path exists. Purchase-order and goods-receipt operations are
-registered only when `PROCUREMENT_ENABLED=true`.
+registered unless `PROCUREMENT_ENABLED=false`.
 
 ## Procurement
 | Transaction | API |
@@ -40,7 +40,7 @@ registered only when `PROCUREMENT_ENABLED=true`.
 | Adjust stock (reason: count variance, damage, loss, scrap, other) | `POST /inventory-adjustments` |
 | Count stock at a location | `POST /stock-counts` |
 | Reverse a movement | `POST /inventory-transactions/:id/reversal` |
-| Check out tool / Check in tool | **Planned** (no endpoint) |
+| Check out tool / Check in tool | `POST /tools/check-out`, `POST /tools/check-in` |
 
 ## Operations
 | Transaction | API |

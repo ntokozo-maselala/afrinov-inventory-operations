@@ -137,3 +137,12 @@ The 2026-10-09 rows record a reconciliation of every document with the code;
 the new ADRs from it are ADR-009 to ADR-017 (marked Inferred from code), and
 the disagreements found are TD-004 to TD-025 in
 `13-project-management/technical-debt.md`.
+| 2026-10-20 | `00-governance/decision-log.md` | Added ADR-019 (procurement on by default); ADR-012 marked superseded | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `04-processes/purchase-order-lifecycle.md` | Rewritten: template-aligned order (prices and VAT, approval by order value, AFRI numbers and revisions, Inputs-sheet details, order document), form pages, receiving from the order page, approver landing | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `04-processes/supplier-management.md` | Rewritten: vendor-list fields, edit and deactivate, vendor list import, store controllers may add suppliers | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `04-processes/tool-loans.md` | Created: tool check-out and check-in | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `04-processes/goods-receiving.md`, `procure-to-stock.md` | Corrected: receiving against an order from its page; no Goods receipts page; on by default | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `03-domain/state-machines.md` | Extended: approval by limit, edits, revisions and the return to Pending approval | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `09-frontend/page-inventory.md`, `information-architecture.md`, `navigation-model.md` | Rewritten: current routes and menu (Tools, Return stock, PO pages, Stock report), permission-filtered menu, approver landing | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `10-security/access-control.md` | Extended: UI role gating, approval limits | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-20 | `01-product/*`, `02-business-analysis/*`, `03-domain/*`, `06-system-architecture/*`, `07-data/migration-strategy.md`, `08-api/*`, `09-frontend/frontend-architecture.md`, `11-testing/*`, `13-project-management/onboarding.md`, `technical-debt.md`, `14-validation/*`, `00-governance/glossary.md` | Corrected: procurement on by default; tool check-out/check-in implemented (was Planned); tools imported; supplier update exists; TD-015 partly resolved | Engineering (reconciliation against code at a7a7360) |

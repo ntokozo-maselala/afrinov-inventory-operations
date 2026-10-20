@@ -56,9 +56,10 @@ Project *----0..1 User (manager)
 - **InventoryBalance**: material, location, quantity — recomputed as
   `SUM(InventoryTransaction.quantity)` for that pair after every movement.
 
-**Planned:** a Tool (a Material with category TOOLS) with a current holder
-and check-out state. No such state exists in the code; tools are issued
-like any other material.
+A Tool is a Material with category TOOLS, optionally with a serial number
+when it is kept as one unit. It is lent, not issued: a check-out is a
+`LOAN` movement to a recipient and a check-in a `LOAN_RETURN`, so what is
+out and with whom is derived from the ledger (`04-processes/tool-loans.md`).
 
 ## Design note carried from the AS-IS analysis
 The workbook's `Brought Forward` figure becomes the balance as of a point in

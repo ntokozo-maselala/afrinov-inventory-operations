@@ -1,6 +1,6 @@
 # Information Architecture
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** a7a7360, 2026-10-20
 
 The sidebar groups, as implemented:
 
@@ -8,49 +8,53 @@ The sidebar groups, as implemented:
 Overview
  `- Dashboard                     /
 
-Operations
- |- Stock                         /stock   (issue, receive, count at /stock/issue, /stock/receive, /stock/count)
- |- Rack                          /racks
- |- Locations                     /locations
- |- Project                       /projects
- |- Recipients                    /recipients
- |- Movements                     /movements
- `- Suppliers                     /suppliers
+Store
+ |- Stock                         /stock
+ |- Issue stock                   /stock/issue      (inventory:issue)
+ |- Receive stock                 /stock/receive    (inventory:receive)
+ |- Return stock                  /stock/return     (inventory:return)
+ |- Count stock                   /stock/count      (inventory:count)
+ `- Tools                         /tools
 
-Procurement                       (only when VITE_PROCUREMENT_ENABLED=true)
- |- Purchase orders               /purchase-orders
- `- Goods receipts                /goods-receipts
-
-Catalogue
- `- Materials                     /materials
-
-Insights
- |- Inventory report              /reports/inventory
+Reports
  |- Stock status                  /reports/stock-status
  |- Stock used                    /reports/consumption
- `- Month-end report              /reports/month-end
+ |- Stock report                  /reports/stock-report
+ `- Movements                     /movements
+
+Operations
+ |- Materials                     /materials
+ |- Locations                     /locations
+ |- Projects                      /projects
+ |- Recipients                    /recipients
+ |- Suppliers                     /suppliers
+ `- Racks                         /racks
+
+Procurement                       (unless VITE_PROCUREMENT_ENABLED=false)
+ |- Purchase orders               /purchase-orders      (orders:view)
+ `- New purchase order            /purchase-orders/new  (procurement:manage)
 
 Account
  `- Settings                      /settings  (General, Notifications, Inventory, Purchase orders*,
                                               Appearance, Users, Security, System, Data, History)
 ```
-\* Purchase-order settings only when procurement is enabled.
+\* Purchase-order settings only when procurement is on.
 
-Transfers and adjustments (and a quick single-item issue) are actions
-launched from the Stock and material detail pages (`StockActionForm`);
-reversals and returns are launched from a movement's detail drawer
-(`TransactionDrawer`). None has its own page. Every group is shown to every
-role (no navigation item is filtered by permission; TD-015).
+Items marked with a permission are shown only to roles that hold it; the
+rest are shown to every signed-in user. Transfers and adjustments are
+actions launched from a row on the Stock page (`StockActionForm`); reversals
+and returns of a single movement are launched from its detail drawer on
+Movements (`TransactionDrawer`). Neither has its own page. A purchase order's
+page and its edit page are reached from the Purchase orders list.
 
-**Planned** (from the original design, not built): a Tools section (check
-out / check in, currently checked out), Documents, and supplier/location
-merge tooling.
+**Planned** (from the original design, not built): Documents, and
+supplier/location merge tooling.
 
 This replaces the flat page list from the first prototype with navigation
 grouped by business area. *Unverified:* that this grouping is the one the
 business owner asked for.
 
 ## Evidence
-- `afrinov-platform/apps/frontend/src/hooks/useNavGroups.tsx:26-73`
-- `afrinov-platform/apps/frontend/src/App.tsx:114-162`
+- `afrinov-platform/apps/frontend/src/hooks/useNavGroups.tsx`
+- `afrinov-platform/apps/frontend/src/App.tsx`
 - `afrinov-platform/apps/frontend/src/components/StockActionForm.tsx`, `afrinov-platform/apps/frontend/src/components/TransactionDrawer.tsx`

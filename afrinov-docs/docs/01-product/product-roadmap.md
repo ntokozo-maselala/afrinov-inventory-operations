@@ -31,7 +31,7 @@ for all five categories.
 ## Milestone 3 — Procurement
 Supplier master, Purchase Orders, Goods Receipt matched to POs, reorder
 alerting against `Required Stock`.
-*Status:* built (suppliers, POs, goods receipts, in-product re-order list) but switched off by default (`PROCUREMENT_ENABLED`); supplier edit not built.
+*Status:* built and on by default (ADR-019): supplier master aligned to the purchase order template's vendor list, with edit; POs with prices, VAT, approval by order value, template-style numbers and revisions, the order document; receiving against an order from its page; in-product re-order list. See `procurement-alignment-roadmap.md` and `procurement-workflow-roadmap.md` at the repository root.
 
 ## Milestone 4 — Tools & Category-Specific Behaviour
 Tool check-out/check-in state tracking, PPE/consumable distinctions if

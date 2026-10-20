@@ -20,8 +20,8 @@ Requirement → code → tests that exist today. Paths are under
 | BR-010 | FR-REP-004 | `src/modules/reporting/consumption.service.ts`, `reporting.service.ts` (`projectConsumption`) | `src/modules/reporting/consumption.test.ts`, `integration/consumption.real-http.test.ts`, `frontend/src/pages/Consumption.test.tsx` | Implemented |
 | BR-011 | FR-SEC-002 | `src/shared/permissions.ts`, `src/shared/authorization.ts` | `src/shared/permissions.test.ts`, `src/shared/authorization.test.ts`, `integration/inventory.real-http.test.ts` (read-only user) | Implemented |
 | BR-012 | FR-SEC-001, FR-SEC-003 | `src/server.ts` (`authenticate`), services' audit writes | `src/security.regression.test.ts`, `integration/auth.real-http.test.ts` | Partly implemented (audit gaps, TD-008) |
-| BR-013 | FR-PROC-001 | `src/modules/procurement/procurement.service.ts` (`SupplierService`) | `src/server.procurement.test.ts` (route stays registered when procurement is off); no test of the duplicate-name rule (TD-023) | Create only; update **Planned** |
-| BR-014 | FR-PROC-002/003 | `procurement.service.ts`, `goods-receipt.service.ts` | `src/modules/procurement/procurement.service.test.ts`, `integration/procurement.real-http.test.ts` | Implemented (behind `PROCUREMENT_ENABLED`) |
+| BR-013 | FR-PROC-001 | `src/modules/procurement/procurement.service.ts` (`SupplierService`) | `src/server.procurement.test.ts` (route stays registered when procurement is off); `src/modules/procurement/supplier.service.test.ts` (template fields, duplicate name and vendor code, update) | Create and update (`PATCH /suppliers/:id`) |
+| BR-014 | FR-PROC-002/003 | `procurement.service.ts`, `goods-receipt.service.ts` | `src/modules/procurement/procurement.service.test.ts`, `integration/procurement.real-http.test.ts` | Implemented (on by default, behind `PROCUREMENT_ENABLED`) |
 
 Update as each requirement is implemented and tested — this table links
 `02-business-analysis/business-requirements.md` to the actual test suite.

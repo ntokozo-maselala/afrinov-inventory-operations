@@ -14,8 +14,9 @@ It expects the backend and database to be running and the dev server on
 port 5173. It is not run in CI, and it hard-codes the admin password it
 expects the seed to have used (TD-017).
 
-The journey tests above are **Planned**; the tool journey depends on the
-tool feature, which is itself **Planned**.
+The journey tests above are **Planned**. The tool feature exists; its
+check-out and check-in are covered over real HTTP by
+`integration/tool-loans.real-http.test.ts`.
 
 ## Evidence
 - `afrinov-platform/apps/frontend/playwright.config.ts`

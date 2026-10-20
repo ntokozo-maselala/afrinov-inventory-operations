@@ -194,7 +194,8 @@ On every start the container runs `prisma migrate deploy`, then the seed
   database;
 - CORS is off unless `CORS_ORIGIN` is set; API docs are off unless
   `API_DOCS_ENABLED=true`;
-- set `PROCUREMENT_ENABLED=true` here if purchase orders are wanted.
+- purchase orders are on by default; set `PROCUREMENT_ENABLED=false` here
+  (and `VITE_PROCUREMENT_ENABLED=false` for the frontend) to switch them off.
 
 Check it with `GET /health/ready`. To deploy a new version, pull the code
 and run the same `docker compose up --build -d`; pending migrations apply
