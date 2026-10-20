@@ -80,7 +80,7 @@ describe('useNavGroups', () => {
     expect(procurement).toBeDefined();
     const itemLabels = procurement!.items.map(i => i.label);
     expect(itemLabels).toContain('Purchase orders');
-    expect(itemLabels).toContain('Goods receipts');
+    expect(itemLabels).not.toContain('Goods receipts');
   });
 
   it('omits the Procurement group but keeps Suppliers when procurement is disabled', () => {
@@ -330,9 +330,9 @@ describe('New purchase order in the menu', () => {
   afterEach(() => { signedIn.roles = ['ADMIN']; });
 
   it.each([
-    ['PROCUREMENT', ['Purchase orders', 'New purchase order', 'Goods receipts']],
+    ['PROCUREMENT', ['Purchase orders', 'New purchase order']],
     ['APPROVER', ['Purchase orders']],
-    ['STORE_CONTROLLER', ['Purchase orders', 'Goods receipts']],
+    ['STORE_CONTROLLER', ['Purchase orders']],
   ])('shows a %s only the Procurement entries they can use', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Procurement')).toEqual(expected);
