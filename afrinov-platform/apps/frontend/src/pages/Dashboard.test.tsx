@@ -3,7 +3,10 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
-vi.mock('../api/client', () => ({ api: { get: mockGet } }));
+vi.mock('../api/client', () => ({
+  api: { get: mockGet },
+  isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
+}));
 // Signed in as a store controller unless a test says otherwise; procurement on.
 const auth = vi.hoisted(() => ({ roles: ['STORE_CONTROLLER'] as string[] }));
 vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: auth.roles } }) }));
@@ -24,6 +27,7 @@ const VALUE = {
 describe('Dashboard', () => {
   let tools: unknown[] = [];
   beforeEach(() => {
+    auth.roles = ['STORE_CONTROLLER'];
     tools = [];
     mockGet.mockReset().mockImplementation(async (path: string) => {
       if (path === '/reports/stock-value') return VALUE;
@@ -37,6 +41,31 @@ describe('Dashboard', () => {
         ],
       };
     });
+  });
+
+  it('exposes a single level-one Dashboard heading after data loads', async () => {
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByLabelText('Stock value by category');
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('exposes the Dashboard heading while data is still loading', () => {
+    mockGet.mockReturnValue(new Promise(() => {}));
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('retains the Dashboard heading when data cannot be loaded', async () => {
+    mockGet.mockRejectedValue({ code: 'INTERNAL_ERROR', message: 'Reports unavailable.' });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByText('Some dashboard data could not be loaded.');
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
   it('shows the stock value per category, with a total, and the status counts', async () => {
