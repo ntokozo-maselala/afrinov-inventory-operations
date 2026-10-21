@@ -26,3 +26,8 @@ export const STORES_CATEGORIES = CATEGORIES.filter((c) => c.value !== PROJECTS_C
 export function sectionOf(category: string): MaterialSection {
   return category === PROJECTS_CATEGORY ? 'PROJECTS' : 'STORES';
 }
+
+/** Projects material with no project yet: kept, but not issued or ordered until it has one. */
+export function needsProject(m: { category: string; projectNumber?: string | null }): boolean {
+  return m.category === PROJECTS_CATEGORY && !m.projectNumber;
+}

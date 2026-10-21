@@ -31,3 +31,13 @@ describe('mock Stores and Projects materials', () => {
     expect(await api.patch<Material>('/materials/mat-9', { projectNumber: 'AFRI-1325' })).toMatchObject({ projectNumber: 'AFRI-1325' });
   });
 });
+
+describe('mock: project material with no project (Phase 3)', () => {
+  it('is refused for issuing and ordering until it has its project', async () => {
+    // mat-9 is seeded as Project Material with no project.
+    expect(await codeOf(api.post('/inventory-issues', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1 }] }))).toBe('VALIDATION_ERROR');
+    expect(await codeOf(api.post('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-9', orderedQty: 1 }] }))).toBe('VALIDATION_ERROR');
+    await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
+    expect(await codeOf(api.post('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-9', orderedQty: 1 }] }))).toBeUndefined();
+  });
+});
