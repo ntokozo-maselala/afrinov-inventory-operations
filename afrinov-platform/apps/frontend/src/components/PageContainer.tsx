@@ -14,6 +14,11 @@ const maxWidthClasses = {
   full: 'max-w-full',
 };
 
+/**
+ * Wraps page content in the focusable main-content landmark targeted by the shell's skip link.
+ * `maxWidth` selects a width cap (lg by default); full uses the available width.
+ * The landmark is excluded from sequential keyboard navigation.
+ */
 export function PageContainer({ children, className = '', maxWidth = 'lg' }: PageContainerProps) {
 
   return (

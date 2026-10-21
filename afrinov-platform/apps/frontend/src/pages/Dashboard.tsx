@@ -71,6 +71,14 @@ const HEALTH_SEGMENTS = [
   { key: 'NOT_SET', label: 'No reorder level', color: 'bg-surface-400', text: 'text-surface-300' },
 ] as const;
 
+/**
+ * Loads and displays current stock valuation, health, tool loans, and inventory.
+ * Requests the first 200 active inventory lines and shows up to five low-stock items.
+ * Fetches approval queues only when procurement is enabled and the user can approve.
+ * Request failures are caught and represented by error messages or fallback displays.
+ *
+ * @throws {Error} If rendered without an AuthProvider.
+ */
 export function Dashboard() {
   const { hasPermission } = usePermissions();
   const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');

@@ -26,6 +26,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Renders navigation, a skip link, and scrollable page content within the viewport.
+ * Uses the full content width on the dashboard route and closes the drawer on Escape.
+ *
+ * @throws {Error} If rendered without an AuthProvider.
+ */
 function AppShellInner({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const isDashboard = useLocation().pathname === '/';

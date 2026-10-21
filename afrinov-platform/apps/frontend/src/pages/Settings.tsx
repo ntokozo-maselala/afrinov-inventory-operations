@@ -40,6 +40,14 @@ function SettingsLayout() {
   );
 }
 
+/**
+ * Renders settings navigation and the active section within the surrounding page landmark.
+ * `isAdmin` exposes administrative sections and save/reset actions. Guards unloads
+ * and navigation through settings links while edits are unsaved.
+ * Save failures appear as toasts; reset failures close the confirmation dialog.
+ *
+ * @throws {Error} If SettingsProvider or ToastProvider is missing.
+ */
 function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
   const location = useLocation();
   const settings = useSettings();
