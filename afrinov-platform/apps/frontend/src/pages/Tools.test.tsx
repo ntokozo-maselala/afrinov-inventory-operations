@@ -62,6 +62,7 @@ describe('Tools page', () => {
   it('filters to the tools out now, and finds a tool by who has it', async () => {
     renderPage();
     await screen.findByText('Scraper');
+    expect(screen.getByRole('option', { name: 'Checked out' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'out' } });
     expect(screen.queryByText('Saw Cutter')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'all' } });
@@ -90,6 +91,11 @@ describe('Tools page', () => {
     fireEvent.click(within(row('Makita Hand Drill')).getByRole('button', { name: 'Check in' }));
     const drawer = await screen.findByRole('dialog');
     expect(within(drawer).getByLabelText('Back now')).toHaveValue(1);
+    fireEvent.change(within(drawer).getByLabelText('Back now'), { target: { value: '2' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
+    expect(await within(drawer).findByText('Some check-outs get back more than is out.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+    fireEvent.change(within(drawer).getByLabelText('Back now'), { target: { value: '1' } });
     fireEvent.change(within(drawer).getByLabelText('Condition'), { target: { value: 'LOST' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
     expect(await within(drawer).findByText('Say what happened to a lost tool.')).toBeInTheDocument();

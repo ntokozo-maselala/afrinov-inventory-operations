@@ -44,6 +44,25 @@ describe('procurement switch', () => {
     }
   });
 
+  it('registers procurement routes by default when the environment switch is unset', async () => {
+    const original = process.env.PROCUREMENT_ENABLED;
+    const originalNodeEnv = process.env.NODE_ENV;
+    delete process.env.PROCUREMENT_ENABLED;
+    process.env.NODE_ENV = 'test';
+    try {
+      app = await buildServer({ skipConfigValidation: true });
+      for (const [method, url] of PROCUREMENT_URLS) {
+        const res = await app.inject({ method, url });
+        expect(res.statusCode, `${method} ${url}`).toBe(401);
+      }
+    } finally {
+      if (original === undefined) delete process.env.PROCUREMENT_ENABLED;
+      else process.env.PROCUREMENT_ENABLED = original;
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   it('keeps supplier routes registered when procurement is disabled', async () => {
     app = await buildServer({ skipConfigValidation: true, procurementEnabled: false });
     const res = await app.inject({ method: 'GET', url: '/api/v1/suppliers' });

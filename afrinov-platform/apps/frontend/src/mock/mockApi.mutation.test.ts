@@ -711,10 +711,14 @@ describe('mock API mutation flows', () => {
     it('writes off a tool lost on loan, and refuses more back than is out', async () => {
       await api.post('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 1 }] });
       const loanId = (await wrench()).loans[0]!.loanId;
-      await expect(api.post('/tools/check-in', { lines: [{ loanId, quantity: 2, condition: 'GOOD' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(api.post('/tools/check-in', { lines: [{ loanId, quantity: 2, condition: 'GOOD' }] })).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR', message: expect.stringContaining('only 1 still checked out'),
+      });
       await expect(api.post('/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
       await api.post('/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST', note: 'Left on site' }] });
       expect((await wrench()).owned).toBe('2');
+      const writeOffs = await api.get<Array<{ reasonNote?: string }>>('/inventory-transactions?report=writeoffs');
+      expect(writeOffs.some((movement) => movement.reasonNote === 'Lost while checked out to Sabelo: Left on site')).toBe(true);
     });
 
     it('refuses more than is in store, issuing a tool, and reversing a loan', async () => {

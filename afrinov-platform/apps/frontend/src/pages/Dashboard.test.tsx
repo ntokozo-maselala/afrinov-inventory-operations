@@ -41,6 +41,7 @@ describe('Dashboard', () => {
 
   it('shows the stock value per category, with a total, and the status counts', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
     const table = within(await screen.findByLabelText('Stock value by category'));
     expect(await table.findByRole('img', { name: /Consumables .*75%/ })).toBeInTheDocument();
     expect(table.getByText('Unpriced: 1 in Consumables')).toBeInTheDocument();
