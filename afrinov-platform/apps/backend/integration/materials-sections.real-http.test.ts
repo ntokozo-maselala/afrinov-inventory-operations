@@ -5,7 +5,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 
 interface MaterialRow { id: string; sku: string; section: string; projectNumber: string | null; project: { projectNumber: string } | null; requiredStock: string }
 
@@ -55,5 +55,22 @@ describe('Stores and Projects materials over real HTTP', () => {
     const res = await create({ sku: `IT-SEC-X3-${run}`, category: 'CONSUMABLES', projectNumber });
     expect(res.status).toBe(400);
     expect((await api('GET', '/materials?section=OTHER')).status).toBe(400);
+  });
+
+  it('keeps project material with no project from being issued until it is given one (Phase 3)', async () => {
+    // As the workbook import and the migration leave it: Project Material with no project.
+    const old = await prisma.material.create({ data: { sku: `IT-SEC-OLD-${run}`, name: 'Old plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' } });
+    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections rack ${run}`, type: 'RACK' });
+    expect((await api('POST', '/inventory-adjustments', { materialId: old.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER' })).status).toBe(201);
+    const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections fitter ${run}`, type: 'WORKER' });
+    const issue = () => api<{ error?: { message: string } }>('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber, lines: [{ materialId: old.id, locationId: loc.body.id, quantity: 1 }] });
+
+    const refused = await issue();
+    expect(refused.status).toBe(400);
+    expect(refused.body.error?.message).toMatch(/has no project yet, so it can't be issued/);
+
+    const assigned = await api<MaterialRow>('PATCH', `/materials/${old.id}`, { projectNumber });
+    expect(assigned.body).toMatchObject({ projectNumber, section: 'PROJECTS' });
+    expect((await issue()).status).toBe(201);
   });
 });

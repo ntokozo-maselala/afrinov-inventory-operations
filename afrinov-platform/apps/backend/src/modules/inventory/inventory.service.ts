@@ -15,6 +15,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { refuseUnassigned } from './material-section.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -553,6 +554,7 @@ export const InventoryService = {
       for (const t of totals.values()) {
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
+        refuseUnassigned(material, 'issued');
         materials.set(t.materialId, material);
         await checkLocationActive(t.locationId, tx);
 
