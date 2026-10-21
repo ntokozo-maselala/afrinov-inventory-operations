@@ -30,6 +30,10 @@ function placeOf(m: Material): string {
   return `Project ${m.projectNumber}${m.project?.name ? ` · ${m.project.name}` : ''}`;
 }
 
+/**
+ * Show the route's material, its Stores category or project placement, stock, and recent movements.
+ * Management permissions expose editing, project assignment for unassigned Projects items, and activation controls.
+ */
 export function MaterialDetail() {
   const { id } = useParams<{ id: string }>();
   const material = useApi<Material>(id ? `/materials/${id}` : null);

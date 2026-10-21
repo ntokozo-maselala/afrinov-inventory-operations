@@ -23,6 +23,7 @@ export const PROJECTS_CATEGORY = 'PROJECT_MATERIAL';
 /** The categories a Stores item can be in. */
 export const STORES_CATEGORIES = CATEGORIES.filter((c) => c.value !== PROJECTS_CATEGORY);
 
+/** Return Projects for PROJECT_MATERIAL; all other category values, including unknown ones, map to Stores. */
 export function sectionOf(category: string): MaterialSection {
   return category === PROJECTS_CATEGORY ? 'PROJECTS' : 'STORES';
 }

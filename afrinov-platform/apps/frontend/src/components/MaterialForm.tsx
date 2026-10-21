@@ -24,9 +24,14 @@ interface ProjectOpt { projectNumber: string; name?: string | null; status?: str
 /** A stored decimal ("12.5000") as the user would type it ("12.5"); blank when unset. */
 const asInput = (v: string | null | undefined) => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
 
-/** Projects that can take new material: active, and not completed or cancelled (as the server checks). */
+/** Accept projects unless explicitly inactive, completed, or canceled; missing flags are allowed. */
 const isOpen = (p: ProjectOpt) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED';
 
+/**
+ * Render a catalog item form that creates an item or edits `initial`.
+ * Editing fixes the SKU, section, and category; a Projects item can be assigned
+ * a project only while it has none. Saves call `onSaved`; save errors call `onError`.
+ */
 export function MaterialForm({ initial, section: startSection = 'STORES', projectNumber: startProject = '', onCancel, onSaved, onError }: {
   /** The item to edit. Leave it out to add a new item. */
   initial?: Material;
@@ -56,6 +61,13 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
   const projectList = useApi<ProjectOpt[]>(projects && !projectFixed ? '/projects?active=true' : null);
   const openProjects = (projectList.data ?? []).filter(isOpen);
 
+  /**
+   * Prevent form navigation, show validation errors inline, and create or update the item.
+   * Stores saves include a nonnegative reorder level; Projects saves omit it.
+   * On edit, blank cost and description clear their stored values.
+   * Request errors and errors thrown by `onSaved` go to `onError`; if `onError`
+   * throws, the submission rejects.
+   */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setValidation(null);

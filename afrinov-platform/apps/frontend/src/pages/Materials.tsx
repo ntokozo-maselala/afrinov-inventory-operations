@@ -44,6 +44,12 @@ const TABS: Array<{ value: MaterialSection; label: string }> = [
   { value: 'PROJECTS', label: 'Projects' },
 ];
 
+/**
+ * Render the catalog with section, project, and view filters read from the URL.
+ * Defaults to Stores unless `section=PROJECTS`; `project=none` selects unassigned Projects items.
+ * Projects rows sort by project number and name, with unassigned items last.
+ * The add form starts with the selected section and any specific project filter.
+ */
 export function Materials() {
   const mats = useApi<Material[]>('/materials');
   const [q, setQ] = useState('');
@@ -53,11 +59,16 @@ export function Materials() {
   const project = section === 'PROJECTS' ? params.get('project') ?? '' : '';
   const views = VIEWS.filter((v) => section === 'STORES' || !v.stores);
   const view = views.find((v) => v.value === (params.get('view') ?? '')) ?? views[0]!;
+  /** Replace a query parameter without adding browser history; an empty value removes it. */
   const setParam = (key: string, value: string) => setParams((p) => {
     const next = new URLSearchParams(p);
     if (value) next.set(key, value); else next.delete(key);
     return next;
   }, { replace: true });
+  /**
+   * Replace the section in the URL, clear the project filter, and drop Stores-only
+   * views when switching to Projects. Stores is represented by an absent section parameter.
+   */
   const setSection = (value: MaterialSection) => setParams((p) => {
     const next = new URLSearchParams(p);
     if (value === 'PROJECTS') next.set('section', value); else next.delete('section');
@@ -217,6 +228,7 @@ const tailColumns: DataTableColumn<Material>[] = [
   { key: 'status', header: 'Status', render: (m) => m.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '7rem' },
 ];
 
+/** Return Stores table columns, including category and reorder level. */
 function storesColumns(): DataTableColumn<Material>[] {
   return [
     skuColumn,
@@ -228,6 +240,7 @@ function storesColumns(): DataTableColumn<Material>[] {
   ];
 }
 
+/** Return Projects table columns with project filter links or an unassigned badge. */
 function projectsColumns(): DataTableColumn<Material>[] {
   return [
     skuColumn,

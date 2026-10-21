@@ -340,6 +340,11 @@ function stockUsedLink(p: Project): string {
   return `/reports/consumption?${q.toString()}`;
 }
 
+/**
+ * Return project columns with stock usage and materials links.
+ * When `canManage` is true, add buttons that call `onEdit` or `onArchive` with the row;
+ * archiving is disabled for inactive projects.
+ */
 function columns({ canManage, onEdit, onArchive }: { canManage: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
   return [
     { key: 'num', header: 'Number', render: (p) => <span className="font-mono">{p.projectNumber}</span>, width: '10rem' },
