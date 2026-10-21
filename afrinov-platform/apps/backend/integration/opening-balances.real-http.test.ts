@@ -81,6 +81,8 @@ describe('opening balance import against a real database', () => {
       plan: plan([
         material(`IT-OB-1-${run}`, balances()),
         material(`IT-OB-2-${run}`, [{ location: rackName, quantity: 0 }], { unitCost: null, oldProductIds: [] }),
+        // The workbook's project sheet: lands with no project and no Required Stock.
+        material(`IT-OB-PRJ-${run}`, [{ location: rackName, quantity: 0 }], { category: 'PROJECT_MATERIAL', requiredStock: 7, oldProductIds: [] }),
       ]),
       masterData: {
         projects: [{ projectNumber: `IT-OBP-NEW-${run}`, name: 'Pump overhaul' }, { projectNumber: `IT-OBP-OLD-${run}`, name: null }],
@@ -93,7 +95,7 @@ describe('opening balance import against a real database', () => {
       openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'workbook.xlsm',
     });
     expect(result).toMatchObject({
-      materialsCreated: 2, locationsCreated: 1, locationsReused: 1, balancesPosted: 2, zeroBalances: 1,
+      materialsCreated: 3, locationsCreated: 1, locationsReused: 1, balancesPosted: 2, zeroBalances: 2,
       projects: { created: 1, existing: 1 }, recipients: { created: 1, existing: 1 }, suppliers: { created: 1, existing: 1 },
     });
     expect(await prisma.project.findUnique({ where: { projectNumber: `IT-OBP-NEW-${run}` } })).toMatchObject({ name: 'Pump overhaul', status: 'ACTIVE', active: true });
@@ -108,6 +110,9 @@ describe('opening balance import against a real database', () => {
     expect(first.unitCost?.toString()).toBe('42.05');
     expect(first.requiredStock.toString()).toBe('10');
     expect((await prisma.material.findUniqueOrThrow({ where: { sku: `IT-OB-2-${run}` } })).unitCost).toBeNull();
+    const projectItem = await prisma.material.findUniqueOrThrow({ where: { sku: `IT-OB-PRJ-${run}` } });
+    expect(projectItem.projectNumber).toBeNull();
+    expect(projectItem.requiredStock.toString()).toBe('0');
 
     const rack = await prisma.location.findFirstOrThrow({ where: { name: rackName } });
     expect(rack.type).toBe('RACK');

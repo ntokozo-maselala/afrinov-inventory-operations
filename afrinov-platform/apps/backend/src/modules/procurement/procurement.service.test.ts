@@ -28,7 +28,7 @@ interface PO {
 interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal; unitPrice?: number | null; deliveryDate?: Date | null }
 interface Loc { id: string; name: string; active: boolean }
 interface Sup { id: string; name: string; active: boolean; currency?: string; paymentTerms?: string | null }
-interface Mat { id: string; sku: string; name: string; active: boolean }
+interface Mat { id: string; sku: string; name: string; active: boolean; category?: string; projectNumber?: string | null }
 interface TxRow { id: string; materialId: string; locationId: string; type: TxType; quantity: Prisma.Decimal; referenceType: string | null; referenceId: string | null; actorId: string; postedAt: Date }
 interface BalRow { materialId: string; locationId: string; quantity: Prisma.Decimal }
 interface AuditRow { id: string; actorId: string | null; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: Date }
@@ -74,6 +74,7 @@ function makePrisma(): unknown {
     },
     material: {
       findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null,
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => db.materials.get(id)).filter((m): m is Mat => !!m),
     },
     location: {
       findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null,
@@ -412,6 +413,17 @@ describe('PurchaseOrderService lifecycle', () => {
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
     await expect(PurchaseOrderService.cancel({ id: po.id, reason: 'no' }, 'user-1')).rejects.toThrow(/disabled/i);
     await SettingsService.set('purchaseOrders.allowCancellation', true, 'user-1');
+  });
+});
+
+describe('PurchaseOrderService and project material with no project (materials sections Phase 3)', () => {
+  it('refuses to order it until it has its project', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-old', { id: 'mat-old', sku: 'OLD-PLATE', name: 'Plate', active: true, category: 'PROJECT_MATERIAL', projectNumber: null });
+    await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE has no project yet, so it can't be ordered/) });
+    db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: '1369' });
+    expect(await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
   });
 });
 

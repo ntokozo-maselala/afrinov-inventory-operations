@@ -50,7 +50,8 @@ beforeEach(() => {
 const list = (url = '/materials') => render(
   <MemoryRouter initialEntries={[url]}><ToastProvider><Routes><Route path="/materials" element={<Materials />} /></Routes></ToastProvider></MemoryRouter>,
 );
-const skus = () => screen.getAllByRole('link').map((a) => a.textContent).filter((t) => t && /^[A-Z0-9-]+$/.test(t));
+// The item codes in the table, in order.
+const skus = () => within(screen.getByRole('table')).getAllByRole('link').map((a) => a.textContent).filter((t) => t && /^[A-Z0-9-]+$/.test(t));
 
 describe('Materials: Stores and Projects tabs', () => {
   it('opens on Stores, with only Stores items', async () => {
@@ -67,7 +68,7 @@ describe('Materials: Stores and Projects tabs', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
     expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
     expect(screen.getByRole('link', { name: '1369 · Plant upgrade' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1369');
-    expect(within(screen.getByText('OLD-PLATE').closest('tr')!).getByText('No project yet')).toBeInTheDocument();
+    expect(within(within(screen.getByRole('table')).getByText('OLD-PLATE').closest('tr')!).getByText('No project yet')).toBeInTheDocument();
     expect(screen.queryByText('Reorder')).not.toBeInTheDocument();
   });
 
@@ -171,5 +172,47 @@ describe('an item’s page says where it belongs', () => {
     detail('m-DISC');
     expect(await screen.findByText('DISC · Stores · Consumables')).toBeInTheDocument();
     expect(screen.getByText('Reorder at')).toBeInTheDocument();
+  });
+});
+
+describe('Needs a project (Phase 3)', () => {
+  it('tells the Stores tab how many Projects items need a project, linking to them', async () => {
+    list();
+    const notice = await screen.findByText('1 Projects item needs a project');
+    expect(within(notice.closest('[role="status"]')!).getByRole('link', { name: 'Give them their projects' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=none');
+  });
+
+  it('gives the ticked items the chosen project, and reloads', async () => {
+    list('/materials?section=PROJECTS');
+    const panel = (await screen.findByRole('heading', { name: /Needs a project/ })).closest('section')!;
+    const give = within(panel).getByRole('button', { name: 'Tick the items first' });
+    expect(give).toBeDisabled();
+    fireEvent.click(within(panel).getByLabelText('Give OLD-PLATE a project'));
+    await within(panel).findByRole('option', { name: '1369 · Plant upgrade' });
+    expect(within(panel).queryByRole('option', { name: /1200/ })).not.toBeInTheDocument();
+    fireEvent.change(within(panel).getByLabelText('Project'), { target: { value: '1369' } });
+    const loads = mockGet.mock.calls.filter(([p]) => p === '/materials').length;
+    fireEvent.click(within(panel).getByRole('button', { name: 'Give 1 item this project' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-OLD-PLATE', { projectNumber: '1369' }));
+    expect(await screen.findByText('1 item given project 1369')).toBeInTheDocument();
+    await waitFor(() => expect(mockGet.mock.calls.filter(([p]) => p === '/materials').length).toBeGreaterThan(loads));
+  });
+
+  it('says which items kept no project when the server refuses', async () => {
+    mockPatch.mockRejectedValue({ code: 'VALIDATION_ERROR', message: 'Project 1369 is closed, so no new material can be added to it' });
+    list('/materials?section=PROJECTS');
+    const panel = (await screen.findByRole('heading', { name: /Needs a project/ })).closest('section')!;
+    fireEvent.click(within(panel).getByLabelText('Tick all'));
+    await within(panel).findByRole('option', { name: '1369 · Plant upgrade' });
+    fireEvent.change(within(panel).getByLabelText('Project'), { target: { value: '1369' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Give 1 item this project' }));
+    expect(await within(panel).findByText(/OLD-PLATE: Project 1369 is closed/)).toBeInTheDocument();
+  });
+
+  it('a Projects item with no project offers no Order or Issue on its page', async () => {
+    detail('m-OLD-PLATE');
+    await screen.findByText(/No project yet/);
+    expect(screen.queryByRole('link', { name: 'Order' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
   });
 });

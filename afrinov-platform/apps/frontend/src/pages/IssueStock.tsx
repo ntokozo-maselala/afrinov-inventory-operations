@@ -17,6 +17,7 @@ import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
+import { needsProject } from '../lib/categories';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -42,7 +43,7 @@ export function IssueStock() {
 
   // Only items with stock can be issued, and tools are lent on the Tools page instead.
   const available = useMemo(
-    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS')
+    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
     [stock.data],
   );

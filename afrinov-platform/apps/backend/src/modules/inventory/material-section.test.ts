@@ -51,6 +51,7 @@ function makePrisma(): unknown {
 vi.mock('../../shared/db.js', () => ({ get prisma() { return makePrisma(); } }));
 
 const { MaterialService } = await import('./material.service.js');
+const { refuseUnassigned } = await import('./material-section.js');
 
 const projectItem = (sku: string, projectNumber?: string, extra: Record<string, unknown> = {}) =>
   MaterialService.create({ sku, name: `Pipe ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber, ...extra }, 'admin');
@@ -134,6 +135,15 @@ describe('changing a material', () => {
   it('refuses a closed project when assigning', async () => {
     unassigned('old-2');
     await expect(MaterialService.update({ id: 'old-2', projectNumber: '1200' }, 'admin')).rejects.toMatchObject({ message: expect.stringMatching(/is closed/) });
+  });
+});
+
+describe('material with no project yet', () => {
+  it('is refused for issuing and ordering; with a project, or in Stores, it is not', () => {
+    expect(() => refuseUnassigned({ sku: 'OLD-PLATE', category: 'PROJECT_MATERIAL', projectNumber: null }, 'ordered'))
+      .toThrow("OLD-PLATE has no project yet, so it can't be ordered. Give it its project on Materials first.");
+    expect(() => refuseUnassigned({ sku: 'PIPE', category: 'PROJECT_MATERIAL', projectNumber: '1369' }, 'issued')).not.toThrow();
+    expect(() => refuseUnassigned({ sku: 'DISC', category: 'CONSUMABLES', projectNumber: null }, 'issued')).not.toThrow();
   });
 });
 

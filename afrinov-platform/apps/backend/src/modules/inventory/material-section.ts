@@ -84,3 +84,13 @@ export async function checkMaterialChange(
   }
   return next;
 }
+
+/**
+ * Refuses a Projects material that has no project yet: until it is given one,
+ * it keeps its stock and history but is not issued or ordered.
+ */
+export function refuseUnassigned(m: { sku: string; category: string; projectNumber: string | null }, use: 'issued' | 'ordered'): void {
+  if (sectionOf(m.category) === 'PROJECTS' && !m.projectNumber) {
+    throw Errors.validation(`${m.sku} has no project yet, so it can't be ${use}. Give it its project on Materials first.`);
+  }
+}

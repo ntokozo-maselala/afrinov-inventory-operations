@@ -68,7 +68,8 @@ let state: State = freshState();
 
 function freshState(): State {
   return {
-    materials: [...SEED_MATERIALS],
+    // A copy of each item, so a change in one test (or session) never edits the seed.
+    materials: SEED_MATERIALS.map((m) => ({ ...m })),
     locations: [...SEED_LOCATIONS],
     suppliers: [...SEED_SUPPLIERS],
     purchaseOrders: JSON.parse(JSON.stringify(SEED_PURCHASE_ORDERS)),
@@ -158,6 +159,15 @@ function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
   if (b.penaltiesApply !== undefined) out.penaltiesApply = b.penaltiesApply;
   if (b.deliveryMethod !== undefined) out.deliveryMethod = b.deliveryMethod;
   return out as Partial<MockPurchaseOrder>;
+}
+
+// As the server (material-section.ts): project material with no project yet
+// is not issued or ordered until it has one.
+function refuseUnassigned(materialId: string, use: 'issued' | 'ordered') {
+  const m = state.materials.find((x) => x.id === materialId);
+  if (m && m.category === 'PROJECT_MATERIAL' && !m.projectNumber) {
+    throw err('VALIDATION_ERROR', `${m.sku} has no project yet, so it can't be ${use}. Give it its project on Materials first.`);
+  }
 }
 
 function assertProjectOpen(projectNumber: string) {
@@ -561,6 +571,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
+    for (const l of b.lines) refuseUnassigned(l.materialId, 'ordered');
     // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
     const details = poDetails(b);
     if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
@@ -905,6 +916,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   if (method === 'POST' && p === '/inventory-issues') {
+    for (const l of (body as IssueBody)?.lines ?? []) refuseUnassigned(l.materialId, 'issued');
     return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'GET' && p === '/tools') return listTools();
@@ -2040,6 +2052,7 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       materialSku: m.sku,
       materialName: m.name,
       category: m.category,
+      projectNumber: m.projectNumber ?? null,
       unitOfMeasure: m.unitOfMeasure,
       requiredStock: String(required),
       locationId: l.id,

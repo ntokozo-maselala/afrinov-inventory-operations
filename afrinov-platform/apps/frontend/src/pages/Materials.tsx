@@ -19,9 +19,11 @@ import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { MaterialForm } from '../components/MaterialForm';
+import { NeedsProjectPanel } from '../components/NeedsProjectPanel';
+import { Alert } from '../components/Alert';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
-import { STORES_CATEGORIES, categoryLabel, sectionOf, type MaterialSection } from '../lib/categories';
+import { STORES_CATEGORIES, categoryLabel, needsProject, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 
 const hasPrice = (m: Material) => m.unitCost !== null && m.unitCost !== undefined && m.unitCost !== '';
@@ -101,6 +103,8 @@ export function Materials() {
     return [...seen.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [inSection]);
   const unassigned = inSection.filter((m) => !m.projectNumber).length;
+  // Projects material with no project yet, wherever the page is: it waits to be assigned (Phase 3).
+  const needingProject = (mats.data ?? []).filter(needsProject);
 
   const filtered = (() => {
     const needle = q.trim().toLowerCase();
@@ -148,6 +152,17 @@ export function Materials() {
           </button>
         ))}
       </div>
+
+      {section === 'STORES' && needingProject.length > 0 && (
+        <Alert tone="info" title={`${needingProject.length} Projects item${needingProject.length === 1 ? ' needs' : 's need'} a project`} className="mb-4">
+          Until it has one, an item keeps its stock but can&rsquo;t be issued or ordered.{' '}
+          <Link to="/materials?section=PROJECTS&project=none" className="btn-link">{canManage ? 'Give them their projects' : 'See them'}</Link>
+        </Alert>
+      )}
+
+      {section === 'PROJECTS' && canManage && needingProject.length > 0 && (
+        <NeedsProjectPanel items={needingProject} onAssigned={mats.reload} />
+      )}
 
       <FilterBar
         onClear={filtering ? () => { setQ(''); setCategory(''); setParams((p) => { const next = new URLSearchParams(p); next.delete('view'); next.delete('project'); return next; }, { replace: true }); } : undefined}

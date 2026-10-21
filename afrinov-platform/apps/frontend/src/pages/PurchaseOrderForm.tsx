@@ -31,6 +31,7 @@ import { useAuth } from '../auth';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
+import { needsProject } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import {
   PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
@@ -94,7 +95,8 @@ function NewPurchaseOrderForm() {
   const suppliersReq = useApi<Supplier[]>('/suppliers');
   const materialsReq = useApi<Material[]>('/materials');
   const suppliers = suppliersReq.data ?? [];
-  const materials = materialsReq.data ?? [];
+  // Project material with no project yet isn't ordered until it has one.
+  const materials = (materialsReq.data ?? []).filter((m) => !needsProject(m));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
   const [expected, setExpected] = useState('');

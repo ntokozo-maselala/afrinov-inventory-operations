@@ -130,7 +130,9 @@ export const OpeningBalanceService = {
           name: m.name,
           category: m.category,
           unitOfMeasure: m.unitOfMeasure,
-          requiredStock: toDecimal(m.requiredStock),
+          // Project material is bought per job and never re-ordered (materials
+          // sections roadmap); it lands with no project, to be assigned in the app.
+          requiredStock: m.category === 'PROJECT_MATERIAL' ? toDecimal(0) : toDecimal(m.requiredStock),
           unitCost: m.unitCost === null ? null : toDecimal(m.unitCost),
           serialNumber: m.serialNumber,
           description: m.oldProductIds.length > 0 ? `Workbook Product ID: ${m.oldProductIds.join(', ')}` : null,

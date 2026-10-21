@@ -162,9 +162,11 @@ const fakeTx = {
     },
   },
   material: {
-    // An id starting "tool" is a tool.
+    // An id starting "tool" is a tool; "prj" is project material with no project yet.
     findUnique: async ({ where }: { where: { id: string } }) => ({
-      id: where.id, sku: where.id.toUpperCase(), category: where.id.startsWith('tool') ? 'TOOLS' : 'CONSUMABLES', requiredStock: new Prisma.Decimal(5), active: true,
+      id: where.id, sku: where.id.toUpperCase(),
+      category: where.id.startsWith('tool') ? 'TOOLS' : where.id.startsWith('prj') ? 'PROJECT_MATERIAL' : 'CONSUMABLES',
+      projectNumber: null, requiredStock: new Prisma.Decimal(5), active: true,
     }),
   },
   location: {
@@ -502,6 +504,14 @@ describe('InventoryService — ADR-002 invariants', () => {
       })).rejects.toThrow(/Cannot issue 6 .*only 5 available/);
       expect(trxRows).toHaveLength(1);
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('5');
+    });
+
+    it('refuses project material that has no project yet, booking nothing', async () => {
+      await InventoryService.adjust({ materialId: 'prj-1', locationId: 'loc-1', quantity: 4, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      const before = trxRows.length;
+      await expect(InventoryService.issue({ recipientId: 'user-3', actorId: 'u', lines: [{ materialId: 'prj-1', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toThrow(/PRJ-1 has no project yet, so it can't be issued/);
+      expect(trxRows).toHaveLength(before);
     });
 
     it('requires a recipient and at least one line', async () => {

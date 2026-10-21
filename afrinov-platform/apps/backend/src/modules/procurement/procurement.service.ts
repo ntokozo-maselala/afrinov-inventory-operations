@@ -24,6 +24,7 @@ import { recomputeBalance } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { approvalBlock, approversFor, listApprovers, whoToAsk } from './po-approval.js';
+import { refuseUnassigned } from '../inventory/material-section.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -361,6 +362,12 @@ export const PurchaseOrderService = {
     const currency = supplier.currency ?? 'ZAR';
     const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate'));
     if (input.projectNumber) await assertProjectOpen(input.projectNumber);
+    // Project material with no project yet is not ordered until it has one.
+    const lineMaterials = await prisma.material.findMany({
+      where: { id: { in: [...new Set(input.lines.map((l) => l.materialId))] } },
+      select: { sku: true, category: true, projectNumber: true },
+    });
+    for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
 
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods

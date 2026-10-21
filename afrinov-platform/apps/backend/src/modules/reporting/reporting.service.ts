@@ -122,6 +122,8 @@ export const ReportingService = {
           materialSku: m.sku,
           materialName: m.name,
           category: m.category,
+          // Projects material: the project it belongs to (null until assigned).
+          projectNumber: m.projectNumber,
           unitOfMeasure: m.unitOfMeasure,
           requiredStock: requiredStock.toString(),
           locationId: b.locationId,
