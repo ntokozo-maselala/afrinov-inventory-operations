@@ -170,6 +170,72 @@ describe('SettingsService', () => {
     expect(db.settings.get('appearance.theme')?.value).toBe('system');
   });
 
+  it.each(['light', 'dark'])('leaves an unattributed %s theme unchanged during legacy migration', async (theme) => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    const appearance = { ...db.settings.get('appearance.theme')!, value: theme, updatedById: null };
+    db.settings.set(appearance.key, appearance);
+
+    await SettingsService.ensureSeeded();
+
+    expect(db.settings.get(appearance.key)).toEqual(appearance);
+  });
+
+  it('migrates the untouched system default once without changing other settings or audit history', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('appearance.density', 'compact', 'admin');
+    const densityBefore = { ...db.settings.get('appearance.density')! };
+    const auditBefore = [...db.audit];
+    const appearance = db.settings.get('appearance.theme')!;
+    db.settings.set(appearance.key, { ...appearance, value: 'system', updatedById: null });
+
+    await SettingsService.ensureSeeded();
+    const migrated = db.settings.get(appearance.key)!;
+    expect(migrated).toMatchObject({ key: appearance.key, value: 'light', updatedById: null });
+    await SettingsService.ensureSeeded();
+
+    expect(db.settings.get(appearance.key)).toBe(migrated);
+    expect(db.settings.get('appearance.density')).toEqual(densityBefore);
+    expect(db.audit).toEqual(auditBefore);
+  });
+
+  it.each(['light', 'dark', 'system'])('preserves an explicitly saved %s choice and its attribution across repeated seeds', async (theme) => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('appearance.theme', theme, 'theme-admin');
+    const saved = { ...db.settings.get('appearance.theme')! };
+    const auditBefore = [...db.audit];
+
+    await SettingsService.ensureSeeded();
+    await SettingsService.ensureSeeded();
+
+    expect(db.settings.get('appearance.theme')).toEqual(saved);
+    expect(db.audit).toEqual(auditBefore);
+  });
+
+  it('returns light through both default lookup APIs before any settings are seeded', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+
+    expect(await SettingsService.getValue('appearance.theme')).toBe('light');
+    expect(await SettingsService.getValues(['appearance.theme'])).toEqual({ 'appearance.theme': 'light' });
+    expect(db.settings.size).toBe(0);
+  });
+
+  it('resets a saved theme to light with an audit entry and preserves the reset on seeding', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('appearance.theme', 'dark', 'admin');
+
+    await SettingsService.resetDefaults('reset-admin');
+    await SettingsService.ensureSeeded();
+
+    expect(db.settings.get('appearance.theme')).toMatchObject({ value: 'light', updatedById: 'reset-admin' });
+    expect(db.audit.find((entry) => entry.entityId === 'appearance.theme' && entry.action === 'SETTING_RESET')).toMatchObject({
+      actorId: 'reset-admin', before: { value: 'dark' }, after: { value: 'light', reset: true },
+    });
+  });
+
   it('deletes and hides settings that were retired from the catalog', async () => {
     const { SettingsService } = await import('./settings.service.js');
     const retired: SettingRow = {
