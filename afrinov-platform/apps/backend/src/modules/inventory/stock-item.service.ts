@@ -14,6 +14,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero, ZERO } from '../../shared/decimal.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
+import { projectForNewMaterial } from './material-section.js';
 
 export type MaterialCategory =
   | 'FASTENERS_SLUGS_INSULATION'
@@ -33,6 +34,8 @@ export interface CreateStockItemInput {
   initialQuantity?: number;
   locationId?: string;
   supplierId?: string;
+  /** Project Material only, and required there: the project it is bought for. */
+  projectNumber?: string;
 }
 
 export interface CreateStockItemResult {
@@ -46,6 +49,7 @@ export interface CreateStockItemResult {
     requiredStock: string;
     unitCost: string | null;
     active: boolean;
+    projectNumber: string | null;
   };
   initialTransactionId: string | null;
 }
@@ -93,6 +97,7 @@ export const StockItemService = {
     return prisma.$transaction(async (tx) => {
       const existing = await tx.material.findUnique({ where: { sku } });
       if (existing) throw Errors.conflict(`An item with this SKU already exists.`);
+      const projectNumber = await projectForNewMaterial(input, tx);
 
       const material = await tx.material.create({
         data: {
@@ -103,6 +108,7 @@ export const StockItemService = {
           unitOfMeasure,
           requiredStock: input.requiredStock ?? 0,
           unitCost: input.unitCost ?? null,
+          projectNumber,
         },
       });
 
@@ -155,6 +161,7 @@ export const StockItemService = {
           requiredStock: material.requiredStock.toString(),
           unitCost: material.unitCost ? material.unitCost.toString() : null,
           active: material.active,
+          projectNumber: material.projectNumber,
         },
         initialTransactionId,
       };

@@ -114,6 +114,10 @@ model Material {
   // A tool kept as one unit (a drill, a harness): its maker's serial number.
   // Only tools have one; null for everything else.
   serialNumber  String?             @unique @map("serial_number")
+  // Projects material (category PROJECT_MATERIAL): the one project it is
+  // bought for. Stores material has none. Null on a Projects item that has
+  // not been assigned its project yet.
+  projectNumber String?             @map("project_number")
   active        Boolean             @default(true)
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")
@@ -123,9 +127,11 @@ model Material {
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
   stockCountLines      StockCountLine[]
+  project              Project?            @relation(fields: [projectNumber], references: [projectNumber])
 
   @@index([category])
   @@index([active])
+  @@index([projectNumber])
   @@map("materials")
 }
 
@@ -220,6 +226,7 @@ model Project {
   inventoryTransactions InventoryTransaction[]
   purchaseOrders      PurchaseOrder[]
   racks               Rack[]
+  materials           Material[]
 
   @@index([status])
   @@index([active])

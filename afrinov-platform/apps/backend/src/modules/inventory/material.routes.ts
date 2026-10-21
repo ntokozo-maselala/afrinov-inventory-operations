@@ -15,6 +15,8 @@ export const createMaterialSchema = z.object({
   description: z.string().optional(),
   /** Tools only: the serial number of a tool kept as one unit. */
   serialNumber: z.string().trim().min(1).max(64).optional(),
+  /** Project Material only, and required there: the project it is bought for. */
+  projectNumber: z.string().trim().min(1).max(64).optional(),
 });
 
 export const updateMaterialSchema = z.object({
@@ -28,15 +30,35 @@ export const updateMaterialSchema = z.object({
   active: z.boolean().optional(),
   /** Tools only; null clears it. */
   serialNumber: z.string().trim().min(1).max(64).nullable().optional(),
+  /** Project Material only: assigns its project. */
+  projectNumber: z.string().trim().min(1).max(64).optional(),
+});
+
+export const listMaterialsQuerySchema = z.object({
+  category: z.string().optional(),
+  active: z.enum(['true', 'false']).optional(),
+  q: z.string().optional(),
+  /** Stores (every category but Project Material) or Projects (Project Material). */
+  section: z.enum(['STORES', 'PROJECTS']).optional(),
+  /** Projects material for one project. */
+  projectNumber: z.string().max(64).optional(),
 });
 
 export async function materialRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/materials', { preHandler: [app.authenticate] }, async (req) => {
-    const q = (req.query as Record<string, string | undefined>);
+  app.get('/materials', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const parsed = listMaterialsQuerySchema.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid materials filter', details: parsed.error.flatten() },
+      });
+    }
+    const q = parsed.data;
     return MaterialService.list({
-      category: q['category'],
-      active: q['active'] === 'true' ? true : q['active'] === 'false' ? false : undefined,
-      q: q['q'],
+      category: q.category,
+      active: q.active === 'true' ? true : q.active === 'false' ? false : undefined,
+      q: q.q,
+      section: q.section,
+      projectNumber: q.projectNumber,
     });
   });
 

@@ -160,7 +160,12 @@ export const OPERATIONS: Operation[] = [
   // Materials
   {
     method: 'get', path: '/materials', tag: 'Materials', summary: 'List materials',
-    query: z.object({ category: materialCategorySchema.optional(), active: yesNo.optional(), q: z.string().optional() }),
+    description: 'Each material carries its section (STORES or PROJECTS) and, for Projects material, its project.',
+    query: z.object({
+      category: materialCategorySchema.optional(), active: yesNo.optional(), q: z.string().optional(),
+      section: z.enum(['STORES', 'PROJECTS']).optional(), projectNumber: z.string().optional(),
+    }),
+    errors: [400],
   },
   { method: 'get', path: '/materials/:id', tag: 'Materials', summary: 'Get a material', errors: [404] },
   {

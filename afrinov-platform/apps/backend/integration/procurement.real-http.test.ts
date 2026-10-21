@@ -89,7 +89,7 @@ describe('receiving stock over real HTTP', () => {
     const material = await api<{ id: string }>('POST', '/materials', {
       sku: `IT-PO-${run}`,
       name: `Integration cable ${run}`,
-      category: 'PROJECT_MATERIAL',
+      category: 'CONSUMABLES',
       unitOfMeasure: 'm',
     });
     expect(material.status).toBe(200);

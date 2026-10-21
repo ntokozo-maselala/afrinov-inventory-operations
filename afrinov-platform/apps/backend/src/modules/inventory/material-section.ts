@@ -1,0 +1,86 @@
+// Stores and Projects (materials sections roadmap, Phase 1). Every material is
+// in one of two sections: Stores, kept on the shelf and topped up, or
+// Projects, bought for one job. The "Project Material" category is the
+// Projects section and the other categories make up Stores, so reports that
+// group by category keep working. A Projects material belongs to one project
+// and has no Required Stock, as it is never re-ordered.
+//
+// Items moved into Projects from the old category have no project yet; they
+// are assigned one later (Phase 3), and assigning a first project is always
+// allowed. After that an item's project is fixed once it has stock movements,
+// so its history never changes jobs.
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { Errors } from '../../shared/errors.js';
+
+export type MaterialSection = 'STORES' | 'PROJECTS';
+
+export const PROJECTS_CATEGORY = 'PROJECT_MATERIAL';
+
+type Db = PrismaClient | Prisma.TransactionClient;
+
+export function sectionOf(category: string): MaterialSection {
+  return category === PROJECTS_CATEGORY ? 'PROJECTS' : 'STORES';
+}
+
+/** The category filter for one section. */
+export function categoryWhere(section: MaterialSection): Prisma.MaterialWhereInput['category'] {
+  return section === 'PROJECTS' ? PROJECTS_CATEGORY : { not: PROJECTS_CATEGORY };
+}
+
+/** Refuses a project that doesn't exist or can't take new work: inactive, completed or cancelled. */
+async function checkOpenProject(projectNumber: string, db: Db): Promise<void> {
+  const p = await db.project.findUnique({ where: { projectNumber }, select: { active: true, status: true } });
+  if (!p) throw Errors.validation(`Project ${projectNumber} does not exist`);
+  if (!p.active || p.status === 'COMPLETED' || p.status === 'CANCELLED') {
+    throw Errors.validation(`Project ${projectNumber} is closed, so no new material can be added to it`);
+  }
+}
+
+/**
+ * The project for a new material, checked against its section: a Projects
+ * material needs an open project and no Required Stock; a Stores material has
+ * no project.
+ */
+export async function projectForNewMaterial(
+  input: { category: string; projectNumber?: string | null; requiredStock?: number },
+  db: Db,
+): Promise<string | null> {
+  const projectNumber = input.projectNumber?.trim() || null;
+  if (sectionOf(input.category) === 'STORES') {
+    if (projectNumber) throw Errors.validation('A Stores material has no project. Choose the Project Material category for material bought for one job.');
+    return null;
+  }
+  if (!projectNumber) throw Errors.validation('A Projects material needs the project it is for');
+  if (input.requiredStock) throw Errors.validation('A Projects material has no Required Stock: it is bought for its job, not re-ordered');
+  await checkOpenProject(projectNumber, db);
+  return projectNumber;
+}
+
+/**
+ * Checks a change to an existing material: Required Stock and its project.
+ * Returns the project to save, or undefined when the project isn't changing.
+ */
+export async function checkMaterialChange(
+  before: { id: string; category: string; projectNumber: string | null },
+  change: { projectNumber?: string | null; requiredStock?: number },
+  db: Db,
+): Promise<string | null | undefined> {
+  const projects = sectionOf(before.category) === 'PROJECTS';
+  if (projects && change.requiredStock) {
+    throw Errors.validation('A Projects material has no Required Stock: it is bought for its job, not re-ordered');
+  }
+  if (change.projectNumber === undefined) return undefined;
+  const next = change.projectNumber?.trim() || null;
+  if (next === before.projectNumber) return undefined;
+  if (!projects) throw Errors.validation('A Stores material has no project');
+  if (!next) throw Errors.validation('A Projects material needs the project it is for');
+  await checkOpenProject(next, db);
+  // A first project can always be assigned; after that, history fixes it.
+  if (before.projectNumber) {
+    const moved = await db.inventoryTransaction.count({ where: { materialId: before.id } });
+    if (moved > 0) {
+      throw Errors.conflict(`This material has stock movements on project ${before.projectNumber}, so it stays with that project. Create a new item for project ${next}.`);
+    }
+  }
+  return next;
+}

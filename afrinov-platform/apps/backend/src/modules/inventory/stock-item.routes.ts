@@ -25,6 +25,8 @@ export const createStockItemSchema = z
     initialQuantity: z.number().nonnegative().optional(),
     locationId: z.string().uuid().optional(),
     supplierId: supplierIdSchema.optional(),
+    /** Project Material only, and required there: the project it is bought for. */
+    projectNumber: z.string().trim().min(1).max(64).optional(),
   })
   .refine(
     (v) => v.initialQuantity === undefined || v.initialQuantity === 0 || !!v.locationId,

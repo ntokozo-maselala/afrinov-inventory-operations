@@ -9,6 +9,11 @@ export interface Material {
   unitCost?: string | null; active: boolean;
   /** Tools kept as one unit: the serial number. */
   serialNumber?: string | null;
+  /** STORES, or PROJECTS for Project Material (bought for one job). */
+  section?: 'STORES' | 'PROJECTS';
+  /** Projects material: the project it is bought for; null until assigned. */
+  projectNumber?: string | null;
+  project?: { projectNumber: string; name: string | null } | null;
 }
 
 /** A supplier (GET /suppliers). The vendor fields follow the AFRI-0000_x purchase order template. */

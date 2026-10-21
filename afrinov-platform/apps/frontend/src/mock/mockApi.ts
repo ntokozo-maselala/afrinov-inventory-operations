@@ -277,6 +277,17 @@ function route(method: string, path: string, body?: unknown): unknown {
     const holder = state.materials.find((m) => m.id !== exceptId && m.serialNumber?.toLowerCase() === serialNumber.toLowerCase());
     if (holder) throw err('CONFLICT', `Serial number "${serialNumber}" is already on ${holder.sku}`);
   };
+  // As the server (material-section.ts): Project Material is the Projects
+  // section and belongs to one open project, with no Required Stock.
+  const sectionOf = (category: string) => (category === 'PROJECT_MATERIAL' ? 'PROJECTS' : 'STORES');
+  const withSection = (m: MockMaterial) => ({ ...m, section: sectionOf(m.category), projectNumber: m.projectNumber ?? null, project: projectRef(m.projectNumber) });
+  const checkOpenProject = (projectNumber: string) => {
+    const project = state.projects.find((x) => x.projectNumber === projectNumber);
+    if (!project) throw err('VALIDATION_ERROR', `Project ${projectNumber} does not exist`);
+    if (project.active === false || project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+      throw err('VALIDATION_ERROR', `Project ${projectNumber} is closed, so no new material can be added to it`);
+    }
+  };
   if (method === 'GET' && p === '/materials') {
     let list = [...state.materials].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
@@ -285,13 +296,15 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (q) list = list.filter((m) => m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q) || (m.serialNumber ?? '').toLowerCase().includes(q));
     if (cat) list = list.filter((m) => m.category === cat);
     if (active !== undefined) list = list.filter((m) => m.active === (active === 'true'));
-    return list;
+    if (qs.section) list = list.filter((m) => sectionOf(m.category) === qs.section);
+    if (qs.projectNumber) list = list.filter((m) => m.projectNumber === qs.projectNumber);
+    return list.map(withSection);
   }
   if (method === 'GET' && p.startsWith('/materials/')) {
     const id = p.slice('/materials/'.length);
     const m = findMaterial(id);
     if (!m) throw err('NOT_FOUND', 'Material not found');
-    return m;
+    return withSection(m);
   }
   if (method === 'POST' && p === '/materials') {
     const b = body as Partial<MockMaterial>;
@@ -303,6 +316,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     const serialNumber = b.serialNumber?.trim() || null;
     if (serialNumber) checkSerial(serialNumber, b.category);
+    const projectNumber = b.projectNumber?.trim() || null;
+    if (sectionOf(b.category) === 'STORES' && projectNumber) throw err('VALIDATION_ERROR', 'A Stores material has no project. Choose the Project Material category for material bought for one job.');
+    if (sectionOf(b.category) === 'PROJECTS') {
+      if (!projectNumber) throw err('VALIDATION_ERROR', 'A Projects material needs the project it is for');
+      if (Number(b.requiredStock ?? 0) > 0) throw err('VALIDATION_ERROR', 'A Projects material has no Required Stock: it is bought for its job, not re-ordered');
+      checkOpenProject(projectNumber);
+    }
     const created: MockMaterial = {
       id: nextId('mat'),
       sku: b.sku,
@@ -314,9 +334,10 @@ function route(method: string, path: string, body?: unknown): unknown {
       unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
       active: true,
       serialNumber,
+      projectNumber,
     };
     state.materials.push(created);
-    return created;
+    return withSection(created);
   }
   if (method === 'PATCH' && p.startsWith('/materials/')) {
     const id = p.slice('/materials/'.length);
@@ -324,6 +345,18 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!m) throw err('NOT_FOUND', 'Material not found');
     // As the server: null clears the description or the unit cost.
     const b = body as Omit<Partial<MockMaterial>, 'description' | 'unitCost'> & { description?: string | null; unitCost?: number | string | null };
+    const projects = sectionOf(m.category) === 'PROJECTS';
+    if (projects && Number(b.requiredStock ?? 0) > 0) throw err('VALIDATION_ERROR', 'A Projects material has no Required Stock: it is bought for its job, not re-ordered');
+    const nextProject = b.projectNumber === undefined ? undefined : b.projectNumber?.trim() || null;
+    if (nextProject !== undefined && nextProject !== (m.projectNumber ?? null)) {
+      if (!projects) throw err('VALIDATION_ERROR', 'A Stores material has no project');
+      if (!nextProject) throw err('VALIDATION_ERROR', 'A Projects material needs the project it is for');
+      checkOpenProject(nextProject);
+      if (m.projectNumber && state.transactions.some((t) => t.materialId === m.id)) {
+        throw err('CONFLICT', `This material has stock movements on project ${m.projectNumber}, so it stays with that project. Create a new item for project ${nextProject}.`);
+      }
+      m.projectNumber = nextProject;
+    }
     if (b.name !== undefined) m.name = b.name;
     if (b.description !== undefined) m.description = b.description ?? undefined;
     if (b.unitOfMeasure !== undefined) m.unitOfMeasure = b.unitOfMeasure;
@@ -335,7 +368,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       if (serialNumber) checkSerial(serialNumber, m.category, m.id);
       m.serialNumber = serialNumber;
     }
-    return m;
+    return withSection(m);
   }
 
   // Locations

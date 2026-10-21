@@ -53,6 +53,8 @@ export interface MockMaterial {
   unitCost?: string;
   active: boolean;
   serialNumber?: string | null;
+  /** Project Material only: the project it is bought for (null until assigned). */
+  projectNumber?: string | null;
 }
 
 export interface MockLocation {
