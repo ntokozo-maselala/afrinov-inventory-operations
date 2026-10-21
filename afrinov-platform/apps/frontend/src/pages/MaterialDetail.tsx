@@ -18,10 +18,17 @@ import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
-import { categoryLabel } from '../lib/categories';
+import { categoryLabel, sectionOf } from '../lib/categories';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 
+
+/** "Stores · Consumables", "Project 1369 · Plant upgrade" or "Projects · no project yet". */
+function placeOf(m: Material): string {
+  if (sectionOf(m.category) === 'STORES') return `Stores · ${categoryLabel(m.category)}`;
+  if (!m.projectNumber) return 'Projects · no project yet';
+  return `Project ${m.projectNumber}${m.project?.name ? ` · ${m.project.name}` : ''}`;
+}
 
 export function MaterialDetail() {
   const { id } = useParams<{ id: string }>();
@@ -77,7 +84,7 @@ export function MaterialDetail() {
     <div>
       <PageHeader
         title={material.data?.name ?? (material.loading ? 'Loading…' : 'Material')}
-        description={material.data ? `${material.data.sku} · ${categoryLabel(material.data.category)}` : ''}
+        description={material.data ? `${material.data.sku} · ${placeOf(material.data)}` : ''}
         breadcrumb={[
           { label: 'Catalogue', to: '/materials' },
           { label: material.data?.sku ?? 'Material' },
@@ -107,10 +114,21 @@ export function MaterialDetail() {
               <h2 className="text-h3 text-surface-900">Identity</h2>
               <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
                 <dt className="text-surface-500">SKU</dt><dd className="col-span-2 text-mono">{material.data.sku}</dd>
-                <dt className="text-surface-500">Category</dt><dd className="col-span-2">{categoryLabel(material.data.category)}</dd>
+                {sectionOf(material.data.category) === 'PROJECTS' ? (
+                  <><dt className="text-surface-500">Section</dt><dd className="col-span-2">Projects</dd>
+                  <dt className="text-surface-500">Project</dt>
+                  <dd className="col-span-2">
+                    {material.data.projectNumber
+                      ? <Link to={`/materials?section=PROJECTS&project=${encodeURIComponent(material.data.projectNumber)}`} className="btn-link">{material.data.projectNumber}{material.data.project?.name ? ` · ${material.data.project.name}` : ''}</Link>
+                      : <span className="text-warning-700">No project yet{canManage && <> · <button type="button" className="btn-link" onClick={() => setEditing(true)}>Choose one</button></>}</span>}
+                  </dd></>
+                ) : (
+                  <><dt className="text-surface-500">Section</dt><dd className="col-span-2">Stores</dd>
+                  <dt className="text-surface-500">Category</dt><dd className="col-span-2">{categoryLabel(material.data.category)}</dd></>
+                )}
                 <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
                 {material.data.serialNumber && (<><dt className="text-surface-500">Serial number</dt><dd className="col-span-2 text-mono">{material.data.serialNumber}</dd></>)}
-                <dt className="text-surface-500">Reorder at</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd>
+                {sectionOf(material.data.category) === 'STORES' && (<><dt className="text-surface-500">Reorder at</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd></>)}
                 <dt className="text-surface-500">Unit cost</dt>
                 <dd className="col-span-2 text-num">
                   {hasPrice

@@ -350,6 +350,7 @@ function columns({ canManage, onEdit, onArchive }: { canManage: boolean; onEdit:
     { key: 'status', header: 'Status', render: (p) => <Badge tone={STATUS_TONE[p.status]} dot>{p.status}</Badge>, width: '10rem' },
     { key: 'start', header: 'Start', render: (p) => p.startDate ? <span className="text-meta">{formatDate(p.startDate)}</span> : <span className="text-surface-300">—</span>, width: '10rem' },
     { key: 'used', header: 'Stock used', render: (p) => <Link to={stockUsedLink(p)} className="btn-link text-sm">View</Link>, width: '7rem' },
+    { key: 'materials', header: 'Materials', render: (p) => <Link to={`/materials?section=PROJECTS&project=${encodeURIComponent(p.projectNumber)}`} className="btn-link text-sm" aria-label={`Materials for ${p.projectNumber}`}>View</Link>, width: '7rem' },
     ...(canManage ? [{
       key: 'actions', header: '', align: 'right' as const, width: '12rem',
       render: (p: Project) => (
