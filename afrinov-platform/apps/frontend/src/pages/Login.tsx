@@ -272,8 +272,7 @@ export function Login() {
               </p>
 
               <p className="text-xs text-surface-500 text-center pt-2">
-                By signing in you agree to Afrinov IMS acceptable-use policies. This is a demo
-                environment — do not enter real credentials.
+                By signing in you agree to Afrinov IMS acceptable-use policies.
               </p>
             </form>
           </div>
