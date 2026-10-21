@@ -150,13 +150,13 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
             </ul>
           </nav>
         </aside>
-        <main className="lg:col-span-3 space-y-4">
+        <div className="lg:col-span-3 space-y-4">
           {loading && !settings.settings['general.companyName'] ? (
             <div className="surface-card p-6 space-y-3"><Skeleton h={18} /><Skeleton h={120} /><Skeleton h={120} /></div>
           ) : (
             <Outlet context={settings} />
           )}
-        </main>
+        </div>
       </div>
 
       {pendingNav && (

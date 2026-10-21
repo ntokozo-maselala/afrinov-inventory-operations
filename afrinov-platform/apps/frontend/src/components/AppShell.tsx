@@ -46,6 +46,7 @@ function AppShellInner({ children }: { children: ReactNode }) {
     // so the sidebar never moves when the page is scrolled.
     <div className={`h-[100dvh] flex flex-col overflow-hidden bg-surface-50 text-surface-800 dark:bg-surface-50 dark:text-surface-800`}>
       <DevModeBanner />
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <div className="flex flex-1 min-h-0">
         <DesktopSidebar />
         <MobileDrawer />
