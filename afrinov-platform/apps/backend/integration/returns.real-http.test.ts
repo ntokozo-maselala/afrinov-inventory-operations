@@ -34,13 +34,14 @@ describe('returns over real HTTP', () => {
     server = await startServer();
     api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
 
-    const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-RET-${run}`, name: `Return cable ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'm' });
+    expect((await api('POST', '/projects', { projectNumber, name: `Return project ${run}` })).status).toBe(201);
+    // Project material belongs to its project.
+    const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-RET-${run}`, name: `Return cable ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber });
     expect(m.status).toBe(200);
     materialId = m.body.id;
     const rack = await api<{ id: string }>('POST', '/locations', { name: `IT return rack ${run}`, type: 'RACK' });
     expect(rack.status).toBe(201);
     rackId = rack.body.id;
-    expect((await api('POST', '/projects', { projectNumber, name: `Return project ${run}` })).status).toBe(201);
     const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT electrician ${run}`, type: 'WORKER' });
     expect(recipient.status).toBe(201);
     expect((await api('POST', '/inventory-adjustments', { materialId, locationId: rackId, quantity: 50, reasonCode: 'COUNT_VARIANCE' })).status).toBe(201);

@@ -30,9 +30,10 @@ describe('consumption report over real HTTP', () => {
     server = await startServer();
     api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
     const disc = await api<{ id: string }>('POST', '/materials', { sku: sku.disc, name: `Disc ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 42.05 });
-    const pipe = await api<{ id: string }>('POST', '/materials', { sku: sku.pipe, name: `Pipe ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'm' });
-    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT consumption rack ${run}`, type: 'RACK' });
     expect((await api('POST', '/projects', { projectNumber: project, name: 'Consumption test' })).status).toBe(201);
+    // Project material belongs to its project.
+    const pipe = await api<{ id: string }>('POST', '/materials', { sku: sku.pipe, name: `Pipe ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: project });
+    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT consumption rack ${run}`, type: 'RACK' });
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT consumption fitter ${run}`, type: 'WORKER' });
     recipientId = rcp.body.id;
     for (const m of [disc.body.id, pipe.body.id]) {
