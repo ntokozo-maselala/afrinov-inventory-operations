@@ -199,6 +199,7 @@ export interface MockStockRow {
   category: MaterialCategory;
   /** Projects material: its project, null until assigned. */
   projectNumber?: string | null;
+  project?: { name: string | null; status: string } | null;
   unitOfMeasure: string;
   requiredStock: string;
   locationId: string;

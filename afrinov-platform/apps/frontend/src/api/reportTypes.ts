@@ -37,6 +37,20 @@ export interface ReportInventoryLine {
   inventoryValue: number;
   status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
   lastUpdated: string | null;
+  /** Projects material: its project, null until assigned; null for Stores. */
+  projectNumber?: string | null;
+}
+
+/** Projects material per project (materials sections roadmap, Phase 4). */
+export interface ReportProjectRow {
+  /** Null for Projects material with no project yet. */
+  projectNumber: string | null;
+  name: string | null;
+  status: string | null;
+  skuCount: number;
+  quantity: number;
+  inventoryValue: number;
+  share: number;
 }
 
 export interface ReportCategoryRow {
@@ -116,6 +130,8 @@ export interface ReportResult {
   kpis: ReportKpis;
   byStatus: ReportStatusRow[];
   byCategory: ReportCategoryRow[];
+  /** Projects material per project, closed projects included. */
+  byProject?: ReportProjectRow[];
   byLocation: ReportLocationRow[];
   bySupplier: ReportSupplierRow[];
   exceptions: ReportInventoryLine[];
@@ -133,6 +149,12 @@ export interface ReportResult {
 export interface MonthEndItem {
   sku: string; name: string; location: string; requiredStock: number; currentStock: number;
   unitCost: number | null; value: number | null; percentOfRequired: number | null; reorderQuantity: number | null; status: StockStatus;
+  /** Projects material: its project, null until assigned; null for Stores. */
+  project?: string | null;
+}
+/** Projects material per project at the end of the range. */
+export interface MonthEndProject {
+  projectNumber: string | null; name: string | null; status: string | null; items: number; itemsInStock: number; value: number;
 }
 export interface MonthEndCategory {
   category: string; items: MonthEndItem[]; value: number; urgent: number; warning: number; itemsInStock: number;
@@ -142,6 +164,8 @@ export interface MonthEndReport {
   /** YYYY-MM when the period is exactly one calendar month, otherwise null. */
   month: string | null; from: string; to: string; generatedAt: string; currency: string; bands: StatusBands;
   categories: MonthEndCategory[];
+  /** Projects material per project, completed and cancelled projects included. */
+  projects?: MonthEndProject[];
   total: { items: number; itemsInStock: number; value: number; urgent: number; warning: number; usedValue: number };
 }
 

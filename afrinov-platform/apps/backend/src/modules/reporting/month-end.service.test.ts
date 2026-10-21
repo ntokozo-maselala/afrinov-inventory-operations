@@ -53,7 +53,7 @@ describe('MonthEndService.report', () => {
     expect(mocks.consumption).toHaveBeenCalledExactlyOnceWith({ from: '2026-09-01', to: '2026-09-30' });
     expect(report).toEqual({
       month: '2026-09', from: '2026-09-01', to: '2026-09-30', generatedAt: '2026-10-09T10:00:00.000Z',
-      currency: 'USD', bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, categories: [],
+      currency: 'USD', bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, categories: [], projects: [],
       total: { items: 0, itemsInStock: 0, value: 0, urgent: 0, warning: 0, usedValue: 0 },
     });
   });

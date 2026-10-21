@@ -24,6 +24,11 @@ export interface StockValue {
   currency: string;
   categories: Array<{ category: string; items: number; itemsInStock: number; value: number; unpriced: number; share: number }>;
   total: { items: number; itemsInStock: number; value: number; unpriced: number };
+  /** Stores and Projects totals (materials sections roadmap, Phase 4). */
+  sections?: Record<'STORES' | 'PROJECTS', { items: number; itemsInStock: number; value: number; unpriced: number }>;
+  /** Projects material per project; null projectNumber for items with no project yet. */
+  projects?: Array<{ projectNumber: string | null; name: string | null; status: string | null; items: number; itemsInStock: number; value: number; unpriced: number }>;
+  /** Stores only: Projects material is bought per job, so never urgent or out of stock. */
   status: { URGENT: number; WARNING: number; OK: number; NOT_SET: number; outOfStock: number };
 }
 
@@ -259,6 +264,13 @@ export function Dashboard() {
               <div className="dashboard-chart-empty">No priced stock is available for category comparison.</div>
             )}
             {value?.total.unpriced ? <p className="dashboard-panel-footnote">Unpriced stock is excluded from the valuation total.</p> : null}
+            {value?.sections && value.sections.PROJECTS.items > 0 && (
+              <p className="dashboard-panel-footnote">
+                Projects material: {formatCurrency(value.sections.PROJECTS.value, value.currency)} across{' '}
+                {(value.projects ?? []).filter((p) => p.projectNumber).length} project{(value.projects ?? []).filter((p) => p.projectNumber).length === 1 ? '' : 's'}; it is never re-ordered, so the counts above are Stores only.{' '}
+                <Link to="/stock?section=PROJECTS" className="btn-link">By project</Link>
+              </p>
+            )}
           </section>
 
           <section className="dashboard-panel dashboard-location-panel" aria-label="Stock value by location">

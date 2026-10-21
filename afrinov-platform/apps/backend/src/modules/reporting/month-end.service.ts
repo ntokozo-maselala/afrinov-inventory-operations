@@ -31,6 +31,19 @@ export interface MonthEndItem {
   /** Required Stock − current stock, as the workbook shows it (negative when over); null when not set. */
   reorderQuantity: number | null;
   status: StockStatus;
+  /** Projects material: its project, null until assigned; null for Stores. */
+  project: string | null;
+}
+
+/** Projects material per project at the end of the range (materials sections roadmap, Phase 4). */
+export interface MonthEndProject {
+  /** Null for Projects material with no project yet. */
+  projectNumber: string | null;
+  name: string | null;
+  status: string | null;
+  items: number;
+  itemsInStock: number;
+  value: number;
 }
 
 export interface MonthEndUsed { sku: string; name: string; location: string; used: number; value: number | null }
@@ -55,6 +68,8 @@ export interface MonthEndReport {
   currency: string;
   bands: StatusBands;
   categories: MonthEndCategory[];
+  /** Projects material per project, completed and cancelled projects included. */
+  projects: MonthEndProject[];
   total: { items: number; itemsInStock: number; value: number; urgent: number; warning: number; usedValue: number };
 }
 
@@ -132,7 +147,7 @@ export const MonthEndService = {
     const { month, from, to, end } = reportRange(q);
     const [balances, materials, bands, currency, consumption] = await Promise.all([
       prisma.inventoryTransaction.groupBy({ by: ['materialId', 'locationId'], where: { postedAt: { lt: end } }, _sum: { quantity: true } }),
-      prisma.material.findMany({ select: { id: true, sku: true, name: true, category: true, requiredStock: true, unitCost: true, active: true } }),
+      prisma.material.findMany({ select: { id: true, sku: true, name: true, category: true, requiredStock: true, unitCost: true, active: true, projectNumber: true, project: { select: { name: true, status: true } } } }),
       getStatusBands(),
       SettingsService.getValue<string>('general.defaultCurrency'),
       ConsumptionService.report({ from, to }),
@@ -162,7 +177,9 @@ export const MonthEndService = {
       // Active items, and any inactive one that still had stock at the end.
       const mine = materials
         .filter((m) => m.category === category && (m.active || held.has(m.id)))
-        .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
+        // Projects material reads project by project, those with no project last.
+        .sort((a, b) => (a.projectNumber ?? '\uffff').localeCompare(b.projectNumber ?? '\uffff')
+          || a.sku.localeCompare(b.sku, undefined, { numeric: true }));
       const items: MonthEndItem[] = mine.map((m) => {
         const current = round4((held.get(m.id) ?? []).reduce((a, r) => a + r.quantity, 0));
         const required = Number(m.requiredStock);
@@ -181,6 +198,7 @@ export const MonthEndService = {
           percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
           reorderQuantity: required > 0 ? round4(required - owned) : null,
           status: s.status,
+          project: m.projectNumber,
         };
       });
       const used = consumption.items
@@ -200,6 +218,19 @@ export const MonthEndService = {
       });
     }
 
+    // Projects material per project, from the Project Material items.
+    const projects = new Map<string, MonthEndProject>();
+    const projectItems = categories.find((c) => c.category === 'PROJECT_MATERIAL')?.items ?? [];
+    for (const i of projectItems) {
+      const m = materials.find((x) => x.sku === i.sku);
+      const key = i.project ?? '';
+      const p = projects.get(key) ?? { projectNumber: i.project, name: m?.project?.name ?? null, status: m?.project?.status ?? null, items: 0, itemsInStock: 0, value: 0 };
+      p.items++;
+      if (i.currentStock > 0) p.itemsInStock++;
+      p.value = round2(p.value + (i.value ?? 0));
+      projects.set(key, p);
+    }
+
     return {
       month,
       from,
@@ -208,6 +239,7 @@ export const MonthEndService = {
       currency,
       bands,
       categories,
+      projects: [...projects.values()].sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
       total: {
         items: categories.reduce((a, c) => a + c.items.length, 0),
         itemsInStock: categories.reduce((a, c) => a + c.itemsInStock, 0),

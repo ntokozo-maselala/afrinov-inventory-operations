@@ -4,8 +4,8 @@
 // stock status bands, with the period's stock used from the consumption report.
 import type { ApiError } from '../api/client';
 import { classifyItem, type StatusBands } from '../lib/stockStatus';
-import type { ConsumptionReport, MonthEndCategory, MonthEndItem, MonthEndReport } from '../api/reportTypes';
-import type { MockInventoryTransaction, MockLocation, MockMaterial } from './types';
+import type { ConsumptionReport, MonthEndCategory, MonthEndItem, MonthEndProject, MonthEndReport } from '../api/reportTypes';
+import type { MockInventoryTransaction, MockLocation, MockMaterial, MockProject } from './types';
 
 const ORDER = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -68,6 +68,8 @@ export function computeMonthEnd(
   data: {
     transactions: MockInventoryTransaction[]; materials: MockMaterial[]; locations: MockLocation[];
     bands: StatusBands; currency: string; consumption: (from: string, to: string) => ConsumptionReport;
+    /** For the projects' names and statuses in the by-project summary. */
+    projects?: MockProject[];
   },
   now = new Date(),
 ): MonthEndReport {
@@ -101,7 +103,9 @@ export function computeMonthEnd(
   for (const category of ORDER) {
     const mine = data.materials
       .filter((x) => x.category === category && (x.active || held(x.id).length > 0))
-      .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
+      // Projects material reads project by project, those with no project last.
+      .sort((a, b) => (a.projectNumber ?? '\uffff').localeCompare(b.projectNumber ?? '\uffff')
+        || a.sku.localeCompare(b.sku, undefined, { numeric: true }));
     const items: MonthEndItem[] = mine.map((x) => {
       const current = round4(held(x.id).reduce((a, r) => a + r.quantity, 0));
       const required = Number(x.requiredStock);
@@ -114,6 +118,7 @@ export function computeMonthEnd(
         percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
         reorderQuantity: required > 0 ? round4(required - owned) : null,
         status: s.status,
+        project: x.projectNumber ?? null,
       };
     });
     const used = consumption.items
@@ -132,8 +137,20 @@ export function computeMonthEnd(
     });
   }
   const sum = (f: (c: MonthEndCategory) => number) => categories.reduce((a, c) => a + f(c), 0);
+  // Projects material per project, as the server adds it up.
+  const projects = new Map<string, MonthEndProject>();
+  for (const i of categories.find((c) => c.category === 'PROJECT_MATERIAL')?.items ?? []) {
+    const key = i.project ?? '';
+    const info = data.projects?.find((p) => p.projectNumber === i.project);
+    const p = projects.get(key) ?? { projectNumber: i.project ?? null, name: info?.name ?? null, status: info?.status ?? null, items: 0, itemsInStock: 0, value: 0 };
+    p.items++;
+    if (i.currentStock > 0) p.itemsInStock++;
+    p.value = round2(p.value + (i.value ?? 0));
+    projects.set(key, p);
+  }
   return {
     month, from, to, generatedAt: now.toISOString(), currency: data.currency, bands: data.bands, categories,
+    projects: [...projects.values()].sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
     total: {
       items: sum((c) => c.items.length), itemsInStock: sum((c) => c.itemsInStock), value: round2(sum((c) => c.value)),
       urgent: sum((c) => c.urgent), warning: sum((c) => c.warning), usedValue: round2(sum((c) => c.usedValue)),

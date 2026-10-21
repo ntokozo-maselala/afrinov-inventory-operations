@@ -9,7 +9,7 @@ const row = (sku: string, category: string, status: 'URGENT' | 'WARNING', onHand
   requiredStock: String(required), onHand: String(onHand), onLoan: '0', percentOfRequired: Math.round((onHand / required) * 1000) / 10,
   status, reorderQuantity: String(required - onHand), unitCost,
   locations: onHand > 0 ? [{ locationId: 'l-1', locationName: 'A-1', quantity: String(onHand) }] : [],
-  lastSupplier: null, ...extra,
+  lastSupplier: null, projectNumber: null, project: null, ...extra,
 });
 
 const meta = { generatedAt: new Date('2026-10-09T08:30:00Z'), bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, currency: 'ZAR' };

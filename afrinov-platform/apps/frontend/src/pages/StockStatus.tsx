@@ -27,7 +27,7 @@ import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
 import { DownloadMenu } from '../components/DownloadMenu';
 import { downloadReorderList, downloadReorderListPdf } from '../api/exportReorderList';
-import { CATEGORIES } from '../lib/categories';
+import { STORES_CATEGORIES } from '../lib/categories';
 
 /** One item, as GET /reports/stock-status returns it. */
 export interface StockStatusItem {
@@ -47,6 +47,9 @@ export interface StockStatusItem {
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
   /** The supplier of the latest posted goods receipt with this item. */
   lastSupplier: { id: string; name: string; receivedAt: string } | null;
+  /** Projects material: its project (Stock status itself lists Stores only). */
+  projectNumber?: string | null;
+  project?: { name: string | null; status: string } | null;
 }
 
 const VIEWS: Array<{ value: string; label: string }> = [
@@ -197,7 +200,7 @@ export function StockStatus() {
         <Field label="Category" htmlFor="ss-category" className={FILTER_WIDTH}>
           <Select id="ss-category" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">All categories</option>
-            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {STORES_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </Select>
         </Field>
       </FilterBar>

@@ -56,6 +56,7 @@ export interface CurrentStockRow {
   category: string; unitOfMeasure: string; requiredStock: string;
   /** Projects material: its project, null until assigned. */
   projectNumber?: string | null;
+  project?: { name: string | null; status: string } | null;
   locationId: string; locationName: string; locationType: string;
   quantity: string; belowThreshold: boolean;
   /** The item's status from its total across locations, the same on each of its rows. */

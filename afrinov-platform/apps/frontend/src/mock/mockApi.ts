@@ -1137,7 +1137,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/reports/month-end') {
     const currency = String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR');
     return computeMonthEnd({ month: qs.month || undefined, from: qs.from || undefined, to: qs.to || undefined }, {
-      transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency,
+      transactions: state.transactions, materials: state.materials, locations: state.locations, bands: mockBands(), currency, projects: state.projects,
       consumption: (from, to) => computeConsumption({ from, to }, { transactions: state.transactions, materials: state.materials, projects: state.projects, currency }),
     });
   }
@@ -1164,6 +1164,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/reports/inventory') {
     return buildReport(parseMockReportQuery(qs), {
       bands: mockBands(),
+      projects: state.projects,
       materials: state.materials,
       locations: state.locations,
       suppliers: state.suppliers,
@@ -1970,12 +1971,15 @@ function onLoanOf(materialId: string): number {
     .reduce((a, t) => a + Number(t.quantity), 0);
 }
 
-function computeStockStatus(filter: { status?: StockStatus[]; category?: string }) {
+function computeStockStatus(filter: { status?: StockStatus[]; category?: string; section?: 'STORES' | 'PROJECTS' | 'ALL' }) {
   const balances = computeBalances();
   const bands = mockBands();
   const order: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
+  // As the server: re-ordering is for Stores, so Projects material is left out unless asked for.
+  const section = filter.section ?? 'STORES';
+  const inSection = (category: string) => section === 'ALL' || (category === 'PROJECT_MATERIAL') === (section === 'PROJECTS');
   return state.materials
-    .filter((m) => m.active && (!filter.category || m.category === filter.category))
+    .filter((m) => m.active && (filter.category ? m.category === filter.category : inSection(m.category)))
     .map((m) => {
       const mine = balances.filter((b) => b.materialId === m.id);
       const onHand = mine.reduce((a, b) => a + b.quantity, 0);
@@ -1990,6 +1994,8 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string 
           .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
         lastSupplier: lastSupplierOf(m.id),
+        projectNumber: m.projectNumber ?? null,
+        project: projectInfo(m.projectNumber),
       };
     })
     .filter((r) => !filter.status || filter.status.length === 0 || filter.status.includes(r.status))
@@ -1999,21 +2005,34 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string 
 // Mirrors ReportingService.stockValue: on hand x unit price per category, and items by status.
 function computeStockValue() {
   const order = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL', 'PROJECT_MATERIAL', 'TOOLS'];
-  const cats = new Map<string, { items: number; itemsInStock: number; value: number; unpriced: number }>();
+  const blank = () => ({ items: 0, itemsInStock: 0, value: 0, unpriced: 0 });
+  const cats = new Map<string, ReturnType<typeof blank>>();
+  const sections = { STORES: blank(), PROJECTS: blank() };
+  type ProjectValue = ReturnType<typeof blank> & { projectNumber: string | null; name: string | null; status: string | null };
+  const projects = new Map<string, ProjectValue>();
   const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
-  for (const r of computeStockStatus({})) {
+  for (const r of computeStockStatus({ section: 'ALL' })) {
     const onHand = Number(r.onHand);
-    const c = cats.get(r.category) ?? { items: 0, itemsInStock: 0, value: 0, unpriced: 0 };
-    c.items++;
-    if (onHand > 0) {
-      c.itemsInStock++;
-      if (r.unitCost === null) c.unpriced++;
-      else c.value += onHand * Number(r.unitCost);
-    } else {
-      status.outOfStock++;
+    const section = r.category === 'PROJECT_MATERIAL' ? 'PROJECTS' : 'STORES';
+    if (!cats.has(r.category)) cats.set(r.category, blank());
+    const totals = [cats.get(r.category)!, sections[section]];
+    if (section === 'PROJECTS') {
+      const key = r.projectNumber ?? '';
+      if (!projects.has(key)) projects.set(key, { projectNumber: r.projectNumber, name: r.project?.name ?? null, status: r.project?.status ?? null, ...blank() });
+      totals.push(projects.get(key)!);
     }
-    cats.set(r.category, c);
-    status[r.status]++;
+    for (const c of totals) {
+      c.items++;
+      if (onHand > 0) {
+        c.itemsInStock++;
+        if (r.unitCost === null) c.unpriced++;
+        else c.value += onHand * Number(r.unitCost);
+      }
+    }
+    if (section === 'STORES') {
+      if (onHand <= 0) status.outOfStock++;
+      status[r.status]++;
+    }
   }
   const total = [...cats.values()].reduce(
     (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
@@ -2026,8 +2045,21 @@ function computeStockValue() {
       .sort(([a], [b]) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
       .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
     total: { ...total, value: round2(total.value) },
+    sections: {
+      STORES: { ...sections.STORES, value: round2(sections.STORES.value) },
+      PROJECTS: { ...sections.PROJECTS, value: round2(sections.PROJECTS.value) },
+    },
+    projects: [...projects.values()]
+      .map((p) => ({ ...p, value: round2(p.value) }))
+      .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
     status,
   };
+}
+
+/** A project's name and status, as the server includes them with Projects material. */
+function projectInfo(projectNumber: string | null | undefined): { name: string | null; status: string } | null {
+  const p = projectNumber ? state.projects.find((x) => x.projectNumber === projectNumber) : undefined;
+  return p ? { name: p.name ?? null, status: p.status } : null;
 }
 
 function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
@@ -2053,6 +2085,7 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       materialName: m.name,
       category: m.category,
       projectNumber: m.projectNumber ?? null,
+      project: projectInfo(m.projectNumber),
       unitOfMeasure: m.unitOfMeasure,
       requiredStock: String(required),
       locationId: l.id,

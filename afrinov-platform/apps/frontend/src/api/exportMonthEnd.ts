@@ -12,6 +12,18 @@ import { today } from '../lib/dates';
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** The download name: the month when the report covers one, otherwise both dates (as the server names it). */
+/** A project item's name with its project, as the server's export writes it: "[1369] Pipe". */
+function itemName(category: string, i: { name: string; project?: string | null }): string {
+  return category === 'PROJECT_MATERIAL' ? `[${i.project ?? 'no project'}] ${i.name}` : i.name;
+}
+
+/** "1369 · Plant upgrade (completed)", or "No project yet". */
+function projectLabel(p: { projectNumber: string | null; name: string | null; status: string | null }): string {
+  if (!p.projectNumber) return 'No project yet';
+  const closed = p.status === 'COMPLETED' ? ' (completed)' : p.status === 'CANCELLED' ? ' (cancelled)' : '';
+  return `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}${closed}`;
+}
+
 export function stockReportFilename(r: Pick<MonthEndReport, 'month' | 'from' | 'to'>, extension: 'xlsx' | 'pdf' = 'xlsx'): string {
   return `afrinov-stock-report-${r.month ?? `${r.from}-to-${r.to}`}.${extension}`;
 }
@@ -70,6 +82,11 @@ async function buildInBrowser(r: MonthEndReport): Promise<ArrayBuffer> {
   ov.getRow(4).font = { bold: true };
   for (const c of r.categories) ov.addRow([SHEET[c.category]?.label ?? c.category, c.items.length, c.itemsInStock, c.value, c.urgent, c.warning, c.usedValue]);
   ov.addRow(['Total', r.total.items, r.total.itemsInStock, r.total.value, r.total.urgent, r.total.warning, r.total.usedValue]).font = { bold: true };
+  if ((r.projects ?? []).length > 0) {
+    ov.addRow([]);
+    ov.addRow(['Project material by project', 'Items', 'In stock', `Stock value (${r.currency})`]).font = { bold: true };
+    for (const p of r.projects!) ov.addRow([projectLabel(p), p.items, p.itemsInStock, p.value]);
+  }
 
   for (const c of r.categories) {
     const names = SHEET[c.category] ?? { summary: c.category.slice(0, 31), used: `${c.category.slice(0, 26)} Used`, label: c.category, title: 'STOCK INVENTORY' };
@@ -79,7 +96,7 @@ async function buildInBrowser(r: MonthEndReport): Promise<ArrayBuffer> {
     ws.getRow(4).values = ['S.N #:', 'Product ID', 'Item Name', 'Location', 'Required Stock', 'Current Stock', 'Stock Value VAT Exl',
       '% In Stock Re-Up', 'Unit Price Ex VAT', 'Re Order IN QTY', 'URGENCY'];
     ws.getRow(4).font = { bold: true };
-    c.items.forEach((i, n) => ws.addRow([n + 1, i.sku, i.name, i.location, i.requiredStock, i.currentStock, i.value, i.percentOfRequired, i.unitCost, i.reorderQuantity, URGENCY[i.status]]));
+    c.items.forEach((i, n) => ws.addRow([n + 1, i.sku, itemName(c.category, i), i.location, i.requiredStock, i.currentStock, i.value, i.percentOfRequired, i.unitCost, i.reorderQuantity, URGENCY[i.status]]));
 
     const wu = wb.addWorksheet(names.used);
     wu.getCell('A3').value = c.usedValue;
@@ -117,6 +134,17 @@ export async function downloadMonthEndPdf(range: { from: string; to: string }): 
     totals: [['Total', formatNumber(r.total.items), formatNumber(r.total.itemsInStock), money(r.total.value), formatNumber(r.total.urgent), formatNumber(r.total.warning), money(r.total.usedValue)]],
     empty: 'No items in stock or used in this period.',
   }];
+  if ((r.projects ?? []).length > 0) {
+    sections.push({
+      heading: 'Project material by project',
+      columns: [
+        { header: 'Project', wrap: true }, { header: 'Items', align: 'right' }, { header: 'In stock', align: 'right' },
+        { header: `Stock value (${r.currency})`, align: 'right' },
+      ],
+      rows: r.projects!.map((p) => [projectLabel(p), formatNumber(p.items), formatNumber(p.itemsInStock), money(p.value)]),
+      empty: 'No project material.',
+    });
+  }
   for (const c of r.categories) {
     const title = SHEET[c.category]?.title ?? 'STOCK INVENTORY';
     sections.push({
@@ -129,7 +157,7 @@ export async function downloadMonthEndPdf(range: { from: string; to: string }): 
         { header: 'Unit Price Ex VAT', align: 'right' }, { header: 'Re-order Qty', align: 'right' }, { header: 'Urgency' },
       ],
       rows: c.items.map((i, n) => [
-        String(n + 1), i.sku, i.name, i.location, formatNumber(i.requiredStock), formatNumber(i.currentStock), money(i.value),
+        String(n + 1), i.sku, itemName(c.category, i), i.location, formatNumber(i.requiredStock), formatNumber(i.currentStock), money(i.value),
         i.percentOfRequired === null ? '' : `${i.percentOfRequired.toFixed(1)}%`, money(i.unitCost),
         i.reorderQuantity === null ? '' : formatNumber(i.reorderQuantity), URGENCY[i.status] ?? i.status,
       ]),
