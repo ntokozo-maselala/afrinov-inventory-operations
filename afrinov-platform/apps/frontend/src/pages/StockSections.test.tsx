@@ -3,7 +3,7 @@
 // the mock API's stock status and stock value.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
 vi.mock('../api/client', async (importOriginal) => ({
@@ -78,6 +78,28 @@ describe('Stock: Stores and Projects views', () => {
     fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
     expect(await screen.findByText('1369-PIPE')).toBeInTheDocument();
     expect(screen.getByLabelText('Project')).toHaveValue('');
+  });
+
+  it('keeps the address in step with the filters, so cleared ones do not come back', async () => {
+    function Where() { return <output data-testid="where">{useLocation().search}</output>; }
+    render(<MemoryRouter initialEntries={['/stock?q=DISC&status=OK']}><ToastProvider><Stock /><Where /></ToastProvider></MemoryRouter>);
+    await screen.findByText('DISC');
+    const where = () => screen.getByTestId('where').textContent;
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CONSUMABLES' } });
+    expect(where()).toContain('category=CONSUMABLES');
+    fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
+    expect(where()).toBe('');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'URGENT' } });
+    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
+    expect(where()).toBe('?section=PROJECTS');
+  });
+
+  it('keeps the filters when the tab already open is clicked', async () => {
+    stockPage('/stock?section=PROJECTS&project=1369');
+    await screen.findByText('1369-PIPE');
+    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
+    expect(skus()).toEqual(['1369-PIPE']);
+    expect(screen.getByLabelText('Project')).toHaveValue('1369');
   });
 
   it('opens on one project from the link', async () => {

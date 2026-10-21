@@ -393,7 +393,7 @@ export const ReportService = {
     const storesLines = allLines.filter((l) => sectionOf(l.category) === 'STORES');
     const lowStockCount = storesLines.filter((l) => l.status === 'LOW_STOCK').length;
     const outOfStockCount = storesLines.filter((l) => l.status === 'OUT_OF_STOCK').length;
-    const categorySet = new Set(materials.map((m) => m.category));
+    const categorySet = new Set(allLines.map((l) => l.category)); // categories in the report
     const locationSet = new Set(allLines.map((l) => l.locationId).filter(Boolean));
 
     // Suppliers: pull in suppliers that have any PO line for the filtered
@@ -531,6 +531,9 @@ export const ReportService = {
     }
     for (const m of materials) {
       const lines = linesByMaterial.get(m.id) ?? [];
+      // Only items in the report: a status or location filter that leaves an item
+      // no lines leaves it out of the breakdowns too.
+      if (lines.length === 0) continue;
       const row: ReportCategoryRow = byCategoryMap.get(m.category) ?? {
         category: m.category,
         skuCount: 0,
@@ -625,6 +628,7 @@ export const ReportService = {
     const byProjectMap = new Map<string, ReportProjectRow>();
     for (const m of materials) {
       if (sectionOf(m.category) !== 'PROJECTS') continue;
+      if (!linesByMaterial.has(m.id)) continue; // not in the report (see the categories above)
       const key = m.projectNumber ?? '';
       const row = byProjectMap.get(key) ?? {
         projectNumber: m.projectNumber, name: m.project?.name ?? null, status: m.project?.status ?? null,

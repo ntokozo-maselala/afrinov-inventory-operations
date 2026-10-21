@@ -353,6 +353,10 @@ describe('ReportService.inventory', () => {
     expect(out.inventory.map((l) => l.sku)).not.toContain('OLD-PLATE');
     const inStock = await ReportService.inventory({ ...baseQuery, stockStatus: 'IN_STOCK' });
     expect(inStock.inventory.map((l) => l.sku)).toEqual(['A-1']);
+    // The breakdowns follow the filter: only items in the report are counted.
+    expect(inStock.byProject).toEqual([]);
+    expect(inStock.byCategory.map((c) => [c.category, c.skuCount])).toEqual([['CONSUMABLES', 1]]);
+    expect(inStock.kpis.categoryCount).toBe(1);
   });
 
   it('groups by category with value share', async () => {
