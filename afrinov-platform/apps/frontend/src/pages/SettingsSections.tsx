@@ -244,6 +244,7 @@ export function SettingsNotifications() {
 }
 
 // ── Appearance ────────────────────────────────────────────────────────
+/** Apply and store browser theme changes immediately; keep density changes in the draft until saved. */
 export function SettingsAppearance() {
   const { draft, setDraft, save, saving } = useSettings();
   const appearance = useAppearance();
@@ -308,6 +309,11 @@ interface UserFormProps {
   onError: (e: ApiError) => void;
 }
 
+/**
+ * Create a user or edit the user identified by `initial.id`.
+ * Approval limits are in rand including VAT; a blank limit means no limit.
+ * Report successful saves through `onSaved` and caught save failures through `onError`.
+ */
 function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
   const isEdit = !!initial?.id;
   const [name, setName] = useState(initial?.name ?? '');

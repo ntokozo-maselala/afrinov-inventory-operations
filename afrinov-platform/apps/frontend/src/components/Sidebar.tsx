@@ -183,6 +183,10 @@ function NavItemComponent({
   );
 }
 
+/**
+ * Render navigation groups using the shared sidebar mode.
+ * `isMobile` selects mobile sizing and labeling; `onNavigate` handles navigation clicks.
+ */
 export function Sidebar({ groups, onNavigate, isMobile = false }: SidebarProps) {
   const { sidebarMode, prefersReducedMotion } = useAppShell();
   const isCollapsed = sidebarMode === 'collapsed';

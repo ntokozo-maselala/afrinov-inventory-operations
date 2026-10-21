@@ -83,6 +83,7 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Require authentication and wait for preference initialization before showing the app shell. */
 function Protected() {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -99,6 +100,7 @@ function Protected() {
   );
 }
 
+/** Render public and protected routes with lazy pages and device theme synchronization. */
 export function App() {
   return (
     <>
@@ -176,6 +178,7 @@ export function App() {
   );
 }
 
+/** Reapply the cached theme when the device color scheme changes while mounted. */
 function SystemThemeSync() {
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;

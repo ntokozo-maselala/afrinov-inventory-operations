@@ -106,6 +106,13 @@ function validate(def: SettingValue, raw: unknown): string | null {
   }
 }
 
+/**
+ * Provide server settings, draft validation, and save/reset actions to descendants.
+ * `canEdit` gates persistence actions; they reject with FORBIDDEN when false and
+ * propagate API failures. Load failures are exposed through the context's `error`.
+ * Apply loaded density and prefer the stored browser theme over the server default
+ * when a theme setting is present. Expose the live browser theme in `preferences`.
+ */
 export function SettingsProvider({ children, canEdit }: { children: ReactNode; canEdit: boolean }) {
   const appearance = useAppearance();
   const [all, setAll] = useState<SettingValue[]>([]);

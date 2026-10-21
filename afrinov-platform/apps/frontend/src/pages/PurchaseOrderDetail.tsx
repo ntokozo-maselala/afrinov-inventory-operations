@@ -332,6 +332,7 @@ export function PurchaseOrderDetail() {
 }
 
 // ── Lifecycle tracker ────────────────────────────────────────────────────
+/** Show reached and current purchase order stages, or a cancellation notice. */
 function LifecycleTracker({ status }: { status: POStatus }) {
   if (status === 'CANCELLED') {
     return (

@@ -276,6 +276,9 @@ export const SettingsService = {
   /**
    * Idempotent: ensures every catalog key has a row, and deletes rows for
    * keys that have been retired from the catalog.
+   * Migrates an existing `appearance.theme` value of `system` to `light` when
+   * `updatedById` is null; preserves other existing values.
+   * Database errors reject the promise; completed writes are not rolled back.
    */
   async ensureSeeded(): Promise<void> {
     await prisma.setting.deleteMany({ where: { key: { notIn: SETTING_CATALOG.map((s) => s.key) } } });

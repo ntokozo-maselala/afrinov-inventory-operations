@@ -44,6 +44,7 @@ function stockText(m: Material, rows: CurrentStockRow[] | undefined): string {
   return `${total} ${m.unitOfMeasure} in stock · ${rows.map((r) => `${r.locationName} (${r.quantity})`).join(', ')}`;
 }
 
+/** Record supplier deliveries as counter receipts, with links to receive against open purchase orders. */
 export function ReceiveStock() {
   const suppliers = useApi<Supplier[]>('/suppliers');
   const materials = useApi<Material[]>('/materials');

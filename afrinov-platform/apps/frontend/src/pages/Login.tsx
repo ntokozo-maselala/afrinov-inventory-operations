@@ -31,6 +31,7 @@ interface FieldErrors {
   password?: string;
 }
 
+/** Render sign-in with inline errors and redirect successful logins to the requested or configured landing page. */
 export function Login() {
   const { login, user, loading } = useAuth();
   const nav = useNavigate();

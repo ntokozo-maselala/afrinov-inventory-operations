@@ -12,6 +12,7 @@ import { TooltipProvider } from './ui/tooltip';
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 
+/** Wrap page content in the responsive navigation layout and shell, toast, and tooltip providers. */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <TooltipProvider>

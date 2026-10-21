@@ -42,6 +42,7 @@ export function saveSettings(next: UserSettings): void {
   }
 }
 
+/** Apply the document theme and color scheme, following the device for `system`. */
 export function applyTheme(theme: ThemePreference): void {
   applyCentralTheme(theme);
 }

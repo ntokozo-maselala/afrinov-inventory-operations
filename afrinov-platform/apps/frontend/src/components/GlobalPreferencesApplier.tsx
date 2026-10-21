@@ -10,6 +10,13 @@ import { applyTheme, applyDensity, setAppearance, getAppearance, getStoredThemeP
 
 const THEME_KEYS = ['appearance.theme', 'appearance.density'] as const;
 
+/**
+ * Initialize theme and density without rendering UI; a stored browser theme
+ * overrides the server default. Request errors leave current preferences in place.
+ * Frontend-only mode applies the cached theme and comfortable density.
+ * Calls `onReady` once when the request settles, including on error, or immediately
+ * in frontend-only mode. Unmounting suppresses pending updates and readiness calls.
+ */
 export function GlobalPreferencesApplier({ onReady }: { onReady?: () => void }): null {
   const readyRef = useRef(false);
   const onReadyRef = useRef(onReady);

@@ -1248,6 +1248,7 @@ interface MockSetting {
   updatedById: string | null;
 }
 
+/** Build editable mock settings with matching initial and reset values. */
 function buildMockSettings(): Record<string, MockSetting> {
   const now = new Date().toISOString();
   const row = (key: string, value: unknown, type: MockSettingType, category: string, description: string, enumOptions: string[] | null = null): MockSetting => ({

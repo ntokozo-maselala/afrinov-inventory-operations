@@ -17,11 +17,16 @@ export type AppDensity = 'comfortable' | 'compact';
 export const APPEARANCE_THEME_STORAGE_KEY = 'afrinov.appearance.theme.v1';
 const LEGACY_SETTINGS_STORAGE_KEY = 'afrinov.settings.v1';
 
+/** Recognize the supported browser theme preference values. */
 function isAppTheme(value: unknown): value is AppTheme {
   return value === 'system' || value === 'light' || value === 'dark';
 }
 
-/** Return the last explicit browser choice, if storage is available. */
+/**
+ * Read a valid theme from the current storage key, falling back to legacy settings.
+ * Omitted `storage` uses browser localStorage; null disables storage reads.
+ * Returns null when no valid theme is found or storage access/JSON parsing fails.
+ */
 export function getStoredThemePreference(storage?: Pick<Storage, 'getItem'> | null): AppTheme | null {
   try {
     const source = storage === undefined
@@ -49,6 +54,7 @@ export function resolveInitialTheme(storedTheme: AppTheme | null): AppTheme {
   return storedTheme ?? 'light';
 }
 
+/** Resolve dark mode, using the device preference only for the `system` theme. */
 export function prefersDark(theme: AppTheme, systemPrefersDark: boolean): boolean {
   return theme === 'dark' || (theme === 'system' && systemPrefersDark);
 }
@@ -65,6 +71,12 @@ export function getAppearance(): AppearanceState {
   return current;
 }
 
+/**
+ * Merge preferences into the shared cache and notify subscribers synchronously.
+ * When a document is available, apply supplied theme/density values and attempt
+ * to persist the supplied theme in localStorage. Storage write errors are ignored;
+ * subscriber or document update errors propagate after the cache has changed.
+ */
 export function setAppearance(next: Partial<AppearanceState>): void {
   current = { ...current, ...next };
   for (const fn of subscribers) fn(current);
@@ -81,6 +93,11 @@ export function setAppearance(next: Partial<AppearanceState>): void {
   }
 }
 
+/**
+ * Set the root dark class, theme marker, and browser color scheme.
+ * `system` uses the current device preference, falling back to light when
+ * matchMedia is unavailable. Does nothing when there is no document.
+ */
 export function applyTheme(theme: AppTheme): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;

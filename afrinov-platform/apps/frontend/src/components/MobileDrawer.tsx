@@ -43,6 +43,7 @@ function FocusTrap({ children }: { children: React.ReactNode }) {
   return <div ref={containerRef}>{children}</div>;
 }
 
+/** Show navigation when open on mobile, managing keyboard focus and body scroll locking. */
 export function MobileDrawer() {
   const { sidebarMode, closeMobile, isMobile, prefersReducedMotion } = useAppShell();
   const navGroups = useNavGroups();
