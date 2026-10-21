@@ -155,7 +155,6 @@ export function Dashboard() {
         <header className="dashboard-heading">
           <div>
             <div className="dashboard-eyebrow"><span aria-hidden="true" /> inventory overview</div>
-            <h1>Dashboard</h1>
             <p>Current stock position, valuation and operational exceptions.</p>
           </div>
           <div className="dashboard-heading-actions">
