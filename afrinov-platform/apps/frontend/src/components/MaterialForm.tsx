@@ -2,29 +2,51 @@
 // (POST /materials); with it, it edits that item (PATCH /materials/:id). It
 // defines the item only; stock comes in through Receive stock. Used in a
 // drawer on the Materials, Material detail and Receive stock pages.
+//
+// The first choice is the section: Stores (kept on the shelf, with a category
+// and Required Stock) or Projects (bought for one project, never re-ordered).
+// Both are fixed once the item exists; an item moved in from the old Project
+// Material category without a project can be given one here.
 import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
-import { CATEGORIES } from '../lib/categories';
+import { PROJECTS_CATEGORY, STORES_CATEGORIES, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 
 export interface CreatedMaterial { id: string; sku: string; name: string }
 
+interface ProjectOpt { projectNumber: string; name?: string | null; status?: string; active?: boolean }
+
 /** A stored decimal ("12.5000") as the user would type it ("12.5"); blank when unset. */
 const asInput = (v: string | null | undefined) => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
 
-export function MaterialForm({ initial, onCancel, onSaved, onError }: {
+/** Accept projects unless explicitly inactive, completed, or canceled; missing flags are allowed. */
+const isOpen = (p: ProjectOpt) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED';
+
+/**
+ * Render a catalog item form that creates an item or edits `initial`.
+ * Editing fixes the SKU, section, and category; a Projects item can be assigned
+ * a project only while it has none. Saves call `onSaved`; save errors call `onError`.
+ */
+export function MaterialForm({ initial, section: startSection = 'STORES', projectNumber: startProject = '', onCancel, onSaved, onError }: {
   /** The item to edit. Leave it out to add a new item. */
   initial?: Material;
+  /** For a new item: the section it starts in, e.g. the Materials tab it was added from. */
+  section?: MaterialSection;
+  /** For a new Projects item: the project it starts on. */
+  projectNumber?: string;
   onCancel: () => void; onSaved: (material: CreatedMaterial) => void; onError: (e: ApiError) => void;
 }) {
   const editing = !!initial;
+  const [section, setSection] = useState<MaterialSection>(initial ? sectionOf(initial.category) : startSection);
   const [sku, setSku] = useState(initial?.sku ?? '');
   const [name, setName] = useState(initial?.name ?? '');
-  const [category, setCategory] = useState(initial?.category ?? CATEGORIES[0]!.value);
+  const [category, setCategory] = useState(initial && sectionOf(initial.category) === 'STORES' ? initial.category : STORES_CATEGORIES[0]!.value);
+  const [projectNumber, setProjectNumber] = useState(initial?.projectNumber ?? startProject);
   const [unitOfMeasure, setUom] = useState(initial?.unitOfMeasure ?? 'each');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [requiredStock, setReorder] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
@@ -33,29 +55,46 @@ export function MaterialForm({ initial, onCancel, onSaved, onError }: {
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const bands = useStatusBands();
+  const projects = section === 'PROJECTS';
+  // A Projects item's project is fixed once it has one; one without can be given it here.
+  const projectFixed = editing && !!initial?.projectNumber;
+  const projectList = useApi<ProjectOpt[]>(projects && !projectFixed ? '/projects?active=true' : null);
+  const openProjects = (projectList.data ?? []).filter(isOpen);
 
+  /**
+   * Prevent form navigation, show validation errors inline, and create or update the item.
+   * Stores saves include a nonnegative reorder level; Projects saves omit it.
+   * On edit, blank cost and description clear their stored values.
+   * Request errors and errors thrown by `onSaved` go to `onError`; if `onError`
+   * throws, the submission rejects.
+   */
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setValidation(null);
     if (!sku.trim() || !name.trim() || !unitOfMeasure.trim()) { setValidation('SKU, name and unit of measure are required.'); return; }
-    const reorder = Number(requiredStock);
-    if (requiredStock.trim() === '' || !Number.isFinite(reorder) || reorder < 0) { setValidation('Reorder level must be 0 or positive.'); return; }
+    if (projects && !projectNumber) { setValidation('Choose the project this material is for.'); return; }
+    const reorder = projects ? 0 : Number(requiredStock);
+    if (!projects && (requiredStock.trim() === '' || !Number.isFinite(reorder) || reorder < 0)) { setValidation('Reorder level must be 0 or positive.'); return; }
     const cost = unitCost.trim() === '' ? undefined : Number(unitCost);
     if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) { setValidation('Unit cost must be 0 or positive.'); return; }
+    const itemCategory = projects ? PROJECTS_CATEGORY : category;
     setBusy(true);
     try {
       const saved = initial
-        // SKU and category are fixed once the item exists. A blank cost or
-        // description clears it.
+        // SKU, section and category are fixed once the item exists. A blank
+        // cost or description clears it.
         ? await api.patch<CreatedMaterial>(`/materials/${initial.id}`, {
           name: name.trim(), unitOfMeasure: unitOfMeasure.trim(),
-          requiredStock: reorder, unitCost: cost ?? null, description: description.trim() || null,
+          unitCost: cost ?? null, description: description.trim() || null,
+          ...(projects ? {} : { requiredStock: reorder }),
+          ...(projects && !projectFixed ? { projectNumber } : {}),
           ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : {}),
         })
         : await api.post<CreatedMaterial>('/materials', {
-          sku: sku.trim(), name: name.trim(), category, unitOfMeasure: unitOfMeasure.trim(),
-          requiredStock: reorder, unitCost: cost, description: description.trim() || undefined,
-          serialNumber: category === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
+          sku: sku.trim(), name: name.trim(), category: itemCategory, unitOfMeasure: unitOfMeasure.trim(),
+          unitCost: cost, description: description.trim() || undefined,
+          ...(projects ? { projectNumber } : { requiredStock: reorder }),
+          serialNumber: itemCategory === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
         });
       onSaved(saved);
     } catch (err) { onError(err as ApiError); }
@@ -67,9 +106,21 @@ export function MaterialForm({ initial, onCancel, onSaved, onError }: {
 
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
+      <fieldset>
+        <legend className="field-label mb-1">Section</legend>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup">
+          {([['STORES', 'Stores', 'Kept on the shelf and topped up'], ['PROJECTS', 'Projects', 'Bought for one project, not re-ordered']] as const).map(([value, label, help]) => (
+            <label key={value} className={`flex items-start gap-2 p-3 rounded border ${section === value ? 'border-brand-500 bg-brand-50' : 'border-surface-200'} ${editing ? 'opacity-70' : 'cursor-pointer'}`}>
+              <input type="radio" name="m-section" value={value} checked={section === value} onChange={() => setSection(value)} disabled={editing} className="mt-1" />
+              <span><span className="block text-sm font-medium text-surface-900">{label}</span><span className="block text-xs text-surface-500">{help}</span></span>
+            </label>
+          ))}
+        </div>
+        {editing && <p className="text-xs text-surface-500 mt-1">Fixed once the item exists.</p>}
+      </fieldset>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="SKU / item code" htmlFor="m-sku" required help={fixed}>
-          <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="e.g. M16-WSHR" autoComplete="off" required invalid={missing(sku)} disabled={editing} />
+        <Field label="SKU / item code" htmlFor="m-sku" required help={fixed ?? (projects ? 'e.g. the project number first: 1369-PIPE-150NB' : undefined)}>
+          <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={projects ? 'e.g. 1369-PIPE-150NB' : 'e.g. M16-WSHR'} autoComplete="off" required invalid={missing(sku)} disabled={editing} />
         </Field>
         <Field label="Unit of measure" htmlFor="m-uom" required>
           <Input id="m-uom" value={unitOfMeasure} onChange={(e) => setUom(e.target.value)} required invalid={missing(unitOfMeasure)} />
@@ -78,12 +129,27 @@ export function MaterialForm({ initial, onCancel, onSaved, onError }: {
       <Field label="Item name" htmlFor="m-name" required>
         <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. M16 flat washer" required invalid={missing(name)} />
       </Field>
-      <Field label="Category" htmlFor="m-cat" required help={fixed}>
-        <Select id="m-cat" value={category} onChange={(e) => setCategory(e.target.value)} disabled={editing}>
-          {CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </Select>
-      </Field>
-      {category === 'TOOLS' && (
+      {projects ? (
+        projectFixed ? (
+          <Field label="Project" htmlFor="m-project" help="Fixed once the item has its project.">
+            <Input id="m-project" value={`${initial!.projectNumber}${initial!.project?.name ? ` · ${initial!.project.name}` : ''}`} disabled />
+          </Field>
+        ) : (
+          <Field label="Project" htmlFor="m-project" required help={editing ? 'This item has no project yet. Choose the one it was bought for.' : 'The project this material is bought for. Only open projects are listed.'} error={projectList.error ? 'Couldn’t load projects. Close and reopen to try again.' : null}>
+            <Select id="m-project" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)} invalid={!!validation && !projectNumber}>
+              <option value="">{projectList.loading ? 'Loading…' : '— choose a project —'}</option>
+              {openProjects.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` · ${p.name}` : ''}</option>)}
+            </Select>
+          </Field>
+        )
+      ) : (
+        <Field label="Category" htmlFor="m-cat" required help={fixed}>
+          <Select id="m-cat" value={category} onChange={(e) => setCategory(e.target.value)} disabled={editing}>
+            {STORES_CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </Field>
+      )}
+      {!projects && category === 'TOOLS' && (
         <Field label="Serial number" htmlFor="m-serial" help="For a single tool, such as a drill or a harness. Leave it blank for a set of identical tools.">
           <Input id="m-serial" value={serialNumber} onChange={(e) => setSerialNumber(e.target.value)} maxLength={64} autoComplete="off" />
         </Field>
@@ -92,13 +158,16 @@ export function MaterialForm({ initial, onCancel, onSaved, onError }: {
         <Textarea id="m-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Reorder level" htmlFor="m-reorder" help={`Stock status compares stock on hand with this: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
-          <Input id="m-reorder" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
-        </Field>
+        {!projects && (
+          <Field label="Reorder level" htmlFor="m-reorder" help={`Stock status compares stock on hand with this: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
+            <Input id="m-reorder" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
+          </Field>
+        )}
         <Field label="Unit cost" htmlFor="m-cost" help={editing ? 'In ZAR excl. VAT. Leave it blank if the price is not known.' : 'Optional, in ZAR excl. VAT.'}>
           <Input id="m-cost" type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="0.00" />
         </Field>
       </div>
+      {projects && <p className="text-xs text-surface-500">Projects material has no reorder level: it is bought for its project, not kept topped up.</p>}
       {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
       <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
