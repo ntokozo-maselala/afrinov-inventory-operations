@@ -244,6 +244,9 @@ describe('ReportingService', () => {
       db.balances = [];
       const { ReportingService } = await import('./reporting.service.js');
       expect((await ReportingService.stockStatus()).map((r) => r.sku)).not.toContain('1369-PIPE');
+      // Asking for the Project Material category in Stores gives nothing: both filters apply.
+      expect(await ReportingService.stockStatus({ category: 'PROJECT_MATERIAL' })).toEqual([]);
+      expect((await ReportingService.stockStatus({ category: 'PROJECT_MATERIAL', section: 'PROJECTS' })).map((r) => r.sku)).toEqual(['1369-PIPE']);
       const all = await ReportingService.stockStatus({ section: 'ALL' });
       expect(all.find((r) => r.sku === '1369-PIPE')).toMatchObject({ projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
     });

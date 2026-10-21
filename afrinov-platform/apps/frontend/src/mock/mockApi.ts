@@ -1979,7 +1979,7 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string;
   const section = filter.section ?? 'STORES';
   const inSection = (category: string) => section === 'ALL' || (category === 'PROJECT_MATERIAL') === (section === 'PROJECTS');
   return state.materials
-    .filter((m) => m.active && (filter.category ? m.category === filter.category : inSection(m.category)))
+    .filter((m) => m.active && (!filter.category || m.category === filter.category) && inSection(m.category))
     .map((m) => {
       const mine = balances.filter((b) => b.materialId === m.id);
       const onHand = mine.reduce((a, b) => a + b.quantity, 0);

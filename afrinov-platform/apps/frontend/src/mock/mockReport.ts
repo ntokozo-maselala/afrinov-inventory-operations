@@ -146,6 +146,8 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   // they still appear in the inventory table and exception list.
   const allLines: ReportInventoryLine[] = [];
   for (const m of materials) {
+    // Stock status is a Stores measure: a status filter leaves Projects material out, as the counts do.
+    if (q.stockStatus !== 'ALL' && m.category === 'PROJECT_MATERIAL') continue;
     const myBals = Array.from(balanceMap.entries())
       .filter(([k]) => k.startsWith(`${m.id}|`))
       .map(([k, qty]) => {

@@ -519,6 +519,12 @@ export const PurchaseOrderService = {
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot submit a PO in status ${po.status}`, { status: po.status });
       }
+      // A draft raised before its project material had a project is not ordered until it has one.
+      const lineMaterials = await tx.material.findMany({
+        where: { id: { in: [...new Set(po.lines.map((l) => l.materialId))] } },
+        select: { sku: true, category: true, projectNumber: true },
+      });
+      for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
       const now = new Date();
       if (requireApproval) {
         const target: PurchaseOrderStatus = 'PENDING_APPROVAL';

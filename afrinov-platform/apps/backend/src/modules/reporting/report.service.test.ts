@@ -348,6 +348,11 @@ describe('ReportService.inventory', () => {
     expect(r.kpis.outOfStockCount).toBe(0);
     expect(r.exceptions.map((l) => l.sku)).not.toContain('OLD-PLATE');
     expect(r.inventory.find((l) => l.sku === '1369-PIPE')?.projectNumber).toBe('1369');
+    // A status filter covers Stores lines, as the status counts do.
+    const out = await ReportService.inventory({ ...baseQuery, stockStatus: 'OUT_OF_STOCK' });
+    expect(out.inventory.map((l) => l.sku)).not.toContain('OLD-PLATE');
+    const inStock = await ReportService.inventory({ ...baseQuery, stockStatus: 'IN_STOCK' });
+    expect(inStock.inventory.map((l) => l.sku)).toEqual(['A-1']);
   });
 
   it('groups by category with value share', async () => {

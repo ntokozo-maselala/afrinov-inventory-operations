@@ -354,6 +354,9 @@ export const ReportService = {
     const allLines: ReportInventoryLine[] = [];
     for (const m of materials) {
       const myBals = balancesByMaterial.get(m.id) ?? [];
+      // Stock status (in stock, low, out) is a Stores measure: a status filter
+      // leaves Projects material out, as the status counts do.
+      if (q.stockStatus !== 'ALL' && sectionOf(m.category) === 'PROJECTS') continue;
       if (myBals.length === 0) {
         allLines.push(buildLine(m, undefined, 0, lastUpdateByMaterial.get(m.id) ?? null, true));
         continue;

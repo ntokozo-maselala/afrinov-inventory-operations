@@ -211,6 +211,8 @@ export const ReportingService = {
     // Re-ordering is for Stores: Projects material is bought per job, so it is
     // left out unless asked for (materials sections roadmap, Phase 4).
     const section = filter.section ?? 'STORES';
+    // A category and a section apply together: Project Material asked for in Stores is nothing.
+    if (filter.category && section !== 'ALL' && sectionOf(filter.category) !== section) return [];
     const category = filter.category
       ? filter.category as Prisma.MaterialWhereInput['category']
       : section === 'ALL' ? undefined : categoryWhere(section);
