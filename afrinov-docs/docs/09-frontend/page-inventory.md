@@ -1,6 +1,6 @@
 # Page Inventory
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** a7a7360, 2026-10-20
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 2026-10-21
 
 | Page (route) | Domain | Purpose | Main actions → API |
 |---|---|---|---|
@@ -41,6 +41,28 @@ link shows a "no access" message instead of its form (`10-security/access-contro
 
 **Planned:** Stock value and Project consumption as their own report pages
 (their data appears on the Dashboard and the Stock used page); location merge.
+
+## Route coverage and UI audit (2026-10-21)
+
+The router in `afrinov-platform/apps/frontend/src/App.tsx` defines these active route families:
+
+- Public: `/login`.
+- Protected shell: `/`, `/stock`, `/stock/issue`, `/stock/return`, `/stock/receive`, `/stock/count`, `/materials`, `/materials/:id`, `/movements`, `/suppliers`, `/suppliers/:id`, `/reports/stock-status`, `/reports/consumption`, `/reports/stock-report`, `/racks`, `/locations`, `/projects`, `/recipients`, `/tools`, and `/settings`.
+- Conditional procurement routes when `PROCUREMENT_ENABLED`: `/purchase-orders`, `/purchase-orders/new`, `/purchase-orders/:id`, `/purchase-orders/:id/edit`, and `/settings/purchase-orders`.
+- Settings child routes: `/settings/notifications`, `/settings/inventory`, `/settings/appearance`, `/settings/users`, `/settings/security`, `/settings/system`, `/settings/data`, and `/settings/history`; `/settings` renders the general section.
+- Fallback: all other protected paths render Not found.
+
+Redirects are not separate page designs: `/reports/low-stock` → `/reports/stock-status`, `/reports/month-end` → `/reports/stock-report`, `/reports/inventory` → `/`, `/goods-receipts/*` → `/purchase-orders` when procurement is enabled, and procurement paths → `/` when it is disabled. The disabled `/settings/purchase-orders` section redirects to `/settings`.
+
+### Render and source audit notes
+
+On 2026-10-21 the route families were opened in Chromium using the frontend-only mock mode and an administrator session. Registered list/form/settings/report routes reached their page component without page-level JavaScript errors. Representative rendered views included `/`, `/stock`, `/stock/issue`, `/materials`, `/reports/stock-status`, and `/settings/appearance`; dashboard light/dark and desktop/mobile variants were also inspected. This is a mock-data browser pass, not a live API or role-matrix verification.
+
+Page components share `PageHeader`, `Field`/`Input`/`Select`, `Button`, `Badge`, surface classes, and `DataTable` where applicable. The dashboard has its own local composition; settings child routes share the parent Settings heading and navigation. Only `index.css` and the dashboard-specific `Dashboard.css` define stylesheet rules in `src/`; the rest of the routes use shared styles and utility classes.
+
+The audit identified a missing dashboard h1, invalid Tailwind opacity placeholders in plain CSS, and a nested Settings main landmark. These were corrected: the dashboard now has its page heading, theme rules use valid CSS alpha values, and Settings has one main landmark. The chart-axis fill resolves to the expected light and dark surface colors in Chromium.
+
+Some API-backed detail and list routes were still displaying their loading branch in the short browser sampling window. Their loading, empty, and error branches were reviewed in source, but those delayed data states are not reported as visually verified. Mobile rendering beyond the dashboard and touch hardware remain unverified.
 
 ## Evidence
 - `afrinov-platform/apps/frontend/src/App.tsx` (routes)
