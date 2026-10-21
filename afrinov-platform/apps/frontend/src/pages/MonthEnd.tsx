@@ -24,6 +24,11 @@ export function lastMonth(today = new Date()): { from: string; to: string } {
 }
 
 /** Show the chosen period's category overview and export action; the dates live in the address, as on Movements. */
+/** A project's status as the by-project table shows it. */
+const PROJECT_STATUS: Record<string, string> = {
+  PLANNING: 'planning', ACTIVE: 'active', ON_HOLD: 'on hold', COMPLETED: 'completed', CANCELLED: 'cancelled',
+};
+
 export function MonthEnd() {
   const [params, setParams] = useSearchParams();
   const today = useMemo(() => iso(new Date()), []);
@@ -136,7 +141,7 @@ export function MonthEnd() {
                 <tr key={p.projectNumber ?? 'none'}>
                   <td className="font-medium">
                     {p.projectNumber ? `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}` : 'No project yet'}
-                    {(p.status === 'COMPLETED' || p.status === 'CANCELLED') && <span className="text-meta"> ({p.status === 'COMPLETED' ? 'completed' : 'cancelled'})</span>}
+                    {p.status && <span className="text-meta"> ({PROJECT_STATUS[p.status] ?? p.status.toLowerCase()})</span>}
                   </td>
                   <td className="text-right font-mono">{formatNumber(p.items)}</td>
                   <td className="text-right font-mono">{formatNumber(p.itemsInStock)}</td>

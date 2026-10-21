@@ -46,7 +46,9 @@ export function Stock() {
   const [params, setParams] = useSearchParams();
   const section: MaterialSection = params.get('section') === 'PROJECTS' ? 'PROJECTS' : 'STORES';
   const project = section === 'PROJECTS' ? params.get('project') ?? '' : '';
-  const setSection = (value: MaterialSection) => setParams((p) => {
+  // Category and status are Stores filters: switching tabs clears them, so none stays on unseen.
+  const setSection = (value: MaterialSection) => { setCategory(''); setStatus(''); changeSection(value); };
+  const changeSection = (value: MaterialSection) => setParams((p) => {
     const next = new URLSearchParams(p);
     if (value === 'PROJECTS') next.set('section', value); else next.delete('section');
     next.delete('project');
@@ -79,7 +81,7 @@ export function Stock() {
     if (project === NO_PROJECT && r.projectNumber) return false;
     if (project && project !== NO_PROJECT && r.projectNumber !== project) return false;
     const qty = Number(r.quantity);
-    if (status === 'out' && qty > 0) return false;
+    if (section === 'STORES' && status === 'out' && qty > 0) return false;
     if (section === 'STORES' && status && status !== 'out' && r.stockStatus !== status) return false;
     if (needle) {
       const hay = `${r.materialSku} ${r.materialName} ${r.locationName} ${r.projectNumber ?? ''} ${r.project?.name ?? ''}`.toLowerCase();
@@ -92,7 +94,7 @@ export function Stock() {
     filtered.sort((a, b) => (a.projectNumber ?? '\uffff').localeCompare(b.projectNumber ?? '\uffff') || a.materialSku.localeCompare(b.materialSku));
   }
 
-  const activeFilters = (category ? 1 : 0) + (status ? 1 : 0) + (q ? 1 : 0) + (project ? 1 : 0);
+  const activeFilters = (section === 'STORES' && category ? 1 : 0) + (section === 'STORES' && status ? 1 : 0) + (q ? 1 : 0) + (project ? 1 : 0);
 
   return (
     <div>
@@ -147,7 +149,9 @@ export function Stock() {
             <Select id="stock-project" value={project} onChange={(e) => setProject(e.target.value)}>
               <option value="">All projects</option>
               {projectOptions.map((r) => <option key={r.projectNumber} value={r.projectNumber!}>{projectName(r)}{closed(r) ? ' (closed)' : ''}</option>)}
-              {unassigned && <option value={NO_PROJECT}>No project yet</option>}
+              {/* A link may name a project holding no stock: keep it shown, so the filter in force is visible and can be cleared. */}
+              {project && project !== NO_PROJECT && !projectOptions.some((r) => r.projectNumber === project) && <option value={project}>{project}</option>}
+              {(unassigned || project === NO_PROJECT) && <option value={NO_PROJECT}>No project yet</option>}
             </Select>
           </Field>
         )}

@@ -76,6 +76,11 @@ const HEALTH_SEGMENTS = [
   { key: 'NOT_SET', label: 'No reorder level', color: 'bg-surface-400', text: 'text-surface-500' },
 ] as const;
 
+/** The Stores totals the status counts belong to (the overall totals from a server without sections). */
+function stores(v: StockValue): { items: number; itemsInStock: number } {
+  return v.sections?.STORES ?? v.total;
+}
+
 export function Dashboard() {
   const { hasPermission } = usePermissions();
   const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');
@@ -104,7 +109,8 @@ export function Dashboard() {
         note: value.total.unpriced > 0 ? `${formatNumber(value.total.unpriced)} in stock without a price · excl. VAT` : 'Current on hand · excl. VAT',
         to: value.total.unpriced > 0 ? '/materials?view=no-price' : undefined,
       },
-      { label: 'Items in stock', value: `${formatNumber(value.total.itemsInStock)} of ${formatNumber(value.total.items)}`, tone: 'brand' as const, note: 'active catalogue items', to: '/stock' },
+      // Stores, like the status cards beside it; Projects material is shown under the value chart.
+      { label: 'Items in stock', value: `${formatNumber(stores(value).itemsInStock)} of ${formatNumber(stores(value).items)}`, tone: 'brand' as const, note: value.sections ? 'active Stores items' : 'active catalogue items', to: '/stock' },
       { label: 'Urgent', value: formatNumber(status.URGENT), tone: status.URGENT > 0 ? 'danger' as const : 'neutral' as const, note: `below ${urgentBelowPercent}% of required`, to: '/reports/stock-status?view=URGENT' },
       { label: 'Warning', value: formatNumber(status.WARNING), tone: status.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
       { label: 'Out of stock', value: formatNumber(status.outOfStock), tone: status.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
@@ -217,12 +223,13 @@ export function Dashboard() {
           </div>
           {valueLoading && !value ? (
             <div className="dashboard-health-skeleton" aria-label="Loading stock health"><span /><span /><span /></div>
-          ) : value && value.total.items > 0 ? (
+          ) : value && stores(value).items > 0 ? (
             <>
               <div className="dashboard-health-bar" role="img" aria-label={HEALTH_SEGMENTS.map((segment) => `${segment.label}: ${value.status[segment.key]}`).join(', ')}>
                 {HEALTH_SEGMENTS.map((segment) => {
                   const count = value.status[segment.key];
-                  const share = count / value.total.items * 100;
+                  // The status counts are Stores only, so is what they are a share of.
+                  const share = count / stores(value).items * 100;
                   return count > 0 ? <span key={segment.key} className={segment.color} style={{ width: `${share}%` }} title={`${segment.label}: ${formatNumber(count)}`} /> : null;
                 })}
               </div>
