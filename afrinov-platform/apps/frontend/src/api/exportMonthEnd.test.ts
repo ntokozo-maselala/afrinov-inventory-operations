@@ -122,7 +122,8 @@ describe('downloadMonthEnd in frontend-only mode', () => {
     const summary = wb.getWorksheet('Project Stock Summary')!;
     expect(summary.getCell('B2').value).toBe(24);
     expect(summary.getCell('B3').value).toBe('PROJECT INVENTORY — as at 2026-09-30');
-    expect(summary.getRow(5).values).toEqual([undefined, 1, 'PRJ-1', 'Pipe', 'Rack A', 10, 12, 24, 1.2, 2, -2, 'OK']);
+    // Project material names its project, as the server's export does.
+    expect(summary.getRow(5).values).toEqual([undefined, 1, 'PRJ-1', '[no project] Pipe', 'Rack A', 10, 12, 24, 1.2, 2, -2, 'OK']);
     expect(summary.getCell('G6').value).toBeNull();
     expect(summary.getCell('H6').value).toBeNull();
     expect(summary.getCell('J6').value).toBeNull();

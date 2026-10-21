@@ -9,7 +9,8 @@
 // the in-memory mock state.
 
 import { classifyItem, needsAttention, type StatusBands } from '../lib/stockStatus';
-import type { MockMaterial, MockLocation, MockSupplier, MockPurchaseOrder, MockInventoryTransaction } from './types';
+import type { MockMaterial, MockLocation, MockSupplier, MockPurchaseOrder, MockInventoryTransaction, MockProject } from './types';
+import type { ReportProjectRow } from '../api/reportTypes';
 import type {
   ReportQuery, ReportInventoryLine, ReportCategoryRow, ReportLocationRow, ReportSupplierRow, ReportStatusRow,
   ReportMovementRow, ReportMovementSummary, ReportKpis, ReportResult,
@@ -97,6 +98,8 @@ interface ReportInput {
   purchaseOrders: MockPurchaseOrder[];
   transactions: MockInventoryTransaction[];
   bands?: StatusBands;
+  /** For the projects' names and statuses in the by-project breakdown. */
+  projects?: MockProject[];
 }
 
 export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
@@ -167,6 +170,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
         inventoryValue: 0,
         status: classifyStatus(0, true),
         lastUpdated: lastUpdate.get(m.id) ?? null,
+        projectNumber: m.projectNumber ?? null,
       };
       if (q.stockStatus === 'ALL' || line.status === q.stockStatus) allLines.push(line);
       continue;
@@ -194,6 +198,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
         inventoryValue: value,
         status: classifyStatus(qty, itemNeedsReorder(m)),
         lastUpdated: lastUpdate.get(m.id) ?? null,
+        projectNumber: m.projectNumber ?? null,
       };
       if (q.stockStatus !== 'ALL' && line.status !== q.stockStatus) continue;
       allLines.push(line);
@@ -204,8 +209,10 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   const skuSet = new Set(allLines.map((l) => l.materialId));
   const totalQuantity = allLines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0);
   const inventoryValue = allLines.reduce((acc, l) => acc + (l.unitCost === null ? 0 : l.inventoryValue), 0);
-  const lowStockCount = allLines.filter((l) => l.status === 'LOW_STOCK').length;
-  const outOfStockCount = allLines.filter((l) => l.status === 'OUT_OF_STOCK').length;
+  // As the server: low and out of stock are re-ordering signals, for Stores lines only.
+  const storesLines = allLines.filter((l) => l.category !== 'PROJECT_MATERIAL');
+  const lowStockCount = storesLines.filter((l) => l.status === 'LOW_STOCK').length;
+  const outOfStockCount = storesLines.filter((l) => l.status === 'OUT_OF_STOCK').length;
   const categorySet = new Set(materials.map((m) => m.category));
   const locationSet = new Set(allLines.map((l) => l.locationId).filter(Boolean));
 
@@ -290,7 +297,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
 
   // By status
   const byStatus: ReportStatusRow[] = (['IN_STOCK', 'LOW_STOCK', 'OUT_OF_STOCK'] as const).map((status) => {
-    const filt = allLines.filter((l) => l.status === status);
+    const filt = storesLines.filter((l) => l.status === status);
     return {
       status,
       skuCount: new Set(filt.map((l) => l.materialId)).size,
@@ -364,8 +371,25 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   }
   const bySupplier = Array.from(bySupplierMap.values()).sort((a, b) => b.inventoryValue - a.inventoryValue);
 
-  // Exceptions
-  const exceptions = allLines
+  // Projects material per project.
+  const byProjectMap = new Map<string, ReportProjectRow>();
+  for (const m of materials) {
+    if (m.category !== 'PROJECT_MATERIAL') continue;
+    const key = m.projectNumber ?? '';
+    const p = input.projects?.find((x) => x.projectNumber === m.projectNumber);
+    const row = byProjectMap.get(key) ?? { projectNumber: m.projectNumber ?? null, name: p?.name ?? null, status: p?.status ?? null, skuCount: 0, quantity: 0, inventoryValue: 0, share: 0 };
+    const lines = allLines.filter((l) => l.materialId === m.id);
+    row.skuCount += 1;
+    row.quantity += lines.reduce((a, l) => a + Math.max(0, l.quantity), 0);
+    row.inventoryValue += lines.reduce((a, l) => a + (l.unitCost === null ? 0 : l.inventoryValue), 0);
+    byProjectMap.set(key, row);
+  }
+  const byProject = Array.from(byProjectMap.values())
+    .map((r) => ({ ...r, share: inventoryValue > 0 ? r.inventoryValue / inventoryValue : 0 }))
+    .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber)));
+
+  // Exceptions (Stores only)
+  const exceptions = storesLines
     .filter((l) => l.status === 'LOW_STOCK' || l.status === 'OUT_OF_STOCK')
     .sort((a, b) => {
       if (a.status === 'OUT_OF_STOCK' && b.status !== 'OUT_OF_STOCK') return -1;
@@ -401,6 +425,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
     kpis,
     byStatus,
     byCategory,
+    byProject,
     byLocation,
     bySupplier,
     exceptions,

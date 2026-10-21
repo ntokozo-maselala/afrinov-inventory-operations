@@ -118,6 +118,35 @@ export function MonthEnd() {
           </table>
         </section>
       )}
+      {r && (r.projects ?? []).length > 0 && (
+        <section aria-labelledby="month-end-projects" className="surface-card overflow-x-auto mt-4">
+          <h2 id="month-end-projects" className="text-h3 text-surface-900 px-4 pt-3">Project material by project</h2>
+          <p className="text-meta px-4">At the end of the period. Completed and cancelled projects keep their leftovers.</p>
+          <table className="table">
+            <thead>
+              <tr>
+                <th scope="col">Project</th>
+                <th scope="col" className="text-right">Items</th>
+                <th scope="col" className="text-right">In stock</th>
+                <th scope="col" className="text-right">Stock value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.projects!.map((p) => (
+                <tr key={p.projectNumber ?? 'none'}>
+                  <td className="font-medium">
+                    {p.projectNumber ? `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}` : 'No project yet'}
+                    {(p.status === 'COMPLETED' || p.status === 'CANCELLED') && <span className="text-meta"> ({p.status === 'COMPLETED' ? 'completed' : 'cancelled'})</span>}
+                  </td>
+                  <td className="text-right font-mono">{formatNumber(p.items)}</td>
+                  <td className="text-right font-mono">{formatNumber(p.itemsInStock)}</td>
+                  <td className="text-right font-mono">{formatCurrency(p.value, r.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
       {r && (
         <p className="text-xs text-surface-500 mt-2">
           The download has this overview, then for each category a Summary sheet and a Used sheet, with the workbook&rsquo;s column names; the PDF puts each category on its own page.

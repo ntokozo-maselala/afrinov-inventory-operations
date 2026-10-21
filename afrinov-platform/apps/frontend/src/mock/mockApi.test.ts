@@ -55,11 +55,13 @@ describe('mock API demo data flow', () => {
   });
 
   it('GET /reports/stock-value adds up on hand x unit price per category, matching the stock status', async () => {
-    const v = await api.get<{ categories: Array<{ category: string; items: number; value: number; share: number }>; total: { items: number; value: number }; status: Record<string, number> }>('/reports/stock-value');
+    const v = await api.get<{ categories: Array<{ category: string; items: number; value: number; share: number }>; total: { items: number; value: number }; sections: Record<'STORES' | 'PROJECTS', { items: number; value: number }>; status: Record<string, number> }>('/reports/stock-value');
+    // Stock status is for Stores; the stock value counts Projects material too, apart.
     const rows = await api.get<Array<StatusRow & { category: string; unitCost: string | null }>>('/reports/stock-status');
-    expect(v.total.items).toBe(rows.length);
+    expect(v.sections.STORES.items).toBe(rows.length);
+    expect(v.total.items).toBe(v.sections.STORES.items + v.sections.PROJECTS.items);
     const expected = rows.reduce((a, r) => a + (Number(r.onHand) > 0 && r.unitCost !== null ? Number(r.onHand) * Number(r.unitCost) : 0), 0);
-    expect(v.total.value).toBeCloseTo(expected, 2);
+    expect(v.sections.STORES.value).toBeCloseTo(expected, 2);
     expect(v.categories.reduce((a, c) => a + c.value, 0)).toBeCloseTo(v.total.value, 2);
     expect(v.status.URGENT).toBe(rows.filter((r) => r.status === 'URGENT').length);
     expect(v.status.outOfStock).toBe(rows.filter((r) => Number(r.onHand) <= 0).length);

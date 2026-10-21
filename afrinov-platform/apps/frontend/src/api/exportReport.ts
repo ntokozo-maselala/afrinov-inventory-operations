@@ -17,6 +17,19 @@ import { useToast } from '../components/Toast';
 import { categoryLabel } from '../lib/categories';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 
+/** "1369 · Plant upgrade (completed)", or "No project yet". */
+function projectLabel(p: { projectNumber: string | null; name: string | null; status: string | null }): string {
+  if (!p.projectNumber) return 'No project yet';
+  const closed = p.status === 'COMPLETED' ? ' (completed)' : p.status === 'CANCELLED' ? ' (cancelled)' : '';
+  return `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}${closed}`;
+}
+
+/** An item's category, with its project for Projects material. */
+function categoryCell(l: { category: string; projectNumber?: string | null }): string {
+  const label = categoryLabel(l.category);
+  return l.category === 'PROJECT_MATERIAL' ? `${label} · ${l.projectNumber ?? 'no project yet'}` : label;
+}
+
 export function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -192,11 +205,16 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
     summary.addRow([k, v]);
   }
   summary.addRow([]);
-  summary.addRow(['Status', 'SKUs', 'Quantity', 'Inventory value']).font = { bold: true };
+  summary.addRow(['Status (Stores)', 'SKUs', 'Quantity', 'Inventory value']).font = { bold: true };
   for (const s of report.byStatus) summary.addRow([stLabel(s.status), s.skuCount, s.quantity, fmtCurrency(s.inventoryValue, report.currency)]);
   summary.addRow([]);
   summary.addRow(['Category', 'SKUs', 'Quantity', 'Inventory value', 'Share']).font = { bold: true };
   for (const c of report.byCategory) summary.addRow([categoryLabel(c.category), c.skuCount, c.quantity, fmtCurrency(c.inventoryValue, report.currency), c.share]);
+  if ((report.byProject ?? []).length > 0) {
+    summary.addRow([]);
+    summary.addRow(['Project', 'SKUs', 'Quantity', 'Inventory value', 'Share']).font = { bold: true };
+    for (const p of report.byProject!) summary.addRow([projectLabel(p), p.skuCount, p.quantity, fmtCurrency(p.inventoryValue, report.currency), p.share]);
+  }
   summary.getColumn(5).numFmt = '0.0%';
   summary.views = [{ state: 'frozen', ySplit: 1 }];
 
@@ -217,7 +235,7 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
   inv.getRow(1).font = { bold: true };
   inv.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
   for (const l of report.inventory) {
-    inv.addRow([l.name, l.sku, categoryLabel(l.category), l.unitOfMeasure, l.quantity, l.requiredStock, l.unitCost ?? '', l.inventoryValue, stLabel(l.status), l.locationName, fmtDateTime(l.lastUpdated)]);
+    inv.addRow([l.name, l.sku, categoryCell(l), l.unitOfMeasure, l.quantity, l.requiredStock, l.unitCost ?? '', l.inventoryValue, stLabel(l.status), l.locationName, fmtDateTime(l.lastUpdated)]);
   }
   inv.getColumn(5).numFmt = '#,##0.0000';
   inv.getColumn(6).numFmt = '#,##0.0000';
@@ -304,12 +322,17 @@ function buildPdfInBrowser(report: ReportResult): ArrayBuffer {
   add(`SKUs: ${report.kpis.skuCount}    Total qty: ${fmtQty(report.kpis.totalQuantity)}    Inventory value: ${fmtCurrency(report.kpis.inventoryValue, report.currency)}`);
   add(`Reorder rows: ${report.kpis.lowStockCount}    None-here rows: ${report.kpis.outOfStockCount}    Categories: ${report.kpis.categoryCount}    Locations: ${report.kpis.locationCount}    Suppliers: ${report.kpis.supplierCount}    Movements: ${report.kpis.movementCount}`);
   add('');
-  add('Stock status breakdown');
+  add('Stock status breakdown (Stores)');
   for (const s of report.byStatus) add(`  ${stLabel(s.status).padEnd(14)} SKUs=${String(s.skuCount).padStart(4)}  Qty=${fmtQty(s.quantity).padStart(10)}  Value=${fmtCurrency(s.inventoryValue, report.currency)}`);
   add('');
   add('Inventory by category');
   for (const c of report.byCategory) add(`  ${categoryLabel(c.category).padEnd(28)} SKUs=${String(c.skuCount).padStart(3)}  Qty=${fmtQty(c.quantity).padStart(10)}  Value=${fmtCurrency(c.inventoryValue, report.currency).padStart(14)}  Share=${(c.share * 100).toFixed(1)}%`);
   add('');
+  if ((report.byProject ?? []).length > 0) {
+    add('Projects material by project');
+    for (const p of report.byProject!) add(`  ${projectLabel(p).padEnd(40)} SKUs=${String(p.skuCount).padStart(3)}  Qty=${fmtQty(p.quantity).padStart(10)}  Value=${fmtCurrency(p.inventoryValue, report.currency).padStart(14)}`);
+    add('');
+  }
   add(`Inventory requiring attention (${report.exceptions.length})`);
   for (const l of report.exceptions) {
     add(`  ${l.sku.padEnd(20)} ${l.name.slice(0, 30).padEnd(30)} ${l.locationName.slice(0, 16).padEnd(16)} on-hand=${fmtQty(l.quantity).padStart(8)} reorder=${fmtQty(l.requiredStock).padStart(8)} [${stLabel(l.status)}]`);

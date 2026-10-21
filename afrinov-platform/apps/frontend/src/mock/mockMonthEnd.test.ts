@@ -30,7 +30,7 @@ describe('computeMonthEnd (mock)', () => {
     const disc = r.categories[0]!.items.find((i) => i.sku === 'CON-0001')!;
     expect(disc).toEqual({
       sku: 'CON-0001', name: 'Disc', location: 'A-1 (15), B-2 (10)', requiredStock: 100, currentStock: 25, unitCost: 10,
-      value: 250, percentOfRequired: 0.25, reorderQuantity: 75, status: 'WARNING',
+      value: 250, percentOfRequired: 0.25, reorderQuantity: 75, status: 'WARNING', project: null,
     });
     expect(r.categories[0]!.used).toEqual([{ sku: 'CON-0001', name: 'Disc', location: 'A-1 (15), B-2 (10)', used: 25, value: 250 }]);
     expect(r.categories[0]!.items.map((i) => i.sku)).toEqual(['CON-0001']); // inactive with no stock is left out
