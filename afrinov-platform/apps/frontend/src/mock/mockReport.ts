@@ -215,7 +215,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   const storesLines = allLines.filter((l) => l.category !== 'PROJECT_MATERIAL');
   const lowStockCount = storesLines.filter((l) => l.status === 'LOW_STOCK').length;
   const outOfStockCount = storesLines.filter((l) => l.status === 'OUT_OF_STOCK').length;
-  const categorySet = new Set(materials.map((m) => m.category));
+  const categorySet = new Set(allLines.map((l) => l.category)); // categories in the report
   const locationSet = new Set(allLines.map((l) => l.locationId).filter(Boolean));
 
   // Suppliers: via PO history (mirrors backend logic)
@@ -312,6 +312,8 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   const byCategoryMap = new Map<string, ReportCategoryRow>();
   for (const m of materials) {
     const lines = allLines.filter((l) => l.materialId === m.id);
+    // As the server: only items in the report, so the breakdowns follow its filters.
+    if (lines.length === 0) continue;
     const row = byCategoryMap.get(m.category) ?? { category: m.category, skuCount: 0, quantity: 0, inventoryValue: 0, share: 0 };
     row.skuCount++;
     row.quantity += lines.reduce((a, l) => a + Math.max(0, l.quantity), 0);
@@ -377,6 +379,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   const byProjectMap = new Map<string, ReportProjectRow>();
   for (const m of materials) {
     if (m.category !== 'PROJECT_MATERIAL') continue;
+    if (!allLines.some((l) => l.materialId === m.id)) continue; // not in the report
     const key = m.projectNumber ?? '';
     const p = input.projects?.find((x) => x.projectNumber === m.projectNumber);
     const row = byProjectMap.get(key) ?? { projectNumber: m.projectNumber ?? null, name: p?.name ?? null, status: p?.status ?? null, skuCount: 0, quantity: 0, inventoryValue: 0, share: 0 };
