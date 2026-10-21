@@ -425,6 +425,17 @@ describe('PurchaseOrderService and project material with no project (materials s
     db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: '1369' });
     expect(await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
   });
+
+  it('refuses to submit a draft holding such an item, raised before the rule', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-old', { id: 'mat-old', sku: 'OLD-PLATE', name: 'Plate', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1369' });
+    const draft = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1');
+    // As a draft from before Phase 3 would be: its item has no project.
+    db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: null });
+    await expect(PurchaseOrderService.submit(draft.id, 'user-1'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE has no project yet/) });
+    expect(db.pos.get(draft.id)!.status).toBe('DRAFT');
+  });
 });
 
 describe('PurchaseOrderService prices and VAT (procurement roadmap Phase 2)', () => {

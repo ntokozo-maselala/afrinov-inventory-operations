@@ -55,6 +55,31 @@ describe('Stock: Stores and Projects views', () => {
     expect(within(within(table).getByText('OLD-PLATE').closest('tr')!).getByText('No project yet')).toBeInTheDocument();
   });
 
+  it('leaves no Stores-only filter on, unseen, after switching to Projects', async () => {
+    stockPage();
+    await screen.findByText('DISC');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'out' } });
+    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
+    expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
+    fireEvent.click(screen.getByRole('tab', { name: /Stores/ }));
+    expect(screen.getByLabelText('Status')).toHaveValue('');
+  });
+
+  it('ignores a stock-status filter in a Projects link', async () => {
+    stockPage('/stock?section=PROJECTS&status=out');
+    await screen.findByText('1369-PIPE');
+    expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
+  });
+
+  it('keeps a linked project with no stock shown in the Project field, so it can be cleared', async () => {
+    stockPage('/stock?section=PROJECTS&project=1500');
+    await screen.findByText('No stock matches your filters');
+    expect(screen.getByLabelText('Project')).toHaveValue('1500');
+    fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
+    expect(await screen.findByText('1369-PIPE')).toBeInTheDocument();
+    expect(screen.getByLabelText('Project')).toHaveValue('');
+  });
+
   it('opens on one project from the link', async () => {
     stockPage('/stock?section=PROJECTS&project=1369');
     await screen.findByText('1369-PIPE');
@@ -70,6 +95,7 @@ describe('Month-end report: project material by project', () => {
       bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, categories: [],
       projects: [
         { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 1, itemsInStock: 1, value: 300 },
+        { projectNumber: '1402', name: 'Silo', status: 'ON_HOLD', items: 1, itemsInStock: 1, value: 50 },
         { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0 },
       ],
       total: { items: 0, itemsInStock: 0, value: 0, urgent: 0, warning: 0, usedValue: 0 },
@@ -78,6 +104,8 @@ describe('Month-end report: project material by project', () => {
     const section = (await screen.findByRole('heading', { name: 'Project material by project' })).closest('section')!;
     expect(within(section).getByText('1369 · Plant upgrade')).toBeInTheDocument();
     expect(within(section).getByText('(completed)')).toBeInTheDocument();
+    // Every project shows its status, not only closed ones.
+    expect(within(section).getByText('(on hold)')).toBeInTheDocument();
     expect(within(section).getByText('No project yet')).toBeInTheDocument();
   });
 });
@@ -93,5 +121,9 @@ describe('mock API: re-ordering is for Stores', () => {
     expect(v.sections.PROJECTS.items).toBeGreaterThan(0);
     expect(v.total.items).toBe(v.sections.STORES.items + v.sections.PROJECTS.items);
     expect(v.projects.reduce((a, p) => a + p.items, 0)).toBe(v.sections.PROJECTS.items);
+  });
+
+  it('applies a category and the section together in stock status', async () => {
+    expect(await api.get('/reports/stock-status?category=PROJECT_MATERIAL')).toEqual([]);
   });
 });

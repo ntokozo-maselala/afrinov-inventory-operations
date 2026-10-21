@@ -116,6 +116,26 @@ describe('Dashboard analytics', () => {
   });
 });
 
+describe('Dashboard: Stores counts against the Stores total', () => {
+  it('shows items in stock and the health bar out of Stores items, as the status counts are', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-value') {
+        return {
+          ...VALUE,
+          total: { ...VALUE.total, items: 50, itemsInStock: 40 },
+          sections: { STORES: { items: 20, itemsInStock: 15, value: 0, unpriced: 0 }, PROJECTS: { items: 30, itemsInStock: 25, value: 0, unpriced: 0 } },
+          projects: [],
+        };
+      }
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText('15 of 20')).toBeInTheDocument();
+    expect(screen.getByText('active Stores items')).toBeInTheDocument();
+  });
+});
+
 describe('Dashboard: pending approvals card', () => {
   const order = (id: string, number: string, net: string) => ({
     id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' },
