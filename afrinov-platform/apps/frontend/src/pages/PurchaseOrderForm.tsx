@@ -57,6 +57,17 @@ function shownLineDate(own: string, expected: string): string { return own || ex
 /** What to keep for a line when its date is changed: nothing if it matches the order's. */
 function ownLineDate(picked: string, expected: string): string { return picked === expected ? '' : picked; }
 
+// The line columns, in the order of the purchase order template and the
+// Manhours and Material workbook: item, units, quantity, unit price, subtotal,
+// then the delivery date. Units comes from the item; the subtotal is unit
+// price x quantity, before VAT.
+const NEW_LINE_GRID = 'grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_4.5rem_6rem_7.5rem_8.5rem_9.5rem_2.5rem] gap-2';
+const EDIT_LINE_GRID = 'grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_4.5rem_5rem_7.5rem_8.5rem_9.5rem] gap-2';
+/** A read-only cell beside the inputs: the line's units, quantity or subtotal. */
+function LineValue({ label, children, align = 'left' }: { label: string; children: React.ReactNode; align?: 'left' | 'right' }) {
+  return <output aria-label={label} className={`block py-2 text-sm text-surface-700 truncate ${align === 'right' ? 'text-right font-mono' : ''}`}>{children}</output>;
+}
+
 function checkVat(vatRate: string): string | null {
   const rate = Number(vatRate);
   return vatRate.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 100 ? 'VAT rate must be between 0 and 100.' : null;
@@ -99,6 +110,8 @@ function NewPurchaseOrderForm() {
   const currency = supplier?.currency ?? 'ZAR';
   const vatRate = vatOverride ?? String(currency === 'ZAR' ? settingRate : 0);
   const preview = priceLines(lines.filter((l) => l.materialId && Number(l.orderedQty) > 0), Number(vatRate) || 0);
+  // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
+  const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: Number(l.orderedQty) > 0 ? l.orderedQty : 0 })), Number(vatRate) || 0).lines;
 
   // The delivery block starts from Settings, once they arrive, keeping anything already typed.
   const [deliverySeeded, setDeliverySeeded] = useState(false);
@@ -245,25 +258,33 @@ function NewPurchaseOrderForm() {
           {filledFromLink && (
             <p className="text-meta mb-2">Filled in from what needs ordering: quantities bring each item up to its Required Stock, and prices start from unit cost. Change them to what you are ordering.</p>
           )}
-          <div className="hidden md:grid grid-cols-12 gap-2 text-meta mb-1">
-            <span className="col-span-5">Material</span><span className="col-span-2">Quantity</span><span className="col-span-2">Unit price</span><span className="col-span-2">Delivery date</span>
+          <div className={`hidden md:grid ${NEW_LINE_GRID} text-meta mb-1`}>
+            <span>Material</span><span>Units</span><span>Quantity</span><span className="text-right">Unit price</span><span className="text-right">Subtotal</span><span>Delivery date</span><span />
           </div>
           <div className="space-y-2">
             {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-start">
-                <div className="col-span-12 md:col-span-5">
+              <div key={i} className={`${NEW_LINE_GRID} items-start`}>
+                <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(i, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
                     {materials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
-                <div className="col-span-4 md:col-span-2">
+                <div className="col-span-3 md:col-span-1">
+                  <LineValue label={`Line ${i + 1} units`}>{materials.find((m) => m.id === l.materialId)?.unitOfMeasure ?? '—'}</LineValue>
+                </div>
+                <div className="col-span-3 md:col-span-1">
                   <Input type="number" min="0.0001" step="0.0001" placeholder="Qty" value={l.orderedQty} onChange={(e) => updateLine(i, { orderedQty: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
                 </div>
-                <div className="col-span-4 md:col-span-2">
+                <div className="col-span-3 md:col-span-1">
                   <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Unit price" value={l.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} aria-label={`Line ${i + 1} unit price`} className="text-right" />
                 </div>
-                <div className="col-span-4 md:col-span-2">
+                <div className="col-span-3 md:col-span-1">
+                  <LineValue label={`Line ${i + 1} subtotal`} align="right">
+                    {Number(l.orderedQty) > 0 && rowMoney[i]?.subtotal ? formatMoney(rowMoney[i]!.subtotal, currency) : '—'}
+                  </LineValue>
+                </div>
+                <div className="col-span-10 md:col-span-1">
                   <Input
                     type="date" value={shownLineDate(l.deliveryDate, expected)}
                     onChange={(e) => updateLine(i, { deliveryDate: ownLineDate(e.target.value, expected) })}
@@ -272,7 +293,7 @@ function NewPurchaseOrderForm() {
                     className={l.deliveryDate ? undefined : 'text-surface-500'}
                   />
                 </div>
-                <div className="col-span-12 md:col-span-1 flex md:justify-center">
+                <div className="col-span-2 md:col-span-1 flex md:justify-center">
                   <Button size="sm" variant="ghost" type="button" onClick={() => removeLine(i)} aria-label={`Remove line ${i + 1}`} leadingIcon={<Icon.Trash size={14} />}><span className="md:hidden">Remove</span></Button>
                 </div>
               </div>
@@ -361,6 +382,8 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   );
   const [details, setDetails] = useState<OrderDetailsDraft>(() => draftFromOrder(po));
   const [busy, setBusy] = useState(false);
+  // Each line's subtotal at the prices being typed, for its Subtotal column.
+  const editMoney = priceLines(po.lines.map((l) => ({ orderedQty: l.orderedQty, unitPrice: prices[l.id]?.trim() ? prices[l.id] : null })), Number(vatRate) || 0).lines;
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
@@ -408,19 +431,25 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
       <form onSubmit={submit} className="surface-card p-5 space-y-6 max-w-5xl" noValidate>
         <fieldset className="space-y-2">
           <legend className="text-eyebrow mb-1">Lines</legend>
-          <div className="hidden sm:grid grid-cols-12 gap-2 text-meta"><span className="col-span-6" /><span className="col-span-3">Unit price</span><span className="col-span-3">Delivery date</span></div>
-          {po.lines.map((l) => (
-            <div key={l.id} className="grid grid-cols-12 gap-2 items-center">
-              <div className="col-span-12 sm:col-span-6 text-sm min-w-0">
+          <div className={`hidden md:grid ${EDIT_LINE_GRID} text-meta`}>
+            <span>Material</span><span>Units</span><span className="text-right">Quantity</span><span className="text-right">Unit price</span><span className="text-right">Subtotal</span><span>Delivery date</span>
+          </div>
+          {po.lines.map((l, i) => (
+            <div key={l.id} className={`${EDIT_LINE_GRID} items-center`}>
+              <div className="col-span-12 md:col-span-1 text-sm min-w-0">
                 <span className="text-mono text-xs">{l.material.sku}</span> {l.material.name}
-                <span className="text-meta"> · {formatNumber(Number(l.orderedQty))} {l.material.unitOfMeasure}</span>
               </div>
+              <div className="col-span-3 md:col-span-1"><LineValue label={`${l.material.sku} units`}>{l.material.unitOfMeasure}</LineValue></div>
+              <div className="col-span-3 md:col-span-1"><LineValue label={`${l.material.sku} quantity`} align="right">{formatNumber(Number(l.orderedQty))}</LineValue></div>
               <Input id={`po-edit-price-${l.id}`} aria-label={`${l.material.sku} unit price`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
-                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-6 sm:col-span-3" />
+                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-3 md:col-span-1" />
+              <div className="col-span-3 md:col-span-1">
+                <LineValue label={`${l.material.sku} subtotal`} align="right">{editMoney[i]?.subtotal ? formatMoney(editMoney[i]!.subtotal, po.currency ?? 'ZAR') : '—'}</LineValue>
+              </div>
               <Input id={`po-edit-date-${l.id}`} aria-label={`${l.material.sku} delivery date`} type="date" value={shownLineDate(dates[l.id] ?? '', expectedDeliveryDate)}
                 onChange={(e) => setDates((d) => ({ ...d, [l.id]: ownLineDate(e.target.value, expectedDeliveryDate) }))}
                 title={dates[l.id] ? 'This line’s own delivery date' : 'The expected delivery, until changed for this line'}
-                className={`col-span-6 sm:col-span-3 ${dates[l.id] ? '' : 'text-surface-500'}`} />
+                className={`col-span-12 md:col-span-1 ${dates[l.id] ? '' : 'text-surface-500'}`} />
             </div>
           ))}
         </fieldset>

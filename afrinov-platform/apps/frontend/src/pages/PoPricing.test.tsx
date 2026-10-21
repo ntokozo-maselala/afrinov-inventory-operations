@@ -124,6 +124,30 @@ describe('New purchase order', () => {
   });
 });
 
+describe('line Units and Subtotal, as on the template', () => {
+  it('shows each line\u2019s units from its item, and its subtotal before VAT', async () => {
+    appAt('/purchase-orders/new');
+    await screen.findByRole('heading', { name: 'New purchase order' });
+    fireEvent.change(await screen.findByLabelText(/^Supplier/), { target: { value: 's-za' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    expect(screen.getByLabelText('Line 1 units')).toHaveTextContent('—');
+    expect(screen.getByLabelText('Line 1 subtotal')).toHaveTextContent('—');
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
+    expect(screen.getByLabelText('Line 1 units')).toHaveTextContent('each');
+    fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '3' } });
+    expect(screen.getByLabelText('Line 1 subtotal')).toHaveTextContent(money('37.50'));
+  });
+
+  it('on Edit, shows units, quantity and the subtotal at the price being typed', async () => {
+    appAt('/purchase-orders/po-1/edit');
+    expect(await screen.findByLabelText('BOLT-M16 units')).toHaveTextContent('each');
+    expect(screen.getByLabelText('BOLT-M16 quantity')).toHaveTextContent('10');
+    expect(screen.getByLabelText('BOLT-M16 subtotal')).toHaveTextContent('—');
+    fireEvent.change(screen.getByLabelText('BOLT-M16 unit price'), { target: { value: '4.2' } });
+    expect(screen.getByLabelText('BOLT-M16 subtotal')).toHaveTextContent(money('42.00'));
+  });
+});
+
 describe('Purchase order detail', () => {
   it('shows each line price, subtotal, VAT and net, and the order total', async () => {
     detailPage();
