@@ -94,6 +94,14 @@ describe('Stock: Stores and Projects views', () => {
     expect(where()).toBe('?section=PROJECTS');
   });
 
+  it('keeps the filters when the tab already open is clicked', async () => {
+    stockPage('/stock?section=PROJECTS&project=1369');
+    await screen.findByText('1369-PIPE');
+    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
+    expect(skus()).toEqual(['1369-PIPE']);
+    expect(screen.getByLabelText('Project')).toHaveValue('1369');
+  });
+
   it('opens on one project from the link', async () => {
     stockPage('/stock?section=PROJECTS&project=1369');
     await screen.findByText('1369-PIPE');

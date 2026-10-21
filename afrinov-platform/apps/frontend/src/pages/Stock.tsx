@@ -56,6 +56,7 @@ export function Stock() {
   }, { replace: true });
   // Category and status are Stores filters: switching tabs clears them, so none stays on unseen.
   const setSection = (value: MaterialSection) => {
+    if (value === section) return; // the tab already open: its filters stay
     setCategory('');
     setStatus('');
     writeParams({ section: value === 'PROJECTS' ? value : '', project: '', category: '', status: '' });

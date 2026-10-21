@@ -82,6 +82,13 @@ describe('Materials: Stores and Projects tabs', () => {
     expect(skus()).toEqual(['OLD-PLATE']);
   });
 
+  it('keeps the project filter when the Projects tab, already open, is clicked', async () => {
+    list('/materials?section=PROJECTS&project=1402');
+    await screen.findByText('1402-BOLT');
+    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
+    expect(skus()).toEqual(['1402-BOLT']);
+  });
+
   it('adds an item from the Projects tab as Projects material on that project', async () => {
     list('/materials?section=PROJECTS&project=1369');
     await screen.findByText('1369-PIPE');

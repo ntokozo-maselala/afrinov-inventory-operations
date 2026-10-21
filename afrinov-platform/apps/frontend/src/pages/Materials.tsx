@@ -71,7 +71,8 @@ export function Materials() {
    * Replace the section in the URL, clear the project filter, and drop Stores-only
    * views when switching to Projects. Stores is represented by an absent section parameter.
    */
-  const setSection = (value: MaterialSection) => setParams((p) => {
+  // Clicking the tab already open keeps its filters; only a real switch clears them.
+  const setSection = (value: MaterialSection) => value !== section && setParams((p) => {
     const next = new URLSearchParams(p);
     if (value === 'PROJECTS') next.set('section', value); else next.delete('section');
     next.delete('project');
