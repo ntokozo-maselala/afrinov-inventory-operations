@@ -197,7 +197,8 @@ a.dashboard-kpi-card:hover {
 
 .dashboard-kpi-success { color: rgb(var(--color-success-500) / 1); }
 .dashboard-kpi-brand { color: rgb(var(--color-brand-500) / 1); }
-.dashboard-kpi-warning { color: rgb(var(--color-warning-500) / 1); }
+.dashboard-kpi-warning { color: rgb(var(--color-warning-600) / 1); }
+.dark .dashboard-kpi-warning { color: rgb(var(--color-warning-500) / 1); }
 .dashboard-kpi-danger { color: rgb(var(--color-danger-500) / 1); }
 .dashboard-kpi-neutral { color: rgb(var(--color-surface-700) / 1); }
 
@@ -320,7 +321,8 @@ a.dashboard-kpi-card:hover {
 .dashboard-chart-column { filter: drop-shadow(0 3px 5px rgb(var(--color-surface-900) / 0.12)); transition: opacity 150ms ease; }
 .dashboard-chart-column:hover { opacity: 0.78; }
 .dashboard-chart-caption { display: grid; gap: 0.2rem; margin: 0.2rem 0 0; color: rgb(var(--color-surface-500) / 1); font-size: 0.625rem; text-align: center; }
-.dashboard-chart-unpriced { color: rgb(var(--color-warning-500) / 1); }
+.dashboard-chart-unpriced { color: rgb(var(--color-warning-600) / 1); }
+.dark .dashboard-chart-unpriced { color: rgb(var(--color-warning-500) / 1); }
 
 .dashboard-panel-footnote {
   margin: 1rem 0 0;
