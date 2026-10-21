@@ -18,6 +18,8 @@ export function PageContainer({ children, className = '', maxWidth = 'lg' }: Pag
 
   return (
     <main
+      id="main-content"
+      tabIndex={-1}
       className={`flex-1 min-w-0 py-6 px-4 sm:px-6 lg:px-8 ${maxWidthClasses[maxWidth]} w-full mx-auto ${className}`}
     >
       {children}
