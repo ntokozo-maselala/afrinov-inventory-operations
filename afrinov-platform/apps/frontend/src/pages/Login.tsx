@@ -163,7 +163,7 @@ export function Login() {
           <div className="w-full max-w-md">
             {/* Mobile / tablet brand block */}
             <div className="flex items-center gap-3 mb-8 lg:hidden">
-              <span className="inline-flex items-center justify-center h-10 w-10 rounded-md bg-brand-50">
+              <span className="inline-flex items-center justify-center h-10 w-10 rounded-md bg-brand-50 dark:bg-brand-900/50">
                 <Logo size={24} decorative />
               </span>
               <div className="leading-tight">
@@ -173,7 +173,7 @@ export function Login() {
             </div>
 
             <div className="mb-6">
-              <p className="text-eyebrow text-brand-600 mb-2 hidden lg:block">{SIGN_IN_TAGLINE}</p>
+              <p className="text-eyebrow text-brand-600 dark:text-brand-300 mb-2 hidden lg:block">{SIGN_IN_TAGLINE}</p>
               <h2 className="text-h1 text-surface-900">{SIGN_IN_TITLE}</h2>
               <p className="text-sm text-surface-500 mt-1">{SIGN_IN_SUBTITLE}</p>
             </div>
@@ -221,7 +221,7 @@ export function Login() {
                     onClick={() => setShowPassword((s) => !s)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                     aria-pressed={showPassword}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-brand-600 hover:text-brand-700 px-2 py-1 rounded"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200 px-2 py-1 rounded"
                     tabIndex={0}
                   >
                     {showPassword ? 'Hide' : 'Show'}

@@ -4,6 +4,7 @@
 // update the local draft.
 import { useState, type ReactNode } from 'react';
 import { useSettings, type SettingValue } from '../hooks/useSettings';
+import { setAppearance, useAppearance, type AppTheme } from '../hooks/useAppearance';
 import { useApi } from '../hooks/useApi';
 import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField } from './Settings';
 import { useToast } from '../components/Toast';
@@ -245,24 +246,26 @@ export function SettingsNotifications() {
 // ── Appearance ────────────────────────────────────────────────────────
 export function SettingsAppearance() {
   const { draft, setDraft, save, saving } = useSettings();
+  const appearance = useAppearance();
   const toast = useToast();
   const items = useCategorySettings('appearance');
-  const theme = useSetting('appearance.theme');
+  const densityItems = items.filter((item) => item.key === 'appearance.density');
+  const themeSetting = useSetting('appearance.theme');
   const density = useSetting('appearance.density');
   if (items.length === 0) return <PanelSkeleton />;
   return (
-    <SectionPanel title="Appearance" description="These settings apply to the current user on this device. Save to apply.">
+    <SectionPanel title="Appearance" description="Theme changes apply immediately and are stored in this browser. Save table density changes below.">
       <EnumField
-        def={theme}
-        value={(draft['appearance.theme'] as string) ?? 'system'}
-        onChange={(v) => setDraft('appearance.theme', v)}
+        def={{ ...themeSetting, description: 'Light is the default. System follows this device’s appearance setting.' }}
+        value={appearance.theme}
+        onChange={(v) => setAppearance({ theme: v as AppTheme })}
       />
       <EnumField
         def={density}
         value={(draft['appearance.density'] as string) ?? 'comfortable'}
         onChange={(v) => setDraft('appearance.density', v)}
       />
-      <SaveBar items={items} onSave={async () => {
+      <SaveBar items={densityItems} onSave={async () => {
         try {
           const r = await save();
           toast.success('Appearance updated', r.updated > 0 ? 'Changes applied immediately.' : 'No changes to save.');
@@ -404,7 +407,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       <Field label="Roles" htmlFor="usr-roles" required help="Users need at least one role. ADMIN is the only role with full settings access." error={fieldErrors.roles}>
         <div id="usr-roles" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {ALL_ROLES.map((r) => (
-            <label key={r} className={`flex items-center gap-2 p-2 rounded border ${roles.includes(r) ? 'border-brand-300 bg-brand-50/50 dark:bg-brand-900/30' : 'border-surface-200 bg-surface-0'} cursor-pointer hover:bg-surface-50`}>
+            <label key={r} className={`flex items-center gap-2 p-2 rounded border ${roles.includes(r) ? 'border-brand-300 bg-brand-50/50 dark:border-brand-300/50 dark:bg-brand-900/30' : 'border-surface-200 bg-surface-0'} cursor-pointer hover:bg-surface-50`}>
               <input type="checkbox" className="h-4 w-4 rounded border-surface-300 text-brand-500 focus:ring-brand-100" checked={roles.includes(r)} onChange={() => toggleRole(r)} />
               <span className="text-sm text-surface-900">{ROLE_LABEL[r]}</span>
               <span className="text-xs text-surface-500 font-mono">{r}</span>

@@ -198,7 +198,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'notifications.enablePurchaseOrderNotifications', type: 'boolean', category: 'notifications', description: 'Alert when purchase orders need approval or reach a new state.', default: true },
 
   // ── Appearance ────────────────────────────────────────────────────────
-  { key: 'appearance.theme', type: 'enum', category: 'appearance', description: 'Default visual theme. Users may override this in their browser.', default: 'system', enumOptions: THEMES, validate: ENUM(THEMES) },
+  { key: 'appearance.theme', type: 'enum', category: 'appearance', description: 'Default visual theme when no browser preference is saved. Users may choose Light, Dark, or System in their browser.', default: 'light', enumOptions: THEMES, validate: ENUM(THEMES) },
   { key: 'appearance.density', type: 'enum', category: 'appearance', description: 'Default table density.', default: 'comfortable', enumOptions: DENSITIES, validate: ENUM(DENSITIES) },
 
   // ── Security ──────────────────────────────────────────────────────────
@@ -280,6 +280,9 @@ export const SettingsService = {
   async ensureSeeded(): Promise<void> {
     await prisma.setting.deleteMany({ where: { key: { notIn: SETTING_CATALOG.map((s) => s.key) } } });
     for (const def of SETTING_CATALOG) {
+      const existing = def.key === 'appearance.theme'
+        ? await prisma.setting.findUnique({ where: { key: def.key } })
+        : null;
       await prisma.setting.upsert({
         where: { key: def.key },
         update: {},
@@ -296,6 +299,12 @@ export const SettingsService = {
           enumOptions: (def.enumOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         },
       });
+      // Previous releases seeded `system` without recording who selected it.
+      // Move only that untouched default to light; keep any saved choice,
+      // including Dark or System, exactly as the user selected it.
+      if (def.key === 'appearance.theme' && existing?.value === 'system' && existing.updatedById === null) {
+        await prisma.setting.update({ where: { key: def.key }, data: { value: 'light' } });
+      }
     }
   },
 

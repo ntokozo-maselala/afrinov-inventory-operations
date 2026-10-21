@@ -9,7 +9,15 @@ vi.mock('./components/AppShell', () => ({
 vi.mock('./components/Toast', () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock('./components/GlobalPreferencesApplier', () => ({ GlobalPreferencesApplier: () => null }));
+vi.mock('./components/GlobalPreferencesApplier', async () => {
+  const React = await import('react');
+  return {
+    GlobalPreferencesApplier: ({ onReady }: { onReady?: () => void }) => {
+      React.useEffect(() => { onReady?.(); }, [onReady]);
+      return null;
+    },
+  };
+});
 vi.mock('./config/features', () => ({ PROCUREMENT_ENABLED: true }));
 vi.mock('./pages/PurchaseOrders', () => ({ PurchaseOrders: () => <h1>Purchase orders list</h1> }));
 

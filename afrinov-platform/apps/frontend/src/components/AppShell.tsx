@@ -7,7 +7,6 @@ import { PageContainer } from './PageContainer';
 import { DevModeBanner } from './DevModeBanner';
 import { AppShellProvider, useAppShell } from '../hooks/useAppShell';
 import { ToastProvider } from './Toast';
-import { GlobalPreferencesApplier } from './GlobalPreferencesApplier';
 import { useNavGroups } from '../hooks/useNavGroups';
 import { TooltipProvider } from './ui/tooltip';
 import type { ReactNode } from 'react';
@@ -17,7 +16,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <TooltipProvider>
       <ToastProvider>
-        <GlobalPreferencesApplier />
         <AppShellProvider>
           <AppShellInner>{children}</AppShellInner>
         </AppShellProvider>

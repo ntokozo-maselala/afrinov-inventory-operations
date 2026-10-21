@@ -18,7 +18,7 @@ const toneAccent: Record<NonNullable<StatProps['tone']>, string> = {
   success: 'bg-success-50 text-success-700',
   warning: 'bg-warning-50 text-warning-700',
   danger:  'bg-danger-50  text-danger-700',
-  brand:   'bg-brand-50   text-brand-700',
+  brand:   'bg-brand-50 text-brand-700 dark:bg-brand-900/50 dark:text-brand-100',
 };
 
 export function Stat({ label, value, helper, tone = 'neutral', icon, onClick, href, trend, className = '' }: StatProps) {

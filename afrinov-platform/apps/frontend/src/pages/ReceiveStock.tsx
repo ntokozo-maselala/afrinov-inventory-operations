@@ -200,7 +200,7 @@ export function ReceiveStock() {
             </Alert>
           )}
           {askAboutOrders && (
-            <div className="rounded border border-brand-200 bg-brand-50 p-3 space-y-2" role="group" aria-labelledby="rcv-orders-q">
+            <div className="rounded border border-brand-200 bg-brand-50 p-3 space-y-2 dark:border-brand-300/50 dark:bg-brand-900/30" role="group" aria-labelledby="rcv-orders-q">
               <p id="rcv-orders-q" className="text-sm font-semibold text-surface-900">Is this delivery against a purchase order?</p>
               <p className="text-meta">
                 {activeSuppliers.find((x) => x.id === supplierId)?.name} has {openOrders.length === 1 ? 'an open order' : `${openOrders.length} open orders`}.

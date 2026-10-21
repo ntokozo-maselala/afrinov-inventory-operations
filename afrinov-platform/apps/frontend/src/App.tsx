@@ -1,10 +1,11 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from './auth';
 import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
 import { GlobalPreferencesApplier } from './components/GlobalPreferencesApplier';
 import { PROCUREMENT_ENABLED } from './config/features';
+import { applyTheme, getAppearance } from './hooks/useAppearance';
 
 function importPage(
   importFn: () => Promise<{ default: React.ComponentType<unknown> }>,
@@ -85,33 +86,34 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
 function Protected() {
   const { user, loading } = useAuth();
   const location = useLocation();
+  const [themeReady, setThemeReady] = useState(false);
   if (loading) return <AuthLoading />;
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
   return (
     <ToastProvider>
-      <GlobalPreferencesApplier />
-      <AppShell>
-        <Outlet />
-      </AppShell>
+      <GlobalPreferencesApplier onReady={() => setThemeReady(true)} />
+      {themeReady ? <AppShell><Outlet /></AppShell> : <AuthLoading />}
     </ToastProvider>
   );
 }
 
 export function App() {
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={
-          <PublicOnly>
-            <Suspense fallback={<PageSkeleton />}>
-              <Login />
-            </Suspense>
-          </PublicOnly>
-        }
-      />
+    <>
+      <SystemThemeSync />
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <PublicOnly>
+              <Suspense fallback={<PageSkeleton />}>
+                <Login />
+              </Suspense>
+            </PublicOnly>
+          }
+        />
 
       <Route element={<Protected />}>
         <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Dashboard /></Suspense>} />
@@ -169,6 +171,18 @@ export function App() {
         </Route>
         <Route path="*" element={<Suspense fallback={<PageSkeleton />}><NotFound /></Suspense>} />
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
+}
+
+function SystemThemeSync() {
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => applyTheme(getAppearance().theme);
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+  return null;
 }

@@ -65,10 +65,10 @@ function toolsCard(tools: ToolRow[]) {
 }
 
 const HEALTH_SEGMENTS = [
-  { key: 'URGENT', label: 'Urgent', color: 'bg-danger-500', text: 'text-danger-300' },
-  { key: 'WARNING', label: 'Warning', color: 'bg-warning-500', text: 'text-warning-300' },
-  { key: 'OK', label: 'In range', color: 'bg-success-500', text: 'text-success-300' },
-  { key: 'NOT_SET', label: 'No reorder level', color: 'bg-surface-400', text: 'text-surface-300' },
+  { key: 'URGENT', label: 'Urgent', color: 'bg-danger-500', text: 'text-danger-700' },
+  { key: 'WARNING', label: 'Warning', color: 'bg-warning-500', text: 'text-warning-700' },
+  { key: 'OK', label: 'In range', color: 'bg-success-500', text: 'text-success-700' },
+  { key: 'NOT_SET', label: 'No reorder level', color: 'bg-surface-400', text: 'text-surface-500' },
 ] as const;
 
 export function Dashboard() {
