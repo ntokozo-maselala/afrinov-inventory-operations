@@ -7,6 +7,19 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import type { ReportResult, ReportMovementRow } from './report.service.js';
 
+/** "1369 · Plant upgrade (completed)", or "No project yet". */
+function projectLabel(p: { projectNumber: string | null; name: string | null; status: string | null }): string {
+  if (!p.projectNumber) return 'No project yet';
+  const closed = p.status === 'COMPLETED' ? ' (completed)' : p.status === 'CANCELLED' ? ' (cancelled)' : '';
+  return `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}${closed}`;
+}
+
+/** An item's category, with its project for Projects material. */
+function categoryCell(l: { category: unknown; projectNumber?: string | null }): string {
+  const label = categoryLabel(String(l.category));
+  return l.category === 'PROJECT_MATERIAL' ? `${label} · ${l.projectNumber ?? 'no project yet'}` : label;
+}
+
 function fmtQty(n: number): string {
   return n.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
@@ -77,8 +90,8 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
   kpiRow('Movements (in period)', String(report.kpis.movementCount));
   summary.addRow([]);
 
-  // Status breakdown
-  summary.addRow(['Status', 'SKUs', 'Quantity', 'Inventory value']).font = { bold: true };
+  // Status breakdown (Stores: Projects material is never low or out of stock)
+  summary.addRow(['Status (Stores)', 'SKUs', 'Quantity', 'Inventory value']).font = { bold: true };
   for (const s of report.byStatus) {
     summary.addRow([
       STATUS_LABELS[s.status] ?? s.status,
@@ -104,6 +117,15 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
   summary.getColumn(4).numFmt = '#,##0.00';
   summary.getColumn(5).numFmt = '0.0%';
   summary.addRow([]);
+
+  // Projects material, per project
+  if (report.byProject.length > 0) {
+    summary.addRow(['Project', 'SKUs', 'Quantity', 'Inventory value', 'Share']).font = { bold: true };
+    for (const p of report.byProject) {
+      summary.addRow([projectLabel(p), p.skuCount, p.quantity, fmtCurrency(p.inventoryValue, report.currency), p.share]);
+    }
+    summary.addRow([]);
+  }
 
   // Movement summary
   summary.addRow(['Movement', 'Count', 'Quantity']).font = { bold: true };
@@ -141,7 +163,7 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
     inv.addRow([
       l.name,
       l.sku,
-      categoryLabel(String(l.category)),
+      categoryCell(l),
       l.unitOfMeasure,
       l.quantity,
       l.requiredStock,
@@ -246,6 +268,7 @@ export async function buildInventoryPdf(report: ReportResult): Promise<Buffer> {
       drawKpis(doc, report);
       drawStatus(doc, report);
       drawCategoryTable(doc, report);
+      drawProjectTable(doc, report);
       drawExceptionsTable(doc, report);
       drawInventoryTable(doc, report);
       drawMovementsTable(doc, report);
@@ -359,6 +382,24 @@ function drawCategoryTable(doc: PDFKit.PDFDocument, report: ReportResult): void 
       fmtQty(c.quantity),
       fmtCurrency(c.inventoryValue, report.currency),
       `${(c.share * 100).toFixed(1)}%`,
+    ]),
+    [180, 60, 80, 110, 60],
+  );
+  doc.moveDown(0.6);
+}
+
+function drawProjectTable(doc: PDFKit.PDFDocument, report: ReportResult): void {
+  if (report.byProject.length === 0) return;
+  ensureSpace(doc, 80);
+  sectionTitle(doc, 'Projects material by project');
+  drawTable(doc,
+    ['Project', 'SKUs', 'Quantity', 'Value', 'Share'],
+    report.byProject.map((p) => [
+      projectLabel(p),
+      String(p.skuCount),
+      fmtQty(p.quantity),
+      fmtCurrency(p.inventoryValue, report.currency),
+      `${(p.share * 100).toFixed(1)}%`,
     ]),
     [180, 60, 80, 110, 60],
   );

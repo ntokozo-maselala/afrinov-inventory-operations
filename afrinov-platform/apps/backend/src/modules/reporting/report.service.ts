@@ -13,6 +13,7 @@ import { prisma } from '../../shared/db.js';
 import { resolveDateWindow, type ReportQuery } from './report-query.schema.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
+import { sectionOf } from '../inventory/material-section.js';
 
 type Decimal = Prisma.Decimal;
 type MaterialCategory = PrismaMaterialCategory;
@@ -37,6 +38,20 @@ export interface ReportInventoryLine {
   inventoryValue: number;
   status: StockStatus;
   lastUpdated: string | null;
+  /** Projects material: its project, null until assigned; null for Stores. */
+  projectNumber: string | null;
+}
+
+/** Projects material per project (materials sections roadmap, Phase 4). */
+export interface ReportProjectRow {
+  /** Null for Projects material with no project yet. */
+  projectNumber: string | null;
+  name: string | null;
+  status: string | null;
+  skuCount: number;
+  quantity: number;
+  inventoryValue: number;
+  share: number;
 }
 
 export interface ReportCategoryRow {
@@ -121,8 +136,11 @@ export interface ReportKpis {
 
 export interface ReportResult {
   kpis: ReportKpis;
+  /** Stores only: Projects material is bought per job, so never low or out of stock. */
   byStatus: ReportStatusRow[];
   byCategory: ReportCategoryRow[];
+  /** Projects material per project, closed projects included. */
+  byProject: ReportProjectRow[];
   byLocation: ReportLocationRow[];
   bySupplier: ReportSupplierRow[];
   exceptions: ReportInventoryLine[]; // low + out of stock, sorted by severity
@@ -183,6 +201,8 @@ interface MaterialRow {
   requiredStock: Decimal;
   active: boolean;
   updatedAt: Date;
+  projectNumber: string | null;
+  project: { name: string | null; status: string } | null;
 }
 
 interface BalanceRow {
@@ -206,7 +226,7 @@ async function loadMaterials(q: ReportQuery): Promise<MaterialRow[]> {
       { name: { contains: q.search, mode: 'insensitive' } },
     ];
   }
-  return prisma.material.findMany({ where, orderBy: [{ name: 'asc' }] });
+  return prisma.material.findMany({ where, include: { project: { select: { name: true, status: true } } }, orderBy: [{ name: 'asc' }] });
 }
 
 async function loadBalances(q: ReportQuery): Promise<BalanceRow[]> {
@@ -273,6 +293,7 @@ function buildLine(
     quantity: qty,
     inventoryValue: value,
     status,
+    projectNumber: m.projectNumber ?? null,
     lastUpdated: lastUpdated ? lastUpdated.toISOString() : null,
   };
 }
@@ -365,8 +386,10 @@ export const ReportService = {
     const skuSet = new Set(allLines.map((l) => l.materialId));
     const totalQuantity = allLines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0);
     const inventoryValue = allLines.reduce((acc, l) => acc + lineValueOrZero(l), 0);
-    const lowStockCount = allLines.filter((l) => l.status === 'LOW_STOCK').length;
-    const outOfStockCount = allLines.filter((l) => l.status === 'OUT_OF_STOCK').length;
+    // Low and out of stock are re-ordering signals, so they count Stores lines only.
+    const storesLines = allLines.filter((l) => sectionOf(l.category) === 'STORES');
+    const lowStockCount = storesLines.filter((l) => l.status === 'LOW_STOCK').length;
+    const outOfStockCount = storesLines.filter((l) => l.status === 'OUT_OF_STOCK').length;
     const categorySet = new Set(materials.map((m) => m.category));
     const locationSet = new Set(allLines.map((l) => l.locationId).filter(Boolean));
 
@@ -486,7 +509,7 @@ export const ReportService = {
 
     // Status breakdown
     const byStatus: ReportStatusRow[] = (['IN_STOCK', 'LOW_STOCK', 'OUT_OF_STOCK'] as StockStatus[]).map((status) => {
-      const filtered = allLines.filter((l) => l.status === status);
+      const filtered = storesLines.filter((l) => l.status === status);
       return {
         status,
         skuCount: new Set(filtered.map((l) => l.materialId)).size,
@@ -595,8 +618,27 @@ export const ReportService = {
     }
     const bySupplier = Array.from(bySupplierMap.values()).sort((a, b) => b.inventoryValue - a.inventoryValue);
 
-    // Exceptions: low + out of stock, sorted by severity
-    const exceptions = allLines
+    // Projects material per project: what each job holds and what it is worth.
+    const byProjectMap = new Map<string, ReportProjectRow>();
+    for (const m of materials) {
+      if (sectionOf(m.category) !== 'PROJECTS') continue;
+      const key = m.projectNumber ?? '';
+      const row = byProjectMap.get(key) ?? {
+        projectNumber: m.projectNumber, name: m.project?.name ?? null, status: m.project?.status ?? null,
+        skuCount: 0, quantity: 0, inventoryValue: 0, share: 0,
+      };
+      const lines = linesByMaterial.get(m.id) ?? [];
+      row.skuCount += 1;
+      row.quantity += lines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0);
+      row.inventoryValue += lines.reduce((acc, l) => acc + lineValueOrZero(l), 0);
+      byProjectMap.set(key, row);
+    }
+    const byProject = Array.from(byProjectMap.values())
+      .map((r) => ({ ...r, share: inventoryValue > 0 ? r.inventoryValue / inventoryValue : 0 }))
+      .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber)));
+
+    // Exceptions: low + out of stock, sorted by severity (Stores only)
+    const exceptions = storesLines
       .filter((l) => l.status === 'LOW_STOCK' || l.status === 'OUT_OF_STOCK')
       .sort((a, b) => {
         if (a.status === 'OUT_OF_STOCK' && b.status !== 'OUT_OF_STOCK') return -1;
@@ -631,6 +673,7 @@ export const ReportService = {
       kpis,
       byStatus,
       byCategory,
+      byProject,
       byLocation,
       bySupplier,
       exceptions,

@@ -3,6 +3,7 @@ import { prisma } from '../../shared/db.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
+import { categoryWhere, sectionOf, type MaterialSection } from '../inventory/material-section.js';
 
 export interface StockStatusRow {
   materialId: string;
@@ -22,6 +23,21 @@ export interface StockStatusRow {
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
   /** Who it last came from: the most recent posted goods receipt with this item. */
   lastSupplier: { id: string; name: string; receivedAt: string } | null;
+  /** Projects material: the project it belongs to (null until assigned). */
+  projectNumber: string | null;
+  project: { name: string | null; status: string } | null;
+}
+
+/** Projects material per project, for the stock value (materials sections roadmap, Phase 4). */
+export interface ProjectStockValue {
+  /** Null for Projects material with no project yet. */
+  projectNumber: string | null;
+  name: string | null;
+  status: string | null;
+  items: number;
+  itemsInStock: number;
+  value: number;
+  unpriced: number;
 }
 
 export interface StockValueReport {
@@ -38,6 +54,11 @@ export interface StockValueReport {
     share: number;
   }>;
   total: { items: number; itemsInStock: number; value: number; unpriced: number };
+  /** The same, for each section. */
+  sections: Record<MaterialSection, { items: number; itemsInStock: number; value: number; unpriced: number }>;
+  /** Projects material per project, completed and cancelled projects included. */
+  projects: ProjectStockValue[];
+  /** Stores only: Projects material is bought per job, so never urgent, low or "out". */
   status: Record<StockStatus, number> & { outOfStock: number };
 }
 
@@ -95,6 +116,7 @@ export const ReportingService = {
               id: { in: materialIds },
               ...(filter.category ? { category: filter.category as Prisma.MaterialWhereInput['category'] } : {}),
             },
+            include: { project: { select: { name: true, status: true } } },
           })
         : Promise.resolve([]),
       locationIds.length ? prisma.location.findMany({ where: { id: { in: locationIds } } }) : Promise.resolve([]),
@@ -124,6 +146,7 @@ export const ReportingService = {
           category: m.category,
           // Projects material: the project it belongs to (null until assigned).
           projectNumber: m.projectNumber,
+          project: m.project ? { name: m.project.name, status: m.project.status } : null,
           unitOfMeasure: m.unitOfMeasure,
           requiredStock: requiredStock.toString(),
           locationId: b.locationId,
@@ -184,9 +207,16 @@ export const ReportingService = {
    * Required Stock, URGENT / WARNING / OK by the setting bands, or NOT_SET.
    * Most urgent first, then lowest percentage.
    */
-  async stockStatus(filter: { status?: StockStatus[]; category?: string } = {}): Promise<StockStatusRow[]> {
+  async stockStatus(filter: { status?: StockStatus[]; category?: string; section?: MaterialSection | 'ALL' } = {}): Promise<StockStatusRow[]> {
+    // Re-ordering is for Stores: Projects material is bought per job, so it is
+    // left out unless asked for (materials sections roadmap, Phase 4).
+    const section = filter.section ?? 'STORES';
+    const category = filter.category
+      ? filter.category as Prisma.MaterialWhereInput['category']
+      : section === 'ALL' ? undefined : categoryWhere(section);
     const materials = await prisma.material.findMany({
-      where: { active: true, ...(filter.category ? { category: filter.category as Prisma.MaterialWhereInput['category'] } : {}) },
+      where: { active: true, ...(category ? { category } : {}) },
+      include: { project: { select: { name: true, status: true } } },
       orderBy: { name: 'asc' },
     });
     const ids = materials.map((m) => m.id);
@@ -223,6 +253,8 @@ export const ReportingService = {
           .map((b) => ({ locationId: b.locationId, locationName: b.location.name, quantity: b.quantity.toString() }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
         lastSupplier: lastSupplier.get(m.id) ?? null,
+        projectNumber: m.projectNumber,
+        project: m.project ? { name: m.project.name, status: m.project.status } : null,
       };
     });
     return rows
@@ -238,22 +270,36 @@ export const ReportingService = {
    * item counts by stock status for the dashboard cards.
    */
   async stockValue(): Promise<StockValueReport> {
-    const [rows, currency] = await Promise.all([this.stockStatus(), SettingsService.getValue<string>('general.defaultCurrency')]);
-    const cats = new Map<string, { items: number; itemsInStock: number; value: number; unpriced: number }>();
+    const [rows, currency] = await Promise.all([this.stockStatus({ section: 'ALL' }), SettingsService.getValue<string>('general.defaultCurrency')]);
+    const blank = () => ({ items: 0, itemsInStock: 0, value: 0, unpriced: 0 });
+    const cats = new Map<string, ReturnType<typeof blank>>();
+    const sections = { STORES: blank(), PROJECTS: blank() };
+    const projects = new Map<string, ProjectStockValue>();
     const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
     for (const r of rows) {
       const onHand = Number(r.onHand);
-      const c = cats.get(r.category) ?? { items: 0, itemsInStock: 0, value: 0, unpriced: 0 };
-      c.items++;
-      if (onHand > 0) {
-        c.itemsInStock++;
-        if (r.unitCost === null) c.unpriced++;
-        else c.value += onHand * Number(r.unitCost);
-      } else {
-        status.outOfStock++;
+      const section = sectionOf(r.category);
+      if (!cats.has(r.category)) cats.set(r.category, blank());
+      // Each item counts in its category and its section and, for Projects material, its project.
+      const totals = [cats.get(r.category)!, sections[section]];
+      if (section === 'PROJECTS') {
+        const key = r.projectNumber ?? '';
+        if (!projects.has(key)) projects.set(key, { projectNumber: r.projectNumber, name: r.project?.name ?? null, status: r.project?.status ?? null, ...blank() });
+        totals.push(projects.get(key)!);
       }
-      cats.set(r.category, c);
-      status[r.status]++;
+      for (const c of totals) {
+        c.items++;
+        if (onHand > 0) {
+          c.itemsInStock++;
+          if (r.unitCost === null) c.unpriced++;
+          else c.value += onHand * Number(r.unitCost);
+        }
+      }
+      if (section === 'STORES') {
+        // The counts the Dashboard cards show: Stores only.
+        if (onHand <= 0) status.outOfStock++;
+        status[r.status]++;
+      }
     }
     const total = [...cats.values()].reduce(
       (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
@@ -266,6 +312,13 @@ export const ReportingService = {
         .sort(([a], [b]) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99))
         .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
       total: { ...total, value: round2(total.value) },
+      sections: {
+        STORES: { ...sections.STORES, value: round2(sections.STORES.value) },
+        PROJECTS: { ...sections.PROJECTS, value: round2(sections.PROJECTS.value) },
+      },
+      projects: [...projects.values()]
+        .map((p) => ({ ...p, value: round2(p.value) }))
+        .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
       status,
     };
   },

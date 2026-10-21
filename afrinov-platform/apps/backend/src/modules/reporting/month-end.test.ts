@@ -67,9 +67,9 @@ const REPORT: MonthEndReport = {
     {
       category: 'CONSUMABLES',
       items: [
-        { sku: 'CON-0001', name: 'E115-7 PSF Grinding Disc', location: 'A-1', requiredStock: 100, currentStock: 11, unitCost: 42.05, value: 462.55, percentOfRequired: 0.11, reorderQuantity: 89, status: 'URGENT' },
-        { sku: 'CON-0002', name: 'EHT115-1.0 Cutting Disc', location: 'A-1 (100), B-2 (67)', requiredStock: 100, currentStock: 167, unitCost: 30.1, value: 5026.7, percentOfRequired: 1.67, reorderQuantity: -67, status: 'OK' },
-        { sku: 'CON-0003', name: 'Boiler chalk', location: '', requiredStock: 0, currentStock: 0, unitCost: null, value: null, percentOfRequired: null, reorderQuantity: null, status: 'NOT_SET' },
+        { sku: 'CON-0001', name: 'E115-7 PSF Grinding Disc', location: 'A-1', requiredStock: 100, currentStock: 11, unitCost: 42.05, value: 462.55, percentOfRequired: 0.11, reorderQuantity: 89, status: 'URGENT', project: null },
+        { sku: 'CON-0002', name: 'EHT115-1.0 Cutting Disc', location: 'A-1 (100), B-2 (67)', requiredStock: 100, currentStock: 167, unitCost: 30.1, value: 5026.7, percentOfRequired: 1.67, reorderQuantity: -67, status: 'OK', project: null },
+        { sku: 'CON-0003', name: 'Boiler chalk', location: '', requiredStock: 0, currentStock: 0, unitCost: null, value: null, percentOfRequired: null, reorderQuantity: null, status: 'NOT_SET', project: null },
       ],
       value: 5489.25,
       urgent: 1,
@@ -82,6 +82,7 @@ const REPORT: MonthEndReport = {
       category: 'TOOLS', items: [], value: 0, urgent: 0, warning: 0, itemsInStock: 0, used: [], usedValue: 0,
     },
   ],
+  projects: [],
   total: { items: 3, itemsInStock: 2, value: 5489.25, urgent: 1, warning: 0, usedValue: 1051.25 },
 };
 
@@ -174,6 +175,28 @@ describe('month-end workbook edge cases', () => {
     const wb = await load({ ...REPORT, categories: [{ ...REPORT.categories[0]!, category }] });
     expect(wb.worksheets.map((s) => s.name)).toEqual(['Overview', summary, used]);
     expect(wb.getWorksheet(summary)!.getCell('B3').value).toBe(`${title} — as at 30 September 2026`);
+  });
+
+  it('names each project item’s project, and lists Projects material by project on the Overview', async () => {
+    const base = REPORT.categories[0]!.items[2]!;
+    const wb = await load({
+      ...REPORT,
+      categories: [{ ...REPORT.categories[0]!, category: 'PROJECT_MATERIAL', items: [
+        { ...base, sku: '1369-PIPE', name: 'Pipe', project: '1369' },
+        { ...base, sku: 'OLD-PLATE', name: 'Plate', project: null },
+      ] }],
+      projects: [
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 1, itemsInStock: 1, value: 300 },
+        { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0 },
+      ],
+    });
+    const summary = wb.getWorksheet('Project Stock Summary')!;
+    expect(summary.getCell('C5').value).toBe('[1369] Pipe');
+    expect(summary.getCell('C6').value).toBe('[no project] Plate');
+    const overview = wb.getWorksheet('Overview')!;
+    const labels: unknown[] = [];
+    overview.eachRow((row) => labels.push(row.getCell(1).value));
+    expect(labels).toEqual(expect.arrayContaining(['Project material by project', '1369 · Plant upgrade (completed)', 'No project yet']));
   });
 
   it('preserves numeric formatting, frozen headers and urgency colors after serialization', async () => {

@@ -11,7 +11,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
-interface Mat { id: string; sku: string; name: string; category: string; unitOfMeasure: string; requiredStock: Prisma.Decimal; unitCost: Prisma.Decimal | null; active: boolean }
+interface Mat {
+  id: string; sku: string; name: string; category: string; unitOfMeasure: string; requiredStock: Prisma.Decimal; unitCost: Prisma.Decimal | null; active: boolean;
+  projectNumber?: string | null; project?: { name: string | null; status: string } | null;
+}
 interface Loc { id: string; name: string; type: string; active: boolean }
 interface Bal { materialId: string; locationId: string; quantity: Prisma.Decimal; updatedAt: Date }
 interface Tx {
@@ -65,11 +68,13 @@ function makePrisma(): unknown {
       },
     },
     material: {
-      findMany: async ({ where }: { where?: { id?: { in: string[] }; active?: boolean; category?: string } } = {}) => {
+      findMany: async ({ where }: { where?: { id?: { in: string[] }; active?: boolean; category?: string | { not: string } } } = {}) => {
         let list = db.materials.slice();
         if (where?.id?.in) list = list.filter((m) => where.id!.in.includes(m.id));
         if (where?.active !== undefined) list = list.filter((m) => m.active === where.active);
-        if (where?.category) list = list.filter((m) => m.category === where.category);
+        const category = where?.category;
+        if (typeof category === 'string') list = list.filter((m) => m.category === category);
+        else if (category) list = list.filter((m) => m.category !== category.not);
         return list;
       },
     },
@@ -233,6 +238,16 @@ describe('ReportingService', () => {
   });
 
   describe('stockStatus', () => {
+    it('is for Stores: Projects material is left out unless asked for', async () => {
+      seedMaterials();
+      db.materials.push({ id: 'p-1', sku: '1369-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: DEC(0), unitCost: null, active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
+      db.balances = [];
+      const { ReportingService } = await import('./reporting.service.js');
+      expect((await ReportingService.stockStatus()).map((r) => r.sku)).not.toContain('1369-PIPE');
+      const all = await ReportingService.stockStatus({ section: 'ALL' });
+      expect(all.find((r) => r.sku === '1369-PIPE')).toMatchObject({ projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
+    });
+
     it('grades every active item by on hand as a share of Required Stock, most urgent first', async () => {
       seedMaterials();
       db.materials.push(
@@ -311,6 +326,34 @@ describe('ReportingService', () => {
   });
 
   describe('stockValue', () => {
+    it('keeps Projects material in the totals, splits it by project, and counts statuses for Stores only', async () => {
+      seedMaterials();
+      db.materials.push(
+        { id: 'p-1', sku: '1369-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: DEC(0), unitCost: DEC(100), active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'COMPLETED' } },
+        { id: 'p-2', sku: '1369-FLANGE', name: 'Flange', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: DEC(0), unitCost: null, active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'COMPLETED' } },
+        { id: 'p-3', sku: 'OLD-PLATE', name: 'Plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: DEC(0), unitCost: DEC(10), active: true, projectNumber: null, project: null },
+      );
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(4), updatedAt: new Date() },
+        { materialId: 'p-1', locationId: 'l-1', quantity: DEC(3), updatedAt: new Date() },  // 3 x 100 = 300
+        { materialId: 'p-2', locationId: 'l-1', quantity: DEC(2), updatedAt: new Date() },  // no price
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const v = await ReportingService.stockValue();
+      expect(v.total).toEqual({ items: 6, itemsInStock: 3, value: 320, unpriced: 1 });
+      expect(v.sections).toEqual({
+        STORES: { items: 3, itemsInStock: 1, value: 20, unpriced: 0 },
+        PROJECTS: { items: 3, itemsInStock: 2, value: 300, unpriced: 1 },
+      });
+      // A completed project's leftovers stay with it; items with no project come last.
+      expect(v.projects).toEqual([
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 2, itemsInStock: 2, value: 300, unpriced: 1 },
+        { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0, unpriced: 0 },
+      ]);
+      // Projects material is never urgent or "out of stock": the three Stores items only.
+      expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
+    });
+
     it('adds up on hand × unit price per category, as the Summary sheets do, with status counts', async () => {
       seedMaterials();
       db.materials.push({ id: 'm-4', sku: 'SKU-004', name: 'Tape', category: 'CONSUMABLES', unitOfMeasure: 'roll', requiredStock: DEC(0), unitCost: null, active: true });

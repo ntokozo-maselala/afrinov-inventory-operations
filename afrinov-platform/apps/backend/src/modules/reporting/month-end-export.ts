@@ -74,6 +74,17 @@ export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
   const ot = ov.addRow(['Total', r.total.items, r.total.itemsInStock, r.total.value, r.total.urgent, r.total.warning, r.total.usedValue]);
   ot.font = { bold: true };
   ot.getCell(4).numFmt = MONEY;
+  // Projects material per project: what each job holds at the end of the period.
+  if (r.projects.length > 0) {
+    ov.addRow([]);
+    const ph = ov.addRow(['Project material by project', 'Items', 'In stock', `Stock value (${r.currency})`]);
+    headerRow(ph);
+    for (const p of r.projects) {
+      const closed = p.status === 'COMPLETED' ? ' (completed)' : p.status === 'CANCELLED' ? ' (cancelled)' : '';
+      const label = p.projectNumber ? `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}${closed}` : 'No project yet';
+      ov.addRow([label, p.items, p.itemsInStock, p.value]).getCell(4).numFmt = MONEY;
+    }
+  }
   ot.getCell(7).numFmt = MONEY;
 
   for (const c of r.categories) {
@@ -95,7 +106,9 @@ export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
       '% In Stock Re-Up', 'Unit Price Ex VAT', 'Re Order IN QTY', 'URGENCY'];
     headerRow(sh);
     c.items.forEach((i, n) => {
-      const row = ws.addRow([n + 1, i.sku, i.name, i.location, i.requiredStock, i.currentStock, i.value, i.percentOfRequired, i.unitCost, i.reorderQuantity, URGENCY[i.status]]);
+      // Projects material names its project: "[1369] Pipe", or "[no project] Plate".
+      const name = c.category === 'PROJECT_MATERIAL' ? `[${i.project ?? 'no project'}] ${i.name}` : i.name;
+      const row = ws.addRow([n + 1, i.sku, name, i.location, i.requiredStock, i.currentStock, i.value, i.percentOfRequired, i.unitCost, i.reorderQuantity, URGENCY[i.status]]);
       for (const k of [5, 6, 10]) row.getCell(k).numFmt = QTY;
       row.getCell(7).numFmt = MONEY;
       row.getCell(8).numFmt = '0%';

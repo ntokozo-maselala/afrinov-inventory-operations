@@ -330,6 +330,26 @@ describe('ReportService.inventory', () => {
     expect(r.kpis.inventoryValue).toBeCloseTo(500);
   });
 
+  it('splits Projects material by project, and counts low and out of stock for Stores only', async () => {
+    const pipe = { ...makeMat('p-1', '1369-PIPE', 'Pipe', 0, 100, 'PROJECT_MATERIAL'), projectNumber: '1369', project: { name: 'Plant upgrade', status: 'COMPLETED' } };
+    const old = { ...makeMat('p-2', 'OLD-PLATE', 'Plate', 0, 10, 'PROJECT_MATERIAL'), projectNumber: null, project: null };
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 100, 'CONSUMABLES'), pipe, old],
+      balances: [makeBal('m-1', 'l-1', 10), makeBal('p-1', 'l-1', 3)],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [], purchaseOrders: [], purchaseOrderLines: [], transactions: [], users: [],
+    };
+    const r = await ReportService.inventory(baseQuery);
+    expect(r.byProject).toEqual([
+      { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', skuCount: 1, quantity: 3, inventoryValue: 300, share: 300 / 1300 },
+      { projectNumber: null, name: null, status: null, skuCount: 1, quantity: 0, inventoryValue: 0, share: 0 },
+    ]);
+    // The plate has nothing on hand, but it is project material: not "out of stock".
+    expect(r.kpis.outOfStockCount).toBe(0);
+    expect(r.exceptions.map((l) => l.sku)).not.toContain('OLD-PLATE');
+    expect(r.inventory.find((l) => l.sku === '1369-PIPE')?.projectNumber).toBe('1369');
+  });
+
   it('groups by category with value share', async () => {
     __stubState.current = {
       materials: [

@@ -42,6 +42,14 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(storesList.body.map((m) => m.sku)).not.toContain(`IT-SEC-PIPE-${run}`);
   });
 
+  it('leaves Projects material out of stock status, and lists it under its project in the stock value (Phase 4)', async () => {
+    const status = await api<Array<{ sku: string }>>('GET', '/reports/stock-status');
+    expect(status.body.map((r) => r.sku)).not.toContain(`IT-SEC-PIPE-${run}`);
+    const value = await api<{ projects: Array<{ projectNumber: string | null; items: number }>; sections: { PROJECTS: { items: number } } }>('GET', '/reports/stock-value');
+    expect(value.body.projects.find((p) => p.projectNumber === projectNumber)).toMatchObject({ items: 1 });
+    expect(value.body.sections.PROJECTS.items).toBeGreaterThanOrEqual(1);
+  });
+
   it('refuses a Projects material without a project, or with Required Stock', async () => {
     const noProject = await create({ sku: `IT-SEC-X1-${run}`, category: 'PROJECT_MATERIAL' });
     expect(noProject.status).toBe(400);
