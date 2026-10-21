@@ -46,14 +46,23 @@ export function Stock() {
   const [params, setParams] = useSearchParams();
   const section: MaterialSection = params.get('section') === 'PROJECTS' ? 'PROJECTS' : 'STORES';
   const project = section === 'PROJECTS' ? params.get('project') ?? '' : '';
-  // Category and status are Stores filters: switching tabs clears them, so none stays on unseen.
-  const setSection = (value: MaterialSection) => { setCategory(''); setStatus(''); changeSection(value); };
-  const changeSection = (value: MaterialSection) => setParams((p) => {
+  // The address follows the filters, so a reload or a shared link shows what is on screen.
+  const writeParams = (change: Record<string, string>) => setParams((p) => {
     const next = new URLSearchParams(p);
-    if (value === 'PROJECTS') next.set('section', value); else next.delete('section');
-    next.delete('project');
+    for (const [key, value] of Object.entries(change)) {
+      if (value) next.set(key, value); else next.delete(key);
+    }
     return next;
   }, { replace: true });
+  // Category and status are Stores filters: switching tabs clears them, so none stays on unseen.
+  const setSection = (value: MaterialSection) => {
+    setCategory('');
+    setStatus('');
+    writeParams({ section: value === 'PROJECTS' ? value : '', project: '', category: '', status: '' });
+  };
+  const changeQ = (value: string) => { setQ(value); writeParams({ q: value }); };
+  const changeCategory = (value: string) => { setCategory(value); writeParams({ category: value }); };
+  const changeStatus = (value: string) => { setStatus(value); writeParams({ status: value }); };
   const setProject = (value: string) => setParams((p) => {
     const next = new URLSearchParams(p);
     if (value) next.set('project', value); else next.delete('project');
@@ -126,20 +135,20 @@ export function Stock() {
       </div>
 
       <FilterBar
-        onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); setProject(''); } : undefined}
+        onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', project: '' }); } : undefined}
         count={stock.loading ? 'Loading…' : `${filtered.length} of ${inSection.length} lines`}
       >
-        <SearchField id="stock-search" value={q} onChange={setQ} placeholder={section === 'PROJECTS' ? 'SKU, material, location or project…' : 'SKU, material or location…'} />
+        <SearchField id="stock-search" value={q} onChange={changeQ} placeholder={section === 'PROJECTS' ? 'SKU, material, location or project…' : 'SKU, material or location…'} />
         {section === 'STORES' ? (
           <>
             <Field label="Category" htmlFor="stock-category" className={FILTER_WIDTH}>
-              <Select id="stock-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <Select id="stock-category" value={category} onChange={(e) => changeCategory(e.target.value)}>
                 <option value="">All categories</option>
                 {STORES_CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </Field>
             <Field label="Status" htmlFor="stock-status" className={FILTER_WIDTH}>
-              <Select id="stock-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <Select id="stock-status" value={status} onChange={(e) => changeStatus(e.target.value)}>
                 {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </Field>
