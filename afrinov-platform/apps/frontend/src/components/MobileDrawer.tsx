@@ -100,8 +100,8 @@ export function MobileDrawer() {
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-surface-200 dark:border-surface-200 sticky top-0 bg-surface-0 dark:bg-surface-0 z-10">
             <div className="flex items-center gap-3">
-              <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-brand-50">
-                <Icon.Box size={20} className="text-brand-600" />
+              <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-brand-50 dark:bg-brand-900/50">
+                <Icon.Box size={20} className="text-brand-600 dark:text-brand-300" />
               </span>
               <div className="leading-tight truncate">
                 <div className="text-sm font-semibold text-surface-900 dark:text-surface-900">Afrinov IMS</div>

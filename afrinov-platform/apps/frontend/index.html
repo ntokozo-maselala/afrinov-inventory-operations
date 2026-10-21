@@ -6,9 +6,30 @@
     <meta name="theme-color" content="#E3001B" />
     <meta name="description" content="Afrinov Inventory &amp; Operations — modular platform for materials, stock movements, procurement and reporting." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      (() => {
+        let theme = 'light';
+        try {
+          const current = localStorage.getItem('afrinov.appearance.theme.v1');
+          if (current === 'light' || current === 'dark' || current === 'system') {
+            theme = current;
+          } else {
+            const legacy = JSON.parse(localStorage.getItem('afrinov.settings.v1') || 'null');
+            if (legacy && ['light', 'dark', 'system'].includes(legacy.theme)) theme = legacy.theme;
+          }
+        } catch {
+          // A blocked or invalid storage value falls back to light mode.
+        }
+        const dark = theme === 'dark' || (theme === 'system' && typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
+        const root = document.documentElement;
+        root.classList.toggle('dark', dark);
+        root.dataset.theme = theme;
+        root.style.colorScheme = dark ? 'dark' : 'light';
+      })();
+    </script>
     <title>Afrinov Inventory &amp; Operations</title>
   </head>
-  <body class="bg-surface-50 text-slate-900 antialiased">
+  <body class="bg-surface-50 antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

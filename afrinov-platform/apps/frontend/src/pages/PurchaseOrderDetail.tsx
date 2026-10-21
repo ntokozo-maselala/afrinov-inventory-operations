@@ -354,7 +354,7 @@ function LifecycleTracker({ status }: { status: POStatus }) {
             <li key={s} className="flex flex-col items-center text-center" aria-current={isCurrent ? 'step' : undefined}>
               <div className="flex items-center w-full">
                 <div className={`h-0.5 flex-1 ${i === 0 ? 'invisible' : reached ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />
-                <span className={`flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-full border-2 text-[10px] sm:text-xs font-semibold ${isCurrent ? 'border-brand-600 bg-brand-600 text-white' : reached ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-surface-300 bg-surface-0 text-surface-400'}`}>
+                <span className={`flex items-center justify-center h-6 w-6 sm:h-7 sm:w-7 rounded-full border-2 text-[10px] sm:text-xs font-semibold ${isCurrent ? 'border-brand-600 bg-brand-600 text-white' : reached ? 'border-brand-500 bg-brand-50 text-brand-700 dark:border-brand-300 dark:bg-brand-900/50 dark:text-brand-100' : 'border-surface-300 bg-surface-0 text-surface-400'}`}>
                   {i + 1}
                 </span>
                 <div className={`h-0.5 flex-1 ${i === LIFECYCLE_ORDER.length - 1 ? 'invisible' : reached && i < currentIndex ? 'bg-brand-500' : 'bg-surface-200'}`} aria-hidden="true" />

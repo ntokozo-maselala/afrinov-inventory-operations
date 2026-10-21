@@ -1286,7 +1286,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'notifications.enableLowStockNotifications': row('notifications.enableLowStockNotifications', true, 'boolean', 'notifications', 'Generate alerts when materials fall below their reorder threshold.'),
     'notifications.enablePurchaseOrderNotifications': row('notifications.enablePurchaseOrderNotifications', true, 'boolean', 'notifications', 'Alert when purchase orders need approval or reach a new state.'),
 
-    'appearance.theme': row('appearance.theme', 'system', 'enum', 'appearance', 'Default visual theme.', ['system', 'light', 'dark']),
+    'appearance.theme': row('appearance.theme', 'light', 'enum', 'appearance', 'Default visual theme when no browser preference is saved.', ['system', 'light', 'dark']),
     'appearance.density': row('appearance.density', 'comfortable', 'enum', 'appearance', 'Default table density.', ['comfortable', 'compact']),
 
     'security.sessionTimeoutMinutes': row('security.sessionTimeoutMinutes', 60, 'number', 'security', 'Inactivity time before a session is signed out.'),

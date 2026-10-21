@@ -1,12 +1,12 @@
-// Global settings provider: loads settings from the backend, applies theme
-// and density to the document, tracks unsaved changes, and exposes save /
+// Global settings provider: loads settings from the backend, applies the
+// server theme default and density, tracks unsaved changes, and exposes save /
 // reset helpers. All routes that need preference data use the `useSettings`
 // hook instead of calling the API directly — this guarantees a single source
 // of truth and that theme/density always reflect the last server response.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, type ApiError } from '../api/client';
-import { setAppearance as setGlobalAppearance } from './useAppearance';
+import { applyDensity, getStoredThemePreference, setAppearance as setGlobalAppearance, useAppearance } from './useAppearance';
 
 export type SettingType = 'string' | 'number' | 'boolean' | 'enum';
 export type SettingCategory =
@@ -106,20 +106,8 @@ function validate(def: SettingValue, raw: unknown): string | null {
   }
 }
 
-function applyTheme(theme: 'system' | 'light' | 'dark'): void {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  const isDark = theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-  root.classList.toggle('dark', isDark);
-  root.dataset['theme'] = theme;
-}
-
-function applyDensity(density: 'comfortable' | 'compact'): void {
-  if (typeof document === 'undefined') return;
-  document.body.classList.toggle('table-compact', density === 'compact');
-}
-
 export function SettingsProvider({ children, canEdit }: { children: ReactNode; canEdit: boolean }) {
+  const appearance = useAppearance();
   const [all, setAll] = useState<SettingValue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -160,17 +148,18 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
     return map;
   }, [all]);
 
-  // Apply theme + density from the most recent server state. We only do
-  // this when not actively saving — otherwise the user could be looking at
-  // a stale applied state mid-edit. Also mirror into the global cache so
-  // any page can read the last applied value without a re-fetch.
+  // Apply the browser's saved theme choice, falling back to the server
+  // default, and mirror the effective preference into the shared cache.
   useEffect(() => {
     if (loading) return;
-    const t = (settings['appearance.theme']?.value as 'system' | 'light' | 'dark' | undefined) ?? 'system';
     const d = (settings['appearance.density']?.value as 'comfortable' | 'compact' | undefined) ?? 'comfortable';
-    applyTheme(t);
-    applyDensity(d);
-    setGlobalAppearance({ theme: t, density: d });
+    const savedTheme = settings['appearance.theme']?.value;
+    const serverTheme = savedTheme === 'system' || savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'light';
+    // A browser choice belongs to this user/device and takes precedence over
+    // the server's default. If none is stored, honor the server's saved value.
+    const theme = getStoredThemePreference() ?? serverTheme;
+    if (settings['appearance.theme']) setGlobalAppearance({ theme, density: d });
+    else applyDensity(d);
   }, [loading, settings]);
 
   const setDraft = useCallback((key: string, value: unknown) => {
@@ -255,10 +244,10 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   const preferences = useMemo(() => ({
-    theme: (settings['appearance.theme']?.value as 'system' | 'light' | 'dark') ?? 'system',
+    theme: appearance.theme,
     density: (settings['appearance.density']?.value as 'comfortable' | 'compact') ?? 'comfortable',
     enableInAppNotifications: asBool(settings['notifications.enableInAppNotifications']?.value ?? true),
-  }), [settings]);
+  }), [appearance.theme, settings]);
 
   const value: SettingsContextValue = {
     loading, error, reload, settings,

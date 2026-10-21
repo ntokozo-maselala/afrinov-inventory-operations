@@ -1,6 +1,8 @@
 // Lightweight user-preferences store backed by localStorage.
 // Keeps the Settings page truly persistent without inventing a server-side
 // settings engine that the current backend does not support.
+import { applyTheme as applyCentralTheme } from './useAppearance';
+
 const KEY = 'afrinov.settings.v1';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -14,7 +16,7 @@ export interface UserSettings {
 }
 
 const DEFAULTS: UserSettings = {
-  theme: 'system',
+  theme: 'light',
   density: 'comfortable',
   showLowStockAlerts: true,
   defaultReportingRange: 'MONTH',
@@ -41,8 +43,5 @@ export function saveSettings(next: UserSettings): void {
 }
 
 export function applyTheme(theme: ThemePreference): void {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  const isDark = theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-  root.classList.toggle('dark', isDark);
+  applyCentralTheme(theme);
 }

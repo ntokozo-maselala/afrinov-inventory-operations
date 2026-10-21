@@ -85,7 +85,7 @@ describe('mock API demo data flow', () => {
 
   it('GET /settings/values?keys=appearance.theme,appearance.density returns the theme + density defaults', async () => {
     const r = await api.get<Record<string, string>>('/settings/values?keys=appearance.theme,appearance.density');
-    expect(r['appearance.theme']).toBe('system');
+    expect(r['appearance.theme']).toBe('light');
     expect(r['appearance.density']).toBe('comfortable');
   });
 

@@ -1,17 +1,40 @@
-// Framework-free smoke tests for the lightweight appearance cache used by
-// GlobalPreferencesApplier and the SettingsProvider.
-//
-// We deliberately avoid @testing-library/react since the project does not
-// currently ship a frontend test framework. The React component itself is
-// exercised by the production typecheck + build.
+// Unit tests for the shared appearance cache and its theme persistence rules.
 import { describe, it, expect } from 'vitest';
-import { setAppearance, getAppearance } from './useAppearance';
+import {
+  APPEARANCE_THEME_STORAGE_KEY,
+  getAppearance,
+  getStoredThemePreference,
+  prefersDark,
+  resolveInitialTheme,
+  setAppearance,
+} from './useAppearance';
 
 describe('useAppearance cache', () => {
-  it('starts with the documented defaults', () => {
-    // The default cache value (set in the module) is system/comfortable.
-    expect(['system', 'light', 'dark']).toContain(getAppearance().theme);
-    expect(['comfortable', 'compact']).toContain(getAppearance().density);
+  it('uses light when there is no saved preference, regardless of the OS preference', () => {
+    expect(resolveInitialTheme(null)).toBe('light');
+    expect(prefersDark(resolveInitialTheme(null), true)).toBe(false);
+  });
+
+  it('follows the OS only when System was explicitly selected', () => {
+    expect(prefersDark('system', true)).toBe(true);
+    expect(prefersDark('system', false)).toBe(false);
+  });
+
+  it.each(['light', 'dark', 'system'] as const)('retains an explicitly saved %s preference', (theme) => {
+    expect(resolveInitialTheme(theme)).toBe(theme);
+  });
+
+  it('reads current and legacy browser preference storage safely', () => {
+    const values = new Map<string, string>([[APPEARANCE_THEME_STORAGE_KEY, 'dark']]);
+    const storage = { getItem: (key: string) => values.get(key) ?? null };
+    expect(getStoredThemePreference(storage)).toBe('dark');
+
+    values.delete(APPEARANCE_THEME_STORAGE_KEY);
+    values.set('afrinov.settings.v1', JSON.stringify({ theme: 'light' }));
+    expect(getStoredThemePreference(storage)).toBe('light');
+    values.set('afrinov.settings.v1', '{invalid');
+    expect(getStoredThemePreference(storage)).toBeNull();
+    expect(getStoredThemePreference({ getItem: () => { throw new Error('blocked'); } })).toBeNull();
   });
 
   it('setAppearance updates the cache immutably', () => {
@@ -29,5 +52,17 @@ describe('useAppearance cache', () => {
     const s = getAppearance();
     expect(s.theme).toBe('dark');
     expect(s.density).toBe('compact');
+  });
+
+  it('applies theme changes to the document and stores the choice', () => {
+    setAppearance({ theme: 'dark' });
+    expect(document.documentElement).toHaveClass('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+    expect(localStorage.getItem(APPEARANCE_THEME_STORAGE_KEY)).toBe('dark');
+
+    setAppearance({ theme: 'light' });
+    expect(document.documentElement).not.toHaveClass('dark');
+    expect(document.documentElement.style.colorScheme).toBe('light');
   });
 });

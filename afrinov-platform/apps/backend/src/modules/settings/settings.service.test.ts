@@ -143,6 +143,31 @@ describe('SettingsService', () => {
     expect(db.settings.size).toBe(SETTING_CATALOG.length);
     const company = db.settings.get('general.companyName');
     expect(company?.value).toBe('Afrinov');
+    expect(db.settings.get('appearance.theme')?.value).toBe('light');
+  });
+
+  it('moves only the untouched legacy system default to light', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    const appearance = db.settings.get('appearance.theme')!;
+    db.settings.set(appearance.key, { ...appearance, value: 'system', updatedById: null });
+
+    await SettingsService.ensureSeeded();
+
+    expect(db.settings.get('appearance.theme')?.value).toBe('light');
+  });
+
+  it('preserves explicitly saved dark and system preferences during seeding', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    const appearance = db.settings.get('appearance.theme')!;
+    db.settings.set(appearance.key, { ...appearance, value: 'dark', updatedById: 'admin' });
+    await SettingsService.ensureSeeded();
+    expect(db.settings.get('appearance.theme')?.value).toBe('dark');
+
+    db.settings.set(appearance.key, { ...appearance, value: 'system', updatedById: 'admin' });
+    await SettingsService.ensureSeeded();
+    expect(db.settings.get('appearance.theme')?.value).toBe('system');
   });
 
   it('deletes and hides settings that were retired from the catalog', async () => {
