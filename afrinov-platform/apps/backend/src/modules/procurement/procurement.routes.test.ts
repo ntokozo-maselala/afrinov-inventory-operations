@@ -47,10 +47,10 @@ describe.each([
     if (!parsed.success) expect(parsed.error.flatten().fieldErrors).toHaveProperty(key);
   });
 
-  it('accepts a 200 character email and rejects a 201 character email', () => {
-    const domain = `${'b'.repeat(60)}.${'c'.repeat(60)}.${'d'.repeat(9)}.com`;
-    const email = `${'a'.repeat(64)}@${domain}`;
-    expect(email).toHaveLength(200);
+  // The longest an email address can be: the rule supplier emails are imported with has no lower cap.
+  it('accepts a 320 character email and rejects a 321 character email', () => {
+    const email = `${'a'.repeat(64)}@${'b'.repeat(251)}.com`;
+    expect(email).toHaveLength(320);
     expect(schema.parse({ ...required, supplierContactEmail: email })).toMatchObject({ supplierContactEmail: email });
     expect(schema.safeParse({ ...required, supplierContactEmail: `${email}x` }).success).toBe(false);
   });
