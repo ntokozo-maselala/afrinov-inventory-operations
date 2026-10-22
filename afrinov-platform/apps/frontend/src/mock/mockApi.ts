@@ -1493,6 +1493,22 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
     const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
     if (!project) throw err('NOT_FOUND', 'Project not found');
     if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
+    if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+      throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
+    }
+  }
+  // As the server (checkIssueProject): project material goes only to its own project.
+  const own = [...new Set(lines.map((l) => l.materialId))].map(findMaterial)
+    .filter((m): m is NonNullable<typeof m> => !!m && m.category === 'PROJECT_MATERIAL' && !!m.projectNumber);
+  const ownProjects = [...new Set(own.map((m) => m.projectNumber))];
+  if (ownProjects.length > 1) {
+    throw err('VALIDATION_ERROR', `One issue can't hold material for two projects (${ownProjects.join(' and ')}). Issue each project's material separately.`);
+  }
+  const wrong = own.find((m) => m.projectNumber !== (b.projectNumber || null));
+  if (wrong) {
+    throw err('VALIDATION_ERROR', b.projectNumber
+      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be issued to project ${b.projectNumber}.`
+      : `${wrong.sku} is material for project ${wrong.projectNumber}: issue it to that project.`);
   }
   const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
   for (const l of lines) {

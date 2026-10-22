@@ -15,7 +15,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { refuseUnassigned } from './material-section.js';
+import { checkIssueProject, refuseUnassigned } from './material-section.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -99,6 +99,20 @@ export async function checkProjectActive(projectNumber: string, tx: Prisma.Trans
   const p = await tx.project.findUnique({ where: { projectNumber } });
   if (!p) throw Errors.notFound('Project');
   if (!p.active) throw Errors.validation('Project is inactive');
+}
+
+/**
+ * Stock is issued only to an open project. A completed or cancelled project
+ * takes no more: its leftovers go to Stores and are issued from there.
+ * Returns are still accepted from it.
+ */
+async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+  const p = await tx.project.findUnique({ where: { projectNumber } });
+  if (!p) throw Errors.notFound('Project');
+  if (!p.active) throw Errors.validation('Project is inactive');
+  if (p.status === 'COMPLETED' || p.status === 'CANCELLED') {
+    throw Errors.validation(`Project ${projectNumber} is ${p.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
+  }
 }
 
 async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): Promise<Decimal> {
@@ -548,14 +562,20 @@ export const InventoryService = {
 
     return prisma.$transaction(async (tx) => {
       await checkRecipientActive(input.recipientId, tx);
-      if (input.projectNumber) await checkProjectActive(input.projectNumber, tx);
+      if (input.projectNumber) await checkProjectTakesIssues(input.projectNumber, tx);
 
       const materials = new Map<string, Awaited<ReturnType<typeof checkMaterialActive>>>();
       for (const t of totals.values()) {
+        if (materials.has(t.materialId)) continue;
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
         refuseUnassigned(material, 'issued');
         materials.set(t.materialId, material);
+      }
+      checkIssueProject(input.projectNumber, [...materials.values()]);
+
+      for (const t of totals.values()) {
+        const material = materials.get(t.materialId)!;
         await checkLocationActive(t.locationId, tx);
 
         // Stock can never go below zero. This is a fixed rule, not a setting:

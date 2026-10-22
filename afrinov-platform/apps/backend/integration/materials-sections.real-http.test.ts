@@ -81,4 +81,30 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(assigned.body).toMatchObject({ projectNumber, section: 'PROJECTS' });
     expect((await issue()).status).toBe(201);
   });
+
+  it('issues project material only to its own project, and nothing to a completed project (Phase 5)', async () => {
+    const other = `IT-SEC2-${run}`;
+    expect((await api('POST', '/projects', { projectNumber: other, name: `Other project ${run}` })).status).toBe(201);
+    const pipe = await create({ sku: `IT-SEC-OWN-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
+    const disc = await create({ sku: `IT-SEC-DISC2-${run}`, category: 'CONSUMABLES' });
+    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections shelf ${run}`, type: 'RACK' });
+    for (const m of [pipe.body, disc.body]) {
+      expect((await api('POST', '/inventory-adjustments', { materialId: m.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER' })).status).toBe(201);
+    }
+    const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections rigger ${run}`, type: 'WORKER' });
+    const issue = (materialId: string, to?: string) => api<{ error?: { message: string } }>('POST', '/inventory-issues', {
+      recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId, locationId: loc.body.id, quantity: 1 }],
+    });
+
+    const wrong = await issue(pipe.body.id, other);
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error?.message).toMatch(/is material for project .*, so it can't be issued to project/);
+    expect((await issue(pipe.body.id)).status).toBe(400);
+    expect((await issue(pipe.body.id, projectNumber)).status).toBe(201);
+
+    expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
+    const closed = await issue(disc.body.id, other);
+    expect(closed.status).toBe(400);
+    expect(closed.body.error?.message).toMatch(/is completed, so no more stock is issued to it/);
+  });
 });
