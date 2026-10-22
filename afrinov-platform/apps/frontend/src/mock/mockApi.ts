@@ -174,12 +174,37 @@ function assertProjectOpen(projectNumber: string) {
   const project = state.projects.find((p) => p.projectNumber === projectNumber);
   if (!project) throw err('VALIDATION_ERROR', `No project ${projectNumber}`);
   if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
+  if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+    throw err('VALIDATION_ERROR', `Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
+  }
+}
+
+// As the server (checkProjectMaterial): project material goes only to its own
+// project, so one issue or order can't hold two projects' material.
+const PROJECT_USE = {
+  issued: { verb: 'issue', Verb: 'Issue', past: 'issued', to: 'to' },
+  ordered: { verb: 'order', Verb: 'Order', past: 'ordered', to: 'for' },
+} as const;
+function checkProjectMaterial(projectNumber: string | null | undefined, materialIds: string[], use: 'issued' | 'ordered') {
+  const u = PROJECT_USE[use];
+  const own = [...new Set(materialIds)].map(findMaterial)
+    .filter((m): m is NonNullable<typeof m> => !!m && m.category === 'PROJECT_MATERIAL' && !!m.projectNumber);
+  const projects = [...new Set(own.map((m) => m.projectNumber))];
+  if (projects.length > 1) {
+    throw err('VALIDATION_ERROR', `One ${u.verb} can't hold material for two projects (${projects.join(' and ')}). ${u.Verb} each project's material separately.`);
+  }
+  const wrong = own.find((m) => m.projectNumber !== (projectNumber || null));
+  if (wrong) {
+    throw err('VALIDATION_ERROR', projectNumber
+      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be ${u.past} ${u.to} project ${projectNumber}.`
+      : `${wrong.sku} is material for project ${wrong.projectNumber}: ${u.verb} it ${u.to} that project.`);
+  }
 }
 
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
   const p = state.projects.find((x) => x.projectNumber === projectNumber);
-  return { projectNumber, name: p?.name ?? null };
+  return { projectNumber, name: p?.name ?? null, status: p?.status ?? null };
 }
 
 // AFRI-0001, AFRI-0002, …: one past the highest AFRI number, never below the
@@ -572,6 +597,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
     for (const l of b.lines) refuseUnassigned(l.materialId, 'ordered');
+    checkProjectMaterial(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId), 'ordered');
     // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
     const details = poDetails(b);
     if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
@@ -609,6 +635,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (po.status !== 'DRAFT') throw err('INVALID_STATE', `Cannot submit from ${po.status}`);
+    for (const l of po.lines) refuseUnassigned(l.materialId, 'ordered');
+    checkProjectMaterial(po.projectNumber, po.lines.map((l) => l.materialId), 'ordered');
+    if (po.projectNumber) assertProjectOpen(po.projectNumber);
     const before = { status: po.status };
     po.status = 'PENDING_APPROVAL';
     po.history = po.history ?? [];
@@ -717,6 +746,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     // To tell whether anything changed: an approved order changed gets a new revision.
     const snapshot = (x: MockPurchaseOrder) => JSON.stringify({ ...x, history: undefined, notes: x.notes || undefined });
     const before = snapshot(po);
+    const nextProject = b.projectNumber === undefined ? undefined : (b.projectNumber?.trim() || null);
+    if (nextProject !== undefined && nextProject !== (po.projectNumber ?? null)) {
+      if (nextProject) assertProjectOpen(nextProject);
+      checkProjectMaterial(nextProject, po.lines.map((l) => l.materialId), 'ordered');
+    }
     if (b.notes !== undefined) po.notes = b.notes ?? undefined;
     if (b.expectedDeliveryDate !== undefined) po.expectedDeliveryDate = b.expectedDeliveryDate ?? null;
     if (b.vatRate !== undefined) po.vatRate = String(b.vatRate);
@@ -729,7 +763,6 @@ function route(method: string, path: string, body?: unknown): unknown {
       if (!line) throw err('VALIDATION_ERROR', `Line ${ld.lineId} is not on purchase order ${po.number}`);
       line.deliveryDate = ld.deliveryDate;
     }
-    if (b.projectNumber) assertProjectOpen(b.projectNumber);
     Object.assign(po, poDetails(b));
     if (po.status === 'APPROVED' && snapshot(po) !== before) po.revision = (po.revision ?? 0) + 1;
     po.history = po.history ?? [];
@@ -1497,19 +1530,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
       throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
     }
   }
-  // As the server (checkIssueProject): project material goes only to its own project.
-  const own = [...new Set(lines.map((l) => l.materialId))].map(findMaterial)
-    .filter((m): m is NonNullable<typeof m> => !!m && m.category === 'PROJECT_MATERIAL' && !!m.projectNumber);
-  const ownProjects = [...new Set(own.map((m) => m.projectNumber))];
-  if (ownProjects.length > 1) {
-    throw err('VALIDATION_ERROR', `One issue can't hold material for two projects (${ownProjects.join(' and ')}). Issue each project's material separately.`);
-  }
-  const wrong = own.find((m) => m.projectNumber !== (b.projectNumber || null));
-  if (wrong) {
-    throw err('VALIDATION_ERROR', b.projectNumber
-      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be issued to project ${b.projectNumber}.`
-      : `${wrong.sku} is material for project ${wrong.projectNumber}: issue it to that project.`);
-  }
+  checkProjectMaterial(b.projectNumber, lines.map((l) => l.materialId), 'issued');
   const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
   for (const l of lines) {
     const key = `${l.materialId}|${l.locationId}`;

@@ -38,7 +38,7 @@ describe('mock: project material with no project (Phase 3)', () => {
     expect(await codeOf(api.post('/inventory-issues', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1 }] }))).toBe('VALIDATION_ERROR');
     expect(await codeOf(api.post('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-9', orderedQty: 1 }] }))).toBe('VALIDATION_ERROR');
     await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
-    expect(await codeOf(api.post('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-9', orderedQty: 1 }] }))).toBeUndefined();
+    expect(await codeOf(api.post('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', orderedQty: 1 }] }))).toBeUndefined();
   });
 });
 
@@ -58,5 +58,27 @@ describe('mock: project material goes only to its own project (Phase 5)', () => 
   it('refuses a completed project, even for Stores items', async () => {
     await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
     expect(await messageOf(issue([{ materialId: 'mat-1' }], 'AFRI-1402'))).toMatch(/Project AFRI-1402 is completed, so no more stock is issued to it/);
+  });
+});
+
+describe('mock: project material is ordered only for its own project (Phase 6)', () => {
+  const messageOf = (p: Promise<unknown>) => p.then(() => undefined, (e: { message?: string }) => e.message);
+  const order = (projectNumber: string | undefined, ...materialIds: string[]) =>
+    api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber, lines: materialIds.map((materialId) => ({ materialId, orderedQty: 1 })) });
+
+  it('refuses it for another project, for none, or with another project\'s material', async () => {
+    await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
+    const other = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402' });
+    expect(await messageOf(order('AFRI-1402', 'mat-9'))).toMatch(/is material for project AFRI-1325, so it can't be ordered for project AFRI-1402/);
+    expect(await messageOf(order(undefined, 'mat-9'))).toMatch(/is material for project AFRI-1325: order it for that project/);
+    expect(await messageOf(order('AFRI-1325', 'mat-9', other.id))).toMatch(/One order can't hold material for two projects/);
+    expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-1'))).toBeUndefined();
+  });
+
+  it('refuses an order for a completed project, and submitting a draft whose project has closed since', async () => {
+    const draft = await order('AFRI-1402', 'mat-1');
+    await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
+    expect(await messageOf(order('AFRI-1402', 'mat-1'))).toMatch(/Project AFRI-1402 is completed, so nothing more is ordered for it/);
+    expect(await messageOf(api.post(`/purchase-orders/${draft.id}/submit`))).toMatch(/is completed/);
   });
 });

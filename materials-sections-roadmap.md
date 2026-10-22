@@ -15,7 +15,7 @@ This roadmap splits the catalogue into a **Stores** section and a **Projects** s
 | 3 | Assign a project to existing Project Material | S | Shipped (#70) |
 | 4 | Stores and Projects stock and reports, apart | M | Shipped (#71, follow-ups #72, #73) |
 | 5 | Issue project material only to its project | S–M | Built (`feature/materials-issue-project`) |
-| 6 | Order project material only for its project | S | To do |
+| 6 | Order project material only for its project | S | Built (`feature/materials-order-project`, on Phase 5) |
 | 7 | Move a closed project's leftovers to Stores | M | Proposed |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.

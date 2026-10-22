@@ -15,7 +15,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { checkIssueProject, refuseUnassigned } from './material-section.js';
+import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -572,7 +572,7 @@ export const InventoryService = {
         refuseUnassigned(material, 'issued');
         materials.set(t.materialId, material);
       }
-      checkIssueProject(input.projectNumber, [...materials.values()]);
+      checkProjectMaterial(input.projectNumber, [...materials.values()], 'issued');
 
       for (const t of totals.values()) {
         const material = materials.get(t.materialId)!;

@@ -43,7 +43,7 @@ const db = {
   balances: new Map<string, BalRow>(),
   audit: [] as AuditRow[],
   settings: new Map<string, SettingRow>(),
-  projects: new Map<string, { projectNumber: string; active: boolean }>(),
+  projects: new Map<string, { projectNumber: string; active: boolean; status?: string }>(),
   users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean }>(),
 };
 let poCounter = 0;
@@ -423,18 +423,77 @@ describe('PurchaseOrderService and project material with no project (materials s
     await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1'))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE has no project yet, so it can't be ordered/) });
     db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: '1369' });
-    expect(await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
+    db.projects.set('1369', { projectNumber: '1369', active: true });
+    expect(await PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber: '1369', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
   });
 
   it('refuses to submit a draft holding such an item, raised before the rule', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     db.materials.set('mat-old', { id: 'mat-old', sku: 'OLD-PLATE', name: 'Plate', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1369' });
-    const draft = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1');
+    db.projects.set('1369', { projectNumber: '1369', active: true });
+    const draft = await PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber: '1369', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1');
     // As a draft from before Phase 3 would be: its item has no project.
     db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: null });
     await expect(PurchaseOrderService.submit(draft.id, 'user-1'))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE has no project yet/) });
     expect(db.pos.get(draft.id)!.status).toBe('DRAFT');
+  });
+});
+
+describe('PurchaseOrderService and project material (materials sections Phase 6)', () => {
+  beforeEach(() => {
+    db.projects.set('1369', { projectNumber: '1369', active: true, status: 'ACTIVE' });
+    db.projects.set('1402', { projectNumber: '1402', active: true, status: 'PLANNING' });
+    db.projects.set('1200', { projectNumber: '1200', active: true, status: 'COMPLETED' });
+    db.materials.set('pipe-1369', { id: 'pipe-1369', sku: '1369-PIPE', name: 'Pipe', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1369' });
+    db.materials.set('pipe-1402', { id: 'pipe-1402', sku: '1402-PIPE', name: 'Pipe', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1402' });
+  });
+  const order = (projectNumber: string | undefined, ...materialIds: string[]) => import('./procurement.service.js').then(({ PurchaseOrderService }) =>
+    PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber, lines: materialIds.map((materialId) => ({ materialId, orderedQty: 1 })) }, 'user-1'));
+
+  it('orders it, with Stores items, for its own project', async () => {
+    expect(await order('1369', 'pipe-1369', 'mat-1')).toMatchObject({ status: 'DRAFT', projectNumber: '1369' });
+  });
+
+  it('refuses it on an order for another project, for none, or with another project\'s material', async () => {
+    await expect(order('1402', 'pipe-1369')).rejects.toMatchObject({ message: "1369-PIPE is material for project 1369, so it can't be ordered for project 1402." });
+    await expect(order(undefined, 'pipe-1369')).rejects.toMatchObject({ message: '1369-PIPE is material for project 1369: order it for that project.' });
+    await expect(order('1369', 'pipe-1369', 'pipe-1402')).rejects.toMatchObject({ message: expect.stringMatching(/One order can't hold material for two projects \(1369 and 1402\)/) });
+    expect(db.pos.size).toBe(0);
+  });
+
+  it('refuses an order for a completed project, even of Stores items', async () => {
+    await expect(order('1200', 'mat-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Project 1200 is completed, so nothing more is ordered for it.' });
+  });
+
+  it('refuses moving an order with project material to another project', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await order('1369', 'pipe-1369');
+    await expect(PurchaseOrderService.update({ id: po.id, projectNumber: '1402' }, 'user-1'))
+      .rejects.toMatchObject({ message: expect.stringMatching(/can't be ordered for project 1402/) });
+    await expect(PurchaseOrderService.update({ id: po.id, projectNumber: null }, 'user-1'))
+      .rejects.toMatchObject({ message: expect.stringMatching(/order it for that project/) });
+  });
+
+  it('still edits an order whose project has closed, if the project is left alone', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await order('1369', 'pipe-1369');
+    db.projects.set('1369', { projectNumber: '1369', active: true, status: 'COMPLETED' });
+    expect(await PurchaseOrderService.update({ id: po.id, projectNumber: '1369', notes: 'Call before delivery' }, 'user-1')).toMatchObject({ notes: 'Call before delivery' });
+  });
+
+  it('refuses to submit a draft whose project has closed, or that breaks the rule from before it', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const closed = await order('1369', 'pipe-1369');
+    db.projects.set('1369', { projectNumber: '1369', active: true, status: 'CANCELLED' });
+    await expect(PurchaseOrderService.submit(closed.id, 'user-1')).rejects.toMatchObject({ message: 'Project 1369 is cancelled, so nothing more is ordered for it.' });
+
+    // As a draft from before Phase 6 could be: a project item on an order with no project.
+    const old = await order(undefined, 'mat-1');
+    const line = [...db.lines.values()].find((l) => l.purchaseOrderId === old.id)!;
+    line.materialId = 'pipe-1402';
+    await expect(PurchaseOrderService.submit(old.id, 'user-1')).rejects.toMatchObject({ message: expect.stringMatching(/1402-PIPE is material for project 1402: order it for that project/) });
+    expect(db.pos.get(old.id)!.status).toBe('DRAFT');
   });
 });
 

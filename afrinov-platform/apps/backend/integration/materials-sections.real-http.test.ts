@@ -16,7 +16,7 @@ describe('Stores and Projects materials over real HTTP', () => {
   let api: ReturnType<typeof client>;
 
   beforeAll(async () => {
-    server = await startServer();
+    server = await startServer({ procurementEnabled: true });
     api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
     expect((await api('POST', '/projects', { projectNumber, name: `Sections project ${run}` })).status).toBe(201);
   });
@@ -106,5 +106,31 @@ describe('Stores and Projects materials over real HTTP', () => {
     const closed = await issue(disc.body.id, other);
     expect(closed.status).toBe(400);
     expect(closed.body.error?.message).toMatch(/is completed, so no more stock is issued to it/);
+  });
+
+  it('orders project material only for its own project, and nothing for a completed project (Phase 6)', async () => {
+    const other = `IT-SEC3-${run}`;
+    expect((await api('POST', '/projects', { projectNumber: other, name: `Third project ${run}` })).status).toBe(201);
+    const pipe = await create({ sku: `IT-SEC-ORD-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
+    const disc = await create({ sku: `IT-SEC-DISC3-${run}`, category: 'CONSUMABLES' });
+    const supplier = await api<{ id: string }>('POST', '/suppliers', { name: `IT sections supplier ${run}` });
+    const order = (materialId: string, to?: string) => api<{ id: string; error?: { message: string } }>('POST', '/purchase-orders', {
+      supplierId: supplier.body.id, projectNumber: to, lines: [{ materialId, orderedQty: 2 }],
+    });
+
+    const wrong = await order(pipe.body.id, other);
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error?.message).toMatch(/is material for project .*, so it can't be ordered for project/);
+    expect((await order(pipe.body.id)).status).toBe(400);
+    expect([200, 201]).toContain((await order(pipe.body.id, projectNumber)).status);
+
+    const draft = await order(disc.body.id, other);
+    expect([200, 201]).toContain(draft.status);
+    expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
+    const closed = await order(disc.body.id, other);
+    expect(closed.status).toBe(400);
+    expect(closed.body.error?.message).toMatch(/is completed, so nothing more is ordered for it/);
+    const submit = await api<{ error?: { message: string } }>('POST', `/purchase-orders/${draft.body.id}/submit`);
+    expect(submit.status).toBe(400);
   });
 });
