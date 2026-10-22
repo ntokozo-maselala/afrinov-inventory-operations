@@ -14,7 +14,7 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 |---|---|---|---|
 | 1 | A location can sit inside another | S–M | In review (#85) |
 | 2 | Show and choose the parent on screen | S–M | In review (#86) |
-| 3 | Move the Rack records onto locations, retire Racks | M | Not started |
+| 3 | Move the Rack records onto locations, retire Racks | M | 3.1 in review |
 | 4 | The import asks which room each rack is in | S | Not started |
 | 5 | Stock by room, racks included | S–M | Not started |
 
@@ -25,7 +25,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 ### Decisions needed
 
 - **Depth:** *Decided: one level* (a rack inside a room), as built in Phase 1. It is all the workbook needs, and reports stay simple.
-- **Rack extras:** a Rack record also has a capacity, a "Full" status and a project. None of them comes from the workbook and nothing uses them. Drop them, or move them onto the location? *Recommended: drop them.*
+- **Rack extras:** *Decided 2026-10-22: drop them.* A Rack record also has a capacity, a "Full" status, a project and notes. None of them comes from the workbook and nothing uses them. The 3.1 report lists every one, and each rack's full record goes to the audit log before it is removed.
 - **Which room:** the storeman says which room each rack is in (racks A to O are presumably in the Stores room). Needed before Phase 4.
 
 ### Order of work
@@ -60,7 +60,7 @@ Size M. Backend and frontend. Needs Phases 1 and 2.
 
 Three pull requests, each safe on its own. Nothing is deleted until the copy has run on every database, and the delete refuses to run if it has not.
 
-- [ ] **3.1 Copy what Rack records know, with a dry run.** A command (`npm run racks:to-locations`), a dry run by default like the vendor list import, that writes a report and changes nothing.
+- [x] **3.1 Copy what Rack records know, with a dry run.** *Built; to be run on every database after Phases 1 and 2 are merged.* A command (`npm run racks:to-locations`), a dry run by default like the vendor list import, that writes a report and changes nothing.
   - **Matching, never a guess.** Each Rack is matched to a location by code first. A name match counts only when exactly one location has that name and the rack's code points to no other location. Anything else (the code and the name point to different locations, or several could fit) is reported as *needs a decision*, and that rack is neither changed nor removed.
   - **The report** lists every rack under one heading: will set the room (from the Rack's location, through the Phase 1 rules, so never inside a rack or an inactive room), already in that room, conflict (the location is already in a different room), needs a decision, no matching location, and the extras that would be dropped (project, capacity, "Full" status, notes).
   - **Settling what it cannot.** The command is the supported way to resolve a rack the match leaves open, and stays so until 3.3, since the Racks page goes in 3.2: `--create <code>` adds the rack as a location of type Rack in its room, and `--discard <code>` removes it. Each takes the rack codes it names, so nothing is created or removed without a person choosing it.
@@ -72,7 +72,7 @@ Three pull requests, each safe on its own. Nothing is deleted until the copy has
 - [ ] **3.3 Drop the Rack table**, in a later migration once 3.1 has run on every database and every rack is settled. The migration first checks that `racks` is empty and **stops with an error** if it is not, so it cannot drop a Rack that was never copied. It drops the `RackStatus` type and deletes the `manage:racks` permission; only now does the location delete check stop counting racks. Update `src/db/migrations.test.ts`, which lists the Rack table and its keys. Back up the database (`pg_dump`) before deploying it.
   Files: new migration, `prisma/schema.prisma`, `location.service.ts`, `src/db/migrations.test.ts`
 
-Before 3.1, decide what the Rack extras become (see Decisions needed): on the local database rack `D-1` carries project AFRI-1325, rack `F-7` has no matching location, and `CHK-8849` looks like test data.
+On the local database the 3.1 dry run gives: rack `D-1` goes inside Main Storeroom (dropping project AFRI-1325, capacity 100 and its description); `F-7` has no matching location and `CHK-8849` looks like test data, so both need a decision (`--create F-7`, `--discard CHK-8849`).
 
 **Done when:** each rack exists once, as a location, and nothing in the app mentions a separate Rack.
 
