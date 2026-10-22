@@ -306,6 +306,8 @@ async function ensureRackRooms(locations: Map<string, string>): Promise<void> {
   if (!roomId || !rackId) return;
   const room = await prisma.location.findUnique({ where: { id: roomId } });
   if (!room || !room.active || room.type === 'RACK' || room.parentId) return;
+  // A location with locations inside it cannot go inside another (one level).
+  if ((await prisma.location.count({ where: { parentId: rackId } })) > 0) return;
   await prisma.location.updateMany({ where: { id: rackId, parentId: null, type: 'RACK' }, data: { parentId: roomId } });
 }
 

@@ -14,8 +14,9 @@ import type {
 export const SEED_LOCATIONS: MockLocation[] = [
   { id: 'loc-1', name: 'Main Storeroom', code: 'WH-MAIN', type: 'STOREROOM', active: true, address: '12 Industrial Rd, Jet Park' },
   { id: 'loc-2', name: 'Boiler Shop', code: 'WS-BOILER', type: 'SHOP_FLOOR_AREA', active: true, address: 'Workshop A', contactPerson: 'Workshop Foreman', contactPhone: '+27 11 555 0210' },
-  { id: 'loc-3', name: 'D-1', code: 'RACK-D1', type: 'RACK', active: true, description: 'Project rack for AFRI-1325' },
-  { id: 'loc-4', name: 'F-7', code: 'RACK-F7', type: 'RACK', active: true },
+  // The demo racks stand in Main Storeroom, as racks to locations records them.
+  { id: 'loc-3', name: 'D-1', code: 'RACK-D1', type: 'RACK', active: true, parentId: 'loc-1', description: 'Project rack for AFRI-1325' },
+  { id: 'loc-4', name: 'F-7', code: 'RACK-F7', type: 'RACK', active: true, parentId: 'loc-1' },
   { id: 'loc-5', name: 'Off-site Container', code: 'OFF-CTN', type: 'OFF_SITE', active: false, notes: 'Decommissioned Q1 2026' },
 ];
 
