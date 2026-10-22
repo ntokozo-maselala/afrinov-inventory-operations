@@ -146,21 +146,24 @@ async function ensureRoles(): Promise<void> {
 
 async function ensureAdminUser(): Promise<string> {
   const adminEmail = 'admin@afrinov.local';
+  // The bootstrap password is NEVER hardcoded in source. It is supplied via the
+  // SEED_ADMIN_PASSWORD environment variable. Empty and whitespace-only values
+  // are treated as missing. In production a value is mandatory;
+  // in dev/test a strong random password is generated so no secret is committed
+  // and the seed still runs out of the box. Operators MUST rotate the password
+  // after first login.
+  const isProd = process.env.NODE_ENV === 'production';
+  const configuredAdminPassword = process.env.SEED_ADMIN_PASSWORD;
+  const adminPassword = configuredAdminPassword?.trim() ? configuredAdminPassword : undefined;
+  if (isProd && !adminPassword) {
+    throw new Error('SEED_ADMIN_PASSWORD must be set when seeding in production');
+  }
+
   const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
   if (existing) return existing.id;
   const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
   if (!adminRole) throw new Error('ADMIN role missing — seed ordering bug');
 
-  // The bootstrap password is NEVER hardcoded in source. It is supplied via the
-  // SEED_ADMIN_PASSWORD environment variable. In production a value is mandatory;
-  // in dev/test a strong random password is generated so no secret is committed
-  // and the seed still runs out of the box. Operators MUST rotate the password
-  // after first login.
-  const isProd = process.env.NODE_ENV === 'production';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  if (isProd && !adminPassword) {
-    throw new Error('SEED_ADMIN_PASSWORD must be set when seeding in production');
-  }
   const passwordToHash = adminPassword ?? randomBytes(24).toString('base64url');
   const hash = await bcrypt.hash(passwordToHash, 12);
   const created = await prisma.user.create({

@@ -4,7 +4,7 @@ import { AuthService } from './identity.service.js';
 
 export const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(1),
+  password: z.string().min(1).regex(/[^\0]/),
 });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {

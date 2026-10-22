@@ -59,8 +59,9 @@ npm run dev:frontend          # http://localhost:5173
 ```
 
 The seed creates `admin@afrinov.local` with the password you set in
-`SEED_ADMIN_PASSWORD`. Without it the seed generates a random password and
-does not print it.
+`SEED_ADMIN_PASSWORD`. An unset, empty, or whitespace-only value makes the seed
+generate a random password and not print it; production seeding rejects those
+values.
 
 ### Frontend-only (no backend, no DB)
 

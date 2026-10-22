@@ -11,7 +11,7 @@ async function main() {
   // hardcoded. Mirrors the value the seed uses to create the admin account.
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@afrinov.local';
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  if (!adminPassword) {
+  if (!adminPassword?.trim()) {
     console.error('SEED_ADMIN_PASSWORD is required for the diagnostic login tool.');
     process.exit(2);
   }
