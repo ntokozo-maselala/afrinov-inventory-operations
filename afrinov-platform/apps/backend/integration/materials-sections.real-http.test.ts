@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, client, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 
-interface MaterialRow { id: string; sku: string; section: string; projectNumber: string | null; project: { projectNumber: string } | null; requiredStock: string }
+interface MaterialRow { id: string; sku: string; section: string; projectNumber: string | null; project: { projectNumber: string; status?: string } | null; requiredStock: string }
 
 describe('Stores and Projects materials over real HTTP', () => {
   const run = runId();
@@ -30,13 +30,16 @@ describe('Stores and Projects materials over real HTTP', () => {
   it('keeps a Projects material with its project, and lists it by section and project', async () => {
     const res = await create({ sku: `IT-SEC-PIPE-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ section: 'PROJECTS', projectNumber, project: { projectNumber } });
+    // With the project's status: the order form and the item page use it to leave out a closed project's material.
+    expect(res.body).toMatchObject({ section: 'PROJECTS', projectNumber, project: { projectNumber, status: 'PLANNING' } });
+    expect((await api<MaterialRow>('GET', `/materials/${res.body.id}`)).body).toMatchObject({ project: { projectNumber, status: 'PLANNING' } });
 
     const stores = await create({ sku: `IT-SEC-DISC-${run}`, category: 'CONSUMABLES', requiredStock: 10 });
     expect(stores.body).toMatchObject({ section: 'STORES', projectNumber: null });
 
     const forProject = await api<MaterialRow[]>('GET', `/materials?section=PROJECTS&projectNumber=${projectNumber}`);
     expect(forProject.body.map((m) => m.sku)).toEqual([`IT-SEC-PIPE-${run}`]);
+    expect(forProject.body[0]).toMatchObject({ project: { projectNumber, status: 'PLANNING' } });
     const storesList = await api<MaterialRow[]>('GET', '/materials?section=STORES');
     expect(storesList.body.map((m) => m.sku)).toContain(`IT-SEC-DISC-${run}`);
     expect(storesList.body.map((m) => m.sku)).not.toContain(`IT-SEC-PIPE-${run}`);
