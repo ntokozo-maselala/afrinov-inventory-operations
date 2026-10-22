@@ -21,6 +21,7 @@ import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockRec
 import { toolCheckInSchema, toolCheckOutSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
+  moveLeftoversSchema,
   updateMaterialSchema,
   createLocationSchema,
   updateLocationSchema,
@@ -390,6 +391,16 @@ export const OPERATIONS: Operation[] = [
     method: 'delete', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Archive a project',
     description: 'Archives rather than deletes, and returns the archived project.',
     permissions: [P.ManageProjects], errors: [404],
+  },
+  {
+    method: 'get', path: '/projects/:projectNumber/leftovers', tag: 'Projects', summary: 'List the project material still in stock',
+    description: 'Once the project is completed or cancelled (closed: true), these are its leftovers to move to Stores.',
+    errors: [404],
+  },
+  {
+    method: 'post', path: '/projects/:projectNumber/leftovers/move', tag: 'Projects', summary: 'Move the leftovers of a closed project to Stores',
+    description: 'All or none. Each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no project and no Required Stock.',
+    permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
 
   // Recipients ("Issued To")

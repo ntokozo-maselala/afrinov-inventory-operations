@@ -82,3 +82,23 @@ describe('mock: project material is ordered only for its own project (Phase 6)',
     expect(await messageOf(api.post(`/purchase-orders/${draft.id}/submit`))).toMatch(/is completed/);
   });
 });
+
+describe('mock: a closed project\'s leftovers move to Stores (Phase 7)', () => {
+  const messageOf = (p: Promise<unknown>) => p.then(() => undefined, (e: { message?: string }) => e.message);
+
+  it('lists them, refuses to move them while the project is open, then makes them Stores items', async () => {
+    const pipe = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402', unitCost: 50 });
+    await api.post('/inventory-adjustments', { materialId: pipe.id, locationId: 'loc-1', quantity: 4, reasonCode: 'OTHER' });
+    const move = () => api.post<{ moved: number }>('/projects/AFRI-1402/leftovers/move', { items: [{ materialId: pipe.id, category: 'CONSUMABLES' }] });
+
+    expect(await messageOf(move())).toMatch(/Project AFRI-1402 is still open/);
+    await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
+    const listed = await api.get<{ project: { closed: boolean }; items: Array<{ sku: string; onHand: string; value: number | null }> }>('/projects/AFRI-1402/leftovers');
+    expect(listed.project.closed).toBe(true);
+    expect(listed.items).toEqual([expect.objectContaining({ sku: 'AFRI-1402-PIPE', onHand: '4', value: 200 })]);
+
+    expect(await move()).toEqual({ moved: 1 });
+    expect(await api.get<Material>(`/materials/${pipe.id}`)).toMatchObject({ section: 'STORES', category: 'CONSUMABLES', projectNumber: null });
+    expect((await api.get<{ items: unknown[] }>('/projects/AFRI-1402/leftovers')).items).toEqual([]);
+  });
+});

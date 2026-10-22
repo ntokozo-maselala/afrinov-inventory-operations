@@ -1087,6 +1087,31 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   // Projects
+  // As the server (project-leftovers.service.ts): a project's material still in
+  // stock, and, once it is completed or cancelled, moving it to Stores.
+  const leftoversPath = /^\/projects\/([^/]+)\/leftovers(\/move)?$/.exec(p);
+  if (leftoversPath) {
+    const projectNumber = decodeURIComponent(leftoversPath[1]!);
+    const project = state.projects.find((x) => x.projectNumber === projectNumber);
+    if (!project) throw err('NOT_FOUND', 'Project not found');
+    const closed = project.status === 'COMPLETED' || project.status === 'CANCELLED';
+    if (method === 'GET' && !leftoversPath[2]) return mockLeftovers(project, closed);
+    if (method === 'POST' && leftoversPath[2]) {
+      const items = (body as { items?: Array<{ materialId: string; category: string }> })?.items ?? [];
+      if (items.length === 0) throw err('VALIDATION_ERROR', 'Choose at least one item to move to Stores');
+      if (!closed) throw err('VALIDATION_ERROR', `Project ${projectNumber} is still open, so its material stays with it. Leftovers move to Stores once it is completed or cancelled.`);
+      for (const item of items) {
+        const m = findMaterial(item.materialId);
+        if (!m) throw err('NOT_FOUND', 'Material not found');
+        if (m.category !== 'PROJECT_MATERIAL' || m.projectNumber !== projectNumber) {
+          throw err('VALIDATION_ERROR', `${m.sku} is not material of project ${projectNumber}, so it isn't moved from it.`);
+        }
+        if (!['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
+      }
+      for (const item of items) Object.assign(findMaterial(item.materialId)!, { category: item.category, projectNumber: null, requiredStock: '0' });
+      return { moved: items.length };
+    }
+  }
   if (method === 'GET' && p === '/projects') {
     const q = qs.q?.toLowerCase();
     let list = [...state.projects];
@@ -1896,6 +1921,24 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
     after: { locationId: b.locationId, counted: lines.length, adjusted, note: note ?? null }, createdAt: new Date().toISOString(), actorId: 'user-1',
   });
   return { countId, counted: lines.length, adjusted, lines: results };
+}
+
+function mockLeftovers(project: MockProject, closed: boolean) {
+  const balances = computeBalances().filter((b) => b.quantity > 0);
+  const items = state.materials
+    .filter((m) => m.category === 'PROJECT_MATERIAL' && m.projectNumber === project.projectNumber)
+    .sort((a, b) => a.sku.localeCompare(b.sku))
+    .flatMap((m) => {
+      const held = balances.filter((b) => b.materialId === m.id);
+      if (held.length === 0) return [];
+      const onHand = held.reduce((sum, b) => sum + b.quantity, 0);
+      return [{
+        materialId: m.id, sku: m.sku, name: m.name, unitOfMeasure: m.unitOfMeasure, onHand: String(onHand),
+        value: m.unitCost ? Math.round(onHand * Number(m.unitCost) * 100) / 100 : null,
+        locations: held.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity})`).join(', '),
+      }];
+    });
+  return { project: { projectNumber: project.projectNumber, name: project.name ?? null, status: project.status, closed }, items };
 }
 
 function getBalance(materialId: string, locationId: string): number {

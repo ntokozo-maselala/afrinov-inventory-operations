@@ -25,6 +25,7 @@ import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 import { STORES_CATEGORIES, categoryLabel, needsProject, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
+import { LeftoversNotice } from '../components/LeftoversNotice';
 
 const hasPrice = (m: Material) => m.unitCost !== null && m.unitCost !== undefined && m.unitCost !== '';
 
@@ -164,6 +165,8 @@ export function Materials() {
       {section === 'PROJECTS' && canManage && needingProject.length > 0 && (
         <NeedsProjectPanel items={needingProject} onAssigned={mats.reload} />
       )}
+
+      {section === 'PROJECTS' && <LeftoversNotice projectNumber={project || undefined} className="mb-4" />}
 
       <FilterBar
         onClear={filtering ? () => { setQ(''); setCategory(''); setParams((p) => { const next = new URLSearchParams(p); next.delete('view'); next.delete('project'); return next; }, { replace: true }); } : undefined}

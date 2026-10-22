@@ -16,7 +16,7 @@ This roadmap splits the catalogue into a **Stores** section and a **Projects** s
 | 4 | Stores and Projects stock and reports, apart | M | Shipped (#71, follow-ups #72, #73) |
 | 5 | Issue project material only to its project | S–M | Built (`feature/materials-issue-project`) |
 | 6 | Order project material only for its project | S | Built (`feature/materials-order-project`, on Phase 5) |
-| 7 | Move a closed project's leftovers to Stores | M | Proposed |
+| 7 | Move a closed project's leftovers to Stores | M | Built (`feature/materials-leftovers-to-stores`, on Phase 6) |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
@@ -27,13 +27,13 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 - **How Projects material differs:** no Required Stock and never on the re-order list, though it is still bought on a purchase order for its own project (Phase 6); its own stock view and reports; issued only to its own project.
 - **A level above the categories.** Stores holds today's categories (Consumables; Fasteners, Slugs & Insulation; Tooling, PPE & Electrical; Tools). Projects takes the place of the "Project Material" category.
 - **Existing Project Material:** listed for a user to assign each item to its project.
-- **When a project closes** (Completed or Cancelled), its leftover stock **moves to Stores** and becomes Stores material (corrected on 21 October 2026; the first answer was "stays with the project", and Phase 4 was built on that). Nothing moves on its own: a person gives each item its Stores category, when closing the project or afterwards (an open choice in Phase 7).
+- **When a project closes** (Completed or Cancelled), its leftover stock **moves to Stores** and becomes Stores material (corrected on 21 October 2026; the first answer was "stays with the project", and Phase 4 was built on that). Nothing moves on its own: closing a project flags its leftovers, and someone moves them later, giving each item its own Stores category. The item itself becomes a Stores item (decided 22 October 2026).
 
 ## How to run this
 
 ### Order of work
 
-One branch and pull request per phase, each on top of the one before. Phase 1 comes first: every other phase reads the new fields. Phases 4, 5 and 6 don't depend on each other once Phases 1 to 3 are in. Phase 7 comes after Phases 5 and 6, which stop a closed project's stock being issued or ordered before it moves, and its open choices are settled before it starts.
+One branch and pull request per phase, each on top of the one before. Phase 1 comes first: every other phase reads the new fields. Phases 4, 5 and 6 don't depend on each other once Phases 1 to 3 are in. Phase 7 comes after Phases 5 and 6, which stop a closed project's stock being issued or ordered before it moves.
 
 ### Rule of thumb
 
@@ -126,19 +126,19 @@ Size S. Backend and frontend.
 
 ## Phase 7: Move a closed project's leftovers to Stores
 
-Size M. Backend and frontend. **Proposed**: the open choices below need settling before it's built.
+Size M. Backend and frontend.
 
 - [ ] **7.1 Leftovers are flagged.** A completed or cancelled project that still holds stock shows "N items to move to Stores" on Projects, on the Stock page's Projects view and on its materials list. (Phases 5 and 6 already stop them being issued or ordered meanwhile.)
   Files: `pages/Projects.tsx`, `pages/Stock.tsx`, `reporting.service.ts`
-- [ ] **7.2 Move to Stores.** One screen lists the project's leftover items, with their quantity and value. Each is given a Stores category, and all move at once. A moved item keeps its SKU, stock, locations, cost and history; it loses its project, and its Required Stock starts at 0 until someone sets it. Each move is written to the audit log, naming the project.
+- [ ] **7.2 Move to Stores.** One screen lists the project's leftover items, with their quantity, where they are and their value. Each is given a Stores category (not Tools: a tool is lent one by one), and those given one move together; the rest stay listed. A moved item keeps its SKU, stock, locations, cost and history. It loses its project, and its Required Stock is 0 until someone sets it. Each move is written to the audit log, naming the project.
   Files: `material-section.ts`, `material.service.ts`, a new route, `pages/ProjectLeftovers.tsx`
 - [ ] **7.3 Reports follow.** Once moved, the stock counts under Stores in stock value, stock status and reports; the project's stock is gone. The month-end note "Completed and cancelled projects keep their leftovers" is replaced by the count still to move.
   Files: `reporting.service.ts`, `pages/MonthEnd.tsx`, `month-end-export.ts`
 
-**Open choices:**
-- **Same item or a new one?** Proposed: the item itself becomes Stores, keeping its SKU and history. Alternative: its stock is moved into an existing Stores item, for when the shelf already has the same thing.
-- **When?** Proposed: closing a project doesn't move anything by itself; the leftovers are flagged until someone moves them. Alternative: closing the project asks for the categories and moves them there and then.
-- **Which category?** Proposed: chosen per item when moving. Alternative: one category for all of a project's leftovers.
+**Decided (22 October 2026):**
+- **Same item.** The item itself becomes a Stores item, keeping its SKU and history.
+- **Flagged, moved later.** Closing a project moves nothing by itself; its leftovers are flagged until someone moves them.
+- **Category per item,** chosen when moving.
 
 **Done when:**
 - Job 1369 is marked Completed with pipe left over; the pipe is moved to Stores under a category, and is then issued to job 1402 from Stores.

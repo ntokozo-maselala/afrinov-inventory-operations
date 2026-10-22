@@ -25,6 +25,13 @@ export function lastMonth(today = new Date()): { from: string; to: string } {
 
 /** Show the chosen period's category overview and export action; the dates live in the address, as on Movements. */
 /** A project's status as the by-project table shows it. */
+/** How many closed projects still held stock: a completed or cancelled project's leftovers move to Stores. */
+function leftoverNote(projects: Array<{ projectNumber: string | null; status: string | null; itemsInStock: number }>): string {
+  const waiting = projects.filter((p) => p.projectNumber && (p.status === 'COMPLETED' || p.status === 'CANCELLED') && p.itemsInStock > 0).length;
+  if (waiting === 0) return "A completed or cancelled project's leftovers move to Stores.";
+  return `${waiting} completed or cancelled project${waiting === 1 ? ' still holds' : 's still hold'} leftovers, to move to Stores.`;
+}
+
 const PROJECT_STATUS: Record<string, string> = {
   PLANNING: 'planning', ACTIVE: 'active', ON_HOLD: 'on hold', COMPLETED: 'completed', CANCELLED: 'cancelled',
 };
@@ -126,7 +133,7 @@ export function MonthEnd() {
       {r && (r.projects ?? []).length > 0 && (
         <section aria-labelledby="month-end-projects" className="surface-card overflow-x-auto mt-4">
           <h2 id="month-end-projects" className="text-h3 text-surface-900 px-4 pt-3">Project material by project</h2>
-          <p className="text-meta px-4">At the end of the period. Completed and cancelled projects keep their leftovers.</p>
+          <p className="text-meta px-4">At the end of the period. {leftoverNote(r.projects!)}</p>
           <table className="table">
             <thead>
               <tr>
