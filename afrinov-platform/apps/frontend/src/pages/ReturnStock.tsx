@@ -18,8 +18,9 @@ import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import type { ReturnableLine } from '../api/types';
+import { locationLabel } from '../lib/locations';
 
-interface Location { id: string; name: string; active: boolean }
+interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 
 /** The typed quantity, or null when blank; NaN when it is not a usable number. */
 function parseQty(text: string | undefined): number | null {
@@ -203,7 +204,7 @@ export function ReturnStock() {
                                 disabled={locations.loading}
                               >
                                 <option value="">— choose —</option>
-                                {activeLocations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}{loc.id === l.locationId ? ' (issued from)' : ''}</option>)}
+                                {activeLocations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}{loc.id === l.locationId ? ' (issued from)' : ''}</option>)}
                               </Select>
                             </td>
                           </tr>

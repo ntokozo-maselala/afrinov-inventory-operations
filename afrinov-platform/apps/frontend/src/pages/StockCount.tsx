@@ -20,8 +20,9 @@ import { api, type ApiError } from '../api/client';
 import type { CountRecord, CurrentStockRow, Material } from '../api/types';
 import { formatDateTime } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
+import { locationLabel } from '../lib/locations';
 
-interface Location { id: string; name: string; active: boolean }
+interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
 interface Draft { counts: Record<string, string>; notes: Record<string, string>; extra: string[]; note: string }
 
@@ -209,7 +210,7 @@ export function StockCount() {
             <Field label="Location" htmlFor="count-location" required>
               <Select id="count-location" value={locationId} onChange={(e) => chooseLocation(e.target.value)} disabled={locations.loading}>
                 <option value="">{locations.loading ? 'Loading…' : '— choose a location —'}</option>
-                {activeLocations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                {activeLocations.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
               </Select>
             </Field>
             {locationId && (

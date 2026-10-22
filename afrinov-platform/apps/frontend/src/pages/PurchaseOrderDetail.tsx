@@ -86,7 +86,7 @@ interface HistoryEntry {
   createdAt: string;
 }
 
-interface LocationOpt { id: string; name: string }
+interface LocationOpt { id: string; name: string; parent?: { name: string } | null }
 
 interface ReasonDraft { reason: string }
 

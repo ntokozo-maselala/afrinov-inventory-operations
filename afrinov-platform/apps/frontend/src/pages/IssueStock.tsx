@@ -18,6 +18,7 @@ import { api, type ApiError } from '../api/client';
 import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
 import { needsProject, sectionOf } from '../lib/categories';
+import { useLocationLabel } from '../hooks/useLocationLabel';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -43,6 +44,7 @@ export function IssueStock() {
   // The issue just posted, kept on the page (a toast fades) with a way to its slip.
   const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
+  const locationName = useLocationLabel();
 
   // Only items with stock can be issued, and tools are lent on the Tools page
   // instead. A closed project's material waits to move to Stores.
@@ -63,9 +65,9 @@ export function IssueStock() {
     .filter((r) => sectionOf(r.category) === 'STORES' || !issueProject || r.projectNumber === issueProject)
     .map((r) => ({
       value: stockKey(r),
-      label: `${r.materialName} (${r.materialSku}) · ${r.locationName}`,
+      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}`,
       detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
-    })), [available, issueProject]);
+    })), [available, issueProject, locationName]);
   const projectOptions = useMemo(() => {
     const open = projects.filter((p) => !isClosed(p.status));
     const locked = lockedBy?.projectNumber;
@@ -182,7 +184,7 @@ export function IssueStock() {
               const over = overIssued.has(l.stockKey);
               return (
                 <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_auto] gap-2 items-start">
-                  <Field label={`Item ${i + 1}`} htmlFor={`issue-item-${l.key}`} help={row ? `On hand at ${row.locationName}: ${row.quantity} ${row.unitOfMeasure}` : undefined}>
+                  <Field label={`Item ${i + 1}`} htmlFor={`issue-item-${l.key}`} help={row ? `On hand at ${locationName(row.locationId, row.locationName)}: ${row.quantity} ${row.unitOfMeasure}` : undefined}>
                     <SearchSelect
                       id={`issue-item-${l.key}`}
                       value={l.stockKey}
