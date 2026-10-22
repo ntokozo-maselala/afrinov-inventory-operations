@@ -10,8 +10,7 @@
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, prisma, runId } from './helpers.js';
-import { planRackCopy } from '../src/modules/migration/rack-copy.js';
-import { applyRackPlan } from '../src/modules/migration/rack-copy-apply.js';
+import { applyRackPlan, readAndPlanRacks } from '../src/modules/migration/rack-copy-apply.js';
 
 describe('racks to locations against a real database', () => {
   const run = runId();
@@ -22,13 +21,10 @@ describe('racks to locations against a real database', () => {
   const rackIds: string[] = [];
   const createdLocationIds: string[] = [];
 
-  /** Plans over this file's racks only, as they stand in the transaction, under the location-tree lock. */
+  /** Plans over this file's racks only, as the script does: under the location-tree lock, with their rows locked. */
   async function applyOwn(decisions: { create?: string[]; discard?: string[] }) {
     return prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:location-tree'))`;
-      const racks = await tx.rack.findMany({ where: { id: { in: rackIds } } });
-      const locations = await tx.location.findMany({ select: { id: true, name: true, code: true, type: true, active: true, parentId: true } });
-      const plan = planRackCopy(racks, locations, decisions);
+      const plan = await readAndPlanRacks(tx, decisions, { lock: true, rackIds });
       return { plan, handled: await applyRackPlan(tx, plan, actorId) };
     });
   }

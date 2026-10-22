@@ -43,7 +43,7 @@ export type RackOutcome =
   /** Nothing to copy (already in that room, or the rack names no room); the rack goes. */
   | { kind: 'nothing-to-copy'; location: LocationRow; room: LocationRow | null }
   /** --create: a new location of type Rack, in the rack's room if it can hold one; the rack goes. */
-  | { kind: 'create'; name: string; room: LocationRow | null; roomProblem: string | null }
+  | { kind: 'create'; name: string; room: LocationRow | null }
   /** --discard: the rack goes, copying nothing. */
   | { kind: 'discard' }
   /** Left as it is, for a person to decide. */
@@ -105,35 +105,53 @@ export function roomProblem(room: LocationRow, location: LocationRow | null, loc
   return null;
 }
 
+/**
+ * The racks named by --create or --discard, each code to exactly one rack:
+ * the rack with that exact code, else the one rack matching it ignoring case
+ * and spacing. A code matching several racks (D-1 and d-1) or none is an
+ * error, so one decision never reaches more than the rack it names.
+ */
+function resolveCodes(codes: string[] | undefined, racks: RackRow[], flag: string, errors: string[]): Set<string> {
+  const ids = new Set<string>();
+  for (const c of codes ?? []) {
+    const exact = racks.filter((r) => r.code.trim() === c.trim());
+    const loose = exact.length ? exact : racks.filter((r) => norm(r.code) === norm(c));
+    if (loose.length === 1) ids.add(loose[0]!.id);
+    else if (loose.length > 1) errors.push(`${flag} ${c} matches ${loose.length} racks (${loose.map((r) => r.code).join(', ')}); give the exact code`);
+    else errors.push(`no rack has the code ${c}`);
+  }
+  return ids;
+}
+
 export function planRackCopy(
   racks: RackRow[],
   locations: LocationRow[],
   decisions: { create?: string[]; discard?: string[] } = {},
 ): RackPlan {
   const byId = new Map(locations.map((l) => [l.id, l]));
-  const wanted = (list: string[] | undefined) => new Set((list ?? []).map(norm));
-  const create = wanted(decisions.create);
-  const discard = wanted(decisions.discard);
   const errors: string[] = [];
-  for (const c of create) if (discard.has(c)) errors.push(`${c} is given to both --create and --discard`);
-  const known = new Set(racks.map((r) => norm(r.code)));
-  for (const c of [...create, ...discard]) if (!known.has(c)) errors.push(`no rack has the code ${c}`);
+  const create = resolveCodes(decisions.create, racks, '--create', errors);
+  const discard = resolveCodes(decisions.discard, racks, '--discard', errors);
+  for (const id of create) {
+    if (discard.has(id)) errors.push(`${racks.find((r) => r.id === id)!.code} is given to both --create and --discard`);
+  }
 
   const items = racks.map((rack): RackPlanItem => {
     const dropped = droppedFields(rack);
-    const code = norm(rack.code);
-    if (discard.has(code)) return { rack, outcome: { kind: 'discard' }, dropped };
+    if (discard.has(rack.id)) return { rack, outcome: { kind: 'discard' }, dropped };
     // The rack's room as the Rack record has it. A missing room record counts as none.
     const room = rack.locationId ? byId.get(rack.locationId) ?? null : null;
     const match = matchRack(rack, locations);
 
-    if (create.has(code)) {
+    if (create.has(rack.id)) {
       if (!('none' in match)) {
         errors.push(`${rack.code} already matches a location, so --create does not apply; leave it out, or --discard it`);
         return { rack, outcome: { kind: 'needs-decision', reason: 'given to --create but it already matches a location' }, dropped };
       }
+      // A room that cannot hold it is not dropped silently: the rack waits until the room is fixed, or is discarded.
       const problem = room ? roomProblem(room, null, locations) : null;
-      return { rack, outcome: { kind: 'create', name: rack.code.trim(), room: problem ? null : room, roomProblem: problem }, dropped };
+      if (problem) return { rack, outcome: { kind: 'needs-decision', reason: `cannot add it in its room: ${problem}; fix the room, or --discard it` }, dropped };
+      return { rack, outcome: { kind: 'create', name: rack.code.trim(), room }, dropped };
     }
 
     if ('ambiguous' in match) return { rack, outcome: { kind: 'needs-decision', reason: `no single match: ${match.ambiguous}` }, dropped };
@@ -144,7 +162,12 @@ export function planRackCopy(
       return { rack, outcome: { kind: 'needs-decision', reason: `it matches ${location.name}, which is not a rack (${location.type})`, location }, dropped };
     }
     if (!room) return { rack, outcome: { kind: 'nothing-to-copy', location, room: null }, dropped };
-    if (location.parentId === room.id) return { rack, outcome: { kind: 'nothing-to-copy', location, room }, dropped };
+    if (location.parentId === room.id) {
+      // Already copied, but the room must still hold it by the location rules (it may have been deactivated since).
+      const problem = roomProblem(room, location, locations);
+      if (problem) return { rack, outcome: { kind: 'needs-decision', reason: `${location.name} is inside its room, but ${problem}`, location }, dropped };
+      return { rack, outcome: { kind: 'nothing-to-copy', location, room }, dropped };
+    }
     if (location.parentId) {
       const current = byId.get(location.parentId);
       return { rack, outcome: { kind: 'needs-decision', reason: `${location.name} is already inside ${current?.name ?? 'another location'}, not ${room.name}`, location }, dropped };
@@ -192,7 +215,7 @@ function line(i: RackPlanItem): string {
   if (o.kind === 'create') {
     what = o.room
       ? `new location ${o.name} (Rack) inside ${o.room.name}`
-      : `new location ${o.name} (Rack)${o.roomProblem ? `, in no room: ${o.roomProblem}` : ''}`;
+      : `new location ${o.name} (Rack); the rack names no room`;
   }
   if (o.kind === 'discard') what = 'removed, nothing copied';
   if (o.kind === 'needs-decision') what = o.reason;

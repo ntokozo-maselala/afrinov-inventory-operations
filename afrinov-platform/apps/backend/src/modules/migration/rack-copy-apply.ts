@@ -4,7 +4,36 @@
 // the rack. Only the racks in the plan are touched, and the caller holds the
 // afrinov:location-tree lock and planned from what the transaction sees.
 import type { Prisma } from '@prisma/client';
-import { removedRacks, type RackPlan } from './rack-copy.js';
+import { planRackCopy, removedRacks, type RackPlan } from './rack-copy.js';
+
+/**
+ * Reads the racks and locations and plans, inside the caller's transaction.
+ * When applying (`lock`), it first takes the afrinov:location-tree lock (as
+ * location edits do) and locks the Rack rows (SELECT … FOR UPDATE), so a rack
+ * edited on the Racks page either lands before this reads it or waits until
+ * the transaction ends: what is copied is never an older room than the one
+ * removed. `rackIds` limits it to those racks (the integration tests' own).
+ */
+export async function readAndPlanRacks(
+  tx: Prisma.TransactionClient,
+  decisions: { create?: string[]; discard?: string[] },
+  opts: { lock: boolean; rackIds?: string[] },
+): Promise<RackPlan> {
+  if (opts.lock) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:location-tree'))`;
+    if (opts.rackIds) await tx.$queryRaw`SELECT id FROM racks WHERE id = ANY(${opts.rackIds}) FOR UPDATE`;
+    else await tx.$queryRaw`SELECT id FROM racks FOR UPDATE`;
+  }
+  const [racks, locations] = await Promise.all([
+    tx.rack.findMany({
+      where: opts.rackIds ? { id: { in: opts.rackIds } } : undefined,
+      select: { id: true, code: true, name: true, description: true, locationId: true, projectNumber: true, capacity: true, status: true, notes: true },
+      orderBy: { code: 'asc' },
+    }),
+    tx.location.findMany({ select: { id: true, name: true, code: true, type: true, active: true, parentId: true } }),
+  ]);
+  return planRackCopy(racks, locations, decisions);
+}
 
 export async function applyRackPlan(tx: Prisma.TransactionClient, plan: RackPlan, actorId: string): Promise<number> {
   if (plan.errors.length) throw new Error(`The plan cannot be applied: ${plan.errors.join('; ')}`);

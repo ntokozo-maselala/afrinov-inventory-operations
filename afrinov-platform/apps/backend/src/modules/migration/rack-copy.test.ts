@@ -71,6 +71,12 @@ describe('planRackCopy: the room, by the location rules', () => {
     expect(removedRacks(plan)).toHaveLength(2);
   });
 
+  it('leaves a location already in its room when that room can no longer hold it', () => {
+    const closed = loc('store', 'Main Storeroom', { type: 'STOREROOM', active: false });
+    const plan = planRackCopy([rack('D-1', { locationId: 'store' })], [closed, loc('d1', 'D-1', { parentId: 'store', active: false })]);
+    expect(kind(plan, 'D-1')).toMatchObject({ kind: 'needs-decision', reason: 'D-1 is inside its room, but its room Main Storeroom is inactive' });
+  });
+
   it('leaves a location already inside a different room', () => {
     const plan = planRackCopy([rack('D-1', { locationId: 'store' })], [store, loc('up', 'Upstairs', { type: 'STOREROOM' }), loc('d1', 'D-1', { parentId: 'up' })]);
     expect(kind(plan, 'D-1')).toMatchObject({ kind: 'needs-decision', reason: 'D-1 is already inside Upstairs, not Main Storeroom' });
@@ -94,16 +100,30 @@ describe('planRackCopy: decisions given by code', () => {
     expect(plan.errors).toEqual([]);
   });
 
-  it('adds it in no room, saying why, when its room cannot hold it', () => {
+  it('leaves --create for a decision when its room cannot hold it, rather than dropping the room', () => {
     const plan = planRackCopy([rack('F-7', { locationId: 'store' })], [loc('store', 'Main Storeroom', { type: 'STOREROOM', active: false })], { create: ['F-7'] });
-    expect(kind(plan, 'F-7')).toMatchObject({ kind: 'create', room: null, roomProblem: expect.stringContaining('inactive') });
+    expect(kind(plan, 'F-7')).toMatchObject({ kind: 'needs-decision', reason: expect.stringContaining('cannot add it in its room: its room Main Storeroom is inactive') });
+    expect(removedRacks(plan)).toHaveLength(0);
+  });
+
+  it('lets one decision reach only the rack it names, refusing a code that fits several', () => {
+    const racks = [rack('D-1'), rack('d-1', { id: 'r-lower' }), rack('E-3')];
+    // The exact code picks one rack, even when another differs only in case.
+    const exact = planRackCopy(racks, [], { discard: ['D-1'] });
+    expect(exact.errors).toEqual([]);
+    expect(exact.items.filter((i) => i.outcome.kind === 'discard').map((i) => i.rack.code)).toEqual(['D-1']);
+    // A code that fits two racks only loosely (D-1 and "D-1 ") is refused, so nothing is applied.
+    const both = planRackCopy([rack('D-1'), rack('D-1 ', { id: 'r-space' })], [], { discard: ['d-1'] });
+    expect(both.errors).toEqual([expect.stringContaining('--discard d-1 matches 2 racks')]);
+    // Ignoring case still finds a single rack.
+    expect(planRackCopy(racks, [], { discard: ['e-3'] }).items.find((i) => i.rack.code === 'E-3')!.outcome.kind).toBe('discard');
   });
 
   it('refuses codes it cannot act on, so nothing is applied', () => {
     const plan = planRackCopy([rack('D-1')], [loc('d1', 'D-1')], { create: ['D-1', 'Z-0'], discard: ['D-1'] });
     expect(plan.errors).toEqual(expect.arrayContaining([
       expect.stringContaining('both --create and --discard'),
-      expect.stringContaining('no rack has the code z-0'),
+      expect.stringContaining('no rack has the code Z-0'),
     ]));
   });
 

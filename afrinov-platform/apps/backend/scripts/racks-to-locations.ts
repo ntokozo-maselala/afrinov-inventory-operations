@@ -20,17 +20,16 @@
 //
 //   npm run racks:to-locations -- --apply --database afrinov --actor admin@afrinov.local
 //
+// It locks the Rack rows while it works, and writes the report before it
+// commits, so a report that cannot be written means nothing was applied.
 // Safe to run again: handled racks are gone, so a second run finds only the
 // ones still needing a decision. The report goes to import-reports/, which
 // stays out of git.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import type { Prisma } from '@prisma/client';
-import { planRackCopy, removedRacks, renderRackReport, type RackPlan } from '../src/modules/migration/rack-copy.js';
-import { applyRackPlan } from '../src/modules/migration/rack-copy-apply.js';
-
-type Db = Prisma.TransactionClient;
+import { removedRacks, renderRackReport, type RackPlan } from '../src/modules/migration/rack-copy.js';
+import { applyRackPlan, readAndPlanRacks } from '../src/modules/migration/rack-copy-apply.js';
 
 function databaseName(url: string | undefined): string | null {
   if (!url) return null;
@@ -42,17 +41,6 @@ function databaseName(url: string | undefined): string | null {
 }
 
 const list = (v: string[] | undefined) => (v ?? []).flatMap((s) => s.split(',')).map((s) => s.trim()).filter(Boolean);
-
-async function readAndPlan(db: Db, decisions: { create: string[]; discard: string[] }): Promise<RackPlan> {
-  const [racks, locations] = await Promise.all([
-    db.rack.findMany({
-      select: { id: true, code: true, name: true, description: true, locationId: true, projectNumber: true, capacity: true, status: true, notes: true },
-      orderBy: { code: 'asc' },
-    }),
-    db.location.findMany({ select: { id: true, name: true, code: true, type: true, active: true, parentId: true } }),
-  ]);
-  return planRackCopy(racks, locations, decisions);
-}
 
 async function main() {
   const { values } = parseArgs({
@@ -70,6 +58,8 @@ async function main() {
   const decisions = { create: list(values.create), discard: list(values.discard) };
   const outDir = values.out!;
   await mkdir(outDir, { recursive: true });
+  const generatedAt = new Date();
+  const reportPath = join(outDir, `racks-to-locations-${generatedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.md`);
 
   const { prisma } = await import('../src/shared/db.js');
   try {
@@ -84,19 +74,26 @@ async function main() {
       actorId = actor.id;
     }
 
-    // Applied under the location-tree lock, planned again from what the
-    // transaction sees, so it acts on exactly what it checked.
-    const plan = await prisma.$transaction(async (tx) => {
-      if (actorId) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:location-tree'))`;
-      const p = await readAndPlan(tx, decisions);
-      if (actorId && p.errors.length === 0) await applyRackPlan(tx, p, actorId);
-      return p;
-    }, { timeout: 60_000 });
-
-    const applied = !!actorId && plan.errors.length === 0;
-    const generatedAt = new Date();
-    const reportPath = join(outDir, `racks-to-locations-${generatedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}.md`);
-    await writeFile(reportPath, renderRackReport(plan, { database: dbName, generatedAt, applied }), 'utf8');
+    // Planned from what the transaction sees, under the locks when applying,
+    // so it acts on exactly what it checked. The report is written BEFORE the
+    // transaction commits: if it cannot be written, nothing is applied.
+    let plan: RackPlan | null = null;
+    let applying = false;
+    try {
+      plan = await prisma.$transaction(async (tx) => {
+        const p = await readAndPlanRacks(tx, decisions, { lock: !!actorId });
+        applying = !!actorId && p.errors.length === 0;
+        if (applying) await applyRackPlan(tx, p, actorId!);
+        await writeFile(reportPath, renderRackReport(p, { database: dbName, generatedAt, applied: applying }), 'utf8');
+        return p;
+      }, { timeout: 60_000 });
+    } catch (e) {
+      // The changes were rolled back. A report already written says "applied": say otherwise.
+      if (applying) {
+        await writeFile(reportPath, `# Racks to locations\n\nNOT APPLIED: the transaction failed and was rolled back, so nothing was changed.\n\n${e instanceof Error ? e.message : String(e)}\n`, 'utf8').catch(() => {});
+      }
+      throw new Error(`Nothing was changed: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     const counts = new Map<string, number>();
     for (const i of plan.items) counts.set(i.outcome.kind, (counts.get(i.outcome.kind) ?? 0) + 1);
@@ -106,7 +103,7 @@ async function main() {
     if (plan.errors.length) {
       console.log('Nothing was changed: fix the --create / --discard codes above first.');
       process.exitCode = 1;
-    } else if (!applied) {
+    } else if (!applying) {
       console.log('Dry run only: nothing was written to the database.');
     } else {
       console.log(`Done: ${removedRacks(plan).length} racks handled and removed; ${plan.items.length - removedRacks(plan).length} left for a decision.`);
