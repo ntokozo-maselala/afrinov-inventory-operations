@@ -178,15 +178,28 @@ export function planRackCopy(
   });
 
   // Two racks that come to the same location (one by code, one by name) cannot
-  // both say where it stands: neither is applied.
-  const target = (i: RackPlanItem) => (i.outcome.kind === 'set-room' || i.outcome.kind === 'nothing-to-copy' ? i.outcome.location.id : null);
+  // both say where it stands: neither is applied. Every rack that matched a
+  // location counts, including one already left for a decision (its room is
+  // invalid, say), so the other cannot be applied and removed without anyone
+  // choosing which rack that location is. Only a --discard decision is out.
+  const target = (i: RackPlanItem) => {
+    const o = i.outcome;
+    if (o.kind === 'set-room' || o.kind === 'nothing-to-copy') return o.location.id;
+    if (o.kind === 'needs-decision') return o.location?.id ?? null;
+    return null;
+  };
   const counts = new Map<string, number>();
   for (const i of items) { const t = target(i); if (t) counts.set(t, (counts.get(t) ?? 0) + 1); }
   for (const i of items) {
     const t = target(i);
     if (t && counts.get(t)! > 1) {
       const name = byId.get(t)?.name ?? 'one location';
-      i.outcome = { kind: 'needs-decision', reason: `${counts.get(t)} racks match ${name}; --discard the ones that are not it`, location: byId.get(t) };
+      const shared = `${counts.get(t)} racks match ${name}; --discard the ones that are not it`;
+      i.outcome = {
+        kind: 'needs-decision',
+        reason: i.outcome.kind === 'needs-decision' ? `${i.outcome.reason}; also, ${shared}` : shared,
+        location: byId.get(t),
+      };
     }
   }
 

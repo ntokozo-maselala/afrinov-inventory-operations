@@ -49,6 +49,25 @@ describe('planRackCopy: matching, never a guess', () => {
     expect(kind(plan, 'Q-2').kind).toBe('needs-decision');
   });
 
+  it('leaves both when a second rack on the same location already needs a decision', () => {
+    // D-1 matches by code with a valid room; Q-2 matches the same location by name, with an inactive room.
+    const plan = planRackCopy(
+      [rack('D-1', { locationId: 'store' }), rack('Q-2', { name: 'D-1', locationId: 'closed' })],
+      [store, loc('closed', 'Old shed', { type: 'STOREROOM', active: false }), loc('d1', 'D-1')],
+    );
+    expect(kind(plan, 'D-1')).toMatchObject({ kind: 'needs-decision', reason: '2 racks match D-1; --discard the ones that are not it' });
+    expect(kind(plan, 'Q-2')).toMatchObject({ kind: 'needs-decision', reason: expect.stringContaining('is inactive; also, 2 racks match D-1') });
+    expect(removedRacks(plan)).toHaveLength(0);
+    // Discarding the wrong one settles it: the other is applied.
+    const settled = planRackCopy(
+      [rack('D-1', { locationId: 'store' }), rack('Q-2', { name: 'D-1', locationId: 'closed' })],
+      [store, loc('closed', 'Old shed', { type: 'STOREROOM', active: false }), loc('d1', 'D-1')],
+      { discard: ['Q-2'] },
+    );
+    expect(kind(settled, 'D-1').kind).toBe('set-room');
+    expect(kind(settled, 'Q-2').kind).toBe('discard');
+  });
+
   it('leaves a rack that matches a location that is not a rack', () => {
     const plan = planRackCopy([rack('Boiler Shop')], [loc('bs', 'Boiler Shop', { type: 'SHOP_FLOOR_AREA' })]);
     expect(kind(plan, 'Boiler Shop')).toMatchObject({ kind: 'needs-decision', reason: expect.stringContaining('not a rack') });
