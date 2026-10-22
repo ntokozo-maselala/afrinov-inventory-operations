@@ -82,6 +82,25 @@ describe('documentBlocks', () => {
     expect(b.delivery[0]).toEqual(['Delivery', 'Collection by Afrinov']);
     expect(b.delivery.some(([k]) => k === 'Address')).toBe(false);
   });
+
+  it.each([null, '', '   '])('does not fall back to the supplier when order details were explicitly cleared (%j)', (value) => {
+    const b = documentBlocks(order({ supplierContactName: value, supplierContactPhone: value, supplierContactEmail: value, supplierAddress: value }), COMPANY);
+    expect(Object.fromEntries(b.supplier)).toEqual({
+      Supplier: 'Hydac', 'Vendor code': 'V006', 'Contact person': '-', Phone: '-', Email: '-', Address: '-',
+    });
+    expect(b.delivery).toContainEqual(['Address', '10 Lime Street\nSouth Africa']);
+  });
+
+  it('falls back independently for each missing legacy field and handles a supplier without details', () => {
+    const mixed = documentBlocks(order({ supplierContactEmail: 'orders@example.com', supplierAddress: null }), COMPANY);
+    expect(Object.fromEntries(mixed.supplier)).toMatchObject({
+      'Contact person': 'Lillian', Phone: '011 723 9080', Email: 'orders@example.com', Address: '-',
+    });
+    const missing = documentBlocks(order({ supplier: { name: 'New supplier' } }), COMPANY);
+    expect(Object.fromEntries(missing.supplier)).toEqual({
+      Supplier: 'New supplier', 'Vendor code': '-', 'Contact person': '-', Phone: '-', Email: '-', Address: '-',
+    });
+  });
 });
 
 describe('documentLines', () => {
@@ -96,6 +115,21 @@ describe('documentLines', () => {
 });
 
 describe('buildPoDocument', () => {
+  it('puts the saved supplier details in the PDF and leaves out the supplier master details', async () => {
+    const out = text(await buildPoDocument(order({
+      supplierContactName: 'Sean Buyer', supplierContactPhone: '060 970 5820', supplierContactEmail: 'branch@example.com', supplierAddress: 'Branch Depot\nRoodekop',
+    }), COMPANY));
+    for (const value of ['Sean Buyer', '060 970 5820', 'branch@example.com', 'Branch Depot', 'Roodekop']) expect(out).toContain(value);
+    for (const value of ['Lillian', '011 723 9080', 'lillian@hydac.com', 'Edenvale']) expect(out).not.toContain(value);
+  });
+
+  it('keeps explicitly cleared supplier details out of the PDF', async () => {
+    const out = text(await buildPoDocument(order({ supplierContactName: null, supplierContactPhone: null, supplierContactEmail: null, supplierAddress: null }), COMPANY));
+    for (const value of ['Lillian', '011 723 9080', 'lillian@hydac.com', 'Edenvale']) expect(out).not.toContain(value);
+    expect(out).toContain('Hydac');
+    expect(out).toContain('V006');
+  });
+
   it('prints the order as the template does', async () => {
     const out = text(await buildPoDocument(order(), COMPANY, new Date('2026-10-19T12:00:00Z')));
     expect(out.startsWith('%PDF-')).toBe(true);
