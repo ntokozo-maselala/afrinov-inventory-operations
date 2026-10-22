@@ -446,6 +446,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const q = qs.q?.toLowerCase();
     let list = [...state.locations];
     if (qs.type) list = list.filter((l) => l.type === qs.type);
+    if (qs.parentId) list = list.filter((l) => l.parentId === qs.parentId);
     if (qs.active === 'true') list = list.filter((l) => l.active);
     else if (qs.active === 'false') list = list.filter((l) => !l.active);
     if (q) list = list.filter((l) =>
@@ -456,6 +457,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       .sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name))
       .map((l) => ({
         ...l,
+        parent: mockLocationParent(l),
         inventoryCount: balances.filter((b) => b.locationId === l.id).length,
       }));
   }
@@ -465,7 +467,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!l) throw err('NOT_FOUND', 'Location not found');
     const counts = mockLocationDependencyCounts(id);
     const balances = computeBalances().filter((b) => b.locationId === id);
-    return { ...l, inventoryCount: balances.length, dependencyCounts: counts };
+    return { ...l, parent: mockLocationParent(l), inventoryCount: balances.length, dependencyCounts: counts };
   }
   if (method === 'POST' && p === '/locations') {
     const b = body as Partial<MockLocation> & { name?: string; type?: MockLocation['type']; code?: string };
@@ -476,6 +478,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.code && state.locations.some((l) => l.code === b.code)) {
       throw err('CONFLICT', `Location code "${b.code}" is already in use.`);
     }
+    if (b.parentId) mockAssertParent(b.parentId);
     const now = new Date().toISOString();
     const created: MockLocation = {
       id: nextId('loc'),
@@ -483,6 +486,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       code: b.code?.trim() || undefined,
       type: b.type,
       active: b.active ?? true,
+      parentId: b.parentId || undefined,
       address: b.address,
       description: b.description,
       contactPerson: b.contactPerson,
@@ -501,6 +505,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!l) throw err('NOT_FOUND', 'Location not found');
     const b = body as { active?: boolean };
     if (typeof b?.active !== 'boolean') throw err('VALIDATION_ERROR', 'active is required');
+    if (!b.active && l.active) mockAssertNoActiveChildren(l);
+    if (b.active && !l.active) mockAssertRoomActive(l.name, l.parentId);
     l.active = b.active;
     l.updatedAt = new Date().toISOString();
     return l;
@@ -509,33 +515,51 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/locations/'.length);
     const l = findLocation(id);
     if (!l) throw err('NOT_FOUND', 'Location not found');
-    const b = body as Partial<MockLocation>;
+    const b = body as Partial<Omit<MockLocation, 'parentId'>> & { parentId?: string | null };
+    // Changes go on a copy, saved only once every check has passed, so a
+    // refused edit changes nothing (as the server, which checks then writes).
+    const next: MockLocation = { ...l };
     if (b.name !== undefined) {
       if (!b.name.trim()) throw err('VALIDATION_ERROR', 'Name is required');
       if (state.locations.some((x) => x.id !== id && x.name === b.name)) {
         throw err('CONFLICT', `Location "${b.name}" already exists`);
       }
-      l.name = b.name.trim();
+      next.name = b.name.trim();
     }
     if (b.code !== undefined) {
       if (b.code) {
         if (state.locations.some((x) => x.id !== id && x.code === b.code)) {
           throw err('CONFLICT', `Location code "${b.code}" is already in use.`);
         }
-        l.code = b.code.trim();
+        next.code = b.code.trim();
       } else {
-        l.code = undefined;
+        next.code = undefined;
       }
     }
-    if (b.type !== undefined) l.type = b.type;
-    if (b.active !== undefined) l.active = b.active;
-    if (b.address !== undefined) l.address = b.address;
-    if (b.description !== undefined) l.description = b.description;
-    if (b.contactPerson !== undefined) l.contactPerson = b.contactPerson;
-    if (b.contactPhone !== undefined) l.contactPhone = b.contactPhone;
-    if (b.contactEmail !== undefined) l.contactEmail = b.contactEmail;
-    if (b.notes !== undefined) l.notes = b.notes;
-    l.updatedAt = new Date().toISOString();
+    if (b.type !== undefined) {
+      if (b.type === 'RACK' && l.type !== 'RACK' && state.locations.some((x) => x.parentId === id)) {
+        throw err('VALIDATION_ERROR', 'This location has locations inside it, so it cannot be a rack. Move them out first.');
+      }
+      next.type = b.type;
+    }
+    if (b.parentId !== undefined && (b.parentId || undefined) !== l.parentId) {
+      if (b.parentId) mockAssertParent(b.parentId, id);
+      next.parentId = b.parentId || undefined;
+    }
+    if (b.active !== undefined) {
+      if (!b.active && l.active) mockAssertNoActiveChildren(l);
+      // A new room was checked active above; an unchanged one is checked here.
+      if (b.active && !l.active && next.parentId === l.parentId) mockAssertRoomActive(next.name, next.parentId);
+      next.active = b.active;
+    }
+    if (b.address !== undefined) next.address = b.address;
+    if (b.description !== undefined) next.description = b.description;
+    if (b.contactPerson !== undefined) next.contactPerson = b.contactPerson;
+    if (b.contactPhone !== undefined) next.contactPhone = b.contactPhone;
+    if (b.contactEmail !== undefined) next.contactEmail = b.contactEmail;
+    if (b.notes !== undefined) next.notes = b.notes;
+    next.updatedAt = new Date().toISOString();
+    Object.assign(l, next);
     return l;
   }
   if (method === 'DELETE' && p.startsWith('/locations/')) {
@@ -543,6 +567,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const l = findLocation(id);
     if (!l) throw err('NOT_FOUND', 'Location not found');
     const counts = mockLocationDependencyCounts(id);
+    if (counts.locations > 0) {
+      throw err('CONFLICT', `${l.name} has ${counts.locations} location${counts.locations === 1 ? '' : 's'} inside it. Move them out of it before deleting it.`, { dependencies: counts });
+    }
     const total = counts.racks + counts.goodsReceiptLines + counts.inventoryTransactions + counts.inventoryBalances;
     if (total > 0) {
       throw err('CONFLICT', 'This location cannot be deleted because it is referenced by other records. Deactivate the location instead.', { dependencies: counts });
@@ -1989,9 +2016,40 @@ function getBalance(materialId: string, locationId: string): number {
     .reduce((acc, t) => acc + Number(t.quantity), 0);
 }
 
-function mockLocationDependencyCounts(locationId: string): { racks: number; goodsReceiptLines: number; inventoryTransactions: number; inventoryBalances: number } {
+// The room a location stands in, as GET /locations returns it.
+function mockLocationParent(l: MockLocation): { id: string; name: string; code: string | null; type: MockLocation['type'] } | null {
+  const p = l.parentId ? findLocation(l.parentId) : undefined;
+  return p ? { id: p.id, name: p.name, code: p.code ?? null, type: p.type } : null;
+}
+
+// As LocationService: the room exists, is active, is no rack and is not inside another; the location is not itself and holds nothing.
+function mockAssertParent(parentId: string, childId?: string): void {
+  if (parentId === childId) throw err('VALIDATION_ERROR', 'A location cannot be inside itself.');
+  const p = findLocation(parentId);
+  if (!p) throw err('VALIDATION_ERROR', 'The location it is inside does not exist.');
+  if (!p.active) throw err('VALIDATION_ERROR', `${p.name} is inactive. Reactivate it to put locations inside it.`);
+  if (p.type === 'RACK') throw err('VALIDATION_ERROR', `${p.name} is a rack. A location can be inside a room or area, not a rack.`);
+  if (p.parentId) throw err('VALIDATION_ERROR', `${p.name} is itself inside another location. Locations go one level deep: choose a room or area that is not inside another.`);
+  if (childId && state.locations.some((x) => x.parentId === childId)) {
+    throw err('VALIDATION_ERROR', 'This location has locations inside it, so it cannot go inside another. Move them out first.');
+  }
+}
+
+// As LocationService: a location inside an inactive room stays inactive until the room is reactivated.
+function mockAssertRoomActive(name: string, parentId: string | undefined): void {
+  const room = parentId ? findLocation(parentId) : undefined;
+  if (room && !room.active) throw err('VALIDATION_ERROR', `${name} is inside ${room.name}, which is inactive. Reactivate ${room.name} first, or move ${name} out of it.`);
+}
+
+function mockAssertNoActiveChildren(l: MockLocation): void {
+  const inside = state.locations.filter((x) => x.parentId === l.id && x.active).length;
+  if (inside > 0) throw err('CONFLICT', `${l.name} has ${inside} active location${inside === 1 ? '' : 's'} inside it. Move or deactivate them first.`, { locations: inside });
+}
+
+function mockLocationDependencyCounts(locationId: string): { locations: number; racks: number; goodsReceiptLines: number; inventoryTransactions: number; inventoryBalances: number } {
   const balances = computeBalances();
   return {
+    locations: state.locations.filter((l) => l.parentId === locationId).length,
     racks: state.racks.filter((r) => r.locationId === locationId).length,
     goodsReceiptLines: state.goodsReceipts.reduce((acc, g) => acc + g.lines.filter((l) => l.locationId === locationId).length, 0),
     inventoryTransactions: state.transactions.filter((t) => t.locationId === locationId).length,

@@ -152,6 +152,10 @@ model Location {
   code        String?      @unique
   type        LocationType
   active      Boolean      @default(true)
+  // The room or area this location stands in: rack "D-1" in "Main Storeroom".
+  // One level only — a location with a parent is never a parent itself, and a
+  // rack is never a parent. Stock stays on the location itself (the rack).
+  parentId    String?      @map("parent_id")
   // Extended master-data fields (added with the Location Management feature).
   address        String?
   description    String?
@@ -168,9 +172,12 @@ model Location {
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
   racks                Rack[]
+  parent               Location?  @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
+  children             Location[] @relation("LocationParent")
 
   @@index([type])
   @@index([active])
+  @@index([parentId])
   @@map("locations")
 }
 
