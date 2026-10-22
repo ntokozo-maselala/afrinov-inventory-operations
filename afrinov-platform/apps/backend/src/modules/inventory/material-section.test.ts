@@ -6,36 +6,53 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 type Material = { id: string; sku: string; name: string; category: string; projectNumber: string | null; requiredStock: number; [k: string]: unknown };
 type Where = { id?: string; sku?: string };
+type Project = { projectNumber: string; name: string; active: boolean; status: string };
+type Include = { project: { select: Partial<Record<keyof Project, boolean>> } };
 
 const db = {
   materials: new Map<string, Material>(),
-  projects: new Map<string, { active: boolean; status: string }>(),
+  projects: new Map<string, Project>(),
   movements: new Map<string, number>(),
 };
 let seq = 0;
 
+// Only return the requested relation fields, so omitting status from the
+// Prisma selection cannot accidentally pass the response assertions below.
+function withRelations(m: Material, include?: Include) {
+  if (!include) return { ...m };
+  const project = m.projectNumber ? db.projects.get(m.projectNumber) : null;
+  return {
+    ...m,
+    project: project ? Object.fromEntries(Object.entries(include.project.select)
+      .filter(([, selected]) => selected)
+      .map(([key]) => [key, project[key as keyof Project]])) : null,
+  };
+}
+
 function makePrisma(): unknown {
   return {
     material: {
-      findUnique: async ({ where }: { where: Where }) =>
-        [...db.materials.values()].find((m) => (where.id ? m.id === where.id : m.sku === where.sku)) ?? null,
+      findUnique: async ({ where, include }: { where: Where; include?: Include }) => {
+        const m = [...db.materials.values()].find((m) => (where.id ? m.id === where.id : m.sku === where.sku));
+        return m ? withRelations(m, include) : null;
+      },
       findFirst: async () => null,
-      findMany: async ({ where }: { where: { category?: string | { not: string }; projectNumber?: string } }) =>
+      findMany: async ({ where, include }: { where: { category?: string | { not: string }; projectNumber?: string }; include?: Include }) =>
         [...db.materials.values()].filter((m) => {
           const c = where.category;
           if (typeof c === 'string' && m.category !== c) return false;
           if (c && typeof c === 'object' && m.category === c.not) return false;
           return !where.projectNumber || m.projectNumber === where.projectNumber;
-        }),
-      create: async ({ data }: { data: Omit<Material, 'id'> }) => {
+        }).map((m) => withRelations(m, include)),
+      create: async ({ data, include }: { data: Omit<Material, 'id'>; include?: Include }) => {
         const m = { projectNumber: null, ...data, id: `mat-${++seq}` } as Material;
         db.materials.set(m.id, m);
-        return m;
+        return withRelations(m, include);
       },
-      update: async ({ where, data }: { where: { id: string }; data: Partial<Material> }) => {
+      update: async ({ where, data, include }: { where: { id: string }; data: Partial<Material>; include?: Include }) => {
         const m = { ...db.materials.get(where.id)!, ...data };
         db.materials.set(m.id, m);
-        return m;
+        return withRelations(m, include);
       },
     },
     project: {
@@ -62,10 +79,10 @@ beforeEach(() => {
   db.materials.clear();
   db.movements.clear();
   db.projects.clear();
-  db.projects.set('1369', { active: true, status: 'ACTIVE' });
-  db.projects.set('1402', { active: true, status: 'PLANNING' });
-  db.projects.set('1200', { active: true, status: 'COMPLETED' });
-  db.projects.set('1100', { active: false, status: 'CANCELLED' });
+  db.projects.set('1369', { projectNumber: '1369', name: 'Plant upgrade', active: true, status: 'ACTIVE' });
+  db.projects.set('1402', { projectNumber: '1402', name: 'Boiler', active: true, status: 'PLANNING' });
+  db.projects.set('1200', { projectNumber: '1200', name: 'Completed job', active: true, status: 'COMPLETED' });
+  db.projects.set('1100', { projectNumber: '1100', name: 'Cancelled job', active: false, status: 'CANCELLED' });
   seq = 0;
 });
 
@@ -155,5 +172,69 @@ describe('listing by section', () => {
     expect((await MaterialService.list({ section: 'STORES' })).map((m) => m.sku)).toEqual(['CON-1']);
     expect((await MaterialService.list({ section: 'PROJECTS' })).map((m) => m.sku).sort()).toEqual(['A', 'B']);
     expect((await MaterialService.list({ section: 'PROJECTS', projectNumber: '1402' })).map((m) => m.sku)).toEqual(['B']);
+  });
+});
+
+describe('project status in material responses', () => {
+  it.each([
+    { projectNumber: '1402', status: 'PLANNING' },
+    { projectNumber: '1369', status: 'ACTIVE' },
+  ])('includes $status when creating material for project $projectNumber', async ({ projectNumber, status }) => {
+    const m = await projectItem('PIPE', projectNumber);
+    expect(m).toMatchObject({ section: 'PROJECTS', projectNumber, project: { projectNumber, status } });
+  });
+
+  it.each(['PLANNING', 'ACTIVE', 'COMPLETED', 'CANCELLED'])(
+    'returns the current %s status on detail and filtered list reads', async (status) => {
+      const m = await projectItem('PIPE', '1402');
+      expect(await MaterialService.getById(m.id)).toMatchObject({ project: { status: 'PLANNING' } });
+      expect(await MaterialService.list({ section: 'PROJECTS', projectNumber: '1402' }))
+        .toEqual([expect.objectContaining({ id: m.id, project: expect.objectContaining({ status: 'PLANNING' }) })]);
+
+      // Closing a project leaves its existing material visible with the new
+      // status, so clients can decide whether it can still be ordered.
+      db.projects.get('1402')!.status = status;
+      const expected = { id: m.id, section: 'PROJECTS', projectNumber: '1402', project: { projectNumber: '1402', status } };
+      expect(await MaterialService.getById(m.id)).toMatchObject(expected);
+      expect(await MaterialService.list({ section: 'PROJECTS', projectNumber: '1402' }))
+        .toEqual([expect.objectContaining({ ...expected, project: expect.objectContaining(expected.project) })]);
+    },
+  );
+
+  it('keeps each project status on both unfiltered and Projects lists, including closed projects', async () => {
+    await projectItem('ACTIVE-PIPE', '1369');
+    await projectItem('PLANNED-PIPE', '1402');
+    db.projects.get('1200')!.status = 'ACTIVE';
+    db.projects.get('1100')!.status = 'ACTIVE';
+    db.projects.get('1100')!.active = true;
+    await projectItem('COMPLETED-PIPE', '1200');
+    await projectItem('CANCELLED-PIPE', '1100');
+    db.projects.get('1200')!.status = 'COMPLETED';
+    db.projects.get('1100')!.status = 'CANCELLED';
+    db.projects.get('1100')!.active = false;
+
+    const expected = [
+      { sku: 'ACTIVE-PIPE', project: { projectNumber: '1369', status: 'ACTIVE' } },
+      { sku: 'PLANNED-PIPE', project: { projectNumber: '1402', status: 'PLANNING' } },
+      { sku: 'COMPLETED-PIPE', project: { projectNumber: '1200', status: 'COMPLETED' } },
+      { sku: 'CANCELLED-PIPE', project: { projectNumber: '1100', status: 'CANCELLED' } },
+    ];
+    expect(await MaterialService.list()).toMatchObject(expected);
+    expect(await MaterialService.list({ section: 'PROJECTS' })).toMatchObject(expected);
+  });
+
+  it('returns a null project for Stores material on create, detail and list', async () => {
+    const m = await storesItem('DISC');
+    const expected = { id: m.id, section: 'STORES', projectNumber: null, project: null };
+    expect(m).toMatchObject(expected);
+    expect(await MaterialService.getById(m.id)).toMatchObject(expected);
+    expect(await MaterialService.list({ section: 'STORES' })).toMatchObject([expected]);
+  });
+
+  it('returns a null project for legacy unassigned Projects material on detail and list', async () => {
+    db.materials.set('old-pipe', { id: 'old-pipe', sku: 'OLD-PIPE', name: 'Old pipe', category: 'PROJECT_MATERIAL', projectNumber: null, requiredStock: 0 });
+    const expected = { id: 'old-pipe', section: 'PROJECTS', projectNumber: null, project: null };
+    expect(await MaterialService.getById('old-pipe')).toMatchObject(expected);
+    expect(await MaterialService.list({ section: 'PROJECTS' })).toMatchObject([expected]);
   });
 });
