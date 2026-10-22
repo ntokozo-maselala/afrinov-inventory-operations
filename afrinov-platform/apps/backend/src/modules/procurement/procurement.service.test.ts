@@ -9,6 +9,7 @@
 //   - duplicate-transition rejection via optimistic guard
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
+import type { OrderDetailsInput } from './procurement.service.js';
 
 type POStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
 type TxType = 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT';
@@ -666,6 +667,97 @@ describe('PurchaseOrderService order details (procurement roadmap Phase 3)', () 
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', shippingTerms: 'FOB', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
     await PurchaseOrderService.update({ id: po.id, shippingTerms: null }, 'user-1');
     expect(db.pos.get(po.id)!).toMatchObject({ shippingTerms: null });
+  });
+});
+
+describe('PurchaseOrderService supplier details', () => {
+  const supplier = {
+    id: 'sup-1', name: 'Acme', active: true, contactName: 'Nicole', contactPhone: '011 452 8413',
+    contactEmail: 'nicole@acme.co.za', address: '23 Grader Road\nSpartan',
+  };
+  const copied = {
+    supplierContactName: 'Nicole', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@acme.co.za', supplierAddress: '23 Grader Road\nSpartan',
+  };
+  const cleared = { supplierContactName: null, supplierContactPhone: null, supplierContactEmail: null, supplierAddress: null };
+
+  beforeEach(() => { db.suppliers.set(supplier.id, { ...supplier }); });
+
+  async function createOrder(details: OrderDetailsInput = {}) {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    return PurchaseOrderService.create({ supplierId: supplier.id, ...details, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
+  }
+
+  it.each([null, '', ' \t\r\n '])('keeps every explicitly cleared field empty on creation (%j)', async (value) => {
+    expect(await createOrder({ supplierContactName: value, supplierContactPhone: value, supplierContactEmail: value, supplierAddress: value }))
+      .toMatchObject(cleared);
+    expect(db.suppliers.get(supplier.id)).toEqual(supplier);
+  });
+
+  it('defaults only the fields omitted from a partially specified supplier block', async () => {
+    expect(await createOrder({ supplierContactName: null, supplierContactEmail: '  branch@example.com  ' }))
+      .toMatchObject({ ...copied, supplierContactName: null, supplierContactEmail: 'branch@example.com' });
+  });
+
+  it('cleans supplier defaults while preserving meaningful address lines', async () => {
+    db.suppliers.set(supplier.id, {
+      ...supplier, contactName: '  Nicole   Buyer ', contactPhone: '  011  452 8413 ', contactEmail: ' nicole@acme.co.za ',
+      address: '  23   Grader Road \r\n\r\n Spartan  Ext 3 \n ',
+    });
+    expect(await createOrder()).toMatchObject({
+      supplierContactName: 'Nicole Buyer', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@acme.co.za', supplierAddress: '23 Grader Road\nSpartan Ext 3',
+    });
+  });
+
+  it('uses null when a supplier has no contact or address', async () => {
+    db.suppliers.set(supplier.id, { id: supplier.id, name: 'Acme', active: true });
+    expect(await createOrder()).toMatchObject(cleared);
+  });
+
+  it('keeps the saved details after the supplier changes and an unrelated order field is edited', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await createOrder();
+    db.suppliers.set(supplier.id, { ...supplier, contactName: 'Sean', contactPhone: null, contactEmail: 'sean@example.com', address: 'Branch 2' });
+    await PurchaseOrderService.update({ id: po.id, notes: 'Deliver before noon' }, 'user-1');
+    expect(await PurchaseOrderService.getById(po.id)).toMatchObject(copied);
+    expect(await createOrder()).toMatchObject({ supplierContactName: 'Sean', supplierContactPhone: null, supplierContactEmail: 'sean@example.com', supplierAddress: 'Branch 2' });
+  });
+
+  it.each([null, '', ' \t\r\n '])('clears every supplier detail on update without repopulating it (%j)', async (value) => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await createOrder();
+    await PurchaseOrderService.update({ id: po.id, supplierContactName: value, supplierContactPhone: value, supplierContactEmail: value, supplierAddress: value }, 'user-1');
+    await PurchaseOrderService.update({ id: po.id, notes: 'Keep contact details empty' }, 'user-1');
+    expect(await PurchaseOrderService.getById(po.id)).toMatchObject(cleared);
+    expect(db.suppliers.get(supplier.id)).toEqual(supplier);
+  });
+
+  it('normalizes an address edit, preserves other supplier fields and logs only the changed address', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await createOrder({ deliveryAddress: '10 Lime Street' });
+    await PurchaseOrderService.update({ id: po.id, supplierAddress: '  Branch   2 \r\n\r\n Roodekop ' }, 'user-2');
+    expect(await PurchaseOrderService.getById(po.id)).toMatchObject({ ...copied, supplierAddress: 'Branch 2\nRoodekop', deliveryAddress: '10 Lime Street' });
+    expect(db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id)).toEqual([
+      expect.objectContaining({ actorId: 'user-2', before: { supplierAddress: copied.supplierAddress }, after: { supplierAddress: 'Branch 2\nRoodekop' } }),
+    ]);
+    expect(db.suppliers.get(supplier.id)).toEqual(supplier);
+  });
+
+  it.each([
+    { key: 'supplierContactName', value: 'Sean' },
+    { key: 'supplierContactPhone', value: '060 970 5820' },
+    { key: 'supplierContactEmail', value: 'sean@example.com' },
+    { key: 'supplierAddress', value: 'Branch 2' },
+  ] as const)('revises an approved order when $key changes, but not for an unchanged save', async ({ key, value }) => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await createOrder();
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'u-sb');
+    await PurchaseOrderService.update({ id: po.id, [key]: value }, 'user-1');
+    await PurchaseOrderService.update({ id: po.id, [key]: `  ${value}  ` }, 'user-1');
+    expect(await PurchaseOrderService.getById(po.id)).toMatchObject({ ...copied, [key]: value, revision: 1, status: 'APPROVED' });
+    expect(db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id)).toEqual([
+      expect.objectContaining({ before: { [key]: copied[key], revision: 0 }, after: { [key]: value, revision: 1 } }),
+    ]);
   });
 });
 

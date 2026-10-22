@@ -53,6 +53,14 @@ const pick = async (supplierId: string) => {
 };
 
 describe('the supplier details on a new order', () => {
+  it('prefills supplier details when the supplier is supplied by a link', async () => {
+    at('/purchase-orders/new?supplierId=s-1', '/purchase-orders/new', <NewPurchaseOrder />);
+    expect(await screen.findByLabelText('Contact person')).toHaveValue('Nicole');
+    expect(screen.getByLabelText('Phone')).toHaveValue('011 452 8413');
+    expect(screen.getByLabelText('Email')).toHaveValue('nicole@welding.co.za');
+    expect(screen.getByLabelText('Supplier address')).toHaveValue('23 Grader Road\nSpartan Ext 3');
+  });
+
   it('fills them in from the supplier picked, with its vendor code', async () => {
     newOrder();
     expect(screen.queryByLabelText('Contact person')).not.toBeInTheDocument();
@@ -73,6 +81,26 @@ describe('the supplier details on a new order', () => {
     expect(screen.getByLabelText('Contact person')).toHaveValue('Sean');
     expect(screen.getByLabelText('Phone')).toHaveValue('');
     expect(screen.getByLabelText('Supplier address')).toHaveValue('');
+  });
+
+  it('replaces buyer overrides on a supplier change and keeps the delivery address separate', async () => {
+    newOrder();
+    await pick('s-1');
+    fireEvent.change(screen.getByLabelText('Contact person'), { target: { value: 'Order contact' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'branch@example.com' } });
+    fireEvent.change(screen.getByLabelText('Supplier address'), { target: { value: 'Branch 2' } });
+    fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'Deliver to the plant' } });
+    await pick('s-2');
+    expect(screen.getByLabelText('Contact person')).toHaveValue('Sean');
+    expect(screen.getByLabelText('Phone')).toHaveValue('');
+    expect(screen.getByLabelText('Email')).toHaveValue('');
+    expect(screen.getByLabelText('Supplier address')).toHaveValue('');
+    expect(screen.getByLabelText('Address')).toHaveValue('Deliver to the plant');
+    await pick('s-1');
+    expect(screen.getByLabelText('Contact person')).toHaveValue('Nicole');
+    expect(screen.getByLabelText('Email')).toHaveValue('nicole@welding.co.za');
+    expect(screen.getByLabelText('Supplier address')).toHaveValue('23 Grader Road\nSpartan Ext 3');
+    expect(screen.getByLabelText('Address')).toHaveValue('Deliver to the plant');
   });
 
   it('saves them as changed for this order, a cleared one as none', async () => {
@@ -112,6 +140,29 @@ describe('the supplier email check', () => {
 });
 
 describe('the supplier details when editing an order', () => {
+  it('shows explicitly cleared order fields as blank and sends nulls when saved', async () => {
+    const get = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => path === '/purchase-orders/po-1'
+      ? { ...ORDER, supplierContactName: null, supplierContactPhone: null, supplierContactEmail: null, supplierAddress: null }
+      : get(path));
+    at('/purchase-orders/po-1/edit', '/purchase-orders/:id/edit', <EditPurchaseOrder />);
+    expect(await screen.findByLabelText('Contact person')).toHaveValue('');
+    for (const label of ['Phone', 'Email', 'Supplier address']) expect(screen.getByLabelText(label)).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/purchase-orders/po-1', expect.objectContaining({
+      supplierContactName: null, supplierContactPhone: null, supplierContactEmail: null, supplierAddress: null,
+    })));
+  });
+
+  it('rejects an invalid supplier email before patching the order', async () => {
+    at('/purchase-orders/po-1/edit', '/purchase-orders/:id/edit', <EditPurchaseOrder />);
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'orders@@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('The supplier email "orders@@example.com" is not an email address.')).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
   it('shows the order\'s own, and saves a change to them', async () => {
     at('/purchase-orders/po-1/edit', '/purchase-orders/:id/edit', <EditPurchaseOrder />);
     expect(await screen.findByLabelText('Supplier address')).toHaveValue('Branch 2');

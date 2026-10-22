@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createMockApi, resetMockState } from './mockApi';
 import { isApiError } from '../api/client';
 import type { ApiError } from '../api/client';
+import type { MockPurchaseOrder, MockSupplier } from './types';
 
 const api = createMockApi();
 
@@ -29,6 +30,18 @@ async function issue(materialId: string, locationId: string, quantity: number, r
 describe('mock API mutation flows', () => {
   beforeEach(() => {
     resetMockState();
+  });
+
+  it('initializes existing demo orders with supplier details that survive later supplier edits', async () => {
+    const po = await api.get<MockPurchaseOrder>('/purchase-orders/po-1');
+    const supplier = await api.get<MockSupplier>(`/suppliers/${po.supplierId}`);
+    const expected = {
+      supplierContactName: supplier.contactName ?? null, supplierContactPhone: supplier.contactPhone ?? null,
+      supplierContactEmail: supplier.contactEmail ?? null, supplierAddress: supplier.address ?? null,
+    };
+    expect(po).toMatchObject(expected);
+    await api.patch(`/suppliers/${po.supplierId}`, { contactName: 'New contact', contactPhone: null, contactEmail: 'new@example.com', address: 'New branch' });
+    expect(await api.get(`/purchase-orders/${po.id}`)).toMatchObject(expected);
   });
 
   describe('suppliers (vendor fields, edit, deactivate)', () => {
@@ -157,6 +170,50 @@ describe('mock API mutation flows', () => {
       const read = await api.get<Detailed>(`/purchase-orders/${po.id}`);
       expect(read).toMatchObject({ shippingTerms: null, penaltiesApply: true });
       expect(read.lines[0]!.deliveryDate).toBe('2026-12-01');
+    });
+  });
+
+  describe('purchase order supplier details', () => {
+    const supplier = { contactName: 'Nicole', contactPhone: '011 452 8413', contactEmail: 'nicole@example.com', address: '23 Grader Road, Spartan' };
+    const copied = { supplierContactName: 'Nicole', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@example.com', supplierAddress: '23 Grader Road, Spartan' };
+    const cleared = { supplierContactName: null, supplierContactPhone: null, supplierContactEmail: null, supplierAddress: null };
+
+    async function createOrder(details: Partial<MockPurchaseOrder> = {}) {
+      return api.post<MockPurchaseOrder>('/purchase-orders', {
+        supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }], ...details,
+      });
+    }
+
+    beforeEach(async () => { await api.patch('/suppliers/sup-1', supplier); });
+
+    it('keeps a snapshot on a new order when the supplier is subsequently changed', async () => {
+      const po = await createOrder();
+      expect(po).toMatchObject(copied);
+      await api.patch('/suppliers/sup-1', { contactName: 'Sean', contactPhone: null, contactEmail: 'sean@example.com', address: 'Branch 2' });
+      await api.patch(`/purchase-orders/${po.id}`, { notes: 'Unrelated order edit' });
+      expect(await api.get(`/purchase-orders/${po.id}`)).toMatchObject(copied);
+      expect(await createOrder()).toMatchObject({ supplierContactName: 'Sean', supplierContactPhone: null, supplierContactEmail: 'sean@example.com', supplierAddress: 'Branch 2' });
+    });
+
+    it('combines order overrides, cleared fields and supplier defaults independently', async () => {
+      expect(await createOrder({ supplierContactName: '  Sean  ', supplierContactPhone: null, supplierAddress: '  Branch 2\nRoodekop  ' }))
+        .toMatchObject({ ...copied, supplierContactName: 'Sean', supplierContactPhone: null, supplierAddress: 'Branch 2\nRoodekop' });
+      expect(await api.get<MockSupplier>('/suppliers/sup-1')).toMatchObject(supplier);
+    });
+
+    it.each([null, '', ' \t\n '])('keeps explicit clears on creation and edit (%j)', async (value) => {
+      const blankDetails = { supplierContactName: value, supplierContactPhone: value, supplierContactEmail: value, supplierAddress: value };
+      expect(await createOrder(blankDetails)).toMatchObject(cleared);
+      const po = await createOrder();
+      await api.patch(`/purchase-orders/${po.id}`, blankDetails);
+      await api.patch(`/purchase-orders/${po.id}`, { notes: 'Do not repopulate' });
+      expect(await api.get(`/purchase-orders/${po.id}`)).toMatchObject(cleared);
+      expect(await api.get<MockSupplier>('/suppliers/sup-1')).toMatchObject(supplier);
+    });
+
+    it('stores absent supplier details as nulls', async () => {
+      await api.patch('/suppliers/sup-1', { contactName: null, contactPhone: null, contactEmail: null, address: null });
+      expect(await createOrder()).toMatchObject(cleared);
     });
   });
 
