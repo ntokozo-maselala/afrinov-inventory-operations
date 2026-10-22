@@ -787,3 +787,25 @@ describe('mock API mutation flows', () => {
     });
   });
 });
+
+describe('mock API: a location inside another', () => {
+  beforeEach(() => resetMockState());
+
+  it('changes nothing when an edit is refused, as the server', async () => {
+    const store = await api.post<{ id: string }>('/locations', { name: 'Test room', type: 'STOREROOM' });
+    await api.post('/locations', { name: 'Test rack', type: 'RACK', parentId: store.id });
+    // Renaming the room while deactivating it is refused (its rack is active): the name stays.
+    await expect(api.patch(`/locations/${store.id}`, { name: 'Renamed room', active: false })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const after = await api.get<{ name: string; active: boolean }>(`/locations/${store.id}`);
+    expect(after).toMatchObject({ name: 'Test room', active: true });
+  });
+
+  it('keeps a rack inactive while its room is, and says to move locations out before deleting a room', async () => {
+    const store = await api.post<{ id: string }>('/locations', { name: 'Test room', type: 'STOREROOM' });
+    const rack = await api.post<{ id: string }>('/locations', { name: 'Test rack', type: 'RACK', parentId: store.id });
+    await expect(api.del(`/locations/${store.id}`)).rejects.toMatchObject({ message: 'Test room has 1 location inside it. Move them out of it before deleting it.' });
+    await api.patch(`/locations/${rack.id}/status`, { active: false });
+    await api.patch(`/locations/${store.id}/status`, { active: false });
+    await expect(api.patch(`/locations/${rack.id}/status`, { active: true })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+});
