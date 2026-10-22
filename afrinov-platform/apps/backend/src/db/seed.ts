@@ -297,12 +297,16 @@ async function ensureProjects(managerId: string): Promise<Map<string, string>> {
 
 // The demo rack D-1 stands in Main Storeroom, as racks to locations (Phase 3.1)
 // records it; only set when it has no room yet, so a room someone chose stays.
-// There are no Rack records any more: they were copied onto locations.
+// There are no Rack records any more: they were copied onto locations. The
+// room is checked by LocationService's rules (active, not a rack, not inside
+// another), so the seed never makes a layout the app would refuse.
 async function ensureRackRooms(locations: Map<string, string>): Promise<void> {
-  const room = locations.get('Main Storeroom');
-  const rack = locations.get('D-1');
-  if (!room || !rack) return;
-  await prisma.location.updateMany({ where: { id: rack, parentId: null, type: 'RACK' }, data: { parentId: room } });
+  const roomId = locations.get('Main Storeroom');
+  const rackId = locations.get('D-1');
+  if (!roomId || !rackId) return;
+  const room = await prisma.location.findUnique({ where: { id: roomId } });
+  if (!room || !room.active || room.type === 'RACK' || room.parentId) return;
+  await prisma.location.updateMany({ where: { id: rackId, parentId: null, type: 'RACK' }, data: { parentId: roomId } });
 }
 
 async function ensureMaterials(): Promise<Map<string, string>> {

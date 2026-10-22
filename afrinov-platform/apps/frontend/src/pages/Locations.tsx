@@ -297,12 +297,17 @@ export function Locations() {
     return (id: string) => formatCurrency(byId.get(id) ?? 0, currency);
   }, [report.data]);
   const [q, setQ] = useState('');
-  // ?type=RACK (where the old Racks page now leads) opens the list on one type.
-  const [params] = useSearchParams();
-  const [typeFilter, setTypeFilter] = useState(() => {
-    const t = params.get('type') ?? '';
-    return TYPE_OPTIONS.some((o) => o.value === t) ? t : '';
-  });
+  // The type filter lives in the link (?type=RACK, where the old Racks page now
+  // leads): read from it every time, so following a link while already on the
+  // page applies it, and choosing a type rewrites it, so the view can be shared.
+  const [params, setParams] = useSearchParams();
+  const typeParam = params.get('type') ?? '';
+  const typeFilter = TYPE_OPTIONS.some((o) => o.value === typeParam) ? typeParam : '';
+  const setTypeFilter = (value: string) => setParams((p) => {
+    const next = new URLSearchParams(p);
+    if (value) next.set('type', value); else next.delete('type');
+    return next;
+  }, { replace: true });
   const [statusFilter, setStatusFilter] = useState('');
   // A room and the locations inside it.
   const [roomFilter, setRoomFilter] = useState('');
