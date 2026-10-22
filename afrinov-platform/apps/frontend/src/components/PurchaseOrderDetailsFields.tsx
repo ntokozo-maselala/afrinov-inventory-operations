@@ -95,6 +95,8 @@ export function supplierDetails(s: { contactName?: string | null; contactPhone?:
 /** Says what is wrong, or null. */
 export function checkDetails(d: OrderDetailsDraft): string | null {
   const email = d.supplierContactEmail.trim();
+  // As the server: the rule a supplier's email is imported with, and the longest an email can be.
+  if (email.length > 320) return 'The supplier email is longer than an email address can be (320 characters).';
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return `The supplier email "${email}" is not an email address.`;
   const discount = Number(d.settlementDiscount);
   if (d.settlementDiscount.trim() !== '' && (!Number.isFinite(discount) || discount < 0 || discount > 100)) {

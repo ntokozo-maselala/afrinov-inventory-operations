@@ -155,13 +155,29 @@ type PoDetailsBody = Partial<Record<
   | 'deliveryCountry' | 'deliveryContactName' | 'deliveryContactPhone' | 'afrinovContact', string | null
 >> & { settlementDiscount?: number; penaltiesApply?: boolean; deliveryMethod?: 'DELIVERY' | 'COLLECTION' };
 
+/** As the server's cleanLines: an address tidied line by line, blank lines dropped. */
+function cleanLines(s: string): string | null {
+  const lines = s.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return lines.length ? lines.join('\n') : null;
+}
+
+/** As the server's order details schema: the supplier email by the rule suppliers are imported with. */
+function checkPoDetails(b: PoDetailsBody) {
+  const email = b.supplierContactEmail?.trim();
+  if (email && (email.length > 320 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))) {
+    throw err('VALIDATION_ERROR', 'Invalid purchase order payload');
+  }
+}
+
 /** The details sent, blanks as null; fields left out stay out. */
 function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
   const out: Record<string, unknown> = {};
   for (const k of ['supplierContactName', 'supplierContactPhone', 'supplierContactEmail', 'supplierAddress',
     'projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
     'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact'] as const) {
-    if (b[k] !== undefined) out[k] = (typeof b[k] === 'string' ? b[k]!.trim() : '') || null;
+    if (b[k] === undefined) continue;
+    const v = typeof b[k] === 'string' ? b[k]! : '';
+    out[k] = k === 'supplierAddress' || k === 'deliveryAddress' ? cleanLines(v) : v.trim() || null;
   }
   if (b.settlementDiscount !== undefined) out.settlementDiscount = String(b.settlementDiscount);
   if (b.penaltiesApply !== undefined) out.penaltiesApply = b.penaltiesApply;
@@ -603,6 +619,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const supplier = findSupplier(b.supplierId);
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
+    checkPoDetails(b);
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
     for (const l of b.lines) refuseUnassigned(l.materialId, 'ordered');
     checkProjectMaterial(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId), 'ordered');
@@ -748,6 +765,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
+    checkPoDetails((body ?? {}) as PoDetailsBody);
     const b = (body as PoDetailsBody & {
       notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number;
       linePrices?: Array<{ lineId: string; unitPrice: number | null }>;

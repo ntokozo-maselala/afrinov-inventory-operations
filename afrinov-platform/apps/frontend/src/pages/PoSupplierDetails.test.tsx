@@ -102,6 +102,15 @@ describe('the supplier details on a new order', () => {
   });
 });
 
+describe('the supplier email check', () => {
+  it('refuses an email longer than an email can be, as the server does', async () => {
+    const { checkDetails, draftFromOrder } = await import('../components/PurchaseOrderDetailsFields');
+    const long = `${'a'.repeat(310)}@example.com`;
+    expect(checkDetails({ ...draftFromOrder({}), supplierContactEmail: long })).toMatch(/longer than an email address can be/);
+    expect(checkDetails({ ...draftFromOrder({}), supplierContactEmail: 'a..b@x.co' })).toBeNull();
+  });
+});
+
 describe('the supplier details when editing an order', () => {
   it('shows the order\'s own, and saves a change to them', async () => {
     at('/purchase-orders/po-1/edit', '/purchase-orders/:id/edit', <EditPurchaseOrder />);
