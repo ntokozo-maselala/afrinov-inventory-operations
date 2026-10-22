@@ -2,15 +2,14 @@
 // described, and how the list pages.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { auditFindMany, userFindMany, locationFindMany, rackFindMany } = vi.hoisted(() => ({
-  auditFindMany: vi.fn(), userFindMany: vi.fn(), locationFindMany: vi.fn(), rackFindMany: vi.fn(),
+const { auditFindMany, userFindMany, locationFindMany } = vi.hoisted(() => ({
+  auditFindMany: vi.fn(), userFindMany: vi.fn(), locationFindMany: vi.fn(),
 }));
 vi.mock('../../shared/db.js', () => ({
   prisma: {
     auditLogEntry: { findMany: auditFindMany },
     user: { findMany: userFindMany },
     location: { findMany: locationFindMany },
-    rack: { findMany: rackFindMany },
   },
 }));
 
@@ -83,7 +82,6 @@ describe('ActivityService.list', () => {
     auditFindMany.mockReset();
     userFindMany.mockReset().mockResolvedValue([{ id: 'u-1', name: 'Vusi' }]);
     locationFindMany.mockReset().mockResolvedValue([{ id: 'l-1', name: 'Boiler Shop' }]);
-    rackFindMany.mockReset().mockResolvedValue([]);
   });
 
   it('names who did it and the location an entry only refers to by id', async () => {
@@ -100,6 +98,16 @@ describe('ActivityService.list', () => {
     ]);
     expect(rows[0]!.cursor).toBe('2026-10-12T09:30:00.000Z_a-2');
     expect(locationFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ['l-1'] } } }));
+  });
+
+  it('names an archived rack from its own audit entries, with no Rack table, and links to rack locations', async () => {
+    auditFindMany.mockImplementation(async (args: { where?: { entityType?: string } }) => (args.where?.entityType === 'Rack'
+      // The rack's earlier entries: its creation carries its code and name.
+      ? [{ entityId: 'r-1', before: null, after: { code: 'R-01', name: 'Rack one' } }]
+      : [entry({ id: 'a-9', entityType: 'Rack', action: 'ARCHIVE', entityId: 'r-1', before: { status: 'FULL' }, after: { status: 'INACTIVE' } })]));
+    const rows = await ActivityService.list({});
+    expect(rows.map((r) => [r.summary, r.link])).toEqual([['Archived rack R-01 Rack one', '/locations?type=RACK']]);
+    expect(auditFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { entityType: 'Rack', entityId: { in: ['r-1'] }, action: { not: 'ARCHIVE' } } }));
   });
 
   it('pages newest first, ties by id, continuing after the cursor, at most 500 rows', async () => {

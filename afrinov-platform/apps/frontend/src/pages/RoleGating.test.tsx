@@ -14,7 +14,6 @@ vi.mock('../api/client', () => ({
 vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } }) }));
 
 const { Stock } = await import('./Stock');
-const { Racks } = await import('./Racks');
 const { Locations } = await import('./Locations');
 const { Projects } = await import('./Projects');
 const { Suppliers } = await import('./Suppliers');
@@ -32,7 +31,6 @@ const STOCK_ROW = {
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
     if (path.startsWith('/reports/current-stock')) return [STOCK_ROW];
-    if (path.startsWith('/racks')) return [{ id: 'k-1', code: 'R-A1', name: 'Aisle A', status: 'ACTIVE', createdAt: '', updatedAt: '' }];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'A-1', code: 'A1', type: 'STOREROOM', active: true }];
     if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE', active: true }];
     if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydroscand', active: true }];
@@ -80,7 +78,6 @@ describe('Stock page actions', () => {
 
 describe('setup pages', () => {
   it.each([
-    ['Racks', <Racks key="r" />, 'Aisle A', ['Add rack', 'Edit', 'Archive'], 'STORE_CONTROLLER'],
     ['Locations', <Locations key="l" />, 'A-1', ['Add location', 'Edit', 'Deactivate', 'Delete'], 'STORE_CONTROLLER'],
     ['Projects', <Projects key="p" />, 'Plant upgrade', ['Add project', 'Edit', 'Archive'], 'PROCUREMENT'],
     ['Suppliers', <Suppliers key="s" />, 'Hydroscand', ['Add supplier'], 'PROCUREMENT'],

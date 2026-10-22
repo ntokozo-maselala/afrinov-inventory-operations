@@ -20,6 +20,10 @@ vi.mock('./components/GlobalPreferencesApplier', async () => {
 });
 vi.mock('./config/features', () => ({ PROCUREMENT_ENABLED: true }));
 vi.mock('./pages/PurchaseOrders', () => ({ PurchaseOrders: () => <h1>Purchase orders list</h1> }));
+vi.mock('./pages/Locations', async () => {
+  const { useLocation } = await import('react-router-dom');
+  return { Locations: () => <h1>Locations {useLocation().search}</h1> };
+});
 
 const { App } = await import('./App');
 
@@ -28,5 +32,13 @@ describe('retired goods receipts route', () => {
     render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
 
     expect(await screen.findByRole('heading', { name: 'Purchase orders list' })).toBeInTheDocument();
+  });
+});
+
+describe('retired racks route', () => {
+  it('opens Locations filtered to racks', async () => {
+    render(<MemoryRouter initialEntries={['/racks']}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { name: 'Locations ?type=RACK' })).toBeInTheDocument();
   });
 });

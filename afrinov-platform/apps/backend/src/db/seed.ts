@@ -295,36 +295,14 @@ async function ensureProjects(managerId: string): Promise<Map<string, string>> {
   return byNumber;
 }
 
-async function ensureRacks(locations: Map<string, string>): Promise<void> {
-  const racks = [
-    {
-      id: 'seed-rack-d1',
-      code: 'D-1',
-      name: 'Aisle D – Shelf 1',
-      description: 'Heavy consumables, lower shelves.',
-      locationId: locations.get('Main Storeroom') ?? null,
-      projectNumber: 'AFRI-1325',
-      capacity: 100,
-      status: 'ACTIVE' as const,
-    },
-    {
-      id: 'seed-rack-f7',
-      code: 'F-7',
-      name: 'Aisle F – Shelf 7',
-      description: null,
-      locationId: locations.get('Main Storeroom') ?? null,
-      projectNumber: null,
-      capacity: 80,
-      status: 'ACTIVE' as const,
-    },
-  ];
-  for (const r of racks) {
-    await prisma.rack.upsert({
-      where: { id: r.id },
-      update: r,
-      create: r,
-    });
-  }
+// The demo rack D-1 stands in Main Storeroom, as racks to locations (Phase 3.1)
+// records it; only set when it has no room yet, so a room someone chose stays.
+// There are no Rack records any more: they were copied onto locations.
+async function ensureRackRooms(locations: Map<string, string>): Promise<void> {
+  const room = locations.get('Main Storeroom');
+  const rack = locations.get('D-1');
+  if (!room || !rack) return;
+  await prisma.location.updateMany({ where: { id: rack, parentId: null, type: 'RACK' }, data: { parentId: room } });
 }
 
 async function ensureMaterials(): Promise<Map<string, string>> {
@@ -539,7 +517,7 @@ async function main(): Promise<void> {
   const materials = await ensureMaterials();
   await ensureProjects(adminId);
   const recipients = await ensureRecipients();
-  await ensureRacks(locations);
+  await ensureRackRooms(locations);
   await ensurePurchaseOrders(suppliers, materials, adminId);
   await ensureGoodsReceipt(suppliers, materials, locations, adminId);
   await ensureTransactions(materials, locations, recipients, adminId);

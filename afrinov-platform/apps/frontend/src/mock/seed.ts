@@ -8,7 +8,6 @@ import type {
   MockPurchaseOrder,
   MockGoodsReceipt,
   MockInventoryTransaction,
-  MockRack,
   MockProject,
 } from './types';
 
@@ -161,32 +160,5 @@ export const SEED_PROJECTS: MockProject[] = [
     active: true,
     createdAt: new Date('2026-08-15').toISOString(),
     updatedAt: new Date('2026-08-15').toISOString(),
-  },
-];
-
-export const SEED_RACKS: MockRack[] = [
-  {
-    id: 'rack-1',
-    code: 'D-1',
-    name: 'Aisle D – Shelf 1',
-    description: 'Heavy consumables, lower shelves.',
-    locationId: 'loc-1',
-    projectNumber: 'AFRI-1325',
-    capacity: 100,
-    status: 'ACTIVE',
-    createdAt: new Date('2026-01-10').toISOString(),
-    updatedAt: new Date('2026-08-01').toISOString(),
-    location: { id: 'loc-1', name: 'Main Storeroom' },
-  },
-  {
-    id: 'rack-2',
-    code: 'F-7',
-    name: 'Aisle F – Shelf 7',
-    locationId: 'loc-1',
-    capacity: 80,
-    status: 'ACTIVE',
-    createdAt: new Date('2026-02-04').toISOString(),
-    updatedAt: new Date('2026-07-12').toISOString(),
-    location: { id: 'loc-1', name: 'Main Storeroom' },
   },
 ];

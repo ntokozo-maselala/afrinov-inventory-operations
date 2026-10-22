@@ -59,7 +59,6 @@ export const PERMISSION_ROLES = {
   'inventory:reverse': ['STORE_CONTROLLER'], // reverse:inventory_transaction
   'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
   'locations:manage': ['STORE_CONTROLLER'], // create/edit/delete:location, manage:location_status
-  'racks:manage': ['STORE_CONTROLLER'], // manage:racks
   'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // manage:projects
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
   'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)

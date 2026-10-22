@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, SearchField, FILTER_WIDTH } from '../components/FilterBar';
@@ -167,7 +168,7 @@ function LocationForm({ initial, all, onCancel, onSaved, onError }: LocationForm
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
       <p className="text-sm text-surface-500">
-        Locations identify where stock is held. Add storerooms, racks, shop floor areas, containers, and off-site holdings. A rack that holds stock is added here with the type Rack, located in the room it stands in; the Racks page only records which workshop and project a rack belongs to.
+        Locations identify where stock is held. Add storerooms, racks, shop floor areas, containers, and off-site holdings. A rack is added here with the type Rack, located in the room it stands in, and holds its own stock.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -296,7 +297,12 @@ export function Locations() {
     return (id: string) => formatCurrency(byId.get(id) ?? 0, currency);
   }, [report.data]);
   const [q, setQ] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
+  // ?type=RACK (where the old Racks page now leads) opens the list on one type.
+  const [params] = useSearchParams();
+  const [typeFilter, setTypeFilter] = useState(() => {
+    const t = params.get('type') ?? '';
+    return TYPE_OPTIONS.some((o) => o.value === t) ? t : '';
+  });
   const [statusFilter, setStatusFilter] = useState('');
   // A room and the locations inside it.
   const [roomFilter, setRoomFilter] = useState('');

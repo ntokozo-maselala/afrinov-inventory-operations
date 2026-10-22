@@ -15,7 +15,6 @@
 | Movements (`/movements`) | Inventory / Reporting | Ledger history in views: all movements, received, issued, returned, stock counts, transfers, write-offs and adjustments, tool check in/out, other changes. Date range, filters, paging; Excel and PDF download; drawer to reverse or return | `GET /inventory-transactions`, `/activity`; `POST …/reversal`, `…/returns` |
 | Materials (`/materials`, `/materials/:id`) | Inventory | Material master and per-item detail; edit Required Stock, unit cost and active status; start a purchase order for the item | `POST/PATCH /materials` |
 | Locations (`/locations`) | Inventory | Location master; activate/deactivate; delete unused | `/locations` routes |
-| Racks (`/racks`) | Inventory | Rack master; archive | `/racks` routes |
 | Projects (`/projects`) | Operations | Project master; archive | `/projects` routes |
 | Recipients (`/recipients`) | Operations | "Issued To" list | `/recipients` routes |
 | Suppliers (`/suppliers`, `/suppliers/:id`) | Procurement | Supplier master (the template's vendor list): list, add, edit, deactivate; a supplier's orders and a new order for it | `GET/POST /suppliers`, `PATCH /suppliers/:id` |
@@ -47,7 +46,7 @@ link shows a "no access" message instead of its form (`10-security/access-contro
 The router in `afrinov-platform/apps/frontend/src/App.tsx` defines these active route families:
 
 - Public: `/login`.
-- Protected shell: `/`, `/stock`, `/stock/issue`, `/stock/return`, `/stock/receive`, `/stock/count`, `/materials`, `/materials/:id`, `/movements`, `/suppliers`, `/suppliers/:id`, `/reports/stock-status`, `/reports/consumption`, `/reports/stock-report`, `/racks`, `/locations`, `/projects`, `/recipients`, `/tools`, and `/settings`.
+- Protected shell: `/`, `/stock`, `/stock/issue`, `/stock/return`, `/stock/receive`, `/stock/count`, `/materials`, `/materials/:id`, `/movements`, `/suppliers`, `/suppliers/:id`, `/reports/stock-status`, `/reports/consumption`, `/reports/stock-report`, `/locations`, `/projects`, `/recipients`, `/tools`, and `/settings`.
 - Conditional procurement routes when `PROCUREMENT_ENABLED`: `/purchase-orders`, `/purchase-orders/new`, `/purchase-orders/:id`, `/purchase-orders/:id/edit`, and `/settings/purchase-orders`.
 - Settings child routes: `/settings/notifications`, `/settings/inventory`, `/settings/appearance`, `/settings/users`, `/settings/security`, `/settings/system`, `/settings/data`, and `/settings/history`; `/settings` renders the general section.
 - Fallback: all other protected paths render Not found.

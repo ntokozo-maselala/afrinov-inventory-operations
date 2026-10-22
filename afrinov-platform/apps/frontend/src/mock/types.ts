@@ -254,23 +254,6 @@ export interface MockMovementRow {
   returnedQuantity?: string | null;
 }
 
-export type MockRackStatus = 'ACTIVE' | 'INACTIVE' | 'FULL';
-
-export interface MockRack {
-  id: string;
-  code: string;
-  name: string;
-  description?: string;
-  locationId?: string;
-  projectNumber?: string;
-  capacity?: number;
-  status: MockRackStatus;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-  location?: { id: string; name: string };
-}
-
 export type MockProjectStatus = 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED';
 
 export interface MockProject {
