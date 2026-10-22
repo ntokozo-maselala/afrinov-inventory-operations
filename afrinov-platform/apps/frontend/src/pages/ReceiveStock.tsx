@@ -24,9 +24,10 @@ import { api, type ApiError } from '../api/client';
 import type { CurrentStockRow, Material } from '../api/types';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { formatDate } from '../lib/format';
+import { locationLabel } from '../lib/locations';
 
 interface Supplier { id: string; name: string; active: boolean }
-interface Location { id: string; name: string; active: boolean }
+interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 interface OpenOrder {
   id: string; number: string; status: string; supplierId: string; expectedDeliveryDate?: string | null;
   lines: Array<{ orderedQty: string; receivedQty: string }>;
@@ -258,7 +259,7 @@ export function ReceiveStock() {
                 <Field label="Into location" htmlFor={`rcv-loc-${l.key}`}>
                   <Select id={`rcv-loc-${l.key}`} value={l.locationId} onChange={(e) => update(l.key, { locationId: e.target.value })} disabled={loading}>
                     <option value="">— choose —</option>
-                    {activeLocations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                    {activeLocations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}</option>)}
                   </Select>
                 </Field>
                 <Field label="Quantity" htmlFor={`rcv-qty-${l.key}`} help={materialById.get(l.materialId)?.unitOfMeasure}>

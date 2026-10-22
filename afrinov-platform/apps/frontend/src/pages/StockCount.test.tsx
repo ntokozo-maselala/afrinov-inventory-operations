@@ -212,3 +212,18 @@ describe('StockCount page', () => {
     expect(screen.queryByLabelText('Note for Cutting disc')).not.toBeInTheDocument();
   });
 });
+
+describe('Count stock: the location picker', () => {
+  it('names a rack with the room it stands in', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/locations')) return [
+        { id: 'l-1', name: 'A-1', active: true, parent: { name: 'Main Storeroom' } },
+        { id: 'l-2', name: 'Boiler Shop', active: true, parent: null },
+      ];
+      return [];
+    });
+    render(<MemoryRouter><ToastProvider><StockCount /></ToastProvider></MemoryRouter>);
+    expect(await screen.findByRole('option', { name: 'A-1 · Main Storeroom' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Boiler Shop' })).toBeInTheDocument();
+  });
+});

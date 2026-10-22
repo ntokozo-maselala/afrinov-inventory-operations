@@ -5,6 +5,7 @@ import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
 import type { MovementRow } from '../api/types';
+import { locationLabel } from '../lib/locations';
 
 
 interface Props {
@@ -223,7 +224,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
   const [quantity, setQuantity] = useState('');
   const [locationId, setLocationId] = useState(transaction.locationId);
   const [reason, setReason] = useState('');
-  const locations = useApi<Array<{ id: string; name: string; active: boolean }>>(open ? '/locations' : null);
+  const locations = useApi<Array<{ id: string; name: string; active: boolean; parent?: { name: string } | null }>>(open ? '/locations' : null);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
@@ -265,8 +266,8 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
             </Field>
             <Field label="Back into" htmlFor="return-loc" error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
               <Select id="return-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <option value={transaction.locationId}>{transaction.locationName}</option>
-                {(locations.data ?? []).filter((l) => l.active && l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                <option value={transaction.locationId}>{locationLabel((locations.data ?? []).find((l) => l.id === transaction.locationId) ?? { name: transaction.locationName })}</option>
+                {(locations.data ?? []).filter((l) => l.active && l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
               </Select>
             </Field>
           </div>

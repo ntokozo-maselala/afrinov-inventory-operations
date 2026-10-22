@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+const { mockGet, mockPatch } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPatch: vi.fn() }));
 vi.mock('../api/client', () => ({
-  api: { get: mockGet },
+  api: { get: mockGet, patch: mockPatch },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 
@@ -60,6 +60,73 @@ describe('Locations page', () => {
   });
 });
 
+describe('Locations page: the room a location stands in', () => {
+  const ROOMS = [
+    { id: 'l-1', name: 'Main Storeroom', type: 'STOREROOM', active: true, parentId: null, parent: null, inventoryCount: 0 },
+    { id: 'l-2', name: 'D-1', type: 'RACK', active: true, parentId: 'l-1', parent: { id: 'l-1', name: 'Main Storeroom', type: 'STOREROOM' }, inventoryCount: 2 },
+    { id: 'l-3', name: 'Boiler Shop', type: 'SHOP_FLOOR_AREA', active: true, parentId: null, parent: null, inventoryCount: 0 },
+    { id: 'l-4', name: 'E-3', type: 'RACK', active: true, parentId: null, parent: null, inventoryCount: 0 },
+  ];
+  const show = () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') return ROOMS;
+      if (path.startsWith('/reports/inventory')) return { currency: 'ZAR', byLocation: [] };
+      return [];
+    });
+    mockPatch.mockReset().mockResolvedValue({});
+    render(<MemoryRouter><ToastProvider><Locations /></ToastProvider></MemoryRouter>);
+  };
+  const row = async (name: string) => (await screen.findByText(name, { selector: 'span.font-medium' })).closest('tr')!;
+  const edit = async (name: string) => fireEvent.click(within(await row(name)).getByRole('button', { name: 'Edit' }));
+
+  it('shows each location’s room, and filters to a room and what stands in it', async () => {
+    show();
+    expect(screen.getByRole('columnheader', { name: 'Located in' })).toBeInTheDocument();
+    expect(within(await row('D-1')).getByText('Main Storeroom')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'l-1' } });
+    expect(screen.queryByText('Boiler Shop', { selector: 'span.font-medium' })).not.toBeInTheDocument();
+    expect(screen.getByText('D-1', { selector: 'span.font-medium' })).toBeInTheDocument();
+    expect(screen.getByText('Main Storeroom', { selector: 'span.font-medium' })).toBeInTheDocument();
+  });
+
+  it('offers only rooms a location can go inside, and moves a rack to another one', async () => {
+    show();
+    await edit('D-1');
+    const select = await screen.findByLabelText('Located in');
+    const offered = within(select).getAllByRole('option').map((o) => o.textContent);
+    expect(offered).toEqual(['Not inside another location', 'Main Storeroom', 'Boiler Shop']);
+    fireEvent.change(select, { target: { value: 'l-3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save location' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/locations/l-2', expect.objectContaining({ parentId: 'l-3' })));
+  });
+
+  it('takes a location out of its room with "Not inside another location"', async () => {
+    show();
+    await edit('D-1');
+    fireEvent.change(await screen.findByLabelText('Located in'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save location' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/locations/l-2', expect.objectContaining({ parentId: null })));
+  });
+
+  it('will not put a room that holds others inside another, and says why', async () => {
+    show();
+    await edit('Main Storeroom');
+    expect(await screen.findByLabelText('Located in')).toBeDisabled();
+    expect(screen.getByText('Other locations stand inside this one, so it cannot go inside another.')).toBeInTheDocument();
+  });
+
+  it('shows the server’s reason when a room is refused', async () => {
+    show();
+    mockPatch.mockRejectedValue({ code: 'VALIDATION_ERROR', message: 'Boiler Shop is inactive. Reactivate it to put locations inside it.' });
+    await edit('E-3');
+    fireEvent.change(await screen.findByLabelText('Located in'), { target: { value: 'l-3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save location' }));
+    // In the form, under 'Cannot save', and in the toast.
+    expect((await screen.findAllByText('Boiler Shop is inactive. Reactivate it to put locations inside it.')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Cannot save')).toBeInTheDocument();
+  });
+});
+
 describe('Locations page: details of a room with locations inside it', () => {
   it('counts them, and says to move them out rather than to deactivate it', async () => {
     mockGet.mockReset().mockImplementation(async (path: string) => {
@@ -77,5 +144,49 @@ describe('Locations page: details of a room with locations inside it', () => {
     expect(await screen.findByText('Referenced by other records')).toBeInTheDocument();
     expect(screen.getByText(/1 location\(s\) inside it/)).toBeInTheDocument();
     expect(screen.getByText(/Move the locations inside it out before deleting or deactivating it\./)).toBeInTheDocument();
+  });
+});
+
+describe('Locations page: review findings on PR #86', () => {
+  let rows: Array<Record<string, unknown>> = [];
+  const show = () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') return rows;
+      if (path.startsWith('/reports/inventory')) return { currency: 'ZAR', byLocation: [] };
+      return [];
+    });
+    mockPatch.mockReset().mockResolvedValue({});
+    render(<MemoryRouter><ToastProvider><Locations /></ToastProvider></MemoryRouter>);
+  };
+  const row = async (name: string) => (await screen.findByText(name, { selector: 'span.font-medium' })).closest('tr')!;
+
+  it('highlights the name field for a duplicate name, even one with "inside" in it', async () => {
+    rows = [{ id: 'l-1', name: 'Boiler Shop', type: 'SHOP_FLOOR_AREA', active: true, parentId: null, parent: null, inventoryCount: 0 }];
+    show();
+    mockPatch.mockRejectedValue({ code: 'CONFLICT', message: 'Location name "Inside Bay" already exists.' });
+    fireEvent.click(within(await row('Boiler Shop')).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByLabelText(/Location name/), { target: { value: 'Inside Bay' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save location' }));
+    expect((await screen.findAllByText('A location with this name already exists.')).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText(/Location name/)).toHaveClass('input-error');
+  });
+
+  it('stops filtering by a room once it no longer holds anything', async () => {
+    rows = [
+      { id: 'l-1', name: 'Main Storeroom', type: 'STOREROOM', active: true, parentId: null, parent: null, inventoryCount: 0 },
+      { id: 'l-2', name: 'D-1', type: 'RACK', active: true, parentId: 'l-1', parent: { id: 'l-1', name: 'Main Storeroom', type: 'STOREROOM' }, inventoryCount: 0 },
+      { id: 'l-3', name: 'Boiler Shop', type: 'SHOP_FLOOR_AREA', active: true, parentId: null, parent: null, inventoryCount: 0 },
+    ];
+    show();
+    await row('D-1');
+    fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'l-1' } });
+    expect(screen.queryByText('Boiler Shop', { selector: 'span.font-medium' })).not.toBeInTheDocument();
+    // D-1 is taken out of Main Storeroom; the list reloads with no room holding anything.
+    rows = rows.map((l) => (l.id === 'l-2' ? { ...l, parentId: null, parent: null } : l));
+    fireEvent.click(within(await row('D-1')).getByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByLabelText('Located in'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save location' }));
+    expect(await screen.findByText('Boiler Shop', { selector: 'span.font-medium' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Room')).not.toBeInTheDocument();
   });
 });

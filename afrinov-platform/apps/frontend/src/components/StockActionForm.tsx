@@ -5,6 +5,7 @@ import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import type { CurrentStockRow } from '../api/types';
+import { locationLabel } from '../lib/locations';
 
 // Issuing has its own page (IssueStock), so the row drawer only transfers and adjusts.
 export type StockActionKind = 'transfer' | 'adjust';
@@ -18,7 +19,7 @@ interface Props {
   onSuccess: (message: string) => void;
 }
 
-interface Location { id: string; name: string; }
+interface Location { id: string; name: string; parent?: { name: string } | null }
 
 // Count differences are posted from Count stock, which checks the quantity
 // the counter saw; an adjustment records a known reason instead.
@@ -100,7 +101,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
           <Field label="Destination location" htmlFor="to" required error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
             <Select id="to" required value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} invalid={!!validation}>
               <option value="">— select —</option>
-              {(locations.data ?? []).filter((l) => l.id !== row.locationId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {(locations.data ?? []).filter((l) => l.id !== row.locationId).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
             </Select>
           </Field>
           <Alert tone="info" title="Atomic transfer">

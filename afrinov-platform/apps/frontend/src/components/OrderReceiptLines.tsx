@@ -6,6 +6,7 @@
 import { Button } from './Button';
 import { Select, Input } from './Field';
 import { formatNumber } from '../lib/format';
+import { locationLabel } from '../lib/locations';
 
 export interface OrderForReceipt {
   id: string; number: string; supplierId: string;
@@ -20,7 +21,7 @@ export interface ReceiptLineDraft {
   outstanding?: number; label?: string; unit?: string;
 }
 
-interface LocationOpt { id: string; name: string }
+interface LocationOpt { id: string; name: string; parent?: { name: string } | null }
 
 /** The order's lines with something still outstanding, each filled in with that amount. */
 export function receiptLinesFromOrder(order: OrderForReceipt): ReceiptLineDraft[] {
@@ -56,7 +57,7 @@ export function EveryLineInto({ locations, onChoose }: { locations: LocationOpt[
   return (
     <Select value="" onChange={(e) => onChoose(e.target.value)} aria-label="Receive every line into" className="sm:w-56">
       <option value="">Receive every line into…</option>
-      {locations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+      {locations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}</option>)}
     </Select>
   );
 }
@@ -74,7 +75,7 @@ export function OrderReceiptRow({ line, index, locations, onChange }: {
       <div className="col-span-7 sm:col-span-3">
         <Select value={line.locationId} onChange={(e) => onChange({ locationId: e.target.value })} aria-label={`Line ${index + 1} location`}>
           <option value="">Location…</option>
-          {locations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+          {locations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}</option>)}
         </Select>
       </div>
       <div className="col-span-5 sm:col-span-2">

@@ -28,6 +28,9 @@ interface Location {
   code?: string | null;
   type: LocationType;
   active: boolean;
+  /** The room or area it stands in: rack D-1 in Main Storeroom. */
+  parentId?: string | null;
+  parent?: { id: string; name: string; code?: string | null; type: LocationType } | null;
   address?: string | null;
   description?: string | null;
   contactPerson?: string | null;
@@ -79,16 +82,23 @@ function statusFor(loc: Location): LocationStatus {
 
 interface LocationFormProps {
   initial?: Partial<Location>;
+  /** Every location, to offer the rooms this one can stand in. */
+  all: Location[];
   onCancel: () => void;
   onSaved: (msg: string) => void;
   onError: (e: ApiError) => void;
 }
 
-function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps) {
+function LocationForm({ initial, all, onCancel, onSaved, onError }: LocationFormProps) {
   const [name, setName] = useState(initial?.name ?? '');
   const [code, setCode] = useState(initial?.code ?? '');
   const [type, setType] = useState<LocationType>((initial?.type as LocationType) ?? 'STOREROOM');
   const [active, setActive] = useState(initial?.active ?? true);
+  const [parentId, setParentId] = useState(initial?.parentId ?? '');
+  // One level, as the server checks: a room is active, not a rack and not inside
+  // another; a location that holds others cannot go inside one.
+  const rooms = all.filter((l) => l.id !== initial?.id && ((l.active && l.type !== 'RACK' && !l.parentId) || l.id === initial?.parentId));
+  const holdsOthers = !!initial?.id && all.some((l) => l.parentId === initial.id);
   // Address and contact fields still exist on the API but are not shown: the
   // store's locations are racks and rooms on one site, not addresses.
   const [description, setDescription] = useState(initial?.description ?? '');
@@ -116,6 +126,8 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
         code: code.trim() || undefined,
         type,
         active,
+        // On an edit, none takes it out of its room.
+        parentId: parentId || (initial?.id ? null : undefined),
         description: description.trim() || undefined,
         notes: notes.trim() || undefined,
       };
@@ -128,14 +140,15 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
       }
     } catch (err) {
       const e = err as ApiError;
-      if (e.code === 'CONFLICT') {
-        if (/code/i.test(e.message)) {
-          setFieldErrors({ code: 'A location with this code already exists.' });
-          setValidation('A location with this code already exists.');
-        } else {
-          setFieldErrors({ name: 'A location with this name already exists.' });
-          setValidation('A location with this name already exists.');
-        }
+      if (e.code === 'CONFLICT' && /^Location code ".*" is already in use\.?$/.test(e.message)) {
+        setFieldErrors({ code: 'A location with this code already exists.' });
+        setValidation('A location with this code already exists.');
+      } else if (e.code === 'CONFLICT' && /^Location (name )?".*" already exists\.?$/.test(e.message)) {
+        setFieldErrors({ name: 'A location with this name already exists.' });
+        setValidation('A location with this name already exists.');
+      } else if ((e.code === 'CONFLICT' || e.code === 'VALIDATION_ERROR') && e.message && e.message !== 'Invalid location payload') {
+        // A rule the server refused (a room: one level, never a rack, active rooms): its words say why.
+        setValidation(e.message);
       } else if (e.code === 'VALIDATION_ERROR') {
         setValidation('Please correct the highlighted fields.');
       } else if (e.code === 'FORBIDDEN') {
@@ -154,7 +167,7 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
       <p className="text-sm text-surface-500">
-        Locations identify where stock is held. Add storerooms, racks, shop floor areas, containers, and off-site holdings. A rack that holds stock is added here with the type Rack; the Racks page only records which workshop and project a rack belongs to.
+        Locations identify where stock is held. Add storerooms, racks, shop floor areas, containers, and off-site holdings. A rack that holds stock is added here with the type Rack, located in the room it stands in; the Racks page only records which workshop and project a rack belongs to.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -179,6 +192,19 @@ function LocationForm({ initial, onCancel, onSaved, onError }: LocationFormProps
           </Select>
         </Field>
       </div>
+
+      <Field
+        label="Located in"
+        htmlFor="loc-parent"
+        help={holdsOthers
+          ? 'Other locations stand inside this one, so it cannot go inside another.'
+          : 'The room or area it stands in, e.g. rack D-1 in Main Storeroom. Stock stays on this location.'}
+      >
+        <Select id="loc-parent" value={parentId} onChange={(e) => setParentId(e.target.value)} disabled={holdsOthers}>
+          <option value="">Not inside another location</option>
+          {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </Select>
+      </Field>
 
       <Field label="Description" htmlFor="loc-desc">
         <Textarea id="loc-desc" rows={2} value={description ?? ''} onChange={(e) => setDescription(e.target.value)} placeholder="Optional. Helps identify the location in lists." />
@@ -216,6 +242,10 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
         <div>
           <dt className="text-eyebrow text-surface-500">Type</dt>
           <dd className="text-surface-900">{TYPE_LABEL[location.type] ?? location.type}</dd>
+        </div>
+        <div>
+          <dt className="text-eyebrow text-surface-500">Located in</dt>
+          <dd className="text-surface-900">{location.parent?.name ?? <span className="text-surface-300">—</span>}</dd>
         </div>
         <div>
           <dt className="text-eyebrow text-surface-500">Inventory</dt>
@@ -268,6 +298,8 @@ export function Locations() {
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  // A room and the locations inside it.
+  const [roomFilter, setRoomFilter] = useState('');
   const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; location: Location } | null>(null);
   const [viewing, setViewing] = useState<LocationDetails | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Location | null>(null);
@@ -278,19 +310,31 @@ export function Locations() {
   // Viewing is for everyone; adding, editing, (de)activating and deleting need the location permissions.
   const canManage = usePermissions().hasPermission('locations:manage');
 
+  // The rooms that have locations inside them, for the Room filter.
+  const roomOptions = useMemo(() => {
+    const data = locations.data ?? [];
+    const holding = new Set(data.map((l) => l.parentId).filter((id): id is string => !!id));
+    return data.filter((l) => holding.has(l.id)).sort((a, b) => a.name.localeCompare(b.name));
+  }, [locations.data]);
+  // A room that no longer holds anything leaves the filter: it stops applying,
+  // rather than hiding locations behind a control that is not shown.
+  const activeRoom = roomOptions.some((r) => r.id === roomFilter) ? roomFilter : '';
+
   const filtered = useMemo(() => {
     if (!locations.data) return [];
     const needle = q.trim().toLowerCase();
     return locations.data.filter((l) => {
       if (typeFilter && l.type !== typeFilter) return false;
       if (statusFilter && statusFor(l) !== statusFilter) return false;
+      if (activeRoom && l.id !== activeRoom && l.parentId !== activeRoom) return false;
       if (needle) {
-        const hay = `${l.name} ${l.code ?? ''} ${l.description ?? ''}`.toLowerCase();
+        const hay = `${l.name} ${l.code ?? ''} ${l.description ?? ''} ${l.parent?.name ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [locations.data, q, typeFilter, statusFilter]);
+  }, [locations.data, q, typeFilter, statusFilter, activeRoom]);
+  const filtering = !!(q || typeFilter || statusFilter || activeRoom);
 
   const stats = useMemo(() => {
     const data = locations.data ?? [];
@@ -366,7 +410,7 @@ export function Locations() {
       </div>
 
       <FilterBar
-        onClear={q || typeFilter || statusFilter ? () => { setQ(''); setTypeFilter(''); setStatusFilter(''); } : undefined}
+        onClear={filtering ? () => { setQ(''); setTypeFilter(''); setStatusFilter(''); setRoomFilter(''); } : undefined}
         count={locations.loading ? 'Loading…' : `${filtered.length} of ${locations.data?.length ?? 0}`}
       >
         <SearchField id="locations-search" value={q} onChange={setQ} placeholder="Name, code, description…" />
@@ -380,6 +424,14 @@ export function Locations() {
             {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
         </Field>
+        {roomOptions.length > 0 && (
+          <Field label="Room" htmlFor="locations-room" className={FILTER_WIDTH}>
+            <Select id="locations-room" value={activeRoom} onChange={(e) => setRoomFilter(e.target.value)}>
+              <option value="">All rooms</option>
+              {roomOptions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </Select>
+          </Field>
+        )}
       </FilterBar>
 
       {locations.error && <ErrorState message={locations.error.message} onRetry={locations.reload} />}
@@ -400,9 +452,9 @@ export function Locations() {
           })}
           emptyState={
             <EmptyState
-              title={q || typeFilter || statusFilter ? 'No locations match your filters' : 'No locations yet'}
-              description={q || typeFilter || statusFilter ? 'Try clearing your filters.' : 'Create your first location to start organising inventory.'}
-              action={!q && !typeFilter && !statusFilter && canManage ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first location</Button> : undefined}
+              title={filtering ? 'No locations match your filters' : 'No locations yet'}
+              description={filtering ? 'Try clearing your filters.' : 'Create your first location to start organising inventory.'}
+              action={!filtering && canManage ? <Button variant="primary" onClick={() => setDrawer({ mode: 'add' })}>Add your first location</Button> : undefined}
             />
           }
         />
@@ -418,6 +470,7 @@ export function Locations() {
         >
           <LocationForm
             initial={drawer.mode === 'edit' ? drawer.location : undefined}
+            all={locations.data ?? []}
             onCancel={() => setDrawer(null)}
             onSaved={(msg) => { setDrawer(null); locations.reload(); toast.success(msg); }}
             onError={(err) => toast.error('Could not save location', err.message)}
@@ -485,6 +538,7 @@ function columns({
         </button>
       ),
     },
+    { key: 'parent', header: 'Located in', render: (l) => l.parent ? l.parent.name : <span className="text-surface-300">—</span>, width: '11rem' },
     { key: 'code', header: 'Code', render: (l) => l.code ? <span className="font-mono">{l.code}</span> : <span className="text-surface-300">—</span>, width: '8rem' },
     { key: 'type', header: 'Type', render: (l) => TYPE_LABEL[l.type] ?? l.type, width: '11rem' },
     { key: 'status', header: 'Status', render: (l) => <Badge tone={l.active ? 'success' : 'neutral'} dot>{l.active ? 'Active' : 'Inactive'}</Badge>, width: '9rem' },

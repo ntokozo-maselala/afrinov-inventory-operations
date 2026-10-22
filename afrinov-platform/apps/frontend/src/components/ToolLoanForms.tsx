@@ -13,6 +13,7 @@ import { RecipientSelect, ProjectSelect, useIssueOptions } from './IssueFields';
 import { api, type ApiError } from '../api/client';
 import { formatDate, formatNumber } from '../lib/format';
 import type { OpenLoan, ToolRow } from '../api/types';
+import { useLocationLabel } from '../hooks/useLocationLabel';
 
 const stockKey = (materialId: string, locationId: string) => `${materialId}|${locationId}`;
 
@@ -34,15 +35,16 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
   const [lines, setLines] = useState<Line[]>(() => [line(start?.locations[0] ? stockKey(start.materialId, start.locations[0].locationId) : '')]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const locationName = useLocationLabel();
 
   // What is in store, per tool and location.
   const available = useMemo(() => tools.flatMap((t) => t.locations.map((l) => ({ tool: t, ...l }))), [tools]);
   const byKey = useMemo(() => new Map(available.map((a) => [stockKey(a.tool.materialId, a.locationId), a])), [available]);
   const options = useMemo<SearchOption[]>(() => available.map((a) => ({
     value: stockKey(a.tool.materialId, a.locationId),
-    label: `${a.tool.name} (${a.tool.sku}${a.tool.serialNumber ? ` · S/N ${a.tool.serialNumber}` : ''}) · ${a.locationName}`,
+    label: `${a.tool.name} (${a.tool.sku}${a.tool.serialNumber ? ` · S/N ${a.tool.serialNumber}` : ''}) · ${locationName(a.locationId, a.locationName)}`,
     detail: `${formatNumber(Number(a.quantity))} in store`,
-  })), [available]);
+  })), [available, locationName]);
 
   const asked = new Map<string, number>();
   for (const l of lines) if (l.stockKey && Number(l.quantity) > 0) asked.set(l.stockKey, (asked.get(l.stockKey) ?? 0) + Number(l.quantity));
@@ -93,7 +95,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
           const tooMany = over.has(l.stockKey);
           return (
             <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_6rem_auto] gap-2 items-start">
-              <Field label={`Tool ${i + 1}`} htmlFor={`loan-tool-${l.key}`} help={a ? `In store at ${a.locationName}: ${formatNumber(Number(a.quantity))}` : undefined}>
+              <Field label={`Tool ${i + 1}`} htmlFor={`loan-tool-${l.key}`} help={a ? `In store at ${locationName(a.locationId, a.locationName)}: ${formatNumber(Number(a.quantity))}` : undefined}>
                 <SearchSelect
                   id={`loan-tool-${l.key}`} value={l.stockKey} onChange={(v) => update(l.key, { stockKey: v, quantity: l.quantity || '1' })}
                   options={options} placeholder="Search by name, code, serial number or location" noMatchText="No tool in store matches"

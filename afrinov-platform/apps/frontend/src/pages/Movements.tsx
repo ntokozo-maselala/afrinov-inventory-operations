@@ -32,6 +32,7 @@ import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
 import { today } from '../lib/dates';
 import { formatDate } from '../lib/format';
+import { locationLabel } from '../lib/locations';
 
 type Filter = 'recipientId' | 'locationId' | 'actorId' | 'materialId' | 'supplierId' | 'entityType' | 'q';
 type ReportId = 'all' | 'received' | 'issued' | 'returned' | 'counts' | 'transfers' | 'writeoffs' | 'loans' | 'other';
@@ -79,7 +80,7 @@ export function Movements() {
   const query = queryParams.toString();
 
   const ledgerActors = has('actorId') && report.id !== 'other';
-  const locations = useApi<Option[]>(has('locationId') ? '/locations' : null);
+  const locations = useApi<Array<Option & { parent?: { name: string } | null }>>(has('locationId') ? '/locations' : null);
   const suppliers = useApi<Option[]>(has('supplierId') ? '/suppliers' : null);
   const recipients = useApi<Option[]>(has('recipientId') ? '/recipients' : null);
   const materials = useApi<Material[]>(has('materialId') ? '/materials' : null);
@@ -215,7 +216,7 @@ export function Movements() {
           <Field label="Location" htmlFor="mv-location" className={FILTER_WIDTH}>
             <Select id="mv-location" value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)}>
               <option value="">All locations</option>
-              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
             </Select>
           </Field>
         )}

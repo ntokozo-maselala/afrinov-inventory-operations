@@ -12,8 +12,8 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | A location can sit inside another | S–M | Not started |
-| 2 | Show and choose the parent on screen | S–M | Not started |
+| 1 | A location can sit inside another | S–M | In review (#85) |
+| 2 | Show and choose the parent on screen | S–M | In review (#86) |
 | 3 | Move the Rack records onto locations, retire Racks | M | Not started |
 | 4 | The import asks which room each rack is in | S | Not started |
 | 5 | Stock by room, racks included | S–M | Not started |
@@ -24,7 +24,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
 ### Decisions needed
 
-- **Depth:** one level only (a rack inside a room), or rooms inside buildings too? *Recommended: one level.* It is all the workbook needs, and reports stay simple.
+- **Depth:** *Decided: one level* (a rack inside a room), as built in Phase 1. It is all the workbook needs, and reports stay simple.
 - **Rack extras:** a Rack record also has a capacity, a "Full" status and a project. None of them comes from the workbook and nothing uses them. Drop them, or move them onto the location? *Recommended: drop them.*
 - **Which room:** the storeman says which room each rack is in (racks A to O are presumably in the Stores room). Needed before Phase 4.
 
@@ -36,9 +36,9 @@ One branch and pull request per phase, in order. Phase 3 needs Phases 1 and 2. P
 
 Size S–M. Backend.
 
-- [ ] **1.1 Parent location.** A nullable `parentId` on `Location`, pointing at another location, in a new migration. One level: a location with a parent cannot itself be a parent, and the parent must be active and not of type Rack.
+- [x] **1.1 Parent location.** A nullable `parentId` on `Location`, pointing at another location, in a new migration. One level: a location with a parent cannot itself be a parent, and the parent must be active and not of type Rack.
   Files: `prisma/schema.prisma`, new migration, `modules/inventory/location.service.ts`
-- [ ] **1.2 API.** `POST` and `PATCH /locations` take `parentId`; `GET /locations` returns each location's parent. A location with locations inside it cannot be deleted or deactivated until they are moved.
+- [x] **1.2 API.** `POST` and `PATCH /locations` take `parentId`; `GET /locations` returns each location's parent. A location with locations inside it cannot be deleted or deactivated until they are moved.
   Files: `location.service.ts`, `material.routes.ts` (location routes), `openapi/document.ts`, `mock/mockApi.ts`
 
 **Done when:** `D-1` can be saved as a Rack inside `Main Storeroom`, and the API refuses a loop or a second level.
@@ -47,9 +47,9 @@ Size S–M. Backend.
 
 Size S–M. Frontend.
 
-- [ ] **2.1 Locations page.** A "Located in" field on the location form, a column in the list, and a filter by room.
+- [x] **2.1 Locations page.** A "Located in" field on the location form, a column in the list, and a filter by room.
   Files: `pages/Locations.tsx`
-- [ ] **2.2 Pickers say where a rack is.** Wherever a location is chosen (Receive, Issue, Return and Count stock, transfers, tool check-out), a rack shows as `D-1 · Main Storeroom`.
+- [x] **2.2 Pickers say where a rack is.** Wherever a location is chosen (Receive, Issue, Return and Count stock, transfers, tool check-out), a rack shows as `D-1 · Main Storeroom`.
   Files: the location pickers on those pages
 
 **Done when:** a storeman picking a rack sees which room it is in.
@@ -58,11 +58,21 @@ Size S–M. Frontend.
 
 Size M. Backend and frontend. Needs Phases 1 and 2.
 
-- [ ] **3.1 Copy what Rack records know.** A migration matches each Rack to the location with the same code or name and sets that location's parent from the Rack's location. Racks with no matching location are listed in a report, for someone to add or discard. Nothing is deleted yet.
-  Files: new migration or a one-off script under `scripts/`
-- [ ] **3.2 Retire the Racks page.** Remove the Racks menu entry and page; `/racks` redirects to Locations filtered to type Rack. Remove the `/racks` routes and the rack count from the location delete check. Update the Locations page's description, which currently explains the two records.
-  Files: `pages/Racks.tsx`, `App.tsx`, `hooks/useNavGroups.tsx`, `modules/inventory/rack.routes.ts`, `rack.service.ts`, `location.service.ts`, `pages/Locations.tsx`, `db/seed.ts`, `mock/*`
-- [ ] **3.3 Drop the Rack table**, in a later migration once 3.1 has run on every database.
+Three pull requests, each safe on its own. Nothing is deleted until the copy has run on every database, and the delete refuses to run if it has not.
+
+- [ ] **3.1 Copy what Rack records know, with a dry run.** A command (`npm run racks:to-locations`), a dry run by default like the vendor list import, that writes a report and changes nothing.
+  - **Matching, never a guess.** Each Rack is matched to a location by code first. A name match counts only when exactly one location has that name and the rack's code points to no other location. Anything else (the code and the name point to different locations, or several could fit) is reported as *needs a decision*, and that rack is neither changed nor removed.
+  - **The report** lists every rack under one heading: will set the room (from the Rack's location, through the Phase 1 rules, so never inside a rack or an inactive room), already in that room, conflict (the location is already in a different room), needs a decision, no matching location, and the extras that would be dropped (project, capacity, "Full" status, notes).
+  - **Settling what it cannot.** The command is the supported way to resolve a rack the match leaves open, and stays so until 3.3, since the Racks page goes in 3.2: `--create <code>` adds the rack as a location of type Rack in its room, and `--discard <code>` removes it. Each takes the rack codes it names, so nothing is created or removed without a person choosing it.
+  - **Before `--apply`:** back up the database (`pg_dump`) and keep the dry-run report, since applying removes Rack rows. Then `--apply`, with the database name typed back and the acting user, applies everything in one transaction and is safe to run again.
+  - **Nothing about a rack is lost.** Before removing a Rack, it writes the rack's full record (code, name, location, project, capacity, status, notes) to the audit log, then removes each Rack it copied or that someone discarded. Racks still needing a decision stay, listed in the report.
+  Files: `scripts/racks-to-locations.ts` (new), `package.json`
+- [ ] **3.2 Retire the Racks page, keeping the table and its guards.** Remove the Racks menu entry and page; `/racks` redirects to Locations filtered to type Rack. Remove the `/racks` routes and the `manage:racks` permission from the roles. The Movements "Other changes" history names rack entries from the audit log itself (the rack's own entries that carry its code and name, such as when it was added or the record 3.1 wrote), not from the Rack table: today an "Archived rack" entry records only its status and takes the name from the table, so it would read "a rack" once the table is gone. Rack entries link to Locations. Update the Locations page's description, which currently explains the two records. **Keep the rack count in the location delete check:** while any Rack row remains, deleting its location would quietly clear the rack's location (`ON DELETE SET NULL` on `racks.location_id`) before 3.1 has copied it.
+  Files: `pages/Racks.tsx`, `App.tsx`, `hooks/useNavGroups.tsx`, `modules/inventory/rack.routes.ts`, `rack.service.ts`, `modules/audit/activity.service.ts`, `shared/permissions.ts`, `pages/Locations.tsx`, `db/seed.ts`, `mock/*`, `openapi/document.ts`
+- [ ] **3.3 Drop the Rack table**, in a later migration once 3.1 has run on every database and every rack is settled. The migration first checks that `racks` is empty and **stops with an error** if it is not, so it cannot drop a Rack that was never copied. It drops the `RackStatus` type and deletes the `manage:racks` permission; only now does the location delete check stop counting racks. Update `src/db/migrations.test.ts`, which lists the Rack table and its keys. Back up the database (`pg_dump`) before deploying it.
+  Files: new migration, `prisma/schema.prisma`, `location.service.ts`, `src/db/migrations.test.ts`
+
+Before 3.1, decide what the Rack extras become (see Decisions needed): on the local database rack `D-1` carries project AFRI-1325, rack `F-7` has no matching location, and `CHK-8849` looks like test data.
 
 **Done when:** each rack exists once, as a location, and nothing in the app mentions a separate Rack.
 
