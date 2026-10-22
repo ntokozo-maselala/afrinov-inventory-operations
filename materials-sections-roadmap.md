@@ -24,10 +24,10 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
 - **Allocated per item, fixed.** Stores or Projects is set on the catalogue item, not per purchase or per delivery.
 - **Tied to one project.** A Projects material belongs to one named project. The same kind of item needed on two jobs is two catalogue items, for example `1369-PIPE-150NB` and `1402-PIPE-150NB`.
-- **How Projects material differs:** no Required Stock or re-ordering; its own stock view and reports; issued only to its own project.
+- **How Projects material differs:** no Required Stock and never on the re-order list, though it is still bought on a purchase order for its own project (Phase 6); its own stock view and reports; issued only to its own project.
 - **A level above the categories.** Stores holds today's categories (Consumables; Fasteners, Slugs & Insulation; Tooling, PPE & Electrical; Tools). Projects takes the place of the "Project Material" category.
 - **Existing Project Material:** listed for a user to assign each item to its project.
-- **When a project closes** (Completed or Cancelled), its leftover stock **moves to Stores** and becomes Stores material (corrected on 21 October 2026; the first answer was "stays with the project", and Phase 4 was built on that). See Phase 7.
+- **When a project closes** (Completed or Cancelled), its leftover stock **moves to Stores** and becomes Stores material (corrected on 21 October 2026; the first answer was "stays with the project", and Phase 4 was built on that). Nothing moves on its own: a person gives each item its Stores category, when closing the project or afterwards (an open choice in Phase 7).
 
 ## How to run this
 
@@ -54,7 +54,7 @@ Size M. Backend, with a migration.
   Files: `material.routes.ts`, `openapi/document.ts`
 
 **Done when:**
-- The server refuses a Projects material without a project, and Required Stock on one.
+- The server refuses a new Projects material without a project, and Required Stock on one. Existing Project Material with no project is allowed until it is assigned (Phase 3).
 
 ## Phase 2: The Materials screens show the two sections
 
@@ -106,7 +106,7 @@ Size S–M. Backend and frontend.
 
 - [ ] **5.1 The server refuses the wrong project.** Issuing a Projects item to another project, or to none, is refused. One issue can't hold items from two projects. Issuing to a completed or cancelled project is refused too: its leftovers go to Stores (Phase 7), and are issued from there. (Today only an inactive project is refused; marking a project Completed doesn't make it inactive.)
   Files: `inventory.service.ts`
-- [ ] **5.2 Issue stock fills the project in.** Choosing a Projects item sets the issue's project and locks it; Stores items can still go to any project or none. Returns go back to the item's own project stock, and are still accepted once the project is closed: material brought back after a job is marked Completed becomes leftovers, to move to Stores (Phase 7).
+- [ ] **5.2 Issue stock fills the project in.** Choosing a Projects item sets the issue's project and locks it; Stores items can still go to any project or none. Returns go back to the item's own project stock, and are still accepted once the project is closed: material brought back after a job is marked Completed becomes leftovers, to move to Stores (Phase 7). A return of an item already moved to Stores goes into Stores with it.
   Files: `pages/IssueStock.tsx`, `pages/ReturnStock.tsx`, `components/IssueFields.tsx`
 
 **Done when:**
@@ -118,7 +118,7 @@ Size S. Backend and frontend.
 
 - [ ] **6.1 The order's project matches.** A Projects item can only go on a purchase order for its own project, and one order can't hold items from two projects. Picking a Projects item on a new order sets the order's project. An order for a completed or cancelled project is refused, as its leftovers go to Stores. (Today only an inactive project is refused.)
   Files: `procurement.service.ts`, `pages/PurchaseOrderForm.tsx`
-- [ ] **6.2 Order from the item.** Material detail's **Order** on a Projects item opens the form with its project set. Stock status's **Order these** stays with Stores, as Projects items are never re-ordered.
+- [ ] **6.2 Order from the item.** Material detail's **Order** on a Projects item opens the form with its project set. Stock status's **Order these** stays with Stores, as Projects items are bought for their job, not topped up from the re-order list.
   Files: `pages/MaterialDetail.tsx`, `pages/StockStatus.tsx`
 
 **Done when:**
