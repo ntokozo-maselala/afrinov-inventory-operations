@@ -55,7 +55,9 @@ const orderDetails = {
   supplierContactName: text(200),
   supplierContactPhone: text(50),
   // The same rule as a supplier's imported email, so an order never refuses the email its supplier holds.
-  supplierContactEmail: z.union([z.string().trim().max(SUPPLIER_EMAIL_MAX).regex(EMAIL_PATTERN, 'Not an email address'), z.literal('')]).nullable().optional(),
+  // Blank, or spaces only, clears it, as for the other details.
+  supplierContactEmail: z.string().trim().max(SUPPLIER_EMAIL_MAX)
+    .refine((v) => v === '' || EMAIL_PATTERN.test(v), 'Not an email address').nullable().optional(),
   supplierAddress: text(500),
   paymentTerms: text(100),
   paymentMilestone: text(200),

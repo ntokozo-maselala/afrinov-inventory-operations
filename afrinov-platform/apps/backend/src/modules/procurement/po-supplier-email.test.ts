@@ -14,8 +14,10 @@ describe('the supplier email on a purchase order', () => {
     }
   });
 
-  it('takes none: blank or null', () => {
+  it('takes none: blank, spaces only or null', () => {
     expect(valid('')).toBe(true);
+    // Spaces only clear it too, as for the other details.
+    expect(updatePOSchema.parse({ supplierContactEmail: '   ' }).supplierContactEmail).toBe('');
     expect(valid(null)).toBe(true);
     expect(updatePOSchema.safeParse({}).success).toBe(true);
   });

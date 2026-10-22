@@ -110,7 +110,12 @@ const or = (v: string | null | undefined) => (v && v.trim() ? v : dash);
 /** The order's own supplier detail (null when cleared), or the supplier's for an order that doesn't carry one. */
 const onOrder = (own: string | null | undefined, supplier: string | null | undefined) => (own === undefined ? supplier : own);
 
-/** The two blocks under the heading, as label and value pairs. */
+/**
+ * The supplier, delivery and order blocks as label and value pairs.
+ * Supplier contact details and address fall back to the supplier only when
+ * undefined on the order; null or blank values display as "-". Collection
+ * shows contact details without a delivery address.
+ */
 export function documentBlocks(po: PoDocumentOrder, company: PoCompany): { supplier: Pair[]; delivery: Pair[]; order: Pair[] } {
   const collection = po.deliveryMethod === 'COLLECTION';
   return {

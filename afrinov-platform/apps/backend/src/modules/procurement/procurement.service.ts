@@ -372,6 +372,20 @@ export const PurchaseOrderService = {
     return withTotals(po);
   },
 
+  /**
+   * Creates a numbered draft with its lines and records actorId as its creator.
+   * Omitted supplier contact details, address and payment terms come from the
+   * supplier; null or blank text clears them. Delivery is the default method,
+   * with omitted delivery details filled from Settings only for delivery.
+   * The Afrinov contact defaults to the creator's name when omitted.
+   *
+   * @returns The saved order, including its supplier and lines.
+   * @throws {ApiError} NOT_FOUND if the supplier is missing; VALIDATION_ERROR
+   * for no lines, an inactive supplier, a missing, inactive, closed or mismatched
+   * project, unassigned project material, or an invalid order or line delivery date.
+   * @throws {Error} Propagates database errors, including delivery settings
+   * lookup and transaction failures.
+   */
   async create(input: CreatePOInput, actorId: string) {
     if (input.lines.length === 0) throw Errors.validation('Purchase order must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
