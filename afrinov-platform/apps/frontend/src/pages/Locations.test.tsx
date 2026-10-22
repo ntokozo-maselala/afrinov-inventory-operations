@@ -190,3 +190,42 @@ describe('Locations page: review findings on PR #86', () => {
     expect(screen.queryByLabelText('Room')).not.toBeInTheDocument();
   });
 });
+
+describe('Locations page: opened from the old Racks link', () => {
+  it('opens on the racks, from ?type=RACK', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') return LOCATIONS;
+      if (path.startsWith('/reports/inventory')) return { currency: 'ZAR', byLocation: [] };
+      return [];
+    });
+    render(<MemoryRouter initialEntries={['/locations?type=RACK']}><ToastProvider><Locations /></ToastProvider></MemoryRouter>);
+    expect(await screen.findByText('D-1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Type')).toHaveValue('RACK');
+    expect(screen.queryByText('Main Storeroom')).not.toBeInTheDocument();
+  });
+});
+
+describe('Locations page: the type filter follows the link', () => {
+  it('applies a link followed while on the page, and puts a chosen type in the link', async () => {
+    const { Link, useLocation } = await import('react-router-dom');
+    const Where = () => <output aria-label="where">{useLocation().search}</output>;
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') return LOCATIONS;
+      if (path.startsWith('/reports/inventory')) return { currency: 'ZAR', byLocation: [] };
+      return [];
+    });
+    render(
+      <MemoryRouter initialEntries={['/locations']}>
+        <ToastProvider><Link to="/locations?type=RACK">Rack locations</Link><Where /><Locations /></ToastProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('Main Storeroom')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: 'Rack locations' }));
+    expect(screen.getByLabelText('Type')).toHaveValue('RACK');
+    expect(screen.queryByText('Main Storeroom')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'STOREROOM' } });
+    expect(screen.getByLabelText('where')).toHaveTextContent('?type=STOREROOM');
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: '' } });
+    expect(screen.getByLabelText('where')).toHaveTextContent(/^$/);
+  });
+});

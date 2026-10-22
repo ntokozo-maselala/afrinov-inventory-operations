@@ -8,15 +8,15 @@ import type {
   MockPurchaseOrder,
   MockGoodsReceipt,
   MockInventoryTransaction,
-  MockRack,
   MockProject,
 } from './types';
 
 export const SEED_LOCATIONS: MockLocation[] = [
   { id: 'loc-1', name: 'Main Storeroom', code: 'WH-MAIN', type: 'STOREROOM', active: true, address: '12 Industrial Rd, Jet Park' },
   { id: 'loc-2', name: 'Boiler Shop', code: 'WS-BOILER', type: 'SHOP_FLOOR_AREA', active: true, address: 'Workshop A', contactPerson: 'Workshop Foreman', contactPhone: '+27 11 555 0210' },
-  { id: 'loc-3', name: 'D-1', code: 'RACK-D1', type: 'RACK', active: true, description: 'Project rack for AFRI-1325' },
-  { id: 'loc-4', name: 'F-7', code: 'RACK-F7', type: 'RACK', active: true },
+  // The demo racks stand in Main Storeroom, as racks to locations records them.
+  { id: 'loc-3', name: 'D-1', code: 'RACK-D1', type: 'RACK', active: true, parentId: 'loc-1', description: 'Project rack for AFRI-1325' },
+  { id: 'loc-4', name: 'F-7', code: 'RACK-F7', type: 'RACK', active: true, parentId: 'loc-1' },
   { id: 'loc-5', name: 'Off-site Container', code: 'OFF-CTN', type: 'OFF_SITE', active: false, notes: 'Decommissioned Q1 2026' },
 ];
 
@@ -161,32 +161,5 @@ export const SEED_PROJECTS: MockProject[] = [
     active: true,
     createdAt: new Date('2026-08-15').toISOString(),
     updatedAt: new Date('2026-08-15').toISOString(),
-  },
-];
-
-export const SEED_RACKS: MockRack[] = [
-  {
-    id: 'rack-1',
-    code: 'D-1',
-    name: 'Aisle D – Shelf 1',
-    description: 'Heavy consumables, lower shelves.',
-    locationId: 'loc-1',
-    projectNumber: 'AFRI-1325',
-    capacity: 100,
-    status: 'ACTIVE',
-    createdAt: new Date('2026-01-10').toISOString(),
-    updatedAt: new Date('2026-08-01').toISOString(),
-    location: { id: 'loc-1', name: 'Main Storeroom' },
-  },
-  {
-    id: 'rack-2',
-    code: 'F-7',
-    name: 'Aisle F – Shelf 7',
-    locationId: 'loc-1',
-    capacity: 80,
-    status: 'ACTIVE',
-    createdAt: new Date('2026-02-04').toISOString(),
-    updatedAt: new Date('2026-07-12').toISOString(),
-    location: { id: 'loc-1', name: 'Main Storeroom' },
   },
 ];

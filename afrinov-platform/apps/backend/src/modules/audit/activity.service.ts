@@ -80,6 +80,9 @@ function editSentence(noun: string, label: string, before: unknown, after: unkno
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 
+/** Racks are locations of type Rack now (Phase 3.2); the old Racks page is gone. */
+const RACKS = '/locations?type=RACK';
+
 /** A plain sentence for an entry, and where its record lives. `names` resolves ids the entry only refers to. */
 export function describeActivity(e: Entry, names: Map<string, string>): { summary: string; link: string | null } {
   const a = (e.after ?? {}) as Json;
@@ -104,9 +107,9 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
     }
     case 'Rack': {
       const label = [str(a['code']) ?? str(b['code']), str(a['name']) ?? str(b['name'])].filter(Boolean).join(' ') || known(e.entityId) || 'a rack';
-      if (e.action === 'CREATE') return { summary: `Added rack ${label}`, link: '/racks' };
-      if (e.action === 'UPDATE') return { summary: editSentence('rack', label, e.before, e.after), link: '/racks' };
-      if (e.action === 'ARCHIVE') return { summary: `Archived rack ${label}`, link: '/racks' };
+      if (e.action === 'CREATE') return { summary: `Added rack ${label}`, link: RACKS };
+      if (e.action === 'UPDATE') return { summary: editSentence('rack', label, e.before, e.after), link: RACKS };
+      if (e.action === 'ARCHIVE') return { summary: `Archived rack ${label}`, link: RACKS };
       // Racks to locations (Phase 3.1): the entry carries the rack's whole record, so it names itself.
       if (e.action === 'MOVE_TO_LOCATION') return { summary: `Rack ${label} became location ${str(a['locationName']) ?? 'a location'}`, link: '/locations' };
       if (e.action === 'DISCARD') return { summary: `Discarded rack ${label}`, link: null };
@@ -168,15 +171,37 @@ export const ActivityService = {
       if (e.entityType === 'Location' && (e.action === 'ACTIVATE' || e.action === 'DEACTIVATE')) locationIds.add(e.entityId);
       if (e.entityType === 'Rack' && e.action === 'ARCHIVE') rackIds.add(e.entityId);
     }
-    const [users, locations, racks] = await Promise.all([
+    // An "Archived rack" entry records only its status. Its name comes from the
+    // rack's own entries in the audit log (when it was added or changed, or
+    // the record racks to locations wrote), not the Rack table, which goes:
+    // only the latest such entry per rack, read in one query.
+    const [users, locations, rackEntries] = await Promise.all([
       userIds.size ? prisma.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true } }) : [],
       locationIds.size ? prisma.location.findMany({ where: { id: { in: [...locationIds] } }, select: { id: true, name: true } }) : [],
-      rackIds.size ? prisma.rack.findMany({ where: { id: { in: [...rackIds] } }, select: { id: true, code: true, name: true } }) : [],
+      rackIds.size
+        ? prisma.$queryRaw<Array<{ entityId: string; before: unknown; after: unknown }>>`
+          SELECT DISTINCT ON (entity_id) entity_id AS "entityId", before, after
+          FROM audit_log_entries
+          WHERE entity_type = 'Rack' AND entity_id = ANY(${[...rackIds]}) AND action <> 'ARCHIVE'
+          ORDER BY entity_id, created_at DESC, id DESC`
+        : [],
     ]);
-    const names = new Map<string, string>([
-      ...locations.map((l) => [l.id, l.name] as [string, string]),
-      ...racks.map((r) => [r.id, `${r.code} ${r.name}`] as [string, string]),
-    ]);
+    const names = new Map<string, string>(locations.map((l) => [l.id, l.name] as [string, string]));
+    for (const r of rackEntries) {
+      const a = (r.after ?? {}) as Json;
+      const b = (r.before ?? {}) as Json;
+      const label = [str(a['code']) ?? str(b['code']), str(a['name']) ?? str(b['name'])].filter(Boolean).join(' ');
+      if (label) names.set(r.entityId, label);
+    }
+    // A rack whose audit entries carry no name (seeded or imported, not yet
+    // through racks to locations) is still a Rack row: name it from there
+    // while the table stays. Phase 3.3 drops this with the table, when every
+    // rack has been through 3.1, which records each one's name.
+    const unnamed = [...rackIds].filter((id) => !names.has(id));
+    if (unnamed.length) {
+      const racks = await prisma.rack.findMany({ where: { id: { in: unnamed } }, select: { id: true, code: true, name: true } });
+      for (const r of racks) names.set(r.id, `${r.code} ${r.name}`);
+    }
     const userName = new Map(users.map((u) => [u.id, u.name]));
 
     return entries.map((e) => ({

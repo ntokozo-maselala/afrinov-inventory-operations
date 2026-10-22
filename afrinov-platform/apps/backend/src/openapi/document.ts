@@ -27,7 +27,6 @@ import {
   updateLocationSchema,
   locationStatusSchema,
 } from '../modules/inventory/material.routes.js';
-import { createRackSchema, updateRackSchema } from '../modules/inventory/rack.routes.js';
 import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
 import { createProjectSchema, updateProjectSchema } from '../modules/operations/project.routes.js';
 import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
@@ -207,31 +206,6 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'delete', path: '/locations/:id', tag: 'Locations', summary: 'Delete a location',
     permissions: [P.DeleteLocation], success: 204, successDescription: 'Deleted', errors: [404, 409],
-  },
-
-  // Racks
-  {
-    method: 'get', path: '/racks', tag: 'Racks', summary: 'List racks',
-    query: z.object({
-      q: z.string().optional(),
-      locationId: z.string().optional(),
-      projectNumber: z.string().optional(),
-      status: z.enum(['ACTIVE', 'INACTIVE', 'FULL']).optional(),
-    }),
-  },
-  { method: 'get', path: '/racks/:id', tag: 'Racks', summary: 'Get a rack', errors: [404] },
-  {
-    method: 'post', path: '/racks', tag: 'Racks', summary: 'Create a rack', permissions: [P.ManageRacks],
-    body: createRackSchema, success: 201, errors: [404, 409],
-  },
-  {
-    method: 'patch', path: '/racks/:id', tag: 'Racks', summary: 'Update a rack', permissions: [P.ManageRacks],
-    body: updateRackSchema, errors: [404],
-  },
-  {
-    method: 'delete', path: '/racks/:id', tag: 'Racks', summary: 'Archive a rack',
-    description: 'Archives rather than deletes, and returns the archived rack.',
-    permissions: [P.ManageRacks], errors: [404],
   },
 
   // Stock movements

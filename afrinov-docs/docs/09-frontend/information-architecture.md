@@ -27,8 +27,7 @@ Operations
  |- Locations                     /locations
  |- Projects                      /projects
  |- Recipients                    /recipients
- |- Suppliers                     /suppliers
- `- Racks                         /racks
+ `- Suppliers                     /suppliers
 
 Procurement                       (unless VITE_PROCUREMENT_ENABLED=false)
  |- Purchase orders               /purchase-orders      (orders:view)

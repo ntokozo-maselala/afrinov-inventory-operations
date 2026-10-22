@@ -54,7 +54,7 @@ describe('useNavGroups', () => {
   });
 
   it('puts the lists the counter draws on in Operations', () => {
-    expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Projects', 'Recipients', 'Suppliers', 'Racks']);
+    expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Projects', 'Recipients', 'Suppliers']);
   });
 
   it('marks Stock as an exact match, so it is not lit on /stock/issue', () => {

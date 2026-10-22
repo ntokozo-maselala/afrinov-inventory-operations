@@ -212,7 +212,7 @@ needs an `Authorization: Bearer <token>` header, using the token returned by
 | --- | --- |
 | Auth | `/auth/login`, `/auth/me` |
 | Users | `/users`, `/users/lookup` |
-| Inventory | `/materials`, `/locations`, `/racks`, `/stock-items`, `/inventory-transactions` (with `/:id/returns` and `/:id/reversal`), `/inventory-issues`, `/inventory-transfers`, `/inventory-adjustments`, `/stock-counts`, `/stock-receipts` |
+| Inventory | `/materials`, `/locations`, `/stock-items`, `/inventory-transactions` (with `/:id/returns` and `/:id/reversal`), `/inventory-issues`, `/inventory-transfers`, `/inventory-adjustments`, `/stock-counts`, `/stock-receipts` |
 | Procurement | `/suppliers`; `/purchase-orders` and `/goods-receipts` unless `PROCUREMENT_ENABLED=false` |
 | Projects and recipients | `/projects`, `/recipients` |
 | Reports | `/reports/current-stock`, `/reports/movement-history`, `/reports/stock-status`, `/reports/stock-value`, `/reports/low-stock`, `/reports/reorder-list/export`, `/reports/project-consumption/:projectNumber`, `/reports/consumption` (+ `/export`), `/reports/month-end` (+ `/export`), `/reports/inventory` (+ `/export`) |

@@ -179,7 +179,7 @@ describe('usePermissions — the role check sheet', () => {
   const EXPECTED: Record<Exclude<RoleName, 'ADMIN'>, string[]> = {
     STORE_CONTROLLER: [
       'materials:manage', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
-      'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage', 'racks:manage',
+      'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage',
       'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:view', 'orders:receive', 'receipts:view',
     ],
     PROCUREMENT: ['inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],

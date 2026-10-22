@@ -28,7 +28,6 @@ const EditPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').t
 const StockStatus = importPage(() => import('./pages/StockStatus').then(m => ({ default: m.StockStatus })));
 const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ default: m.Consumption })));
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
-const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.Racks })));
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ProjectLeftovers = importPage(() => import('./pages/ProjectLeftovers').then(m => ({ default: m.ProjectLeftovers })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
@@ -151,7 +150,8 @@ export function App() {
         <Route path="/reports/low-stock" element={<Navigate to="/reports/stock-status" replace />} />
         {/* The retired Inventory report: its figures are on the Dashboard, Stock status and Locations. */}
         <Route path="/reports/inventory" element={<Navigate to="/" replace />} />
-        <Route path="/racks" element={<Suspense fallback={<PageSkeleton />}><Racks /></Suspense>} />
+        {/* Racks are locations of type Rack, inside their room (racks and locations roadmap, Phase 3.2). */}
+        <Route path="/racks" element={<Navigate to="/locations?type=RACK" replace />} />
         <Route path="/locations" element={<Suspense fallback={<PageSkeleton />}><Locations /></Suspense>} />
         <Route path="/projects" element={<Suspense fallback={<PageSkeleton />}><Projects /></Suspense>} />
         <Route path="/projects/:projectNumber/leftovers" element={<Suspense fallback={<PageSkeleton />}><ProjectLeftovers /></Suspense>} />

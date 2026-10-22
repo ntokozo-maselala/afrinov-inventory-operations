@@ -73,7 +73,6 @@ export function useNavGroups(): NavGroup[] {
         { to: '/projects', label: 'Projects', icon: <Icon.Tag /> },
         { to: '/recipients', label: 'Recipients', icon: <Icon.Users /> },
         { to: '/suppliers', label: 'Suppliers', icon: <Icon.Truck /> },
-        { to: '/racks', label: 'Racks', icon: <Icon.Layers /> },
       ],
     },
     ...(PROCUREMENT_ENABLED ? [{

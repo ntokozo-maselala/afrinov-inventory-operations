@@ -19,7 +19,6 @@ import {
   SEED_GOODS_RECEIPTS,
   SEED_TRANSACTIONS,
   SEED_PROJECTS,
-  SEED_RACKS,
 } from './seed';
 import { buildReport } from './mockReport';
 import type { ReportQuery as MockReportQuery } from '../api/reportTypes';
@@ -37,8 +36,6 @@ import type {
   MockStockRow,
   MockMovementRow,
   MockUser,
-  MockRack,
-  MockRackStatus,
   MockProject,
   AdjustmentReasonCode,
   MockRecipient,
@@ -59,7 +56,6 @@ interface State {
   purchaseOrders: MockPurchaseOrder[];
   goodsReceipts: MockGoodsReceipt[];
   transactions: MockInventoryTransaction[];
-  racks: MockRack[];
   projects: MockProject[];
   recipients: MockRecipient[];
 }
@@ -85,7 +81,6 @@ function freshState(): State {
     }),
     goodsReceipts: JSON.parse(JSON.stringify(SEED_GOODS_RECEIPTS)),
     transactions: [...SEED_TRANSACTIONS],
-    racks: JSON.parse(JSON.stringify(SEED_RACKS)),
     projects: JSON.parse(JSON.stringify(SEED_PROJECTS)),
     recipients: [
       { id: 'rcp-1', name: 'Sabelo', type: 'WORKER', active: true },
@@ -1058,72 +1053,6 @@ function route(method: string, path: string, body?: unknown): unknown {
     });
   }
 
-  // Racks
-  if (method === 'GET' && p === '/racks') {
-    const q = qs.q?.toLowerCase();
-    let list = [...state.racks];
-    if (qs.status) list = list.filter((r) => r.status === qs.status);
-    if (qs.locationId) list = list.filter((r) => r.locationId === qs.locationId);
-    if (qs.projectNumber) list = list.filter((r) => r.projectNumber === qs.projectNumber);
-    if (q) list = list.filter((r) => `${r.code} ${r.name} ${r.description ?? ''} ${r.location?.name ?? ''}`.toLowerCase().includes(q));
-    return list.sort((a, b) => a.code.localeCompare(b.code));
-  }
-  if (method === 'GET' && p.startsWith('/racks/')) {
-    const id = p.slice('/racks/'.length);
-    return state.racks.find((r) => r.id === id) ?? null;
-  }
-  if (method === 'POST' && p === '/racks') {
-    const b = body as { code: string; name: string; description?: string; locationId?: string; projectNumber?: string; capacity?: number; status?: MockRackStatus; notes?: string };
-    if (!b.code || !b.name) throw err('VALIDATION_ERROR', 'Code and name are required');
-    if (state.racks.some((r) => r.code === b.code)) throw err('CONFLICT', `Rack code "${b.code}" is already in use.`);
-    const loc = b.locationId ? state.locations.find((l) => l.id === b.locationId) : null;
-    if (b.locationId && !loc) throw err('NOT_FOUND', 'Location not found');
-    const created: MockRack = {
-      id: nextId('rack'),
-      code: b.code,
-      name: b.name,
-      description: b.description,
-      locationId: b.locationId,
-      projectNumber: b.projectNumber,
-      capacity: b.capacity,
-      status: b.status ?? 'ACTIVE',
-      notes: b.notes,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      location: loc ? { id: loc.id, name: loc.name } : undefined,
-    };
-    state.racks.push(created);
-    return created;
-  }
-  if (method === 'PATCH' && p.startsWith('/racks/')) {
-    const id = p.slice('/racks/'.length);
-    const r = state.racks.find((x) => x.id === id);
-    if (!r) throw err('NOT_FOUND', 'Rack not found');
-    const b = body as Partial<MockRack>;
-    if (b.code !== undefined) r.code = b.code;
-    if (b.name !== undefined) r.name = b.name;
-    if (b.description !== undefined) r.description = b.description;
-    if (b.locationId !== undefined) {
-      r.locationId = b.locationId ?? undefined;
-      const loc = b.locationId ? state.locations.find((l) => l.id === b.locationId) : null;
-      r.location = loc ? { id: loc.id, name: loc.name } : undefined;
-    }
-    if (b.projectNumber !== undefined) r.projectNumber = b.projectNumber ?? undefined;
-    if (b.capacity !== undefined) r.capacity = b.capacity;
-    if (b.status !== undefined) r.status = b.status;
-    if (b.notes !== undefined) r.notes = b.notes;
-    r.updatedAt = new Date().toISOString();
-    return r;
-  }
-  if (method === 'DELETE' && p.startsWith('/racks/')) {
-    const id = p.slice('/racks/'.length);
-    const r = state.racks.find((x) => x.id === id);
-    if (!r) throw err('NOT_FOUND', 'Rack not found');
-    r.status = 'INACTIVE';
-    r.updatedAt = new Date().toISOString();
-    return r;
-  }
-
   // Recipients ("Issued To")
   if (method === 'GET' && p === '/recipients') {
     const q = qs.q?.toLowerCase();
@@ -2050,7 +1979,7 @@ function mockLocationDependencyCounts(locationId: string): { locations: number; 
   const balances = computeBalances();
   return {
     locations: state.locations.filter((l) => l.parentId === locationId).length,
-    racks: state.racks.filter((r) => r.locationId === locationId).length,
+    racks: 0,
     goodsReceiptLines: state.goodsReceipts.reduce((acc, g) => acc + g.lines.filter((l) => l.locationId === locationId).length, 0),
     inventoryTransactions: state.transactions.filter((t) => t.locationId === locationId).length,
     inventoryBalances: balances.filter((b) => b.locationId === locationId).length,

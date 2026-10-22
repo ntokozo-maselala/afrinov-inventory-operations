@@ -20,7 +20,7 @@ Two records answer "who changed what, when":
 | Users | CREATE, UPDATE (name, active, roles; before and after) |
 | Materials | CREATE (also via POST /stock-items), UPDATE |
 | Locations | CREATE, UPDATE, ACTIVATE / DEACTIVATE, DELETE |
-| Racks | CREATE, UPDATE, ARCHIVE |
+| Racks | CREATE, UPDATE, ARCHIVE (until Phase 3.2 retired the Racks page); MOVE_TO_LOCATION and DISCARD by racks to locations, each carrying the rack's full record |
 | Projects | CREATE, UPDATE, ARCHIVE |
 | Recipients | CREATE, UPDATE |
 | Suppliers | CREATE |
