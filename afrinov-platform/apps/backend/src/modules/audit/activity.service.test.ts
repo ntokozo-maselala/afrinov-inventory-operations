@@ -54,6 +54,11 @@ describe('describeActivity', () => {
     expect(say({ entityType: 'Location', action: 'DEACTIVATE', entityId: 'loc-9', after: { active: false } }, names).summary).toBe('Deactivated location D-1');
     expect(say({ entityType: 'Location', action: 'DELETE', before: { name: 'Old shed' } }).summary).toBe('Deleted location Old shed');
     expect(say({ entityType: 'Rack', action: 'ARCHIVE', entityId: 'r-1', after: { status: 'INACTIVE' } }, names).summary).toBe('Archived rack R-01 Rack one');
+    // Racks to locations: the entry carries the rack's record, so it names itself with no Rack table.
+    expect(say({ entityType: 'Rack', action: 'MOVE_TO_LOCATION', entityId: 'r-gone', before: { code: 'D-1', name: 'Aisle D' }, after: { locationName: 'D-1' } }))
+      .toEqual({ summary: 'Rack D-1 Aisle D became location D-1', link: '/locations' });
+    expect(say({ entityType: 'Rack', action: 'DISCARD', entityId: 'r-gone', before: { code: 'CHK-8849', name: 'Check rack' }, after: { dropped: [] } }).summary)
+      .toBe('Discarded rack CHK-8849 Check rack');
     expect(say({ entityType: 'Project', action: 'CREATE', entityId: 'AFRI-1325', after: { name: 'Hydroscand line' } }).summary).toBe('Added project AFRI-1325 Hydroscand line');
     expect(say({ entityType: 'Recipient', action: 'CREATE', after: { name: 'Sabelo', type: 'WORKER' } }).summary).toBe('Added recipient Sabelo (worker)');
     expect(say({ entityType: 'Supplier', action: 'CREATE', entityId: 's-1', after: { name: 'Hydroscand' } })).toEqual({ summary: 'Added supplier Hydroscand', link: '/suppliers/s-1' });

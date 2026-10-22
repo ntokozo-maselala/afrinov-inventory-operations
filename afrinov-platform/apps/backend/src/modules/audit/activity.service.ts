@@ -107,6 +107,9 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
       if (e.action === 'CREATE') return { summary: `Added rack ${label}`, link: '/racks' };
       if (e.action === 'UPDATE') return { summary: editSentence('rack', label, e.before, e.after), link: '/racks' };
       if (e.action === 'ARCHIVE') return { summary: `Archived rack ${label}`, link: '/racks' };
+      // Racks to locations (Phase 3.1): the entry carries the rack's whole record, so it names itself.
+      if (e.action === 'MOVE_TO_LOCATION') return { summary: `Rack ${label} became location ${str(a['locationName']) ?? 'a location'}`, link: '/locations' };
+      if (e.action === 'DISCARD') return { summary: `Discarded rack ${label}`, link: null };
       break;
     }
     case 'Project': {
