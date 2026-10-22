@@ -58,11 +58,16 @@ Size S–M. Frontend.
 
 Size M. Backend and frontend. Needs Phases 1 and 2.
 
-- [ ] **3.1 Copy what Rack records know.** A migration matches each Rack to the location with the same code or name and sets that location's parent from the Rack's location. Racks with no matching location are listed in a report, for someone to add or discard. Nothing is deleted yet.
-  Files: new migration or a one-off script under `scripts/`
-- [ ] **3.2 Retire the Racks page.** Remove the Racks menu entry and page; `/racks` redirects to Locations filtered to type Rack. Remove the `/racks` routes and the rack count from the location delete check. Update the Locations page's description, which currently explains the two records.
-  Files: `pages/Racks.tsx`, `App.tsx`, `hooks/useNavGroups.tsx`, `modules/inventory/rack.routes.ts`, `rack.service.ts`, `location.service.ts`, `pages/Locations.tsx`, `db/seed.ts`, `mock/*`
-- [ ] **3.3 Drop the Rack table**, in a later migration once 3.1 has run on every database.
+Three pull requests, each safe on its own. Nothing is deleted until the copy has run on every database, and the delete refuses to run if it has not.
+
+- [ ] **3.1 Copy what Rack records know, with a dry run.** A command (`npm run racks:to-locations`), a dry run by default like the vendor list import: for each Rack it finds the location with the same code, then the same name, and reports what it would do: set the location's room from the Rack's location (through the Phase 1 rules, so never inside a rack or an inactive room), already in that room, a conflict (the location is already in a different room), no matching location, and the extras that would be dropped (project, capacity, "Full" status, notes). With `--apply`, the database name typed back and the acting user, it applies everything in one transaction, is safe to run again, writes an audit entry, and then removes each Rack it has copied or that someone chose to discard. Racks it could not handle stay, listed in the report.
+  Files: `scripts/racks-to-locations.ts` (new), `package.json`
+- [ ] **3.2 Retire the Racks page, keeping the table and its guards.** Remove the Racks menu entry and page; `/racks` redirects to Locations filtered to type Rack. Remove the `/racks` routes and the `manage:racks` permission from the roles. The Movements "Other changes" history names rack entries from what the audit entry recorded, not from the Rack table, and links to Locations. Update the Locations page's description, which currently explains the two records. **Keep the rack count in the location delete check:** while any Rack row remains, deleting its location would quietly clear the rack's location (`ON DELETE SET NULL` on `racks.location_id`) before 3.1 has copied it.
+  Files: `pages/Racks.tsx`, `App.tsx`, `hooks/useNavGroups.tsx`, `modules/inventory/rack.routes.ts`, `rack.service.ts`, `modules/audit/activity.service.ts`, `shared/permissions.ts`, `pages/Locations.tsx`, `db/seed.ts`, `mock/*`, `openapi/document.ts`
+- [ ] **3.3 Drop the Rack table**, in a later migration once 3.1 has run on every database. The migration first checks that `racks` is empty and **stops with an error** if it is not, so it cannot drop a Rack that was never copied. It drops the `RackStatus` type and deletes the `manage:racks` permission; only now does the location delete check stop counting racks. Update `src/db/migrations.test.ts`, which lists the Rack table and its keys. Take a database backup (`pg_dump`) before deploying it: this is the one step that cannot be undone.
+  Files: new migration, `prisma/schema.prisma`, `location.service.ts`, `src/db/migrations.test.ts`
+
+Before 3.1, decide what the Rack extras become (see Decisions needed): on the local database rack `D-1` carries project AFRI-1325, rack `F-7` has no matching location, and `CHK-8849` looks like test data.
 
 **Done when:** each rack exists once, as a location, and nothing in the app mentions a separate Rack.
 
