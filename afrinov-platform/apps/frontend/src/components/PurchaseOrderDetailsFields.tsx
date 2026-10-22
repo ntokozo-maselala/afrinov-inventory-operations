@@ -92,18 +92,21 @@ export function detailsBody(d: OrderDetailsDraft, mode: 'create' | 'edit'): Reco
   return body;
 }
 
-interface ProjectOpt { projectNumber: string; name?: string | null; active: boolean }
+interface ProjectOpt { projectNumber: string; name?: string | null; active: boolean; status?: string }
 
-export function PurchaseOrderDetailsFields({ value, onChange, idPrefix }: {
+export function PurchaseOrderDetailsFields({ value, onChange, idPrefix, projectSetBy }: {
   value: OrderDetailsDraft;
   onChange: (next: OrderDetailsDraft) => void;
   /** Keeps ids unique when two forms are open. */
   idPrefix: string;
+  /** The SKU of the project material that fixes the order's project, if any. */
+  projectSetBy?: string;
 }) {
   const projects = useApi<ProjectOpt[]>('/projects?active=true');
   const set = <K extends keyof OrderDetailsDraft>(k: K, v: OrderDetailsDraft[K]) => onChange({ ...value, [k]: v });
   const id = (s: string) => `${idPrefix}-${s}`;
-  const options = projects.data ?? [];
+  // Nothing more is ordered for a completed or cancelled project.
+  const options = (projects.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED');
   // An order on a project that has since closed still shows it.
   const listed = value.projectNumber && !options.some((p) => p.projectNumber === value.projectNumber)
     ? [...options, { projectNumber: value.projectNumber, name: null, active: false }]
@@ -114,8 +117,12 @@ export function PurchaseOrderDetailsFields({ value, onChange, idPrefix }: {
       <fieldset className="space-y-3">
         <legend className="text-eyebrow mb-1">Order information</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Project" htmlFor={id('project')} help="Leave blank for general store stock.">
-            <Select id={id('project')} value={value.projectNumber} onChange={(e) => set('projectNumber', e.target.value)}>
+          <Field
+            label="Project"
+            htmlFor={id('project')}
+            help={projectSetBy ? `Set by ${projectSetBy}: project material is ordered only for its own project.` : 'Leave blank for general store stock.'}
+          >
+            <Select id={id('project')} value={value.projectNumber} onChange={(e) => set('projectNumber', e.target.value)} disabled={!!projectSetBy}>
               <option value="">No project</option>
               {listed.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` — ${p.name}` : ''}</option>)}
             </Select>

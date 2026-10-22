@@ -31,7 +31,7 @@ import { useAuth } from '../auth';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
-import { needsProject } from '../lib/categories';
+import { needsProject, sectionOf } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import {
   PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
@@ -95,8 +95,10 @@ function NewPurchaseOrderForm() {
   const suppliersReq = useApi<Supplier[]>('/suppliers');
   const materialsReq = useApi<Material[]>('/materials');
   const suppliers = suppliersReq.data ?? [];
-  // Project material with no project yet isn't ordered until it has one.
-  const materials = (materialsReq.data ?? []).filter((m) => !needsProject(m));
+  // Project material with no project yet isn't ordered until it has one, and a
+  // completed or cancelled project's isn't ordered at all: its leftovers go to Stores.
+  const materials = (materialsReq.data ?? []).filter((m) => !needsProject(m)
+    && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED')));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
   const [expected, setExpected] = useState('');
@@ -112,6 +114,12 @@ function NewPurchaseOrderForm() {
   const currency = supplier?.currency ?? 'ZAR';
   const vatRate = vatOverride ?? String(currency === 'ZAR' ? settingRate : 0);
   const preview = priceLines(lines.filter((l) => l.materialId && Number(l.orderedQty) > 0), Number(vatRate) || 0);
+  // Project material is ordered only for its own project: a line holding some
+  // sets the order's project, which can't change while it is there, and other
+  // projects' material is not offered.
+  const lockedBy = lines.map((l) => materials.find((m) => m.id === l.materialId)).find((m) => m && sectionOf(m.category) === 'PROJECTS');
+  const orderProject = lockedBy?.projectNumber ?? details.projectNumber;
+  const lineMaterials = materials.filter((m) => sectionOf(m.category) === 'STORES' || !orderProject || m.projectNumber === orderProject);
   // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
   const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: Number(l.orderedQty) > 0 ? l.orderedQty : 0 })), Number(vatRate) || 0).lines;
 
@@ -191,7 +199,7 @@ function NewPurchaseOrderForm() {
         notes: notes.trim() || undefined,
         expectedDeliveryDate: expected || undefined,
         vatRate: Number(vatRate),
-        ...detailsBody(details, 'create'),
+        ...detailsBody({ ...details, projectNumber: orderProject }, 'create'),
         lines: validLines.map((l) => ({
           materialId: l.materialId,
           orderedQty: Number(l.orderedQty),
@@ -249,7 +257,13 @@ function NewPurchaseOrderForm() {
           </div>
         </fieldset>
 
-        <PurchaseOrderDetailsFields value={details} onChange={setDetails} idPrefix="po-new" />
+        <PurchaseOrderDetailsFields
+          value={{ ...details, projectNumber: orderProject }}
+          // While project material fixes the project, the buyer's own choice is kept for when it goes.
+          onChange={(next) => setDetails(lockedBy ? { ...next, projectNumber: details.projectNumber } : next)}
+          idPrefix="po-new"
+          projectSetBy={lockedBy?.sku}
+        />
 
         <fieldset>
           <div className="flex items-center justify-between mb-2">
@@ -269,7 +283,7 @@ function NewPurchaseOrderForm() {
                 <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(i, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
-                    {materials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                    {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
                 <div className="col-span-3 md:col-span-1">
@@ -334,7 +348,7 @@ function NewPurchaseOrderForm() {
 // ── Edit purchase order ─────────────────────────────────────────────────
 interface EditLine {
   id: string;
-  material: { sku: string; name: string; unitOfMeasure: string };
+  material: { sku: string; name: string; unitOfMeasure: string; category?: string; projectNumber?: string | null };
   orderedQty: string;
   unitPrice?: string | null;
   deliveryDate?: string | null;
@@ -463,7 +477,12 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
             <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
           </Field>
         </div>
-        <PurchaseOrderDetailsFields value={details} onChange={setDetails} idPrefix="po-edit" />
+        <PurchaseOrderDetailsFields
+          value={details}
+          onChange={setDetails}
+          idPrefix="po-edit"
+          projectSetBy={po.lines.find((l) => l.material.category && sectionOf(l.material.category) === 'PROJECTS' && l.material.projectNumber)?.material.sku}
+        />
         <Field label="Remarks" htmlFor="po-edit-notes">
           <Textarea id="po-edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>

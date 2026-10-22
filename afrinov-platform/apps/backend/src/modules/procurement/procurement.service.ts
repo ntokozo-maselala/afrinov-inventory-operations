@@ -24,7 +24,7 @@ import { recomputeBalance } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { approvalBlock, approversFor, listApprovers, whoToAsk } from './po-approval.js';
-import { refuseUnassigned } from '../inventory/material-section.js';
+import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -243,10 +243,22 @@ function cleanLines(s: string | null | undefined): string | null {
   return lines.length ? lines.join('\n') : null;
 }
 
+/** Orders are raised only for an open project: a completed or cancelled one's leftovers go to Stores. */
 async function assertProjectOpen(projectNumber: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
   const project = await client.project.findUnique({ where: { projectNumber } });
   if (!project) throw Errors.validation(`No project ${projectNumber}`);
   if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
+  if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+    throw Errors.validation(`Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
+  }
+}
+
+/** The order's lines' materials, for the project rules. */
+function lineMaterialsOf(materialIds: string[], client: Prisma.TransactionClient | typeof prisma) {
+  return client.material.findMany({
+    where: { id: { in: [...new Set(materialIds)] } },
+    select: { sku: true, category: true, projectNumber: true },
+  });
 }
 
 const dayOf = (d: Date | null | undefined): string | null => (d ? d.toISOString().slice(0, 10) : null);
@@ -362,12 +374,11 @@ export const PurchaseOrderService = {
     const currency = supplier.currency ?? 'ZAR';
     const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate'));
     if (input.projectNumber) await assertProjectOpen(input.projectNumber);
-    // Project material with no project yet is not ordered until it has one.
-    const lineMaterials = await prisma.material.findMany({
-      where: { id: { in: [...new Set(input.lines.map((l) => l.materialId))] } },
-      select: { sku: true, category: true, projectNumber: true },
-    });
+    // Project material with no project yet is not ordered until it has one,
+    // and is ordered only for its own project.
+    const lineMaterials = await lineMaterialsOf(input.lines.map((l) => l.materialId), prisma);
     for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
+    checkProjectMaterial(cleanText(input.projectNumber), lineMaterials, 'ordered');
 
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods
@@ -441,7 +452,13 @@ export const PurchaseOrderService = {
           : toDateOnly(input.expectedDeliveryDate);
       }
       if (input.vatRate !== undefined) data.vatRate = input.vatRate;
-      if (input.projectNumber) await assertProjectOpen(input.projectNumber, tx);
+      // A new project is checked: open, and the one its project material is for.
+      // An order left on its project can still be edited after the project closes.
+      const nextProject = input.projectNumber === undefined ? undefined : cleanText(input.projectNumber);
+      if (nextProject !== undefined && nextProject !== po.projectNumber) {
+        if (nextProject) await assertProjectOpen(nextProject, tx);
+        checkProjectMaterial(nextProject, await lineMaterialsOf(po.lines.map((l) => l.materialId), tx), 'ordered');
+      }
       Object.assign(data, detailsData(input));
       const priceChanges: Array<{ lineId: string; before: string | null; after: string | null }> = [];
       for (const p of input.linePrices ?? []) {
@@ -519,12 +536,12 @@ export const PurchaseOrderService = {
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot submit a PO in status ${po.status}`, { status: po.status });
       }
-      // A draft raised before its project material had a project is not ordered until it has one.
-      const lineMaterials = await tx.material.findMany({
-        where: { id: { in: [...new Set(po.lines.map((l) => l.materialId))] } },
-        select: { sku: true, category: true, projectNumber: true },
-      });
+      // A draft is checked again as it goes out: its project material may have
+      // had no project when it was raised, and its project may have closed since.
+      const lineMaterials = await lineMaterialsOf(po.lines.map((l) => l.materialId), tx);
       for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
+      checkProjectMaterial(po.projectNumber, lineMaterials, 'ordered');
+      if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
       const now = new Date();
       if (requireApproval) {
         const target: PurchaseOrderStatus = 'PENDING_APPROVAL';

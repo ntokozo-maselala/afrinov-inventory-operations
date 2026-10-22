@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { MaterialService } from './material.service.js';
 import { LocationService } from './location.service.js';
+import { LEFTOVER_CATEGORIES, ProjectLeftoversService } from './project-leftovers.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
@@ -42,6 +43,11 @@ export const listMaterialsQuerySchema = z.object({
   section: z.enum(['STORES', 'PROJECTS']).optional(),
   /** Projects material for one project. */
   projectNumber: z.string().max(64).optional(),
+});
+
+/** A closed project's leftovers to move to Stores, each with its Stores category (Phase 7). */
+export const moveLeftoversSchema = z.object({
+  items: z.array(z.object({ materialId: z.string().min(1), category: z.enum(LEFTOVER_CATEGORIES) })).min(1).max(500),
 });
 
 export async function materialRoutes(app: FastifyInstance): Promise<void> {
@@ -90,6 +96,25 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
     return MaterialService.update({ id, ...parsed.data }, actorId);
+  });
+
+  // A project's material still in stock: once it is closed, its leftovers to move to Stores.
+  app.get('/projects/:projectNumber/leftovers', { preHandler: [app.authenticate] }, async (req) => {
+    const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+    return ProjectLeftoversService.list(projectNumber);
+  });
+
+  app.post('/projects/:projectNumber/leftovers/move', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.EditMaterial);
+    const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+    const parsed = moveLeftoversSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid move payload', details: parsed.error.flatten() },
+      });
+    }
+    const actorId = (req as unknown as { user: { id: string } }).user.id;
+    return ProjectLeftoversService.moveToStores(projectNumber, parsed.data.items, actorId);
   });
 }
 

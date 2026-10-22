@@ -18,6 +18,7 @@ import { StockActionForm, type StockActionKind } from '../components/StockAction
 import { STORES_CATEGORIES, categoryLabel, sectionOf, type MaterialSection } from '../lib/categories';
 import { Badge } from '../components/Badge';
 import type { CurrentStockRow } from '../api/types';
+import { LeftoversNotice } from '../components/LeftoversNotice';
 
 
 const STATUS_OPTIONS = [
@@ -81,7 +82,7 @@ export function Stock() {
     STORES: (stock.data ?? []).filter((r) => sectionOf(r.category) === 'STORES').length,
     PROJECTS: (stock.data ?? []).filter((r) => sectionOf(r.category) === 'PROJECTS').length,
   };
-  // The projects holding stock, completed and cancelled ones included: leftovers stay with their project.
+  // The projects holding stock, completed and cancelled ones included: their leftovers are here until moved to Stores.
   const projectOptions = [...new Map(inSection.filter((r) => r.projectNumber).map((r) => [r.projectNumber!, r])).values()]
     .sort((a, b) => a.projectNumber!.localeCompare(b.projectNumber!));
   const unassigned = inSection.some((r) => !r.projectNumber);
@@ -134,6 +135,8 @@ export function Stock() {
           </button>
         ))}
       </div>
+
+      {section === 'PROJECTS' && <LeftoversNotice projectNumber={project || undefined} className="mb-4" />}
 
       <FilterBar
         onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', project: '' }); } : undefined}

@@ -30,6 +30,7 @@ const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ 
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
 const Racks = importPage(() => import('./pages/Racks').then(m => ({ default: m.Racks })));
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
+const ProjectLeftovers = importPage(() => import('./pages/ProjectLeftovers').then(m => ({ default: m.ProjectLeftovers })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
 const IssueStock = importPage(() => import('./pages/IssueStock').then(m => ({ default: m.IssueStock })));
 const ReturnStock = importPage(() => import('./pages/ReturnStock').then(m => ({ default: m.ReturnStock })));
@@ -153,6 +154,7 @@ export function App() {
         <Route path="/racks" element={<Suspense fallback={<PageSkeleton />}><Racks /></Suspense>} />
         <Route path="/locations" element={<Suspense fallback={<PageSkeleton />}><Locations /></Suspense>} />
         <Route path="/projects" element={<Suspense fallback={<PageSkeleton />}><Projects /></Suspense>} />
+        <Route path="/projects/:projectNumber/leftovers" element={<Suspense fallback={<PageSkeleton />}><ProjectLeftovers /></Suspense>} />
         <Route path="/recipients" element={<Suspense fallback={<PageSkeleton />}><Recipients /></Suspense>} />
         <Route path="/tools" element={<Suspense fallback={<PageSkeleton />}><Tools /></Suspense>} />
         <Route path="/settings" element={<Suspense fallback={<PageSkeleton />}><Settings /></Suspense>}>

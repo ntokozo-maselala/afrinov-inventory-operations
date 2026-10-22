@@ -13,7 +13,7 @@ export interface Material {
   section?: 'STORES' | 'PROJECTS';
   /** Projects material: the project it is bought for; null until assigned. */
   projectNumber?: string | null;
-  project?: { projectNumber: string; name: string | null } | null;
+  project?: { projectNumber: string; name: string | null; status?: string | null } | null;
 }
 
 /** A supplier (GET /suppliers). The vendor fields follow the AFRI-0000_x purchase order template. */

@@ -17,12 +17,15 @@ import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
-import { needsProject } from '../lib/categories';
+import { needsProject, sectionOf } from '../lib/categories';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
 
 const stockKey = (r: Pick<CurrentStockRow, 'materialId' | 'locationId'>) => `${r.materialId}|${r.locationId}`;
+
+// A completed or cancelled project takes no more stock: its leftovers go to Stores.
+const isClosed = (status: string | undefined) => status === 'COMPLETED' || status === 'CANCELLED';
 
 let nextKey = 1;
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
@@ -41,18 +44,35 @@ export function IssueStock() {
   const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
 
-  // Only items with stock can be issued, and tools are lent on the Tools page instead.
+  // Only items with stock can be issued, and tools are lent on the Tools page
+  // instead. A closed project's material waits to move to Stores.
   const available = useMemo(
-    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r))
+    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r)
+      && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status)))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
     [stock.data],
   );
   const byKey = useMemo(() => new Map(available.map((r) => [stockKey(r), r])), [available]);
-  const itemOptions = useMemo<SearchOption[]>(() => available.map((r) => ({
-    value: stockKey(r),
-    label: `${r.materialName} (${r.materialSku}) · ${r.locationName}`,
-    detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
-  })), [available]);
+
+  // Project material goes only to its own project: a line holding some sets the
+  // issue's project, which can't change while it is there, and other projects'
+  // material is not offered.
+  const lockedBy = lines.map((l) => byKey.get(l.stockKey)).find((r) => r && sectionOf(r.category) === 'PROJECTS');
+  const issueProject = lockedBy?.projectNumber ?? projectNumber;
+  const itemOptions = useMemo<SearchOption[]>(() => available
+    .filter((r) => sectionOf(r.category) === 'STORES' || !issueProject || r.projectNumber === issueProject)
+    .map((r) => ({
+      value: stockKey(r),
+      label: `${r.materialName} (${r.materialSku}) · ${r.locationName}`,
+      detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
+    })), [available, issueProject]);
+  const projectOptions = useMemo(() => {
+    const open = projects.filter((p) => !isClosed(p.status));
+    const locked = lockedBy?.projectNumber;
+    return locked && !open.some((p) => p.projectNumber === locked)
+      ? [{ projectNumber: locked, name: lockedBy?.project?.name ?? null }, ...open]
+      : open;
+  }, [projects, lockedBy]);
 
   // An item's page links here with ?materialId=: once stock has loaded, the
   // first line starts on that item, at the location that holds the most.
@@ -88,7 +108,7 @@ export function IssueStock() {
     try {
       await api.post('/inventory-issues', {
         recipientId,
-        projectNumber: projectNumber || undefined,
+        projectNumber: issueProject || undefined,
         lines: filled.map((l) => {
           const r = byKey.get(l.stockKey)!;
           return { materialId: r.materialId, locationId: r.locationId, quantity: Number(l.quantity) };
@@ -135,7 +155,14 @@ export function IssueStock() {
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <RecipientSelect id="issue-recipient" value={recipientId} onChange={setRecipientId} recipients={recipients} disabled={loading} invalid={!!error && !recipientId} />
-            <ProjectSelect id="issue-project" value={projectNumber} onChange={setProjectNumber} projects={projects} disabled={loading} />
+            <ProjectSelect
+              id="issue-project"
+              value={issueProject}
+              onChange={setProjectNumber}
+              projects={projectOptions}
+              disabled={loading || !!lockedBy}
+              help={lockedBy ? `Set by ${lockedBy.materialSku}: project material is issued only to its own project.` : undefined}
+            />
           </div>
           {optionsError && (
             <Alert tone="danger" title="Couldn't load recipients and projects">

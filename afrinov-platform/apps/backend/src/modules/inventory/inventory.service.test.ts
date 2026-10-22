@@ -48,11 +48,15 @@ const recipients = new Map<string, { id: string; name: string; active: boolean }
   ['user-3', { id: 'user-3', name: 'Sabelo', active: true }],
   ['rcp-inactive', { id: 'rcp-inactive', name: 'Old forklift', active: false }],
 ]);
-const projects = new Map<string, { projectNumber: string; active: boolean }>([
+const projects = new Map<string, { projectNumber: string; active: boolean; status?: string }>([
   ['AFRI-1325', { projectNumber: 'AFRI-1325', active: true }],
   ['P-42', { projectNumber: 'P-42', active: true }],
   ['OLD-1', { projectNumber: 'OLD-1', active: false }],
+  ['DONE-1', { projectNumber: 'DONE-1', active: true, status: 'COMPLETED' }],
+  ['CXL-1', { projectNumber: 'CXL-1', active: true, status: 'CANCELLED' }],
 ]);
+// Project material that belongs to a project, by material id.
+const materialProjects: Record<string, string> = { 'pipe-1325': 'AFRI-1325', 'pipe-42': 'P-42' };
 const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
 
 function balKey(materialId: string, locationId: string) { return `${materialId}|${locationId}`; }
@@ -162,11 +166,12 @@ const fakeTx = {
     },
   },
   material: {
-    // An id starting "tool" is a tool; "prj" is project material with no project yet.
+    // An id starting "tool" is a tool; "prj" is project material with no project
+    // yet; "pipe" is project material for its project in materialProjects.
     findUnique: async ({ where }: { where: { id: string } }) => ({
       id: where.id, sku: where.id.toUpperCase(),
-      category: where.id.startsWith('tool') ? 'TOOLS' : where.id.startsWith('prj') ? 'PROJECT_MATERIAL' : 'CONSUMABLES',
-      projectNumber: null, requiredStock: new Prisma.Decimal(5), active: true,
+      category: where.id.startsWith('tool') ? 'TOOLS' : /^(prj|pipe)/.test(where.id) ? 'PROJECT_MATERIAL' : 'CONSUMABLES',
+      projectNumber: materialProjects[where.id] ?? null, requiredStock: new Prisma.Decimal(5), active: true,
     }),
   },
   location: {
@@ -528,6 +533,61 @@ describe('InventoryService — ADR-002 invariants', () => {
       await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'OLD-1' }))
         .rejects.toThrow(/Project is inactive/);
       expect(trxRows).toHaveLength(1);
+    });
+
+    it('refuses a completed or cancelled project, even for Stores items', async () => {
+      await stock(5);
+      await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'DONE-1' }))
+        .rejects.toThrow(/Project DONE-1 is completed, so no more stock is issued to it/);
+      await expect(issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'CXL-1' }))
+        .rejects.toThrow(/Project CXL-1 is cancelled/);
+      expect(trxRows).toHaveLength(1);
+    });
+  });
+
+  // ── Project material goes only to its own project (materials Phase 5) ──
+  describe('issuing project material', () => {
+    beforeEach(async () => {
+      for (const materialId of ['pipe-1325', 'pipe-42', 'mat-1']) {
+        await InventoryService.adjust({ materialId, locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      }
+    });
+
+    it('issues it, with Stores items, to its own project', async () => {
+      const { transactionIds } = await InventoryService.issue({
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
+        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 2 }, { materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }],
+      });
+      expect(transactionIds).toHaveLength(2);
+      expect(getBalance('pipe-1325', 'loc-1').toString()).toBe('3');
+    });
+
+    it('refuses it to another project, or to none, booking nothing', async () => {
+      const before = trxRows.length;
+      await expect(issueOne({ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, actorId: 'u', projectNumber: 'P-42' }))
+        .rejects.toThrow(/PIPE-1325 is material for project AFRI-1325, so it can't be issued to project P-42/);
+      await expect(issueOne({ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1, actorId: 'u' }))
+        .rejects.toThrow(/PIPE-1325 is material for project AFRI-1325: issue it to that project/);
+      expect(trxRows).toHaveLength(before);
+    });
+
+    it('refuses two projects\' material on one issue', async () => {
+      await expect(InventoryService.issue({
+        recipientId: 'user-3', projectNumber: 'AFRI-1325', actorId: 'u',
+        lines: [{ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 1 }, { materialId: 'pipe-42', locationId: 'loc-1', quantity: 1 }],
+      })).rejects.toThrow(/One issue can't hold material for two projects \(AFRI-1325 and P-42\)/);
+    });
+
+    it('still takes a return once the project is completed', async () => {
+      const { transactionId } = await issueOne({ materialId: 'pipe-1325', locationId: 'loc-1', quantity: 2, actorId: 'u', projectNumber: 'AFRI-1325' });
+      const project = projects.get('AFRI-1325')!;
+      project.status = 'COMPLETED';
+      try {
+        await InventoryService.returnToStock({ issueTransactionId: transactionId, quantity: 1, actorId: 'u' });
+        expect(getBalance('pipe-1325', 'loc-1').toString()).toBe('4');
+      } finally {
+        delete project.status;
+      }
     });
   });
 

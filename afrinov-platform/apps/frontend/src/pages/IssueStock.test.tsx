@@ -192,3 +192,81 @@ describe('IssueStock linked from an item', () => {
     expect(screen.queryByText(/On hand at/)).not.toBeInTheDocument();
   });
 });
+
+// Materials Phase 5: project material goes only to its own project.
+describe('IssueStock with project material', () => {
+  const pipe = (n: string, sku: string, projectNumber: string, status = 'ACTIVE') => ({
+    materialId: `p-${n}`, materialSku: sku, materialName: `Pipe ${n}`, category: 'PROJECT_MATERIAL', projectNumber,
+    project: { name: `Job ${projectNumber}`, status }, locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'm', quantity: '6',
+  });
+  const stock = [...STOCK, pipe('1', 'PIPE-1325', 'AFRI-1325'), pipe('2', 'PIPE-42', 'P-42'), pipe('3', 'PIPE-DONE', 'DONE-1', 'COMPLETED')];
+
+  beforeEach(() => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/reports/current-stock')) return stock;
+      if (path.startsWith('/projects')) {
+        return [
+          { projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE' },
+          { projectNumber: 'P-42', name: 'Boiler', status: 'PLANNING' },
+          { projectNumber: 'DONE-1', name: 'Old job', status: 'COMPLETED' },
+        ];
+      }
+      return respond(path);
+    });
+    mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1', 't-2'] });
+  });
+
+  it('offers neither a closed project nor its material', async () => {
+    renderPage();
+    await ready();
+    expect(screen.queryByRole('option', { name: /DONE-1/ })).not.toBeInTheDocument();
+    fireEvent.focus(screen.getByLabelText('Item 1'));
+    expect(screen.queryByRole('option', { name: /PIPE-DONE/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /PIPE-42/ })).toBeInTheDocument();
+  });
+
+  it('sets the project from its material, locks it, and offers no other project\'s material', async () => {
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
+    choose('Item 1', 'PIPE-1325');
+    const project = screen.getByLabelText(/Project/);
+    expect(project).toHaveValue('AFRI-1325');
+    expect(project).toBeDisabled();
+    expect(screen.getByText(/Set by PIPE-1325: project material is issued only to its own project/)).toBeInTheDocument();
+    fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '2' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Add another item/ }));
+    fireEvent.focus(screen.getByLabelText('Item 2'));
+    expect(screen.queryByRole('option', { name: /PIPE-42/ })).not.toBeInTheDocument();
+    choose('Item 2', 'DISC');
+    fireEvent.change(screen.getAllByLabelText('Quantity')[1]!, { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/inventory-issues', {
+      recipientId: 'r-1',
+      projectNumber: 'AFRI-1325',
+      lines: [{ materialId: 'p-1', locationId: 'l-1', quantity: 2 }, { materialId: 'm-1', locationId: 'l-1', quantity: 1 }],
+    }));
+  });
+
+  it('frees the project again once its material is removed', async () => {
+    renderPage();
+    await ready();
+    choose('Item 1', 'PIPE-1325');
+    expect(screen.getByLabelText(/Project/)).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove item 1' }));
+    expect(screen.getByLabelText(/Project/)).toBeEnabled();
+    expect(screen.getByLabelText(/Project/)).toHaveValue('');
+  });
+
+  it('offers only the chosen project\'s material once a project is picked', async () => {
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'P-42' } });
+    fireEvent.focus(screen.getByLabelText('Item 1'));
+    expect(screen.getByRole('option', { name: /PIPE-42/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /PIPE-1325/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /DISC-115/ })).toBeInTheDocument();
+  });
+});

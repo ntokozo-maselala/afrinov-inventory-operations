@@ -23,6 +23,11 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 
 
+/** Project material of a completed or cancelled project: nothing more is ordered for it; its leftovers go to Stores. */
+function projectClosed(m: Material): boolean {
+  return m.category === 'PROJECT_MATERIAL' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED');
+}
+
 /** "Stores · Consumables", "Project 1369 · Plant upgrade" or "Projects · no project yet". */
 function placeOf(m: Material): string {
   if (sectionOf(m.category) === 'STORES') return `Stores · ${categoryLabel(m.category)}`;
@@ -98,7 +103,7 @@ export function MaterialDetail() {
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
             <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
-            {active && canOrder && !needsProject(material.data) && <Link to={`/purchase-orders/new?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
+            {active && canOrder && !needsProject(material.data) && !projectClosed(material.data) && <Link to={`/purchase-orders/new?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
             {active && total > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active

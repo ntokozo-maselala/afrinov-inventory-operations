@@ -16,7 +16,7 @@ describe('Stores and Projects materials over real HTTP', () => {
   let api: ReturnType<typeof client>;
 
   beforeAll(async () => {
-    server = await startServer();
+    server = await startServer({ procurementEnabled: true });
     api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
     expect((await api('POST', '/projects', { projectNumber, name: `Sections project ${run}` })).status).toBe(201);
   });
@@ -80,5 +80,87 @@ describe('Stores and Projects materials over real HTTP', () => {
     const assigned = await api<MaterialRow>('PATCH', `/materials/${old.id}`, { projectNumber });
     expect(assigned.body).toMatchObject({ projectNumber, section: 'PROJECTS' });
     expect((await issue()).status).toBe(201);
+  });
+
+  it('issues project material only to its own project, and nothing to a completed project (Phase 5)', async () => {
+    const other = `IT-SEC2-${run}`;
+    expect((await api('POST', '/projects', { projectNumber: other, name: `Other project ${run}` })).status).toBe(201);
+    const pipe = await create({ sku: `IT-SEC-OWN-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
+    const disc = await create({ sku: `IT-SEC-DISC2-${run}`, category: 'CONSUMABLES' });
+    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections shelf ${run}`, type: 'RACK' });
+    for (const m of [pipe.body, disc.body]) {
+      expect((await api('POST', '/inventory-adjustments', { materialId: m.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER' })).status).toBe(201);
+    }
+    const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections rigger ${run}`, type: 'WORKER' });
+    const issue = (materialId: string, to?: string) => api<{ error?: { message: string } }>('POST', '/inventory-issues', {
+      recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId, locationId: loc.body.id, quantity: 1 }],
+    });
+
+    const wrong = await issue(pipe.body.id, other);
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error?.message).toMatch(/is material for project .*, so it can't be issued to project/);
+    expect((await issue(pipe.body.id)).status).toBe(400);
+    expect((await issue(pipe.body.id, projectNumber)).status).toBe(201);
+
+    expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
+    const closed = await issue(disc.body.id, other);
+    expect(closed.status).toBe(400);
+    expect(closed.body.error?.message).toMatch(/is completed, so no more stock is issued to it/);
+  });
+
+  it('orders project material only for its own project, and nothing for a completed project (Phase 6)', async () => {
+    const other = `IT-SEC3-${run}`;
+    expect((await api('POST', '/projects', { projectNumber: other, name: `Third project ${run}` })).status).toBe(201);
+    const pipe = await create({ sku: `IT-SEC-ORD-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
+    const disc = await create({ sku: `IT-SEC-DISC3-${run}`, category: 'CONSUMABLES' });
+    const supplier = await api<{ id: string }>('POST', '/suppliers', { name: `IT sections supplier ${run}` });
+    const order = (materialId: string, to?: string) => api<{ id: string; error?: { message: string } }>('POST', '/purchase-orders', {
+      supplierId: supplier.body.id, projectNumber: to, lines: [{ materialId, orderedQty: 2 }],
+    });
+
+    const wrong = await order(pipe.body.id, other);
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error?.message).toMatch(/is material for project .*, so it can't be ordered for project/);
+    expect((await order(pipe.body.id)).status).toBe(400);
+    expect([200, 201]).toContain((await order(pipe.body.id, projectNumber)).status);
+
+    const draft = await order(disc.body.id, other);
+    expect([200, 201]).toContain(draft.status);
+    expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
+    const closed = await order(disc.body.id, other);
+    expect(closed.status).toBe(400);
+    expect(closed.body.error?.message).toMatch(/is completed, so nothing more is ordered for it/);
+    const submit = await api<{ error?: { message: string } }>('POST', `/purchase-orders/${draft.body.id}/submit`);
+    expect(submit.status).toBe(400);
+  });
+
+  it('moves the leftovers of a completed project to Stores, to be issued to another job (Phase 7)', async () => {
+    const job = `IT-SEC4-${run}`;
+    const next = `IT-SEC5-${run}`;
+    for (const p of [job, next]) expect((await api('POST', '/projects', { projectNumber: p, name: `Job ${p}` })).status).toBe(201);
+    const pipe = await create({ sku: `IT-SEC-LEFT-${run}`, category: 'PROJECT_MATERIAL', projectNumber: job, unitCost: 25 });
+    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections bay ${run}`, type: 'RACK' });
+    expect((await api('POST', '/inventory-adjustments', { materialId: pipe.body.id, locationId: loc.body.id, quantity: 10, reasonCode: 'OTHER' })).status).toBe(201);
+    const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections welder ${run}`, type: 'WORKER' });
+    const issue = (to: string) => api('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 3 }] });
+    expect((await issue(job)).status).toBe(201);
+
+    const move = () => api<{ moved: number; error?: { message: string } }>('POST', `/projects/${job}/leftovers/move`, { items: [{ materialId: pipe.body.id, category: 'CONSUMABLES' }] });
+    const open = await move();
+    expect(open.status).toBe(400);
+    expect(open.body.error?.message).toMatch(/is still open/);
+
+    expect((await api('PATCH', `/projects/${job}`, { status: 'COMPLETED' })).status).toBe(200);
+    const listed = await api<{ project: { closed: boolean }; items: Array<{ sku: string; onHand: string; value: number | null }> }>('GET', `/projects/${job}/leftovers`);
+    expect(listed.body.project.closed).toBe(true);
+    expect(listed.body.items).toEqual([expect.objectContaining({ sku: `IT-SEC-LEFT-${run}`, onHand: '7', value: 175 })]);
+
+    expect((await move()).body).toEqual({ moved: 1 });
+    const after = await api<MaterialRow & { category: string }>('GET', `/materials/${pipe.body.id}`);
+    expect(after.body).toMatchObject({ section: 'STORES', category: 'CONSUMABLES', projectNumber: null });
+    expect((await api<{ items: unknown[] }>('GET', `/projects/${job}/leftovers`)).body.items).toEqual([]);
+
+    // Now Stores material: issued to the next job, from the same stock.
+    expect((await issue(next)).status).toBe(201);
   });
 });

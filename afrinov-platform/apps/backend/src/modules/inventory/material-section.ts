@@ -85,6 +85,35 @@ export async function checkMaterialChange(
   return next;
 }
 
+const PROJECT_USE = {
+  issued: { verb: 'issue', Verb: 'Issue', past: 'issued', to: 'to' },
+  ordered: { verb: 'order', Verb: 'Order', past: 'ordered', to: 'for' },
+} as const;
+
+/**
+ * Project material goes only to its own project (Phases 5 and 6): an issue or
+ * an order holding a Projects item is for that item's project, so one can't
+ * hold two projects' material. Stores items can go to any project, or none.
+ */
+export function checkProjectMaterial(
+  projectNumber: string | null | undefined,
+  materials: Array<{ sku: string; category: string; projectNumber: string | null }>,
+  use: 'issued' | 'ordered',
+): void {
+  const u = PROJECT_USE[use];
+  const own = materials.filter((m) => sectionOf(m.category) === 'PROJECTS' && m.projectNumber);
+  const projects = [...new Set(own.map((m) => m.projectNumber))];
+  if (projects.length > 1) {
+    throw Errors.validation(`One ${u.verb} can't hold material for two projects (${projects.join(' and ')}). ${u.Verb} each project's material separately.`);
+  }
+  const wrong = own.find((m) => m.projectNumber !== (projectNumber || null));
+  if (wrong) {
+    throw Errors.validation(projectNumber
+      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be ${u.past} ${u.to} project ${projectNumber}.`
+      : `${wrong.sku} is material for project ${wrong.projectNumber}: ${u.verb} it ${u.to} that project.`);
+  }
+}
+
 /**
  * Refuses a Projects material that has no project yet: until it is given one,
  * it keeps its stock and history but is not issued or ordered.

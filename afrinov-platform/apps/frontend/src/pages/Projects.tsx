@@ -17,6 +17,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
+import { LeftoversNotice } from '../components/LeftoversNotice';
 
 interface UserOpt { id: string; name: string }
 
@@ -259,6 +260,8 @@ export function Projects() {
           </Button>
         )}
       />
+
+      <LeftoversNotice className="mb-4" />
 
       <FilterBar
         onClear={q || statusFilter || !activeOnly ? () => { setQ(''); setStatusFilter(''); setActiveOnly(true); } : undefined}
