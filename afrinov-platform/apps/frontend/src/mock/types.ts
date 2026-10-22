@@ -115,6 +115,11 @@ export interface MockPurchaseOrder {
   revision?: number;
   // The template's order details (see PurchaseOrderDetailsFields).
   projectNumber?: string | null;
+  /** The supplier's contact and address on this order. */
+  supplierContactName?: string | null;
+  supplierContactPhone?: string | null;
+  supplierContactEmail?: string | null;
+  supplierAddress?: string | null;
   paymentTerms?: string | null;
   paymentMilestone?: string | null;
   settlementDiscount?: string;

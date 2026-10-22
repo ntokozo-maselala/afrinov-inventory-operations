@@ -83,7 +83,7 @@ describe('New purchase order', () => {
 
   it('starts the price at the item unit cost, and sends prices and the VAT rate', async () => {
     await openForm();
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-za' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
     expect(screen.getByLabelText('VAT rate (%)')).toHaveValue(15);
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
@@ -98,7 +98,7 @@ describe('New purchase order', () => {
 
   it('starts a euro order at 0% VAT, and leaves out a price the buyer left blank', async () => {
     await openForm();
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-eu' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-eu' } });
     expect(screen.getByLabelText('VAT rate (%)')).toHaveValue(0);
     expect(screen.getByText('EUR orders start at 0%.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
@@ -113,7 +113,7 @@ describe('New purchase order', () => {
 
   it('refuses a VAT rate over 100', async () => {
     await openForm();
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-za' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });

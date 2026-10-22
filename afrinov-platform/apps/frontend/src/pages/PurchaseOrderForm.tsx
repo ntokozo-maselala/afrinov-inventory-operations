@@ -34,12 +34,16 @@ import { formatNumber } from '../lib/format';
 import { needsProject, sectionOf } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import {
-  PurchaseOrderDetailsFields, checkDetails, detailsBody, draftFromOrder, type OrderDetails, type OrderDetailsDraft,
+  PurchaseOrderDetailsFields, SupplierDetailsFields, checkDetails, detailsBody, draftFromOrder, supplierDetails,
+  type OrderDetails, type OrderDetailsDraft,
 } from '../components/PurchaseOrderDetailsFields';
 
 const ORDERS = { label: 'Purchase orders', to: '/purchase-orders' };
 
-interface Supplier { id: string; name: string; active: boolean; currency?: string; vendorCode?: string | null; paymentTerms?: string | null }
+interface Supplier {
+  id: string; name: string; active: boolean; currency?: string; vendorCode?: string | null; paymentTerms?: string | null;
+  contactName?: string | null; contactPhone?: string | null; contactEmail?: string | null; address?: string | null;
+}
 interface DraftLine { materialId: string; orderedQty: string; unitPrice: string; deliveryDate: string }
 interface ReorderRow { materialId: string; reorderQuantity: string; lastSupplier?: { id: string } | null }
 
@@ -88,6 +92,11 @@ export function NewPurchaseOrder() {
   return <NewPurchaseOrderForm />;
 }
 
+/**
+ * Renders the new-order form with supplier, Settings and buyer defaults.
+ * Saves a draft and optionally submits it; a failed submission opens the saved
+ * draft with an error toast, while a failed save leaves the form open.
+ */
 function NewPurchaseOrderForm() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -137,11 +146,16 @@ function NewPurchaseOrderForm() {
     });
   }
 
+  /**
+   * Selects the supplier, resets the VAT override, and replaces payment terms
+   * and supplier details. An unknown or empty id blanks those details.
+   */
   function chooseSupplier(id: string) {
     setSupplierId(id);
     setVatOverride(null);
-    // Payment terms follow the supplier, as the template looks them up.
-    setDetails((d) => ({ ...d, paymentTerms: suppliers.find((s) => s.id === id)?.paymentTerms ?? '' }));
+    // Payment terms and the supplier block follow the supplier, as the template looks them up.
+    const chosen = suppliers.find((s) => s.id === id);
+    setDetails((d) => ({ ...d, paymentTerms: chosen?.paymentTerms ?? '', ...supplierDetails(chosen) }));
   }
   // What the link asked for, applied once the suppliers, items and (for the
   // quantities) stock status have loaded. Unknown or inactive ones are skipped.
@@ -255,6 +269,7 @@ function NewPurchaseOrderForm() {
               <Input id="po-expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} />
             </Field>
           </div>
+          {supplier && <SupplierDetailsFields value={details} onChange={setDetails} idPrefix="po-new-supplier" supplier={supplier} />}
         </fieldset>
 
         <PurchaseOrderDetailsFields
@@ -355,6 +370,7 @@ interface EditLine {
 }
 interface EditableOrder extends OrderDetails {
   id: string; number: string; status: string; currency?: string; vatRate?: string;
+  supplier?: { id: string; name: string; vendorCode?: string | null };
   notes?: string | null; expectedDeliveryDate?: string | null; lines: EditLine[];
 }
 
@@ -383,6 +399,11 @@ export function EditPurchaseOrder() {
   return <EditPurchaseOrderForm po={po.data} />;
 }
 
+/**
+ * Renders an edit form using the order's saved details, including supplier
+ * overrides. Saves changes through PATCH and returns to the order on success;
+ * save errors leave the form open with validation feedback and an error toast.
+ */
 function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -477,6 +498,12 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
             <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
           </Field>
         </div>
+        {po.supplier && (
+          <fieldset className="space-y-3">
+            <legend className="text-eyebrow mb-1">Supplier information · {po.supplier.name}</legend>
+            <SupplierDetailsFields value={details} onChange={setDetails} idPrefix="po-edit-supplier" supplier={po.supplier} />
+          </fieldset>
+        )}
         <PurchaseOrderDetailsFields
           value={details}
           onChange={setDetails}

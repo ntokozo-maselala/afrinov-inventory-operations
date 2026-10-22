@@ -66,13 +66,23 @@ interface State {
 
 let state: State = freshState();
 
+/**
+ * Builds initial mock state from the seeds. Seed orders inherit supplier
+ * contact details and address unless the order already carries those fields.
+ */
 function freshState(): State {
   return {
     // A copy of each item, so a change in one test (or session) never edits the seed.
     materials: SEED_MATERIALS.map((m) => ({ ...m })),
     locations: [...SEED_LOCATIONS],
     suppliers: [...SEED_SUPPLIERS],
-    purchaseOrders: JSON.parse(JSON.stringify(SEED_PURCHASE_ORDERS)),
+    purchaseOrders: (JSON.parse(JSON.stringify(SEED_PURCHASE_ORDERS)) as MockPurchaseOrder[]).map((po) => {
+      const s = SEED_SUPPLIERS.find((x) => x.id === po.supplierId);
+      return {
+        supplierContactName: s?.contactName ?? null, supplierContactPhone: s?.contactPhone ?? null,
+        supplierContactEmail: s?.contactEmail ?? null, supplierAddress: s?.address ?? null, ...po,
+      };
+    }),
     goodsReceipts: JSON.parse(JSON.stringify(SEED_GOODS_RECEIPTS)),
     transactions: [...SEED_TRANSACTIONS],
     racks: JSON.parse(JSON.stringify(SEED_RACKS)),
@@ -144,16 +154,34 @@ function supplierFields(b: Partial<Record<keyof MockSupplier, unknown>>): Partia
 
 // The order details on the template's Inputs sheet, as the server takes them.
 type PoDetailsBody = Partial<Record<
-  'projectNumber' | 'paymentTerms' | 'paymentMilestone' | 'shippingTerms' | 'deliveryTo' | 'deliveryAddress'
+  'supplierContactName' | 'supplierContactPhone' | 'supplierContactEmail' | 'supplierAddress'
+  | 'projectNumber' | 'paymentTerms' | 'paymentMilestone' | 'shippingTerms' | 'deliveryTo' | 'deliveryAddress'
   | 'deliveryCountry' | 'deliveryContactName' | 'deliveryContactPhone' | 'afrinovContact', string | null
 >> & { settlementDiscount?: number; penaltiesApply?: boolean; deliveryMethod?: 'DELIVERY' | 'COLLECTION' };
+
+/** As the server's cleanLines: an address tidied line by line, blank lines dropped. */
+function cleanLines(s: string): string | null {
+  const lines = s.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return lines.length ? lines.join('\n') : null;
+}
+
+/** As the server's order details schema: the supplier email by the rule suppliers are imported with. */
+function checkPoDetails(b: PoDetailsBody) {
+  const email = b.supplierContactEmail?.trim();
+  if (email && (email.length > 320 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))) {
+    throw err('VALIDATION_ERROR', 'Invalid purchase order payload');
+  }
+}
 
 /** The details sent, blanks as null; fields left out stay out. */
 function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
   const out: Record<string, unknown> = {};
-  for (const k of ['projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
+  for (const k of ['supplierContactName', 'supplierContactPhone', 'supplierContactEmail', 'supplierAddress',
+    'projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
     'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact'] as const) {
-    if (b[k] !== undefined) out[k] = (typeof b[k] === 'string' ? b[k]!.trim() : '') || null;
+    if (b[k] === undefined) continue;
+    const v = typeof b[k] === 'string' ? b[k]! : '';
+    out[k] = k === 'supplierAddress' || k === 'deliveryAddress' ? cleanLines(v) : v.trim() || null;
   }
   if (b.settlementDiscount !== undefined) out.settlementDiscount = String(b.settlementDiscount);
   if (b.penaltiesApply !== undefined) out.penaltiesApply = b.penaltiesApply;
@@ -286,7 +314,14 @@ export function createMockApi(): MockApi {
   };
 }
 
-// Tiny path-router. Returns the response payload or throws an ApiError.
+/**
+ * Returns the payload for a mock HTTP method and API path (with query string),
+ * applying writes to shared in-memory state. New purchase orders copy omitted
+ * supplier details; explicit null or blank text keeps a detail cleared.
+ *
+ * @throws {ApiError} For rejected operations, missing records or unimplemented routes.
+ * @throws {Error} Propagates unexpected handler and URL decoding errors.
+ */
 function route(method: string, path: string, body?: unknown): unknown {
   const p = path.split('?')[0] ?? '';
   const qs = parseQuery(path);
@@ -595,12 +630,18 @@ function route(method: string, path: string, body?: unknown): unknown {
     const supplier = findSupplier(b.supplierId);
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
+    checkPoDetails(b);
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
     for (const l of b.lines) refuseUnassigned(l.materialId, 'ordered');
     checkProjectMaterial(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId), 'ordered');
     // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
     const details = poDetails(b);
     if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
+    // As the server: the supplier block starts from the supplier.
+    if (b.supplierContactName === undefined) details.supplierContactName = supplier.contactName ?? null;
+    if (b.supplierContactPhone === undefined) details.supplierContactPhone = supplier.contactPhone ?? null;
+    if (b.supplierContactEmail === undefined) details.supplierContactEmail = supplier.contactEmail ?? null;
+    if (b.supplierAddress === undefined) details.supplierAddress = supplier.address ?? null;
     details.deliveryMethod = b.deliveryMethod ?? 'DELIVERY';
     if (details.deliveryMethod === 'DELIVERY') {
       for (const k of ['deliveryTo', 'deliveryAddress', 'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone'] as const) {
@@ -735,6 +776,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(po.status)) throw err('INVALID_STATE', 'This purchase order is no longer editable.');
+    checkPoDetails((body ?? {}) as PoDetailsBody);
     const b = (body as PoDetailsBody & {
       notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number;
       linePrices?: Array<{ lineId: string; unitPrice: number | null }>;

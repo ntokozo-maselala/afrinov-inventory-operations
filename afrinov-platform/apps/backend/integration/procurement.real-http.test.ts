@@ -362,4 +362,28 @@ describe('receiving stock over real HTTP', () => {
       expect(order.lines[0]!.deliveryDate?.slice(0, 10)).toBe('2026-12-01');
     });
   });
+
+  // As the template's Inputs sheet: the supplier's contact and address fill a
+  // new order, and are changed on the order without touching the supplier.
+  describe('supplier details on an order', () => {
+    interface WithSupplierDetails { id: string; supplierContactName: string | null; supplierContactPhone: string | null; supplierContactEmail: string | null; supplierAddress: string | null }
+
+    it('copies them from the supplier, and keeps changes to this order', async () => {
+      const supplier = await api<{ id: string }>('POST', '/suppliers', {
+        name: `IT Supplier details ${run}`, contactName: 'Nicole', contactPhone: '011 452 8413', contactEmail: 'nicole@example.com', address: '23 Grader Road',
+      });
+      expect(supplier.status).toBe(201);
+      const created = await api<WithSupplierDetails>('POST', '/purchase-orders', { supplierId: supplier.body.id, lines: [{ materialId, orderedQty: 1 }] });
+      expect([200, 201]).toContain(created.status);
+      expect(created.body).toMatchObject({ supplierContactName: 'Nicole', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@example.com', supplierAddress: '23 Grader Road' });
+
+      expect((await api('PATCH', `/purchase-orders/${created.body.id}`, { supplierContactName: 'Sean', supplierContactPhone: null })).status).toBe(200);
+      const order = (await api<WithSupplierDetails>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(order).toMatchObject({ supplierContactName: 'Sean', supplierContactPhone: null, supplierAddress: '23 Grader Road' });
+      expect((await api<{ contactName: string }>('GET', `/suppliers/${supplier.body.id}`)).body.contactName).toBe('Nicole');
+
+      const bad = await api('PATCH', `/purchase-orders/${created.body.id}`, { supplierContactEmail: 'not-an-email' });
+      expect(bad.status).toBe(400);
+    });
+  });
 });

@@ -84,13 +84,13 @@ describe('New purchase order: the template details', () => {
     expect(screen.getByLabelText('Address')).toHaveValue('10 Lime Street, Icon Industrial Park\nSunderland Ridge, Centurion 0157');
     expect(screen.getByLabelText('Contact at delivery address')).toHaveValue('Site storeman');
     expect(screen.getByLabelText('Afrinov contact')).toHaveValue('Thandi Buyer');
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     expect(screen.getByLabelText('Payment terms')).toHaveValue('30 DAYS NETT');
   });
 
   it('sends the project, terms, penalties and a line delivery date', async () => {
     await openForm();
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     await screen.findByRole('option', { name: 'M-1325 — Plant upgrade' });
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: 'M-1325' } });
     fireEvent.change(screen.getByLabelText('Shipping terms'), { target: { value: 'Delivered to site' } });
@@ -110,7 +110,7 @@ describe('New purchase order: the template details', () => {
 
   it('drops the delivery address when Afrinov collects', async () => {
     await openForm();
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Collection by Afrinov' }));
     expect(screen.queryByLabelText('Deliver to')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Contact for collection')).toBeInTheDocument();
@@ -127,7 +127,7 @@ describe('New purchase order: the template details', () => {
 
   it('refuses a settlement discount over 100', async () => {
     await openForm();
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });
@@ -184,7 +184,7 @@ describe('line delivery dates follow the expected delivery', () => {
   it('fills each line with the expected delivery until the line is given its own date', async () => {
     appAt('/purchase-orders/new');
     await waitFor(() => expect(screen.getByLabelText('Deliver to')).toHaveValue('Afrinov (PTY) Ltd'));
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.change(screen.getByLabelText('Expected delivery'), { target: { value: '2026-11-10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));

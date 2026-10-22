@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
 import { DELIVERY_METHODS, PurchaseOrderService, SupplierService } from './procurement.service.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
-import { SUPPLIER_CURRENCIES } from './supplier-fields.js';
+import { EMAIL_PATTERN, SUPPLIER_CURRENCIES } from './supplier-fields.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
@@ -45,10 +45,20 @@ const vatRate = z.number().min(0).max(100);
 const unitPrice = z.number().nonnegative().max(1e12);
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD');
 const text = (max: number) => z.string().max(max).nullable().optional();
+/** The longest email address there can be. */
+const SUPPLIER_EMAIL_MAX = 320;
 
 // The template's order details. Text fields take null (or blank) to clear.
 const orderDetails = {
   projectNumber: text(64),
+  // The supplier's contact and address on this order; filled from the supplier when left out.
+  supplierContactName: text(200),
+  supplierContactPhone: text(50),
+  // The same rule as a supplier's imported email, so an order never refuses the email its supplier holds.
+  // Blank, or spaces only, clears it, as for the other details.
+  supplierContactEmail: z.string().trim().max(SUPPLIER_EMAIL_MAX)
+    .refine((v) => v === '' || EMAIL_PATTERN.test(v), 'Not an email address').nullable().optional(),
+  supplierAddress: text(500),
   paymentTerms: text(100),
   paymentMilestone: text(200),
   settlementDiscount: z.number().min(0).max(100).optional(),
