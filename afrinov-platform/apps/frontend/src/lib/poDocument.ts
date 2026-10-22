@@ -39,6 +39,11 @@ export interface PoDocumentOrder {
     name: string; vendorCode?: string | null; address?: string | null; contactName?: string | null;
     contactPhone?: string | null; contactEmail?: string | null;
   };
+  /** The supplier's contact and address as on this order; left out by orders that don't carry them. */
+  supplierContactName?: string | null;
+  supplierContactPhone?: string | null;
+  supplierContactEmail?: string | null;
+  supplierAddress?: string | null;
   projectNumber?: string | null;
   paymentTerms?: string | null;
   paymentMilestone?: string | null;
@@ -102,6 +107,8 @@ export function documentFilename(po: Pick<PoDocumentOrder, 'number' | 'status' |
 type Pair = [string, string];
 const dash = '-';
 const or = (v: string | null | undefined) => (v && v.trim() ? v : dash);
+/** The order's own supplier detail (null when cleared), or the supplier's for an order that doesn't carry one. */
+const onOrder = (own: string | null | undefined, supplier: string | null | undefined) => (own === undefined ? supplier : own);
 
 /** The two blocks under the heading, as label and value pairs. */
 export function documentBlocks(po: PoDocumentOrder, company: PoCompany): { supplier: Pair[]; delivery: Pair[]; order: Pair[] } {
@@ -110,10 +117,10 @@ export function documentBlocks(po: PoDocumentOrder, company: PoCompany): { suppl
     supplier: [
       ['Supplier', po.supplier.name],
       ['Vendor code', or(po.supplier.vendorCode)],
-      ['Address', or(po.supplier.address)],
-      ['Contact person', or(po.supplier.contactName)],
-      ['Phone', or(po.supplier.contactPhone)],
-      ['Email', or(po.supplier.contactEmail)],
+      ['Address', or(onOrder(po.supplierAddress, po.supplier.address))],
+      ['Contact person', or(onOrder(po.supplierContactName, po.supplier.contactName))],
+      ['Phone', or(onOrder(po.supplierContactPhone, po.supplier.contactPhone))],
+      ['Email', or(onOrder(po.supplierContactEmail, po.supplier.contactEmail))],
     ],
     delivery: collection
       ? [

@@ -49,6 +49,11 @@ const text = (max: number) => z.string().max(max).nullable().optional();
 // The template's order details. Text fields take null (or blank) to clear.
 const orderDetails = {
   projectNumber: text(64),
+  // The supplier's contact and address on this order; filled from the supplier when left out.
+  supplierContactName: text(200),
+  supplierContactPhone: text(50),
+  supplierContactEmail: z.union([z.string().trim().email().max(200), z.literal('')]).nullable().optional(),
+  supplierAddress: text(500),
   paymentTerms: text(100),
   paymentMilestone: text(200),
   settlementDiscount: z.number().min(0).max(100).optional(),

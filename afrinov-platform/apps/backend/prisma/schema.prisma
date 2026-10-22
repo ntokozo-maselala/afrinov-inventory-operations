@@ -323,6 +323,12 @@ model PurchaseOrder {
   // ── Order details from the template's Inputs sheet ───────────────────────
   // Optional: general store stock is bought without a project.
   projectNumber      String?  @map("project_number")
+  // The supplier's contact and address, as on the template's Inputs sheet:
+  // copied from the supplier when the order is raised; editable on the order.
+  supplierContactName  String? @map("supplier_contact_name")
+  supplierContactPhone String? @map("supplier_contact_phone")
+  supplierContactEmail String? @map("supplier_contact_email")
+  supplierAddress      String? @map("supplier_address")
   // Copied from the supplier when the order is raised; editable on the order.
   paymentTerms       String?  @map("payment_terms")
   paymentMilestone   String?  @map("payment_milestone")

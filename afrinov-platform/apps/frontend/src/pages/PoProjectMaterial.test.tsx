@@ -64,7 +64,7 @@ describe('the new-order form with project material', () => {
     expect(line2).toContain('DISC — Cutting disc');
     expect(line2).not.toContain('1402-PIPE — Pipe for 1402');
 
-    fireEvent.change(screen.getByLabelText(/^Supplier/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '4' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({

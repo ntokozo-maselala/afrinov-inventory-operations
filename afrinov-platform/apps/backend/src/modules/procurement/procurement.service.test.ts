@@ -27,7 +27,10 @@ interface PO {
 }
 interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal; unitPrice?: number | null; deliveryDate?: Date | null }
 interface Loc { id: string; name: string; active: boolean }
-interface Sup { id: string; name: string; active: boolean; currency?: string; paymentTerms?: string | null }
+interface Sup {
+  id: string; name: string; active: boolean; currency?: string; paymentTerms?: string | null;
+  contactName?: string | null; contactPhone?: string | null; contactEmail?: string | null; address?: string | null;
+}
 interface Mat { id: string; sku: string; name: string; active: boolean; category?: string; projectNumber?: string | null }
 interface TxRow { id: string; materialId: string; locationId: string; type: TxType; quantity: Prisma.Decimal; referenceType: string | null; referenceId: string | null; actorId: string; postedAt: Date }
 interface BalRow { materialId: string; locationId: string; quantity: Prisma.Decimal }
@@ -625,6 +628,36 @@ describe('PurchaseOrderService order details (procurement roadmap Phase 3)', () 
     const entry = db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id).pop()!;
     expect(entry.before).toEqual({ shippingTerms: null, penaltiesApply: false, deliveryDates: [{ lineId, deliveryDate: null }] });
     expect(entry.after).toEqual({ shippingTerms: 'Ex works', penaltiesApply: true, deliveryDates: [{ lineId, deliveryDate: '2026-12-01' }] });
+  });
+
+  it('copies the contact and address of the supplier onto a new order, as the template looks them up', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    await seededSettings();
+    db.suppliers.set('sup-1', {
+      id: 'sup-1', name: 'Acme', active: true,
+      contactName: 'Nicole', contactPhone: '011 452 8413', contactEmail: 'nicole@acme.co.za', address: '23 Grader Road\nSpartan',
+    });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
+    expect(po).toMatchObject({
+      supplierContactName: 'Nicole', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@acme.co.za', supplierAddress: '23 Grader Road\nSpartan',
+    });
+  });
+
+  it('keeps the supplier details typed on the order, and a cleared one stays cleared', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    await seededSettings();
+    db.suppliers.set('sup-1', { id: 'sup-1', name: 'Acme', active: true, contactName: 'Nicole', contactEmail: 'nicole@acme.co.za', address: '23 Grader Road' });
+    const po = await PurchaseOrderService.create({
+      supplierId: 'sup-1', supplierContactName: '  Sean  ', supplierContactEmail: null, supplierAddress: '  Branch 2 \n\n Roodekop ',
+      lines: [{ materialId: 'mat-1', orderedQty: 1 }],
+    }, 'user-1');
+    expect(po).toMatchObject({ supplierContactName: 'Sean', supplierContactEmail: null, supplierAddress: 'Branch 2\nRoodekop' });
+
+    // Edited on the order later: the supplier's own record is left alone.
+    await PurchaseOrderService.update({ id: po.id, supplierContactPhone: '060 970 5820', supplierContactName: null }, 'user-1');
+    expect(db.pos.get(po.id)).toMatchObject({ supplierContactPhone: '060 970 5820', supplierContactName: null });
+    expect(db.suppliers.get('sup-1')!.contactName).toBe('Nicole');
+    expect(db.suppliers.get('sup-1')!.contactPhone).toBeUndefined();
   });
 
   it('clears a detail with null', async () => {

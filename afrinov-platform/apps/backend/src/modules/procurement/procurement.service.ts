@@ -195,6 +195,11 @@ export type DeliveryMethod = (typeof DELIVERY_METHODS)[number];
 /** The order details on the template's Inputs sheet. On update, null clears a text field. */
 export interface OrderDetailsInput {
   projectNumber?: string | null;
+  /** The supplier's contact and address on this order. Left out on a new order: the supplier's own. */
+  supplierContactName?: string | null;
+  supplierContactPhone?: string | null;
+  supplierContactEmail?: string | null;
+  supplierAddress?: string | null;
   paymentTerms?: string | null;
   paymentMilestone?: string | null;
   /** Percent. */
@@ -232,6 +237,7 @@ export interface UpdatePOInput extends OrderDetailsInput {
 }
 
 const DETAIL_TEXT_FIELDS = [
+  'supplierContactName', 'supplierContactPhone', 'supplierContactEmail', 'supplierAddress',
   'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
   'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact',
 ] as const;
@@ -286,7 +292,7 @@ function detailsData(input: OrderDetailsInput): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   for (const k of DETAIL_TEXT_FIELDS) {
     if (input[k] === undefined) continue;
-    data[k] = k === 'deliveryAddress' ? cleanLines(input[k]) : k === 'paymentTerms' ? cleanPaymentTerms(input[k]) : cleanText(input[k]);
+    data[k] = k === 'deliveryAddress' || k === 'supplierAddress' ? cleanLines(input[k]) : k === 'paymentTerms' ? cleanPaymentTerms(input[k]) : cleanText(input[k]);
   }
   if (input.projectNumber !== undefined) data.projectNumber = cleanText(input.projectNumber);
   if (input.settlementDiscount !== undefined) data.settlementDiscount = input.settlementDiscount;
@@ -385,6 +391,11 @@ export const PurchaseOrderService = {
     // are collected), the Afrinov contact from whoever raises the order.
     const details = detailsData(input);
     if (input.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
+    // The supplier block starts from the supplier, as the template looks it up.
+    if (input.supplierContactName === undefined) details.supplierContactName = cleanText(supplier.contactName);
+    if (input.supplierContactPhone === undefined) details.supplierContactPhone = cleanText(supplier.contactPhone);
+    if (input.supplierContactEmail === undefined) details.supplierContactEmail = cleanText(supplier.contactEmail);
+    if (input.supplierAddress === undefined) details.supplierAddress = cleanLines(supplier.address);
     const method = input.deliveryMethod ?? 'DELIVERY';
     if (method === 'DELIVERY') {
       const defaults = await SettingsService.getValues([

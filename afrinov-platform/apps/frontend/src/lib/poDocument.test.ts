@@ -70,6 +70,13 @@ describe('documentBlocks', () => {
     });
   });
 
+  it('prints the supplier details as on the order, and the supplier own for an order without them', () => {
+    const own = documentBlocks(order({ supplierContactName: 'Sean', supplierContactPhone: null, supplierAddress: 'Branch 2' }), COMPANY);
+    expect(Object.fromEntries(own.supplier)).toMatchObject({ 'Contact person': 'Sean', Phone: '-', Address: 'Branch 2', Email: 'lillian@hydac.com' });
+    const before = documentBlocks(order(), COMPANY);
+    expect(Object.fromEntries(before.supplier)).toMatchObject({ 'Contact person': 'Lillian', Phone: '011 723 9080', Address: 'Edenvale' });
+  });
+
   it('prints a collection without a delivery address', () => {
     const b = documentBlocks(order({ deliveryMethod: 'COLLECTION' }), COMPANY);
     expect(b.delivery[0]).toEqual(['Delivery', 'Collection by Afrinov']);

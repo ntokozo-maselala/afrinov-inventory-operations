@@ -72,7 +72,13 @@ function freshState(): State {
     materials: SEED_MATERIALS.map((m) => ({ ...m })),
     locations: [...SEED_LOCATIONS],
     suppliers: [...SEED_SUPPLIERS],
-    purchaseOrders: JSON.parse(JSON.stringify(SEED_PURCHASE_ORDERS)),
+    purchaseOrders: (JSON.parse(JSON.stringify(SEED_PURCHASE_ORDERS)) as MockPurchaseOrder[]).map((po) => {
+      const s = SEED_SUPPLIERS.find((x) => x.id === po.supplierId);
+      return {
+        supplierContactName: s?.contactName ?? null, supplierContactPhone: s?.contactPhone ?? null,
+        supplierContactEmail: s?.contactEmail ?? null, supplierAddress: s?.address ?? null, ...po,
+      };
+    }),
     goodsReceipts: JSON.parse(JSON.stringify(SEED_GOODS_RECEIPTS)),
     transactions: [...SEED_TRANSACTIONS],
     racks: JSON.parse(JSON.stringify(SEED_RACKS)),
@@ -144,14 +150,16 @@ function supplierFields(b: Partial<Record<keyof MockSupplier, unknown>>): Partia
 
 // The order details on the template's Inputs sheet, as the server takes them.
 type PoDetailsBody = Partial<Record<
-  'projectNumber' | 'paymentTerms' | 'paymentMilestone' | 'shippingTerms' | 'deliveryTo' | 'deliveryAddress'
+  'supplierContactName' | 'supplierContactPhone' | 'supplierContactEmail' | 'supplierAddress'
+  | 'projectNumber' | 'paymentTerms' | 'paymentMilestone' | 'shippingTerms' | 'deliveryTo' | 'deliveryAddress'
   | 'deliveryCountry' | 'deliveryContactName' | 'deliveryContactPhone' | 'afrinovContact', string | null
 >> & { settlementDiscount?: number; penaltiesApply?: boolean; deliveryMethod?: 'DELIVERY' | 'COLLECTION' };
 
 /** The details sent, blanks as null; fields left out stay out. */
 function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
   const out: Record<string, unknown> = {};
-  for (const k of ['projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
+  for (const k of ['supplierContactName', 'supplierContactPhone', 'supplierContactEmail', 'supplierAddress',
+    'projectNumber', 'paymentTerms', 'paymentMilestone', 'shippingTerms', 'deliveryTo', 'deliveryAddress',
     'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact'] as const) {
     if (b[k] !== undefined) out[k] = (typeof b[k] === 'string' ? b[k]!.trim() : '') || null;
   }
@@ -601,6 +609,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
     const details = poDetails(b);
     if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
+    // As the server: the supplier block starts from the supplier.
+    if (b.supplierContactName === undefined) details.supplierContactName = supplier.contactName ?? null;
+    if (b.supplierContactPhone === undefined) details.supplierContactPhone = supplier.contactPhone ?? null;
+    if (b.supplierContactEmail === undefined) details.supplierContactEmail = supplier.contactEmail ?? null;
+    if (b.supplierAddress === undefined) details.supplierAddress = supplier.address ?? null;
     details.deliveryMethod = b.deliveryMethod ?? 'DELIVERY';
     if (details.deliveryMethod === 'DELIVERY') {
       for (const k of ['deliveryTo', 'deliveryAddress', 'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone'] as const) {

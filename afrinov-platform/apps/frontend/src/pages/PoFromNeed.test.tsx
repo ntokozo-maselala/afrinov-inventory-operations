@@ -68,7 +68,7 @@ describe('the new-order form filled in from its link', () => {
   it('fills in the supplier and the lines: up to Required Stock, priced from unit cost', async () => {
     form('supplierId=s-1&materialIds=m-1,m-2');
     expect(await screen.findByLabelText('Line 2 material')).toHaveValue('m-2');
-    expect(screen.getByLabelText(/^Supplier/)).toHaveValue('s-1');
+    expect(screen.getByLabelText(/^Supplier(?! address)/)).toHaveValue('s-1');
     expect(screen.getByLabelText('Payment terms')).toHaveValue('30 DAYS NETT');
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-1');
     expect(screen.getByLabelText('Line 1 quantity')).toHaveValue(8);
@@ -81,13 +81,13 @@ describe('the new-order form filled in from its link', () => {
   it('suggests the items’ last supplier when they share one', async () => {
     form('materialIds=m-1,m-2');
     await screen.findByLabelText('Line 2 material');
-    expect(screen.getByLabelText(/^Supplier/)).toHaveValue('s-1');
+    expect(screen.getByLabelText(/^Supplier(?! address)/)).toHaveValue('s-1');
   });
 
   it('leaves the supplier to choose when the items came from different ones', async () => {
     form('materialIds=m-1,m-3');
     await screen.findByLabelText('Line 2 material');
-    expect(screen.getByLabelText(/^Supplier/)).toHaveValue('');
+    expect(screen.getByLabelText(/^Supplier(?! address)/)).toHaveValue('');
   });
 
   it('skips unknown and inactive items', async () => {

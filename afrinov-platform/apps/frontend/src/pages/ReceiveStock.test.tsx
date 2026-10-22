@@ -176,7 +176,7 @@ describe('ReceiveStock with a new supplier (ADR-018)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save supplier' }));
 
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/suppliers', expect.objectContaining({ name: 'Kenflex' })));
-    await waitFor(() => expect(screen.getByLabelText(/^Supplier/)).toHaveValue('s-new'));
+    await waitFor(() => expect(screen.getByLabelText(/^Supplier(?! address)/)).toHaveValue('s-new'));
     expect(screen.queryByRole('button', { name: 'Save supplier' })).not.toBeInTheDocument();
   });
 
