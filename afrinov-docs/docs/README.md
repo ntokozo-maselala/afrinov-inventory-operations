@@ -7,6 +7,10 @@ This is the full documentation set for moving Afrinov from a family of
 per the direction to treat inventory as one piece of a larger business
 system (studying SAP as a reference model) rather than a standalone app.
 
+Repository-wide navigation and audit records start at
+[`docs/README.md`](../../docs/README.md). This page remains the detailed index
+for the product, business, domain, and technical reference set below.
+
 **Start here, in order:**
 
 1. `00-governance/documentation-guide.md` — how this tree is organised.
@@ -32,10 +36,13 @@ repository; whether it matches the workbook the import reads is assumption
 A-10. Where something is inferred rather than confirmed, it's flagged in
 `00-governance/assumptions-register.md`.
 
-**Code:** documents in `06`–`12` were reconciled with the code at commit
-4e6d76f on 2026-10-09 and cite their evidence; intent documents (`01`,
-`02`, `05`) carry implementation-status notes. The delivery plan now lives in
-`workbook-replacement-roadmap.md` at the repository root.
+**Code:** the last full reconciliation recorded for documents in `06`–`12`
+was at commit 4e6d76f on 2026-10-09. Those documents cite their evidence, but
+that date is a verification baseline, not confirmation against the current
+checkout. Intent documents (`01`, `02`, `05`) carry implementation-status
+notes. The main delivery plan remains in `workbook-replacement-roadmap.md` at
+the repository root; specialist implementation roadmaps are in
+`13-project-management/roadmaps/`.
 
 **Next action:** review Milestone 0 (`01-product/product-roadmap.md`) with
 the business owner — see `14-validation/stakeholder-review.md` for what
@@ -58,5 +65,5 @@ implementation has continued (Phases 0–3 of the root roadmap).
 | `10-security` | Requirements, threat model, access control, authn/authz model, audit & accountability, secrets, security testing |
 | `11-testing` | Strategy, pyramid, unit/integration/API/contract/E2E/acceptance/performance testing, traceability |
 | `12-operations` | Environments, deployment, CI/CD, monitoring, logging, alerting, backup/DR, incident management |
-| `13-project-management` | Developer onboarding (run, test, deploy), workflow, branching, coding standards, PR guidelines, DoR/DoD, release process, tech debt |
+| `13-project-management` | Developer onboarding (run, test, deploy), workflow, branching, coding standards, PR guidelines, DoR/DoD, release process, tech debt, specialist implementation roadmaps |
 | `14-validation` | Prototype validation, stakeholder review, UAT plan, acceptance criteria, readiness checklist, production readiness |

@@ -24,12 +24,15 @@ every stock change recorded in a ledger that can be audited.
 
 ## Documentation
 
-- [`afrinov-docs/docs/`](afrinov-docs/docs/README.md) — product, domain,
-  processes, data, architecture, API, security, testing and operations.
-  Reconciled with the code on 2026-10-09; each system document cites the
-  files it relies on.
+- [Documentation index](docs/README.md) — repository-wide navigation and
+  documentation maintenance guidance.
+- [`afrinov-docs/docs/`](afrinov-docs/docs/README.md) — detailed product,
+  domain, process, data, architecture, API, security, testing and operations
+  references. Its recorded full code reconciliation is dated 2026-10-09.
 - [Gap analysis](afrinov-docs/docs/02-business-analysis/gap-analysis.md) and
   [SAP lessons](afrinov-docs/docs/05-sap-study/sap-lessons-for-afrinov.md) —
   early analysis (the root-level copies now point there).
+- [Project roadmaps](afrinov-docs/docs/13-project-management/roadmaps/) —
+  materials and procurement implementation plans.
 - [`docs/archive/`](docs/archive/README.md) — earlier audits and reports, kept
   for history.

@@ -60,8 +60,12 @@ either. The spreadsheets remain the authoritative record of current stock
 until the migration in `07-data/migration-strategy.md` is signed off.
 
 ## Related material outside this tree
+- `../../../docs/README.md` (repository root) — repository-wide navigation,
+  audit locations, and documentation maintenance conventions.
 - `workbook-replacement-roadmap.md` (repository root) — the live delivery
   plan, phase by phase.
+- `../13-project-management/roadmaps/` — materials and procurement
+  implementation roadmaps.
 - `afrinov-platform/apps/backend/README.md` — running the backend, scripts,
   environment variables.
 - `docs/archive/` (repository root) — earlier audits and reports, kept for

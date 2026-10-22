@@ -130,13 +130,6 @@
 | 2026-10-09 | `afrinov-platform/README.md` | Corrected: modules, tests, quick start; removed a default admin password the seed no longer uses | Engineering (reconciliation against code at 4e6d76f) |
 | 2026-10-09 | `afrinov-platform/apps/backend/README.md` | Corrected: removed /auth/register and self-registration; endpoint table, module list, Node versions, REPORT_CURRENCY scope | Engineering (reconciliation against code at 4e6d76f) |
 | 2026-10-09 | `afrinov-platform/apps/frontend/FRONTEND_ONLY.md` | Corrected: projects are emulated; auth file paths; mock seed contents | Engineering (reconciliation against code at 4e6d76f) |
-
-Add one row per meaningful revision (not typo fixes). For architecture-level
-changes, also add an ADR in `decision-log.md` and reference its ID here.
-The 2026-10-09 rows record a reconciliation of every document with the code;
-the new ADRs from it are ADR-009 to ADR-017 (marked Inferred from code), and
-the disagreements found are TD-004 to TD-025 in
-`13-project-management/technical-debt.md`.
 | 2026-10-20 | `00-governance/decision-log.md` | Added ADR-019 (procurement on by default); ADR-012 marked superseded | Engineering (reconciliation against code at a7a7360) |
 | 2026-10-20 | `04-processes/purchase-order-lifecycle.md` | Rewritten: template-aligned order (prices and VAT, approval by order value, AFRI numbers and revisions, Inputs-sheet details, order document), form pages, receiving from the order page, approver landing | Engineering (reconciliation against code at a7a7360) |
 | 2026-10-20 | `04-processes/supplier-management.md` | Rewritten: vendor-list fields, edit and deactivate, vendor list import, store controllers may add suppliers | Engineering (reconciliation against code at a7a7360) |
@@ -146,3 +139,11 @@ the disagreements found are TD-004 to TD-025 in
 | 2026-10-20 | `09-frontend/page-inventory.md`, `information-architecture.md`, `navigation-model.md` | Rewritten: current routes and menu (Tools, Return stock, PO pages, Stock report), permission-filtered menu, approver landing | Engineering (reconciliation against code at a7a7360) |
 | 2026-10-20 | `10-security/access-control.md` | Extended: UI role gating, approval limits | Engineering (reconciliation against code at a7a7360) |
 | 2026-10-20 | `01-product/*`, `02-business-analysis/*`, `03-domain/*`, `06-system-architecture/*`, `07-data/migration-strategy.md`, `08-api/*`, `09-frontend/frontend-architecture.md`, `11-testing/*`, `13-project-management/onboarding.md`, `technical-debt.md`, `14-validation/*`, `00-governance/glossary.md` | Corrected: procurement on by default; tool check-out/check-in implemented (was Planned); tools imported; supplier update exists; TD-015 partly resolved | Engineering (reconciliation against code at a7a7360) |
+| 2026-10-22 | Repository `README.md`, `docs/README.md`, documentation inventory and reorganization report, project roadmaps, documentation guide, product roadmap, and migration README | Added repository-wide navigation and a complete document disposition inventory; grouped audit reports and specialist roadmaps; corrected moved references and migration-folder name | Engineering (repository maintenance) |
+
+Add one row per meaningful revision (not typo fixes). For architecture-level
+changes, also add an ADR in `decision-log.md` and reference its ID here.
+The 2026-10-09 rows record a reconciliation of every document with the code;
+the new ADRs from it are ADR-009 to ADR-017 (marked Inferred from code), and
+the disagreements found are TD-004 to TD-025 in
+`13-project-management/technical-debt.md`.
