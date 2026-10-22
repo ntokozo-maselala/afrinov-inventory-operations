@@ -36,6 +36,8 @@ const db = {
   invTxs: new Map<string, InvTx>(),
   invBal: new Map<string, InvBal>(),
   audit: [] as AuditRow[],
+  /** The advisory locks taken, one per locked change. */
+  locks: [] as string[],
 };
 let counter = 0;
 function nextId(): string { counter += 1; return `loc-${counter}`; }
@@ -47,6 +49,8 @@ vi.mock('../../shared/db.js', () => ({
 
 function makePrisma(): unknown {
   return {
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
+    $executeRaw: async (strings: TemplateStringsArray) => { db.locks.push(strings.join('?')); return 1; },
     location: {
       findUnique: async ({ where }: { where: { id?: string; name?: string; code?: string | null } }) => {
         if (where.id) return db.locations.get(where.id) ?? null;
@@ -128,6 +132,7 @@ beforeEach(() => {
   db.invTxs.clear();
   db.invBal.clear();
   db.audit.length = 0;
+  db.locks.length = 0;
   counter = 0;
 });
 
@@ -285,5 +290,33 @@ describe('LocationService: a location inside another', () => {
     await expect(LocationService.update({ id: store.id, active: false }, 'user-1')).rejects.toThrow(/active location inside it/);
     await expect(LocationService.update({ id: store.id, type: 'RACK' }, 'user-1')).rejects.toThrow(/cannot be a rack/);
     await expect(LocationService.remove(store.id, 'user-1')).rejects.toMatchObject({ details: { dependencies: { locations: 1 } } });
+  });
+  it('will not reactivate a rack while its room is inactive', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    const rack = await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    await LocationService.setStatus(rack.id, false, 'user-1');
+    await LocationService.setStatus(store.id, false, 'user-1');
+    await expect(LocationService.setStatus(rack.id, true, 'user-1')).rejects.toThrow(/inside Main Storeroom, which is inactive/);
+    await expect(LocationService.update({ id: rack.id, active: true }, 'user-1')).rejects.toThrow(/which is inactive/);
+    // Moved out of the room, it can be reactivated.
+    expect((await LocationService.update({ id: rack.id, parentId: null, active: true }, 'user-1')).active).toBe(true);
+  });
+
+  it('says to move the locations out, not to deactivate, when a room cannot be deleted', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    await expect(LocationService.remove(store.id, 'user-1')).rejects.toThrow('Main Storeroom has 1 location inside it. Move them out of it before deleting it.');
+  });
+
+  it('takes the location-tree lock for every change, so two edits at once see the same locations', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    const rack = await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    await LocationService.update({ id: rack.id, name: 'D-2' }, 'user-1');
+    await LocationService.setStatus(rack.id, false, 'user-1');
+    expect(db.locks).toHaveLength(4);
+    expect(db.locks.every((q) => q.includes('pg_advisory_xact_lock') && q.includes('afrinov:location-tree'))).toBe(true);
   });
 });

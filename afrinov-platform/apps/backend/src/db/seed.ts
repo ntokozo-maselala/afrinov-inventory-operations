@@ -190,9 +190,13 @@ async function ensureLocations(): Promise<Map<string, string>> {
     { name: 'D-1', type: 'RACK' as const, code: 'RACK-D1' },
   ];
   for (const l of seeds) {
+    // A location that now holds others keeps its type: a rack holds no
+    // locations, and turning it into one would leave them inside a rack.
+    const existing = await prisma.location.findUnique({ where: { name: l.name } });
+    const holdsOthers = !!existing && (await prisma.location.count({ where: { parentId: existing.id } })) > 0;
     const row = await prisma.location.upsert({
       where: { name: l.name },
-      update: { type: l.type, code: l.code },
+      update: holdsOthers && l.type === 'RACK' ? { code: l.code } : { type: l.type, code: l.code },
       create: { name: l.name, type: l.type, code: l.code },
     });
     byName.set(l.name, row.id);
