@@ -220,6 +220,17 @@ describe('TransactionDrawer', () => {
       expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/returns', { quantity: 3, locationId: 'l-2', reason: 'Job finished early' });
     });
 
+    it('names the location it was issued from with its room, like the other choices', async () => {
+      mockGet.mockResolvedValue([
+        { id: 'l-1', name: 'A-1', active: true, parent: { name: 'Main Storeroom' } },
+        { id: 'l-2', name: 'B-2', active: true, parent: { name: 'Main Storeroom' } },
+      ]);
+      renderIssue();
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      expect(await screen.findByRole('option', { name: 'A-1 · Main Storeroom' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'B-2 · Main Storeroom' })).toBeInTheDocument();
+    });
+
     it('refuses more than is still out before posting', () => {
       renderIssue({ returnedQuantity: '1' });
       expect(screen.getByText(/1 of 4 returned to stock/)).toBeInTheDocument();

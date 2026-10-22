@@ -12,8 +12,8 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | A location can sit inside another | S–M | Not started |
-| 2 | Show and choose the parent on screen | S–M | Not started |
+| 1 | A location can sit inside another | S–M | In review (#85) |
+| 2 | Show and choose the parent on screen | S–M | In review (#86) |
 | 3 | Move the Rack records onto locations, retire Racks | M | Not started |
 | 4 | The import asks which room each rack is in | S | Not started |
 | 5 | Stock by room, racks included | S–M | Not started |
@@ -24,7 +24,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
 ### Decisions needed
 
-- **Depth:** one level only (a rack inside a room), or rooms inside buildings too? *Recommended: one level.* It is all the workbook needs, and reports stay simple.
+- **Depth:** *Decided: one level* (a rack inside a room), as built in Phase 1. It is all the workbook needs, and reports stay simple.
 - **Rack extras:** a Rack record also has a capacity, a "Full" status and a project. None of them comes from the workbook and nothing uses them. Drop them, or move them onto the location? *Recommended: drop them.*
 - **Which room:** the storeman says which room each rack is in (racks A to O are presumably in the Stores room). Needed before Phase 4.
 
@@ -36,9 +36,9 @@ One branch and pull request per phase, in order. Phase 3 needs Phases 1 and 2. P
 
 Size S–M. Backend.
 
-- [ ] **1.1 Parent location.** A nullable `parentId` on `Location`, pointing at another location, in a new migration. One level: a location with a parent cannot itself be a parent, and the parent must be active and not of type Rack.
+- [x] **1.1 Parent location.** A nullable `parentId` on `Location`, pointing at another location, in a new migration. One level: a location with a parent cannot itself be a parent, and the parent must be active and not of type Rack.
   Files: `prisma/schema.prisma`, new migration, `modules/inventory/location.service.ts`
-- [ ] **1.2 API.** `POST` and `PATCH /locations` take `parentId`; `GET /locations` returns each location's parent. A location with locations inside it cannot be deleted or deactivated until they are moved.
+- [x] **1.2 API.** `POST` and `PATCH /locations` take `parentId`; `GET /locations` returns each location's parent. A location with locations inside it cannot be deleted or deactivated until they are moved.
   Files: `location.service.ts`, `material.routes.ts` (location routes), `openapi/document.ts`, `mock/mockApi.ts`
 
 **Done when:** `D-1` can be saved as a Rack inside `Main Storeroom`, and the API refuses a loop or a second level.
@@ -47,9 +47,9 @@ Size S–M. Backend.
 
 Size S–M. Frontend.
 
-- [ ] **2.1 Locations page.** A "Located in" field on the location form, a column in the list, and a filter by room.
+- [x] **2.1 Locations page.** A "Located in" field on the location form, a column in the list, and a filter by room.
   Files: `pages/Locations.tsx`
-- [ ] **2.2 Pickers say where a rack is.** Wherever a location is chosen (Receive, Issue, Return and Count stock, transfers, tool check-out), a rack shows as `D-1 · Main Storeroom`.
+- [x] **2.2 Pickers say where a rack is.** Wherever a location is chosen (Receive, Issue, Return and Count stock, transfers, tool check-out), a rack shows as `D-1 · Main Storeroom`.
   Files: the location pickers on those pages
 
 **Done when:** a storeman picking a rack sees which room it is in.

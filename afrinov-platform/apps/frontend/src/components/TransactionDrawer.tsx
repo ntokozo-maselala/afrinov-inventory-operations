@@ -266,7 +266,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
             </Field>
             <Field label="Back into" htmlFor="return-loc" error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
               <Select id="return-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <option value={transaction.locationId}>{transaction.locationName}</option>
+                <option value={transaction.locationId}>{locationLabel((locations.data ?? []).find((l) => l.id === transaction.locationId) ?? { name: transaction.locationName })}</option>
                 {(locations.data ?? []).filter((l) => l.active && l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
               </Select>
             </Field>

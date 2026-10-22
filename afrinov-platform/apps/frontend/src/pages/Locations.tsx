@@ -140,17 +140,15 @@ function LocationForm({ initial, all, onCancel, onSaved, onError }: LocationForm
       }
     } catch (err) {
       const e = err as ApiError;
-      if (/inside/i.test(e.message)) {
-        // A room rule the server refused (one level, never a rack, active rooms): its words say why.
+      if (e.code === 'CONFLICT' && /^Location code ".*" is already in use\.?$/.test(e.message)) {
+        setFieldErrors({ code: 'A location with this code already exists.' });
+        setValidation('A location with this code already exists.');
+      } else if (e.code === 'CONFLICT' && /^Location (name )?".*" already exists\.?$/.test(e.message)) {
+        setFieldErrors({ name: 'A location with this name already exists.' });
+        setValidation('A location with this name already exists.');
+      } else if ((e.code === 'CONFLICT' || e.code === 'VALIDATION_ERROR') && e.message && e.message !== 'Invalid location payload') {
+        // A rule the server refused (a room: one level, never a rack, active rooms): its words say why.
         setValidation(e.message);
-      } else if (e.code === 'CONFLICT') {
-        if (/code/i.test(e.message)) {
-          setFieldErrors({ code: 'A location with this code already exists.' });
-          setValidation('A location with this code already exists.');
-        } else {
-          setFieldErrors({ name: 'A location with this name already exists.' });
-          setValidation('A location with this name already exists.');
-        }
       } else if (e.code === 'VALIDATION_ERROR') {
         setValidation('Please correct the highlighted fields.');
       } else if (e.code === 'FORBIDDEN') {
@@ -312,28 +310,31 @@ export function Locations() {
   // Viewing is for everyone; adding, editing, (de)activating and deleting need the location permissions.
   const canManage = usePermissions().hasPermission('locations:manage');
 
-  const filtered = useMemo(() => {
-    if (!locations.data) return [];
-    const needle = q.trim().toLowerCase();
-    return locations.data.filter((l) => {
-      if (typeFilter && l.type !== typeFilter) return false;
-      if (statusFilter && statusFor(l) !== statusFilter) return false;
-      if (roomFilter && l.id !== roomFilter && l.parentId !== roomFilter) return false;
-      if (needle) {
-        const hay = `${l.name} ${l.code ?? ''} ${l.description ?? ''} ${l.parent?.name ?? ''}`.toLowerCase();
-        if (!hay.includes(needle)) return false;
-      }
-      return true;
-    });
-  }, [locations.data, q, typeFilter, statusFilter, roomFilter]);
-
   // The rooms that have locations inside them, for the Room filter.
   const roomOptions = useMemo(() => {
     const data = locations.data ?? [];
     const holding = new Set(data.map((l) => l.parentId).filter((id): id is string => !!id));
     return data.filter((l) => holding.has(l.id)).sort((a, b) => a.name.localeCompare(b.name));
   }, [locations.data]);
-  const filtering = !!(q || typeFilter || statusFilter || roomFilter);
+  // A room that no longer holds anything leaves the filter: it stops applying,
+  // rather than hiding locations behind a control that is not shown.
+  const activeRoom = roomOptions.some((r) => r.id === roomFilter) ? roomFilter : '';
+
+  const filtered = useMemo(() => {
+    if (!locations.data) return [];
+    const needle = q.trim().toLowerCase();
+    return locations.data.filter((l) => {
+      if (typeFilter && l.type !== typeFilter) return false;
+      if (statusFilter && statusFor(l) !== statusFilter) return false;
+      if (activeRoom && l.id !== activeRoom && l.parentId !== activeRoom) return false;
+      if (needle) {
+        const hay = `${l.name} ${l.code ?? ''} ${l.description ?? ''} ${l.parent?.name ?? ''}`.toLowerCase();
+        if (!hay.includes(needle)) return false;
+      }
+      return true;
+    });
+  }, [locations.data, q, typeFilter, statusFilter, activeRoom]);
+  const filtering = !!(q || typeFilter || statusFilter || activeRoom);
 
   const stats = useMemo(() => {
     const data = locations.data ?? [];
@@ -425,7 +426,7 @@ export function Locations() {
         </Field>
         {roomOptions.length > 0 && (
           <Field label="Room" htmlFor="locations-room" className={FILTER_WIDTH}>
-            <Select id="locations-room" value={roomFilter} onChange={(e) => setRoomFilter(e.target.value)}>
+            <Select id="locations-room" value={activeRoom} onChange={(e) => setRoomFilter(e.target.value)}>
               <option value="">All rooms</option>
               {roomOptions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </Select>
