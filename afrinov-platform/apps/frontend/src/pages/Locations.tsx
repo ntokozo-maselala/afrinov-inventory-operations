@@ -273,7 +273,9 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
 
       {deps && total > 0 && (
         <Alert tone="info" title="Referenced by other records">
-          <p className="text-sm">This location is referenced by {total} record(s) ({deps.locations ?? 0} location(s) inside it, {deps.racks} rack(s), {deps.goodsReceiptLines} goods receipt line(s), {deps.inventoryTransactions} transaction(s), {deps.inventoryBalances} inventory balance(s)). Deactivate the location instead of deleting it to preserve history.</p>
+          <p className="text-sm">This location is referenced by {total} record(s) ({deps.locations ?? 0} location(s) inside it, {deps.racks} rack(s), {deps.goodsReceiptLines} goods receipt line(s), {deps.inventoryTransactions} transaction(s), {deps.inventoryBalances} inventory balance(s)). {(deps.locations ?? 0) > 0
+            ? 'Move the locations inside it out before deleting or deactivating it.'
+            : 'Deactivate the location instead of deleting it to preserve history.'}</p>
         </Alert>
       )}
 

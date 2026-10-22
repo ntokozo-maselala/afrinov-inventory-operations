@@ -126,3 +126,23 @@ describe('Locations page: the room a location stands in', () => {
     expect(screen.getByText('Cannot save')).toBeInTheDocument();
   });
 });
+
+describe('Locations page: details of a room with locations inside it', () => {
+  it('counts them, and says to move them out rather than to deactivate it', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') return LOCATIONS;
+      if (path === '/locations/l-1') return {
+        ...LOCATIONS[0], inventoryCount: 0,
+        dependencyCounts: { locations: 1, racks: 0, goodsReceiptLines: 0, inventoryTransactions: 0, inventoryBalances: 0 },
+      };
+      if (path.startsWith('/reports/inventory')) return { currency: 'ZAR', byLocation: [] };
+      return [];
+    });
+    render(<MemoryRouter><ToastProvider><Locations /></ToastProvider></MemoryRouter>);
+    const row = (await screen.findByText('Main Storeroom')).closest('tr')!;
+    within(row).getByRole('button', { name: 'View' }).click();
+    expect(await screen.findByText('Referenced by other records')).toBeInTheDocument();
+    expect(screen.getByText(/1 location\(s\) inside it/)).toBeInTheDocument();
+    expect(screen.getByText(/Move the locations inside it out before deleting or deactivating it\./)).toBeInTheDocument();
+  });
+});
