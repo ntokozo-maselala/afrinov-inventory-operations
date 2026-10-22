@@ -60,6 +60,10 @@ const TEXT_KEYS = [
   'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone', 'afrinovContact',
 ] as const;
 
+/**
+ * Builds editable details from the order's own values, with missing text blank,
+ * a missing discount at 0%, and delivery unless the method is COLLECTION.
+ */
 export function draftFromOrder(po: OrderDetails): OrderDetailsDraft {
   return {
     supplierContactName: po.supplierContactName ?? '',
@@ -92,7 +96,10 @@ export function supplierDetails(s: { contactName?: string | null; contactPhone?:
   };
 }
 
-/** Says what is wrong, or null. */
+/**
+ * Returns the first supplier email or settlement discount error, or null.
+ * Both may be blank; a supplied discount must be finite and within 0–100%.
+ */
 export function checkDetails(d: OrderDetailsDraft): string | null {
   const email = d.supplierContactEmail.trim();
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return `The supplier email "${email}" is not an email address.`;
@@ -104,9 +111,11 @@ export function checkDetails(d: OrderDetailsDraft): string | null {
 }
 
 /**
- * The request fields. A new order leaves blanks out (the server fills its
- * defaults); an edit sends them as null, which clears them. Collected goods
- * have no delivery block.
+ * Builds trimmed request fields. Blank supplier details always become null
+ * to keep them cleared. Other blank text becomes undefined on create (for
+ * server defaults) or null on edit. Collection clears the delivery recipient,
+ * address and country the same way, keeping the delivery contact fields.
+ * A blank settlement discount becomes 0%.
  */
 export function detailsBody(d: OrderDetailsDraft, mode: 'create' | 'edit'): Record<string, unknown> {
   const blank = mode === 'create' ? undefined : null;

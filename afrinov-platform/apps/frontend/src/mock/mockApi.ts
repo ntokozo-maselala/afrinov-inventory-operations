@@ -66,6 +66,10 @@ interface State {
 
 let state: State = freshState();
 
+/**
+ * Builds initial mock state from the seeds. Seed orders inherit supplier
+ * contact details and address unless the order already carries those fields.
+ */
 function freshState(): State {
   return {
     // A copy of each item, so a change in one test (or session) never edits the seed.
@@ -294,7 +298,14 @@ export function createMockApi(): MockApi {
   };
 }
 
-// Tiny path-router. Returns the response payload or throws an ApiError.
+/**
+ * Returns the payload for a mock HTTP method and API path (with query string),
+ * applying writes to shared in-memory state. New purchase orders copy omitted
+ * supplier details; explicit null or blank text keeps a detail cleared.
+ *
+ * @throws {ApiError} For rejected operations, missing records or unimplemented routes.
+ * @throws {Error} Propagates unexpected handler and URL decoding errors.
+ */
 function route(method: string, path: string, body?: unknown): unknown {
   const p = path.split('?')[0] ?? '';
   const qs = parseQuery(path);

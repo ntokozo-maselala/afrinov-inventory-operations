@@ -92,6 +92,11 @@ export function NewPurchaseOrder() {
   return <NewPurchaseOrderForm />;
 }
 
+/**
+ * Renders the new-order form with supplier, Settings and buyer defaults.
+ * Saves a draft and optionally submits it; a failed submission opens the saved
+ * draft with an error toast, while a failed save leaves the form open.
+ */
 function NewPurchaseOrderForm() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -141,6 +146,10 @@ function NewPurchaseOrderForm() {
     });
   }
 
+  /**
+   * Selects the supplier, resets the VAT override, and replaces payment terms
+   * and supplier details. An unknown or empty id blanks those details.
+   */
   function chooseSupplier(id: string) {
     setSupplierId(id);
     setVatOverride(null);
@@ -390,6 +399,11 @@ export function EditPurchaseOrder() {
   return <EditPurchaseOrderForm po={po.data} />;
 }
 
+/**
+ * Renders an edit form using the order's saved details, including supplier
+ * overrides. Saves changes through PATCH and returns to the order on success;
+ * save errors leave the form open with validation feedback and an error toast.
+ */
 function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const navigate = useNavigate();
   const toast = useToast();
