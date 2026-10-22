@@ -125,6 +125,8 @@ export const createLocationSchema = z.object({
   code: z.string().min(1).max(32).optional(),
   type: locationTypeEnum,
   active: z.boolean().optional(),
+  // The room or area it stands in (one level; never a rack).
+  parentId: z.string().uuid().optional(),
   address: z.string().max(200).optional(),
   description: z.string().max(1000).optional(),
   contactPerson: z.string().max(120).optional(),
@@ -138,6 +140,8 @@ export const updateLocationSchema = z.object({
   code: z.string().min(1).max(32).nullable().optional(),
   type: locationTypeEnum.optional(),
   active: z.boolean().optional(),
+  // The room or area it stands in; null takes it out.
+  parentId: z.string().uuid().nullable().optional(),
   address: z.string().max(200).nullable().optional(),
   description: z.string().max(1000).nullable().optional(),
   contactPerson: z.string().max(120).nullable().optional(),
@@ -157,6 +161,7 @@ export async function locationRoutes(app: FastifyInstance): Promise<void> {
       q: q['q'],
       type: q['type'] as 'RACK' | 'STOREROOM' | 'SHOP_FLOOR_AREA' | 'CONTAINER' | 'OFF_SITE' | undefined,
       active: q['active'] === 'true' ? true : q['active'] === 'false' ? false : undefined,
+      parentId: q['parentId'] || undefined,
     });
   });
 

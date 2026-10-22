@@ -63,6 +63,8 @@ export interface MockLocation {
   code?: string;
   type: LocationType;
   active: boolean;
+  /** The room or area it stands in (one level; never a rack). */
+  parentId?: string;
   address?: string;
   description?: string;
   contactPerson?: string;

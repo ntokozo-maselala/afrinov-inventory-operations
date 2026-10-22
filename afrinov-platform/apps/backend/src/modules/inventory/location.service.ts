@@ -10,6 +10,11 @@
 // service's `checkLocationActive` guard) and the new optional master-data
 // fields (code, address, contact details, …). Status is derived: ACTIVE when
 // `active = true`, otherwise INACTIVE.
+//
+// A location may stand inside another (`parentId`): rack "D-1" in "Main
+// Storeroom". One level only, and never inside a rack; stock stays on the
+// location itself. In the stock workbook a rack code and a room share one
+// column and nothing records which room a rack is in.
 import { Prisma, type LocationType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
@@ -19,6 +24,8 @@ export interface CreateLocationInput {
   code?: string;
   type: LocationType;
   active?: boolean;
+  /** The room or area it stands in. */
+  parentId?: string | null;
   address?: string;
   description?: string;
   contactPerson?: string;
@@ -33,6 +40,8 @@ export interface UpdateLocationInput {
   code?: string | null;
   type?: LocationType;
   active?: boolean;
+  /** The room or area it stands in; null takes it out. */
+  parentId?: string | null;
   address?: string | null;
   description?: string | null;
   contactPerson?: string | null;
@@ -57,7 +66,37 @@ async function assertNameUnique(name: string, excludeId?: string): Promise<void>
   }
 }
 
+/** What a location list or read shows of the room it stands in. */
+const PARENT = { select: { id: true, name: true, code: true, type: true } } as const;
+
+/**
+ * Whether `parentId` can hold this location: it exists, is active, is not a
+ * rack and is not itself inside another; and the location (absent when new)
+ * is not itself and has nothing inside it. One level, so no loops.
+ */
+async function assertParent(parentId: string, child?: { id: string }): Promise<void> {
+  if (child && parentId === child.id) throw Errors.validation('A location cannot be inside itself.');
+  const parent = await prisma.location.findUnique({ where: { id: parentId } });
+  if (!parent) throw Errors.validation('The location it is inside does not exist.');
+  if (!parent.active) throw Errors.validation(`${parent.name} is inactive. Reactivate it to put locations inside it.`);
+  if (parent.type === 'RACK') throw Errors.validation(`${parent.name} is a rack. A location can be inside a room or area, not a rack.`);
+  if (parent.parentId) throw Errors.validation(`${parent.name} is itself inside another location. Locations go one level deep: choose a room or area that is not inside another.`);
+  if (child && (await prisma.location.count({ where: { parentId: child.id } })) > 0) {
+    throw Errors.validation('This location has locations inside it, so it cannot go inside another. Move them out first.');
+  }
+}
+
+/** Refuses to deactivate a room that still has active locations inside it. */
+async function assertNoActiveChildren(id: string, name: string): Promise<void> {
+  const inside = await prisma.location.count({ where: { parentId: id, active: true } });
+  if (inside > 0) {
+    throw Errors.conflict(`${name} has ${inside} active location${inside === 1 ? '' : 's'} inside it. Move or deactivate them first.`, { locations: inside });
+  }
+}
+
 interface DependencyCounts {
+  /** Locations standing inside this one. */
+  locations: number;
   racks: number;
   goodsReceiptLines: number;
   inventoryTransactions: number;
@@ -65,23 +104,26 @@ interface DependencyCounts {
 }
 
 async function dependencyCounts(id: string): Promise<DependencyCounts> {
-  const [racks, goodsReceiptLines, inventoryTransactions, inventoryBalances] = await Promise.all([
+  const [locations, racks, goodsReceiptLines, inventoryTransactions, inventoryBalances] = await Promise.all([
+    prisma.location.count({ where: { parentId: id } }),
     prisma.rack.count({ where: { locationId: id } }),
     prisma.goodsReceiptLine.count({ where: { locationId: id } }),
     prisma.inventoryTransaction.count({ where: { locationId: id } }),
     prisma.inventoryBalance.count({ where: { locationId: id } }),
   ]);
-  return { racks, goodsReceiptLines, inventoryTransactions, inventoryBalances };
+  return { locations, racks, goodsReceiptLines, inventoryTransactions, inventoryBalances };
 }
 
 function hasAnyDependency(c: DependencyCounts): boolean {
-  return c.racks + c.goodsReceiptLines + c.inventoryTransactions + c.inventoryBalances > 0;
+  return c.locations + c.racks + c.goodsReceiptLines + c.inventoryTransactions + c.inventoryBalances > 0;
 }
 
 export const LocationService = {
-  async list(filter: { q?: string; type?: LocationType; active?: boolean } = {}) {
+  async list(filter: { q?: string; type?: LocationType; active?: boolean; parentId?: string } = {}) {
     const where: Prisma.LocationWhereInput = {};
     if (filter.type) where.type = filter.type;
+    // The locations inside one room or area.
+    if (filter.parentId) where.parentId = filter.parentId;
     if (filter.active !== undefined) where.active = filter.active;
     if (filter.q) {
       where.OR = [
@@ -93,6 +135,7 @@ export const LocationService = {
     }
     const rows = await prisma.location.findMany({
       where,
+      include: { parent: PARENT },
       orderBy: [{ active: 'desc' }, { name: 'asc' }],
     });
     const locationIds = rows.map((l) => l.id);
@@ -107,7 +150,7 @@ export const LocationService = {
   },
 
   async getById(id: string) {
-    const loc = await prisma.location.findUnique({ where: { id } });
+    const loc = await prisma.location.findUnique({ where: { id }, include: { parent: PARENT } });
     if (!loc) throw Errors.notFound('Location');
     const counts = await dependencyCounts(id);
     return { ...loc, inventoryCount: counts.inventoryBalances, dependencyCounts: counts };
@@ -119,11 +162,14 @@ export const LocationService = {
     const code = input.code?.trim() || null;
     if (code) await assertCodeUnique(code);
     await assertNameUnique(name);
+    const parentId = input.parentId || null;
+    if (parentId) await assertParent(parentId);
     const data: Prisma.LocationUncheckedCreateInput = {
       name,
       code: code ?? null,
       type: input.type,
       active: input.active ?? true,
+      parentId,
       address: input.address?.trim() || null,
       description: input.description?.trim() || null,
       contactPerson: input.contactPerson?.trim() || null,
@@ -166,8 +212,21 @@ export const LocationService = {
         data.code = next;
       }
     }
-    if (input.type !== undefined) data.type = input.type;
-    if (input.active !== undefined) data.active = input.active;
+    if (input.type !== undefined) {
+      // A room with locations inside it cannot become a rack: racks hold no locations.
+      if (input.type === 'RACK' && before.type !== 'RACK' && (await prisma.location.count({ where: { parentId: before.id } })) > 0) {
+        throw Errors.validation('This location has locations inside it, so it cannot be a rack. Move them out first.');
+      }
+      data.type = input.type;
+    }
+    if (input.parentId !== undefined && input.parentId !== before.parentId) {
+      if (input.parentId) await assertParent(input.parentId, before);
+      data.parentId = input.parentId || null;
+    }
+    if (input.active !== undefined) {
+      if (!input.active && before.active) await assertNoActiveChildren(before.id, before.name);
+      data.active = input.active;
+    }
     if (input.address !== undefined) data.address = input.address === null ? null : input.address.trim() || null;
     if (input.description !== undefined) data.description = input.description === null ? null : input.description.trim() || null;
     if (input.contactPerson !== undefined) data.contactPerson = input.contactPerson === null ? null : input.contactPerson.trim() || null;
@@ -194,6 +253,7 @@ export const LocationService = {
     const before = await prisma.location.findUnique({ where: { id } });
     if (!before) throw Errors.notFound('Location');
     if (before.active === active) return before;
+    if (!active) await assertNoActiveChildren(id, before.name);
     const after = await prisma.location.update({
       where: { id },
       data: { active, updatedById: actorId },

@@ -9,6 +9,7 @@ type Loc = {
   code: string | null;
   type: LocationType;
   active: boolean;
+  parentId?: string | null;
   address: string | null;
   description: string | null;
   contactPerson: string | null;
@@ -53,9 +54,10 @@ function makePrisma(): unknown {
         if (where.code !== undefined) return [...db.locations.values()].find((l) => l.code === where.code) ?? null;
         return null;
       },
-      findMany: async ({ where }: { where?: { type?: LocationType; active?: boolean; OR?: unknown[] } }) => {
+      findMany: async ({ where, include }: { where?: { type?: LocationType; active?: boolean; parentId?: string; OR?: unknown[] }; include?: { parent?: unknown } }) => {
         let list = [...db.locations.values()];
         if (where?.type) list = list.filter((l) => l.type === where.type);
+        if (where?.parentId) list = list.filter((l) => l.parentId === where.parentId);
         if (where?.active !== undefined) list = list.filter((l) => l.active === where.active);
         if (where?.OR && Array.isArray(where.OR)) {
           list = list.filter((l) => (where.OR as Array<Record<string, unknown>>).some((cond) => {
@@ -68,7 +70,7 @@ function makePrisma(): unknown {
             return false;
           }));
         }
-        return list;
+        return include?.parent ? list.map((l) => ({ ...l, parent: l.parentId ? db.locations.get(l.parentId) ?? null : null })) : list;
       },
       create: async ({ data }: { data: Omit<Loc, 'id' | 'createdAt' | 'updatedAt'> }) => {
         const l: Loc = { ...data, id: nextId(), createdAt: new Date(), updatedAt: new Date() };
@@ -88,7 +90,10 @@ function makePrisma(): unknown {
         db.locations.delete(where.id);
         return existing;
       },
-      count: async () => db.locations.size,
+      count: async ({ where }: { where?: { parentId?: string; active?: boolean } } = {}) =>
+        [...db.locations.values()].filter((l) =>
+          (where?.parentId === undefined || l.parentId === where.parentId) &&
+          (where?.active === undefined || l.active === where.active)).length,
     },
     rack: {
       count: async ({ where }: { where: { locationId: string } }) =>
@@ -227,5 +232,58 @@ describe('LocationService', () => {
     const search = await LocationService.list({ q: 'Boiler' });
     expect(search.length).toBe(1);
     expect(search[0]?.name).toBe('Boiler Shop');
+  });
+});
+
+describe('LocationService: a location inside another', () => {
+  const room = async (name = 'Main Storeroom') => (await import('./location.service.js')).LocationService.create({ name, type: 'STOREROOM' }, 'user-1');
+
+  it('puts a rack inside a room, and lists it with its room', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    const rack = await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    expect(rack.parentId).toBe(store.id);
+    const listed = await LocationService.list({ parentId: store.id });
+    expect(listed.map((l) => l.name)).toEqual(['D-1']);
+    expect(listed[0]).toMatchObject({ parent: { name: 'Main Storeroom' } });
+  });
+
+  it('refuses a rack, an inactive location or one inside another as the room', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    const rack = await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    await expect(LocationService.create({ name: 'D-1 top', type: 'RACK', parentId: rack.id }, 'user-1')).rejects.toThrow(/is a rack/);
+    const cage = await LocationService.create({ name: 'Cage', type: 'STOREROOM', parentId: store.id }, 'user-1');
+    await expect(LocationService.create({ name: 'Shelf', type: 'RACK', parentId: cage.id }, 'user-1')).rejects.toThrow(/one level deep/);
+    const old = await LocationService.create({ name: 'Old shed', type: 'STOREROOM', active: false }, 'user-1');
+    await expect(LocationService.create({ name: 'E-1', type: 'RACK', parentId: old.id }, 'user-1')).rejects.toThrow(/inactive/);
+  });
+
+  it('refuses a location inside itself, or a room with locations inside it going inside another', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    const upstairs = await room('Upstairs');
+    await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    await expect(LocationService.update({ id: store.id, parentId: store.id }, 'user-1')).rejects.toThrow(/inside itself/);
+    await expect(LocationService.update({ id: store.id, parentId: upstairs.id }, 'user-1')).rejects.toThrow(/has locations inside it/);
+  });
+
+  it('moves a rack to another room, or out of any room with null', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    const upstairs = await room('Upstairs');
+    const rack = await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    expect((await LocationService.update({ id: rack.id, parentId: upstairs.id }, 'user-1')).parentId).toBe(upstairs.id);
+    expect((await LocationService.update({ id: rack.id, parentId: null }, 'user-1')).parentId).toBeNull();
+  });
+
+  it('will not deactivate, delete or turn into a rack a room with locations inside it', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const store = await room();
+    await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
+    await expect(LocationService.setStatus(store.id, false, 'user-1')).rejects.toThrow(/1 active location inside it/);
+    await expect(LocationService.update({ id: store.id, active: false }, 'user-1')).rejects.toThrow(/active location inside it/);
+    await expect(LocationService.update({ id: store.id, type: 'RACK' }, 'user-1')).rejects.toThrow(/cannot be a rack/);
+    await expect(LocationService.remove(store.id, 'user-1')).rejects.toMatchObject({ details: { dependencies: { locations: 1 } } });
   });
 });

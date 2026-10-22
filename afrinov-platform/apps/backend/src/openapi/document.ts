@@ -186,7 +186,10 @@ export const OPERATIONS: Operation[] = [
   // Locations
   {
     method: 'get', path: '/locations', tag: 'Locations', summary: 'List locations',
-    query: z.object({ q: z.string().optional(), type: locationType.optional(), active: yesNo.optional() }),
+    query: z.object({
+      q: z.string().optional(), type: locationType.optional(), active: yesNo.optional(),
+      parentId: z.string().optional().openapi({ description: 'Only the locations inside this room or area.' }),
+    }),
   },
   { method: 'get', path: '/locations/:id', tag: 'Locations', summary: 'Get a location', errors: [404] },
   {
