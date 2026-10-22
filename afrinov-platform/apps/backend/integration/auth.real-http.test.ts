@@ -32,7 +32,7 @@ describe('real HTTP + real database', () => {
   let jwt: string | null = null;
 
   beforeAll(async () => {
-    if (!ADMIN_PASSWORD) {
+    if (!ADMIN_PASSWORD?.trim()) {
       throw new Error(
         'SEED_ADMIN_PASSWORD is required for the real-HTTP integration suite. ' +
           'Seed the database with that value before running this config.',

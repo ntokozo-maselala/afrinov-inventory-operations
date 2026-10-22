@@ -7,7 +7,7 @@ import { requirePermission } from '../../shared/authorization.js';
 export const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
-  password: z.string().min(8),
+  password: z.string().min(8).regex(/[^\0]/),
   roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1),
 });
 

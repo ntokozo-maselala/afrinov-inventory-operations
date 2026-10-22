@@ -48,9 +48,15 @@ variable for one command with `$env:NAME = "value"; <command>`.
    ```
 
    The seed creates the admin account `admin@afrinov.local` with that
-   password. Without `SEED_ADMIN_PASSWORD` it generates a random password and
-   does not print it, so you will not be able to log in. The seed is safe to
-   re-run.
+   password. An unset, empty, or whitespace-only `SEED_ADMIN_PASSWORD` makes
+   the seed generate a random password and not print it, so you will not be
+   able to log in. Production seeding rejects those values. The seed is safe
+   to re-run and does not change an existing admin password.
+
+To rotate the existing bootstrap admin password, set a new `SEED_ADMIN_PASSWORD`
+and run `npm run db:rotate-admin`. This updates `admin@afrinov.local` and records
+the rotation in the audit log. Use this after deploying the empty-value fix if
+the existing account may have been created with an empty bootstrap password.
 
 5. Start the API with hot reload:
 
@@ -100,7 +106,7 @@ the API docs are off unless `API_DOCS_ENABLED=true`.
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
 | `PROCUREMENT_ENABLED` | No | `true` | `false` turns off purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
 | `API_DOCS_ENABLED` | No | On, except in production | `true` or `false` to serve the API docs at `/api/docs` |
-| `SEED_ADMIN_PASSWORD` | In production | Random | Admin password the seed sets when it first creates the account |
+| `SEED_ADMIN_PASSWORD` | In production | Random | Admin password used when creating or explicitly rotating the bootstrap account; empty and whitespace-only values are missing |
 | `SEED_ADMIN_EMAIL` | No | `admin@afrinov.local` | Account used by the integration tests and diagnostic scripts |
 | `REPORT_CURRENCY` | No | `ZAR` | Currency code returned with the inventory report (`/reports/inventory`) only; the other reports use the `general.defaultCurrency` setting |
 

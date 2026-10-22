@@ -14,7 +14,7 @@ export const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@afrinov.local'
 
 export function requireAdminPassword(): string {
   const password = process.env.SEED_ADMIN_PASSWORD;
-  if (!password) {
+  if (!password?.trim()) {
     throw new Error(
       'SEED_ADMIN_PASSWORD is required for the real-HTTP integration suites. ' +
         'Seed the database with that value before running this config.',
