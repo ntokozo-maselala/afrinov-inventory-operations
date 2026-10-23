@@ -10,7 +10,7 @@ audits, project entry points, and code-adjacent guides.
 | Area | Documentation | Implementation reference |
 |---|---|---|
 | Frontend | [`09-frontend`](../afrinov-docs/docs/09-frontend/) | [`Frontend-only development guide`](../afrinov-platform/apps/frontend/FRONTEND_ONLY.md) |
-| Backend and API | [`08-api`](../afrinov-docs/docs/08-api/) | [`Backend README`](../afrinov-platform/apps/backend/README.md); the OpenAPI document and its test are in `afrinov-platform/apps/backend/src/openapi/` |
+| Backend and API | [`08-api`](../afrinov-docs/docs/08-api/) | [`Backend README`](../afrinov-platform/apps/backend/README.md); [current architecture, configuration, operations, and audit reference](backend/README.md); the OpenAPI document and its test are in `afrinov-platform/apps/backend/src/openapi/` |
 | Database | [`07-data`](../afrinov-docs/docs/07-data/) | Prisma schema and executable migrations are in `afrinov-platform/apps/backend/prisma/`; migration-specific notes stay beside their migrations |
 
 ## Cross-cutting references

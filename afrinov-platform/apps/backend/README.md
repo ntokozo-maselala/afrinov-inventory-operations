@@ -50,8 +50,10 @@ variable for one command with `$env:NAME = "value"; <command>`.
    The seed creates the admin account `admin@afrinov.local` with that
    password. An unset, empty, or whitespace-only `SEED_ADMIN_PASSWORD` makes
    the seed generate a random password and not print it, so you will not be
-   able to log in. Production seeding rejects those values. The seed is safe
-   to re-run and does not change an existing admin password.
+   able to log in. Production seeding rejects those values. The seed does not
+   change an existing admin password. In production, the current seed code
+   requires `SEED_ADMIN_PASSWORD` on every invocation, even after the admin
+   exists, so keep it injected for container restarts.
 
 To rotate the existing bootstrap admin password, set a new `SEED_ADMIN_PASSWORD`
 and run `npm run db:rotate-admin`. This updates `admin@afrinov.local` and records
@@ -85,8 +87,9 @@ docker compose up --build
 
 The container runs with `NODE_ENV=production`, so the stricter production
 rules apply: `JWT_SECRET` must be a real random value, `SEED_ADMIN_PASSWORD`
-is required on first start, CORS is disabled unless `CORS_ORIGIN` is set, and
-the API docs are off unless `API_DOCS_ENABLED=true`.
+must remain injected on every start because the seed runs each time, CORS is
+disabled unless `CORS_ORIGIN` is set, and the API docs are off unless
+`API_DOCS_ENABLED=true`.
 
 ## Environment variables
 
@@ -106,7 +109,7 @@ the API docs are off unless `API_DOCS_ENABLED=true`.
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
 | `PROCUREMENT_ENABLED` | No | `true` | `false` turns off purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
 | `API_DOCS_ENABLED` | No | On, except in production | `true` or `false` to serve the API docs at `/api/docs` |
-| `SEED_ADMIN_PASSWORD` | In production | Random | Admin password used when creating or explicitly rotating the bootstrap account; empty and whitespace-only values are missing |
+| `SEED_ADMIN_PASSWORD` | Required on every production seed invocation | Random in development | Password used when creating or explicitly rotating the bootstrap account; production seed currently checks it even when the account exists |
 | `SEED_ADMIN_EMAIL` | No | `admin@afrinov.local` | Account used by the integration tests and diagnostic scripts |
 | `REPORT_CURRENCY` | No | `ZAR` | Currency code returned with the inventory report (`/reports/inventory`) only; the other reports use the `general.defaultCurrency` setting |
 
