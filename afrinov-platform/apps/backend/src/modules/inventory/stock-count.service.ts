@@ -43,6 +43,8 @@ export interface CountListFilter {
   from?: string;
   to?: string;
   locationId?: string;
+  /** A room and the locations inside it; wins over locationId. */
+  locationIds?: string[];
   /** Who counted. */
   actorId?: string;
   before?: string;
@@ -75,7 +77,8 @@ export const StockCountService = {
     const createdAt = dayRange(filter.from, filter.to);
     if (createdAt) and.push({ createdAt });
     if (filter.actorId) and.push({ actorId: filter.actorId });
-    if (filter.locationId) and.push({ after: { path: ['locationId'], equals: filter.locationId } });
+    if (filter.locationIds) and.push({ OR: filter.locationIds.map((id) => ({ after: { path: ['locationId'], equals: id } })) });
+    else if (filter.locationId) and.push({ after: { path: ['locationId'], equals: filter.locationId } });
     if (filter.before) {
       const { at, id } = parseCursor(filter.before);
       and.push({ OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] });

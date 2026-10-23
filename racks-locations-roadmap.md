@@ -12,11 +12,11 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | A location can sit inside another | S–M | In review (#85) |
-| 2 | Show and choose the parent on screen | S–M | In review (#86) |
-| 3 | Move the Rack records onto locations, retire Racks | M | 3.1 done (#87), 3.2 done (#88), 3.3 in review |
+| 1 | A location can sit inside another | S–M | Done (#85) |
+| 2 | Show and choose the parent on screen | S–M | Done (#86) |
+| 3 | Move the Rack records onto locations, retire Racks | M | 3.1 done (#87); 3.2 done (#88); 3.3 done (#90) |
 | 4 | The import asks which room each rack is in | S | Not started |
-| 5 | Stock by room, racks included | S–M | Not started |
+| 5 | Stock by room, racks included | S–M | In review |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
@@ -69,7 +69,7 @@ Three pull requests, each safe on its own. Nothing is deleted until the copy has
   Files: `scripts/racks-to-locations.ts` (new), `package.json`
 - [x] **3.2 Retire the Racks page, keeping the table and its guards.** *Done (#88). The seed no longer creates demo racks (it would refill the table 3.3 needs empty); it puts the demo location D-1 in Main Storeroom instead.* Remove the Racks menu entry and page; `/racks` redirects to Locations filtered to type Rack. Remove the `/racks` routes and the `manage:racks` permission from the roles. The Movements "Other changes" history names rack entries from the audit log itself (the rack's own entries that carry its code and name, such as when it was added or the record 3.1 wrote), not from the Rack table: today an "Archived rack" entry records only its status and takes the name from the table, so it would read "a rack" once the table is gone. Rack entries link to Locations. Update the Locations page's description, which currently explains the two records. **Keep the rack count in the location delete check:** while any Rack row remains, deleting its location would quietly clear the rack's location (`ON DELETE SET NULL` on `racks.location_id`) before 3.1 has copied it.
   Files: `pages/Racks.tsx`, `App.tsx`, `hooks/useNavGroups.tsx`, `modules/inventory/rack.routes.ts`, `rack.service.ts`, `modules/audit/activity.service.ts`, `shared/permissions.ts`, `pages/Locations.tsx`, `db/seed.ts`, `mock/*`, `openapi/document.ts`
-- [x] **3.3 Drop the Rack table**, *built: migration `20260101000022_drop_racks`, tested on a throwaway Postgres (drops on an empty table, refuses with a rack left); the `racks:to-locations` command goes with the table,* in a later migration once 3.1 has run on every database and every rack is settled. The migration first checks that `racks` is empty and **stops with an error** if it is not, so it cannot drop a Rack that was never copied. It drops the `RackStatus` type and deletes the `manage:racks` permission; only now does the location delete check stop counting racks. Update `src/db/migrations.test.ts`, which lists the Rack table and its keys. Back up the database (`pg_dump`) before deploying it.
+- [x] **3.3 Drop the Rack table**, *Done (#90): migration `20260101000022_drop_racks`, tested on a throwaway Postgres (drops on an empty table, refuses with a rack left); the `racks:to-locations` command goes with the table,* in a later migration once 3.1 has run on every database and every rack is settled. The migration first checks that `racks` is empty and **stops with an error** if it is not, so it cannot drop a Rack that was never copied. It drops the `RackStatus` type and deletes the `manage:racks` permission; only now does the location delete check stop counting racks. Update `src/db/migrations.test.ts`, which lists the Rack table and its keys. Back up the database (`pg_dump`) before deploying it.
   Files: new migration, `prisma/schema.prisma`, `location.service.ts`, `src/db/migrations.test.ts`
 
 On the local database the 3.1 dry run gives: rack `D-1` goes inside Main Storeroom (dropping project AFRI-1325, capacity 100 and its description); `F-7` has no matching location and `CHK-8849` looks like test data, so both need a decision (`--create F-7`, `--discard CHK-8849`).
@@ -89,11 +89,11 @@ Size S. Backend. Needs Phase 1 and the "which room" decision.
 
 Size S–M. Backend and frontend. Needs Phase 1.
 
-- [ ] **5.1 Filter by room.** The Stock page and the movement reports can be filtered by a room, covering stock on its racks too.
+- [x] **5.1 Filter by room.** *Built.* The Stock page and the movement reports can be filtered by a room, covering stock on its racks too. The Stock page has a Room filter and names a rack with its room (`D-1 · Main Storeroom`). On Movements, a room is offered as "Main Storeroom and its racks", which sends `inside=true` with `locationId`; the movement reports, deliveries and counts all take it. A plain `locationId` stays exactly that one location, as Count stock relies on.
   Files: `pages/Stock.tsx`, `pages/Movements.tsx`, the matching report queries
-- [ ] **5.2 Dashboard by room.** The Dashboard's stock-by-location chart can group racks under their room.
+- [x] **5.2 Dashboard by room.** *Built.* The Dashboard's stock-by-location chart can group racks under their room: a "By location / By room" switch, shown once a location stands in a room.
   Files: `pages/DashboardCharts.tsx`
-- [ ] **5.3 Exports keep the workbook's "Rack" column** as the location the stock is on (`D-1`), as today.
+- [x] **5.3 Exports keep the workbook's "Rack" column** as the location the stock is on (`D-1`), as today. *No change needed.*
 
 **Done when:** "what is in the Main Storeroom?" counts the stock on its racks.
 

@@ -144,6 +144,15 @@ function hasAnyDependency(c: DependencyCounts): boolean {
   return c.locations + c.goodsReceiptLines + c.inventoryTransactions + c.inventoryBalances > 0;
 }
 
+/**
+ * A location and the locations standing inside it (one level): a room and its
+ * racks. For report filters that cover a room "and what is in it" (inside=true).
+ */
+export async function locationsWithin(id: string): Promise<string[]> {
+  const inside = await prisma.location.findMany({ where: { parentId: id }, select: { id: true } });
+  return [id, ...inside.map((l) => l.id)];
+}
+
 export const LocationService = {
   async list(filter: { q?: string; type?: LocationType; active?: boolean; parentId?: string } = {}) {
     const where: Prisma.LocationWhereInput = {};

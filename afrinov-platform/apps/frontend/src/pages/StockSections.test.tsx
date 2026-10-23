@@ -34,7 +34,7 @@ const stockPage = (url = '/stock') => render(<MemoryRouter initialEntries={[url]
 const skus = () => within(screen.getByRole('table')).getAllByRole('link').map((a) => a.textContent);
 
 describe('Stock: Stores and Projects views', () => {
-  beforeEach(() => { mockGet.mockReset().mockResolvedValue(ROWS); });
+  beforeEach(() => { mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations' ? [] : ROWS)); });
 
   it('opens on Stores, with its reorder level and status', async () => {
     stockPage();

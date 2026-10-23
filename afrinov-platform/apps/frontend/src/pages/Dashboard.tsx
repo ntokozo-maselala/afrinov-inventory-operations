@@ -16,7 +16,7 @@ import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { usePermissions } from '../hooks/usePermissions';
 import { PROCUREMENT_ENABLED } from '../config/features';
-import { DashboardLocationDonut, DashboardValueBarChart } from './DashboardCharts';
+import { DashboardLocationDonut, DashboardValueBarChart, type RoomOf } from './DashboardCharts';
 import './Dashboard.css';
 
 /** GET /reports/stock-value: current stock on hand, valued per category. */
@@ -89,6 +89,10 @@ export function Dashboard() {
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
   const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
+  // The room each location stands in, for the chart's By room view.
+  const { data: locationList, error: locationsError, reload: reloadLocations } = useApi<Array<{ id: string; parent?: { id: string; name: string } | null }>>('/locations');
+  const roomOf = useMemo<RoomOf>(() => new Map((Array.isArray(locationList) ? locationList : [])
+    .filter((l) => l.parent).map((l) => [l.id, { id: l.parent!.id, name: l.parent!.name }])), [locationList]);
   const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
   // Only for those who may approve: the queue the server picks for them, and every pending order.
   const { data: mine, loading: mineLoading, error: mineError, reload: reloadMine } = useApi<unknown[]>(canApprove ? '/purchase-orders?awaitingMyApproval=true' : null);
@@ -150,12 +154,13 @@ export function Dashboard() {
     reloadLowStock();
     reloadValue();
     reloadTools();
+    reloadLocations();
     if (canApprove) { reloadMine(); reloadPending(); }
-  }, [reload, reloadLowStock, reloadValue, reloadTools, canApprove, reloadMine, reloadPending]);
+  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending]);
 
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
-  const dataError = error ?? valueError;
+  const dataError = error ?? valueError ?? locationsError;
   // Approvers get a seventh card, Pending Approvals, so the row has seven columns.
   const kpiCount = canApprove ? 7 : 6;
   const kpiGridClass = canApprove ? 'dashboard-kpis dashboard-kpis-7' : 'dashboard-kpis';
@@ -291,7 +296,7 @@ export function Dashboard() {
             {loading && !report ? (
               <div className="dashboard-chart-skeleton" aria-label="Loading location values"><span /><span /><span /></div>
             ) : report?.byLocation?.length ? (
-              <DashboardLocationDonut locations={report.byLocation} currency={report.currency} />
+              <DashboardLocationDonut locations={report.byLocation} currency={report.currency} roomOf={roomOf} />
             ) : (
               <div className="dashboard-chart-empty">No location value data is available.</div>
             )}

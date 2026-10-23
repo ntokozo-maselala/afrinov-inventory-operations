@@ -6,12 +6,23 @@ import { buildMovementsXlsx, movementsFilename, MOVEMENTS_EXPORT_LIMIT } from '.
 import { prisma } from '../../shared/db.js';
 import { StockReceiptService } from './stock-receipt.service.js';
 import { StockCountService } from './stock-count.service.js';
+import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
+/**
+ * The locations a report covers: with inside=true, the location and the ones
+ * standing inside it (a room and its racks); otherwise just the location, as
+ * a plain locationId is (Count stock relies on that).
+ */
+async function locationScope(q: Record<string, string | undefined>): Promise<string[] | undefined> {
+  return q['locationId'] && q['inside'] === 'true' ? locationsWithin(q['locationId']) : undefined;
+}
+
 /** The history filters a query string carries; shared by the list, its totals and the download. */
-function historyFilter(q: Record<string, string | undefined>): Omit<HistoryFilter, 'before' | 'limit'> {
+async function historyFilter(q: Record<string, string | undefined>): Promise<Omit<HistoryFilter, 'before' | 'limit'>> {
   return {
+    locationIds: await locationScope(q),
     materialId: q['materialId'],
     type: q['type'],
     from: q['from'],
@@ -37,7 +48,7 @@ async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>)
     f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments', loans: 'tool loans', returned: 'returned stock' }[f.report] : null,
     f.type ? `type ${f.type.replace(/_/g, ' ').toLowerCase()}` : null,
     material ? `item ${material.sku}` : null,
-    location ? `at ${location.name}` : null,
+    location ? `at ${location.name}${f.locationIds && f.locationIds.length > 1 ? ' and the locations inside it' : ''}` : null,
     actor ? `by ${actor.name}` : null,
     f.projectNumber ? `project ${f.projectNumber}` : null,
     f.q?.trim() ? `matching "${f.q.trim()}"` : null,
@@ -125,14 +136,14 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   app.get('/inventory-transactions', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as Record<string, string | undefined>;
     return InventoryService.queryHistory({
-      ...historyFilter(q),
+      ...(await historyFilter(q)),
       before: q['before'],
       limit: q['limit'] ? Number(q['limit']) : undefined,
     });
   });
 
   app.get('/inventory-transactions/summary', { preHandler: [app.authenticate] }, async (req) => {
-    return InventoryService.historySummary(historyFilter(req.query as Record<string, string | undefined>));
+    return InventoryService.historySummary(await historyFilter(req.query as Record<string, string | undefined>));
   });
 
   app.get('/inventory-transactions/actors', { preHandler: [app.authenticate] }, async () => {
@@ -140,7 +151,7 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/inventory-transactions/export', { preHandler: [app.authenticate] }, async (req, reply) => {
-    const filter = historyFilter(req.query as Record<string, string | undefined>);
+    const filter = await historyFilter(req.query as Record<string, string | undefined>);
     const count = await InventoryService.historyCount(filter);
     if (count > MOVEMENTS_EXPORT_LIMIT) {
       return reply.code(400).send({
@@ -211,7 +222,7 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   app.get('/inventory-issues', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
     const q = req.query as Record<string, string | undefined>;
-    return InventoryService.issueSlips({ ...historyFilter(q), before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
+    return InventoryService.issueSlips({ ...(await historyFilter(q)), before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
   });
 
   // The received-stock report: deliveries with their lines, newest first.
@@ -219,7 +230,7 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     await requirePermission(req, PermissionCode.ViewReports);
     const q = req.query as Record<string, string | undefined>;
     return StockReceiptService.list({
-      from: q['from'], to: q['to'], supplierId: q['supplierId'], locationId: q['locationId'], q: q['q'],
+      from: q['from'], to: q['to'], supplierId: q['supplierId'], locationId: q['locationId'], locationIds: await locationScope(q), q: q['q'],
       before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
     });
   });
@@ -229,7 +240,7 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     await requirePermission(req, PermissionCode.ViewReports);
     const q = req.query as Record<string, string | undefined>;
     return StockCountService.list({
-      from: q['from'], to: q['to'], locationId: q['locationId'], actorId: q['actorId'],
+      from: q['from'], to: q['to'], locationId: q['locationId'], locationIds: await locationScope(q), actorId: q['actorId'],
       before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined,
     });
   });
