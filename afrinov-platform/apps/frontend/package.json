@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "build:frontend-only": "tsc -b && cross-env VITE_FRONTEND_ONLY=true vite build --mode demo",
     "preview": "vite preview",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "eslint src e2e playwright.config.ts --ext .ts,.tsx",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run"
   },

@@ -5,14 +5,14 @@ procurement, projects, reporting, settings and audit, behind JWT
 authentication and role-based permissions.
 
 Stack: Node.js, Fastify 5, TypeScript, Prisma 5, PostgreSQL 16, Zod, Vitest.
-The Docker image and the backend CI use Node 20; local development needs
-Node 22 or later (see below).
+The Docker image and backend/frontend CI use Node 24. Local development and
+Vitest checks require Node 22.12 or later (see below).
 
-*Last verified against code: 4e6d76f, 2026-10-09.*
+*Reviewed against the current working tree: 2026-10-23.*
 
 ## Running it locally
 
-Requirements: Node.js 22 or later (24 recommended; the test tools need 22+), npm, and Docker (for PostgreSQL).
+Requirements: Node.js 22.12 or later (24 recommended), npm, and Docker (for PostgreSQL).
 
 Commands below use Git Bash / macOS / Linux syntax. In PowerShell, set a
 variable for one command with `$env:NAME = "value"; <command>`.
@@ -20,7 +20,7 @@ variable for one command with `$env:NAME = "value"; <command>`.
 1. Install dependencies from the workspace root (`afrinov-platform/`):
 
    ```sh
-   npm install
+   npm ci
    ```
 
 2. In `apps/backend`, create your environment file and generate a JWT secret:
@@ -179,12 +179,32 @@ run when `NODE_ENV=production`.
 - **Unit tests** (`src/**/*.test.ts`) mock the database and need no setup:
   `npm test`.
 - **Integration tests** (`integration/`) start the real server and talk to a
-  real PostgreSQL database. Migrate and seed a database first, then run them
-  with the same admin password the seed used:
+  local disposable PostgreSQL database. The integration configuration reads
+  `.env.test` only and refuses remote hosts or database names without the
+  `_test` suffix. It never falls back to `.env`.
+
+  From `apps/backend`, prepare the separate Compose test service. Set
+  `POSTGRES_TEST_PASSWORD` in the shell to a dedicated disposable value (if
+  omitted, Compose falls back to the required local `POSTGRES_PASSWORD`), copy
+  `.env.test.example` to `.env.test`, and make its URL password match. Then run:
 
   ```sh
-  SEED_ADMIN_PASSWORD=<admin password> npm run test:integration
+  docker compose --profile test up -d test-db
+  npm run db:test:migrate
+  npm run db:test:seed
+  npm run test:integration
   ```
+
+  `db:test:migrate` and `db:test:seed` use the same local-host and `_test`
+  database guard. Seeding requires `SEED_ADMIN_PASSWORD` in the ignored
+  `.env.test` or shell environment. Integration tests create persistent rows;
+  this dedicated test database is their only supported target.
+
+- **Browser E2E** (`../frontend/e2e/`) uses the same `.env.test` database and
+  seeded admin. It injects the password from `SEED_ADMIN_PASSWORD`, sends no
+  login body to logs, runs the API in `NODE_ENV=test`, and uses an explicit
+  local CORS origin. From `apps/frontend`, run `npm exec playwright test` after
+  the test DB setup above.
 
 ## Continuous integration
 

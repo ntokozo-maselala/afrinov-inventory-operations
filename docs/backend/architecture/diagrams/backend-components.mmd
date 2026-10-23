@@ -10,7 +10,7 @@ flowchart LR
   SVC --> DB
   AUTH --> DB
   DB --> PG[("PostgreSQL 16")]
-  MIG["Prisma schema + 22 migrations<br/>seed and operator scripts"] --> PG
+  MIG["Prisma schema + 23 migrations<br/>seed and operator scripts"] --> PG
   DOC["OpenAPI document and Swagger UI"] -. "enabled by config" .-> SRV
   EV["In-process domain events"] -. "no runtime handlers found" .-> SVC
   CI["GitHub Actions checks + Postgres integration"] -. "workflow inspected; not run" .-> RT

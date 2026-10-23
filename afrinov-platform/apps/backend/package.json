@@ -19,6 +19,8 @@
     "pretest:integration": "npm run db:generate",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:test:migrate": "tsx scripts/test-database.ts migrate",
+    "db:test:seed": "tsx scripts/test-database.ts seed",
     "db:seed": "tsx src/db/seed.ts",
     "db:rotate-admin": "tsx --env-file-if-exists=.env scripts/rotate-admin-password.ts",
     "import:workbook": "tsx --env-file-if-exists=.env scripts/import-workbook.ts",

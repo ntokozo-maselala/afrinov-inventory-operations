@@ -7,7 +7,8 @@ OAuth/OIDC flow, session store, or password-reset service was found. Account
 creation and role assignment are administrator-controlled through user routes
 and the seed. Password hashes use `bcryptjs` cost 12 for new hashes. Login
 looks up the lowercased email, rejects missing/inactive users, verifies the
-hash, then signs an HMAC JWT with a 12-hour expiry.
+hash, then signs an HS256 HMAC JWT with a 12-hour expiry. Verification is
+restricted to HS256 as well.
 
 Protected requests send `Authorization: Bearer <token>`. The shared Fastify
 `authenticate` decorator verifies the token. It then queries the database for
@@ -22,6 +23,15 @@ There is no refresh-token, token revocation list, key ID/key rotation, issuer,
 audience, or asymmetric key setup in the inspected code. Account deactivation
 is the immediate revocation mechanism; otherwise a valid token lasts up to
 12 hours.
+
+Login is `POST /api/v1/auth/login`; the API does not register a GET login
+route. A GET to that path returns 404 by contract. The browser login form uses
+POST. A POST 401 with `UNAUTHENTICATED` can mean the normalized account was not
+found, is inactive, or its password did not match the stored bcrypt hash. The
+response and current logs do not distinguish those branches. Validation
+errors return 400 and uncaught database or bcrypt errors follow the generic
+500 path. Therefore a 401 alone does not prove a user entered the wrong
+password.
 
 ## Route security boundaries
 
@@ -93,11 +103,18 @@ The current findings are detailed in the
   secret rejection and expose API docs by default.
 - **Medium, confirmed:** production can enable `CORS_ALLOW_ANY` with
   credentialed CORS.
-- **Medium, operational risk:** local real-HTTP tests write to the `.env`
-  database and do not guard the target.
+- **Medium, operational risk:** the former local real-HTTP test setup loaded
+  `.env` without guarding the target. Integration/E2E setup now requires
+  `.env.test` and a local `_test` database; database-backed execution remains
+  unverified without the isolated test service.
 - **Medium, potential:** concurrent stock deductions are not protected by an
   explicit locking/isolation strategy; a negative-balance race was not
   reproduced.
 
-These items are findings for owners to prioritize; no application logic or
-security behavior was changed in this audit.
+The JWT verifier now explicitly accepts HS256 only; regression coverage
+rejects expired, tampered, and HS384 tokens. This preserves tokens issued by
+the application while removing implicit acceptance of other HMAC algorithms.
+No login branch, password comparison, or response behavior was changed. The
+primary incident's POST 401 remains unresolved without deployed revision,
+request correlation, and authoritative account evidence. See the
+[incident investigation](authentication-incident-report.md).

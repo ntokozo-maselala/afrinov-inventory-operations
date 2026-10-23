@@ -17,5 +17,11 @@ module.exports = {
     'react-hooks/purity': 'warn',
     'react-hooks/refs': 'warn'
   },
+  overrides: [
+    {
+      files: ['e2e/**/*.ts', 'playwright.config.ts'],
+      env: { node: true },
+    },
+  ],
   ignorePatterns: ['dist', 'node_modules']
 };

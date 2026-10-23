@@ -7,9 +7,8 @@ secrets, or tokens.
 
 ## Prerequisites and installation
 
-- Node 22.12+ or Node 24 for the current Vitest 5 toolchain; npm 10+ per
-  workspace documentation. CI's Node 20 selection conflicts with Vitest's
-  declared engine range.
+- Node 24 for the current Vitest 5 toolchain; npm 10+ per workspace
+  documentation. Backend CI also selects Node 24.
 - Docker/Compose only when using the included PostgreSQL service.
 - Run from `afrinov-platform/` for workspace installation, or
   `afrinov-platform/apps/backend/` for backend scripts.
@@ -85,18 +84,28 @@ The `dev` script watches TypeScript and reads `.env`. Typecheck, test, and
 build scripts run Prisma Client generation as a pre-script. Unit tests do not
 need a DB; the integration suite does.
 
-The real-HTTP integration suite writes rows to the DB selected by
-`DATABASE_URL`, loads `.env` (not `.env.test`), sets development mode, and
-leaves rows behind. Run it only against a disposable database that has been
-migrated and seeded:
+The real-HTTP integration suite writes rows to its database and leaves them
+behind. It loads only `.env.test`, forces `NODE_ENV=test`, and refuses remote
+hosts or database names without the `_test` suffix. Never copy the ordinary
+`.env` into `.env.test`. Set up a separate Compose service and test-only
+database before running the guarded commands:
 
 ```powershell
+# Prefer a dedicated POSTGRES_TEST_PASSWORD; Compose falls back to the
+# required local POSTGRES_PASSWORD if it is unset.
+Copy-Item .env.test.example .env.test
+docker compose --profile test up -d test-db
+npm.cmd run db:test:migrate
+npm.cmd run db:test:seed
 npm.cmd run test:integration
 ```
 
-Do not run that command against a valuable development or production DB. This
-repository does not guard the target by name or environment. CI's integration
-job is safer because it creates a per-job Postgres 16 service.
+Set the `.env.test` URL password to match the effective test DB password and set
+`SEED_ADMIN_PASSWORD` in that file or the shell. Keep `.env.test` untracked.
+The test database uses port 5433 and its own Compose volume. CI uses an
+ephemeral Postgres 16 service. The `db:test:migrate` and `db:test:seed`
+wrappers apply the same direct-local-host, no-host-override, and `_test`-name
+guard before writing.
 
 ## Compiled startup and container status
 
@@ -104,13 +113,13 @@ After a successful build, `npm.cmd start` runs `node dist/index.js`; inject
 `DATABASE_URL`, `JWT_SECRET`, and other runtime variables through the process
 environment. It does not load `.env` automatically.
 
-The repository documents `docker compose up --build`, and Compose declares a
-command that applies migrations, runs the compiled demo seed, then starts the
-API. That path is **not verified**: Docker is unavailable in this audit, and
-static inspection found the build stage does not copy `src/` or `prisma/`
-before `npm run build`. The runtime stage also invokes `npm prune` from `/app`
-without copying a root package manifest there. Do not use the Compose recipe
-as a verified production deployment path until the image is fixed and built.
+The backend Dockerfile now installs from the workspace lockfile and copies
+source plus Prisma schema before building. The root `.dockerignore` excludes
+local `.env` files and machine-local build artifacts from the image context.
+Compose also has an opt-in isolated test database profile. The image and Compose startup were not executed in
+this audit because Docker engine access was unavailable, so treat container
+startup as unverified until CI or another controlled environment builds and
+runs it against disposable PostgreSQL.
 
 ## Health, logs, and routine diagnosis
 
@@ -133,11 +142,12 @@ as a verified production deployment path until the image is fixed and built.
 | Liveness works but readiness returns 503 | DB host/port reachability, DB service health, migration status; redact credentials | `docker compose ps db` (Compose) and `npx prisma migrate status` after verifying `DATABASE_URL` | Liveness does not depend on DB. Readiness `SELECT 1` failure indicates connectivity/auth/database availability; migration status distinguishes pending schema. | Start/recover the intended DB, correct injected config securely, or apply migrations only after confirming the target and backup. | `/health/ready` returns 200 with database connected. |
 | Startup reports `EADDRINUSE` or listener bind failure | Port, host, `netstat` output | `netstat -ano | findstr :4000` | Another process or an unavailable interface owns the bind target. | Use a free port or correct `HOST`; avoid terminating a process until its owner is known. | Start process and request `/health`. |
 | Login returns 401 | Response code, account active status through approved admin tooling, whether seed/rotation completed | `npm.cmd run diag:login` only in a non-production environment with approved local credentials | Invalid email/password, inactive account, or missing/unusable bootstrap credential can produce 401. | Use administrator-supported password rotation only after verifying DB target; never place passwords on command line/history. | Retry login through API and call `/api/v1/auth/me`. |
+| `GET /api/v1/auth/login` returns 404 | Request method, caller, browser network initiator or monitoring/client configuration | Compare the request with the route contract; login is registered as POST-only | A GET does not match the current login route. The frontend submits login with POST. | Correct the caller only after establishing its source; do not infer that the POST 401 has the same cause. | Confirm the browser/client sends one POST to `/api/v1/auth/login`. |
 | Protected endpoint returns 401 or 403 | HTTP status and safe error code; account state and role permissions | Use API response; inspect route's `preHandler` and permission code in its `*.routes.ts` file | 401 means token absent/invalid/account unavailable; 403 means active user lacks the route permission. | Obtain proper credentials/role through admin workflow. Do not disable authentication or change JWT secret to bypass. | Retry with a freshly issued token and least-required permission. |
 | Browser cannot call API cross-origin | Request `Origin`, response CORS headers, configured origin names (not secrets) | Inspect browser network panel and `CORS_ORIGIN` presence without printing its value | Outside development, unset origin disables CORS. `CORS_ALLOW_ANY` is credentialed and should not be used as a production workaround. | Configure the exact trusted SPA origins in the deployment environment. | Retry browser request and verify allow-origin matches the trusted origin. |
 | Unit tests fail loading Prisma | Node version, `npm.cmd --version`, generated-client command output | `node --version`; `npm.cmd run db:generate`; `npm.cmd test` | Ensure supported Node toolchain and generated client. Unit tests use dummy DB config and should not require Postgres. | Use Node 22.12+ or 24, install from workspace lockfile, and regenerate client. Do not run `npm install` upgrades without approval. | Repeat typecheck and unit tests. |
-| Integration tests fail or pollute local data | Confirmed database name/host, test admin setup, migration state | Review `vitest.integration.config.ts`; verify target through safe DB client before running | Config loads `.env` and tests persist rows; target may be the ordinary dev DB if not overridden. | Stop; point `DATABASE_URL` at a disposable DB, apply migrations/seed there, then rerun. | Run suite against disposable DB and discard that DB through its normal isolated lifecycle. |
-| Docker image build fails | Docker build output; verify build context root | `docker compose build backend` from `apps/backend` | Current Dockerfile omits source/schema copies before build and has an unverified prune working directory. | Do not work around by mounting production code or skipping Prisma generation. Fix and review the Dockerfile in a separate approved implementation change. | Build image in CI and start it against disposable PostgreSQL before release. |
+| Integration tests fail or pollute local data | Confirmed test database name/host, seed fixture setup, migration state | Review `vitest.integration.config.ts` and `scripts/test-environment.ts`; confirm `.env.test` exists without printing its URL | Config refuses remote hosts and database names without `_test`; integration tests still persist rows in that isolated database. | Use only the separate Compose test database and guarded `db:test:migrate` / `db:test:seed` commands. | Run suite against the disposable test DB and retire it through its isolated lifecycle. |
+| Docker image build fails | Docker build output; verify build context root and Docker engine availability | `docker compose build backend` from `apps/backend` | The corrected Dockerfile has not been built in every environment; local Docker engine access was unavailable during this audit. | Preserve the build error and repair the image definition without bypassing Prisma generation. | Build image in CI and start it against disposable PostgreSQL before release. |
 
 ## Graceful shutdown and recovery
 

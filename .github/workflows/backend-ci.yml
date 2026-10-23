@@ -33,10 +33,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Node 20 matches the Docker image (apps/backend/Dockerfile).
+      # Vitest 5 requires Node 22.12 or later; use the same supported major as
+      # the frontend workflow and local development guidance.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: afrinov-platform/package-lock.json
 
@@ -79,7 +80,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: afrinov-platform/package-lock.json
 

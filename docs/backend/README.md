@@ -31,7 +31,7 @@ PostgreSQL 16 is accessed through Prisma 5. The inventory ledger is
 `inventory_transactions`; each stock movement writes signed decimal ledger
 rows and recomputes `inventory_balances` in a Prisma transaction. Application
 rules prevent negative stock, but the schema has no database check constraint
-that independently enforces that rule. There are 22 committed migrations.
+that independently enforces that rule. There are 23 committed migrations.
 
 Login is email/password with bcrypt hashes and 12-hour signed JWTs. Protected
 routes verify the bearer token, look up the account's current active state,
@@ -40,15 +40,19 @@ security headers, allow-list CORS, request IDs, Pino request logs, generic
 500 responses, and root plus API-prefixed health probes are configured in
 `server.ts`.
 
-Local typecheck, lint, build, and unit tests passed in this audit on Node
-24.21.0. The unit suite reports 823 passing tests across 57 files. The
-real-PostgreSQL integration suite and container build were not run: this
-environment has no Docker executable or local `.env`, and integration tests
-write rows to the database named by `DATABASE_URL`. The tracked CI workflow
-selects Node 20 even though installed Vitest 5 declares Node `^22.12.0 ||
-^24.0.0 || >=26.0.0`. The Dockerfile also reaches its build command before
-copying application source and Prisma schema. Treat both paths as unverified
-release blockers until corrected and exercised.
+Verification on 2026-10-23 used Node 24.21.0 and npm 11.19.0. The current
+backend unit suite passes 813 tests across 57 files; backend and frontend
+lint/type checks pass, and the frontend production build completes. The
+database-backed integration suite and browser E2E suite were not executed
+because no isolated test PostgreSQL service was available. An ignored local
+`.env` targets the developer database `afrinov`; it was not used for test
+writes. Integration and E2E setup now require a local database with an
+explicit `_test` suffix. The backend CI workflow now selects Node 24, matching
+Vitest 5's supported range. The Dockerfile was corrected to use the workspace
+lockfile and copy sources/schema before build, but an image build remains
+unverified because Docker engine access was unavailable. See the
+[verification strategy](testing/verification-and-test-strategy.md) for exact
+commands, install/audit limits, and outcomes.
 
 There is no verified production deployment pipeline, external secret manager,
 metrics/tracing/alerting stack, or backup/restore procedure in this repository.

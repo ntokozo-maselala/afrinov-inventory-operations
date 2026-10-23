@@ -86,6 +86,10 @@ describe('F-13: committed example secrets are rejected in production', () => {
     for (const file of ['.env.example', '.env.test.example']) {
       const contents = readFileSync(join(SRC_DIR, '..', file), 'utf8');
       const match = /^JWT_SECRET=["']?([^"'\r\n]+)/m.exec(contents);
+      if (file === '.env.test.example' && !match) {
+        expect(contents).toContain('random process-local JWT_SECRET');
+        continue;
+      }
       expect(match, `${file} must define JWT_SECRET`).not.toBeNull();
       const value = match![1]!.trim();
       if (value === 'test-secret-do-not-use-in-prod') continue; // test fixture

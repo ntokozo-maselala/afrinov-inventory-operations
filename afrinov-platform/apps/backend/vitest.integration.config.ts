@@ -1,32 +1,15 @@
 import { defineConfig } from 'vitest/config';
-import { readFileSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
+import { loadTestEnvironmentFile, requireIsolatedTestDatabaseUrl } from './scripts/test-environment.js';
 
-// Minimal .env loader (dotenv is not installed in this workspace). Loads the
-// real local database credentials so integration tests talk to a LIVE
-// PostgreSQL instance instead of the dummy URL used by unit tests.
-function loadEnvFile(file: string): void {
-  if (!existsSync(file)) return;
-  const text = readFileSync(file, 'utf8');
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const i = line.indexOf('=');
-    if (i === -1) continue;
-    const key = line.slice(0, i).trim();
-    let val = line.slice(i + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    if (!(key in process.env)) process.env[key] = val;
-  }
-}
-
-loadEnvFile(resolve(process.cwd(), '.env'));
-
-// Drive the real server so Fastify's CORS plugin reflects the request origin
-// (production disables reflection). Mirrors `npm run dev` behaviour.
-process.env.NODE_ENV = 'development';
+// Never fall back to the developer .env file for tests. A shell-provided URL
+// or the explicitly named .env.test must point to a local *_test database.
+loadTestEnvironmentFile(resolve(process.cwd(), '.env.test'));
+process.env.NODE_ENV = 'test';
+requireIsolatedTestDatabaseUrl();
+// Tests use a fresh process-local signer and never inherit a deployment key.
+process.env.JWT_SECRET = randomBytes(32).toString('base64url');
 
 export default defineConfig({
   test: {
