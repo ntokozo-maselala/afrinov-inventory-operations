@@ -6,7 +6,7 @@ services:
       # POSTGRES_DB from the environment (or a secret manager) for any
       # deployment that is reachable beyond this machine.
       POSTGRES_USER: ${POSTGRES_USER:-afrinov}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${POSTGRES_TEST_PASSWORD:?set POSTGRES_PASSWORD or POSTGRES_TEST_PASSWORD in the environment}}
       POSTGRES_DB: ${POSTGRES_DB:-afrinov}
     ports:
       - "5432:5432"
