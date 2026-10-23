@@ -135,10 +135,12 @@ running. These operations were not run in this audit.
   real-HTTP suite there.
 
 The separate Compose `test-db` profile uses loopback port 5433 and its own
-named volume. It requires the dedicated `POSTGRES_TEST_PASSWORD`. CI provisions
-an ephemeral Postgres service. No local developer or production database is
-an allowed test target. The real DB test cycle has not yet been exercised in
-this environment.
+named volume. Compose prefers a dedicated `POSTGRES_TEST_PASSWORD`; if it is
+unset, it falls back to `POSTGRES_PASSWORD`. Set the dedicated value to keep
+test and development credentials separate. CI provisions an ephemeral Postgres
+service. No local development or production database is an allowed test target.
+The local real-PostgreSQL cycle has been exercised: migrations were current,
+the test database was seeded, and all 99 integration tests passed.
 
 ## Backup, restore, and recovery
 

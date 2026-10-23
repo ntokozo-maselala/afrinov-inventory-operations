@@ -30,6 +30,10 @@ const result = spawnSync(command, args, {
 });
 
 if (result.error) {
-  throw new Error(`Unable to run the guarded test database ${action} command.`);
+  const code = (result.error as NodeJS.ErrnoException).code ?? 'unknown';
+  throw new Error(
+    `Unable to run the guarded test database ${action} command (${code}).`,
+    { cause: result.error },
+  );
 }
 process.exitCode = result.status ?? 1;

@@ -4,6 +4,7 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
+COPY apps/frontend/package.json apps/frontend/package.json
 RUN npm ci --workspace=@afrinov/backend --include-workspace-root=false
 
 # Prisma generation and the backend build both require the schema and sources.
