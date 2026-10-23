@@ -15,8 +15,8 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 | 1 | A location can sit inside another | S–M | Done (#85) |
 | 2 | Show and choose the parent on screen | S–M | Done (#86) |
 | 3 | Move the Rack records onto locations, retire Racks | M | 3.1 done (#87); 3.2 done (#88); 3.3 done (#90) |
-| 4 | The import asks which room each rack is in | S | Not started |
-| 5 | Stock by room, racks included | S–M | In review |
+| 4 | The import asks which room each rack is in | S | In review |
+| 5 | Stock by room, racks included | S–M | Done (#91) |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
@@ -80,7 +80,7 @@ On the local database the 3.1 dry run gives: rack `D-1` goes inside Main Storero
 
 Size S. Backend. Needs Phase 1 and the "which room" decision.
 
-- [ ] **4.1 A "Located in" column in the location mapping file**, filled in for codes like `D-1` with the room the storeman named, and checked on import like the other columns.
+- [x] **4.1 A "Located in" column in the location mapping file**, filled in for codes like `D-1` with the room the storeman named, and checked on import like the other columns. *Built.* The dry run checks it by the Locations page's rules (one level, never inside a rack or itself, one room per place); a room not on the sheet is created as a storeroom; a rack left without a room is listed for review, not blocking. The apply step creates rooms first and puts each location in its room under the location-tree lock, reusing the same parent checks; it refuses to move a location that is already in another room. The room list itself is the storeman's to fill in before go-live.
   Files: `modules/migration/mapping.ts`, the import's apply step
 
 **Done when:** after the import, every rack-type location has its room.

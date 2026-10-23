@@ -58,7 +58,7 @@ async function apply(file: string, result: MappedImport, masterData: MasterDataP
     });
     console.log(`Done. Import ${done.importId}:`);
     console.log(`  ${done.materialsCreated} items created`);
-    console.log(`  ${done.locationsCreated} locations created, ${done.locationsReused} already there`);
+    console.log(`  ${done.locationsCreated} locations created, ${done.locationsReused} already there${done.locationsMoved ? ` (${done.locationsMoved} put in their room)` : ''}`);
     console.log(`  ${done.balancesPosted} opening balances posted, ${done.zeroBalances} items with nothing on hand`);
     for (const [label, c] of [['projects', done.projects], ['recipients', done.recipients], ['suppliers', done.suppliers]] as const) {
       console.log(`  ${c.created} ${label} created, ${c.existing} already there`);

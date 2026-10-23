@@ -13,7 +13,9 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
 import { recomputeBalance } from '../../shared/inventory/balances.js';
+import { assertParent, lockLocationTree } from '../inventory/location.service.js';
 import type { MappedImport } from './mapping.js';
+import { PROBLEM_TEXT } from './workbook-analysis.js';
 import type { MasterDataPlan } from './master-data.js';
 
 export const OPENING_BALANCE_REFERENCE = 'OpeningBalance';
@@ -33,6 +35,8 @@ export interface OpeningBalanceResult {
   importId: string;
   locationsCreated: number;
   locationsReused: number;
+  /** Existing locations the mapping put in a room. */
+  locationsMoved: number;
   materialsCreated: number;
   balancesPosted: number;
   /** Rows with nothing on hand: the item is created, no receipt is posted. */
@@ -57,7 +61,7 @@ export const OpeningBalanceService = {
     if (Number.isNaN(openingDate.getTime())) throw Errors.validation('Invalid opening date');
     if (openingDate.getTime() > Date.now() + 24 * 60 * 60 * 1000) throw Errors.validation('The opening date cannot be in the future');
     if (plan.materials.length === 0) throw Errors.validation('Nothing to import');
-    const blocking = plan.problems.filter((p) => !['UNUSED_MAPPING_ROW', 'SKU_JOINS_DIFFERENT_NAMES'].includes(p.code));
+    const blocking = plan.problems.filter((p) => PROBLEM_TEXT[p.code].severity === 'error');
     if (blocking.length > 0) throw Errors.validation(`The mapping has ${blocking.length} blocking problems; run the dry run and fix them first`);
 
     const importId = randomUUID();
@@ -109,14 +113,41 @@ export const OpeningBalanceService = {
       }
 
       // Locations: reuse one with the same name (any case), otherwise create it.
+      // Each goes in its room (rooms come first in the plan), by the Locations
+      // page's rules and under its lock, so an edit there cannot cross the import.
+      await lockLocationTree(tx);
       const locationIds = new Map<string, string>();
       let locationsCreated = 0;
+      let locationsMoved = 0;
       for (const l of plan.locations) {
-        const existing = await tx.location.findFirst({ where: { name: { equals: l.name, mode: 'insensitive' } }, select: { id: true } });
+        const parentId = l.parent ? locationIds.get(l.parent) : undefined;
+        if (l.parent && !parentId) throw Errors.validation(`The room "${l.parent}" for "${l.name}" is not in the plan`);
+        const existing = await tx.location.findFirst({ where: { name: { equals: l.name, mode: 'insensitive' } } });
         if (existing) {
+          // Rack or not decides what may stand inside it, so the two must agree.
+          // Other kinds (a storeroom the mapping calls a container) keep the platform's.
+          if ((existing.type === 'RACK') !== (l.type === 'RACK')) {
+            throw Errors.conflict(`${existing.name} is a ${existing.type.toLowerCase().replace(/_/g, ' ')} in the platform; the mapping file makes it a ${l.type.toLowerCase().replace(/_/g, ' ')}. Change its type on the Locations page, or in the mapping file.`);
+          }
           locationIds.set(l.name, existing.id);
+          if (parentId && existing.parentId !== parentId) {
+            if (existing.parentId) {
+              throw Errors.conflict(`${existing.name} is already inside another location; the mapping file puts it in ${l.parent}. Move it on the Locations page, or change the mapping file.`);
+            }
+            await assertParent(tx, parentId, existing);
+            // Recorded as the Locations page records a move.
+            const moved = await tx.location.update({ where: { id: existing.id }, data: { parentId, updatedById: actorId } });
+            await tx.auditLogEntry.create({
+              data: {
+                actorId, action: 'UPDATE', entityType: 'Location', entityId: existing.id,
+                before: existing as unknown as Prisma.InputJsonValue, after: moved as unknown as Prisma.InputJsonValue,
+              },
+            });
+            locationsMoved++;
+          }
         } else {
-          const created = await tx.location.create({ data: { name: l.name, type: l.type, createdById: actorId } });
+          if (parentId) await assertParent(tx, parentId);
+          const created = await tx.location.create({ data: { name: l.name, type: l.type, parentId: parentId ?? null, createdById: actorId } });
           locationIds.set(l.name, created.id);
           locationsCreated++;
         }
@@ -173,6 +204,7 @@ export const OpeningBalanceService = {
             openingDate: openingDate.toISOString().slice(0, 10),
             materials: materials.length,
             locationsCreated,
+            locationsMoved,
             balances: receipts.length,
             projectsCreated: projects.created,
             recipientsCreated: recipients.created,
@@ -185,6 +217,7 @@ export const OpeningBalanceService = {
         importId,
         locationsCreated,
         locationsReused: plan.locations.length - locationsCreated,
+        locationsMoved,
         materialsCreated: materials.length,
         balancesPosted: receipts.length,
         zeroBalances,

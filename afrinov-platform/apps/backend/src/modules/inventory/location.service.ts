@@ -63,9 +63,14 @@ type Db = Prisma.TransactionClient;
  */
 function inTree<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:location-tree'))`;
+    await lockLocationTree(tx);
     return fn(tx);
   });
+}
+
+/** Takes the afrinov:location-tree lock in a transaction of its own (the workbook import's). */
+export async function lockLocationTree(tx: Db): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:location-tree'))`;
 }
 
 async function assertCodeUnique(db: Db, code: string, excludeId?: string): Promise<void> {
@@ -90,7 +95,7 @@ const PARENT = { select: { id: true, name: true, code: true, type: true } } as c
  * rack and is not itself inside another; and the location (absent when new)
  * is not itself and has nothing inside it. One level, so no loops.
  */
-async function assertParent(db: Db, parentId: string, child?: { id: string }): Promise<void> {
+export async function assertParent(db: Db, parentId: string, child?: { id: string }): Promise<void> {
   if (child && parentId === child.id) throw Errors.validation('A location cannot be inside itself.');
   const parent = await db.location.findUnique({ where: { id: parentId } });
   if (!parent) throw Errors.validation('The location it is inside does not exist.');

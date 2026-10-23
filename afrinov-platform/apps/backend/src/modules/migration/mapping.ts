@@ -30,6 +30,8 @@ export interface LocationMapping {
   asWritten: string | null;
   platformName: string | null;
   type: string | null;
+  /** The room or area the location stands in (a rack's room), by its platform name. */
+  locatedIn: string | null;
   row?: number;
 }
 
@@ -48,7 +50,8 @@ export interface PlannedMaterial {
   balances: Array<{ location: string; quantity: number }>;
 }
 
-export interface PlannedLocation { name: string; type: LocationType }
+/** A location to create or reuse; `parent` is the room it stands in, planned before it. */
+export interface PlannedLocation { name: string; type: LocationType; parent?: string }
 
 export const LOCATION_TYPES: LocationType[] = ['RACK', 'STOREROOM', 'SHOP_FLOOR_AREA', 'CONTAINER', 'OFF_SITE'];
 export const COMMON_UNITS = ['each', 'm', 'kg', 'l', 'box', 'pack', 'pair', 'roll', 'set', 'sheet', 'tube', 'can'];
@@ -122,9 +125,9 @@ export function suggestMapping(analysis: Analysis): Mapping {
   const locations: LocationMapping[] = [];
   for (const group of analysis.locations) {
     const platformName = preferredSpelling(group.spellings);
-    for (const s of group.spellings) locations.push({ asWritten: s.text, platformName, type: guessLocationType(platformName) });
+    for (const s of group.spellings) locations.push({ asWritten: s.text, platformName, type: guessLocationType(platformName), locatedIn: null });
   }
-  if (analysis.items.some((i) => !i.location)) locations.push({ asWritten: null, platformName: null, type: null });
+  if (analysis.items.some((i) => !i.location)) locations.push({ asWritten: null, platformName: null, type: null, locatedIn: null });
   return { items, locations };
 }
 
@@ -148,6 +151,7 @@ const LOCATION_COLUMNS = [
   { header: 'Rows', key: 'rows', width: 8, fromWorkbook: true },
   { header: 'Platform location', key: 'platformName', width: 24, fromWorkbook: false },
   { header: 'Type', key: 'type', width: 18, fromWorkbook: false },
+  { header: 'Located in', key: 'locatedIn', width: 24, fromWorkbook: false },
 ] as const;
 
 const README = [
@@ -165,6 +169,7 @@ const README = [
   'Locations sheet',
   '- Platform location: the one name to use for that spelling. Give every spelling of the same place the same platform location.',
   '- Type: RACK, STOREROOM, SHOP_FLOOR_AREA, CONTAINER or OFF_SITE.',
+  '- Located in: for a rack, the room it stands in (for D-1, say, Main Storeroom). Use the platform location name of a room or area; one that is not on this sheet is created as a STOREROOM. One level only: a room cannot itself be located in another, and nothing is located in a rack. Fill it in on one spelling of the place, or the same on each.',
   '',
   'Then save this file and run the dry run again. It reads this file and reports anything still missing.',
 ];
@@ -233,6 +238,7 @@ export async function writeMappingFile(path: string, mapping: Mapping, analysis:
       rows: rowsBySpelling.get(l.asWritten ?? '') ?? analysis.items.filter((i) => !i.location).length,
       platformName: l.platformName,
       type: l.type,
+      locatedIn: l.locatedIn,
     });
     row.getCell(4).dataValidation = {
       type: 'list', allowBlank: false, formulae: [`"${LOCATION_TYPES.join(',')}"`],
@@ -249,6 +255,12 @@ function columnsByHeader(ws: ExcelJS.Worksheet): Map<string, number> {
   const map = new Map<string, number>();
   ws.getRow(1).eachCell((cell, col) => { const t = textOf(cell.value); if (t) map.set(t.toLowerCase(), col); });
   return map;
+}
+
+/** A cell by its column header; null when the file has no such column (one written by an earlier version). */
+function cellText(row: ExcelJS.Row, columns: Map<string, number>, header: string): string | null {
+  const col = columns.get(header.toLowerCase());
+  return col ? textOf(row.getCell(col).value) : null;
 }
 
 export async function readMappingFile(path: string): Promise<{ mapping: Mapping; problems: Problem[] }> {
@@ -270,7 +282,7 @@ export function readMappingSheets(wb: ExcelJS.Workbook): { mapping: Mapping; pro
 
   if (items) {
     const c = columnsByHeader(items);
-    const get = (row: ExcelJS.Row, header: string) => textOf(row.getCell(c.get(header.toLowerCase()) ?? 0).value);
+    const get = (row: ExcelJS.Row, header: string) => cellText(row, c, header);
     for (let r = 2; r <= items.rowCount; r++) {
       const row = items.getRow(r);
       const label = get(row, 'Category');
@@ -298,7 +310,10 @@ export function readMappingSheets(wb: ExcelJS.Workbook): { mapping: Mapping; pro
 
   if (locations) {
     const c = columnsByHeader(locations);
-    const get = (row: ExcelJS.Row, header: string) => textOf(row.getCell(c.get(header.toLowerCase()) ?? 0).value);
+    if (!c.has('located in')) {
+      problems.push({ code: 'MAPPING_COLUMN_MISSING', sheet: 'Locations', detail: 'No "Located in" column, so no rack can be given its room' });
+    }
+    const get = (row: ExcelJS.Row, header: string) => cellText(row, c, header);
     for (let r = 2; r <= locations.rowCount; r++) {
       const row = locations.getRow(r);
       const asWritten = get(row, 'Location as written');
@@ -307,6 +322,8 @@ export function readMappingSheets(wb: ExcelJS.Workbook): { mapping: Mapping; pro
         asWritten: asWritten === NO_LOCATION ? null : asWritten,
         platformName: get(row, 'Platform location'),
         type: get(row, 'Type')?.toUpperCase().replace(/[\s-]+/g, '_') ?? null,
+        // Absent from mapping files written before rooms were asked for.
+        locatedIn: get(row, 'Located in'),
         row: r,
       });
     }
@@ -325,7 +342,7 @@ export interface MappedImport {
 /**
  * Checks the mapping against the workbook and works out what the import would
  * create. Every workbook row needs a mapping row with a SKU and unit, and every
- * location spelling a platform location and type.
+ * location spelling a platform location and type; a rack should name its room.
  */
 export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport {
   const problems: Problem[] = [];
@@ -357,6 +374,33 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
       typeByPlatform.set(name, l.type as LocationType);
     }
   }
+  // Rooms: the location each one stands in, by platform name. One level, as on the Locations page.
+  const loc = 'Locations (mapping)';
+  const roomOf = new Map<string, { room: string; row?: number }>();
+  for (const l of mapping.locations) {
+    if (!l.platformName || !l.locatedIn) continue;
+    const name = canonical.get(locationKey(l.platformName))!;
+    // A room not on the sheet takes its first spelling, as a platform location does.
+    if (!canonical.has(locationKey(l.locatedIn))) canonical.set(locationKey(l.locatedIn), l.locatedIn.replace(/\s+/g, ' ').trim());
+    const room = canonical.get(locationKey(l.locatedIn))!;
+    const before = roomOf.get(name);
+    if (locationKey(room) === locationKey(name)) {
+      problems.push({ code: 'MAPPING_LOCATION_INVALID', sheet: loc, row: l.row, detail: `"${name}" is located in itself` });
+    } else if (before && before.room !== room) {
+      problems.push({ code: 'MAPPING_LOCATION_INVALID', sheet: loc, row: l.row, detail: `"${name}" is located in two rooms: ${before.room} and ${room}` });
+    } else {
+      roomOf.set(name, { room, row: l.row });
+    }
+  }
+  const badRoom = new Set<string>();
+  for (const [name, { room, row }] of roomOf) {
+    const why = typeByPlatform.get(room) === 'RACK'
+      ? `"${room}" is a rack; a location can be inside a room or area, not a rack`
+      : roomOf.has(room) ? `"${room}" is itself located in ${roomOf.get(room)!.room}; locations go one level deep` : null;
+    if (why) { problems.push({ code: 'MAPPING_LOCATION_INVALID', sheet: loc, row, detail: `"${name}": ${why}` }); badRoom.add(name); }
+  }
+  for (const name of badRoom) roomOf.delete(name);
+
   const platformLocationOf = (asWritten: string | null): string | null => {
     const l = locationBySpelling.get((asWritten ?? NO_LOCATION).replace(/\s+/g, ' ').trim());
     return l?.platformName ? canonical.get(locationKey(l.platformName))! : null;
@@ -473,10 +517,19 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
   }
 
   const usedLocations = new Set(materials.flatMap((m) => m.balances.map((b) => b.location)));
-  const plannedLocations = [...usedLocations]
-    .filter((name) => typeByPlatform.has(name))
-    .sort((a, b) => a.localeCompare(b))
-    .map((name) => ({ name, type: typeByPlatform.get(name)! }));
+  const planned = new Map<string, PlannedLocation>();
+  for (const name of usedLocations) {
+    if (!typeByPlatform.has(name)) continue;
+    const room = roomOf.get(name)?.room;
+    planned.set(name, { name, type: typeByPlatform.get(name)!, ...(room ? { parent: room } : {}) });
+    // A room that holds no stock of its own is still created, to hold its racks.
+    if (room && !planned.has(room) && !usedLocations.has(room)) planned.set(room, { name: room, type: typeByPlatform.get(room) ?? 'STOREROOM' });
+  }
+  for (const l of planned.values()) {
+    if (l.type === 'RACK' && !l.parent) problems.push({ code: 'RACK_WITHOUT_ROOM', sheet: loc, detail: `"${l.name}" has no Located in` });
+  }
+  // Rooms first, so each exists before the locations inside it.
+  const plannedLocations = [...planned.values()].sort((a, b) => Number(!!a.parent) - Number(!!b.parent) || a.name.localeCompare(b.name));
 
   // No two items with one serial number.
   const bySerial = new Map<string, string[]>();
