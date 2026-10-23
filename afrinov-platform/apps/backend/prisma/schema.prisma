@@ -171,7 +171,6 @@ model Location {
   goodsReceiptLines    GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
-  racks                Rack[]
   parent               Location?  @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
   children             Location[] @relation("LocationParent")
 
@@ -232,7 +231,6 @@ model Project {
   manager             User?     @relation("ProjectManager", fields: [managerId], references: [id])
   inventoryTransactions InventoryTransaction[]
   purchaseOrders      PurchaseOrder[]
-  racks               Rack[]
   materials           Material[]
 
   @@index([status])
@@ -266,38 +264,6 @@ model Recipient {
   @@index([type])
   @@index([active])
   @@map("recipients")
-}
-
-enum RackStatus {
-  ACTIVE
-  INACTIVE
-  FULL
-}
-
-model Rack {
-  id          String       @id @default(uuid())
-  code        String       @unique
-  name        String
-  description String?
-  // Optional FK to Location. ADR-003 normalises locations; a rack lives at
-  // a single physical location. Racks without a location are allowed (the
-  // master data may exist before physical placement).
-  locationId  String?       @map("location_id")
-  // Optional project association. Racks may be project-allocated or shared.
-  projectNumber String?    @map("project_number")
-  capacity    Int?         // nullable; capacity is meaningful when present
-  status      RackStatus   @default(ACTIVE)
-  notes       String?
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
-
-  location Location? @relation(fields: [locationId], references: [id])
-  project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
-
-  @@index([locationId])
-  @@index([projectNumber])
-  @@index([status])
-  @@map("racks")
 }
 
 // ─── Procurement ──────────────────────────────────────────────────────────

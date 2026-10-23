@@ -33,14 +33,14 @@ detail is in `07-data/database-schema.md`.
 - **Mutable:** all master fields.
 - **Auditable:** yes (CREATE, UPDATE, ACTIVATE/DEACTIVATE, DELETE).
 
-## Rack
-- **Purpose:** a numbered storage position (e.g. `D-1`).
-- **Attributes:** id, code (unique), name, description, optional location,
-  optional project, capacity (informational), status (ACTIVE, INACTIVE,
-  FULL), notes.
-- **Lifecycle:** created as ACTIVE (or FULL); `DELETE` archives it to
-  INACTIVE.
-- **Auditable:** yes (CREATE, UPDATE, ARCHIVE).
+## Rack (retired)
+- **Now:** a Location of type Rack, located in its room (`parentId`, one
+  level). The separate Rack record was copied onto locations (Phase 3.1),
+  its page and API retired (3.2) and its table dropped (3.3); its project,
+  capacity and status were dropped, as decided.
+- **History:** the audit log keeps each rack's entries (CREATE, UPDATE,
+  ARCHIVE) and its last full record (`MOVE_TO_LOCATION` or `DISCARD`), so
+  Movements still names it.
 
 ## Supplier
 - **Purpose:** external vendor of materials.

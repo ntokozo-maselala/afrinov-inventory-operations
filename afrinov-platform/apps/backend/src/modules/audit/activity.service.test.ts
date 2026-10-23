@@ -2,16 +2,14 @@
 // described, and how the list pages.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { auditFindMany, userFindMany, locationFindMany, rackFindMany, queryRaw } = vi.hoisted(() => ({
-  auditFindMany: vi.fn(), userFindMany: vi.fn(), locationFindMany: vi.fn(), rackFindMany: vi.fn(), queryRaw: vi.fn(),
+const { auditFindMany, userFindMany, locationFindMany, queryRaw } = vi.hoisted(() => ({
+  auditFindMany: vi.fn(), userFindMany: vi.fn(), locationFindMany: vi.fn(), queryRaw: vi.fn(),
 }));
 vi.mock('../../shared/db.js', () => ({
   prisma: {
     auditLogEntry: { findMany: auditFindMany },
     user: { findMany: userFindMany },
     location: { findMany: locationFindMany },
-    // Only until Phase 3.3: names a rack its audit entries do not.
-    rack: { findMany: rackFindMany },
     $queryRaw: queryRaw,
   },
 }));
@@ -85,7 +83,6 @@ describe('ActivityService.list', () => {
     auditFindMany.mockReset();
     userFindMany.mockReset().mockResolvedValue([{ id: 'u-1', name: 'Vusi' }]);
     locationFindMany.mockReset().mockResolvedValue([{ id: 'l-1', name: 'Boiler Shop' }]);
-    rackFindMany.mockReset().mockResolvedValue([]);
     queryRaw.mockReset().mockResolvedValue([]);
   });
 
@@ -113,16 +110,6 @@ describe('ActivityService.list', () => {
     // One DISTINCT ON query for the page's archived racks, not their whole history.
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(String(queryRaw.mock.calls[0]![0].join('?'))).toContain('SELECT DISTINCT ON (entity_id)');
-    expect(rackFindMany).not.toHaveBeenCalled();
-  });
-
-  it('falls back to the Rack row for a rack whose audit entries carry no name', async () => {
-    auditFindMany.mockResolvedValue([entry({ id: 'a-8', entityType: 'Rack', action: 'ARCHIVE', entityId: 'r-2', after: { status: 'INACTIVE' } })]);
-    queryRaw.mockResolvedValue([]);
-    rackFindMany.mockResolvedValue([{ id: 'r-2', code: 'S-3', name: 'Seeded rack' }]);
-    const rows = await ActivityService.list({});
-    expect(rows[0]!.summary).toBe('Archived rack S-3 Seeded rack');
-    expect(rackFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ['r-2'] } } }));
   });
 
   it('pages newest first, ties by id, continuing after the cursor, at most 500 rows', async () => {

@@ -133,7 +133,7 @@ describe('Locations page: details of a room with locations inside it', () => {
       if (path === '/locations') return LOCATIONS;
       if (path === '/locations/l-1') return {
         ...LOCATIONS[0], inventoryCount: 0,
-        dependencyCounts: { locations: 1, racks: 0, goodsReceiptLines: 0, inventoryTransactions: 0, inventoryBalances: 0 },
+        dependencyCounts: { locations: 1, goodsReceiptLines: 0, inventoryTransactions: 0, inventoryBalances: 0 },
       };
       if (path.startsWith('/reports/inventory')) return { currency: 'ZAR', byLocation: [] };
       return [];
