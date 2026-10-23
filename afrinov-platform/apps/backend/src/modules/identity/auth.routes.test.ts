@@ -69,6 +69,11 @@ describe('auth routes', () => {
     await app.close();
   });
 
+  it('keeps login POST-only at the single API prefix', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/v1/auth/login' });
+    expect(res.statusCode).toBe(404);
+  });
+
   describe('POST /api/v1/auth/login', () => {
     it('returns 200, a token, and the user on valid credentials', async () => {
       const res = await app.inject({
@@ -175,6 +180,54 @@ describe('auth routes', () => {
       });
       expect(res.statusCode).toBe(401);
       expect(res.json().error.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('rejects an expired token', async () => {
+      const token = app.jwt.sign({
+        sub: 'user-active',
+        email: 'alice@afrinov.local',
+        name: 'Alice',
+        roles: ['ADMIN'],
+      }, { expiresIn: -1 });
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/me',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('rejects an incorrectly signed token', async () => {
+      const token = app.jwt.sign({
+        sub: 'user-active',
+        email: 'alice@afrinov.local',
+        name: 'Alice',
+        roles: ['ADMIN'],
+      });
+      const [header, payload, signature] = token.split('.');
+      const replacement = signature?.startsWith('a') ? 'b' : 'a';
+      const tampered = `${header}.${payload}.${replacement}${signature?.slice(1) ?? ''}`;
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/me',
+        headers: { authorization: `Bearer ${tampered}` },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('rejects HMAC algorithms outside the configured HS256 allow-list', async () => {
+      const token = app.jwt.sign({
+        sub: 'user-active',
+        email: 'alice@afrinov.local',
+        name: 'Alice',
+        roles: ['ADMIN'],
+      }, { algorithm: 'HS384' });
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/me',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.statusCode).toBe(401);
     });
 
     it('omits the password hash from the /me response', async () => {

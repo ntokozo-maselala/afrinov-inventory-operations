@@ -6,7 +6,7 @@ services:
       # POSTGRES_DB from the environment (or a secret manager) for any
       # deployment that is reachable beyond this machine.
       POSTGRES_USER: ${POSTGRES_USER:-afrinov}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${POSTGRES_TEST_PASSWORD:?set POSTGRES_PASSWORD or POSTGRES_TEST_PASSWORD in the environment}}
       POSTGRES_DB: ${POSTGRES_DB:-afrinov}
     ports:
       - "5432:5432"
@@ -18,14 +18,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # Separate, opt-in database for the real-PostgreSQL test suites. Its own
+  # volume and loopback-only port prevent tests from sharing the dev database.
+  test-db:
+    profiles: ["test"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_TEST_USER:-afrinov}
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:-${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD or POSTGRES_TEST_PASSWORD in the environment}}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-afrinov_test}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - afrinov_test_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
-      # The Dockerfile is written against the monorepo root: its first COPY
-      # pulls the root package.json and the second pulls
-      # apps/backend/package.json. Building with `context: .` (this directory)
-      # fails immediately with "file not found in build context" for
-      # apps/backend/package.json, so the context must be the repo root.
-      context: ..
+      # The Dockerfile is written against the workspace root: its first COPY
+      # pulls the root package.json and lockfile, so context must be ../.. from
+      # this apps/backend directory.
+      context: ../..
       dockerfile: apps/backend/Dockerfile
     environment:
       # Assembled from injected parts so the database credential is never
@@ -64,3 +81,4 @@ services:
 
 volumes:
   afrinov_pg:
+  afrinov_test_pg:

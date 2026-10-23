@@ -3,8 +3,28 @@
 **Audit date:** 2026-10-23  
 **Scope:** Source-based audit of `afrinov-platform/apps/backend`, its workspace,
 CI workflow, container recipe, database schema/migrations, tests, and current
-documentation. No application behavior, schema, infrastructure, or data was
-changed.
+documentation. The findings and verification below began as a pre-change
+baseline. The current follow-up status is recorded here because several source
+findings were corrected after that baseline; historical descriptions are not
+the current configuration where this section says otherwise.
+
+## Follow-up status after authentication reliability work
+
+| Baseline finding | Current source status | Remaining verification |
+| --- | --- | --- |
+| BKA-03/04: Docker build order and dependency pruning | Corrected: Node 24 multi-stage build installs from the workspace lockfile, copies source/schema before build, and prunes at the workspace root. Root `.dockerignore` excludes local `.env*` and build artifacts. | Docker engine was unavailable; image build/startup remains unverified. |
+| BKA-05: backend CI used unsupported Node 20 | Corrected: both backend jobs select Node 24. | Workflow was inspected but no GitHub Actions run was available. |
+| BKA-06: integration tests loaded `.env` without a target guard | Corrected: integration and E2E use `.env.test` only and require a local `_test` DB; guarded migrate/seed commands and a separate Compose test DB were added. | URL-guard unit tests pass, but no isolated Postgres integration cycle ran. |
+| Authentication algorithm was implicit | Corrected: application signs and verifies HS256 explicitly; regressions reject unsupported/expired/tampered tokens. | Tokens in an actual deployment were not inspected; confirm they are HS256 before rollout. This is independent of the reported login 401. |
+| Reported authentication incident | The current source explains the POST-only GET 404 and possible POST 401 branches. No login lookup/password behavior was changed. | Production root cause remains unresolved pending deployed revision, sanitized request logs, caller evidence, and authoritative account/database state. See [incident report](../security/authentication-incident-report.md). |
+
+Current local verification on Node 24.21.0: backend 813 tests across 57 files;
+frontend 799 tests across 76 files; backend/frontend lint and typechecks pass;
+frontend production build passes with warnings. `npm ci` could not complete on
+this Windows workspace because native files were locked (`EPERM`); the
+recovery install did not change the lockfile. Integration, E2E, Docker image,
+and CI execution remain unverified. Full results are in the
+[verification strategy](../testing/verification-and-test-strategy.md).
 
 ## Executive summary
 
@@ -29,17 +49,15 @@ ledger inside mutation transactions. The no-negative-stock rule is enforced
 in application logic, not by a database check constraint. Concurrency safety
 for two simultaneous deductions was not verified.
 
-Local `typecheck`, `lint`, `test`, and TypeScript `build` passed on Node
-24.21.0; the unit suite reported 823 tests in 57 files. A compiled process
-probe against a deliberately unreachable dummy database served liveness 200
-and readiness 503, confirming the distinction. The real-Postgres integration
-suite and Docker build were not run: Docker is unavailable, and the integration
-config loads `.env` and leaves test rows in its target DB.
+In the original baseline pass, local checks passed on Node 24.21.0 and the
+unit suite reported 823 tests in 57 files. That count predates the follow-up
+authentication and test-isolation regressions; the current suite has 813 tests
+in 57 files. Integration and Docker were not run in either pass. Current test
+target protections are summarized above.
 
-Production readiness is **not established**. The Dockerfile statically omits
-the source/schema copy before it builds, and its runtime prune command runs
-from a directory without a root package manifest. The CI workflow runs
-Vitest 5 on Node 20 although Vitest declares Node 22.12+. Production JWT
+Production readiness is **not established**. Docker build order and CI Node
+version findings were corrected in source but have not been executed in an
+image or remote workflow. Production JWT
 configuration accepts short secrets, arbitrary `NODE_ENV` values can bypass
 production-only checks, and CORS allows any origin when explicitly enabled in
 any environment. There is no repository-backed deploy/release process,
@@ -58,9 +76,10 @@ external secret manager, backup/restore plan, or metrics/alerting setup.
    where required; Zod and service rules validate inputs; Prisma queries or
    transactions access PostgreSQL; a central handler formats errors.
 4. **Environment:** development loads `.env`; unit tests use mocks and a dummy
-   URL fallback; integration config reads `.env` and writes to a real DB; CI
-   provisions a per-job PostgreSQL 16 service; Compose injects runtime values,
-   applies migrations and runs demo seed. There is no staging-specific model.
+   URL fallback; integration/E2E now read `.env.test` and require a local
+   `_test` DB; CI provisions an ephemeral PostgreSQL 16 service; Compose
+   injects runtime values, applies migrations and runs demo seed. There is no
+   staging-specific model.
 5. **Principal dependencies:** Node.js, Fastify, Prisma, PostgreSQL, bcrypt,
    Zod, Pino, ExcelJS and PDFKit. No runtime queue or remote service client was
    found.
@@ -71,6 +90,11 @@ The authoritative details are in the [system inventory](../architecture/system-i
 [configuration matrix](../configuration/environment-configuration.md).
 
 ## Prioritized findings register
+
+The BKA findings below preserve the original pre-change evidence and
+recommended changes. For current status of BKA-03 through BKA-06, use the
+follow-up table above; do not treat their baseline descriptions as the current
+source state.
 
 Severity uses the requested Critical/High/Medium/Low scale. Confidence
 distinguishes direct runtime reproduction from static inference. Remediation
@@ -414,8 +438,9 @@ Exact commands, setup, and limitations are in
    and does it start with the expected production-only dependencies?
 6. Does a disposable PostgreSQL 16 integration run pass on the intended Node
    version, and are migrations compatible with the actual target schema?
-7. Is local integration testing expected to use `.env.test`? Current config
-   reads `.env` and leaves rows in its DB.
+7. Can a clean local test DB complete migrations, seed, integration, and E2E
+   after the `.env.test` guard changes? This remains unverified without Docker
+   engine access.
 8. What is the real proxy/client-IP topology? `trustProxy` is not configured;
    rate limits may see proxy addresses if a reverse proxy is used.
 9. What concurrency guarantees are required for stock deductions, and is the
@@ -425,15 +450,13 @@ Exact commands, setup, and limitations are in
 
 ## Recommended remediation sequence
 
-1. **Restore a verifiable release path:** fix Docker build copies and package
-   prune location; align CI/Docker/test Node versions; run CI and an image
-   build against a disposable Postgres service.
+1. **Verify the corrected release path:** run CI and build/start the image
+   against a disposable Postgres service.
 2. **Close configuration security gaps:** enforce allowed `NODE_ENV`, define
    JWT key strength and management/rotation, and guard wildcard credentialed
    CORS in production. Decide and validate production CORS origins.
-3. **Protect test data:** make integration configuration explicitly load its
-   test environment and refuse unknown/non-disposable DB targets. Verify a
-   fresh disposable DB migration/seed/test cycle.
+3. **Verify test data protection:** run a fresh disposable DB
+   migration/seed/integration cycle and the guarded browser E2E suite.
 4. **Verify inventory integrity:** run concurrent-write tests against real
    PostgreSQL, then agree on a concurrency guarantee and enforcement strategy
    before changing transaction behavior.
@@ -466,10 +489,10 @@ needed. Inventory mutations use transactions to append signed ledger rows and
 recompute balances.
 
 Development `.env`, unit-test mocks, real-HTTP integration DB, CI Postgres, and
-Compose production-mode settings are distinct. Integration tests write rows to
-the DB in `.env`, so only use a disposable target. Local typecheck, lint, build,
-and 823 unit tests passed on Node 24.21. The real DB suite and container were
-not verified. Fix the Docker recipe and Node 20/Vitest mismatch before relying
-on a production release path. Production secret strength, `NODE_ENV`
+Compose production-mode settings are distinct. Integration tests now write
+only to an explicitly guarded local `_test` target, though a real DB run is
+still pending. Current local checks include 813 backend tests and 799 frontend
+tests on Node 24.21. Docker and CI execution remain unverified. Production
+secret strength, `NODE_ENV`
 validation, database test isolation, backups, monitoring, and deployment
 recovery remain the main risks to resolve.

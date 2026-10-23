@@ -10,9 +10,9 @@ The npm workspace is `afrinov-platform/`; the package root is
 | Development/watch | From `apps/backend`: `npm run dev` (or workspace `npm run dev:backend` from `afrinov-platform/`) | Script runs `tsx watch --env-file=.env src/index.ts`, so Node loads the backend `.env` file. |
 | Compiled build | `npm run build` | `prebuild` generates Prisma Client, then `tsc -p tsconfig.build.json` emits `dist/`. |
 | Compiled process | From `apps/backend`: `npm start` | Runs `node dist/index.js`; it does not pass `--env-file`. Inject/export the required variables before starting. |
-| Compose | From `apps/backend`: `docker compose up --build` | Compose injects environment values into the backend container, runs migration and seed, then invokes `node dist/index.js`. Image build has a source-copy issue documented in the audit. |
+| Compose | From `apps/backend`: `docker compose up --build` | Compose injects environment values into the backend container, runs migration and seed, then invokes `node dist/index.js`. Dockerfile and workspace-root build context were corrected; image build remains unverified. |
 | Unit tests | `npm test` | Vitest config uses a dummy `DATABASE_URL` fallback. Tests in `src/**/*.test.ts` use mocks/in-memory fakes for database-dependent paths. |
-| Integration tests | `npm run test:integration` | Integration config explicitly reads `.env`, then forces `NODE_ENV=development`; the tests use the real database and leave rows behind. |
+| Integration tests | `npm run test:integration` | Integration config reads `.env.test` only, forces `NODE_ENV=test`, and requires a local `_test` PostgreSQL URL; tests persist rows in that isolated DB. |
 
 In PowerShell installations where `npm.ps1` is blocked by execution policy,
 `npm.cmd` invokes the same npm executable. This audit host required that form.
@@ -104,6 +104,5 @@ See [backend-lifecycle.mmd](../architecture/diagrams/backend-lifecycle.mmd).
 - PostgreSQL startup success, live migrations, Docker startup, container
   signal behavior, and watch restart cleanup were not verified.
 - `npm start` and Docker execute compiled output. Building that output is
-  verified with local `npm run build`; building the Docker image itself is
-  not, because Docker is unavailable and the Dockerfile does not copy source
-  before compilation.
+  locally typechecked; building the Docker image itself is not verified
+  because Docker engine access is unavailable.

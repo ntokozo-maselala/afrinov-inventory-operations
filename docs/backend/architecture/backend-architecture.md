@@ -69,7 +69,7 @@ flowchart LR
   SVC --> DB
   AUTH --> DB
   DB --> PG[("PostgreSQL 16")]
-  MIG["Prisma schema + 22 migrations<br/>seed and operator scripts"] --> PG
+  MIG["Prisma schema + 23 migrations<br/>seed and operator scripts"] --> PG
   DOC["OpenAPI document and Swagger UI"] -. "enabled by config" .-> SRV
   EV["In-process domain events"] -. "no runtime handlers found" .-> SVC
   CI["GitHub Actions checks + Postgres integration"] --> RT
@@ -131,9 +131,9 @@ metrics/tracing/error-reporting integration. See the
 - Intended architecture docs describe desired principles and bounded contexts;
   code grouping only partially enforces them. Treat ADRs as intent, not proof
   that deployment or data integrity controls are implemented.
-- Production packaging and CI runtimes are inconsistent with Vitest's engine
-  requirement, and the Docker build context sequence appears incomplete. See
-  the [readiness audit](../audits/backend-understanding-and-readiness-audit.md).
+- The Dockerfile, build context, test database isolation, and backend CI Node
+  version were corrected in the follow-up. Docker and CI execution remain
+  unverified. See the [readiness audit](../audits/backend-understanding-and-readiness-audit.md).
 
 ## Verified versus unverified
 
@@ -146,4 +146,4 @@ dummy PostgreSQL target; `/health` returns 200 and `/health/ready` returns 503.
 
 **Not verified:** remote integrations (none configured), production deployment,
 image build, live schema/migration compatibility, concurrency invariants,
-real-HTTP integration suite, backup/restore, and runtime behavior on Node 20.
+real-HTTP integration suite, backup/restore, and container startup.

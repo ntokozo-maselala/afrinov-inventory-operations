@@ -127,16 +127,20 @@ running. These operations were not run in this audit.
   a distinct test name.
 - Unit tests set a dummy URL if none exists and mock DB-backed services; they
   do not require a real database.
-- `vitest.integration.config.ts` reads `.env`, not `.env.test`, and then sets
-  development mode. Its helper states that suites persist rows and suffix
-  generated records. Local integration commands can therefore write to the
-  database in `.env` unless the operator explicitly overrides the URL.
+- `vitest.integration.config.ts` reads `.env.test` only, forces test mode, and
+  requires a local PostgreSQL host plus a database name ending in `_test`.
+  Guarded migration/seed scripts apply the same check before writes. The
+  integration helper persists rows in that isolated database.
 - CI creates a disposable Postgres service, migrates/seeds it, and runs the
   real-HTTP suite there.
 
-Never point local integration tests at a valuable development or production
-database. The integration runner does not verify a database name or refuse a
-production URL before writing test rows.
+The separate Compose `test-db` profile uses loopback port 5433 and its own
+named volume. Compose prefers a dedicated `POSTGRES_TEST_PASSWORD`; if it is
+unset, it falls back to `POSTGRES_PASSWORD`. Set the dedicated value to keep
+test and development credentials separate. CI provisions an ephemeral Postgres
+service. No local development or production database is an allowed test target.
+The local real-PostgreSQL cycle has been exercised: migrations were current,
+the test database was seeded, and all 99 integration tests passed.
 
 ## Backup, restore, and recovery
 

@@ -18,10 +18,10 @@ Paths below are repository-relative. Start at the
 | Where are errors translated to HTTP? | `src/shared/errors.ts` — `ApiError` and constructors; central `app.setErrorHandler` in `src/server.ts`. |
 | Where are health checks implemented? | Root `/health` and readiness in `src/server.ts`; API-prefixed copies in `src/modules/health/health.routes.ts`. |
 | Where are logs configured? | `src/server.ts` — Fastify/Pino logger and request behavior. No metrics/tracing integration found. |
-| Where are tests configured? | `vitest.config.ts` unit tests; `vitest.integration.config.ts` real DB/HTTP tests; `tsconfig.tools.json`; `.eslintrc.cjs`; `src/**/*.test.ts`; `integration/**/*.test.ts`. |
+| Where are tests configured? | `vitest.config.ts` unit tests; `vitest.integration.config.ts` real DB/HTTP tests using `.env.test` and a local `_test` DB guard; `scripts/test-environment.ts`; frontend `playwright.config.ts`; TypeScript configs; `src/**/*.test.ts`; `integration/**/*.test.ts`; `e2e/`. |
 | Where are development and production separated? | Package scripts (`dev` vs `start`), `shared/config.ts`, `server.ts`, seed's `NODE_ENV` check, `.env.example`, Docker Compose injected settings. No first-class staging config. |
 | Where are migrations/seeds managed? | `src/db/migrate.ts`, `src/db/seed.ts`, `prisma/schema.prisma`, `prisma/migrations/`, and package scripts. |
-| Where is deployment configured? | `Dockerfile`, `docker-compose.yml`, `.github/workflows/backend-ci.yml`. No deploy/release/IaC workflow found; container build path is statically incomplete and not tested. |
+| Where is deployment configured? | `Dockerfile`, root `.dockerignore`, `docker-compose.yml`, `.github/workflows/backend-ci.yml`. No deploy/release/IaC workflow found; corrected container path is not built or tested here. |
 
 ## Dependency map
 

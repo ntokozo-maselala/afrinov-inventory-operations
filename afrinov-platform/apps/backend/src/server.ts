@@ -104,7 +104,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   await app.register(jwt, {
     secret: config.jwtSecret,
-    sign: { expiresIn: '12h' },
+    sign: { algorithm: 'HS256', expiresIn: '12h' },
+    verify: { algorithms: ['HS256'] },
   });
 
   // Rate limiting: strict on authentication endpoints (brute-force/credential-
@@ -359,6 +360,7 @@ export async function start(): Promise<void> {
   // success: the database probe result is logged only after the probe runs.
   app.log.info('Backend starting');
   app.log.info(`Environment: ${config.nodeEnv}`);
+  app.log.info('Authentication mode: local-password');
   app.log.info(`Node version: ${process.version}`);
   app.log.info(`Process ID: ${process.pid}`);
   app.log.info('Configuration loaded');

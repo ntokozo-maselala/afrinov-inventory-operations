@@ -9,7 +9,7 @@
 | --- | --- |
 | Repository / package root | Monorepo `afrinov-platform/`; npm workspace package `@afrinov/backend` at `apps/backend/` |
 | Language / module format | TypeScript 5, strict compiler options, emitted JavaScript, Node ESM (`"type": "module"`) |
-| Runtime | Node.js. The backend README calls for Node 22+ locally; Docker and the backend CI workflow select Node 20. The installed Vitest 5 engine range starts at Node 22.12. |
+| Runtime | Node.js 24 in backend CI and Docker; local tooling requires Node 22.12 or later. |
 | HTTP framework | Fastify 5 with CORS, Helmet, JWT, rate-limit, Swagger, Swagger UI |
 | Persistence | PostgreSQL 16 through Prisma ORM / Prisma Client 5 |
 | Validation | Zod at route boundaries; shared domain checks in services |
@@ -47,7 +47,7 @@ for environment behavior.
 | `src/openapi/document.ts` | Static OpenAPI document assembled from route schemas/operations and conditionally served by Swagger plugins. |
 | `scripts/` | Admin password rotation, diagnostics, workbook/supplier imports, and rack/location conversion. Several scripts write to the `DATABASE_URL` database. |
 | `integration/` | Real-socket API tests against a real PostgreSQL database; rows are left behind and are isolated by random suffixes, not rolled back. |
-| `prisma/schema.prisma`, `prisma/migrations/` | PostgreSQL schema definition and 22 ordered SQL migrations. |
+| `prisma/schema.prisma`, `prisma/migrations/` | PostgreSQL schema definition and 23 ordered SQL migrations. |
 
 The module folders organize a **modular monolith**, not separately deployable
 services. There is no queue, scheduler, remote service client, blob store,
@@ -71,7 +71,8 @@ out to packages that define the matching script.
 | `typecheck` | `pretypecheck` generates Prisma Client; `tsc -p tsconfig.tools.json` includes source, tests, integration, and scripts. |
 | `lint` | ESLint on `src`, `integration`, and `scripts`. |
 | `test` | `pretest` generates Prisma Client; Vitest discovers `src/**/*.test.ts` only. |
-| `test:integration` | `pretest:integration` generates Prisma Client; Vitest uses integration config and a real DB. The config reads `.env`, sets `NODE_ENV=development`, and does not roll back persisted rows. |
+| `test:integration` | `pretest:integration` generates Prisma Client; Vitest uses integration config and a real DB. It reads `.env.test` only, requires local host plus `_test` database suffix, sets `NODE_ENV=test`, and leaves persisted test rows in that isolated DB. |
+| `db:test:migrate`, `db:test:seed` | Guarded test-only migration and seed wrappers; refuse remote or non-`_test` URLs. |
 | `test:watch` | Vitest interactive/watch mode for unit tests. |
 | `db:rotate-admin`, `import:*`, `racks:to-locations` | Database-mutating operator scripts; verify target and inspect each script before use. |
 | `diag:*` | Read-oriented login/admin diagnostics that refuse `NODE_ENV=production`; require configured credentials/database. |
@@ -90,19 +91,19 @@ workspace lockfile.
 
 Infrastructure files found:
 
-- [`Dockerfile`](../../../afrinov-platform/apps/backend/Dockerfile): Node 20
-  multi-stage image, non-root `app` user in the runtime stage, port 4000, and
-  `node dist/index.js` entry command. Its build stage does not copy backend
-  source or the Prisma schema before `npm run build`; Docker execution was not
-  available to confirm the resulting failure.
+- [`Dockerfile`](../../../afrinov-platform/apps/backend/Dockerfile): Node 24
+  multi-stage image, workspace lockfile install, source/schema copied before
+  build, production dependency prune, non-root runtime user, and
+  `node dist/index.js`. Root `.dockerignore` excludes local environment files.
+  Docker execution was unavailable, so build/startup remain unverified.
 - [`docker-compose.yml`](../../../afrinov-platform/apps/backend/docker-compose.yml):
   PostgreSQL 16 with a named volume and `pg_isready` health check; backend waits
   for healthy DB, then runs `prisma migrate deploy`, compiled demo seed, and API.
   It requires injected DB/JWT settings and defaults `NODE_ENV` to production.
 - [`.github/workflows/backend-ci.yml`](../../../.github/workflows/backend-ci.yml):
   typecheck, lint, unit tests, build, and a separate real-Postgres integration
-  job. Both jobs select Node 20; the unit and integration scripts invoke
-  Vitest 5, whose installed package declares Node 22.12 or later.
+  job. Both jobs select Node 24. The workflow was inspected but no remote run
+  was available.
 - No backend deployment workflow, Kubernetes/IaC files, or backup job was
   found in the inspected repository.
 

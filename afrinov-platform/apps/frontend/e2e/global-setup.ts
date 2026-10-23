@@ -4,6 +4,9 @@
 // stack. Both processes are torn down on shutdown.
 import type { FullConfig } from '@playwright/test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
+import { loadTestEnvironmentFile, requireIsolatedTestDatabaseUrl } from '../../backend/scripts/test-environment.js';
 import { frontendDir, backendDir } from '../playwright.config.js';
 
 function waitFor(url: string, timeoutMs = 60_000): Promise<void> {
@@ -62,11 +65,25 @@ function kill(proc: ChildProcessWithoutNullStreams | null): void {
 }
 
 export default async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
+  loadTestEnvironmentFile(resolve(backendDir, '.env.test'));
+  process.env.NODE_ENV = 'test';
+  const databaseUrl = requireIsolatedTestDatabaseUrl();
+  if (!process.env.SEED_ADMIN_PASSWORD?.trim()) {
+    throw new Error('SEED_ADMIN_PASSWORD is required for the seeded test admin in the Playwright suite.');
+  }
+
   backend = spawnServer(
     'npx',
-    ['tsx', '--env-file=.env', 'src/index.ts'],
+    ['tsx', 'src/index.ts'],
     backendDir,
-    { PORT: '4000', NODE_ENV: 'development', CORS_ORIGIN: '*' },
+    {
+      DATABASE_URL: databaseUrl,
+      JWT_SECRET: randomBytes(32).toString('base64url'),
+      NODE_ENV: 'test',
+      PORT: '4000',
+      HOST: '127.0.0.1',
+      CORS_ORIGIN: 'http://localhost:5173',
+    },
   );
   backend.stdout.on('data', (d) => process.stdout.write(`[backend] ${d}`));
   backend.stderr.on('data', (d) => process.stderr.write(`[backend] ${d}`));
@@ -77,7 +94,10 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
     'npx',
     ['vite', '--port', '5173', '--host', '--strictPort'],
     frontendDir,
-    {},
+    {
+      VITE_FRONTEND_ONLY: 'false',
+      VITE_DEMO_AUTH_ENABLED: 'false',
+    },
   );
   frontend.stdout.on('data', (d) => process.stdout.write(`[frontend] ${d}`));
   frontend.stderr.on('data', (d) => process.stderr.write(`[frontend] ${d}`));

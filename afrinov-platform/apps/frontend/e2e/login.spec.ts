@@ -7,21 +7,37 @@
 import { test, expect, type Locator } from '@playwright/test';
 
 const ADMIN_EMAIL = 'admin@afrinov.local';
-const ADMIN_PASSWORD = 'ChangeMe!2026';
+
+function testAdminPassword(): string {
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password?.trim()) {
+    throw new Error('SEED_ADMIN_PASSWORD is required and must match the isolated test database seed.');
+  }
+  return password;
+}
 
 test.describe('real-backend sign-in flow', () => {
   test('authenticated user reaches the dashboard over a live backend', async ({ page }) => {
+    const loginRequests: { method: string; url: string }[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/v1/auth/login') {
+        loginRequests.push({ method: request.method(), url: request.url() });
+      }
+    });
+
     await page.goto('/login', { timeout: 60_000 });
     const emailInput: Locator = page.locator('#login-email');
     const passwordInput: Locator = page.locator('#login-password');
     await emailInput.waitFor({ state: 'visible' });
     await emailInput.fill(ADMIN_EMAIL);
-    await passwordInput.fill(ADMIN_PASSWORD);
+    await passwordInput.fill(testAdminPassword());
 
     await page.getByRole('button', { name: /sign in$/i }).click();
 
     await page.waitForURL('**/', { timeout: 30_000 });
     await expect(page).toHaveURL('http://localhost:5173/');
+    expect(loginRequests).toHaveLength(1);
+    expect(loginRequests[0]?.method).toBe('POST');
 
     await expect(page.getByRole('button', { name: /sign out/i })).toBeVisible();
     await expect(page.getByText('System Administrator')).toBeVisible();
@@ -41,6 +57,6 @@ test.describe('real-backend sign-in flow', () => {
     await page.getByRole('button', { name: /sign in$/i }).click();
 
     await expect(page.locator('text=Sign-in failed')).toBeVisible();
-    await expect(page).toHaveURL('**/login');
+    await expect(page).toHaveURL(/\/login$/);
   });
 });
