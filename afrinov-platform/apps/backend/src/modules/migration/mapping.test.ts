@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
 import type { MaterialCategory } from '@prisma/client';
-import { analyseWorkbook, RESOLVED_BY_MAPPING, type Analysis, type Problem, type ProblemCode } from './workbook-analysis.js';
+import { analyseWorkbook, PROBLEM_TEXT, RESOLVED_BY_MAPPING, type Analysis, type Problem, type ProblemCode } from './workbook-analysis.js';
 import type { MainRow, NumberCell, WorkbookRead } from './workbook-reader.js';
 import {
   applyMapping, guessLocationType, itemKey, readMappingSheets, suggestMapping, suggestSerial, unitHint, NO_LOCATION, type Mapping,
@@ -63,7 +63,9 @@ describe('suggested mapping', () => {
     const m = suggestMapping(sample());
     const stores = m.locations.filter((l) => l.asWritten?.toLowerCase() === 'stores');
     expect(stores.map((l) => l.platformName)).toEqual(['Stores', 'Stores', 'Stores']);
-    expect(m.locations.find((l) => l.asWritten === null)).toEqual({ asWritten: null, platformName: null, type: null });
+    expect(m.locations.find((l) => l.asWritten === null)).toEqual({ asWritten: null, platformName: null, type: null, locatedIn: null });
+    // Which room a rack is in is the storeman's to say: never guessed.
+    expect(m.locations.every((l) => l.locatedIn === null)).toBe(true);
   });
 
   it('guesses location types from their names', () => {
@@ -100,12 +102,15 @@ describe('mapping file', () => {
     const suggested = suggestMapping(analysis);
     suggested.locations.find((l) => l.asWritten === null)!.platformName = 'Stores';
     suggested.locations.find((l) => l.asWritten === null)!.type = 'STOREROOM';
+    suggested.locations.find((l) => l.asWritten === 'A-1')!.locatedIn = 'Stores';
     const { mapping } = await roundTrip(suggested, analysis);
+    expect(mapping.locations.find((l) => l.asWritten === 'A-1')?.locatedIn).toBe('Stores');
     const result = applyMapping(analysis, mapping);
     expect(result.problems).toEqual([]);
     expect(result.materials).toHaveLength(6);
+    // Rooms first, so each exists before the racks inside it.
     expect(result.locations).toEqual([
-      { name: 'A-1', type: 'RACK' }, { name: 'Stores', type: 'STOREROOM' }, { name: 'Stores Container', type: 'CONTAINER' },
+      { name: 'Stores', type: 'STOREROOM' }, { name: 'Stores Container', type: 'CONTAINER' }, { name: 'A-1', type: 'RACK', parent: 'Stores' },
     ]);
     expect(result.materials.find((m) => m.sku === 'PRJ-0001')?.balances).toEqual([{ location: 'Stores', quantity: 3 }]);
   });
@@ -117,6 +122,7 @@ describe('applying the mapping', () => {
     const blank = m.locations.find((l) => l.asWritten === null)!;
     blank.platformName = 'Stores';
     blank.type = 'STOREROOM';
+    m.locations.find((l) => l.asWritten === 'A-1')!.locatedIn = 'Stores';
     return m;
   }
 
@@ -223,6 +229,7 @@ describe('tools', () => {
     const analysis = tools();
     const m = suggestMapping(analysis);
     expect(m.items.map((i) => [i.sku, i.serialNumber])).toEqual([['TL-0001', '34322'], ['TL-0002', '128006542'], ['TL-0003', null], ['TL-0004', null]]);
+    m.locations.find((l) => l.asWritten === 'O-1')!.locatedIn = 'Tool Store';
     const { mapping, problems } = await roundTrip(m, analysis);
     expect(problems).toEqual([]);
     expect(mapping.items.map((i) => i.serialNumber)).toEqual(['34322', '128006542', null, null]);
@@ -261,7 +268,94 @@ describe('tools', () => {
     const m = suggestMapping(analysis);
     m.items[2]!.serialNumber = 'GWS-77777';
     const result = applyMapping(analysis, m);
-    expect(result.problems).toEqual([]);
+    expect(result.problems.map((p) => p.code)).toEqual(['RACK_WITHOUT_ROOM']);
     expect(result.materials.map((x) => [x.sku, x.serialNumber])).toEqual([['TL-0001', null], ['TL-0002', null], ['TL-0003', 'GWS-77777']]);
+  });
+});
+
+describe('which room each rack is in', () => {
+  function racks(): Analysis {
+    return analyseWorkbook({
+      mainRows: [
+        main('CONSUMABLES', 2, 'P-1', 'Disc', 'D-1', 4),
+        main('CONSUMABLES', 3, 'P-2', 'Gloves', 'd1', 2),
+        main('CONSUMABLES', 4, 'P-3', 'Chalk', 'F-7', 1),
+        main('CONSUMABLES', 5, 'P-4', 'Tape', 'Stores', 3),
+        main('CONSUMABLES', 6, 'P-5', 'Rope', 'Stores Container', 1),
+      ],
+      summaryRows: [], summaryTotals: {}, summaryRowTotals: {}, missingSheets: [],
+    });
+  }
+  const locate = (m: Mapping, asWritten: string, locatedIn: string | null) => { m.locations.find((l) => l.asWritten === asWritten)!.locatedIn = locatedIn; };
+
+  it('puts each rack in the room named, on one spelling or all, and creates a room that holds no stock', () => {
+    const analysis = racks();
+    const m = suggestMapping(analysis);
+    locate(m, 'D-1', 'main storeroom');
+    locate(m, 'F-7', 'Main  Storeroom');
+    locate(m, 'Stores Container', 'stores');
+    const result = applyMapping(analysis, m);
+    expect(result.problems).toEqual([]);
+    expect(result.locations).toEqual([
+      { name: 'main storeroom', type: 'STOREROOM' },
+      { name: 'Stores', type: 'STOREROOM' },
+      { name: 'D-1', type: 'RACK', parent: 'main storeroom' },
+      { name: 'F-7', type: 'RACK', parent: 'main storeroom' },
+      { name: 'Stores Container', type: 'CONTAINER', parent: 'Stores' },
+    ].sort((a, b) => Number(!!a.parent) - Number(!!b.parent) || a.name.localeCompare(b.name)));
+  });
+
+  it('names a rack with no room for review, without blocking the import', () => {
+    const analysis = racks();
+    const m = suggestMapping(analysis);
+    locate(m, 'D-1', 'Stores');
+    const result = applyMapping(analysis, m);
+    expect(result.problems).toEqual([expect.objectContaining({ code: 'RACK_WITHOUT_ROOM', detail: '"F-7" has no Located in' })]);
+    expect(PROBLEM_TEXT.RACK_WITHOUT_ROOM.severity).toBe('review');
+    expect(result.locations.find((l) => l.name === 'F-7')).toEqual({ name: 'F-7', type: 'RACK' });
+  });
+
+  it('refuses a room that is a rack, a second level, the place itself, or two rooms for one place', () => {
+    const analysis = racks();
+    const m = suggestMapping(analysis);
+    locate(m, 'D-1', 'F-7');
+    locate(m, 'F-7', 'Stores Container');
+    locate(m, 'Stores Container', 'Stores');
+    locate(m, 'Stores', 'stores');
+    const twoRooms = suggestMapping(analysis);
+    locate(twoRooms, 'D-1', 'Stores');
+    locate(twoRooms, 'd1', 'Main Storeroom');
+    expect(codes(applyMapping(analysis, m).problems, 'MAPPING_LOCATION_INVALID').map((p) => p.detail)).toEqual([
+      '"Stores" is located in itself',
+      '"D-1": "F-7" is a rack; a location can be inside a room or area, not a rack',
+      '"F-7": "Stores Container" is itself located in Stores; locations go one level deep',
+    ]);
+    const result = applyMapping(analysis, twoRooms);
+    expect(codes(result.problems, 'MAPPING_LOCATION_INVALID').map((p) => p.detail)).toEqual(['"D-1" is located in two rooms: Stores and Main Storeroom']);
+    expect(result.locations.find((l) => l.name === 'D-1')).toEqual({ name: 'D-1', type: 'RACK', parent: 'Stores' });
+  });
+
+  it('reads a mapping file written before Located in was asked for', async () => {
+    const analysis = racks();
+    const { wb } = await roundTrip(suggestMapping(analysis), analysis);
+    const sheet = wb.getWorksheet('Locations')!;
+    expect(sheet.getRow(1).getCell(5).value).toBe('Located in');
+    sheet.spliceColumns(5, 1);
+    const { mapping, problems } = readMappingSheets(wb);
+    expect(problems).toEqual([]);
+    expect(mapping.locations.every((l) => l.locatedIn === null)).toBe(true);
+  });
+});
+
+describe('older mapping files', () => {
+  it('reads an Items sheet with no serial number column', async () => {
+    const analysis = sample();
+    const { wb } = await roundTrip(suggestMapping(analysis), analysis);
+    const sheet = wb.getWorksheet('Items')!;
+    expect(sheet.getRow(1).getCell(9).value).toBe('Serial number (tools)');
+    sheet.spliceColumns(9, 1);
+    const { mapping, problems } = readMappingSheets(wb);
+    expect(problems).toEqual([]);
+    expect(mapping.items.every((i) => i.serialNumber === null)).toBe(true);
   });
 });

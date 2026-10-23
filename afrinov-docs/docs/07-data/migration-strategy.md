@@ -53,7 +53,9 @@ files go to `import-reports/` (git-ignored: they contain business data).
 2. **Review files.** The first dry run also writes:
    - `mapping.xlsx` — a suggested SKU (prefix CON/FSI/TPE/PRJ) and unit for
      each workbook row, and the platform location for each location
-     spelling. Rows are matched by category, old Product ID, item name and
+     spelling, with its type and the room it is located in (a rack's room,
+     named by the storeman; a rack left without one is listed for review).
+     Rows are matched by category, old Product ID, item name and
      location as written, not by row number. It is never overwritten.
    - `master-data.xlsx` — projects and recipients from the workbook lists;
      suppliers are typed in by the buyer (the workbook has none).
@@ -66,7 +68,8 @@ files go to `import-reports/` (git-ignored: they contain business data).
    an active user; no opening balances were imported before; no planned SKU
    already exists. In one database transaction it creates projects,
    recipients and suppliers (skipping existing ones), locations (reusing
-   existing ones), items, and one RECEIPT per item and location with
+   existing ones, rooms first, each in its room by the Locations page's
+   rules), items, and one RECEIPT per item and location with
    `reference_type = 'OpeningBalance'`, dated `--date`, and writes an
    `IMPORT_OPENING_BALANCES` audit entry.
 4. **Reconcile** (read-only):

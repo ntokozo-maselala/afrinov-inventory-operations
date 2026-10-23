@@ -30,8 +30,9 @@ describe('opening balance import against a real database', () => {
 
   const plan = (materials: PlannedMaterial[]): MappedImport => ({
     materials,
-    // The existing location is named in another case: it must be reused, not duplicated.
-    locations: [{ name: rackName, type: 'RACK' }, { name: existingName.toUpperCase(), type: 'STOREROOM' }],
+    // The existing location is named in another case: it must be reused, not
+    // duplicated. The new rack stands in it (rooms come first in a plan).
+    locations: [{ name: existingName.toUpperCase(), type: 'STOREROOM' }, { name: rackName, type: 'RACK', parent: existingName.toUpperCase() }],
     problems: [],
   });
 
@@ -66,6 +67,16 @@ describe('opening balance import against a real database', () => {
     expect(await prisma.material.findUnique({ where: { sku: `IT-OB-NEW-${run}` } })).toBeNull();
     expect(await prisma.location.findFirst({ where: { name: rackName } })).toBeNull();
     expect(await prisma.project.findUnique({ where: { projectNumber: `IT-OBP-ROLLBACK-${run}` } })).toBeNull();
+  });
+
+  it('refuses a rack inside a rack by the Locations page\'s rules, and writes nothing', async () => {
+    const outer = `IT OB outer rack ${run}`;
+    await expect(OpeningBalanceService.import({
+      plan: { ...plan([material(`IT-OB-RR-${run}`, [{ location: rackName, quantity: 1 }])]), locations: [{ name: outer, type: 'RACK' }, { name: rackName, type: 'RACK', parent: outer }] },
+      openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
+    })).rejects.toMatchObject({ code: alreadyImported ? 'INVALID_STATE' : 'VALIDATION_ERROR' });
+    expect(await prisma.location.findFirst({ where: { name: outer } })).toBeNull();
+    expect(await prisma.material.findUnique({ where: { sku: `IT-OB-RR-${run}` } })).toBeNull();
   });
 
   it('refuses an opening date in the future', async () => {
@@ -116,6 +127,7 @@ describe('opening balance import against a real database', () => {
 
     const rack = await prisma.location.findFirstOrThrow({ where: { name: rackName } });
     expect(rack.type).toBe('RACK');
+    expect(rack.parentId).toBe(existingLocationId);
     expect(await prisma.location.count({ where: { name: { equals: existingName, mode: 'insensitive' } } })).toBe(1);
 
     for (const [locationId, qty] of [[rack.id, '12'], [existingLocationId, '3.5']] as const) {

@@ -76,7 +76,7 @@ export function renderReport(
       const r = m.result;
       out.push(`Read \`${m.file}\`. With it, the import would create:`, '');
       out.push(`- **${r.materials.length} items**, with ${r.materials.reduce((a, x) => a + x.balances.length, 0)} opening balances`);
-      out.push(`- **${r.locations.length} locations**: ${r.locations.map((l) => `${cell(l.name)} (${l.type.toLowerCase().replace(/_/g, ' ')})`).join(', ')}`);
+      out.push(`- **${r.locations.length} locations**: ${r.locations.map((l) => `${cell(l.name)} (${l.type.toLowerCase().replace(/_/g, ' ')}${l.parent ? `, in ${cell(l.parent)}` : ''})`).join(', ')}`);
       const units = new Map<string, number>();
       for (const x of r.materials) units.set(x.unitOfMeasure, (units.get(x.unitOfMeasure) ?? 0) + 1);
       out.push(`- Units: ${[...units].sort((a, b) => b[1] - a[1]).map(([u, n]) => `${cell(u)} ${n}`).join(', ')}`);
