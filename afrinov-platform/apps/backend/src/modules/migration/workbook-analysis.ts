@@ -64,7 +64,7 @@ export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; t
   MAPPING_ROW_INVALID: { severity: 'error', title: 'Mapping row incomplete or wrong', resolution: 'Correct the row in the mapping file.' },
   UNMAPPED_ITEM: { severity: 'error', title: 'Workbook row not in the mapping file', resolution: 'Add a row for it on the Items sheet, copying the grey columns exactly.' },
   UNMAPPED_LOCATION: { severity: 'error', title: 'Location with no platform location', resolution: 'On the Locations sheet, fill in its platform location and type (add the row if it is missing).' },
-  MAPPING_LOCATION_INVALID: { severity: 'error', title: 'Location type missing or wrong', resolution: 'Choose a type from the list on the Locations sheet.' },
+  MAPPING_LOCATION_INVALID: { severity: 'error', title: 'Location type or room missing or wrong', resolution: 'On the Locations sheet, choose a type from the list; for Located in, name one room or area per place that is not a rack, not the place itself and not inside another room.' },
   SKU_CONFLICT: { severity: 'error', title: 'SKU given to rows that cannot be one item', resolution: 'Give the rows different SKUs, or fix the category, unit or duplicate row.' },
   UNUSED_MAPPING_ROW: { severity: 'review', title: 'Mapping row with no workbook row', resolution: 'Delete the row from the mapping file if the workbook row was merged or removed.' },
   SKU_JOINS_DIFFERENT_NAMES: { severity: 'review', title: 'One SKU joins different names or prices', resolution: 'Check these really are the same item.' },

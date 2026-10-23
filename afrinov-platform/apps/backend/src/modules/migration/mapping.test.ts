@@ -359,3 +359,10 @@ describe('older mapping files', () => {
     expect(mapping.items.every((i) => i.serialNumber === null)).toBe(true);
   });
 });
+
+describe('problem text', () => {
+  it('says the Locations sheet problem covers the room as well as the type', () => {
+    expect(PROBLEM_TEXT.MAPPING_LOCATION_INVALID.title).toBe('Location type or room missing or wrong');
+    expect(PROBLEM_TEXT.MAPPING_LOCATION_INVALID.resolution).toMatch(/Located in/);
+  });
+});
