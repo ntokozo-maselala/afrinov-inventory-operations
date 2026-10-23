@@ -21,14 +21,21 @@ provides `afrinov_test` on loopback port 5433 with its own volume:
 
 ```powershell
 cd afrinov-platform/apps/backend
-# Set POSTGRES_TEST_PASSWORD and SEED_ADMIN_PASSWORD in the local process or
-# ignored .env.test; do not commit them or print their values.
 Copy-Item .env.test.example .env.test
-docker compose --profile test up -d test-db
+# Edit the ignored .env.test before continuing; do not commit or print secrets:
+# - Add POSTGRES_TEST_PASSWORD and SEED_ADMIN_PASSWORD with disposable values.
+# - Set DATABASE_URL's password to POSTGRES_TEST_PASSWORD (URL-encode it).
+# Compose also interpolates the backend's JWT_SECRET when starting only test-db.
+$env:JWT_SECRET = node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+docker compose --env-file .env.test --profile test up -d test-db
 npm.cmd run db:test:migrate
 npm.cmd run db:test:seed
 npm.cmd run test:integration
 ```
+
+Compose does not automatically load `.env.test`; `--env-file` supplies it
+explicitly. Existing shell variables take precedence, so any shell
+`POSTGRES_TEST_PASSWORD` must also match the password in `.env.test`'s URL.
 
 `vitest.integration.config.ts` and the guarded migration/seed scripts read
 only `.env.test` plus existing process variables. They force `NODE_ENV=test`
