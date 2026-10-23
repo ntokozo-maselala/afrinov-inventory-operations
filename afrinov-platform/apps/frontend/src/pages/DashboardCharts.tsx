@@ -189,7 +189,7 @@ export function DashboardLocationDonut({ locations, currency, roomOf }: { locati
     <>
     {grouping}
     <figure className="dashboard-location-composition">
-      <div className="dashboard-donut-wrap" role="img" aria-label={`Share of priced stock value by location: ${description}`}>
+      <div className="dashboard-donut-wrap" role="img" aria-label={`Share of priced stock value by ${canGroup && byRoom ? 'room' : 'location'}: ${description}`}>
         <svg viewBox="0 0 180 180" aria-hidden="true" focusable="false">
           <circle className="dashboard-donut-track" cx="90" cy="90" r={radius} />
           {chartSegments.map((slice, index) => {

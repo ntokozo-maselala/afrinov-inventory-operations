@@ -132,3 +132,19 @@ describe('mock other activity', () => {
     expect(history.map((h) => h.entityId)).toContain('inventory.urgentBelowPercent');
   });
 });
+
+describe('mock movements by room', () => {
+  it('covers a room and the locations inside it with inside=true, and only the one location without', async () => {
+    const locations = await api.get<Array<{ id: string; parentId?: string | null }>>('/locations');
+    const rack = locations.find((l) => l.parentId);
+    expect(rack).toBeDefined();
+    const room = rack!.parentId!;
+    const within = new Set([room, ...locations.filter((l) => l.parentId === room).map((l) => l.id)]);
+    const all = await api.get<Row[]>('/inventory-transactions?limit=1000');
+    const byRoom = await api.get<Row[]>(`/inventory-transactions?limit=1000&locationId=${room}&inside=true`);
+    expect(byRoom.map((t) => t.id)).toEqual(all.filter((t) => within.has(t.locationId)).map((t) => t.id));
+    expect(byRoom.some((t) => t.locationId !== room)).toBe(true);
+    const roomOnly = await api.get<Row[]>(`/inventory-transactions?limit=1000&locationId=${room}`);
+    expect(roomOnly.every((t) => t.locationId === room)).toBe(true);
+  });
+});

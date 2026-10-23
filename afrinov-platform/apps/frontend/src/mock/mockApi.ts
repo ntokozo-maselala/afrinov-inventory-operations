@@ -126,6 +126,12 @@ function findMaterial(id: string): MockMaterial | undefined {
 function findLocation(id: string): MockLocation | undefined {
   return state.locations.find((l) => l.id === id);
 }
+/** As locationsWithin on the server: with inside=true, the location and the ones inside it. */
+function mockLocationScope(qs: Record<string, string>): string[] | undefined {
+  return qs.locationId && qs.inside === 'true'
+    ? [qs.locationId, ...state.locations.filter((l) => l.parentId === qs.locationId).map((l) => l.id)]
+    : undefined;
+}
 function findSupplier(id: string): MockSupplier | undefined {
   return state.suppliers.find((s) => s.id === id);
 }
@@ -2246,6 +2252,7 @@ function olderThan<T extends { id: string }>(rows: T[], cursor: string | undefin
 function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
   const inRange = inDayRange(qs);
   const needle = qs.q?.trim().toLowerCase();
+  const scope = mockLocationScope(qs);
   return state.transactions
     .filter((t) => {
       if (qs.materialId && t.materialId !== qs.materialId) return false;
@@ -2256,7 +2263,7 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (qs.report === 'returned' && t.type !== 'RETURN') return false;
       if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
       if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
-      if (qs.locationId && t.locationId !== qs.locationId) return false;
+      if (scope ? !scope.includes(t.locationId) : qs.locationId && t.locationId !== qs.locationId) return false;
       if (qs.actorId && t.actorId !== qs.actorId) return false;
       if (qs.recipientId && (qs.recipientId === '__none__' ? !!t.recipientId : t.recipientId !== qs.recipientId)) return false;
       if (!inRange(t.postedAt)) return false;
@@ -2336,7 +2343,7 @@ function listReceipts(qs: Record<string, string>) {
   const rows = state.goodsReceipts
     .filter((g) => g.status === 'POSTED' && inRange(g.receivedAt)
       && (!qs.supplierId || g.supplierId === qs.supplierId)
-      && (!qs.locationId || g.lines.some((l) => l.locationId === qs.locationId))
+      && (!qs.locationId || g.lines.some((l) => (mockLocationScope(qs) ?? [qs.locationId]).includes(l.locationId)))
       && (!needle || [g.number, g.deliveryRef, findSupplier(g.supplierId)?.name, ...g.lines.flatMap((l) => [findMaterial(l.materialId)?.sku, findMaterial(l.materialId)?.name])]
         .filter(Boolean).join(' ').toLowerCase().includes(needle)))
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id));
@@ -2358,7 +2365,7 @@ function listCounts(qs: Record<string, string>) {
   const rows = MOCK_AUDIT
     .filter((a) => a.entityType === 'StockCount' && inRange(a.createdAt)
       && (!qs.actorId || a.actorId === qs.actorId)
-      && (!qs.locationId || (a.after as { locationId?: string } | null)?.locationId === qs.locationId))
+      && (!qs.locationId || (mockLocationScope(qs) ?? [qs.locationId]).includes((a.after as { locationId?: string } | null)?.locationId ?? '')))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
   return olderThan(rows, qs.before, (a) => a.createdAt).slice(0, limit).map((a) => {

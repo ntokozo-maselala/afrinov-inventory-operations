@@ -84,7 +84,10 @@ export function Stock() {
   const byId = new Map((locations.data ?? []).map((l) => [l.id, l]));
   const rooms = (locations.data ?? []).filter((l) => (locations.data ?? []).some((x) => x.parentId === l.id))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const room = rooms.some((r) => r.id === params.get('room')) ? params.get('room')! : '';
+  // A room from a link stays in force, even one that no longer holds racks: while the
+  // locations load the table waits, and if they fail it says so rather than show everything.
+  const room = params.get('room') ?? '';
+  const roomPending = !!room && !locations.data && !locations.error;
   const inRoom = (locationId: string) => locationId === room || byId.get(locationId)?.parentId === room;
   const placeOf = (r: CurrentStockRow) => { const l = byId.get(r.locationId); return l ? locationLabel(l) : r.locationName; };
 
@@ -152,14 +155,16 @@ export function Stock() {
 
       <FilterBar
         onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', project: '', room: '' }); } : undefined}
-        count={stock.loading ? 'Loading…' : `${filtered.length} of ${inSection.length} lines`}
+        count={stock.loading || roomPending ? 'Loading…' : `${filtered.length} of ${inSection.length} lines`}
       >
         <SearchField id="stock-search" value={q} onChange={changeQ} placeholder={section === 'PROJECTS' ? 'SKU, material, location or project…' : 'SKU, material or location…'} />
-        {rooms.length > 0 && (
+        {(rooms.length > 0 || room) && (
           <Field label="Room" htmlFor="stock-room" className={FILTER_WIDTH}>
             <Select id="stock-room" value={room} onChange={(e) => writeParams({ room: e.target.value })}>
               <option value="">All rooms</option>
               {rooms.map((r) => <option key={r.id} value={r.id}>{r.name} and its racks</option>)}
+              {/* A linked room holding no racks, or not found: keep it shown, so it can be cleared. */}
+              {room && !rooms.some((r) => r.id === room) && <option value={room}>{byId.get(room)?.name ?? (locations.data ? 'Unknown room' : 'Loading…')}</option>}
             </Select>
           </Field>
         )}
@@ -191,11 +196,12 @@ export function Stock() {
       </FilterBar>
 
       {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
+      {!stock.error && locations.error && <ErrorState message={`Rooms could not be loaded: ${locations.error.message}`} onRetry={locations.reload} />}
 
-      {!stock.error && (
+      {!stock.error && !(room && locations.error) && (
         <DataTable<CurrentStockRow>
           ariaLabel="Stock lines"
-          isLoading={stock.loading}
+          isLoading={stock.loading || roomPending}
           rowKey={(r) => `${r.materialId}-${r.locationId}`}
           rows={filtered}
           columns={columns({ section, placeOf, onAction: (kind, row) => setAction({ kind, row }), canTransfer: hasPermission('inventory:transfer'), canAdjust: hasPermission('inventory:adjust') })}

@@ -34,6 +34,7 @@ describe('DashboardLocationDonut', () => {
     fireEvent.click(screen.getByRole('button', { name: 'By room' }));
     expect(screen.getByRole('button', { name: 'By room' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getAllByText('Main Storeroom').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: /^Share of priced stock value by room:/ })).toBeInTheDocument();
     expect(screen.queryByText('D-1')).toBeNull();
   });
 

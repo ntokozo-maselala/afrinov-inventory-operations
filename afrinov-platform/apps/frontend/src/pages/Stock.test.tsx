@@ -81,3 +81,29 @@ describe('Stock page: by room', () => {
     expect(last.textContent).not.toContain('ELSEWHERE');
   });
 });
+
+describe('Stock page: a room link while the locations are unavailable', () => {
+  const at = (sku: string, locationId: string, locationName: string) => ({ ...row(sku, `Item ${sku}`, 'CONSUMABLES', '5', 'OK'), materialId: `m-${sku}`, locationId, locationName });
+  const STOCK = [at('ON-RACK', 'd1', 'D-1'), at('ELSEWHERE', 'boiler', 'Boiler Shop')];
+
+  it('says the rooms failed to load, with a retry, rather than show stock from everywhere', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') throw new Error('Network down');
+      return STOCK;
+    });
+    renderAt('/stock?room=store');
+    expect(await screen.findByText(/Rooms could not be loaded/)).toBeInTheDocument();
+    expect(screen.queryByText('ELSEWHERE')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Try again' }).length).toBeGreaterThan(0);
+  });
+
+  it('keeps a linked room that holds no racks in force, and shown so it can be cleared', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations'
+      ? [{ id: 'boiler', name: 'Boiler Shop', parentId: null, parent: null }, { id: 'd1', name: 'D-1', parentId: null, parent: null }]
+      : STOCK));
+    renderAt('/stock?room=boiler');
+    expect(await screen.findByText('ELSEWHERE')).toBeInTheDocument();
+    expect(screen.queryByText('ON-RACK')).toBeNull();
+    expect((screen.getByLabelText('Room') as HTMLSelectElement).value).toBe('boiler');
+  });
+});

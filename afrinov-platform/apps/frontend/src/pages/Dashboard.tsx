@@ -90,7 +90,7 @@ export function Dashboard() {
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
   const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
   // The room each location stands in, for the chart's By room view.
-  const { data: locationList } = useApi<Array<{ id: string; parent?: { id: string; name: string } | null }>>('/locations');
+  const { data: locationList, error: locationsError, reload: reloadLocations } = useApi<Array<{ id: string; parent?: { id: string; name: string } | null }>>('/locations');
   const roomOf = useMemo<RoomOf>(() => new Map((Array.isArray(locationList) ? locationList : [])
     .filter((l) => l.parent).map((l) => [l.id, { id: l.parent!.id, name: l.parent!.name }])), [locationList]);
   const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
@@ -154,12 +154,13 @@ export function Dashboard() {
     reloadLowStock();
     reloadValue();
     reloadTools();
+    reloadLocations();
     if (canApprove) { reloadMine(); reloadPending(); }
-  }, [reload, reloadLowStock, reloadValue, reloadTools, canApprove, reloadMine, reloadPending]);
+  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending]);
 
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
-  const dataError = error ?? valueError;
+  const dataError = error ?? valueError ?? locationsError;
   // Approvers get a seventh card, Pending Approvals, so the row has seven columns.
   const kpiCount = canApprove ? 7 : 6;
   const kpiGridClass = canApprove ? 'dashboard-kpis dashboard-kpis-7' : 'dashboard-kpis';
