@@ -22,7 +22,6 @@ type Loc = {
   updatedAt: Date;
 };
 
-type Rack = { id: string; locationId: string | null };
 type Grl = { id: string; locationId: string };
 type InvTx = { id: string; locationId: string };
 type InvBal = { materialId: string; locationId: string; quantity: number };
@@ -31,7 +30,6 @@ type AuditRow = { actorId: string; action: string; entityType: string; entityId:
 
 const db = {
   locations: new Map<string, Loc>(),
-  racks: new Map<string, Rack>(),
   grls: new Map<string, Grl>(),
   invTxs: new Map<string, InvTx>(),
   invBal: new Map<string, InvBal>(),
@@ -99,10 +97,6 @@ function makePrisma(): unknown {
           (where?.parentId === undefined || l.parentId === where.parentId) &&
           (where?.active === undefined || l.active === where.active)).length,
     },
-    rack: {
-      count: async ({ where }: { where: { locationId: string } }) =>
-        [...db.racks.values()].filter((r) => r.locationId === where.locationId).length,
-    },
     goodsReceiptLine: {
       count: async ({ where }: { where: { locationId: string } }) =>
         [...db.grls.values()].filter((g) => g.locationId === where.locationId).length,
@@ -127,7 +121,6 @@ function makePrisma(): unknown {
 
 beforeEach(() => {
   db.locations.clear();
-  db.racks.clear();
   db.grls.clear();
   db.invTxs.clear();
   db.invBal.clear();
@@ -193,10 +186,10 @@ describe('LocationService', () => {
     expect(db.audit.some((a) => a.action === 'ACTIVATE')).toBe(true);
   });
 
-  it('blocks deletion when dependencies exist (racks, GR lines, transactions, balances)', async () => {
+  it('blocks deletion when dependencies exist (GR lines, transactions, balances)', async () => {
     const { LocationService } = await import('./location.service.js');
     const l = await LocationService.create({ name: 'A', type: 'STOREROOM' }, 'user-1');
-    db.racks.set('r-1', { id: 'r-1', locationId: l.id });
+    db.invTxs.set('t-1', { id: 't-1', locationId: l.id });
     await expect(LocationService.remove(l.id, 'user-1')).rejects.toThrow(/cannot be deleted/i);
   });
 

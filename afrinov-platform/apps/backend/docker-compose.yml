@@ -47,8 +47,8 @@ services:
       # API docs at /api/docs. Off in production unless this is "true".
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
       # Password for the admin account the seed creates on first start. The
-      # seed refuses to run in production without it, so it is required the
-      # first time against an empty database and ignored once the admin exists.
+      # current production seed checks this before looking up the existing
+      # admin, so keep it injected on every Compose startup.
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       PORT: 4000
     depends_on:
@@ -58,8 +58,8 @@ services:
       - "4000:4000"
     # Seed is idempotent. Run the compiled seed (node dist/db/seed.js) rather
     # than `npm run db:seed`, which needs tsx — a dev dependency that is
-    # pruned from the production image. SEED_ADMIN_PASSWORD is only consumed
-    # the first time the admin account is created (see above).
+    # pruned from the production image. The current seed requires
+    # SEED_ADMIN_PASSWORD on every production invocation (see above).
     command: sh -c "npx prisma migrate deploy && node dist/db/seed.js && node dist/index.js"
 
 volumes:

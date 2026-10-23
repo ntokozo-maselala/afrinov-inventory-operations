@@ -1,0 +1,87 @@
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Fastify as Fastify request pipeline
+    participant Limit as Rate limiter
+    participant Auth as JWT / authenticate hook
+    participant Permission as Permission check
+    participant Route as Route handler / service
+    participant Prisma as Prisma client
+    participant DB as PostgreSQL
+
+    Client->>Fastify: HTTP request
+    Fastify->>Fastify: Parse request; assign request ID; log request
+    Fastify->>Limit: Apply route-specific or global IP budget
+    alt Rate limit exceeded
+        Limit-->>Client: 429 TOO_MANY_REQUESTS
+    else GET /health
+        Fastify->>Route: Liveness handler (no auth, no DB)
+        Route-->>Client: 200 {status: ok}
+    else GET /health/ready
+        Fastify->>Prisma: SELECT 1
+        Prisma->>DB: Probe connection
+        alt Probe succeeds
+            DB-->>Prisma: Result
+            Prisma-->>Client: 200 {status: ready, database: connected}
+        else Probe fails
+            Prisma-->>Fastify: Connection error; log
+            Fastify-->>Client: 503 {status: not_ready}
+        end
+    else POST /api/v1/auth/login
+        Fastify->>Route: Validate email/password with Zod
+        alt Invalid body
+            Route-->>Client: 400 VALIDATION_ERROR
+        else Valid body
+            Route->>Prisma: Find user and role names
+            Prisma->>DB: SELECT user by lowercase email
+            DB-->>Prisma: User row or none
+            Route->>Route: Check active flag and bcrypt password hash
+            alt Invalid credentials
+                Route-->>Client: 401 UNAUTHENTICATED
+            else Credentials valid
+                Route-->>Client: 200 user + 12-hour JWT
+            end
+        end
+    else GET /api/v1/materials
+        Fastify->>Auth: Verify bearer JWT
+        alt Missing, invalid or inactive account
+            Auth-->>Client: 401 UNAUTHENTICATED
+        else Active account
+            Fastify->>Route: Validate query and call MaterialService.list
+            Route->>Prisma: Query materials + project summary
+            Prisma->>DB: SELECT with filters/order
+            DB-->>Prisma: Material rows
+            Route-->>Client: 200 serialized materials
+        end
+    else POST /api/v1/inventory-issues
+        Fastify->>Auth: Verify bearer JWT and active user in DB
+        alt Missing, invalid or inactive account
+            Auth-->>Client: 401 UNAUTHENTICATED
+        else Active account
+            Fastify->>Permission: Require IssueInventory
+            Permission->>Prisma: Load role permissions
+            Prisma->>DB: SELECT user roles and permission codes
+            DB-->>Prisma: Current permission set
+            alt Permission absent
+                Permission-->>Client: 403 FORBIDDEN
+            else Permission present
+                Fastify->>Route: Validate Zod issue payload
+                alt Invalid body
+                    Route-->>Client: 400 VALIDATION_ERROR
+                else Valid body
+                    Route->>Prisma: Begin transaction; check entities and balance
+                    Prisma->>DB: Read active records and current balance
+                    DB-->>Prisma: Current rows
+                    alt Insufficient stock or business rule failure
+                        Prisma-->>Route: Roll back; ApiError
+                        Route-->>Client: 422 / 400 / 404 domain error
+                    else Checks pass
+                        Route->>Prisma: Insert signed ISSUE ledger rows; recompute balances
+                        Prisma->>DB: Commit transaction
+                        DB-->>Prisma: Commit result
+                        Route-->>Client: 201 transaction IDs
+                    end
+                end
+            end
+        end
+    end

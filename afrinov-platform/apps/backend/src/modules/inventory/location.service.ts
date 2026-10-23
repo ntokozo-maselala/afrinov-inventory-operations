@@ -125,25 +125,23 @@ async function assertRoomActive(db: Db, name: string, parentId: string | null): 
 interface DependencyCounts {
   /** Locations standing inside this one. */
   locations: number;
-  racks: number;
   goodsReceiptLines: number;
   inventoryTransactions: number;
   inventoryBalances: number;
 }
 
 async function dependencyCounts(db: Db, id: string): Promise<DependencyCounts> {
-  const [locations, racks, goodsReceiptLines, inventoryTransactions, inventoryBalances] = await Promise.all([
+  const [locations, goodsReceiptLines, inventoryTransactions, inventoryBalances] = await Promise.all([
     db.location.count({ where: { parentId: id } }),
-    db.rack.count({ where: { locationId: id } }),
     db.goodsReceiptLine.count({ where: { locationId: id } }),
     db.inventoryTransaction.count({ where: { locationId: id } }),
     db.inventoryBalance.count({ where: { locationId: id } }),
   ]);
-  return { locations, racks, goodsReceiptLines, inventoryTransactions, inventoryBalances };
+  return { locations, goodsReceiptLines, inventoryTransactions, inventoryBalances };
 }
 
 function hasAnyDependency(c: DependencyCounts): boolean {
-  return c.locations + c.racks + c.goodsReceiptLines + c.inventoryTransactions + c.inventoryBalances > 0;
+  return c.locations + c.goodsReceiptLines + c.inventoryTransactions + c.inventoryBalances > 0;
 }
 
 /**

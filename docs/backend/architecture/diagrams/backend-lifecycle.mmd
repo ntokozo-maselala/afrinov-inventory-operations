@@ -1,0 +1,41 @@
+sequenceDiagram
+    autonumber
+    actor Dev as Developer or container runtime
+    participant NPM as npm script
+    participant Entry as src/index.ts / dist/index.js
+    participant Config as shared/config.ts
+    participant Server as server.ts
+    participant Prisma as PrismaClient
+    participant PG as PostgreSQL
+    participant Fastify as Fastify listener
+
+    Dev->>NPM: npm run dev / npm start / Compose command
+    NPM->>Entry: tsx watch --env-file OR node dist/index.js
+    Note over Entry,Prisma: ESM imports construct the lazy Prisma singleton before entry body validation
+    Entry->>Entry: Register uncaughtException and unhandledRejection handlers
+    Entry->>Config: loadConfig() (fail fast)
+    alt Invalid required config
+        Config-->>Entry: ConfigError
+        Entry-->>Dev: Log configuration error; exit 1
+    else Valid config
+        Entry->>Server: start()
+        Server->>Config: loadConfig()
+        Server->>Server: buildServer(); loadConfig() again
+        Server->>Server: Register hooks, plugins, errors, health and feature routes
+        Server->>Prisma: SELECT 1 (best-effort startup probe)
+        alt Database reachable
+            Prisma->>PG: Query
+            PG-->>Prisma: Result
+            Prisma-->>Server: Probe succeeds
+        else Database unavailable
+            Prisma-->>Server: Connection error logged; startup continues
+        end
+        Server->>Fastify: listen(HOST, PORT)
+        Fastify-->>Dev: Bound; health routes available
+        Note over Fastify,PG: /health is liveness; /health/ready checks PostgreSQL on demand
+        Dev->>Fastify: SIGTERM or SIGINT
+        Fastify->>Fastify: app.close() and drain listener
+        Fastify->>Prisma: $disconnect()
+        Prisma-->>Fastify: Pool closed
+        Fastify-->>Dev: Log completion; exit 0
+    end

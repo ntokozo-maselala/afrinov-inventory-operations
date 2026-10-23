@@ -47,7 +47,6 @@ interface LocationDetails extends Location {
   dependencyCounts?: {
     /** Locations standing inside this one. */
     locations?: number;
-    racks: number;
     goodsReceiptLines: number;
     inventoryTransactions: number;
     inventoryBalances: number;
@@ -227,7 +226,7 @@ function LocationForm({ initial, all, onCancel, onSaved, onError }: LocationForm
 
 function LocationDetailsView({ location, onClose }: { location: LocationDetails; onClose: () => void }) {
   const deps = location.dependencyCounts;
-  const total = deps ? (deps.locations ?? 0) + deps.racks + deps.goodsReceiptLines + deps.inventoryTransactions + deps.inventoryBalances : 0;
+  const total = deps ? (deps.locations ?? 0) + deps.goodsReceiptLines + deps.inventoryTransactions + deps.inventoryBalances : 0;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -272,7 +271,7 @@ function LocationDetailsView({ location, onClose }: { location: LocationDetails;
 
       {deps && total > 0 && (
         <Alert tone="info" title="Referenced by other records">
-          <p className="text-sm">This location is referenced by {total} record(s) ({deps.locations ?? 0} location(s) inside it, {deps.racks} rack(s), {deps.goodsReceiptLines} goods receipt line(s), {deps.inventoryTransactions} transaction(s), {deps.inventoryBalances} inventory balance(s)). {(deps.locations ?? 0) > 0
+          <p className="text-sm">This location is referenced by {total} record(s) ({deps.locations ?? 0} location(s) inside it, {deps.goodsReceiptLines} goods receipt line(s), {deps.inventoryTransactions} transaction(s), {deps.inventoryBalances} inventory balance(s)). {(deps.locations ?? 0) > 0
             ? 'Move the locations inside it out before deleting or deactivating it.'
             : 'Deactivate the location instead of deleting it to preserve history.'}</p>
         </Alert>
@@ -501,7 +500,7 @@ export function Locations() {
           onClose={() => setPendingDelete(null)}
           onConfirm={() => void performDelete()}
           title={`Delete ${pendingDelete.name}?`}
-          description="If this location is referenced by inventory, racks, goods receipts, or transactions the deletion will be blocked and you will be asked to deactivate it instead."
+          description="If this location holds other locations, or is referenced by inventory, goods receipts or transactions, the deletion will be blocked and you will be asked to deactivate it instead."
           confirmLabel="Delete"
           destructive
           loading={deleting}

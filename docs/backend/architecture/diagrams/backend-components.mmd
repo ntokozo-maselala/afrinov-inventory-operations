@@ -1,0 +1,22 @@
+flowchart LR
+  IDX["src/index.ts<br/>process entry"] --> CFG["shared/config.ts<br/>validation and flags"]
+  IDX --> SRV["server.ts<br/>Fastify assembly and listener"]
+  SRV --> PLUG["Fastify plugins<br/>CORS, Helmet, JWT, rate limit"]
+  SRV --> AUTH["shared/authorization.ts<br/>active user and permissions"]
+  SRV --> RT["Feature route modules<br/>identity, inventory, procurement,<br/>operations, reporting, settings,<br/>audit, health"]
+  RT --> SVC["Feature services<br/>business rules"]
+  RT -. "some routes query Prisma directly" .-> DB["shared/db.ts<br/>singleton PrismaClient"]
+  SVC --> SH["shared helpers<br/>errors, dates, decimal, balances, settings"]
+  SVC --> DB
+  AUTH --> DB
+  DB --> PG[("PostgreSQL 16")]
+  MIG["Prisma schema + 22 migrations<br/>seed and operator scripts"] --> PG
+  DOC["OpenAPI document and Swagger UI"] -. "enabled by config" .-> SRV
+  EV["In-process domain events"] -. "no runtime handlers found" .-> SVC
+  CI["GitHub Actions checks + Postgres integration"] -. "workflow inspected; not run" .-> RT
+  DOCKER["Dockerfile / Compose"] -. "image build not verified" .-> SRV
+
+  classDef confirmed fill:#e8f3ff,stroke:#2463a6,color:#172b4d;
+  classDef conditional fill:#fff4d6,stroke:#b7791f,color:#4a3410;
+  class IDX,CFG,SRV,PLUG,AUTH,RT,SVC,SH,DB,PG,MIG confirmed;
+  class DOC,EV,CI,DOCKER conditional;

@@ -193,15 +193,6 @@ export const ActivityService = {
       const label = [str(a['code']) ?? str(b['code']), str(a['name']) ?? str(b['name'])].filter(Boolean).join(' ');
       if (label) names.set(r.entityId, label);
     }
-    // A rack whose audit entries carry no name (seeded or imported, not yet
-    // through racks to locations) is still a Rack row: name it from there
-    // while the table stays. Phase 3.3 drops this with the table, when every
-    // rack has been through 3.1, which records each one's name.
-    const unnamed = [...rackIds].filter((id) => !names.has(id));
-    if (unnamed.length) {
-      const racks = await prisma.rack.findMany({ where: { id: { in: unnamed } }, select: { id: true, code: true, name: true } });
-      for (const r of racks) names.set(r.id, `${r.code} ${r.name}`);
-    }
     const userName = new Map(users.map((u) => [u.id, u.name]));
 
     return entries.map((e) => ({
