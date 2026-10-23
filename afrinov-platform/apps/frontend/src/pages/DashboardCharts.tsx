@@ -1,4 +1,5 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
+import { Button } from '../components/Button';
 import { formatCurrency } from '../lib/currency';
 import { formatNumber } from '../lib/format';
 import { categoryLabel } from '../lib/categories';
@@ -120,6 +121,27 @@ interface LocationSlice {
   share: number;
 }
 
+/** Where each location stands: location id -> its room. Locations in no room are left out. */
+export type RoomOf = Map<string, { id: string; name: string }>;
+
+/**
+ * The rows with each rack's value added into its room: one row per room, and
+ * one per location that stands in no room. Quantities and values are summed.
+ */
+export function groupByRoom(locations: ReportLocationRow[], roomOf: RoomOf): ReportLocationRow[] {
+  const byKey = new Map<string, ReportLocationRow>();
+  for (const l of locations) {
+    const room = roomOf.get(l.locationId);
+    const key = room?.id ?? l.locationId;
+    const row = byKey.get(key) ?? { ...l, locationId: key, locationName: room?.name ?? l.locationName, quantity: 0, inventoryValue: 0, share: 0 };
+    if (room && key === l.locationId) row.locationName = l.locationName;
+    row.quantity += l.quantity;
+    row.inventoryValue += l.inventoryValue;
+    byKey.set(key, row);
+  }
+  return [...byKey.values()];
+}
+
 function getLocationSlices(locations: ReportLocationRow[]): LocationSlice[] {
   const ranked = locations
     .filter((location) => location.inventoryValue > 0)
@@ -139,8 +161,17 @@ function getLocationSlices(locations: ReportLocationRow[]): LocationSlice[] {
   return visible;
 }
 
-export function DashboardLocationDonut({ locations, currency }: { locations: ReportLocationRow[]; currency: string }) {
-  const slices = getLocationSlices(locations);
+export function DashboardLocationDonut({ locations, currency, roomOf }: { locations: ReportLocationRow[]; currency: string; roomOf?: RoomOf }) {
+  // By room adds each rack's value into the room it stands in; offered once a rack has a room.
+  const [byRoom, setByRoom] = useState(false);
+  const canGroup = !!roomOf && roomOf.size > 0;
+  const slices = getLocationSlices(canGroup && byRoom ? groupByRoom(locations, roomOf!) : locations);
+  const grouping = canGroup && (
+    <div className="flex gap-2 mb-3" role="group" aria-label="Show value by">
+      <Button size="sm" variant={byRoom ? 'ghost' : 'secondary'} aria-pressed={!byRoom} onClick={() => setByRoom(false)}>By location</Button>
+      <Button size="sm" variant={byRoom ? 'secondary' : 'ghost'} aria-pressed={byRoom} onClick={() => setByRoom(true)}>By room</Button>
+    </div>
+  );
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   const radius = 65;
   const circumference = 2 * Math.PI * radius;
@@ -150,11 +181,13 @@ export function DashboardLocationDonut({ locations, currency }: { locations: Rep
   }));
 
   if (slices.length === 0) {
-    return <div className="dashboard-chart-empty">No priced stock is available for location comparison.</div>;
+    return <>{grouping}<div className="dashboard-chart-empty">No priced stock is available for location comparison.</div></>;
   }
 
   const description = slices.map((slice) => `${slice.name} ${Math.round(slice.share * 100)}%`).join('; ');
   return (
+    <>
+    {grouping}
     <figure className="dashboard-location-composition">
       <div className="dashboard-donut-wrap" role="img" aria-label={`Share of priced stock value by location: ${description}`}>
         <svg viewBox="0 0 180 180" aria-hidden="true" focusable="false">
@@ -197,5 +230,6 @@ export function DashboardLocationDonut({ locations, currency }: { locations: Rep
         </ul>
       </figcaption>
     </figure>
+    </>
   );
 }

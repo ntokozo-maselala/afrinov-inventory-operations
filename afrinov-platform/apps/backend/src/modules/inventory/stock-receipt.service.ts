@@ -44,6 +44,8 @@ export interface ReceiptListFilter {
   supplierId?: string;
   /** Deliveries with a line into this location. */
   locationId?: string;
+  /** A room and the locations inside it; wins over locationId. */
+  locationIds?: string[];
   /** Matches the receipt number, delivery note, supplier or an item code or name. */
   q?: string;
   before?: string;
@@ -68,7 +70,8 @@ export const StockReceiptService = {
     const receivedAt = dayRange(filter.from, filter.to);
     if (receivedAt) and.push({ receivedAt });
     if (filter.supplierId) and.push({ supplierId: filter.supplierId });
-    if (filter.locationId) and.push({ lines: { some: { locationId: filter.locationId } } });
+    if (filter.locationIds) and.push({ lines: { some: { locationId: { in: filter.locationIds } } } });
+    else if (filter.locationId) and.push({ lines: { some: { locationId: filter.locationId } } });
     const q = filter.q?.trim();
     if (q) {
       const contains = { contains: q, mode: 'insensitive' as const };

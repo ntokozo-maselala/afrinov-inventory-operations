@@ -299,3 +299,25 @@ describe('Movements page', () => {
     }
   });
 });
+
+describe('Movements: a room with the racks inside', () => {
+  it('offers rooms holding racks, and asks for the room and its racks (inside=true)', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/locations')) return [
+        { id: 'store', name: 'Main Storeroom', parentId: null },
+        { id: 'd1', name: 'D-1', parentId: 'store', parent: { name: 'Main Storeroom' } },
+      ];
+      if (path.startsWith('/inventory-transactions/summary')) return { total: 0, byType: {} };
+      if (path.startsWith('/inventory-transactions/actors')) return [];
+      return [];
+    });
+    render(<MemoryRouter initialEntries={['/movements?from=2026-10-01']}><ToastProvider><Movements /></ToastProvider></MemoryRouter>);
+    const select = await screen.findByLabelText('Location');
+    await screen.findByRole('option', { name: 'Main Storeroom and its racks' });
+    fireEvent.change(select, { target: { value: 'inside:store' } });
+    await waitFor(() => expect(calls('/inventory-transactions?').some((p) => p.includes('locationId=store') && p.includes('inside=true'))).toBe(true));
+    // One location on its own asks for exactly that location.
+    fireEvent.change(select, { target: { value: 'd1' } });
+    await waitFor(() => expect(calls('/inventory-transactions?').some((p) => p.includes('locationId=d1') && !p.includes('inside='))).toBe(true));
+  });
+});

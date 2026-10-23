@@ -19,6 +19,7 @@ import { STORES_CATEGORIES, categoryLabel, sectionOf, type MaterialSection } fro
 import { Badge } from '../components/Badge';
 import type { CurrentStockRow } from '../api/types';
 import { LeftoversNotice } from '../components/LeftoversNotice';
+import { locationLabel, type NamedLocation } from '../lib/locations';
 
 
 const STATUS_OPTIONS = [
@@ -42,6 +43,8 @@ const closed = (r: CurrentStockRow) => r.project?.status === 'COMPLETED' || r.pr
 
 export function Stock() {
   const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
+  // Which room each location stands in: for the Room filter and the Location column.
+  const locations = useApi<Array<{ id: string; parentId?: string | null } & NamedLocation>>('/locations');
   // Other pages link here with ?q=, ?category= or ?status= (an item's page sends
   // its SKU), and with ?section=PROJECTS&project= for a project's stock.
   const [params, setParams] = useSearchParams();
@@ -77,6 +80,14 @@ export function Stock() {
   const { hasPermission } = usePermissions();
   const toast = useToast();
 
+  // Rooms with locations inside them; a room's stock includes its racks'.
+  const byId = new Map((locations.data ?? []).map((l) => [l.id, l]));
+  const rooms = (locations.data ?? []).filter((l) => (locations.data ?? []).some((x) => x.parentId === l.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const room = rooms.some((r) => r.id === params.get('room')) ? params.get('room')! : '';
+  const inRoom = (locationId: string) => locationId === room || byId.get(locationId)?.parentId === room;
+  const placeOf = (r: CurrentStockRow) => { const l = byId.get(r.locationId); return l ? locationLabel(l) : r.locationName; };
+
   const inSection = (stock.data ?? []).filter((r) => sectionOf(r.category) === section);
   const counts = {
     STORES: (stock.data ?? []).filter((r) => sectionOf(r.category) === 'STORES').length,
@@ -88,6 +99,7 @@ export function Stock() {
   const unassigned = inSection.some((r) => !r.projectNumber);
   const needle = q.trim().toLowerCase();
   const filtered = inSection.filter((r) => {
+    if (room && !inRoom(r.locationId)) return false;
     if (section === 'STORES' && category && r.category !== category) return false;
     if (project === NO_PROJECT && r.projectNumber) return false;
     if (project && project !== NO_PROJECT && r.projectNumber !== project) return false;
@@ -95,7 +107,7 @@ export function Stock() {
     if (section === 'STORES' && status === 'out' && qty > 0) return false;
     if (section === 'STORES' && status && status !== 'out' && r.stockStatus !== status) return false;
     if (needle) {
-      const hay = `${r.materialSku} ${r.materialName} ${r.locationName} ${r.projectNumber ?? ''} ${r.project?.name ?? ''}`.toLowerCase();
+      const hay = `${r.materialSku} ${r.materialName} ${placeOf(r)} ${r.projectNumber ?? ''} ${r.project?.name ?? ''}`.toLowerCase();
       if (!hay.includes(needle)) return false;
     }
     return true;
@@ -105,7 +117,7 @@ export function Stock() {
     filtered.sort((a, b) => (a.projectNumber ?? '\uffff').localeCompare(b.projectNumber ?? '\uffff') || a.materialSku.localeCompare(b.materialSku));
   }
 
-  const activeFilters = (section === 'STORES' && category ? 1 : 0) + (section === 'STORES' && status ? 1 : 0) + (q ? 1 : 0) + (project ? 1 : 0);
+  const activeFilters = (section === 'STORES' && category ? 1 : 0) + (section === 'STORES' && status ? 1 : 0) + (q ? 1 : 0) + (project ? 1 : 0) + (room ? 1 : 0);
 
   return (
     <div>
@@ -139,10 +151,18 @@ export function Stock() {
       {section === 'PROJECTS' && <LeftoversNotice projectNumber={project || undefined} className="mb-4" />}
 
       <FilterBar
-        onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', project: '' }); } : undefined}
+        onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', project: '', room: '' }); } : undefined}
         count={stock.loading ? 'Loading…' : `${filtered.length} of ${inSection.length} lines`}
       >
         <SearchField id="stock-search" value={q} onChange={changeQ} placeholder={section === 'PROJECTS' ? 'SKU, material, location or project…' : 'SKU, material or location…'} />
+        {rooms.length > 0 && (
+          <Field label="Room" htmlFor="stock-room" className={FILTER_WIDTH}>
+            <Select id="stock-room" value={room} onChange={(e) => writeParams({ room: e.target.value })}>
+              <option value="">All rooms</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name} and its racks</option>)}
+            </Select>
+          </Field>
+        )}
         {section === 'STORES' ? (
           <>
             <Field label="Category" htmlFor="stock-category" className={FILTER_WIDTH}>
@@ -178,7 +198,7 @@ export function Stock() {
           isLoading={stock.loading}
           rowKey={(r) => `${r.materialId}-${r.locationId}`}
           rows={filtered}
-          columns={columns({ section, onAction: (kind, row) => setAction({ kind, row }), canTransfer: hasPermission('inventory:transfer'), canAdjust: hasPermission('inventory:adjust') })}
+          columns={columns({ section, placeOf, onAction: (kind, row) => setAction({ kind, row }), canTransfer: hasPermission('inventory:transfer'), canAdjust: hasPermission('inventory:adjust') })}
           emptyState={(
             <EmptyState
               title={activeFilters ? 'No stock matches your filters' : section === 'PROJECTS' ? 'No Projects stock' : 'No stock yet'}
@@ -217,8 +237,10 @@ function actionTitle(kind: StockActionKind, row: CurrentStockRow): string {
   }[kind];
 }
 
-function columns({ section, onAction, canTransfer, canAdjust }: {
+function columns({ section, placeOf, onAction, canTransfer, canAdjust }: {
   section: MaterialSection;
+  /** Where a row's stock is: a rack with its room, "D-1 · Main Storeroom". */
+  placeOf: (r: CurrentStockRow) => string;
   onAction: (kind: StockActionKind, row: CurrentStockRow) => void;
   canTransfer: boolean;
   canAdjust: boolean;
@@ -237,7 +259,7 @@ function columns({ section, onAction, canTransfer, canAdjust }: {
           </span>
         ),
       },
-    { key: 'loc', header: 'Location', render: (r) => r.locationName, width: '10rem' },
+    { key: 'loc', header: 'Location', render: (r) => placeOf(r), width: '10rem' },
     { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span>, width: '8rem' },
     { key: 'uom', header: 'UoM', render: (r) => r.unitOfMeasure, width: '6rem' },
     // Re-ordering is for Stores: Projects material is bought per job.

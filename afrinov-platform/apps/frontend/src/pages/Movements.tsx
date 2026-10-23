@@ -77,10 +77,15 @@ export function Movements() {
   // What every request of this report shares: the day or range, and its filters.
   const queryParams = new URLSearchParams({ from, to });
   for (const f of report.filters) { const v = params.get(f); if (v) queryParams.set(f, v); }
+  // A room "with the racks inside" covers the room and the locations inside it.
+  if (report.filters.includes('locationId') && queryParams.has('locationId') && params.get('inside') === 'true') queryParams.set('inside', 'true');
   const query = queryParams.toString();
 
   const ledgerActors = has('actorId') && report.id !== 'other';
-  const locations = useApi<Array<Option & { parent?: { name: string } | null }>>(has('locationId') ? '/locations' : null);
+  const locations = useApi<Array<Option & { parentId?: string | null; parent?: { name: string } | null }>>(has('locationId') ? '/locations' : null);
+  // Rooms with locations inside them, offered "with the racks inside" (inside=true).
+  const rooms = (locations.data ?? []).filter((l) => (locations.data ?? []).some((x) => x.parentId === l.id));
+  const inside = params.get('inside') === 'true';
   const suppliers = useApi<Option[]>(has('supplierId') ? '/suppliers' : null);
   const recipients = useApi<Option[]>(has('recipientId') ? '/recipients' : null);
   const materials = useApi<Material[]>(has('materialId') ? '/materials' : null);
@@ -116,6 +121,17 @@ export function Movements() {
     setParams(keep, { replace: true });
   }
 
+  /** A location, or a room with the racks inside it ("inside:<id>"). */
+  function chooseLocation(value: string) {
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      const id = value.startsWith('inside:') ? value.slice('inside:'.length) : value;
+      if (id) next.set('locationId', id); else next.delete('locationId');
+      if (value.startsWith('inside:')) next.set('inside', 'true'); else next.delete('inside');
+      return next;
+    }, { replace: true });
+  }
+
   const showView = (v: ReportView) => setParam('view', v === 'cards' ? 'cards' : null);
 
   // Tools are checked out to someone; stock is issued to them, and returned by them.
@@ -130,7 +146,7 @@ export function Movements() {
       if (!v) continue;
       if (f === 'supplierId') words.push(`Supplier: ${name(suppliers.data, v)}`);
       else if (f === 'recipientId') words.push(`${recipientLabel}: ${v === '__none__' ? 'Not recorded' : name(recipients.data, v)}`);
-      else if (f === 'locationId') words.push(`Location: ${name(locations.data, v)}`);
+      else if (f === 'locationId') words.push(`Location: ${name(locations.data, v)}${inside ? ' and the locations inside it' : ''}`);
       else if (f === 'actorId') words.push(`Person: ${name(actors.data, v)}`);
       else if (f === 'materialId') words.push(`Item: ${itemOptions.find((o) => o.value === v)?.label ?? v}`);
       else if (f === 'q') words.push(`Search: "${v}"`);
@@ -214,9 +230,20 @@ export function Movements() {
         )}
         {has('locationId') && (
           <Field label="Location" htmlFor="mv-location" className={FILTER_WIDTH}>
-            <Select id="mv-location" value={params.get('locationId') ?? ''} onChange={(e) => setParam('locationId', e.target.value)}>
+            <Select
+              id="mv-location"
+              value={params.get('locationId') ? `${inside ? 'inside:' : ''}${params.get('locationId')}` : ''}
+              onChange={(e) => chooseLocation(e.target.value)}
+            >
               <option value="">All locations</option>
-              {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
+              {rooms.length > 0 && (
+                <optgroup label="Rooms, with the racks inside">
+                  {rooms.map((r) => <option key={`inside:${r.id}`} value={`inside:${r.id}`}>{r.name} and its racks</option>)}
+                </optgroup>
+              )}
+              <optgroup label={rooms.length > 0 ? 'One location' : 'Locations'}>
+                {(locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
+              </optgroup>
             </Select>
           </Field>
         )}

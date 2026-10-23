@@ -211,6 +211,8 @@ export interface HistoryFilter {
   to?: string;
   projectNumber?: string;
   locationId?: string;
+  /** A room and the locations inside it, from locationId with inside=true; wins over locationId. */
+  locationIds?: string[];
   actorId?: string;
   /** Who it was issued to; '__none__' for issues with no recipient recorded. */
   recipientId?: string;
@@ -250,7 +252,9 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
     and.push({ OR: [{ referenceType: null }, { referenceType: { not: 'StockCount' } }] });
   }
   if (filter.projectNumber) where.projectNumber = filter.projectNumber;
-  if (filter.locationId) where.locationId = filter.locationId;
+  // A room and its racks (inside=true), else the one location.
+  if (filter.locationIds) where.locationId = { in: filter.locationIds };
+  else if (filter.locationId) where.locationId = filter.locationId;
   if (filter.actorId) where.actorId = filter.actorId;
   if (filter.recipientId) where.recipientId = filter.recipientId === '__none__' ? null : filter.recipientId;
   if (filter.issueIds) where.issueId = { in: filter.issueIds };

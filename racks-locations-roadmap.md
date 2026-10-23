@@ -12,11 +12,11 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | A location can sit inside another | S–M | In review (#85) |
-| 2 | Show and choose the parent on screen | S–M | In review (#86) |
-| 3 | Move the Rack records onto locations, retire Racks | M | 3.1 done (#87); 3.2 in review |
+| 1 | A location can sit inside another | S–M | Done (#85) |
+| 2 | Show and choose the parent on screen | S–M | Done (#86) |
+| 3 | Move the Rack records onto locations, retire Racks | M | 3.1 done (#87); 3.2 done (#88); 3.3 in review (#90) |
 | 4 | The import asks which room each rack is in | S | Not started |
-| 5 | Stock by room, racks included | S–M | Not started |
+| 5 | Stock by room, racks included | S–M | In review |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
@@ -89,11 +89,11 @@ Size S. Backend. Needs Phase 1 and the "which room" decision.
 
 Size S–M. Backend and frontend. Needs Phase 1.
 
-- [ ] **5.1 Filter by room.** The Stock page and the movement reports can be filtered by a room, covering stock on its racks too.
+- [x] **5.1 Filter by room.** *Built.* The Stock page and the movement reports can be filtered by a room, covering stock on its racks too. The Stock page has a Room filter and names a rack with its room (`D-1 · Main Storeroom`). On Movements, a room is offered as "Main Storeroom and its racks", which sends `inside=true` with `locationId`; the movement reports, deliveries and counts all take it. A plain `locationId` stays exactly that one location, as Count stock relies on.
   Files: `pages/Stock.tsx`, `pages/Movements.tsx`, the matching report queries
-- [ ] **5.2 Dashboard by room.** The Dashboard's stock-by-location chart can group racks under their room.
+- [x] **5.2 Dashboard by room.** *Built.* The Dashboard's stock-by-location chart can group racks under their room: a "By location / By room" switch, shown once a location stands in a room.
   Files: `pages/DashboardCharts.tsx`
-- [ ] **5.3 Exports keep the workbook's "Rack" column** as the location the stock is on (`D-1`), as today.
+- [x] **5.3 Exports keep the workbook's "Rack" column** as the location the stock is on (`D-1`), as today. *No change needed.*
 
 **Done when:** "what is in the Main Storeroom?" counts the stock on its racks.
 
