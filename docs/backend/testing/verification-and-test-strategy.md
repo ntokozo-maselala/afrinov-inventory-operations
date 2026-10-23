@@ -50,6 +50,11 @@ password is supplied with `SEED_ADMIN_PASSWORD`, not embedded in test code.
 
 Executed on 2026-10-23 with Node 24.21.0 and npm 11.19.0 unless stated.
 PowerShell used `npm.cmd` because `npm.ps1` is blocked by execution policy.
+The PostgreSQL and final Playwright runs used the local working tree based on
+`aaff02e` on `main`; those auth/test changes were later committed as `d78c3ec`
+(`fix(auth): harden test isolation and runtime config`) on
+`fix/auth-environment-isolation`. The Dockerfile manifest fix was built later
+that day and committed as `fdbdd1d`.
 
 | Command/check | Result | Interpretation |
 | --- | --- | --- |
@@ -65,11 +70,17 @@ PowerShell used `npm.cmd` because `npm.ps1` is blocked by execution policy.
 | `npm.cmd run typecheck` in frontend | Passed. | Includes E2E and Playwright config TS. |
 | `npm.cmd run build` in frontend | Passed. | Vite 8.2.4 build completed; emitted config-loader/esbuild deprecation, ExcelJS direct-eval, and >500 kB chunk warnings. |
 | `npx.cmd playwright test --list` with synthetic local `_test` URL and fixture password | Passed: found 2 tests in 1 file. | Discovery only; did not start browser, backend, frontend, or database. |
-| Compose config with synthetic values, with and without `--profile test` | Both parsed: the normal profile needs only `POSTGRES_PASSWORD`; the test profile accepts `POSTGRES_TEST_PASSWORD`; build context resolves to the workspace root and test DB binds `127.0.0.1:5433`. | Docker config access emitted warnings; no engine, image, or service was started. |
+| `docker compose --profile test config --quiet` with only `POSTGRES_TEST_PASSWORD` set | Passed. | Confirms the dedicated test credential satisfies Compose interpolation. Compose emits a nonfatal warning for the inactive backend service's `DATABASE_URL`, which references unset `POSTGRES_PASSWORD`. |
+| Same Compose check with both password variables unset | Failed with the required-password error. | Confirms Compose still fails closed when neither credential is supplied. |
 | `npx.cmd prisma validate --schema prisma/schema.prisma` | Passed. | Schema is syntactically valid; no applied migration state was queried. |
 | `npm.cmd ci` from `afrinov-platform/` | Failed twice with Windows `EPERM` unlink errors on locked native Rolldown/Rollup files. | No lockfile change. Recovery `npm.cmd install --no-audit --no-fund` exited 0 but warned about cleanup; this does not count as a clean lockfile install. |
 | `npm audit --audit-level=moderate` | Exit 1: 7 findings (2 moderate, 5 high), in transitive `braces` and `postcss-selector-parser` dependency paths. | npm suggested `npm audit fix --force`, which upgrades Tailwind CSS across a major version. No forced upgrade was applied. |
 | `npm.cmd run db:test:migrate` without `.env.test` | Did not reach test guard: Node `tsx` failed in `os.userInfo()` with `uv_os_get_passwd` / `ENOMEM`. | No Prisma command, DB connection, or write occurred. URL rejection cases ran within the backend unit suite. |
+| `npm.cmd run db:test:migrate` in backend, with `.env.test` | Passed: connected to `afrinov_test` on `localhost:5433`; no pending migrations. | Later successful run; supersedes the earlier attempt without `.env.test`. |
+| `npm.cmd run db:test:seed` in backend | Passed: created `admin@afrinov.local`; `Seed complete.` | `SEED_ADMIN_PASSWORD` was supplied through the PowerShell process environment and was not logged. |
+| `npm.cmd run test:integration` in backend | Passed: 15 files, 99 tests. | Real HTTP and PostgreSQL integration suite. |
+| `npm.cmd exec -- playwright test` in frontend | Passed: 2 tests. | Final rerun passed authenticated and invalid-credential login flows after correcting the URL assertion matcher. |
+| `docker compose build backend` in backend | Passed: `backend-backend:latest` built; `npm ci`, Prisma generation, and backend TypeScript build completed. | Used a temporary Compose interpolation value; no DB service was started. Prisma warned that it could not detect OpenSSL and defaulted to `openssl-1.1.x`; container runtime was not exercised. |
 
 The `npm ci` failure is specific to this Windows workspace's locked files; it
 does not establish a general lockfile defect. Resolve local process/file locks
@@ -78,17 +89,9 @@ the workspace or change the lockfile to work around the observed failure.
 
 ## Not run and why
 
-- **PostgreSQL integration suite and real migration/seed:** no isolated test
-  Postgres service was available. Docker engine access was denied. The local
-  ignored `.env` database is the developer DB `afrinov` and was not used.
-  The attempted guarded migration failed before the wrapper executed due to
-  host `ENOMEM`; no database was touched.
-- **Full Playwright login flow:** no isolated DB/backend was available. The
-  two E2E tests were discovered but not run. A real run requires the isolated
-  Compose test service, migrations, seed fixture, and installed browser.
-- **Docker image build or container startup:** Docker CLI/config access did
-  not permit engine use. The corrected Dockerfile and Compose wiring received
-  static review only.
+- **Container startup and runtime database smoke test:** the image built, but
+  it was not launched as a container. Prisma emitted an OpenSSL detection
+  warning during build, so runtime engine compatibility remains unverified.
 - **GitHub Actions:** workflow changes were inspected, but no remote CI run or
   branch-protection state was available.
 - **Production auth/database validation:** deployed artifact, active
