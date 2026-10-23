@@ -208,7 +208,7 @@ src/
   shared/              Config, errors, permissions, authorization, Prisma client
   modules/
     identity/          Login, users and roles
-    inventory/         Materials, locations, racks, stock items, stock movements, balances
+    inventory/         Materials, locations (racks inside their rooms), stock items, stock movements and counts, tool loans, balances
     procurement/       Suppliers, purchase orders, goods receipts
     operations/        Projects and recipients ("Issued To")
     migration/         Reading and checking the stock workbook; opening-balance import; reconciliation
