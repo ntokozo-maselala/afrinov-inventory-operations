@@ -35,6 +35,8 @@ export interface OpeningBalanceResult {
   importId: string;
   locationsCreated: number;
   locationsReused: number;
+  /** Existing locations the mapping put in a room. */
+  locationsMoved: number;
   materialsCreated: number;
   balancesPosted: number;
   /** Rows with nothing on hand: the item is created, no receipt is posted. */
@@ -116,18 +118,32 @@ export const OpeningBalanceService = {
       await lockLocationTree(tx);
       const locationIds = new Map<string, string>();
       let locationsCreated = 0;
+      let locationsMoved = 0;
       for (const l of plan.locations) {
         const parentId = l.parent ? locationIds.get(l.parent) : undefined;
         if (l.parent && !parentId) throw Errors.validation(`The room "${l.parent}" for "${l.name}" is not in the plan`);
-        const existing = await tx.location.findFirst({ where: { name: { equals: l.name, mode: 'insensitive' } }, select: { id: true, name: true, parentId: true } });
+        const existing = await tx.location.findFirst({ where: { name: { equals: l.name, mode: 'insensitive' } } });
         if (existing) {
+          // Rack or not decides what may stand inside it, so the two must agree.
+          // Other kinds (a storeroom the mapping calls a container) keep the platform's.
+          if ((existing.type === 'RACK') !== (l.type === 'RACK')) {
+            throw Errors.conflict(`${existing.name} is a ${existing.type.toLowerCase().replace(/_/g, ' ')} in the platform; the mapping file makes it a ${l.type.toLowerCase().replace(/_/g, ' ')}. Change its type on the Locations page, or in the mapping file.`);
+          }
           locationIds.set(l.name, existing.id);
           if (parentId && existing.parentId !== parentId) {
             if (existing.parentId) {
               throw Errors.conflict(`${existing.name} is already inside another location; the mapping file puts it in ${l.parent}. Move it on the Locations page, or change the mapping file.`);
             }
             await assertParent(tx, parentId, existing);
-            await tx.location.update({ where: { id: existing.id }, data: { parentId } });
+            // Recorded as the Locations page records a move.
+            const moved = await tx.location.update({ where: { id: existing.id }, data: { parentId, updatedById: actorId } });
+            await tx.auditLogEntry.create({
+              data: {
+                actorId, action: 'UPDATE', entityType: 'Location', entityId: existing.id,
+                before: existing as unknown as Prisma.InputJsonValue, after: moved as unknown as Prisma.InputJsonValue,
+              },
+            });
+            locationsMoved++;
           }
         } else {
           if (parentId) await assertParent(tx, parentId);
@@ -188,6 +204,7 @@ export const OpeningBalanceService = {
             openingDate: openingDate.toISOString().slice(0, 10),
             materials: materials.length,
             locationsCreated,
+            locationsMoved,
             balances: receipts.length,
             projectsCreated: projects.created,
             recipientsCreated: recipients.created,
@@ -200,6 +217,7 @@ export const OpeningBalanceService = {
         importId,
         locationsCreated,
         locationsReused: plan.locations.length - locationsCreated,
+        locationsMoved,
         materialsCreated: materials.length,
         balancesPosted: receipts.length,
         zeroBalances,

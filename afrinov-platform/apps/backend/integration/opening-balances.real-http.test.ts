@@ -17,6 +17,9 @@ describe('opening balance import against a real database', () => {
   const run = runId();
   const rackName = `IT OB rack ${run}`;
   const existingName = `IT OB Store ${run}`;
+  // A rack already in the platform, in no room: the import puts it in its room.
+  const looseRackName = `IT OB loose rack ${run}`;
+  let looseRackId: string;
   let server: TestServer;
   let api: ReturnType<typeof client>;
   let actorId: string;
@@ -32,7 +35,11 @@ describe('opening balance import against a real database', () => {
     materials,
     // The existing location is named in another case: it must be reused, not
     // duplicated. The new rack stands in it (rooms come first in a plan).
-    locations: [{ name: existingName.toUpperCase(), type: 'STOREROOM' }, { name: rackName, type: 'RACK', parent: existingName.toUpperCase() }],
+    locations: [
+      { name: existingName.toUpperCase(), type: 'STOREROOM' },
+      { name: rackName, type: 'RACK', parent: existingName.toUpperCase() },
+      { name: looseRackName, type: 'RACK', parent: existingName.toUpperCase() },
+    ],
     problems: [],
   });
 
@@ -45,6 +52,9 @@ describe('opening balance import against a real database', () => {
     const loc = await api<{ id: string }>('POST', '/locations', { name: existingName, type: 'STOREROOM' });
     expect(loc.status).toBe(201);
     existingLocationId = loc.body.id;
+    const loose = await api<{ id: string }>('POST', '/locations', { name: looseRackName, type: 'RACK' });
+    expect(loose.status).toBe(201);
+    looseRackId = loose.body.id;
     alreadyImported = (await previousImport()) !== null;
     // Already in the platform, under another case: the import leaves them alone.
     expect((await api('POST', '/projects', { projectNumber: `it-obp-old-${run}`, name: 'Existing project' })).status).toBe(201);
@@ -79,6 +89,15 @@ describe('opening balance import against a real database', () => {
     expect(await prisma.material.findUnique({ where: { sku: `IT-OB-RR-${run}` } })).toBeNull();
   });
 
+  it('refuses to reuse a location as a rack when the platform has it as a room, and writes nothing', async () => {
+    await expect(OpeningBalanceService.import({
+      plan: { ...plan([material(`IT-OB-KIND-${run}`, [{ location: existingName.toUpperCase(), quantity: 1 }])]), locations: [{ name: existingName.toUpperCase(), type: 'RACK' }] },
+      openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
+    })).rejects.toMatchObject({ code: alreadyImported ? 'INVALID_STATE' : 'CONFLICT' });
+    expect((await prisma.location.findUniqueOrThrow({ where: { id: existingLocationId } })).type).toBe('STOREROOM');
+    expect(await prisma.material.findUnique({ where: { sku: `IT-OB-KIND-${run}` } })).toBeNull();
+  });
+
   it('refuses an opening date in the future', async () => {
     await expect(OpeningBalanceService.import({
       plan: plan([material(`IT-OB-FUT-${run}`, balances())]),
@@ -106,7 +125,7 @@ describe('opening balance import against a real database', () => {
       openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'workbook.xlsm',
     });
     expect(result).toMatchObject({
-      materialsCreated: 3, locationsCreated: 1, locationsReused: 1, balancesPosted: 2, zeroBalances: 2,
+      materialsCreated: 3, locationsCreated: 1, locationsReused: 2, locationsMoved: 1, balancesPosted: 2, zeroBalances: 2,
       projects: { created: 1, existing: 1 }, recipients: { created: 1, existing: 1 }, suppliers: { created: 1, existing: 1 },
     });
     expect(await prisma.project.findUnique({ where: { projectNumber: `IT-OBP-NEW-${run}` } })).toMatchObject({ name: 'Pump overhaul', status: 'ACTIVE', active: true });
@@ -128,6 +147,11 @@ describe('opening balance import against a real database', () => {
     const rack = await prisma.location.findFirstOrThrow({ where: { name: rackName } });
     expect(rack.type).toBe('RACK');
     expect(rack.parentId).toBe(existingLocationId);
+    // The rack already there is moved into its room, and the move is audited like one on the Locations page.
+    const loose = await prisma.location.findUniqueOrThrow({ where: { id: looseRackId } });
+    expect(loose).toMatchObject({ parentId: existingLocationId, updatedById: actorId });
+    const move = await prisma.auditLogEntry.findFirstOrThrow({ where: { entityType: 'Location', entityId: looseRackId, action: 'UPDATE' } });
+    expect(move).toMatchObject({ actorId, before: expect.objectContaining({ parentId: null }), after: expect.objectContaining({ parentId: existingLocationId }) });
     expect(await prisma.location.count({ where: { name: { equals: existingName, mode: 'insensitive' } } })).toBe(1);
 
     for (const [locationId, qty] of [[rack.id, '12'], [existingLocationId, '3.5']] as const) {

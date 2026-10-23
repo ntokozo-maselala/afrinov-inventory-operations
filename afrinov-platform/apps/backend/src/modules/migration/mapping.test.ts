@@ -342,7 +342,9 @@ describe('which room each rack is in', () => {
     expect(sheet.getRow(1).getCell(5).value).toBe('Located in');
     sheet.spliceColumns(5, 1);
     const { mapping, problems } = readMappingSheets(wb);
-    expect(problems).toEqual([]);
+    // Said once, rather than every rack quietly lacking a room.
+    expect(problems).toEqual([expect.objectContaining({ code: 'MAPPING_COLUMN_MISSING', sheet: 'Locations', detail: expect.stringContaining('"Located in"') })]);
+    expect(PROBLEM_TEXT.MAPPING_COLUMN_MISSING.severity).toBe('review');
     expect(mapping.locations.every((l) => l.locatedIn === null)).toBe(true);
   });
 });

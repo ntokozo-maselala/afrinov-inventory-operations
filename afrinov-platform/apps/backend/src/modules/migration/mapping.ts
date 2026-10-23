@@ -310,6 +310,9 @@ export function readMappingSheets(wb: ExcelJS.Workbook): { mapping: Mapping; pro
 
   if (locations) {
     const c = columnsByHeader(locations);
+    if (!c.has('located in')) {
+      problems.push({ code: 'MAPPING_COLUMN_MISSING', sheet: 'Locations', detail: 'No "Located in" column, so no rack can be given its room' });
+    }
     const get = (row: ExcelJS.Row, header: string) => cellText(row, c, header);
     for (let r = 2; r <= locations.rowCount; r++) {
       const row = locations.getRow(r);
