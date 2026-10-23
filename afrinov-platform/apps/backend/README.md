@@ -91,6 +91,40 @@ must remain injected on every start because the seed runs each time, CORS is
 disabled unless `CORS_ORIGIN` is set, and the API docs are off unless
 `API_DOCS_ENABLED=true`.
 
+## Dropping the Rack table
+
+Migration `20260101000022_drop_racks` drops the old Rack table (racks are
+locations of type Rack now). It cannot be undone, so it refuses to run while
+any Rack row remains. On each database:
+
+1. **Back it up** before deploying this release, e.g. with Docker:
+   `docker exec afrinov-dev-pg pg_dump -U afrinov -d afrinov -f /tmp/backup.sql`
+   then `docker cp afrinov-dev-pg:/tmp/backup.sql ./import-reports/backup.sql`.
+2. **Check it has no racks left:** `SELECT count(*) FROM racks;` should be 0.
+   If it is not, copy them onto locations first, with the release before this
+   one, which still has the command (this release removes it with the table):
+
+   ```sh
+   git switch --detach e7ad3b5      # main before the Rack table was dropped
+   npm run racks:to-locations       # dry run: read the report in import-reports/
+   npm run racks:to-locations -- --create <code> --discard <code> --apply --database <name> --actor <email>
+   git switch main                  # back to this release
+   ```
+
+   Repeat the dry run until it reports 0 racks.
+3. **If the migration already refused** (its error says "The racks table
+   still has N row(s)"), Prisma recorded it as failed and every later deploy
+   stops with `P3009` (in Docker, the API does not start). After step 2, clear
+   that record, then deploy again:
+
+   ```sh
+   npx prisma migrate resolve --rolled-back 20260101000022_drop_racks
+   npm run db:migrate
+   ```
+
+   Nothing was dropped when it refused: the migration checks and drops in one
+   locked step, so a refusal leaves the database as it was.
+
 ## Environment variables
 
 `.env.example` documents each one in more detail.
@@ -177,7 +211,7 @@ src/
   shared/              Config, errors, permissions, authorization, Prisma client
   modules/
     identity/          Login, users and roles
-    inventory/         Materials, locations, racks, stock items, stock movements, balances
+    inventory/         Materials, locations (racks inside their rooms), stock items, stock movements and counts, tool loans, balances
     procurement/       Suppliers, purchase orders, goods receipts
     operations/        Projects and recipients ("Issued To")
     migration/         Reading and checking the stock workbook; opening-balance import; reconciliation

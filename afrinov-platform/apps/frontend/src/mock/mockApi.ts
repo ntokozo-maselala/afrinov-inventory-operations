@@ -565,7 +565,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (counts.locations > 0) {
       throw err('CONFLICT', `${l.name} has ${counts.locations} location${counts.locations === 1 ? '' : 's'} inside it. Move them out of it before deleting it.`, { dependencies: counts });
     }
-    const total = counts.racks + counts.goodsReceiptLines + counts.inventoryTransactions + counts.inventoryBalances;
+    const total = counts.goodsReceiptLines + counts.inventoryTransactions + counts.inventoryBalances;
     if (total > 0) {
       throw err('CONFLICT', 'This location cannot be deleted because it is referenced by other records. Deactivate the location instead.', { dependencies: counts });
     }
@@ -1975,11 +1975,10 @@ function mockAssertNoActiveChildren(l: MockLocation): void {
   if (inside > 0) throw err('CONFLICT', `${l.name} has ${inside} active location${inside === 1 ? '' : 's'} inside it. Move or deactivate them first.`, { locations: inside });
 }
 
-function mockLocationDependencyCounts(locationId: string): { locations: number; racks: number; goodsReceiptLines: number; inventoryTransactions: number; inventoryBalances: number } {
+function mockLocationDependencyCounts(locationId: string): { locations: number; goodsReceiptLines: number; inventoryTransactions: number; inventoryBalances: number } {
   const balances = computeBalances();
   return {
     locations: state.locations.filter((l) => l.parentId === locationId).length,
-    racks: 0,
     goodsReceiptLines: state.goodsReceipts.reduce((acc, g) => acc + g.lines.filter((l) => l.locationId === locationId).length, 0),
     inventoryTransactions: state.transactions.filter((t) => t.locationId === locationId).length,
     inventoryBalances: balances.filter((b) => b.locationId === locationId).length,

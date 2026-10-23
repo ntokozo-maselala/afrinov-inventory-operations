@@ -43,7 +43,6 @@ describe('Prisma migrations baseline', () => {
       'locations',
       'suppliers',
       'projects',
-      'racks',
       'purchase_orders',
       'purchase_order_lines',
       'goods_receipts',
@@ -65,7 +64,6 @@ describe('Prisma migrations baseline', () => {
       'RoleName',
       'MaterialCategory',
       'LocationType',
-      'RackStatus',
       'PurchaseOrderStatus',
       'GoodsReceiptStatus',
       'InventoryTransactionType',
@@ -101,8 +99,6 @@ describe('Prisma migrations baseline', () => {
       'inventory_transactions_paired_with_id_fkey',
       'inventory_transactions_project_number_fkey',
       'settings_updated_by_id_fkey',
-      'racks_location_id_fkey',
-      'racks_project_number_fkey',
       'projects_manager_id_fkey',
     ];
     for (const fk of requiredFks) {
@@ -162,5 +158,26 @@ describe('Prisma migrations baseline', () => {
     expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS/);
     expect(sql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS/);
     expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS/);
+  });
+});
+
+describe('dropping the Rack table (racks and locations roadmap, Phase 3.3)', () => {
+  it('refuses to drop it while any Rack row remains, then drops the table, its type and its permission', () => {
+    const sql = readMigration('20260101000022_drop_racks');
+    // The guard comes first, so a database whose racks were not copied is never changed.
+    const guard = sql.indexOf('RAISE EXCEPTION');
+    expect(guard).toBeGreaterThan(-1);
+    // The table is locked before it is counted, and the count and the drop are one DO block,
+    // so no rack can be added between them.
+    const lock = sql.indexOf('LOCK TABLE "racks" IN ACCESS EXCLUSIVE MODE');
+    expect(lock).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(sql.indexOf('SELECT count(*) INTO remaining'));
+    const block = sql.slice(sql.indexOf('DO $'), sql.lastIndexOf('END $'));
+    expect(block).toContain('DROP TABLE "racks"');
+    expect(block).toContain('DROP TYPE "RackStatus"');
+    expect(sql).toContain('SELECT count(*) INTO remaining FROM "racks"');
+    expect(guard).toBeLessThan(sql.indexOf('DROP TABLE "racks"'));
+    expect(sql).toContain('DROP TYPE "RackStatus"');
+    expect(sql).toContain("DELETE FROM \"permissions\" WHERE \"code\" = 'manage:racks'");
   });
 });
