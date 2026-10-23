@@ -16,7 +16,7 @@ This roadmap makes it one record: a rack is a Location of type Rack, with an opt
 | 2 | Show and choose the parent on screen | S–M | Done (#86) |
 | 3 | Move the Rack records onto locations, retire Racks | M | 3.1 done (#87); 3.2 done (#88); 3.3 done (#90) |
 | 4 | The import asks which room each rack is in | S | Not started |
-| 5 | Stock by room, racks included | S–M | In review |
+| 5 | Stock by room, racks included | S–M | Done (#91) |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
