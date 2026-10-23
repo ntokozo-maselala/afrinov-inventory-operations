@@ -7,18 +7,24 @@
 -- that was not copied: run racks:to-locations on this database (with the
 -- version of the app before this migration) until it reports 0 racks.
 -- Back up the database before deploying this: it cannot be undone.
+--
+-- One DO block, so the check and the drop are one statement, all or nothing,
+-- however the migration runner handles transactions. It first locks the
+-- table against every other reader and writer (ACCESS EXCLUSIVE), so no rack
+-- can be added between counting them and dropping the table.
 DO $$
 DECLARE remaining integer;
 BEGIN
+  LOCK TABLE "racks" IN ACCESS EXCLUSIVE MODE;
   SELECT count(*) INTO remaining FROM "racks";
   IF remaining > 0 THEN
     RAISE EXCEPTION 'The racks table still has % row(s). Run npm run racks:to-locations on this database (before this migration) until it reports 0 racks, then migrate again.', remaining;
   END IF;
+
+  -- The Racks page and API went in Phase 3.2; its permission goes with the table.
+  DELETE FROM "role_permissions" WHERE "permission_id" IN (SELECT "id" FROM "permissions" WHERE "code" = 'manage:racks');
+  DELETE FROM "permissions" WHERE "code" = 'manage:racks';
+
+  DROP TABLE "racks";
+  DROP TYPE "RackStatus";
 END $$;
-
--- The Racks page and API went in Phase 3.2; its permission goes with the table.
-DELETE FROM "role_permissions" WHERE "permission_id" IN (SELECT "id" FROM "permissions" WHERE "code" = 'manage:racks');
-DELETE FROM "permissions" WHERE "code" = 'manage:racks';
-
-DROP TABLE "racks";
-DROP TYPE "RackStatus";

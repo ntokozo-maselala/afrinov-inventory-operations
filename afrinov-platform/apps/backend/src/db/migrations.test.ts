@@ -167,6 +167,14 @@ describe('dropping the Rack table (racks and locations roadmap, Phase 3.3)', () 
     // The guard comes first, so a database whose racks were not copied is never changed.
     const guard = sql.indexOf('RAISE EXCEPTION');
     expect(guard).toBeGreaterThan(-1);
+    // The table is locked before it is counted, and the count and the drop are one DO block,
+    // so no rack can be added between them.
+    const lock = sql.indexOf('LOCK TABLE "racks" IN ACCESS EXCLUSIVE MODE');
+    expect(lock).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(sql.indexOf('SELECT count(*) INTO remaining'));
+    const block = sql.slice(sql.indexOf('DO $'), sql.lastIndexOf('END $'));
+    expect(block).toContain('DROP TABLE "racks"');
+    expect(block).toContain('DROP TYPE "RackStatus"');
     expect(sql).toContain('SELECT count(*) INTO remaining FROM "racks"');
     expect(guard).toBeLessThan(sql.indexOf('DROP TABLE "racks"'));
     expect(sql).toContain('DROP TYPE "RackStatus"');
