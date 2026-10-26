@@ -40,7 +40,11 @@ export function isKnownInsecureSecret(secret: string): boolean {
 }
 
 export function loadConfig(): AppConfig {
-  const nodeEnv = (process.env.NODE_ENV ?? 'production') as AppConfig['nodeEnv'];
+  const rawNodeEnv = process.env.NODE_ENV ?? 'production';
+  if (rawNodeEnv !== 'development' && rawNodeEnv !== 'test' && rawNodeEnv !== 'production') {
+    throw new ConfigError('NODE_ENV must be one of: development, test, production.');
+  }
+  const nodeEnv = rawNodeEnv;
 
   const databaseUrl = process.env.DATABASE_URL ?? '';
   const jwtSecret = process.env.JWT_SECRET ?? '';
@@ -59,6 +63,10 @@ export function loadConfig(): AppConfig {
     if (!jwtSecret) {
       throw new ConfigError('JWT_SECRET is required but was not set.');
     }
+  }
+
+  if (nodeEnv === 'production' && Buffer.byteLength(jwtSecret, 'utf8') < 32) {
+    throw new ConfigError('JWT_SECRET must be at least 32 bytes in production.');
   }
 
   const port = Number(process.env.PORT ?? 4000);

@@ -22,7 +22,7 @@ function setEnv(env: Record<string, string | undefined>) {
 beforeEach(() => {
   setEnv({
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/testdb',
-    JWT_SECRET: 'a-strong-random-secret-value',
+    JWT_SECRET: 'test-secret-for-config-tests-at-least-32-bytes',
     NODE_ENV: 'test',
     PORT: '3100',
     HOST: '0.0.0.0',
@@ -39,16 +39,23 @@ describe('loadConfig', () => {
     const cfg = loadConfig();
     expect(cfg.nodeEnv).toBe('test');
     expect(cfg.databaseUrl).toBe('postgresql://user:pass@localhost:5432/testdb');
-    expect(cfg.jwtSecret).toBe('a-strong-random-secret-value');
+    expect(cfg.jwtSecret).toBe('test-secret-for-config-tests-at-least-32-bytes');
     expect(cfg.port).toBe(3100);
     expect(cfg.host).toBe('0.0.0.0');
     expect(cfg.logLevel).toBe('info');
   });
 
   it('defaults NODE_ENV to production when unset', () => {
+    process.env.JWT_SECRET = 'test-secret-for-config-tests-at-least-32-bytes';
     delete process.env.NODE_ENV;
     const cfg = loadConfig();
     expect(cfg.nodeEnv).toBe('production');
+  });
+
+  it.each(['prod', 'staging', 'Production', ''])('rejects unsupported NODE_ENV value %j', (nodeEnv) => {
+    process.env.NODE_ENV = nodeEnv;
+    expect(() => loadConfig()).toThrow(ConfigError);
+    expect(() => loadConfig()).toThrow(/NODE_ENV must be one of/i);
   });
 
   it('defaults HOST to 0.0.0.0 when unset', () => {
@@ -108,6 +115,23 @@ describe('loadConfig', () => {
     process.env.NODE_ENV = 'production';
     process.env.JWT_SECRET = '';
     expect(() => loadConfig()).toThrow(/JWT_SECRET.*production/i);
+  });
+
+  it('rejects a production JWT_SECRET shorter than 32 UTF-8 bytes without echoing it', () => {
+    const secret = 'short-secret';
+    process.env.NODE_ENV = 'production';
+    process.env.JWT_SECRET = secret;
+
+    let error: unknown;
+    try {
+      loadConfig();
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as Error).message).toMatch(/at least 32 bytes/i);
+    expect((error as Error).message).not.toContain(secret);
   });
 
   it('accepts a strong JWT_SECRET in production', () => {

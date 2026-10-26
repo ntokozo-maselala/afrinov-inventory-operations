@@ -4,6 +4,21 @@
 
 Checks below ran on 2026-10-26 against application code at HEAD 607a642. The only later commit before report generation, c4a0504, deleted an unrelated Word document; application code and lockfiles are unchanged.
 
+## Approved implementation baseline — 2026-10-26
+
+The repository was at `e199815fae167bb6939451849201a7dbc24036c9` (`main`) with no pre-existing working-tree changes when implementation began. This commit adds the audit documents; the application source and lockfiles match the audited application baseline at `607a642`.
+
+| Check | Baseline evidence before implementation | Status for this work |
+|---|---|---|
+| Backend unit tests | Reran `vitest.cmd run` with `NODE_ENV=test` and a dummy localhost `audit_baseline_test` URL. Exit 0; 57 files and 819 tests passed in 3.51 seconds. | Confirmed at implementation start. |
+| Frontend unit tests | Existing audit run at unchanged application baseline: exit 0; 76 files and 799 tests passed. A fresh rerun in this work could not start because the sandbox denied esbuild access; the elevated retry was rejected. | Last confirmed baseline is the audit run; fresh rerun unavailable. Do not attribute this environment block to a code regression. |
+| Backend PostgreSQL integration | Not run. `apps/backend/.env.test` is present, but its target database state has not been established as disposable. Docker daemon access was denied from the sandbox. | Skipped pending a positively isolated PostgreSQL target. |
+| Browser E2E | Not run; requires the test backend/database and browser setup. | Skipped. |
+| Lint/typecheck/build | Existing audit baseline: backend/frontend lint and frontend typecheck/build passed; backend package typecheck failed before `tsc` because Prisma generation hit Windows `EPERM`. | No fresh rerun before first code change. |
+| Coverage, migration rehearsal, Docker image build | Not run in the audit baseline. | Skipped. |
+
+No test failure from the approved implementation is claimed in this baseline. Frontend rerun and PostgreSQL/E2E checks remain environmental gaps; the exact commands, prior results and reasons are retained above.
+
 | Check | Execution method | Result | Limitations |
 |---|---|---|---|
 | Backend unit tests | From apps/backend: vitest.cmd run with NODE_ENV=test and an explicit dummy localhost DATABASE_URL | Exit 0; 57 test files, 819 tests passed | Unit suite uses mocks/fakes for most database cases; does not verify PostgreSQL concurrency |

@@ -1,37 +1,42 @@
 # 08 — Remediation roadmap
 
-No remediation was implemented during this audit. This sequence keeps behavior changes small and separates application correctness from deployment changes. Owners and dates are not assigned in the repository; name them before scheduling release work.
+## Authorization and scope
 
-| Order | Finding | Priority and dependency | Smallest safe change | Required approval | Acceptance evidence |
+The owner approved implementation of work packages 1–6 on 2026-10-26, including the configuration unit-test seam and real PostgreSQL integration-test seam. The approval covers the application and migration work below. It does not authorize deployment, release, production database access, or production infrastructure changes. Work package numbering below is the approved implementation sequence; it is distinct from the earlier audit-priority order.
+
+The package-to-finding map and acceptance criteria were recorded before production-code changes. The only application-code scope is the six packages below. No new runtime dependency is planned; the SEC-02 dependency updates are limited to patched compatible versions and the vulnerable input path.
+
+| WP | Finding(s) | Risk and affected area | Approved change | RED/GREEN acceptance evidence | Boundaries and material risk |
 |---|---|---|---|---|---|
-| 1 | SEC-01 | Release blocker; first | Runtime-validate NODE_ENV and enforce an explicit JWT key strength policy; make API-doc production behavior fail closed | Backend owner and security owner; approve session/key rotation plan | Unit tests reject invalid labels and weak production keys; production configuration probe fails closed; valid environment starts |
-| 2 | DATA-01 | Release blocker; design before implementation | Add one shared transaction-level material/location serialization mechanism and route every balance-changing operation through it | Inventory domain owner and DBA | Disposable PostgreSQL races for issue, transfer, adjustment, return and stock count preserve ledger/balance/no-negative invariants |
-| 3 | DATA-02 | Release blocker; may proceed in parallel with DATA-01 | Conditionally claim receipt state or lock the receipt row before ledger effects inside the existing transaction | Procurement owner and DBA | Two concurrent posts yield one success/one conflict, one ledger set and one PO increment; rollback and sequential duplicate tests pass |
-| 4 | SEC-03 | Release blocker if Compose is the deployment path; confirm topology first | Stop publishing the production DB port; split migration/owner and restricted application DB roles | Infrastructure owner and DBA | External DB access is blocked; runtime role cannot administer DB; app CI/integration works with least privilege |
-| 5 | SEC-02 | High security priority; check compatibility | Bound report filter arrays; update Zod and fast-uri through a reviewed compatible dependency plan | Backend owner and security owner | Production/full npm audit clean or accepted; query limits tested; OpenAPI and API compatibility verified |
-| 6 | DATA-03 | High data-integrity priority; preflight first | Add a forward migration for material/location foreign keys after orphan check | DBA and inventory data owner | Preflight is clean or resolved; clean and populated migration rehearsal passes; invalid references are rejected |
-| 7 | AUD-01 | Medium | Put user mutation and corresponding audit entry in one transaction | Identity/security owner | Injected audit insert failure rolls back user/role change; success writes one audit entry |
-| 8 | ARCH-01 | Medium; policy decision first | Define minimum active admin and break-glass recovery policy; implement transactionally if required | Product/admin owner and security owner | Self-demotion, last-admin and concurrent admin-change tests match approved recovery policy |
-| 9 | OPS-01 | Release gate; external owner required | Document actual topology, backup schedule, retention, restore process, RPO/RTO, alerts and release rollback/correction steps | Infrastructure owner and business continuity owner | Successful isolated restore, accepted recovery objectives, alert proof, migration/deployment rehearsal |
-| 10 | DOC-01 | Low; after operational facts confirmed | Reconcile runtime and integration test documentation | Documentation owner | Instructions match Dockerfile, current integration config and verified commands |
-| 11 | ARCH-02 | Product decision required | Define retry semantics per write endpoint before adding idempotency keys | Product and API owners | Contract documents accepted duplicate behavior; API/integration tests cover timeout retry and legitimate repeated operations |
-| 12 | SEC-04 / SEC-05 | Conditional hardening | Lock down production CORS wildcard; configure known trusted proxies/shared rate-limit storage if topology requires | Security and infrastructure owners | Production config tests and topology tests prove origin and per-client throttling behavior |
+| 1 | SEC-01 | An invalid `NODE_ENV` bypasses production-only checks; short signing secrets can be accepted in production. `shared/config.ts` and config tests. | Runtime-validate the environment allowlist and enforce a documented minimum JWT secret length in production. Keep the default environment behavior explicit. | Unit tests reject unknown labels and short production secrets, accept valid settings, and prove error messages do not contain secret values. Existing config/server startup tests pass. | A production secret shorter than the new threshold will fail startup and needs a planned rotation/session-impact decision before deployment. No production secret is read or changed here. |
+| 2 | DATA-01 | Concurrent stock movements can pass the same balance check or race the materialized balance. Inventory movements and every balance-changing writer. | Use one transaction-scoped material/location serialization protocol before invariant reads and ledger writes; acquire multi-key locks in stable order. Include issue returns and count adjustments, and keep all existing stock writers on the protocol. | Dedicated PostgreSQL races prove that oversubscribed issues, transfers, adjustments, returns and counts cannot violate available stock or ledger/balance equality; failure rollback and existing sequential behavior pass. | Application behavior and ledger format remain unchanged. PostgreSQL advisory-lock serialization can reduce throughput for the same material/location; it does not serialize unrelated keys. |
+| 3 | DATA-02, DATA-04 | Reposting one receipt can duplicate effects; separate receipts can race the same PO line and exceed ordered quantity. Goods receipt posting. | Atomically claim a submitted receipt inside its existing transaction and serialize/check affected PO lines before incrementing quantities. | Dedicated PostgreSQL tests prove same-receipt concurrency yields one post and one conflict, distinct-receipt concurrency cannot exceed the PO cap, effects occur once, and failures roll back receipt, ledger and PO changes. | No idempotency contract is added for legitimate repeated receipts. Existing sequential conflict/validation behavior is preserved. |
+| 4 | SEC-02 | Vulnerable Zod and fast-uri versions are in production dependency paths; report filter arrays are unbounded. Backend query schemas and lockfile. | Bound report filter arrays and move to advisory-fixed dependency versions with compatibility changes limited to what the backend requires. | Query-limit unit/API contract tests pass; typecheck and backend regression suites pass; fresh full and production-only dependency audits are recorded. | Zod crosses a major version boundary. Any incompatible API behavior discovered is documented and corrected only within backend validation compatibility. No unrelated package refresh. |
+| 5 | DATA-03 | Inventory balances can reference missing material/location rows because the database lacks the declared foreign keys. Prisma migration/schema. | Add a forward migration for both foreign keys, with a preflight that reports/refuses orphan rows and no automatic data deletion. | Disposable PostgreSQL migration rehearsal succeeds on clean and populated data, invalid references are rejected, and the orphan check is exercised. | No production database is inspected or migrated. Existing orphan data, if any, must be resolved by the data owner before deployment. Migration is forward-only and requires a corrective migration or restore plan if later changes are needed. |
+| 6 | AUD-01 | User/role changes can commit while their audit write fails. Identity service. | Put each covered user mutation and its audit record in one Prisma transaction. | PostgreSQL integration tests inject audit-write failure and prove the mutation rolls back; success creates one corresponding audit row. Existing identity behavior passes. | Existing audit payloads and authorization remain unchanged. No historical audit records are synthesized. |
+
+## Explicitly outside this authorization
+
+- SEC-03 changes to Compose port publishing, database roles, credentials or host/network rules are deferred until the deployment owner confirms the actual topology and authorizes those changes.
+- SEC-04/SEC-05 topology hardening, SEC-06 token-storage/CSP redesign, ARCH-01 administrator policy, ARCH-02 idempotency policy, OPS-01 deployment/recovery evidence, and DOC-01 documentation drift are residual findings. This implementation does not decide their product or operational policy.
+- No deployment, release, production database access, migration, backup/restore operation, service restart or production infrastructure change is authorized.
 
 ## Behavior-preservation requirements
 
-- Preserve the append-only signed transaction ledger, current API payloads, status meanings, permission checks, audit semantics and valid repeated business operations.
+- Preserve the append-only signed transaction ledger, current API payloads, status meanings, permission checks, audit fields and valid repeated business operations.
 - Do not rewrite historical transactions to repair concurrency results; use audited reversals/corrections under an approved data-repair process.
-- Do not add uniqueness constraints or idempotency rejection until product semantics for legitimate duplicate receipts and retries are approved.
-- Validate migration changes against representative existing data, and retain forward corrective migration steps because the repository has no down migrations.
+- Do not add idempotency rejection for legitimate repeated receipts or retries without a product contract.
+- The stock serialization rule must cover every balance-changing path, including opening balances, receipts, procurement receipts, tool loans, stock counts and material/location movements, or be shown not to touch the protected stock balance.
+- Migration code must reject/report orphan data without deleting it.
 
 ## Verification and rollback approach
 
-1. Add focused unit tests for input/state behavior, then PostgreSQL integration tests in an isolated disposable database for concurrency and transaction rollback.
-2. Rehearse schema changes on a copy and inspect orphan/preflight reports before applying constraints.
-3. Release config and dependency changes separately from ledger locking changes where practical; use controlled rollout and monitor conflicts, database errors and balance reconciliation.
-4. Keep application rollback compatible with any forward database migration. Where the schema cannot be rolled back, provide a corrective forward migration and tested restore process.
-5. Close each finding only when its objective acceptance evidence in 07 is attached to the change/release record.
+1. Establish the clean-revision baseline and record failed, skipped and environment-blocked checks in `05_TESTING_AND_QUALITY.md`.
+2. For each approved behavior, add a focused failing test, verify the failure reason, implement the smallest fix, then refactor and rerun related suites. Record the red/green results in `09_IMPLEMENTATION_LOG.md`.
+3. Use unit tests for configuration and validation; use a newly created, disposable PostgreSQL target for transaction, race and migration assertions. Do not use the existing `.env.test` target until its state is positively established as disposable.
+4. Rehearse forward migration behavior on clean and representative data; inspect the orphan report before constraints are added.
+5. Reassess release readiness only after acceptance evidence is attached. A successful code change does not authorize deployment.
 
-## Phase 8 exit
+## Exit status
 
-The roadmap orders urgent configuration, integrity and deployment work before improvements and documentation. It records dependencies, behavior-preservation rules, approvals, verification and rollback expectations. No fixes were applied; implementation requires a separate explicit authorization.
+Implementation is authorized and in progress. No production change is included. Package completion and residual risks will be recorded here and in the implementation log as evidence is collected.
