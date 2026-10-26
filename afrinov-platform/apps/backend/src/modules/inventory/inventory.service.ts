@@ -115,6 +115,13 @@ async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.Transac
   }
 }
 
+
+async function lockPurchaseOrderLines(lineIds: string[], tx: Prisma.TransactionClient): Promise<void> {
+  for (const lineId of [...new Set(lineIds)].sort()) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`afrinov:purchase-order-line:${lineId}`}))`;
+  }
+}
+
 async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): Promise<Decimal> {
   const agg = await tx.inventoryTransaction.aggregate({
     where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: issueId },
@@ -856,6 +863,7 @@ export const InventoryService = {
         include: { lines: true },
       });
       if (!gr) throw Errors.notFound('GoodsReceipt');
+      await lockPurchaseOrderLines(gr.lines.map((line) => line.purchaseOrderLineId).filter((id): id is string => Boolean(id)), tx);
       await lockInventoryBalances(gr.lines, tx);
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
@@ -882,6 +890,12 @@ export const InventoryService = {
           }
         }
       }
+
+      const claimed = await tx.goodsReceipt.updateMany({
+        where: { id: gr.id, status: 'SUBMITTED' },
+        data: { status: 'POSTED' },
+      });
+      if (claimed.count === 0) throw Errors.invalidState('Goods receipt already posted');
 
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);

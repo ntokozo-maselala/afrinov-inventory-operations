@@ -218,8 +218,16 @@ describe('parseReportQuery', () => {
     const b = parseReportQuery({ category: 'CONSUMABLES,TOOLS' });
     expect(b.category).toEqual(['CONSUMABLES', 'TOOLS']);
   });
-});
+  it('rejects report dimension filters above the bounded maximum', async () => {
+    const { parseReportQuery } = await import('./report-query.schema.js');
+    const accepted = Array.from({ length: 100 }, (_, i) => 'location-' + i);
+    expect(parseReportQuery({ locationId: accepted }).locationId).toHaveLength(100);
+    expect(() => parseReportQuery({ locationId: [...accepted, 'location-100'] })).toThrow();
+    expect(() => parseReportQuery({ supplierId: [...accepted, 'supplier-100'] })).toThrow();
+    expect(() => parseReportQuery({ materialId: [...accepted, 'material-100'] })).toThrow();
+  });
 
+});
 describe('resolveDateWindow', () => {
   it('returns nulls for ALL', async () => {
     const { resolveDateWindow, parseReportQuery } = await import('./report-query.schema.js');

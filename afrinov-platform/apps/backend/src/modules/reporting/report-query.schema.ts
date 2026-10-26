@@ -35,6 +35,9 @@ export const movementTypeSchema = z.enum(ReportMovementTypeValues);
 export const dateRangePresetSchema = z.enum(DateRangePresetValues);
 export const materialCategorySchema = z.enum(MaterialCategoryValues);
 
+// Bound user-controlled multi-select filters to keep validation deterministic and memory-safe.
+export const REPORT_FILTER_MAX = 100;
+
 // Single source of truth for "what does the inventory report want to know".
 // The UI's filter state is parsed/serialised through this schema on both
 // the client and the server so the request and the export cannot drift.
@@ -48,10 +51,10 @@ export const reportQuerySchema = z
     to: z.string().datetime().optional(),
 
     // Dimensional filters.
-    category: z.array(materialCategorySchema).default([]),
-    locationId: z.array(z.string().min(1)).default([]),
-    supplierId: z.array(z.string().min(1)).default([]),
-    materialId: z.array(z.string().min(1)).default([]),
+    category: z.array(materialCategorySchema).max(REPORT_FILTER_MAX).default([]),
+    locationId: z.array(z.string().min(1)).max(REPORT_FILTER_MAX).default([]),
+    supplierId: z.array(z.string().min(1)).max(REPORT_FILTER_MAX).default([]),
+    materialId: z.array(z.string().min(1)).max(REPORT_FILTER_MAX).default([]),
 
     // Stock status filter. 'ALL' means do not filter.
     stockStatus: stockStatusSchema.default('ALL'),

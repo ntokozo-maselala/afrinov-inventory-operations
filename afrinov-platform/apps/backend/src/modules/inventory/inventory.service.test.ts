@@ -213,6 +213,12 @@ const fakeTx = {
       Object.assign(gr, data);
       return gr;
     },
+    updateMany: async ({ where, data }: { where: { id: string; status: string }; data: Partial<GREntry> }) => {
+      const gr = goodsReceipts.get(where.id);
+      if (!gr || gr.status !== where.status) return { count: 0 };
+      Object.assign(gr, data);
+      return { count: 1 };
+    },
   },
   purchaseOrderLine: {
     findUnique: async ({ where }: { where: { id: string } }) => {
