@@ -6,7 +6,7 @@ import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance } from '../../shared/inventory/balances.js';
+import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { generateGRNumber } from '../procurement/goods-receipt.service.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
@@ -122,6 +122,7 @@ export const StockReceiptService = {
     const receivedAt = parseReceivedAt(input.receivedAt);
 
     return prisma.$transaction(async (tx) => {
+      await lockInventoryBalances(lines, tx);
       const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
       if (!supplier) throw Errors.notFound('Supplier');
       if (!supplier.active) throw Errors.validation('Supplier is inactive');

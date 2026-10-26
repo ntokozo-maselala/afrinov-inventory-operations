@@ -17,6 +17,7 @@ vi.mock('../../shared/db.js', () => ({ prisma: { $transaction: async (fn: (t: ty
 vi.mock('../../shared/inventory/balances.js', () => ({
   getCurrentBalance: vi.fn(async (materialId: string) => new Prisma.Decimal(materialId === 'm-1' ? 10 : 4)),
   recomputeBalance: vi.fn(async () => undefined),
+  lockInventoryBalances: vi.fn(async () => undefined),
 }));
 vi.mock('../../shared/events.js', () => ({ dispatchDomainEvents: vi.fn(async () => undefined) }));
 

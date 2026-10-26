@@ -274,6 +274,8 @@ describe('stock movements over real HTTP', () => {
   });
 
   it('forbids a read-only user from moving stock', async () => {
+
+
     const email = `it-viewer-${run}@example.com`;
     const password = `viewer-${run}-pass`;
     const created = await api('POST', '/users', { email, name: `IT viewer ${run}`, password, roleNames: ['VIEWER'] });
@@ -285,4 +287,34 @@ describe('stock movements over real HTTP', () => {
     expect(res.status).toBe(403);
     expect(await transactionCount()).toBe(before);
   });
+
+  it('serializes concurrent issues against the same inventory balance', async () => {
+    const material = await api<{ id: string }>('POST', '/materials', {
+      sku: `RACE-${run}`, name: `Race material ${run}`, category: 'CONSUMABLES',
+      unitOfMeasure: 'each', requiredStock: 0,
+    });
+    const location = await api<{ id: string }>('POST', '/locations', {
+      name: `Race store ${run}`, type: 'STOREROOM',
+    });
+    expect(material.status).toBe(200);
+    expect(location.status).toBe(201);
+    const opening = await api('POST', '/inventory-adjustments', {
+      materialId: material.body.id, locationId: location.body.id, quantity: 1,
+      reasonCode: 'COUNT_VARIANCE', reasonNote: 'Concurrency test opening balance',
+    });
+    expect(opening.status).toBe(201);
+
+    const body = {
+      recipientId,
+      lines: [{ materialId: material.body.id, locationId: location.body.id, quantity: 1 }],
+    };
+    const responses = await Promise.all([
+      api<{ error?: { code: string } }>('POST', '/inventory-issues', body),
+      api<{ error?: { code: string } }>('POST', '/inventory-issues', body),
+    ]);
+
+    expect(responses.map((res) => res.status).sort()).toEqual([201, 422]);
+    expect(await ledgerAndBalance(material.body.id, location.body.id)).toEqual({ ledger: '0', balance: '0' });
+  });
+
 });

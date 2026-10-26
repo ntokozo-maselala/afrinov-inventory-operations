@@ -20,7 +20,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance } from '../../shared/inventory/balances.js';
+import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { approvalBlock, approversFor, listApprovers, whoToAsk } from './po-approval.js';
@@ -678,6 +678,7 @@ export const PurchaseOrderService = {
         include: { lines: true },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      await lockInventoryBalances(po.lines.map((line) => ({ materialId: line.materialId, locationId: input.locationId })), tx);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });
       }

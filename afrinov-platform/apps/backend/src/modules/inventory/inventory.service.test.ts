@@ -88,6 +88,7 @@ const purchaseOrderLines = new Map<string, POLineEntry>();
 const purchaseOrders = new Map<string, POEntry>();
 
 const fakeTx = {
+  $executeRaw: async () => undefined,
   inventoryTransaction: {
     create: async ({ data }: { data: Omit<TxRow, 'id'> }) => {
       const row: TxRow = { id: `trx-${++idSeq}`, ...data, postedAt: data.postedAt ?? new Date() };
