@@ -55,6 +55,10 @@ interface DraftLine { key: number; materialId: string; orderedQty: string; unitP
 let nextLineKey = 1;
 const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', orderedQty: '', unitPrice: '', deliveryDate: '' });
 
+/** One opening of the new-item drawer: the line it is for, and which opening it is. */
+interface NewItemSession { key: number; session: number }
+let nextSession = 1;
+
 /** An item's unit cost as a starting price; a cost of 0 is a price of 0, not none. */
 const priceFrom = (cost: string | null | undefined) => (cost != null && cost !== '' ? String(Number(cost)) : '');
 interface ReorderRow { materialId: string; reorderQuantity: string; lastSupplier?: { id: string } | null }
@@ -206,17 +210,17 @@ function NewPurchaseOrderForm() {
   // + New item: material the client needs that isn't in the catalogue yet is
   // added from its line, as a Projects item for the order's project when it has one.
   const canAddItem = usePermissions().hasPermission('materials:create');
-  // The line (by key) the drawer is open for. The ref is what a save that
-  // finishes later checks: if the drawer was closed meanwhile, the item stays
-  // in the catalogue but goes on no line.
-  const [newItemFor, setNewItemFor] = useState<number | null>(null);
-  const openFor = useRef<number | null>(null);
-  function openNewItem(key: number) { openFor.current = key; setNewItemFor(key); }
+  // The drawer opening on screen, if any. The ref is what a save that finishes
+  // later checks: unless the drawer is still that same opening (not closed,
+  // nor closed and opened again), the item stays in the catalogue but goes on no line.
+  const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
+  const openFor = useRef<NewItemSession | null>(null);
+  function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
   function closeNewItem() { openFor.current = null; setNewItemFor(null); }
-  function itemAdded(saved: Material, forKey: number) {
+  function itemAdded(saved: Material, from: NewItemSession) {
     setAdded((a) => [...a, saved]);
     materialsReq.reload();
-    if (openFor.current !== forKey) {
+    if (openFor.current?.session !== from.session) {
       toast.success(`${saved.sku} added to the catalogue`);
       return;
     }
@@ -226,7 +230,7 @@ function NewPurchaseOrderForm() {
       toast.error(`${saved.sku} added to the catalogue, but not to this order`, `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`);
       return;
     }
-    chooseMaterial(forKey, saved.id, saved);
+    chooseMaterial(from.key, saved.id, saved);
     toast.success(`${saved.sku} added to the catalogue and to the order`);
   }
 
@@ -407,8 +411,8 @@ function NewPurchaseOrderForm() {
       </form>
 
       {newItemFor !== null && (() => {
-        const forKey = newItemFor;
-        const lineNo = lines.findIndex((l) => l.key === forKey) + 1;
+        const from = newItemFor;
+        const lineNo = lines.findIndex((l) => l.key === from.key) + 1;
         return (
           <Drawer
             open
@@ -420,11 +424,12 @@ function NewPurchaseOrderForm() {
             width="md"
           >
             <MaterialForm
+              key={from.session}
               section={orderProject ? 'PROJECTS' : 'STORES'}
               projectNumber={orderProject || undefined}
               onCancel={closeNewItem}
               // The server answers with the whole item, its section and project included.
-              onSaved={(saved) => itemAdded(saved as unknown as Material, forKey)}
+              onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
               onError={(err) => toast.error('Could not add item', err.message)}
             />
           </Drawer>
