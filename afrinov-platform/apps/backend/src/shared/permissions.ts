@@ -70,6 +70,8 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.ViewAuditLog,
   ],
   PROCUREMENT: [
+    // Buyers add client-specific material to the catalogue from an order line; editing it stays with the store.
+    PermissionCode.CreateMaterial,
     PermissionCode.CreateSupplier,
     PermissionCode.EditSupplier,
     PermissionCode.ViewPurchaseOrder,

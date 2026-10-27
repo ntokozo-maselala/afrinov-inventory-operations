@@ -28,6 +28,8 @@ import { NoAccess } from '../components/NoAccess';
 import { useToast } from '../components/Toast';
 import { api, type ApiError } from '../api/client';
 import { useAuth } from '../auth';
+import { Drawer } from '../components/Modal';
+import { MaterialForm } from '../components/MaterialForm';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
@@ -39,6 +41,9 @@ import {
 } from '../components/PurchaseOrderDetailsFields';
 
 const ORDERS = { label: 'Purchase orders', to: '/purchase-orders' };
+
+/** The Material choice that adds an item to the catalogue from its line. */
+const NEW_ITEM = '__new_item__';
 
 interface Supplier {
   id: string; name: string; active: boolean; currency?: string; vendorCode?: string | null; paymentTerms?: string | null;
@@ -104,9 +109,12 @@ function NewPurchaseOrderForm() {
   const suppliersReq = useApi<Supplier[]>('/suppliers');
   const materialsReq = useApi<Material[]>('/materials');
   const suppliers = suppliersReq.data ?? [];
+  // Items added from an order line, until the catalogue is loaded again.
+  const [added, setAdded] = useState<Material[]>([]);
+  const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
   // Project material with no project yet isn't ordered until it has one, and a
   // completed or cancelled project's isn't ordered at all: its leftovers go to Stores.
-  const materials = (materialsReq.data ?? []).filter((m) => !needsProject(m)
+  const materials = catalogue.filter((m) => !needsProject(m)
     && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED')));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
@@ -188,9 +196,27 @@ function NewPurchaseOrderForm() {
   function updateLine(i: number, patch: Partial<DraftLine>) {
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   }
-  function chooseMaterial(i: number, materialId: string) {
+  // + New item: material the client needs that isn't in the catalogue yet is
+  // added from its line, as a Projects item for the order's project when it has one.
+  const canAddItem = usePermissions().hasPermission('materials:create');
+  const [newItemLine, setNewItemLine] = useState<number | null>(null);
+  function itemAdded(saved: Material) {
+    setAdded((a) => [...a, saved]);
+    setNewItemLine(null);
+    materialsReq.reload();
+    // Project material goes only on an order for its own project.
+    if (orderProject && sectionOf(saved.category) === 'PROJECTS' && saved.projectNumber !== orderProject) {
+      toast.error(`${saved.sku} added to the catalogue, but not to this order`, `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`);
+      return;
+    }
+    if (newItemLine !== null) chooseMaterial(newItemLine, saved.id, saved);
+    toast.success(`${saved.sku} added to the catalogue and to line ${(newItemLine ?? 0) + 1}`);
+  }
+
+  function chooseMaterial(i: number, materialId: string, item?: Material) {
+    if (materialId === NEW_ITEM) { setNewItemLine(i); return; }
     // Starts from the item's unit cost; the buyer types the quoted price over it.
-    const cost = materials.find((m) => m.id === materialId)?.unitCost;
+    const cost = (item ?? materials.find((m) => m.id === materialId))?.unitCost;
     setLines((l) => l.map((row, idx) => (idx === i
       ? { ...row, materialId, unitPrice: row.unitPrice || (cost ? String(Number(cost)) : '') }
       : row)));
@@ -298,6 +324,7 @@ function NewPurchaseOrderForm() {
                 <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(i, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
+                    {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                     {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
@@ -356,6 +383,27 @@ function NewPurchaseOrderForm() {
           <Button variant="primary" type="submit" loading={busy === 'submit'} disabled={busy !== null}>Create &amp; submit</Button>
         </FormFooter>
       </form>
+
+      {newItemLine !== null && (
+        <Drawer
+          open
+          onClose={() => setNewItemLine(null)}
+          title="New item"
+          description={orderProject
+            ? `Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${newItemLine + 1}.`
+            : `Material that isn't in the catalogue yet. It is added to the catalogue and goes on line ${newItemLine + 1}.`}
+          width="md"
+        >
+          <MaterialForm
+            section={orderProject ? 'PROJECTS' : 'STORES'}
+            projectNumber={orderProject || undefined}
+            onCancel={() => setNewItemLine(null)}
+            // The server answers with the whole item, its section and project included.
+            onSaved={(saved) => itemAdded(saved as unknown as Material)}
+            onError={(err) => toast.error('Could not add item', err.message)}
+          />
+        </Drawer>
+      )}
     </div>
   );
 }

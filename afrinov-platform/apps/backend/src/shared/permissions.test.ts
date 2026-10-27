@@ -20,6 +20,12 @@ describe('RolePermissions', () => {
     }
   });
 
+  it('lets procurement add catalogue items from an order line, while editing them stays with the store', () => {
+    const holders = (code: string) => Object.entries(RolePermissions).filter(([, p]) => (p as string[]).includes(code)).map(([role]) => role).sort();
+    expect(holders(PermissionCode.CreateMaterial)).toEqual(['ADMIN', 'PROCUREMENT', 'STORE_CONTROLLER']);
+    expect(holders(PermissionCode.EditMaterial)).toEqual(['ADMIN', 'STORE_CONTROLLER']);
+  });
+
   it('only references known permission codes', () => {
     const valid = new Set<string>(ALL_PERMISSION_CODES);
     for (const [role, perms] of Object.entries(RolePermissions)) {
