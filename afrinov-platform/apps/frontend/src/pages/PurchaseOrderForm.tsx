@@ -217,9 +217,13 @@ function NewPurchaseOrderForm() {
     if (materialId === NEW_ITEM) { setNewItemLine(i); return; }
     // Starts from the item's unit cost; the buyer types the quoted price over it.
     const cost = (item ?? materials.find((m) => m.id === materialId))?.unitCost;
-    setLines((l) => l.map((row, idx) => (idx === i
-      ? { ...row, materialId, unitPrice: row.unitPrice || (cost ? String(Number(cost)) : '') }
-      : row)));
+    setLines((l) => l.map((row, idx) => {
+      if (idx !== i) return row;
+      // A price filled from the item the line held follows the new item; one the buyer typed stays.
+      const before = materials.find((m) => m.id === row.materialId)?.unitCost;
+      const filled = !row.unitPrice.trim() || (before != null && row.unitPrice === String(Number(before)));
+      return { ...row, materialId, unitPrice: filled ? (cost ? String(Number(cost)) : '') : row.unitPrice };
+    }));
   }
   function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
 
@@ -264,7 +268,8 @@ function NewPurchaseOrderForm() {
     } finally { setBusy(null); }
   }
 
-  if (suppliersReq.error || materialsReq.error) {
+  // Only when they never loaded: a failed refresh keeps what was loaded, and the order being typed.
+  if ((suppliersReq.error && !suppliersReq.data) || (materialsReq.error && !materialsReq.data)) {
     return <ErrorState message={(suppliersReq.error ?? materialsReq.error)!.message} onRetry={() => { suppliersReq.reload(); materialsReq.reload(); }} />;
   }
 

@@ -97,4 +97,49 @@ describe('+ New item on an order line', () => {
     expect(await screen.findByText(/It is for project 1402, and this order is for 1369/)).toBeInTheDocument();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
   });
+
+  // Review: the line kept the price of the item it held before.
+  it('takes the price of the new item over one filled from the item the line held, but keeps a typed one', async () => {
+    renderForm();
+    await waitFor(() => expect(screen.getByRole('option', { name: /1369 — Plant upgrade/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
+    expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(12.5);
+    const add = async () => {
+      fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
+      const drawer = await screen.findByRole('dialog', { name: 'New item' });
+      fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: 'FLANGE' } });
+      fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flange' } });
+      fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument());
+    };
+    mockPost.mockImplementation(async () => created({ id: 'm-new', category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null }));
+    await add();
+    expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new');
+    expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(850);
+
+    fireEvent.change(screen.getByLabelText('Line 1 unit price'), { target: { value: '99' } });
+    mockPost.mockImplementation(async () => created({ id: 'm-new2', sku: 'FLANGE-2', category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null, unitCost: '500' }));
+    await add();
+    expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new2');
+    expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(99);
+  });
+
+  // Review: a failed refresh of the catalogue hid the order being typed.
+  it('keeps the order on screen when the catalogue fails to refresh after adding', async () => {
+    let calls = 0;
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/materials' && ++calls > 1) throw { code: 'INTERNAL_ERROR', message: 'Network down' };
+      return base(path);
+    });
+    renderForm();
+    const drawer = await lineWithNewItem();
+    fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: '1369-FLANGE-150' } });
+    fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flange 150NB' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(calls).toBeGreaterThan(1));
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new');
+  });
 });
