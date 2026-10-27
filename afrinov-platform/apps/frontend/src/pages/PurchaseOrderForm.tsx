@@ -14,7 +14,7 @@
 // lines are filled in, prices from unit cost and quantities up to Required
 // Stock where it is set. Without a supplier, the items' last supplier is
 // suggested when they share one.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
@@ -28,6 +28,8 @@ import { NoAccess } from '../components/NoAccess';
 import { useToast } from '../components/Toast';
 import { api, type ApiError } from '../api/client';
 import { useAuth } from '../auth';
+import { Drawer } from '../components/Modal';
+import { MaterialForm } from '../components/MaterialForm';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
@@ -40,11 +42,25 @@ import {
 
 const ORDERS = { label: 'Purchase orders', to: '/purchase-orders' };
 
+/** The Material choice that adds an item to the catalogue from its line. */
+const NEW_ITEM = '__new_item__';
+
 interface Supplier {
   id: string; name: string; active: boolean; currency?: string; vendorCode?: string | null; paymentTerms?: string | null;
   contactName?: string | null; contactPhone?: string | null; contactEmail?: string | null; address?: string | null;
 }
-interface DraftLine { materialId: string; orderedQty: string; unitPrice: string; deliveryDate: string }
+/** A line being typed. `key` stays with the line as others are added or removed. */
+interface DraftLine { key: number; materialId: string; orderedQty: string; unitPrice: string; deliveryDate: string }
+
+let nextLineKey = 1;
+const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', orderedQty: '', unitPrice: '', deliveryDate: '' });
+
+/** One opening of the new-item drawer: the line it is for, and which opening it is. */
+interface NewItemSession { key: number; session: number }
+let nextSession = 1;
+
+/** An item's unit cost as a starting price; a cost of 0 is a price of 0, not none. */
+const priceFrom = (cost: string | null | undefined) => (cost != null && cost !== '' ? String(Number(cost)) : '');
 interface ReorderRow { materialId: string; reorderQuantity: string; lastSupplier?: { id: string } | null }
 
 const SETTING_KEYS = [
@@ -104,9 +120,12 @@ function NewPurchaseOrderForm() {
   const suppliersReq = useApi<Supplier[]>('/suppliers');
   const materialsReq = useApi<Material[]>('/materials');
   const suppliers = suppliersReq.data ?? [];
+  // Items added from an order line, until the catalogue is loaded again.
+  const [added, setAdded] = useState<Material[]>([]);
+  const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
   // Project material with no project yet isn't ordered until it has one, and a
   // completed or cancelled project's isn't ordered at all: its leftovers go to Stores.
-  const materials = (materialsReq.data ?? []).filter((m) => !needsProject(m)
+  const materials = catalogue.filter((m) => !needsProject(m)
     && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED')));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
@@ -179,21 +198,53 @@ function NewPurchaseOrderForm() {
       .filter((m): m is Material => !!m)
       .map((m) => {
         const qty = toOrder.get(m.id) ?? 0;
-        return { materialId: m.id, orderedQty: qty > 0 ? String(qty) : '', unitPrice: m.unitCost ? String(Number(m.unitCost)) : '', deliveryDate: '' };
+        return { ...blankLine(), materialId: m.id, orderedQty: qty > 0 ? String(qty) : '', unitPrice: priceFrom(m.unitCost) };
       });
     if (presetLines.length > 0) { setLines(presetLines); setFilledFromLink(true); }
   }
 
-  function addLine() { setLines((l) => [...l, { materialId: '', orderedQty: '', unitPrice: '', deliveryDate: '' }]); }
+  function addLine() { setLines((l) => [...l, blankLine()]); }
   function updateLine(i: number, patch: Partial<DraftLine>) {
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   }
-  function chooseMaterial(i: number, materialId: string) {
+  // + New item: material the client needs that isn't in the catalogue yet is
+  // added from its line, as a Projects item for the order's project when it has one.
+  const canAddItem = usePermissions().hasPermission('materials:create');
+  // The drawer opening on screen, if any. The ref is what a save that finishes
+  // later checks: unless the drawer is still that same opening (not closed,
+  // nor closed and opened again), the item stays in the catalogue but goes on no line.
+  const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
+  const openFor = useRef<NewItemSession | null>(null);
+  function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
+  function closeNewItem() { openFor.current = null; setNewItemFor(null); }
+  function itemAdded(saved: Material, from: NewItemSession) {
+    setAdded((a) => [...a, saved]);
+    materialsReq.reload();
+    if (openFor.current?.session !== from.session) {
+      toast.success(`${saved.sku} added to the catalogue`);
+      return;
+    }
+    closeNewItem();
+    // Project material goes only on an order for its own project.
+    if (orderProject && sectionOf(saved.category) === 'PROJECTS' && saved.projectNumber !== orderProject) {
+      toast.error(`${saved.sku} added to the catalogue, but not to this order`, `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`);
+      return;
+    }
+    chooseMaterial(from.key, saved.id, saved);
+    toast.success(`${saved.sku} added to the catalogue and to the order`);
+  }
+
+  function chooseMaterial(key: number, materialId: string, item?: Material) {
+    if (materialId === NEW_ITEM) { openNewItem(key); return; }
     // Starts from the item's unit cost; the buyer types the quoted price over it.
-    const cost = materials.find((m) => m.id === materialId)?.unitCost;
-    setLines((l) => l.map((row, idx) => (idx === i
-      ? { ...row, materialId, unitPrice: row.unitPrice || (cost ? String(Number(cost)) : '') }
-      : row)));
+    const cost = (item ?? materials.find((m) => m.id === materialId))?.unitCost;
+    setLines((l) => l.map((row) => {
+      if (row.key !== key) return row;
+      // A price filled from the item the line held follows the new item; one the buyer typed stays.
+      const before = materials.find((m) => m.id === row.materialId)?.unitCost;
+      const filled = !row.unitPrice.trim() || (before != null && row.unitPrice === priceFrom(before));
+      return { ...row, materialId, unitPrice: filled ? priceFrom(cost) : row.unitPrice };
+    }));
   }
   function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
 
@@ -238,7 +289,8 @@ function NewPurchaseOrderForm() {
     } finally { setBusy(null); }
   }
 
-  if (suppliersReq.error || materialsReq.error) {
+  // Only when they never loaded: a failed refresh keeps what was loaded, and the order being typed.
+  if ((suppliersReq.error && !suppliersReq.data) || (materialsReq.error && !materialsReq.data)) {
     return <ErrorState message={(suppliersReq.error ?? materialsReq.error)!.message} onRetry={() => { suppliersReq.reload(); materialsReq.reload(); }} />;
   }
 
@@ -294,10 +346,11 @@ function NewPurchaseOrderForm() {
           </div>
           <div className="space-y-2">
             {lines.map((l, i) => (
-              <div key={i} className={`${NEW_LINE_GRID} items-start`}>
+              <div key={l.key} className={`${NEW_LINE_GRID} items-start`}>
                 <div className="col-span-12 md:col-span-1">
-                  <Select value={l.materialId} onChange={(e) => chooseMaterial(i, e.target.value)} aria-label={`Line ${i + 1} material`}>
+                  <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
+                    {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                     {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
@@ -356,6 +409,32 @@ function NewPurchaseOrderForm() {
           <Button variant="primary" type="submit" loading={busy === 'submit'} disabled={busy !== null}>Create &amp; submit</Button>
         </FormFooter>
       </form>
+
+      {newItemFor !== null && (() => {
+        const from = newItemFor;
+        const lineNo = lines.findIndex((l) => l.key === from.key) + 1;
+        return (
+          <Drawer
+            open
+            onClose={closeNewItem}
+            title="New item"
+            description={orderProject
+              ? `Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${lineNo}.`
+              : `Material that isn't in the catalogue yet. It is added to the catalogue and goes on line ${lineNo}.`}
+            width="md"
+          >
+            <MaterialForm
+              key={from.session}
+              section={orderProject ? 'PROJECTS' : 'STORES'}
+              projectNumber={orderProject || undefined}
+              onCancel={closeNewItem}
+              // The server answers with the whole item, its section and project included.
+              onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
+              onError={(err) => toast.error('Could not add item', err.message)}
+            />
+          </Drawer>
+        );
+      })()}
     </div>
   );
 }

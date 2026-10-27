@@ -50,6 +50,7 @@ export function useCanManageUsers(): boolean {
  */
 export const PERMISSION_ROLES = {
   'materials:manage': ['STORE_CONTROLLER'], // create:material, edit:material
+  'materials:create': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:material (buyers add an item from an order line)
   'inventory:receive': ['STORE_CONTROLLER', 'PROCUREMENT'], // receive:inventory
   'inventory:issue': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory
   'inventory:return': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory (returns are booked by the people who issue)
