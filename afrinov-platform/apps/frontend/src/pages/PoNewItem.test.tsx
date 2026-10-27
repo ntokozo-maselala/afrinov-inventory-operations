@@ -142,4 +142,32 @@ describe('+ New item on an order line', () => {
     expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new');
   });
+
+  // Qodo: the target line was a position, so a save finishing after the drawer closed could land anywhere.
+  it('puts an item on no line when its drawer was closed before the save finished', async () => {
+    let finish: (v: unknown) => void = () => {};
+    mockPost.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    renderForm();
+    const drawer = await lineWithNewItem();
+    fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: 'FLANGE' } });
+    fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flange' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument());
+    finish(created({ category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null }));
+    expect(await screen.findByText('1369-FLANGE-150 added to the catalogue')).toBeInTheDocument();
+    expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
+  });
+
+  // Qodo: a unit cost of 0 must price the line at 0, not leave it unpriced.
+  it('prices the line at 0 for an item whose unit cost is 0', async () => {
+    mockPost.mockImplementation(async () => created({ category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null, unitCost: '0' }));
+    renderForm();
+    const drawer = await lineWithNewItem();
+    fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: 'FREE-SAMPLE' } });
+    fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Free sample' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new'));
+    expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(0);
+  });
 });
