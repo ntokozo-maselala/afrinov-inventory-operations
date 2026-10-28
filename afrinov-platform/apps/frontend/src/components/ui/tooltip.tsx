@@ -1,4 +1,4 @@
-import * as React from 'react';
+import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 
 import { cn } from '../../lib/cn';
@@ -11,10 +11,10 @@ export function Tooltip({
   children,
   ...props
 }: {
-  content: React.ReactNode;
+  content: ReactNode;
   side?: 'top' | 'right' | 'bottom' | 'left';
-  children: React.ReactNode;
-} & React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Root>) {
+  children: ReactNode;
+} & ComponentPropsWithoutRef<typeof TooltipPrimitive.Root>) {
   return (
     <TooltipPrimitive.Root {...props}>
       <TooltipPrimitive.Trigger asChild>

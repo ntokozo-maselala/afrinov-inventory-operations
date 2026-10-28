@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { createRef } from 'react';
 import { render, screen } from '@testing-library/react';
 import { Field, Input, Select, Textarea } from './Field';
 
@@ -112,6 +113,43 @@ describe('components/Field.tsx', () => {
       );
       const select = screen.getByRole('combobox');
       expect(select.className).toContain('input-error');
+    });
+  });
+
+  // React 19 passes `ref` as a normal prop, so these components dropped
+  // forwardRef. These tests pin the ref-to-DOM-node contract that the old
+  // forwardRef implementation provided.
+  describe('ref forwarding (React 19 ref-as-prop)', () => {
+    it('forwards ref to the underlying input element', () => {
+      const ref = createRef<HTMLInputElement>();
+      render(<Input ref={ref} defaultValue="x" />);
+      expect(ref.current).toBeInstanceOf(HTMLInputElement);
+      expect(ref.current?.value).toBe('x');
+    });
+
+    it('forwards ref to the underlying textarea element', () => {
+      const ref = createRef<HTMLTextAreaElement>();
+      render(<Textarea ref={ref} defaultValue="notes" />);
+      expect(ref.current).toBeInstanceOf(HTMLTextAreaElement);
+      expect(ref.current?.value).toBe('notes');
+    });
+
+    it('forwards ref to the underlying select element', () => {
+      const ref = createRef<HTMLSelectElement>();
+      render(
+        <Select ref={ref} defaultValue="a">
+          <option value="a">A</option>
+        </Select>
+      );
+      expect(ref.current).toBeInstanceOf(HTMLSelectElement);
+      expect(ref.current?.value).toBe('a');
+    });
+
+    it('exposes a focusable node through the ref', () => {
+      const ref = createRef<HTMLInputElement>();
+      render(<Input ref={ref} />);
+      ref.current?.focus();
+      expect(document.activeElement).toBe(ref.current);
     });
   });
 });
