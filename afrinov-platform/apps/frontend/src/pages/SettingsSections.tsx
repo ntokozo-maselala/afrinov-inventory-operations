@@ -153,6 +153,13 @@ export function SettingsPurchaseOrders() {
   ];
   const documentDefaults = [
     useSetting('purchaseOrders.companyVatNumber'),
+  ];
+  // Under Remarks on every order, in this order; each order keeps the wording it was approved with.
+  const smallPrint = [
+    useSetting('purchaseOrders.terms'),
+    useSetting('purchaseOrders.latePenalty'),
+    useSetting('purchaseOrders.documentation'),
+    useSetting('purchaseOrders.invoicing'),
     useSetting('purchaseOrders.invoiceEmail'),
     useSetting('purchaseOrders.codeOfConduct'),
   ];
@@ -191,14 +198,32 @@ export function SettingsPurchaseOrders() {
         />
       ))}
       <h3 className="text-sm font-semibold text-surface-900 pt-2">Printed on the purchase order</h3>
-      {documentDefaults.map((def) => (
+      {documentDefaults.map((def) => def && (
         <TextField
           key={def.key}
           def={def}
           value={(draft[def.key] as string) ?? ''}
           onChange={(v) => setDraft(def.key, v)}
           error={errors[def.key] ?? null}
-          multiline={def.key === 'purchaseOrders.codeOfConduct'}
+        />
+      ))}
+      {smallPrint.some(Boolean) && (
+        <div className="pt-2">
+          <h3 className="text-sm font-semibold text-surface-900">Terms, documentation and invoicing</h3>
+          <p className="text-xs text-surface-500 mt-0.5">
+            Printed under Remarks on every purchase order. An order keeps the wording it was approved with, so changing it here
+            changes orders approved from now on, not ones already sent.
+          </p>
+        </div>
+      )}
+      {smallPrint.map((def) => def && (
+        <TextField
+          key={def.key}
+          def={def}
+          value={(draft[def.key] as string) ?? ''}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+          multiline={def.key !== 'purchaseOrders.invoiceEmail'}
         />
       ))}
       <SaveBar items={items} onSave={async () => {

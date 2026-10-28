@@ -24,6 +24,7 @@ import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { approvalBlock, approversFor, listApprovers, whoToAsk } from './po-approval.js';
+import { currentPrintedTerms } from './po-terms.js';
 import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
 
 export interface CreateSupplierInput {
@@ -599,10 +600,11 @@ export const PurchaseOrderService = {
           },
         });
       } else {
-        // Approval not required: submission auto-approves.
+        // Approval not required: submission auto-approves, and the order keeps
+        // the small print it was approved with.
         const result = await tx.purchaseOrder.updateMany({
           where: { id, status: { in: allowed } },
-          data: { status: 'APPROVED', approvedAt: now, approvedById: actorId },
+          data: { status: 'APPROVED', approvedAt: now, approvedById: actorId, printedTerms: await currentPrintedTerms(tx) },
         });
         if (result.count === 0) {
           throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
@@ -656,9 +658,11 @@ export const PurchaseOrderService = {
         throw Errors.forbidden(`${block.message} ${whoToAsk(names)}`);
       }
       const now = new Date();
+      // The order keeps the small print it was approved with; approving a
+      // revision again takes the wording of the day.
       const result = await tx.purchaseOrder.updateMany({
         where: { id, status: { in: allowed } },
-        data: { status: 'APPROVED', approvedAt: now, approvedById: actorId },
+        data: { status: 'APPROVED', approvedAt: now, approvedById: actorId, printedTerms: await currentPrintedTerms(tx) },
       });
       if (result.count === 0) {
         throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');

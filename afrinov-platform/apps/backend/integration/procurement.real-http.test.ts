@@ -503,4 +503,24 @@ describe('receiving stock over real HTTP', () => {
       await expectStock(String(Number(before) + each * 2));
     });
   });
+
+  // The supplier accepts the order's terms, so an approved order keeps the
+  // wording it was approved with.
+  describe('small print', () => {
+    it('keeps the wording an order was approved with when the settings change later', async () => {
+      const original = (await api<{ value: string }>('GET', '/settings/purchaseOrders.terms')).body.value;
+      try {
+        expect((await api('PUT', '/settings/purchaseOrders.terms', { value: `Terms as approved ${run}.` })).status).toBe(200);
+        const order = await approvedOrder(1);
+        const kept = await api<{ printedTerms: Record<string, string> | null }>('GET', `/purchase-orders/${order.id}`);
+        expect(kept.body.printedTerms).toMatchObject({ terms: `Terms as approved ${run}.`, invoiceEmail: expect.any(String) });
+
+        expect((await api('PUT', '/settings/purchaseOrders.terms', { value: `Changed later ${run}.` })).status).toBe(200);
+        const after = await api<{ printedTerms: Record<string, string> | null }>('GET', `/purchase-orders/${order.id}`);
+        expect(after.body.printedTerms?.terms).toBe(`Terms as approved ${run}.`);
+      } finally {
+        await api('PUT', '/settings/purchaseOrders.terms', { value: original });
+      }
+    });
+  });
 });

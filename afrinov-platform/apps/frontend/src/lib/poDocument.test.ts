@@ -3,11 +3,16 @@
 // writes its pages uncompressed.
 import { describe, it, expect } from 'vitest';
 import {
-  buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, revisionLabel, type PoDocumentOrder,
+  buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, revisionLabel, smallPrint, type PoDocumentOrder,
 } from './poDocument';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
-const COMPANY = { name: 'Afrinov', vatNumber: '4010288142', invoiceEmail: 'accounts@afrinov.co.za', codeOfConduct: 'Suppliers declare any conflict of interest.' };
+const COMPANY = {
+  name: 'Afrinov', vatNumber: '4010288142',
+  terms: 'Deliver by the order delivery date.', latePenalty: 'Late delivery incurs a penalty of 2% per week.',
+  documentation: 'Provide material certificates.', invoicing: 'Payment may be withheld for missing documents.',
+  invoiceEmail: 'accounts@afrinov.co.za', codeOfConduct: 'Suppliers declare any conflict of interest.',
+};
 
 const order = (over: Partial<PoDocumentOrder> = {}): PoDocumentOrder => ({
   number: 'PO-2026-0007', status: 'APPROVED', createdAt: '2026-10-19T08:00:00Z', expectedDeliveryDate: '2026-10-30',
@@ -136,7 +141,9 @@ describe('buildPoDocument', () => {
     for (const s of [
       'PURCHASE ORDER', 'PO-2026-0007', 'Hydac', 'V006', 'Afrinov \\(PTY\\) Ltd', '30 DAYS NETT', '4010288142',
       'Penalties apply to this order', 'M-1325', 'Cutting disc', 'Total amount of purchase order \\(ZAR\\)',
-      'Deliver to the boiler shop.', 'invoices to be sent to accounts@afrinov.co.za', 'Code of Conduct',
+      'Deliver to the boiler shop.', 'Terms', 'Deliver by the order delivery date.', 'Late delivery incurs a penalty',
+      'Documentation', 'Provide material certificates.', 'Invoicing & Payment', 'Payment may be withheld',
+      'Invoices to be submitted to: accounts@afrinov.co.za, quoting PO-2026-0007.', 'Code of Conduct',
       'Originator', 'Authorization', 'Approver Name', 'Supplier acceptance', '1 line has no price', 'Page 1 of 1',
     ]) expect(out, s).toContain(s);
     expect(out).not.toContain('NOT FOR ISSUE');
@@ -159,6 +166,45 @@ describe('buildPoDocument', () => {
 
 describe('companyFromSettings', () => {
   it('reads the printed company details, with the name falling back to Afrinov', () => {
-    expect(companyFromSettings({ 'purchaseOrders.companyVatNumber': '4010288142' })).toEqual({ name: 'Afrinov', vatNumber: '4010288142', invoiceEmail: '', codeOfConduct: '' });
+    expect(companyFromSettings({ 'purchaseOrders.companyVatNumber': '4010288142', 'purchaseOrders.terms': 'Deliver on time.' })).toEqual({
+      name: 'Afrinov', vatNumber: '4010288142', terms: 'Deliver on time.', latePenalty: '', documentation: '', invoicing: '', invoiceEmail: '', codeOfConduct: '',
+    });
+  });
+});
+
+// Terms, Documentation, Invoicing & Payment and the Code of Conduct, as on the
+// issued orders, under Remarks.
+describe('smallPrint', () => {
+  const headings = (s: ReturnType<typeof smallPrint>) => s.map((x) => x.heading);
+
+  it('prints the sections in order, the late delivery penalty in bold at the end of Terms, and where invoices go', () => {
+    const s = smallPrint({ number: 'AFRI-0412', penaltiesApply: true }, COMPANY);
+    expect(headings(s)).toEqual(['Terms', 'Documentation', 'Invoicing & Payment', 'Code of Conduct']);
+    expect(s[0]!.paragraphs).toEqual([{ text: COMPANY.terms }, { text: COMPANY.latePenalty, bold: true }]);
+    expect(s[2]!.paragraphs.at(-1)).toEqual({ text: 'Invoices to be submitted to: accounts@afrinov.co.za, quoting AFRI-0412.', bold: true });
+  });
+
+  it('leaves the penalty off an order where penalties do not apply', () => {
+    const s = smallPrint({ number: 'AFRI-0412', penaltiesApply: false }, COMPANY);
+    expect(s[0]!.paragraphs).toEqual([{ text: COMPANY.terms }]);
+  });
+
+  it('leaves off a section with nothing in it', () => {
+    const s = smallPrint({ number: 'AFRI-0412', penaltiesApply: false }, { ...COMPANY, documentation: '  ', codeOfConduct: '', terms: '' });
+    expect(headings(s)).toEqual(['Invoicing & Payment']);
+  });
+
+  it('prints an approved order with the wording it was approved with, not today\'s', () => {
+    const kept = { terms: 'Old terms.', latePenalty: 'Old penalty.', documentation: '', invoicing: 'Old invoicing.', invoiceEmail: 'old@afrinov.co.za', codeOfConduct: '' };
+    const s = smallPrint({ number: 'AFRI-0412', penaltiesApply: true, printedTerms: kept }, COMPANY);
+    expect(headings(s)).toEqual(['Terms', 'Invoicing & Payment']);
+    expect(s[0]!.paragraphs.map((p) => p.text)).toEqual(['Old terms.', 'Old penalty.']);
+    expect(s[1]!.paragraphs.at(-1)!.text).toContain('old@afrinov.co.za');
+  });
+
+  it('prints the PDF with the kept wording', async () => {
+    const out = text(await buildPoDocument(order({ printedTerms: { terms: 'Terms as approved.', latePenalty: '', documentation: '', invoicing: '', invoiceEmail: '', codeOfConduct: '' } }), COMPANY));
+    expect(out).toContain('Terms as approved.');
+    expect(out).not.toContain('Deliver by the order delivery date.');
   });
 });

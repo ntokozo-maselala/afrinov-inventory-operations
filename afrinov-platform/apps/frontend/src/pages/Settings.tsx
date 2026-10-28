@@ -334,6 +334,10 @@ function labelForKey(key: string): string {
     .replace(/^Vat Rate$/, 'VAT rate (%)')
     .replace(/^Company Vat Number$/, 'Company VAT number')
     .replace(/^First Number$/, 'First AFRI number')
+    .replace(/^Late Penalty$/, 'Late delivery penalty')
+    .replace(/^Invoicing$/, 'Invoicing & payment')
+    .replace(/^Invoice Email$/, 'Invoices submitted to')
+    .replace(/^Code Of Conduct$/, 'Code of conduct')
     .trim();
 }
 
