@@ -34,7 +34,7 @@ function createMockCSSRuleList(rules: CSSRule[]): CSSRuleList {
   return {
     length: rules.length,
     item: (index: number) => rules[index] ?? null,
-    [Symbol.iterator](): IterableIterator<CSSRule> {
+    [Symbol.iterator](): ArrayIterator<CSSRule> {
       return rules[Symbol.iterator]();
     },
   };
@@ -49,7 +49,7 @@ function createMockCSSStyleSheet(ownerNode: HTMLElement): CSSStyleSheet {
     item: () => null,
     appendMedium: vi.fn(),
     deleteMedium: vi.fn(),
-    [Symbol.iterator](): IterableIterator<string> {
+    [Symbol.iterator](): ArrayIterator<string> {
       return [][Symbol.iterator]();
     },
   };

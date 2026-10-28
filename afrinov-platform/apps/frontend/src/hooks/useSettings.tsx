@@ -121,22 +121,22 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
   useEffect(() => {
     let cancelled = false;
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    setError(null); // eslint-disable-line react-hooks/set-state-in-effect
+    setError(null);  
     api
       .get<SettingValue[]>('/settings')
       .then((rows) => {
         if (cancelled) return;
-        setAll(rows); // eslint-disable-line react-hooks/set-state-in-effect
+        setAll(rows);  
         const map: SettingMap = {};
         for (const r of rows) map[r.key] = r;
         savedRef.current = map;
-        setDraftState(buildInitialDraft(rows)); // eslint-disable-line react-hooks/set-state-in-effect
+        setDraftState(buildInitialDraft(rows));  
       })
       .catch((e: ApiError) => {
-        if (!cancelled) setError(e); // eslint-disable-line react-hooks/set-state-in-effect
+        if (!cancelled) setError(e);  
       })
       .finally(() => {
-        if (!cancelled) setLoading(false); // eslint-disable-line react-hooks/set-state-in-effect
+        if (!cancelled) setLoading(false);  
       });
     return () => { cancelled = true; };
   }, [nonce]);
@@ -170,11 +170,11 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
     setDraftState(buildInitialDraft(all));
   }, [all]);
 
-  // eslint-disable-next-line react-hooks/refs
+   
   const dirty = useMemo(() => {
     // eslint-disable-next-line react-hooks/refs
     return Object.keys(draft).some((k) => {
-      // eslint-disable-next-line react-hooks/refs
+       
       const def = savedRef.current[k];
       if (!def) return true;
       return !valuesEqual(def.value, draft[k]);
@@ -185,7 +185,7 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
   const errors = useMemo<Record<string, string>>(() => {
     const out: Record<string, string> = {};
     for (const key of Object.keys(draft)) {
-      const def = savedRef.current[key]; // eslint-disable-line react-hooks/refs
+      const def = savedRef.current[key];  
       if (!def) continue; // eslint-disable-line react-hooks/refs
       const err = validate(def, draft[key]); // eslint-disable-line react-hooks/refs
       if (err) out[key] = err;

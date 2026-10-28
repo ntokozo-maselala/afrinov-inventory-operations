@@ -14,7 +14,8 @@
     "useDefineForClassFields": true,
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": ["node"]
   },
   "include": ["src", "e2e", "playwright.config.ts"]
 }

@@ -70,7 +70,7 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') return;
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     setPrefersReducedMotion(mediaQuery.matches); // eslint-disable-line react-hooks/set-state-in-effect
-    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches); // eslint-disable-line react-hooks/set-state-in-effect
+    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);  
     mediaQuery.addEventListener('change', handler);
     return () => mediaQuery.removeEventListener('change', handler);
   }, []);
@@ -87,7 +87,7 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
       setSidebarModeState('mobile-closed'); // eslint-disable-line react-hooks/set-state-in-effect
     } else if (isDesktop && (sidebarMode === 'mobile-open' || sidebarMode === 'mobile-closed')) {
       const stored = localStorage.getItem('afrinov.sidebarCollapsed');
-      setSidebarModeState(stored === '1' ? 'collapsed' : 'expanded'); // eslint-disable-line react-hooks/set-state-in-effect
+      setSidebarModeState(stored === '1' ? 'collapsed' : 'expanded');  
     }
     // Tablet: no auto-switch. User controls collapse/expand.
   }, [isMobile, isDesktop, sidebarMode]);

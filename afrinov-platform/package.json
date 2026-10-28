@@ -34,10 +34,10 @@
     }
   },
   "allowScripts": {
-    "@prisma/client@5.22.0": true,
-    "@prisma/engines@5.22.0": true,
-    "prisma@5.22.0": true,
+    "@prisma/client@7.10.1": true,
+    "@prisma/engines@7.10.1": true,
+    "prisma@7.10.1": true,
     "esbuild@0.28.2": true,
-    "core-js@3.50.0": true
+    "core-js@3.51.0": true
   }
 }

@@ -192,8 +192,8 @@ export function Sidebar({ groups, onNavigate, isMobile = false }: SidebarProps) 
       aria-label={isMobile ? 'Mobile navigation' : 'Main'}
       className={cn(
         'h-full flex flex-col bg-surface-0 border-r border-surface-200 dark:bg-surface-0 dark:border-surface-200',
-        isCollapsed && 'w-[var(--sidebar-width-collapsed)]',
-        !isCollapsed && !isMobile && 'w-[var(--sidebar-width-expanded)]'
+        isCollapsed && 'w-(--sidebar-width-collapsed)',
+        !isCollapsed && !isMobile && 'w-(--sidebar-width-expanded)'
       )}
       style={{
         width: isCollapsed
@@ -204,7 +204,7 @@ export function Sidebar({ groups, onNavigate, isMobile = false }: SidebarProps) 
       }}
     >
       <div className="flex items-center gap-2 border-b border-surface-200 dark:border-surface-200 px-3 py-3">
-        <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-brand-50 dark:bg-brand-900/50 flex-shrink-0">
+        <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-brand-50 dark:bg-brand-900/50 shrink-0">
           <Logo size={22} decorative />
         </span>
         {!isCollapsed && !isMobile && (

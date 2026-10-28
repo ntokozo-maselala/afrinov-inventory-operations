@@ -23,16 +23,16 @@ export function useApi<T>(path: string | null): {
       .get<T>(path)
       .then((d) => {
         if (!cancelled) {
-          setData(d); // eslint-disable-line react-hooks/set-state-in-effect
-          setDataPath(path); // eslint-disable-line react-hooks/set-state-in-effect
-          setError(null); // eslint-disable-line react-hooks/set-state-in-effect
+          setData(d);  
+          setDataPath(path);  
+          setError(null);  
         }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(isApiError(e) ? e : { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.' });
       })
       .finally(() => {
-        if (!cancelled) setLoading(false); // eslint-disable-line react-hooks/set-state-in-effect
+        if (!cancelled) setLoading(false);  
       });
     return () => {
       cancelled = true;
@@ -43,9 +43,9 @@ export function useApi<T>(path: string | null): {
   // eslint-disable react-hooks/set-state-in-effect
   useEffect(() => {
     setData(null); // eslint-disable-line react-hooks/set-state-in-effect
-    setDataPath(null); // eslint-disable-line react-hooks/set-state-in-effect
-    setError(null); // eslint-disable-line react-hooks/set-state-in-effect
-    setLoading(path !== null); // eslint-disable-line react-hooks/set-state-in-effect
+    setDataPath(null);  
+    setError(null);  
+    setLoading(path !== null);  
   }, [path]);
   // eslint-enable react-hooks/set-state-in-effect
 

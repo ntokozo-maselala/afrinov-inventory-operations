@@ -263,7 +263,7 @@ export function StockCount() {
 
               <div className="surface-card p-4 space-y-3">
                 <div className="flex flex-wrap items-end gap-3 no-print">
-                  <Field label="Find an item" htmlFor="count-filter" className="flex-1 min-w-[14rem]">
+                  <Field label="Find an item" htmlFor="count-filter" className="flex-1 min-w-56">
                     <Input id="count-filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Name or code" />
                   </Field>
                   <p className="text-sm text-surface-600 pb-2" aria-live="polite">

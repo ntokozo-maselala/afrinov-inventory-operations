@@ -67,7 +67,7 @@ export function DownloadMenu({ label = 'Download', onDownload, disabled }: {
               key={f.format}
               type="button"
               role="menuitem"
-              className="block w-full px-3 py-1.5 text-left text-sm text-surface-800 hover:bg-surface-100 focus:bg-surface-100 focus:outline-none"
+              className="block w-full px-3 py-1.5 text-left text-sm text-surface-800 hover:bg-surface-100 focus:bg-surface-100 focus:outline-hidden"
               onClick={() => choose(f.format)}
             >
               {f.label}
