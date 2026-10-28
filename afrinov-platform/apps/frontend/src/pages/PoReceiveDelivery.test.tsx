@@ -62,11 +62,13 @@ describe('Receive delivery on the order page', () => {
     fireEvent.change(within(dialog).getByLabelText('Receive every line into'), { target: { value: 'loc-2' } });
     fireEvent.change(within(dialog).getByLabelText(/Delivery note/), { target: { value: 'INV-77' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Receive' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/goods-receipts/gr-9/post'));
-    expect(mockPost).toHaveBeenCalledWith('/goods-receipts', {
+    // Recorded and posted in one call, so a failure leaves no unposted receipt.
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/goods-receipts', {
       supplierId: 's-1', purchaseOrderId: 'po-1', deliveryRef: 'INV-77',
       lines: [{ materialId: 'm-1', locationId: 'loc-2', quantity: 2, purchaseOrderLineId: 'pol-1' }],
-    });
+      post: true,
+    }));
+    expect(mockPost).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('Received on GR-2026-0009')).toBeInTheDocument();
   });
 

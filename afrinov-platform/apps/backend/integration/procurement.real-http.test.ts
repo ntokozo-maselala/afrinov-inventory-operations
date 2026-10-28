@@ -386,4 +386,26 @@ describe('receiving stock over real HTTP', () => {
       expect(bad.status).toBe(400);
     });
   });
+
+  // Receive delivery records and posts a receipt in one step. Receipts that
+  // arrive together must each be counted in the balance, and none may fail.
+  describe('one-step receipts at the same time', () => {
+    it('records and posts each, and the balance counts every one', async () => {
+      const orders = await Promise.all([1, 2, 3, 4].map(() => approvedOrder(1)));
+      const { ledger: before } = await ledgerAndBalance(materialId, locationId);
+
+      const results = await Promise.all(orders.map((order) => api<{ status: string; number: string }>('POST', '/goods-receipts', {
+        purchaseOrderId: order.id,
+        supplierId,
+        lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }],
+        post: true,
+      })));
+
+      expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201]);
+      expect(results.map((r) => r.body.status)).toEqual(['POSTED', 'POSTED', 'POSTED', 'POSTED']);
+      expect(new Set(results.map((r) => r.body.number)).size).toBe(4);
+      await expectStock(String(Number(before) + 4));
+      for (const order of orders) expect((await getOrder(order.id)).status).toBe('RECEIVED');
+    });
+  });
 });

@@ -42,6 +42,14 @@ export interface BuildServerOptions {
   onRoute?: (route: RouteOptions) => void;
 }
 
+/** Error codes for Fastify's own refusals, by status; any other 4xx is BAD_REQUEST. */
+const FRAMEWORK_ERROR_CODES: Record<number, string> = {
+  404: 'NOT_FOUND',
+  405: 'METHOD_NOT_ALLOWED',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
+};
+
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
   const config = opts.skipConfigValidation ? loadConfigUnsafe() : loadConfigOrThrow();
 
@@ -188,6 +196,15 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       return reply.code(err.statusCode).send({
         error: { code: err.code, message: err.message, details: err.details },
       });
+    }
+    // Fastify's own refusals of a malformed request (an empty JSON body, bad
+    // JSON, an unsupported content type) are the caller's mistake, not ours.
+    // Only Fastify's (FST_ERR_*): another error's message is not shown.
+    const { statusCode: status, code } = err as { statusCode?: unknown; code?: unknown };
+    if (err instanceof Error && typeof code === 'string' && code.startsWith('FST_ERR_')
+      && typeof status === 'number' && status >= 400 && status < 500) {
+      req.log.warn({ requestId, code, message: err.message, statusCode: status }, 'Bad request');
+      return reply.code(status).send({ error: { code: FRAMEWORK_ERROR_CODES[status] ?? 'BAD_REQUEST', message: err.message } });
     }
     if (err instanceof Error) {
       app.log.error({ err, requestId }, 'Unhandled error');
