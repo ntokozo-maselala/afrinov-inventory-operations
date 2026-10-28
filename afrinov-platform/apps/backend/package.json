@@ -45,7 +45,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20.14.10",
+    "@types/node": "^24.19.2",
     "@types/pdfkit": "^0.17.6",
     "@typescript-eslint/eslint-plugin": "^8.71.1",
     "@typescript-eslint/parser": "^8.71.1",
