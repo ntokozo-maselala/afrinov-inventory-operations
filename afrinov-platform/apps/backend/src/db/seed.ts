@@ -19,15 +19,14 @@
 // mutation, ensuring the seeded balances match what the application
 // would derive from the seeded transactions.
 
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { ALL_PERMISSION_CODES, RolePermissions } from '../shared/permissions.js';
 import { recomputeBalancesFor } from '../modules/inventory/balances.js';
+import { prisma } from '../shared/db.js';
 
 type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER';
 
-const prisma = new PrismaClient();
 
 interface DemoMaterial {
   sku: string;

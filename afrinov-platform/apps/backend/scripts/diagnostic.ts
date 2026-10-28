@@ -1,5 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-const p = new PrismaClient();
+import { prisma as p } from '../src/shared/db.js';
 async function main() {
   // Compiled into the production image; refuse to run there.
   if (process.env.NODE_ENV === 'production') {
