@@ -56,7 +56,8 @@ describe('rfqDocumentBlocks, rfqDocumentLines and rfqReturnNote', () => {
     expect(blocks.rfq).toContainEqual(['Issued', '28 Oct 2026']);
     expect(blocks.rfq).toContainEqual(['Closing', '01 Nov 2026']);
     expect(blocks.rfq).toContainEqual(['Afrinov contact', 'Thandi Buyer']);
-    expect(blocks.rfq).toContainEqual(['Penalties', 'Penalties apply to this order']);
+    // No order exists yet, so the penalties are for the one placed from the quotes.
+    expect(blocks.rfq).toContainEqual(['Penalties', 'Penalties will apply to the order placed']);
   });
 
   it('shows a dash for what a draft or a supplier lacks', () => {
@@ -95,6 +96,20 @@ describe('buildRfqDocument', () => {
       'Instructions', 'save as PDF', 'quotes@afrinov.co.za', 'Remarks', 'Stainless steel to 304 grade.',
     ]) expect(pdf).toContain(s);
     expect(pdf).not.toContain('DRAFT - NOT FOR ISSUE');
+  });
+
+  it("cuts a long supplier name short in the footer, so it can't run into the page number", async () => {
+    const long = `${'Very Long Supplier Name '.repeat(8)}(Pty) Ltd`;
+    const pdf = text(await buildRfqDocument(rfq(), { ...TO, supplier: { ...TO.supplier!, name: long } }, COMPANY));
+    // The footer line ends in an ellipsis, not the whole name.
+    expect(pdf).toMatch(/\(AFRI-02A-1094-02-01 · Very Long Supplier Name[^)]*\.\.\.\) Tj/);
+  });
+
+  it('keeps a long address and description in the detail blocks', async () => {
+    const address = 'Unit 4, Phase 2, '.repeat(20).trim();
+    const pdf = text(await buildRfqDocument(rfq({ description: 'Supply ultrahigh door rails '.repeat(15).trim() }), { ...TO, supplier: { ...TO.supplier!, address } }, COMPANY));
+    expect(pdf).toContain('REQUEST FOR QUOTATION');
+    expect(pdf).toContain('Overhead rail wheel Stainless Steel');
   });
 
   it('stamps a draft, and leaves Instructions off when Settings has none', async () => {

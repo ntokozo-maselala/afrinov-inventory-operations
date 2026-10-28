@@ -125,7 +125,7 @@ export function RfqDetail() {
                 <dt className="text-surface-500">Description</dt><dd className="col-span-2">{r.description ?? '—'}</dd>
                 <dt className="text-surface-500">Issued</dt><dd className="col-span-2">{r.issuedAt ? formatDay(r.issuedAt) : 'Not sent yet'}</dd>
                 <dt className="text-surface-500">Closing</dt><dd className="col-span-2">{r.closingDate ? formatDay(r.closingDate) : `${DEFAULT_CLOSING_DAYS} days after it is sent`}</dd>
-                <dt className="text-surface-500">Penalties</dt><dd className="col-span-2">{r.penaltiesApply ? 'Penalties apply to this order' : 'No penalties applicable'}</dd>
+                <dt className="text-surface-500">Penalties</dt><dd className="col-span-2">{r.penaltiesApply ? 'Will apply to the order placed' : 'None on the order placed'}</dd>
                 <dt className="text-surface-500">Raised</dt><dd className="col-span-2 text-meta">{formatDateTime(r.createdAt)}{r.createdBy ? <><br /><span className="text-surface-400">by {r.createdBy.name}</span></> : null}</dd>
                 {r.sentAt && <><dt className="text-surface-500">Sent</dt><dd className="col-span-2 text-meta">{formatDateTime(r.sentAt)}{r.sentBy ? <><br /><span className="text-surface-400">by {r.sentBy.name}</span></> : null}</dd></>}
                 {r.purchaseOrder && <><dt className="text-surface-500">Order</dt><dd className="col-span-2"><Link to={`/purchase-orders/${r.purchaseOrder.id}`} className="btn-link text-mono">{r.purchaseOrder.number}</Link></dd></>}

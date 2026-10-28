@@ -69,7 +69,8 @@ export function rfqDocumentBlocks(rfq: Rfq, to: RfqSupplier, company: RfqCompany
       ['Closing', rfq.closingDate ? formatDay(rfq.closingDate) : dash],
       [`${company.name} contact`, or(rfq.sentBy?.name ?? rfq.createdBy?.name)],
       ['Currency', s?.currency ?? 'ZAR'],
-      ['Penalties', rfq.penaltiesApply ? 'Penalties apply to this order' : 'No penalties applicable to this order'],
+      // No order exists yet: the penalties are for the one placed from the quotes.
+      ['Penalties', rfq.penaltiesApply ? 'Penalties will apply to the order placed' : 'No penalties will apply to the order placed'],
     ],
   };
 }
@@ -120,25 +121,29 @@ export async function buildRfqDocument(rfq: Rfq, to: RfqSupplier, company: RfqCo
   doc.setFontSize(12);
   doc.text(pdfText(rfq.number), pageWidth - SIDE, TOP + 11, { align: 'right' });
 
-  // Who it is to on the left, the RFQ on the right.
+  // Who it is to on the left, the RFQ on the right: one table of four columns,
+  // so a long address or description that runs onto another page keeps the
+  // two side by side, and the lines start under both.
   const half = (width - 6) / 2;
-  const pairsTable = (title: string, pairs: Pair[], left: number) => {
-    autoTable(doc, {
-      startY: TOP + 24,
-      margin: { left, right: pageWidth - left - half, top: TOP, bottom: BOTTOM + 6 },
-      tableWidth: half,
-      theme: 'plain',
-      head: [[{ content: pdfText(title), colSpan: 2 }]],
-      body: pairs.map(([k, v]) => [pdfText(k), pdfText(v)]),
-      styles: { font: 'helvetica', fontSize: 8, cellPadding: { top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 }, textColor: INK, overflow: 'linebreak' },
-      headStyles: { fontStyle: 'bold', fontSize: 8.5, fillColor: [243, 244, 246], textColor: INK },
-      columnStyles: { 0: { cellWidth: 30, textColor: MUTED }, 1: { cellWidth: half - 30 } },
-    });
-    return finalY();
-  };
-  const leftY = pairsTable('To', blocks.supplier, SIDE);
-  const rightY = pairsTable('Request for quotation', blocks.rfq, SIDE + half + 6);
-  let y = Math.max(leftY, rightY) + 6;
+  const rows = Math.max(blocks.supplier.length, blocks.rfq.length);
+  const cell = (pairs: Pair[], i: number) => (pairs[i] ? [pdfText(pairs[i]![0]), pdfText(pairs[i]![1])] : ['', '']);
+  autoTable(doc, {
+    startY: TOP + 24,
+    margin: { left: SIDE, right: SIDE, top: TOP, bottom: BOTTOM + 6 },
+    tableWidth: width,
+    theme: 'plain',
+    head: [[{ content: 'To', colSpan: 2 }, '', { content: pdfText('Request for quotation'), colSpan: 2 }]],
+    body: Array.from({ length: rows }, (_, i) => [...cell(blocks.supplier, i), '', ...cell(blocks.rfq, i)]),
+    styles: { font: 'helvetica', fontSize: 8, cellPadding: { top: 0.8, bottom: 0.8, left: 1.5, right: 1.5 }, textColor: INK, overflow: 'linebreak' },
+    headStyles: { fontStyle: 'bold', fontSize: 8.5, fillColor: [243, 244, 246], textColor: INK },
+    columnStyles: {
+      0: { cellWidth: 30, textColor: MUTED }, 1: { cellWidth: half - 30 }, 2: { cellWidth: 6 },
+      3: { cellWidth: 30, textColor: MUTED }, 4: { cellWidth: half - 30 },
+    },
+    // The gap between the two blocks stays blank, its heading too.
+    didParseCell: (data) => { if (data.column.index === 2) data.cell.styles.fillColor = false; },
+  });
+  let y = finalY() + 6;
 
   // The lines, with room to write a price, and the totals left blank under them.
   const blank = (label: string) => [{ content: pdfText(label), colSpan: 5, styles: { halign: 'right' as const } }, ''];

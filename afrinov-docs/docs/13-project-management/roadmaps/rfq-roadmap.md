@@ -6,13 +6,13 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phases 1 and 2 are merged (PRs #104 and #105). Phase 3 is built on `feature/rfq-document` and not yet committed. One pull request per phase.
+**Status:** Phases 1 and 2 are merged (PRs #104 and #105). Phase 3 is in review (PR #107). One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | RFQ record and numbering | M | Merged (#104) |
 | 2 | Raise, edit and send an RFQ | M | Merged (#105) |
-| 3 | The RFQ document for suppliers | M | Built |
+| 3 | The RFQ document for suppliers | M | In review |
 | 4 | Record the quotes that come back | M to L | Planned |
 | 5 | Compare quotes and award to a purchase order | M | Planned |
 | 6 | Roll out | S | Planned |
@@ -86,7 +86,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 3: The RFQ document for suppliers
 
-**Built** on `feature/rfq-document`. Size M. Frontend, with a settings migration. 9 document tests and 1 page test.
+**In review** (PR #107). Size M. Frontend, with a settings migration. 11 document tests and 1 page test. Qodo's findings on the first push are fixed: a long supplier name is cut short in the footer, the penalties read as applying to the order placed (there is no order yet), and the two detail blocks are one table, so a long address keeps them side by side.
 
 **Where it shows:** an RFQ → each supplier → **Download PDF**.
 

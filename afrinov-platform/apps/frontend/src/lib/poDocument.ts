@@ -363,6 +363,14 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   return doc.output('arraybuffer');
 }
 
+/** The text cut to `width` with an ellipsis, so a long name can't run into what is beside it. */
+function fitLine(doc: jsPDF, text: string, width: number): string {
+  if (doc.getTextWidth(text) <= width) return text;
+  let cut = text;
+  while (cut.length > 1 && doc.getTextWidth(`${cut}...`) > width) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}...`;
+}
+
 /**
  * On every page: the stamp across it while the document may not go out
  * (red for CANCELLED), and the footer line with the page number. Shared with
@@ -393,7 +401,7 @@ export function finishPages(doc: jsPDF, stamp: string | null, footer: string): v
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    doc.text(pdfText(footer), SIDE, pageHeight - BOTTOM + 7);
+    doc.text(fitLine(doc, pdfText(footer), pageWidth - 2 * SIDE - 25), SIDE, pageHeight - BOTTOM + 7);
     doc.text(`Page ${p} of ${pages}`, pageWidth - SIDE, pageHeight - BOTTOM + 7, { align: 'right' });
   }
 }
