@@ -122,6 +122,10 @@ export const StockReceiptService = {
     const receivedAt = parseReceivedAt(input.receivedAt);
 
     return prisma.$transaction(async (tx) => {
+      // Serialise receipt numbering, as GoodsReceiptService.create does. The
+      // number is locked before stock balances, as there, so a stock receipt
+      // and a receipt against an order cannot deadlock.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
       await lockInventoryBalances(lines, tx);
       const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
       if (!supplier) throw Errors.notFound('Supplier');
@@ -143,8 +147,6 @@ export const StockReceiptService = {
         }
       }
 
-      // Serialise receipt numbering, as GoodsReceiptService.create does.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
       const number = await generateGRNumber(tx);
       const gr = await tx.goodsReceipt.create({
         data: {

@@ -864,17 +864,20 @@ export const InventoryService = {
         include: { lines: true },
       });
       if (!gr) throw Errors.notFound('GoodsReceipt');
+      // Every path that receives stock locks in one order: the receipt number
+      // (taken by the caller), the order, its lines, then stock balances.
+      // Postings against one order wait for each other, so each reads the
+      // status the last one left and its Activity entry shows the real
+      // transition.
+      if (gr.purchaseOrderId) {
+        await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${gr.purchaseOrderId} FOR UPDATE`;
+      }
       await lockPurchaseOrderLines(gr.lines.map((line) => line.purchaseOrderLineId).filter((id): id is string => Boolean(id)), tx);
       await lockInventoryBalances(gr.lines, tx);
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
       // The order may have been cancelled or closed since the receipt was recorded.
       if (gr.purchaseOrderId) {
-        // Postings against one order wait for each other, so each reads the
-        // status the last one left and its Activity entry shows the real
-        // transition. The order row is locked before stock, as receiving a
-        // whole order does, so the two cannot deadlock.
-        await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${gr.purchaseOrderId} FOR UPDATE`;
         const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
         if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
           throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });

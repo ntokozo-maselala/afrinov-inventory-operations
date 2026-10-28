@@ -89,7 +89,6 @@ const purchaseOrderLines = new Map<string, POLineEntry>();
 const purchaseOrders = new Map<string, POEntry>();
 
 const fakeTx = {
-  $executeRaw: async () => undefined,
   inventoryTransaction: {
     create: async ({ data }: { data: Omit<TxRow, 'id'> }) => {
       const row: TxRow = { id: `trx-${++idSeq}`, ...data, postedAt: data.postedAt ?? new Date() };
@@ -198,7 +197,8 @@ const fakeTx = {
       return data;
     },
   },
-  // Raw SQL is only a row lock here; records what it locked and when.
+  // Raw SQL is only locks here (the order row, inventory balances); records
+  // what it locked and when.
   $executeRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
     rowLocks.push({ sql: sql.join('?'), values, auditEntriesBefore: auditLog.length });
     return 1;
@@ -1152,10 +1152,11 @@ describe('InventoryService — ADR-002 invariants', () => {
         before: { status: 'APPROVED' },
         after: { status: 'PARTIALLY_RECEIVED', goodsReceiptId: 'gr-1', goodsReceiptNumber: 'GR-2026-0007' },
       })]);
-      // The order row is locked first, so two postings against it cannot both
-      // read the same status and record the same transition.
-      expect(rowLocks).toEqual([expect.objectContaining({ values: ['po-1'], auditEntriesBefore: 0 })]);
+      // The order row is locked first, before any stock balance, so two postings
+      // against it cannot both read the same status and record the same transition.
+      expect(rowLocks[0]).toMatchObject({ values: ['po-1'], auditEntriesBefore: 0 });
       expect(rowLocks[0]!.sql).toMatch(/FROM purchase_orders WHERE id = \? FOR UPDATE/);
+      expect(rowLocks.filter((l) => /purchase_orders/.test(l.sql))).toHaveLength(1);
     });
 
     it('does not transition PO status when purchaseOrderId is null', async () => {
