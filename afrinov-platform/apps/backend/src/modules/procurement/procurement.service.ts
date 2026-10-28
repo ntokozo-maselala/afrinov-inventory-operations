@@ -434,7 +434,7 @@ export const PurchaseOrderService = {
       // to this transaction and auto-released on commit/rollback.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:po-number'))`;
       const number = await generatePONumber(tx);
-      return tx.purchaseOrder.create({
+      const po = await tx.purchaseOrder.create({
         data: {
           number,
           supplierId: input.supplierId,
@@ -458,6 +458,17 @@ export const PurchaseOrderService = {
         },
         include: { lines: true, supplier: true },
       });
+      // The first entry on the order's Activity.
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'CREATE',
+          entityType: 'PurchaseOrder',
+          entityId: po.id,
+          after: { number, status: po.status } as Prisma.InputJsonValue,
+        },
+      });
+      return po;
     });
   },
 
@@ -815,12 +826,19 @@ export const PurchaseOrderService = {
 
   // Returns the audit log entries relevant to a PO so the UI can render
   // an activity feed. Ordered most-recent first.
+  /** The order's Activity, newest first, each entry with the name of who did it. */
   async history(id: string) {
-    return prisma.auditLogEntry.findMany({
+    const entries = await prisma.auditLogEntry.findMany({
       where: { entityType: 'PurchaseOrder', entityId: id },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
+    const actorIds = [...new Set(entries.map((e) => e.actorId).filter((a): a is string => a !== null))];
+    const actors = actorIds.length
+      ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+      : [];
+    const names = new Map(actors.map((a) => [a.id, a.name]));
+    return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
   },
 };
 

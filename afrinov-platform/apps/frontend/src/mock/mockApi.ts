@@ -101,6 +101,9 @@ export function resetMockState(): void {
 }
 
 let idCounter = 1000;
+/** Names of the users the mock's order events are by; u-admin is the one approving, closing and so on. */
+const MOCK_ACTOR_NAMES: Record<string, string> = { 'u-admin': 'You (admin)' };
+
 function nextId(prefix: string): string {
   return `${prefix}-${++idCounter}`;
 }
@@ -639,7 +642,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/history'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    return po.history ?? [];
+    // As the server: newest first (entries are kept in the order they
+    // happened), each with the name of who did it, and none for an id that is
+    // no user.
+    return [...(po.history ?? [])].reverse().map((e) => ({ ...e, actorName: (e.actorId && MOCK_ACTOR_NAMES[e.actorId]) || null }));
   }
   if (method === 'GET' && p.startsWith('/purchase-orders/')) {
     const id = p.slice('/purchase-orders/'.length);
@@ -696,6 +702,7 @@ function route(method: string, path: string, body?: unknown): unknown {
         deliveryDate: l.deliveryDate ?? null,
       })),
     };
+    po.history!.push({ id: nextId('audit'), action: 'CREATE', actorId: 'u-admin', before: null, after: { number: po.number, status: po.status }, createdAt: po.createdAt });
     state.purchaseOrders.push(po);
     return { ...po, supplier: findSupplier(po.supplierId), lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })) };
   }
@@ -1546,9 +1553,12 @@ function handleReceiptPost(gr: MockGoodsReceipt): void {
   if (gr.purchaseOrderId) {
     const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
     if (po) {
+      const before = { status: po.status };
       const allFully = po.lines.every((l) => Number(l.receivedQty) >= Number(l.orderedQty));
       const anyReceived = po.lines.some((l) => Number(l.receivedQty) > 0);
       if (allFully || anyReceived) po.status = allFully ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+      po.history = po.history ?? [];
+      po.history.push({ id: nextId('audit'), action: 'PO_GOODS_RECEIVED', actorId: 'u-admin', before, after: { status: po.status, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number }, createdAt: new Date().toISOString() });
     }
   }
 }

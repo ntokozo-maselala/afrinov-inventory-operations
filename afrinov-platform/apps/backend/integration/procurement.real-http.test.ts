@@ -20,7 +20,7 @@ import {
 interface PurchaseOrder {
   id: string;
   status: string;
-  lines: Array<{ id: string; orderedQty: string; receivedQty: string }>;
+  lines: Array<{ id: string; materialId: string; orderedQty: string; receivedQty: string }>;
 }
 
 interface GoodsReceipt {
@@ -384,6 +384,47 @@ describe('receiving stock over real HTTP', () => {
 
       const bad = await api('PATCH', `/purchase-orders/${created.body.id}`, { supplierContactEmail: 'not-an-email' });
       expect(bad.status).toBe(400);
+    });
+  });
+
+  // Each delivery goes on the order's Activity with the transition it made.
+  describe('order Activity', () => {
+    // Deliveries for different lines: without the order locked, each saw only
+    // its own line received, so both recorded Approved → Partly received and
+    // the order stayed Partly received with everything delivered.
+    it('records two deliveries posted at once as one transition each, in turn', async () => {
+      const other = await api<{ id: string }>('POST', '/materials', {
+        sku: `IT-PO2-${run}`, name: `Integration gland ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each',
+      });
+      expect(other.status).toBe(200);
+      const created = await api<PurchaseOrder>('POST', '/purchase-orders', {
+        supplierId,
+        lines: [{ materialId, orderedQty: 1, unitPrice: 12.5 }, { materialId: other.body.id, orderedQty: 1, unitPrice: 3 }],
+      });
+      expect(created.status).toBe(201);
+      const submitted = await api<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/submit`);
+      if (submitted.body.status === 'PENDING_APPROVAL') await api('POST', `/purchase-orders/${created.body.id}/approve`);
+      const order = (await api<PurchaseOrder>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(order.status).toBe('APPROVED');
+
+      const receipts = await Promise.all(order.lines.map(async (line) => (await api<GoodsReceipt>('POST', '/goods-receipts', {
+        purchaseOrderId: order.id, supplierId,
+        lines: [{ materialId: line.materialId, locationId, quantity: 1, purchaseOrderLineId: line.id }],
+      })).body));
+
+      const posted = await Promise.all(receipts.map((r) => api('POST', `/goods-receipts/${r.id}/post`)));
+      expect(posted.map((p) => p.status)).toEqual([200, 200]);
+      expect((await getOrder(order.id)).status).toBe('RECEIVED');
+
+      const history = await api<Array<{ action: string; actorName: string | null; before: { status: string }; after: { status: string } }>>('GET', `/purchase-orders/${order.id}/history`);
+      const deliveries = history.body.filter((e) => e.action === 'PO_GOODS_RECEIVED');
+      // Whichever posted first moved it to Partly received, the other on to Received.
+      expect(deliveries.map((e) => `${e.before.status}>${e.after.status}`).sort()).toEqual([
+        'APPROVED>PARTIALLY_RECEIVED',
+        'PARTIALLY_RECEIVED>RECEIVED',
+      ]);
+      expect(history.body.at(-1)).toMatchObject({ action: 'CREATE' });
+      expect(history.body.every((e) => e.actorName)).toBe(true);
     });
   });
 

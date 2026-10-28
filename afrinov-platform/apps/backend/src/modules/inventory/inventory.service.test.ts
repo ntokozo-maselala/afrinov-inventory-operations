@@ -58,6 +58,7 @@ const projects = new Map<string, { projectNumber: string; active: boolean; statu
 // Project material that belongs to a project, by material id.
 const materialProjects: Record<string, string> = { 'pipe-1325': 'AFRI-1325', 'pipe-42': 'P-42' };
 const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
+const rowLocks: Array<{ sql: string; values: unknown[]; auditEntriesBefore: number }> = [];
 
 function balKey(materialId: string, locationId: string) { return `${materialId}|${locationId}`; }
 
@@ -196,6 +197,11 @@ const fakeTx = {
       return data;
     },
   },
+  // Raw SQL is only a row lock here; records what it locked and when.
+  $executeRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
+    rowLocks.push({ sql: sql.join('?'), values, auditEntriesBefore: auditLog.length });
+    return 1;
+  },
   setting: {
     findUnique: async ({ where }: { where: { key: string } }) => mockSettings.get(where.key) ?? null,
   },
@@ -286,6 +292,7 @@ describe('InventoryService — ADR-002 invariants', () => {
     clearMockSettings();
     idSeq = 0;
     auditLog.length = 0;
+    rowLocks.length = 0;
     goodsReceipts.clear();
     purchaseOrderLines.clear();
     purchaseOrders.clear();
@@ -1117,6 +1124,31 @@ describe('InventoryService — ADR-002 invariants', () => {
       const poLine = purchaseOrderLines.get('pol-1');
       expect(poLine?.receivedQty.toString()).toBe('5');
       expect(purchaseOrders.get('po-1')?.status).toBe('PARTIALLY_RECEIVED');
+    });
+
+    // The order's Activity once had no entry for a delivery, though its status changed.
+    it('records on the order which receipt it was received on, and the status it moved to', async () => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(10), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', number: 'GR-2026-0007', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(5), purchaseOrderLineId: 'pol-1' }],
+      } as never);
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(auditLog.filter((e) => e.entityType === 'PurchaseOrder')).toEqual([expect.objectContaining({
+        actorId: 'user-1', action: 'PO_GOODS_RECEIVED', entityId: 'po-1',
+        before: { status: 'APPROVED' },
+        after: { status: 'PARTIALLY_RECEIVED', goodsReceiptId: 'gr-1', goodsReceiptNumber: 'GR-2026-0007' },
+      })]);
+      // The order row is locked first, so two postings against it cannot both
+      // read the same status and record the same transition.
+      expect(rowLocks).toEqual([expect.objectContaining({ values: ['po-1'], auditEntriesBefore: 0 })]);
+      expect(rowLocks[0]!.sql).toMatch(/FROM purchase_orders WHERE id = \? FOR UPDATE/);
     });
 
     it('does not transition PO status when purchaseOrderId is null', async () => {

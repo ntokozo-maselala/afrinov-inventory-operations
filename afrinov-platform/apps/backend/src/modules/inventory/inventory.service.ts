@@ -856,6 +856,11 @@ export const InventoryService = {
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
       // The order may have been cancelled or closed since the receipt was recorded.
       if (gr.purchaseOrderId) {
+        // Postings against one order wait for each other, so each reads the
+        // status the last one left and its Activity entry shows the real
+        // transition. The order row is locked before stock, as receiving a
+        // whole order does, so the two cannot deadlock.
+        await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${gr.purchaseOrderId} FOR UPDATE`;
         const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
         if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
           throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
@@ -929,14 +934,30 @@ export const InventoryService = {
         });
         const allFully = lines.every((l) => toDecimal(l.receivedQty).gte(toDecimal(l.orderedQty)));
         const anyReceived = lines.some((l) => gtZero(toDecimal(l.receivedQty)));
+        const order = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId }, select: { status: true } });
+        const statusBefore = order?.status ?? null;
+        let status = statusBefore;
         if (allFully || anyReceived) {
-          await tx.purchaseOrder.update({
+          const updated = await tx.purchaseOrder.update({
             where: { id: gr.purchaseOrderId },
             data: allFully
               ? { status: 'RECEIVED', deliveredAt: new Date(), deliveredById: input.actorId }
               : { status: 'PARTIALLY_RECEIVED' },
           });
+          status = updated.status;
         }
+        // On the order's Activity: which receipt it was received on, and the
+        // status it moved to (it stays Partly received until the last line).
+        await tx.auditLogEntry.create({
+          data: {
+            actorId: input.actorId,
+            action: 'PO_GOODS_RECEIVED',
+            entityType: 'PurchaseOrder',
+            entityId: gr.purchaseOrderId,
+            before: { status: statusBefore } as Prisma.InputJsonValue,
+            after: { status, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number } as Prisma.InputJsonValue,
+          },
+        });
       }
 
       await dispatchDomainEvents([
