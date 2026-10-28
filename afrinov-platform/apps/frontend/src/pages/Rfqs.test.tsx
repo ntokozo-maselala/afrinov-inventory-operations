@@ -6,9 +6,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGet, mockPost, mockPatch, auth } = vi.hoisted(() => ({
-  mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), auth: { roles: ['PROCUREMENT'] as string[] },
+const { mockGet, mockPost, mockPatch, mockDownload, auth } = vi.hoisted(() => ({
+  mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), mockDownload: vi.fn(), auth: { roles: ['PROCUREMENT'] as string[] },
 }));
+// The PDF itself is tested in rfqDocument.test.ts; here, which copy is asked for.
+vi.mock('../lib/rfqDocument', async (original) => ({ ...(await original<typeof import('../lib/rfqDocument')>()), downloadRfqDocument: mockDownload }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost, patch: mockPatch, del: vi.fn() },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
@@ -49,6 +51,7 @@ beforeEach(() => {
     const found = RFQS.find((r) => path === `/rfqs/${r.id}`);
     if (found) return found;
     if (path === '/suppliers') return SUPPLIERS;
+    if (path.startsWith('/settings/values')) return { 'general.companyName': 'Afrinov', 'purchaseOrders.rfqInstructions': 'Fill in the prices.', 'purchaseOrders.rfqQuoteEmail': 'quotes@afrinov.co.za' };
     if (path === '/materials') return [
       { id: 'm-1', sku: 'WHEEL-SS', name: 'Overhead rail wheel', category: 'CONSUMABLES', unitOfMeasure: 'LOTS', requiredStock: '0', active: true },
       { id: 'm-old', sku: 'OLD-PIN', name: 'Clevis pin (old)', category: 'CONSUMABLES', unitOfMeasure: 'PC', requiredStock: '0', active: false },
@@ -58,6 +61,7 @@ beforeEach(() => {
   });
   mockPost.mockReset().mockImplementation(async (path: string) => (path === '/rfqs' ? DRAFT : SENT));
   mockPatch.mockReset().mockResolvedValue(SENT);
+  mockDownload.mockReset().mockResolvedValue(undefined);
 });
 
 const appAt = (url: string) => render(
@@ -179,6 +183,17 @@ describe('An RFQ’s page', () => {
     fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'Client postponed the job' } });
     fireEvent.click(confirm);
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/rfqs/r-s/cancel', { reason: 'Client postponed the job' }));
+  });
+
+  it("downloads each supplier's own copy, with the RFQ wording from Settings", async () => {
+    appAt('/rfqs/r-s');
+    fireEvent.click(await screen.findByRole('button', { name: 'Download PDF for Macsteel' }));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 'AFRI-02A-1325-02-02' }),
+      expect.objectContaining({ supplierId: 's-2' }),
+      { name: 'Afrinov', instructions: 'Fill in the prices.', quoteEmail: 'quotes@afrinov.co.za' },
+    ));
+    expect(mockGet).toHaveBeenCalledWith('/settings/values?keys=general.companyName,purchaseOrders.rfqInstructions,purchaseOrders.rfqQuoteEmail');
   });
 
   it('warns when a sent RFQ is past its closing date', async () => {

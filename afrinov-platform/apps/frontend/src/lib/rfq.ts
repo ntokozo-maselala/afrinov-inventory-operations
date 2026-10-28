@@ -20,7 +20,10 @@ export interface RfqSupplier {
   supplierId: string;
   quotedAt: string | null;
   declined: boolean;
-  supplier?: { id: string; name: string; vendorCode?: string | null; contactName?: string | null; contactEmail?: string | null; currency?: string };
+  supplier?: {
+    id: string; name: string; vendorCode?: string | null; contactName?: string | null; contactEmail?: string | null;
+    contactPhone?: string | null; address?: string | null; currency?: string;
+  };
 }
 
 export interface Rfq {

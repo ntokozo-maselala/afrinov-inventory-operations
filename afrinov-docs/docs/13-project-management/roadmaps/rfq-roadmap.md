@@ -6,13 +6,13 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phase 1 is merged (PR #104). Phase 2 is in review (PR #105). One pull request per phase.
+**Status:** Phases 1 and 2 are merged (PRs #104 and #105). Phase 3 is built on `feature/rfq-document` and not yet committed. One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | RFQ record and numbering | M | Merged (#104) |
-| 2 | Raise, edit and send an RFQ | M | In review |
-| 3 | The RFQ document for suppliers | M | Planned |
+| 2 | Raise, edit and send an RFQ | M | Merged (#105) |
+| 3 | The RFQ document for suppliers | M | Built |
 | 4 | Record the quotes that come back | M to L | Planned |
 | 5 | Compare quotes and award to a purchase order | M | Planned |
 | 6 | Roll out | S | Planned |
@@ -71,7 +71,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 2: Raise, edit and send an RFQ
 
-**In review** (PR #105). Size M. Frontend and backend. 4 new backend unit tests, 7 real-HTTP tests, 14 page tests and 5 frontend mock tests. Qodo's findings on the first push are fixed: an item or supplier deactivated while an RFQ is sent, inactive items offered on the form, a deactivated supplier blocking another being added, closing dates on days that don't exist, the Send dialog's today in the browser's calendar rather than South Africa's, and the mock's sender.
+**Merged** (PR #105). Size M. Frontend and backend. 4 new backend unit tests, 7 real-HTTP tests, 12 page tests and 5 frontend mock tests. Qodo's findings on the first push are fixed: an item or supplier deactivated while an RFQ is sent, inactive items offered on the form, a deactivated supplier blocking another being added, closing dates on days that don't exist, the Send dialog's today in the browser's calendar rather than South Africa's, and the mock's sender.
 
 - [x] **2.1 The RFQ list.** Procurement → **Requests for quotation**: number, project, description, suppliers asked, quotes in, closing date and status. Buyers land on Draft and Sent. Shows **Closed** beside a Sent RFQ past its closing date. Only buyers (and Admin) see it in the menu.
   Files: `pages/Rfqs.tsx`, `hooks/useNavGroups.tsx`, `App.tsx`
@@ -86,15 +86,15 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 3: The RFQ document for suppliers
 
-Size M. Frontend, with a settings migration.
+**Built** on `feature/rfq-document`. Size M. Frontend, with a settings migration. 9 document tests and 1 page test.
 
 **Where it shows:** an RFQ → each supplier → **Download PDF**.
 
-- [ ] **3.1 Lay it out like the RFQ sheet.** A4 portrait: the logo, **REQUEST FOR QUOTATION**, the RFQ number, description, issued and closing dates; who it is to (the supplier's name, contact and email); the lines with Item, Description, Units and Qty filled in and **Unit price** and **Subtotal** left blank; Total, VAT and Net value rows left blank; then the instructions and Remarks. Built in the browser like the purchase order PDF, so it works in frontend-only mode.
-  Files: `lib/rfqDocument.ts`, sharing the drawing helpers in `lib/poDocument.ts` and `lib/pdf.ts`
-- [ ] **3.2 Instructions in Settings.** `rfq.instructions`, under Settings → Purchase orders, starting with the sheet's wording: "Fill in the unit price and subtotal for each line as per the headings below, and return your quotation as a PDF, quoting the RFQ number." Plus where quotes are returned to (an email setting). A migration inserts the rows.
+- [x] **3.1 Lay it out like the RFQ sheet.** A4 portrait: the logo, **REQUEST FOR QUOTATION**, the RFQ number; who it is to (the supplier's name, vendor code, contact, phone, email and address) beside the RFQ (number, description, project, issued and closing dates, the Afrinov contact, currency and penalties); the lines with Item, Description, Units and Qty filled in and **Unit price** and **Subtotal** left blank; Total, VAT and Net value rows left blank; then the instructions and Remarks. Built in the browser like the purchase order PDF, so it works in frontend-only mode.
+  Files: `lib/rfqDocument.ts`, with the page stamp and footer now shared from `lib/poDocument.ts` (`finishPages`)
+- [x] **3.2 Instructions in Settings.** `purchaseOrders.rfqInstructions` (**RFQ instructions**) under Settings → Purchase orders → Printed on the request for quotation, starting with the sheet's wording: "Fill in the UNIT PRICE and SUBTOTAL for each line as per the headings below, and save as PDF. All files to be returned as PDF, quoting the RFQ number." Plus `purchaseOrders.rfqQuoteEmail` (**Quotes returned to**), blank to start and left off the PDF until set; when set, the PDF says "Quotations to be returned to … by <closing date>, quoting <RFQ number>." A migration inserts the rows.
   Files: `settings.service.ts`, `migrations/20260101000026_rfq_settings`, `pages/SettingsSections.tsx`
-- [ ] **3.3 File name.** `<RFQ number> - <supplier>.pdf`, so the buyer attaches the right copy to each email. A draft RFQ prints stamped "DRAFT - NOT FOR ISSUE", as orders do.
+- [x] **3.3 One copy per supplier.** A **PDF** button beside each supplier asked, named `<RFQ number> - <supplier>.pdf`, so the buyer attaches the right copy to each email. A draft prints stamped "DRAFT - NOT FOR ISSUE" and a cancelled RFQ "CANCELLED", as orders do.
 
 **Done when:**
 - Placed side by side, the PDF and the workbook's RFQ sheet carry the same fields, and a supplier can tell what to quote and which number to quote against.
@@ -160,7 +160,7 @@ Each field on the workbook's RFQ sheet and where the app holds it.
 | **Totals** | | |
 | Total amount, VAT, Net value | Blank on the PDF; worked out per quote | 3, 4 |
 | **Foot** | | |
-| Instructions ("Fill … and save as PDF", "All files to be returned as PDF") | `rfq.instructions` setting | 3 |
+| Instructions ("Fill … and save as PDF", "All files to be returned as PDF") | `purchaseOrders.rfqInstructions` setting, and where quotes go from `purchaseOrders.rfqQuoteEmail` | 3 |
 | Remarks | `Rfq.notes` | 2 |
 | **Not carried over** | | |
 | Labour lines priced from the Manpower Rate sheet | Out of scope (decision open) | — |
