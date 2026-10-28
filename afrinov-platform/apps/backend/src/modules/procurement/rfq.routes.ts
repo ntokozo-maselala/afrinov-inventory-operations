@@ -11,8 +11,11 @@ import { RfqService } from './rfq.service.js';
 export const RFQ_STATUSES = ['DRAFT', 'SENT', 'AWARDED', 'CANCELLED'] as const;
 
 const text = (max: number) => z.string().max(max).nullable().optional();
+/** Quantities are kept to 4 decimal places, so a finer one would be saved as something else, or 0. */
+export const rfqQuantity = z.number().min(0.0001).max(1e9)
+  .refine((q) => Math.abs(q * 1e4 - Math.round(q * 1e4)) < 1e-6, 'At most 4 decimal places');
 const rfqLines = z
-  .array(z.object({ materialId: z.string().uuid(), quantity: z.number().positive().max(1e9) }))
+  .array(z.object({ materialId: z.string().uuid(), quantity: rfqQuantity }))
   .min(1)
   .max(200);
 const supplierIds = z.array(supplierIdSchema).max(50);

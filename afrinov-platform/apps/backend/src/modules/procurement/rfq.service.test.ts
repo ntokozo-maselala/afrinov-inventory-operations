@@ -7,10 +7,19 @@ vi.mock('../../shared/db.js', () => ({ prisma: {} }));
 const { nextRfqNumber, rfqNumberPrefix } = await import('./rfq.service.js');
 
 describe('RFQ numbers', () => {
-  it('takes the project number without its AFRI- for a project, as the workbook files are named', () => {
+  it('takes the digits of an AFRI-<digits> project, as the workbook files are named', () => {
     expect(rfqNumberPrefix('AFRI-1325')).toBe('AFRI-02A-1325-02-');
-    expect(rfqNumberPrefix('afri-1094')).toBe('AFRI-02A-1094-02-');
-    expect(rfqNumberPrefix('P-77')).toBe('AFRI-02A-P-77-02-');
+    expect(rfqNumberPrefix('AFRI-1094')).toBe('AFRI-02A-1094-02-');
+  });
+
+  it('keeps any other project number whole, so two projects never share a sequence', () => {
+    expect(rfqNumberPrefix('1325')).toBe('RFQ-1325-');
+    expect(rfqNumberPrefix('afri-1325')).toBe('RFQ-afri-1325-');
+    expect(rfqNumberPrefix('P-77')).toBe('RFQ-P-77-');
+    expect(nextRfqNumber('1325', ['AFRI-02A-1325-02-04'])).toBe('RFQ-1325-01');
+    expect(nextRfqNumber('AFRI-1325', ['RFQ-1325-04'])).toBe('AFRI-02A-1325-02-01');
+    // Project 0001's RFQs are not RFQs without a project.
+    expect(nextRfqNumber(null, ['RFQ-0001-07'])).toBe('RFQ-0001');
   });
 
   it('starts each project at 01 and goes one past the highest issued', () => {

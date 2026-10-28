@@ -46,15 +46,22 @@ type Db = Prisma.TransactionClient | typeof prisma;
 
 /**
  * The number before the sequence: the workbook's document number for a
- * project (AFRI-02A-1325-02- for project AFRI-1325), else RFQ-.
+ * project numbered as Afrinov's are (AFRI-02A-1325-02- for AFRI-1325), RFQ-
+ * and the project's own number for any other (RFQ-P77- for P77), else RFQ-.
+ * Each project has a prefix no other project shares: only the exact
+ * AFRI-<digits> form drops its AFRI-, so 1325 and AFRI-1325 stay apart.
  */
 export function rfqNumberPrefix(projectNumber: string | null | undefined): string {
-  return projectNumber ? `AFRI-02A-${projectNumber.replace(/^AFRI-/i, '')}-02-` : 'RFQ-';
+  if (!projectNumber) return 'RFQ-';
+  const afrinov = /^AFRI-(\d+)$/.exec(projectNumber);
+  return afrinov ? `AFRI-02A-${afrinov[1]}-02-` : `RFQ-${projectNumber}-`;
 }
 
 /**
  * One past the highest number issued with the same prefix: AFRI-02A-1325-02-01,
  * -02, … for a project (two digits, as the workbook's), RFQ-0001, … without one.
+ * RFQ-0001-01 (project 0001) is not counted as an RFQ without a project: only
+ * digits may follow a prefix.
  */
 export function nextRfqNumber(projectNumber: string | null | undefined, issued: string[]): string {
   const prefix = rfqNumberPrefix(projectNumber);
@@ -69,6 +76,17 @@ export function nextRfqNumber(projectNumber: string | null | undefined, issued: 
 async function generateRfqNumber(tx: Prisma.TransactionClient, projectNumber: string | null): Promise<string> {
   const issued = await tx.rfq.findMany({ where: { number: { startsWith: rfqNumberPrefix(projectNumber) } }, select: { number: true } });
   return nextRfqNumber(projectNumber, issued.map((r) => r.number));
+}
+
+/**
+ * Refuses a missing or closed project, holding its row until the transaction
+ * ends so it can't be archived between the check and the RFQ being written.
+ * Returns its name, the RFQ's description by default.
+ */
+async function openProjectName(projectNumber: string, tx: Prisma.TransactionClient): Promise<string | null> {
+  await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${projectNumber} FOR SHARE`;
+  await assertProjectOpen(projectNumber, tx);
+  return cleanText((await tx.project.findUnique({ where: { projectNumber }, select: { name: true } }))?.name);
 }
 
 /** Refuses missing or inactive items, project material with no project, and another project's material. */
@@ -164,42 +182,43 @@ export const RfqService = {
    */
   async create(input: CreateRfqInput, actorId: string) {
     const projectNumber = cleanText(input.projectNumber);
-    if (projectNumber) await assertProjectOpen(projectNumber);
-    await checkLines(input.lines, projectNumber, prisma);
-    const supplierIds = await checkSuppliers(input.supplierIds ?? [], prisma);
-    let description = cleanText(input.description);
-    if (input.description === undefined && projectNumber) {
-      description = cleanText((await prisma.project.findUnique({ where: { projectNumber }, select: { name: true } }))?.name);
-    }
-
-    return prisma.$transaction(async (tx) => {
+    const id = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
+      const projectName = projectNumber ? await openProjectName(projectNumber, tx) : null;
+      await checkLines(input.lines, projectNumber, tx);
+      const supplierIds = await checkSuppliers(input.supplierIds ?? [], tx);
       const number = await generateRfqNumber(tx, projectNumber);
       const rfq = await tx.rfq.create({
         data: {
           number,
           status: 'DRAFT',
           projectNumber,
-          description,
+          description: input.description === undefined ? projectName : cleanText(input.description),
           notes: cleanText(input.notes),
           penaltiesApply: input.penaltiesApply ?? false,
           createdById: actorId,
           lines: { create: lineRows(input.lines) },
           suppliers: { create: supplierIds.map((supplierId) => ({ supplierId })) },
         },
-        include: { lines: true, suppliers: true },
+        include: { lines: { orderBy: { lineNo: 'asc' } } },
       });
+      // Everything it was raised with, so the Activity starts from the whole draft.
       await tx.auditLogEntry.create({
         data: {
           actorId,
           action: 'CREATE',
           entityType: 'Rfq',
           entityId: rfq.id,
-          after: { number, status: rfq.status, lines: linesForLog(rfq.lines), supplierIds } as Prisma.InputJsonValue,
+          after: {
+            number, status: rfq.status, projectNumber, description: rfq.description, notes: rfq.notes,
+            penaltiesApply: rfq.penaltiesApply, lines: linesForLog(rfq.lines), supplierIds,
+          } as Prisma.InputJsonValue,
         },
       });
-      return rfq;
+      return rfq.id;
     });
+    // The same shape as GET /rfqs/:id.
+    return RfqService.getById(id);
   },
 
   /**
@@ -211,7 +230,7 @@ export const RfqService = {
    * VALIDATION_ERROR as for create.
    */
   async update(input: UpdateRfqInput, actorId: string) {
-    return prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
       // The number lock first, then the row, as create takes them.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
       await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${input.id} FOR UPDATE`;
@@ -232,9 +251,15 @@ export const RfqService = {
       };
       const projectNumber = input.projectNumber === undefined ? rfq.projectNumber : cleanText(input.projectNumber);
       if (projectNumber !== rfq.projectNumber) {
-        if (projectNumber) await assertProjectOpen(projectNumber, tx);
+        const projectName = projectNumber ? await openProjectName(projectNumber, tx) : null;
         change('projectNumber', projectNumber);
         change('number', await generateRfqNumber(tx, projectNumber));
+        // A description that was the old project's name follows the project;
+        // one the buyer wrote stays.
+        if (input.description === undefined && rfq.projectNumber) {
+          const oldName = cleanText((await tx.project.findUnique({ where: { projectNumber: rfq.projectNumber }, select: { name: true } }))?.name);
+          if (oldName && rfq.description === oldName) change('description', projectName);
+        }
       }
       if (input.description !== undefined) change('description', cleanText(input.description));
       if (input.notes !== undefined) change('notes', cleanText(input.notes));
@@ -263,8 +288,8 @@ export const RfqService = {
         after.supplierIds = nextSuppliers;
       }
 
-      if (Object.keys(after).length === 0) return rfq;
-      const saved = await tx.rfq.update({ where: { id: rfq.id }, data, include: { lines: { orderBy: { lineNo: 'asc' } }, suppliers: true } });
+      if (Object.keys(after).length === 0) return;
+      await tx.rfq.update({ where: { id: rfq.id }, data });
       await tx.auditLogEntry.create({
         data: {
           actorId,
@@ -275,8 +300,9 @@ export const RfqService = {
           after: after as Prisma.InputJsonValue,
         },
       });
-      return saved;
     });
+    // The same shape as GET /rfqs/:id.
+    return RfqService.getById(input.id);
   },
 
   /** The RFQ's Activity, newest first, each entry with the name of who did it. */

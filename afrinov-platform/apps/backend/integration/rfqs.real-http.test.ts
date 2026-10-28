@@ -30,8 +30,10 @@ interface ApiErrorBody { error: { code: string; message: string } }
 
 describe('requests for quotation over real HTTP', () => {
   const run = runId();
-  const projectNumber = `AFRI-${run}`;
-  const otherProject = `AFRI-${run}X`;
+  // One project numbered as Afrinov's are, one not: each has its own sequence.
+  const digits = String(parseInt(run, 16));
+  const projectNumber = `AFRI-${digits}`;
+  const otherProject = `IT-${run}`;
   let server: TestServer;
   let api: ReturnType<typeof client>;
   let storesItem: string;
@@ -78,7 +80,10 @@ describe('requests for quotation over real HTTP', () => {
       supplierIds: [supplierA, supplierB, supplierA],
     });
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ number: `AFRI-02A-${run}-02-01`, status: 'DRAFT', projectNumber, description: `Door rails ${run}` });
+    expect(res.body).toMatchObject({ number: `AFRI-02A-${digits}-02-01`, status: 'DRAFT', projectNumber, description: `Door rails ${run}` });
+    // The save answers with the RFQ as GET /rfqs/:id shows it.
+    expect(res.body.lines[0]!.material?.sku).toBe(`IT-RFQ-P-${run}`);
+    expect(res.body.suppliers[0]!.supplier?.name).toBe(`IT RFQ Steel ${run}`);
 
     const rfq = await api<Rfq>('GET', `/rfqs/${res.body.id}`);
     expect(rfq.status).toBe(200);
@@ -91,7 +96,7 @@ describe('requests for quotation over real HTTP', () => {
     expect(rfq.body.suppliers.every((s) => s.totals === null && typeof s.vatRate === 'number')).toBe(true);
 
     const second = await raise({ projectNumber, lines: [{ materialId: storesItem, quantity: 1 }] });
-    expect(second.body.number).toBe(`AFRI-02A-${run}-02-02`);
+    expect(second.body.number).toBe(`AFRI-02A-${digits}-02-02`);
   });
 
   it('numbers an RFQ for Stores RFQ-0001 onwards, and never twice when raised at once', async () => {
@@ -102,7 +107,7 @@ describe('requests for quotation over real HTTP', () => {
 
     const together = await Promise.all([1, 2, 3, 4].map(() => raise({ projectNumber: otherProject, lines: [{ materialId: storesItem, quantity: 1 }] })));
     expect(together.map((r) => r.status)).toEqual([201, 201, 201, 201]);
-    expect(together.map((r) => r.body.number).sort()).toEqual([1, 2, 3, 4].map((n) => `AFRI-02A-${run}X-02-0${n}`));
+    expect(together.map((r) => r.body.number).sort()).toEqual([1, 2, 3, 4].map((n) => `RFQ-IT-${run}-0${n}`));
   });
 
   it("refuses another project's material, an inactive supplier and an unknown project", async () => {
@@ -118,6 +123,40 @@ describe('requests for quotation over real HTTP', () => {
     expect(closed.body.error.message).toMatch(/inactive/);
 
     expect((await raise({ projectNumber: `NOPE-${run}`, lines: [{ materialId: storesItem, quantity: 1 }] })).status).toBe(400);
+
+    // Quantities are kept to 4 decimal places: a finer one would be saved as 0.
+    expect((await raise({ lines: [{ materialId: storesItem, quantity: 0.00001 }] })).status).toBe(400);
+  });
+
+  it('refuses an archived project', async () => {
+    const archived = `IT-ARC-${run}`;
+    expect((await api('POST', '/projects', { projectNumber: archived, name: `Archived ${run}` })).status).toBe(201);
+    expect((await api('DELETE', `/projects/${archived}`)).status).toBe(200);
+    const res = await raise({ projectNumber: archived, lines: [{ materialId: storesItem, quantity: 1 }] });
+    expect(res.status).toBe(400);
+  });
+
+  it('starts the Activity with everything the draft was raised with', async () => {
+    const created = await raise({ lines: [{ materialId: storesItem, quantity: 2.5 }], description: 'Round bars', notes: 'Mill certificates required', penaltiesApply: true, supplierIds: [supplierA] });
+    const history = await api<HistoryEntry[]>('GET', `/rfqs/${created.body.id}/history`);
+    expect(history.body).toHaveLength(1);
+    expect(history.body[0]!.after).toMatchObject({
+      number: created.body.number, status: 'DRAFT', projectNumber: null, description: 'Round bars',
+      notes: 'Mill certificates required', penaltiesApply: true, lines: [{ materialId: storesItem, quantity: '2.5' }], supplierIds: [supplierA],
+    });
+  });
+
+  it("moves a description that was the project's name with the project, and keeps one the buyer wrote", async () => {
+    const named = await raise({ projectNumber, lines: [{ materialId: storesItem, quantity: 1 }] });
+    expect(named.body.description).toBe(`Door rails ${run}`);
+    const moved = await api<Rfq>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: otherProject });
+    expect(moved.body.description).toBe(`Other job ${run}`);
+    const off = await api<Rfq>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: null });
+    expect(off.body.description).toBeNull();
+
+    const written = await raise({ projectNumber, description: 'Round bars for the door rails', lines: [{ materialId: storesItem, quantity: 1 }] });
+    const kept = await api<Rfq>('PATCH', `/rfqs/${written.body.id}`, { projectNumber: otherProject });
+    expect(kept.body.description).toBe('Round bars for the door rails');
   });
 
   it('edits a draft, renumbers it on a new project, and logs only what changed', async () => {
@@ -131,7 +170,7 @@ describe('requests for quotation over real HTTP', () => {
       supplierIds: [supplierB],
     });
     expect(edited.status).toBe(200);
-    expect(edited.body.number).toMatch(new RegExp(`^AFRI-02A-${run}-02-\\d{2}$`));
+    expect(edited.body.number).toMatch(new RegExp(`^AFRI-02A-${digits}-02-\\d{2}$`));
     expect(edited.body.lines).toHaveLength(2);
     expect(edited.body.suppliers.map((s) => s.supplierId)).toEqual([supplierB]);
 

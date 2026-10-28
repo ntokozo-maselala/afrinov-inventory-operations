@@ -13,6 +13,13 @@ describe('request for quotation payloads', () => {
     expect(createRfqSchema.parse({ lines: [line] })).toEqual({ lines: [line] });
   });
 
+  it('keeps quantities to the 4 decimal places they are saved with', () => {
+    expect(createRfqSchema.parse({ lines: [{ ...line, quantity: 0.0001 }] }).lines[0]!.quantity).toBe(0.0001);
+    expect(createRfqSchema.parse({ lines: [{ ...line, quantity: 254.466 }] }).lines[0]!.quantity).toBe(254.466);
+    expect(createRfqSchema.safeParse({ lines: [{ ...line, quantity: 0.00001 }] }).success).toBe(false);
+    expect(createRfqSchema.safeParse({ lines: [{ ...line, quantity: 1.23456 }] }).success).toBe(false);
+  });
+
   it('takes readable supplier ids, as the seed gives', () => {
     expect(createRfqSchema.parse({ lines: [line], supplierIds: ['seed-sup-hydroscand'] }).supplierIds).toEqual(['seed-sup-hydroscand']);
     expect(createRfqSchema.safeParse({ lines: [line], supplierIds: [''] }).success).toBe(false);

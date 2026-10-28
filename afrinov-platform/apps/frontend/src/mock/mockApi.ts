@@ -311,8 +311,36 @@ type RfqBody = {
 
 const rfqText = (v: string | null | undefined) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim() : null);
 
+/** As the server: only AFRI-<digits> drops its AFRI-, so no two projects share a sequence. */
+function rfqNumberPrefix(projectNumber: string | null): string {
+  if (!projectNumber) return 'RFQ-';
+  const afrinov = /^AFRI-(\d+)$/.exec(projectNumber);
+  return afrinov ? `AFRI-02A-${afrinov[1]}-02-` : `RFQ-${projectNumber}-`;
+}
+
+/**
+ * As the server's rfq.routes.ts schemas: the field types, lengths and limits,
+ * so frontend-only mode refuses what the server refuses.
+ */
+function checkRfqBody(b: RfqBody, creating: boolean) {
+  const bad = () => err('VALIDATION_ERROR', 'Invalid request for quotation');
+  const text = (v: unknown, max: number) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
+  if (!text(b.projectNumber, 64) || !text(b.description, 500) || !text(b.notes, 2000)) throw bad();
+  if (b.penaltiesApply !== undefined && typeof b.penaltiesApply !== 'boolean') throw bad();
+  if (creating || b.lines !== undefined) {
+    if (!Array.isArray(b.lines) || b.lines.length < 1 || b.lines.length > 200) throw bad();
+    for (const l of b.lines) {
+      const q = l?.quantity;
+      // Kept to 4 decimal places, as on the server.
+      if (typeof l?.materialId !== 'string' || typeof q !== 'number' || !(q >= 0.0001 && q <= 1e9) || Math.abs(q * 1e4 - Math.round(q * 1e4)) >= 1e-6) throw bad();
+    }
+  }
+  if (b.supplierIds !== undefined && (!Array.isArray(b.supplierIds) || b.supplierIds.length > 50
+    || b.supplierIds.some((s) => typeof s !== 'string' || !s.trim() || s.trim().length > 100))) throw bad();
+}
+
 function nextRfqNumber(projectNumber: string | null): string {
-  const prefix = projectNumber ? `AFRI-02A-${projectNumber.replace(/^AFRI-/i, '')}-02-` : 'RFQ-';
+  const prefix = rfqNumberPrefix(projectNumber);
   const highest = state.rfqs.reduce((max, r) => {
     const rest = r.number.startsWith(prefix) ? r.number.slice(prefix.length) : '';
     return /^\d+$/.test(rest) ? Math.max(max, Number(rest)) : max;
@@ -406,6 +434,7 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
   }
   if (method === 'POST' && p === '/rfqs') {
     const b = (body ?? {}) as RfqBody;
+    checkRfqBody(b, true);
     const projectNumber = rfqText(b.projectNumber);
     if (projectNumber) assertProjectOpen(projectNumber);
     const lines = checkRfqLines(b.lines, projectNumber);
@@ -426,9 +455,14 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
       suppliers: supplierIds.map(rfqSupplierRow),
       history: [],
     };
+    // As the server: everything it was raised with, so the Activity starts from the whole draft.
     created.history.push({
       id: nextId('audit'), action: 'CREATE', actorId: 'u-admin', before: null,
-      after: { number: created.number, status: created.status, lines: rfqLinesForLog(created.lines), supplierIds }, createdAt: now,
+      after: {
+        number: created.number, status: created.status, projectNumber, description: created.description, notes: created.notes,
+        penaltiesApply: created.penaltiesApply, lines: rfqLinesForLog(created.lines), supplierIds,
+      },
+      createdAt: now,
     });
     state.rfqs.push(created);
     return rfqView(created);
@@ -436,6 +470,7 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
   if (method === 'PATCH' && rfq && p === `/rfqs/${rfq.id}`) {
     if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can no longer be edited`);
     const b = (body ?? {}) as RfqBody;
+    checkRfqBody(b, false);
     const before: Record<string, unknown> = {};
     const after: Record<string, unknown> = {};
     const next: MockRfq = { ...rfq };
@@ -450,6 +485,11 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
       if (projectNumber) assertProjectOpen(projectNumber);
       change('projectNumber', projectNumber);
       change('number', nextRfqNumber(projectNumber));
+      // As the server: a description that was the old project's name follows the project.
+      const oldName = rfqText(projectRef(rfq.projectNumber)?.name);
+      if (b.description === undefined && oldName && rfq.description === oldName) {
+        change('description', projectNumber ? rfqText(projectRef(projectNumber)?.name) : null);
+      }
     }
     if (b.description !== undefined) change('description', rfqText(b.description));
     if (b.notes !== undefined) change('notes', rfqText(b.notes));
