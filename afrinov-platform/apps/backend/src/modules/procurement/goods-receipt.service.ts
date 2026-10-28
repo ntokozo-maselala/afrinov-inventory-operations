@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
@@ -100,12 +99,17 @@ export const GoodsReceiptService = {
     }
 
     return prisma.$transaction(async (tx) => {
-      // The receipt is numbered last. Numbering is serialised by a lock held
-      // until commit, so taking it after posting keeps other receipts from
-      // waiting while this one's stock is booked.
+      // Serialize GR-number generation so two concurrent creates cannot
+      // collide on the same sequential number. The lock is taken first and
+      // held through posting, as Receive stock does: receipts then post one
+      // at a time, so two cannot recompute one balance at once and lose an
+      // increase, and every receipt takes its locks in the same order, so
+      // none can deadlock with another.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
+      const number = await generateGRNumber(tx);
       const gr = await tx.goodsReceipt.create({
         data: {
-          number: `PENDING-${randomUUID()}`,
+          number,
           purchaseOrderId: input.purchaseOrderId ?? null,
           supplierId: input.supplierId,
           deliveryRef: input.deliveryRef ?? null,
@@ -123,11 +127,7 @@ export const GoodsReceiptService = {
         include: { lines: true },
       });
       if (opts.post) await InventoryService.postGoodsReceipt({ goodsReceiptId: gr.id, actorId }, tx);
-      // Serialize GR-number generation so two concurrent creates cannot
-      // collide on the same sequential number.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
-      const number = await generateGRNumber(tx);
-      return tx.goodsReceipt.update({ where: { id: gr.id }, data: { number }, include: { lines: true } });
+      return gr;
     });
   },
 

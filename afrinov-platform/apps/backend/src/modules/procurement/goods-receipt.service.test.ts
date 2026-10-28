@@ -287,7 +287,9 @@ describe('GoodsReceiptService', () => {
       expect(InventoryService.postGoodsReceipt).toHaveBeenCalledWith({ goodsReceiptId: received.id, actorId: 'user-1' }, expect.anything());
     });
 
-    it('numbers the receipt after posting, so other receipts do not wait on the numbering lock while stock is booked', async () => {
+    // As Receive stock does: receipts post one at a time, so two cannot recompute
+    // one balance at once, and both take their locks in the same order (no deadlock).
+    it('takes the numbering lock before posting, and holds it while stock is booked', async () => {
       const { GoodsReceiptService } = await import('./goods-receipt.service.js');
       const { InventoryService } = await import('../inventory/inventory.service.js');
       vi.mocked(InventoryService.postGoodsReceipt).mockReset().mockImplementation(async () => { steps.push('post'); });
@@ -295,7 +297,7 @@ describe('GoodsReceiptService', () => {
         { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 5 }] },
         'user-1',
       );
-      expect(steps).toEqual(['post', 'numbering lock']);
+      expect(steps).toEqual(['numbering lock', 'post']);
       expect(received.number).toBe(`GR-${new Date().getFullYear()}-0001`);
       vi.mocked(InventoryService.postGoodsReceipt).mockReset();
     });
