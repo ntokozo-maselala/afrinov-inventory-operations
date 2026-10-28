@@ -188,7 +188,7 @@ Found in the RFQ sheet's formulas:
 
 - Update `mock/mockApi.ts` for any new or changed endpoint, so `npm run dev:frontend-only` keeps working.
 - Add new endpoints to `openapi/document.ts`, and keep `openapi.test.ts` green.
-- Migrations only add tables, columns or settings rows.
+- Migrations only add: tables and columns (with their indexes, keys and constraints) or settings rows. Nothing existing is changed or dropped.
 - From `afrinov-platform/`, run `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`. For backend changes, also run `npm run test:integration`.
 - Check the field map above and mark what the phase closed.
 
