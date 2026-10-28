@@ -60,11 +60,13 @@ async function realRequest<T>(method: string, path: string, body?: unknown): Pro
   try {
     res = await fetch(`/api/v1${path}`, {
       method,
+      // A request with no body (posting a receipt, submitting an order) is not
+      // labelled JSON: the server refuses an empty JSON body.
       headers: {
-        'Content-Type': 'application/json',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
     throw networkError(err);

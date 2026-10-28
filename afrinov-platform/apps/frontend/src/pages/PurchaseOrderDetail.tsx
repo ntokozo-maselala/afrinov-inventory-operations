@@ -525,13 +525,14 @@ function ReceiveDeliveryDialog({ po, onClose, onReceived }: { po: PO; onClose: (
     if ('problem' in checked) { setProblem(checked.problem); return; }
     setBusy(true);
     try {
+      // Recorded and posted in one step: a failure leaves no unposted receipt.
       const created = await api.post<{ id: string; number: string }>('/goods-receipts', {
         supplierId: po.supplierId,
         purchaseOrderId: po.id,
         deliveryRef: deliveryRef.trim() || undefined,
         lines: receiptLinesBody(checked.lines),
+        post: true,
       });
-      await api.post(`/goods-receipts/${created.id}/post`);
       onReceived(created.number);
     } catch (err) {
       setProblem((err as ApiError).message);

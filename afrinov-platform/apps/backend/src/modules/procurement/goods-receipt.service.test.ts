@@ -2,7 +2,8 @@
 //
 // Covers:
 //   - create() happy path (with and without a linked purchase order)
-//   - GR-number generation is sequential via the advisory lock + count
+//   - GR-number generation continues from the year's highest number
+//   - create() with post records and posts in the same transaction
 //   - validation: empty lines, inactive supplier, unknown supplier, unknown PO
 //   - getById() success and not-found
 //   - post() delegates to InventoryService.postGoodsReceipt and re-reads
@@ -23,6 +24,10 @@ const db = {
   locations: new Map<string, { id: string; name: string }>(),
 };
 let grCounter = 0;
+/** The year's highest receipt number, as the numbering query answers it. */
+let highestNumber: number | null = null;
+/** What the transaction did, in order. */
+const steps: string[] = [];
 
 vi.mock('../../shared/db.js', () => ({
   get prisma() { return makePrisma(); },
@@ -86,8 +91,15 @@ function makePrisma(): unknown {
         db.goodsReceipts.push(created);
         return include?.lines ? created : created;
       },
+      update: async ({ where, data }: { where: { id: string }; data: { number: string } }) => {
+        const gr = db.goodsReceipts.find((g) => g.id === where.id)!;
+        gr.number = data.number;
+        return gr;
+      },
     },
-    $executeRaw: async () => void 0,
+    $executeRaw: async () => { steps.push('numbering lock'); },
+    // The highest number among receipts already numbered.
+    $queryRaw: async () => [{ last: highestNumber ?? (db.goodsReceipts.filter((g) => !g.number.startsWith('PENDING-')).length || null) }],
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
   };
 }
@@ -97,6 +109,8 @@ beforeEach(() => {
   db.purchaseOrders.clear();
   db.goodsReceipts.length = 0;
   grCounter = 0;
+  highestNumber = null;
+  steps.length = 0;
   db.suppliers.set('sup-1', { id: 'sup-1', name: 'Hydroscand', active: true });
   db.suppliers.set('sup-inactive', { id: 'sup-inactive', name: 'Closed Supplier', active: false });
   db.purchaseOrders.set('po-1', {
@@ -245,6 +259,59 @@ describe('GoodsReceiptService', () => {
     it('throws not-found for an unknown id', async () => {
       const { GoodsReceiptService } = await import('./goods-receipt.service.js');
       await expect(GoodsReceiptService.getById('nonexistent')).rejects.toThrow(/GoodsReceipt not found/i);
+    });
+  });
+
+  describe('numbering', () => {
+    it('continues from the highest number this year, so a deleted receipt cannot make a number repeat', async () => {
+      const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+      // Three receipts left, the highest GR-…-0007: counting them would issue 0004.
+      highestNumber = 7;
+      const result = await GoodsReceiptService.create(
+        { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] },
+        'user-1',
+      );
+      expect(result.number).toBe(`GR-${new Date().getFullYear()}-0008`);
+    });
+  });
+
+  describe('create with post', () => {
+    it('posts the receipt in the transaction it was recorded in', async () => {
+      const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+      const { InventoryService } = await import('../inventory/inventory.service.js');
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset().mockResolvedValue(undefined);
+      const received = await GoodsReceiptService.receive(
+        { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 5 }] },
+        'user-1',
+      );
+      expect(InventoryService.postGoodsReceipt).toHaveBeenCalledWith({ goodsReceiptId: received.id, actorId: 'user-1' }, expect.anything());
+    });
+
+    // As Receive stock does: receipts post one at a time, so two cannot recompute
+    // one balance at once, and both take their locks in the same order (no deadlock).
+    it('takes the numbering lock before posting, and holds it while stock is booked', async () => {
+      const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+      const { InventoryService } = await import('../inventory/inventory.service.js');
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset().mockImplementation(async () => { steps.push('post'); });
+      const received = await GoodsReceiptService.receive(
+        { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 5 }] },
+        'user-1',
+      );
+      expect(steps).toEqual(['numbering lock', 'post']);
+      expect(received.number).toBe(`GR-${new Date().getFullYear()}-0001`);
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset();
+    });
+
+    it('fails as a whole when posting fails, rather than leaving the receipt recorded', async () => {
+      const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+      const { InventoryService } = await import('../inventory/inventory.service.js');
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset().mockRejectedValue(new Error('posting failed'));
+      // The error leaves the transaction, so the database undoes the receipt with it.
+      await expect(GoodsReceiptService.receive(
+        { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 5 }] },
+        'user-1',
+      )).rejects.toThrow('posting failed');
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset();
     });
   });
 

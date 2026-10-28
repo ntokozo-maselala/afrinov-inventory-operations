@@ -842,10 +842,11 @@ export const InventoryService = {
 
   /**
    * Post a GoodsReceipt: creates Receipt transactions for each line and updates
-   * the linked PO's received quantities. Must be atomic.
+   * the linked PO's received quantities. Must be atomic: given a transaction
+   * (the receipt being recorded in it), it posts within that one.
    */
-  async postGoodsReceipt(input: GoodsReceiptPostInput): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+  async postGoodsReceipt(input: GoodsReceiptPostInput, within?: Prisma.TransactionClient): Promise<void> {
+    const post = async (tx: Prisma.TransactionClient) => {
       const gr = await tx.goodsReceipt.findUnique({
         where: { id: input.goodsReceiptId },
         include: { lines: true },
@@ -962,6 +963,8 @@ export const InventoryService = {
       await dispatchDomainEvents([
         { type: 'GoodsReceived', goodsReceiptId: gr.id, purchaseOrderId: gr.purchaseOrderId },
       ]);
-    });
+    };
+    if (within) return post(within);
+    await prisma.$transaction(post);
   },
 };

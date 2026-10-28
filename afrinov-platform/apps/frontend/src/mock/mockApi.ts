@@ -880,6 +880,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       purchaseOrderId?: string;
       deliveryRef?: string;
       lines: Array<{ materialId: string; locationId: string; quantity: number; purchaseOrderLineId?: string }>;
+      post?: boolean;
     };
     if (!b.supplierId || !b.lines?.length) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     if (!state.suppliers.find((s) => s.id === b.supplierId)) throw err('NOT_FOUND', 'Supplier not found');
@@ -921,7 +922,11 @@ function route(method: string, path: string, body?: unknown): unknown {
         purchaseOrderLineId: l.purchaseOrderLineId,
       })),
     };
+    // As the server: with post, it is recorded and posted in one step, so the
+    // checks above have already refused anything posting would.
+    if (b.post) handleReceiptPost(gr);
     state.goodsReceipts.push(gr);
+    if (b.post) return { ...gr, supplier: findSupplier(gr.supplierId), lines: gr.lines.map((l) => ({ ...l, material: findMaterial(l.materialId), location: findLocation(l.locationId) })) };
     return gr;
   }
   if (method === 'POST' && p.endsWith('/post')) {
@@ -930,46 +935,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!gr) throw err('NOT_FOUND', 'Goods receipt not found');
     if (gr.status === 'POSTED') throw err('INVALID_STATE', 'Already posted');
     if (gr.status === 'DRAFT') throw err('INVALID_STATE', 'Must be submitted first');
-    // Post Receipt transactions and update PO receivedQty.
-    for (const line of gr.lines) {
-      state.transactions.push({
-        id: nextId('t'),
-        postedAt: new Date().toISOString(),
-        type: 'RECEIPT',
-        materialId: line.materialId,
-        locationId: line.locationId,
-        quantity: String(Number(line.quantity)),
-        actorId: 'user-1',
-        referenceType: 'GoodsReceipt',
-        referenceId: gr.id,
-      });
-      if (line.purchaseOrderLineId) {
-        const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
-        const pol = po?.lines.find((l) => l.id === line.purchaseOrderLineId);
-        if (pol) {
-          const orderedQty = Number(pol.orderedQty);
-          const alreadyReceived = Number(pol.receivedQty);
-          const receiving = Number(line.quantity);
-          const projected = alreadyReceived + receiving;
-          if (projected > orderedQty) {
-            throw err('VALIDATION_ERROR', `Receiving ${receiving} would exceed the ordered quantity of ${orderedQty} for this line.`);
-          }
-          pol.receivedQty = String(projected);
-        }
-      }
-    }
-    gr.status = 'POSTED';
-    if (gr.purchaseOrderId) {
-      const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
-      if (po) {
-        const before = { status: po.status };
-        const allFully = po.lines.every((l) => Number(l.receivedQty) >= Number(l.orderedQty));
-        const anyReceived = po.lines.some((l) => Number(l.receivedQty) > 0);
-        if (allFully || anyReceived) po.status = allFully ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
-        po.history = po.history ?? [];
-        po.history.push({ id: nextId('audit'), action: 'PO_GOODS_RECEIVED', actorId: 'u-admin', before, after: { status: po.status, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number }, createdAt: new Date().toISOString() });
-      }
-    }
+    handleReceiptPost(gr);
     return {
       ...gr,
       supplier: findSupplier(gr.supplierId),
@@ -1552,6 +1518,50 @@ interface IssueBody {
   projectNumber?: string;
   lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
 }
+/** Posts a goods receipt into stock and credits its order's lines. */
+function handleReceiptPost(gr: MockGoodsReceipt): void {
+  // Post Receipt transactions and update PO receivedQty.
+  for (const line of gr.lines) {
+    state.transactions.push({
+      id: nextId('t'),
+      postedAt: new Date().toISOString(),
+      type: 'RECEIPT',
+      materialId: line.materialId,
+      locationId: line.locationId,
+      quantity: String(Number(line.quantity)),
+      actorId: 'user-1',
+      referenceType: 'GoodsReceipt',
+      referenceId: gr.id,
+    });
+    if (line.purchaseOrderLineId) {
+      const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
+      const pol = po?.lines.find((l) => l.id === line.purchaseOrderLineId);
+      if (pol) {
+        const orderedQty = Number(pol.orderedQty);
+        const alreadyReceived = Number(pol.receivedQty);
+        const receiving = Number(line.quantity);
+        const projected = alreadyReceived + receiving;
+        if (projected > orderedQty) {
+          throw err('VALIDATION_ERROR', `Receiving ${receiving} would exceed the ordered quantity of ${orderedQty} for this line.`);
+        }
+        pol.receivedQty = String(projected);
+      }
+    }
+  }
+  gr.status = 'POSTED';
+  if (gr.purchaseOrderId) {
+    const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
+    if (po) {
+      const before = { status: po.status };
+      const allFully = po.lines.every((l) => Number(l.receivedQty) >= Number(l.orderedQty));
+      const anyReceived = po.lines.some((l) => Number(l.receivedQty) > 0);
+      if (allFully || anyReceived) po.status = allFully ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+      po.history = po.history ?? [];
+      po.history.push({ id: nextId('audit'), action: 'PO_GOODS_RECEIVED', actorId: 'u-admin', before, after: { status: po.status, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number }, createdAt: new Date().toISOString() });
+    }
+  }
+}
+
 function handleIssue(b: IssueBody): { transactionIds: string[] } {
   if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the stock is issued to');
   const lines = b.lines ?? [];
