@@ -36,21 +36,21 @@ const skus = () => within(screen.getByRole('table')).getAllByRole('link').map((a
 describe('Stock: Stores and Projects views', () => {
   beforeEach(() => { mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations' ? [] : ROWS)); });
 
-  it('opens on Stores, with its reorder level and status', async () => {
+  it('opens on Stores, with its Required threshold and status', async () => {
     stockPage();
     await screen.findByText('DISC');
     expect(skus()).toEqual(['DISC']);
     expect(screen.getByRole('tab', { name: /Stores/ })).toHaveAttribute('aria-selected', 'true');
-    expect(within(screen.getByRole('table')).getByText('Reorder')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getByText('Required')).toBeInTheDocument();
   });
 
-  it('shows Projects stock project by project, completed projects included, without re-ordering', async () => {
+  it('shows Projects stock project by project, completed projects included, without a Required threshold column', async () => {
     stockPage();
     await screen.findByText('DISC');
     fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
     expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
     const table = screen.getByRole('table');
-    expect(within(table).queryByText('Reorder')).not.toBeInTheDocument();
+    expect(within(table).queryByText('Required')).not.toBeInTheDocument();
     expect(within(within(table).getByText('1369-PIPE').closest('tr')!).getByText('Completed')).toBeInTheDocument();
     expect(within(within(table).getByText('OLD-PLATE').closest('tr')!).getByText('No project yet')).toBeInTheDocument();
   });
