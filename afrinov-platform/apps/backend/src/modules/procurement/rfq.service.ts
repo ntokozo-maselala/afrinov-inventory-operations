@@ -46,8 +46,6 @@ export interface UpdateRfqInput {
   closingDate?: string;
 }
 
-type Db = Prisma.TransactionClient | typeof prisma;
-
 /** Days from sending to closing when none is given, as the RFQ sheet's Closing = Issued + 4. */
 export const DEFAULT_CLOSING_DAYS = 4;
 
@@ -71,7 +69,9 @@ const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
 /** A closing date on or after the day it is sent; an RFQ can't close before it goes out. */
 function checkClosingDate(closing: string, issued: string): void {
-  if (Number.isNaN(asDate(closing).getTime())) throw Errors.validation('Invalid closing date');
+  // A day that doesn't exist (2026-02-30) would otherwise be saved as another one.
+  const d = asDate(closing);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== closing) throw Errors.validation(`${closing} is not a date`);
   if (closing < issued) throw Errors.validation(`The closing date can't be before ${issued}, the day it was sent`);
 }
 
@@ -103,11 +103,13 @@ async function editSent(
   }
   if (input.supplierIds !== undefined) {
     const had = rfq.suppliers.map((s) => s.supplierId);
-    const next = await checkSuppliers(input.supplierIds, tx);
+    const next = [...new Set(input.supplierIds.map((s) => s.trim()))];
     if (had.some((s) => !next.includes(s))) {
       throw Errors.invalidState(`${rfq.number} has already gone to its suppliers, so none of them can be taken off. Cancel it to stop asking.`);
     }
-    const added = next.filter((s) => !had.includes(s));
+    // Only the ones being added are checked: a supplier already asked who has
+    // since been deactivated stays on it, and doesn't stop anyone else being asked.
+    const added = await checkSuppliers(next.filter((s) => !had.includes(s)), tx);
     if (added.length > 0) {
       await tx.rfqSupplier.createMany({ data: added.map((supplierId) => ({ rfqId: rfq.id, supplierId })) });
       before.supplierIds = had;
@@ -167,10 +169,12 @@ async function openProjectName(projectNumber: string, tx: Prisma.TransactionClie
 }
 
 /** Refuses missing or inactive items, project material with no project, and another project's material. */
-async function checkLines(lines: RfqLineInput[], projectNumber: string | null, db: Db): Promise<void> {
+async function checkLines(lines: RfqLineInput[], projectNumber: string | null, tx: Prisma.TransactionClient): Promise<void> {
   if (lines.length === 0) throw Errors.validation('A request for quotation needs at least one line');
   const ids = [...new Set(lines.map((l) => l.materialId))];
-  const materials = await db.material.findMany({
+  // Held until the RFQ is written, so an item can't be deactivated between the check and the save.
+  await tx.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
+  const materials = await tx.material.findMany({
     where: { id: { in: ids } },
     select: { id: true, sku: true, active: true, category: true, projectNumber: true },
   });
@@ -183,10 +187,12 @@ async function checkLines(lines: RfqLineInput[], projectNumber: string | null, d
 }
 
 /** The suppliers to ask, each once; missing or inactive ones are refused. */
-async function checkSuppliers(supplierIds: string[], db: Db): Promise<string[]> {
+async function checkSuppliers(supplierIds: string[], tx: Prisma.TransactionClient): Promise<string[]> {
   const ids = [...new Set(supplierIds.map((s) => s.trim()))];
   if (ids.length === 0) return [];
-  const suppliers = await db.supplier.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, active: true } });
+  // Held until the RFQ is written, as for its items.
+  await tx.$executeRaw`SELECT 1 FROM suppliers WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
+  const suppliers = await tx.supplier.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, active: true } });
   const missing = ids.find((id) => !suppliers.some((s) => s.id === id));
   if (missing) throw Errors.validation(`Supplier ${missing} does not exist`);
   const inactive = suppliers.find((s) => !s.active);

@@ -19,8 +19,8 @@ const { Rfqs } = await import('./Rfqs');
 const { RfqDetail } = await import('./RfqDetail');
 const { NewRfq, EditRfq } = await import('./RfqForm');
 const { ToastProvider } = await import('../components/Toast');
-const { addDays } = await import('../lib/rfq');
-const { today } = await import('../lib/dates');
+const { addDays, todayInSouthAfrica } = await import('../lib/rfq');
+const today = todayInSouthAfrica;
 
 const supplier = (id: string, name: string) => ({ id, name, active: true, currency: 'ZAR', contactEmail: `${id}@example.co.za` });
 const SUPPLIERS = [supplier('s-1', 'EMV Africa'), supplier('s-2', 'Macsteel'), supplier('s-3', 'Hydac')];
@@ -49,7 +49,10 @@ beforeEach(() => {
     const found = RFQS.find((r) => path === `/rfqs/${r.id}`);
     if (found) return found;
     if (path === '/suppliers') return SUPPLIERS;
-    if (path === '/materials') return [{ id: 'm-1', sku: 'WHEEL-SS', name: 'Overhead rail wheel', category: 'CONSUMABLES', unitOfMeasure: 'LOTS', requiredStock: '0', active: true }];
+    if (path === '/materials') return [
+      { id: 'm-1', sku: 'WHEEL-SS', name: 'Overhead rail wheel', category: 'CONSUMABLES', unitOfMeasure: 'LOTS', requiredStock: '0', active: true },
+      { id: 'm-old', sku: 'OLD-PIN', name: 'Clevis pin (old)', category: 'CONSUMABLES', unitOfMeasure: 'PC', requiredStock: '0', active: false },
+    ];
     if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Door rails', status: 'ACTIVE' }];
     return [];
   });
@@ -108,6 +111,13 @@ describe('New request for quotation', () => {
       projectNumber: 'AFRI-1325', description: undefined, lines: [{ materialId: 'm-1', quantity: 4.37 }], supplierIds: ['s-1', 's-3'],
     })));
     await screen.findByRole('heading', { name: 'AFRI-02A-1325-02-01' });
+  });
+
+  it("doesn't offer inactive items, which the server would refuse", async () => {
+    appAt('/rfqs/new');
+    const select = await screen.findByLabelText('Line 1 item');
+    await within(select).findByRole('option', { name: /WHEEL-SS/ });
+    expect(within(select).queryByRole('option', { name: /OLD-PIN/ })).not.toBeInTheDocument();
   });
 
   it('refuses a quantity finer than the 4 decimal places kept, before saving', async () => {

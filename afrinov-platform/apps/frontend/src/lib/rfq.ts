@@ -64,6 +64,14 @@ export function formatDay(iso: string | null | undefined): string {
   return iso ? formatDate(`${iso.slice(0, 10)}T12:00:00`) : '—';
 }
 
+/**
+ * Today in South Africa, as YYYY-MM-DD: the day the server issues an RFQ on,
+ * whatever the browser's own calendar says.
+ */
+export function todayInSouthAfrica(now = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
 /** A YYYY-MM-DD day `days` later. */
 export function addDays(day: string, days: number): string {
   const d = new Date(`${day}T12:00:00`);

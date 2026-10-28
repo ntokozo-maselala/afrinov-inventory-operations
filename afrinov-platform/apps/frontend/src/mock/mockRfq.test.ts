@@ -91,6 +91,25 @@ describe('mock: requests for quotation', () => {
     expect(history.map((e) => e.action)).toEqual(['UPDATE', 'RFQ_SEND', 'CREATE']);
   });
 
+  it('adds a supplier to a sent RFQ although one already asked has since been deactivated', async () => {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    await api.post(`/rfqs/${draft.id}/send`, {});
+    await api.patch('/suppliers/sup-1', { active: false });
+    const added = await api.patch<Rfq>(`/rfqs/${draft.id}`, { supplierIds: ['sup-1', 'sup-2'] });
+    expect(added.suppliers.map((s) => s.supplierId)).toEqual(['sup-1', 'sup-2']);
+    await api.patch('/suppliers/sup-3', { active: false });
+    await expect(api.patch(`/rfqs/${draft.id}`, { supplierIds: ['sup-1', 'sup-2', 'sup-3'] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('refuses a day that does not exist, and names who sent it, as the server does', async () => {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    await expect(api.post(`/rfqs/${draft.id}/send`, { closingDate: '2099-02-30' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect((await api.get<Rfq & { sentBy: unknown }>(`/rfqs/${draft.id}`)).sentBy).toBeNull();
+    const sent = await api.post<Rfq & { sentBy: { name: string } }>(`/rfqs/${draft.id}/send`, {});
+    expect(sent.sentBy).toMatchObject({ name: 'You (admin)' });
+    await expect(api.patch(`/rfqs/${draft.id}`, { closingDate: '2099-13-01' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
   it('refuses a closing date on a draft, as the server does', async () => {
     const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }] });
     await expect(api.patch(`/rfqs/${draft.id}`, { closingDate: '2099-01-31' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });

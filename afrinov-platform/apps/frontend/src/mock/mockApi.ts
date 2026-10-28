@@ -384,6 +384,13 @@ const rfqLinesForLog = (lines: Array<{ materialId: string; quantity: string | nu
 
 const RFQ_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/** As the server: a YYYY-MM-DD day that exists (not 2026-02-30). */
+function isRealDay(day: string): boolean {
+  if (!RFQ_DAY.test(day)) return false;
+  const d = new Date(`${day}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
+}
+
 /** Today in South Africa, as the server takes it for an RFQ's issue date. */
 function mockToday(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
@@ -414,6 +421,8 @@ function rfqView(r: MockRfq) {
     ...rfqFields(r),
     project: projectRef(r.projectNumber),
     createdBy: { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] },
+    // As the server: who sent it, once sent (the mock's user does everything).
+    sentBy: r.sentAt ? { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] } : null,
     purchaseOrder: order ? { id: order.id, number: order.number, status: order.status } : null,
     lines: r.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     suppliers: r.suppliers.map((s) => {
@@ -492,7 +501,7 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     checkRfqLines(rfq.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity) })), rfq.projectNumber);
     checkRfqSuppliers(rfq.suppliers.map((s) => s.supplierId));
     const closingDate = (body as { closingDate?: string } | undefined)?.closingDate;
-    if (closingDate !== undefined && !RFQ_DAY.test(closingDate)) throw err('VALIDATION_ERROR', 'Invalid closing date');
+    if (closingDate !== undefined && !isRealDay(closingDate)) throw err('VALIDATION_ERROR', `${closingDate} is not a date`);
     const issued = mockToday();
     const closing = closingDate ?? mockAddDays(issued, 4);
     if (closing < issued) throw err('VALIDATION_ERROR', `The closing date can't be before ${issued}, the day it was sent`);
@@ -531,7 +540,7 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     const next: MockRfq = { ...rfq };
     if (b.closingDate !== undefined && b.closingDate !== rfq.closingDate?.slice(0, 10)) {
       const issued = rfq.issuedAt?.slice(0, 10) ?? mockToday();
-      if (!RFQ_DAY.test(b.closingDate)) throw err('VALIDATION_ERROR', 'Invalid closing date');
+      if (!isRealDay(b.closingDate)) throw err('VALIDATION_ERROR', `${b.closingDate} is not a date`);
       if (b.closingDate < issued) throw err('VALIDATION_ERROR', `The closing date can't be before ${issued}, the day it was sent`);
       next.closingDate = `${b.closingDate}T00:00:00.000Z`;
       before.closingDate = rfq.closingDate?.slice(0, 10) ?? null;
@@ -539,9 +548,11 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     }
     if (b.supplierIds !== undefined) {
       const had = rfq.suppliers.map((s) => s.supplierId);
-      const ids = checkRfqSuppliers(b.supplierIds);
+      const ids = [...new Set(b.supplierIds.map((s) => s.trim()))];
       if (had.some((s) => !ids.includes(s))) throw err('INVALID_STATE', `${rfq.number} has already gone to its suppliers, so none of them can be taken off. Cancel it to stop asking.`);
-      const added = ids.filter((s) => !had.includes(s));
+      // As the server: only the ones being added are checked, so one already
+      // asked who has since been deactivated doesn't stop anyone else being asked.
+      const added = checkRfqSuppliers(ids.filter((s) => !had.includes(s)));
       if (added.length > 0) {
         next.suppliers = [...rfq.suppliers, ...added.map(rfqSupplierRow)];
         before.supplierIds = had;

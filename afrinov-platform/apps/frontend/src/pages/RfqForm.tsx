@@ -231,7 +231,8 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
                     <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} item`}>
                       <option value="">Item…</option>
                       {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
-                      {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
+                      {/* An inactive item isn't quoted for; one a draft already holds stays listed so it can be changed. */}
+                      {lineMaterials.filter((m) => m.active || m.id === l.materialId).map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}{m.active ? '' : ' (inactive)'}</option>)}
                     </Select>
                   </div>
                   <output aria-label={`Line ${i + 1} units`} className="col-span-4 md:col-span-1 py-2 text-sm text-surface-700 truncate">{item?.unitOfMeasure ?? '—'}</output>

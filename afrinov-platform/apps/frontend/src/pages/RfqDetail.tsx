@@ -22,9 +22,8 @@ import { useToast } from '../components/Toast';
 import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
-import { today } from '../lib/dates';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
 
 interface HistoryEntry {
   id: string;
@@ -231,7 +230,8 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
 }
 
 function SendDialog({ rfq, onClose, onSend }: { rfq: Rfq; onClose: () => void; onSend: (closingDate: string) => Promise<void> }) {
-  const issued = today();
+  // The day the server issues it on, so the default and the earliest date match what it accepts.
+  const issued = todayInSouthAfrica();
   const [closing, setClosing] = useState(addDays(issued, DEFAULT_CLOSING_DAYS));
   const [busy, setBusy] = useState(false);
   const tooEarly = !closing || closing < issued;
@@ -286,7 +286,7 @@ function SentEditDialog({ rfq, onClose, onSave }: {
   rfq: Rfq; onClose: () => void; onSave: (body: { closingDate?: string; supplierIds?: string[] }) => Promise<void>;
 }) {
   const suppliers = useApi<Supplier[]>('/suppliers');
-  const issued = rfq.issuedAt?.slice(0, 10) ?? today();
+  const issued = rfq.issuedAt?.slice(0, 10) ?? todayInSouthAfrica();
   const [closing, setClosing] = useState(rfq.closingDate?.slice(0, 10) ?? '');
   const [added, setAdded] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);

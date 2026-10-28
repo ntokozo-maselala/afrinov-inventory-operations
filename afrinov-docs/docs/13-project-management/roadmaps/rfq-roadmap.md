@@ -6,12 +6,12 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phase 1 is merged (PR #104). Phase 2 is built on `feature/rfq-send` and not yet committed. One pull request per phase.
+**Status:** Phase 1 is merged (PR #104). Phase 2 is in review (PR #105). One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | RFQ record and numbering | M | Merged (#104) |
-| 2 | Raise, edit and send an RFQ | M | Built |
+| 2 | Raise, edit and send an RFQ | M | In review |
 | 3 | The RFQ document for suppliers | M | Planned |
 | 4 | Record the quotes that come back | M to L | Planned |
 | 5 | Compare quotes and award to a purchase order | M | Planned |
@@ -71,7 +71,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 2: Raise, edit and send an RFQ
 
-**Built** on `feature/rfq-send`. Size M. Frontend and backend. 4 new backend unit tests, 6 real-HTTP tests, 13 page tests and 3 frontend mock tests.
+**In review** (PR #105). Size M. Frontend and backend. 4 new backend unit tests, 7 real-HTTP tests, 14 page tests and 5 frontend mock tests. Qodo's findings on the first push are fixed: an item or supplier deactivated while an RFQ is sent, inactive items offered on the form, a deactivated supplier blocking another being added, closing dates on days that don't exist, the Send dialog's today in the browser's calendar rather than South Africa's, and the mock's sender.
 
 - [x] **2.1 The RFQ list.** Procurement → **Requests for quotation**: number, project, description, suppliers asked, quotes in, closing date and status. Buyers land on Draft and Sent. Shows **Closed** beside a Sent RFQ past its closing date. Only buyers (and Admin) see it in the menu.
   Files: `pages/Rfqs.tsx`, `hooks/useNavGroups.tsx`, `App.tsx`

@@ -219,6 +219,10 @@ describe('requests for quotation over real HTTP', () => {
     it('takes the closing date given, but not one before today', async () => {
       const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
       expect((await send(created.body.id, { closingDate: addDays(todayInSouthAfrica(), -1) })).status).toBe(400);
+      // A day that doesn't exist is refused, not saved as 2 March.
+      const impossible = await send(created.body.id, { closingDate: '2099-02-30' });
+      expect(impossible.status).toBe(400);
+      expect(impossible.body.error.message).toMatch(/not a date/);
       const res = await send(created.body.id, { closingDate: addDays(todayInSouthAfrica(), 10) });
       expect(day(res.body.closingDate)).toBe(addDays(todayInSouthAfrica(), 10));
     });
@@ -249,6 +253,21 @@ describe('requests for quotation over real HTTP', () => {
       expect(day(moved.body.closingDate)).toBe(later);
       expect(moved.body.suppliers.map((s) => s.supplierId)).toEqual([supplierA, supplierB]);
       expect((await api('PATCH', `/rfqs/${id}`, { closingDate: addDays(todayInSouthAfrica(), -1) })).status).toBe(400);
+    });
+
+    it('adds a supplier to a sent RFQ although one already asked has since been deactivated', async () => {
+      const gone = await api<{ id: string }>('POST', '/suppliers', { name: `IT RFQ Gone ${run}` });
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [gone.body.id] });
+      await send(created.body.id);
+      expect((await api('PATCH', `/suppliers/${gone.body.id}`, { active: false })).status).toBe(200);
+
+      const added = await api<Sent>('PATCH', `/rfqs/${created.body.id}`, { supplierIds: [gone.body.id, supplierA] });
+      expect(added.status).toBe(200);
+      expect(added.body.suppliers.map((s) => s.supplierId)).toEqual([gone.body.id, supplierA]);
+      // A new one is still checked.
+      const inactive = await api<ApiErrorBody>('PATCH', `/rfqs/${created.body.id}`, { supplierIds: [gone.body.id, supplierA, inactiveSupplier] });
+      expect(inactive.status).toBe(400);
+      expect(inactive.body.error.message).toMatch(/inactive/);
     });
 
     it('shows a sent RFQ past its closing date as closed', async () => {
