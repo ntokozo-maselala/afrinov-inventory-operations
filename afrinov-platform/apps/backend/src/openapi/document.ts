@@ -88,8 +88,8 @@ const commaList = (what: string) =>
 
 const reportQuery = z.object({
   range: dateRangePresetSchema.optional().openapi({ description: 'Date range preset. Default ALL. CUSTOM needs from and to.' }),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  from: z.iso.datetime().optional(),
+  to: z.iso.datetime().optional(),
   category: commaList(`Material categories (${materialCategorySchema.options.join(', ')})`),
   locationId: commaList('Location ids'),
   supplierId: commaList('Supplier ids'),

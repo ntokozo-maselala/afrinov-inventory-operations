@@ -5,19 +5,19 @@ import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
 export const toolCheckOutSchema = z.object({
-  recipientId: z.string().uuid(),
+  recipientId: z.uuid(),
   projectNumber: z.string().trim().min(1).max(64).optional(),
   note: z.string().max(500).optional(),
   lines: z.array(z.object({
-    materialId: z.string().uuid(),
-    locationId: z.string().uuid(),
+    materialId: z.uuid(),
+    locationId: z.uuid(),
     quantity: z.number().positive(),
   })).min(1).max(50),
 });
 
 export const toolCheckInSchema = z.object({
   lines: z.array(z.object({
-    loanId: z.string().uuid(),
+    loanId: z.uuid(),
     quantity: z.number().positive(),
     condition: z.enum(['GOOD', 'DAMAGED', 'LOST']),
     note: z.string().max(500).optional(),

@@ -47,8 +47,8 @@ export const reportQuerySchema = z
     // CUSTOM requires both `from` and `to`. All other presets are computed
     // by the server relative to `now` and so do not need explicit bounds.
     range: dateRangePresetSchema.default('ALL'),
-    from: z.string().datetime().optional(),
-    to: z.string().datetime().optional(),
+    from: z.iso.datetime().optional(),
+    to: z.iso.datetime().optional(),
 
     // Dimensional filters.
     category: z.array(materialCategorySchema).max(REPORT_FILTER_MAX).default([]),
