@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation, useBeforeUnload } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useBeforeUnload, type NavLinkRenderProps } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { SettingsProvider, useSettings, type SettingCategory, type SettingValue } from '../hooks/useSettings';
 import { useToast } from '../components/Toast';
@@ -131,7 +131,7 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
                   <NavLink
                     to={s.to}
                     end={s.to === '/settings'}
-                    className={({ isActive }) =>
+                    className={({ isActive }: NavLinkRenderProps) =>
                       `block rounded px-3 py-2 text-sm transition-colors ${
                         isActive
                           ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-900/50 dark:text-brand-100'

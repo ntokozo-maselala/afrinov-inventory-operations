@@ -78,7 +78,9 @@ describe('Materials: Stores and Projects tabs', () => {
     expect(skus()).toEqual(['1402-BOLT']);
     unmount();
     list('/materials?section=PROJECTS&project=none');
-    await screen.findByText('OLD-PLATE');
+    // OLD-PLATE also appears in the "Needs a project" panel, so wait for the
+    // table row specifically rather than any matching text on the page.
+    await within(await screen.findByRole('table')).findByText('OLD-PLATE');
     expect(skus()).toEqual(['OLD-PLATE']);
   });
 

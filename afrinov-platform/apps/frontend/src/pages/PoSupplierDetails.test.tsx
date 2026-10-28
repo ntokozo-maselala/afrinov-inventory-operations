@@ -3,6 +3,7 @@
 // be changed for that order.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet, mockPost, mockPatch } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn() }));
@@ -43,7 +44,7 @@ beforeEach(() => {
   mockPatch.mockReset().mockResolvedValue({});
 });
 
-const at = (url: string, path: string, element: JSX.Element) => render(
+const at = (url: string, path: string, element: ReactElement) => render(
   <MemoryRouter initialEntries={[url]}><ToastProvider><Routes><Route path={path} element={element} /></Routes></ToastProvider></MemoryRouter>,
 );
 const newOrder = () => at('/purchase-orders/new', '/purchase-orders/new', <NewPurchaseOrder />);
