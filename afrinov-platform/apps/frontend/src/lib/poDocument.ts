@@ -9,6 +9,7 @@
 // Built in the browser from the order as the server returns it, totals
 // included, so the copy matches the screen; like the report PDFs it works in
 // frontend-only mode too. jsPDF loads only when a copy is asked for.
+import type { jsPDF } from 'jspdf';
 import { triggerDownload } from '../api/exportReport';
 import { drawLogo, pdfText } from './pdf';
 import { formatDate, formatNumber } from './format';
@@ -358,13 +359,31 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   signature('Authorization', po.approvedBy?.name ?? 'Not yet approved', po.approvedAt ? `Approved ${formatDate(po.approvedAt)}` : '', 1);
   signature('Supplier acceptance', po.supplier.name, 'Name, signature and date', 2);
 
-  // On every page: the stamp across it while the order may not go out, and the footer.
-  const stamp = documentStamp(po.status);
+  finishPages(doc, documentStamp(po.status), `${po.number} ${revisionLabel(po.revision)} · ${company.name} · Printed ${formatDate(generatedAt.toISOString())}`);
+  return doc.output('arraybuffer');
+}
+
+/** The text cut to `width` with an ellipsis, so a long name can't run into what is beside it. */
+function fitLine(doc: jsPDF, text: string, width: number): string {
+  if (doc.getTextWidth(text) <= width) return text;
+  let cut = text;
+  while (cut.length > 1 && doc.getTextWidth(`${cut}...`) > width) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}...`;
+}
+
+/**
+ * On every page: the stamp across it while the document may not go out
+ * (red for CANCELLED), and the footer line with the page number. Shared with
+ * the request for quotation document.
+ */
+export function finishPages(doc: jsPDF, stamp: string | null, footer: string): void {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const pages = doc.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
     if (stamp) {
-      // Faint, so the order stays readable under it, and centred on the page:
+      // Faint, so the document stays readable under it, and centred on the page:
       // jsPDF turns text about its start, so start half its length back along the slope.
       const angle = 35;
       const rad = (angle * Math.PI) / 180;
@@ -382,10 +401,9 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    doc.text(pdfText(`${po.number} ${revisionLabel(po.revision)} · ${company.name} · Printed ${formatDate(generatedAt.toISOString())}`), SIDE, pageHeight - BOTTOM + 7);
+    doc.text(fitLine(doc, pdfText(footer), pageWidth - 2 * SIDE - 25), SIDE, pageHeight - BOTTOM + 7);
     doc.text(`Page ${p} of ${pages}`, pageWidth - SIDE, pageHeight - BOTTOM + 7, { align: 'right' });
   }
-  return doc.output('arraybuffer');
 }
 
 export async function downloadPoDocument(po: PoDocumentOrder, company: PoCompany): Promise<void> {

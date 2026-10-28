@@ -197,6 +197,9 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'purchaseOrders.invoicing', type: 'string', category: 'purchase_orders', description: 'INVOICING & PAYMENT printed on every purchase order, followed by where invoices are submitted. Leave blank to leave it off.', default: 'The Purchaser may withhold payment for late delivery, missing documentation, or defective/non-conforming Goods or Services.', validate: isLength(0, 4000) },
   { key: 'purchaseOrders.invoiceEmail', type: 'string', category: 'purchase_orders', description: 'Where suppliers submit invoices, printed at the end of INVOICING & PAYMENT.', default: 'accounts@afrinov.co.za', validate: isLength(0, 200) },
   { key: 'purchaseOrders.codeOfConduct', type: 'string', category: 'purchase_orders', description: 'The supplier code of conduct printed on every purchase order. Leave blank to leave it off.', default: '', validate: isLength(0, 4000) },
+  // Printed on each request for quotation, as the RFQ sheet's Instructions.
+  { key: 'purchaseOrders.rfqInstructions', type: 'string', category: 'purchase_orders', description: 'Instructions printed on every request for quotation, telling suppliers how to quote. Leave blank to leave them off.', default: 'Fill in the UNIT PRICE and SUBTOTAL for each line as per the headings below, and save as PDF. All files to be returned as PDF, quoting the RFQ number.', validate: isLength(0, 2000) },
+  { key: 'purchaseOrders.rfqQuoteEmail', type: 'string', category: 'purchase_orders', description: 'Where suppliers return their quotations, printed under the instructions on every request for quotation. Leave blank to leave it off.', default: '', validate: isLength(0, 200) },
 
   // ── Notifications ──────────────────────────────────────────────────────
   { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },

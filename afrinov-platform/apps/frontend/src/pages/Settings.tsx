@@ -338,6 +338,8 @@ function labelForKey(key: string): string {
     .replace(/^Invoicing$/, 'Invoicing & payment')
     .replace(/^Invoice Email$/, 'Invoices submitted to')
     .replace(/^Code Of Conduct$/, 'Code of conduct')
+    .replace(/^Rfq Instructions$/, 'RFQ instructions')
+    .replace(/^Rfq Quote Email$/, 'Quotes returned to')
     .trim();
 }
 

@@ -24,6 +24,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
 import { DEFAULT_CLOSING_DAYS, addDays, formatDay, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 
 interface HistoryEntry {
   id: string;
@@ -47,6 +48,21 @@ export function RfqDetail() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const reload = () => { rfq.reload(); history.reload(); };
   const r = rfq.data;
+
+  // Each supplier's own copy, laid out like the RFQ sheet, to email to them.
+  const [printing, setPrinting] = useState<string | null>(null);
+  async function downloadFor(s: RfqSupplier) {
+    if (!r) return;
+    setPrinting(s.supplierId);
+    try {
+      const values = await api.get<Record<string, unknown>>(`/settings/values?keys=${RFQ_DOCUMENT_SETTINGS.join(',')}`);
+      await downloadRfqDocument(r, s, rfqCompanyFromSettings(values));
+    } catch (err) {
+      toast.error('Could not make the PDF', (err as ApiError).message ?? String(err));
+    } finally {
+      setPrinting(null);
+    }
+  }
 
   /** Runs one of the page's actions, then reloads; the dialog stays open on failure. */
   async function act(label: string, run: () => Promise<Rfq>) {
@@ -109,7 +125,7 @@ export function RfqDetail() {
                 <dt className="text-surface-500">Description</dt><dd className="col-span-2">{r.description ?? '—'}</dd>
                 <dt className="text-surface-500">Issued</dt><dd className="col-span-2">{r.issuedAt ? formatDay(r.issuedAt) : 'Not sent yet'}</dd>
                 <dt className="text-surface-500">Closing</dt><dd className="col-span-2">{r.closingDate ? formatDay(r.closingDate) : `${DEFAULT_CLOSING_DAYS} days after it is sent`}</dd>
-                <dt className="text-surface-500">Penalties</dt><dd className="col-span-2">{r.penaltiesApply ? 'Penalties apply to this order' : 'No penalties applicable'}</dd>
+                <dt className="text-surface-500">Penalties</dt><dd className="col-span-2">{r.penaltiesApply ? 'Will apply to the order placed' : 'None on the order placed'}</dd>
                 <dt className="text-surface-500">Raised</dt><dd className="col-span-2 text-meta">{formatDateTime(r.createdAt)}{r.createdBy ? <><br /><span className="text-surface-400">by {r.createdBy.name}</span></> : null}</dd>
                 {r.sentAt && <><dt className="text-surface-500">Sent</dt><dd className="col-span-2 text-meta">{formatDateTime(r.sentAt)}{r.sentBy ? <><br /><span className="text-surface-400">by {r.sentBy.name}</span></> : null}</dd></>}
                 {r.purchaseOrder && <><dt className="text-surface-500">Order</dt><dd className="col-span-2"><Link to={`/purchase-orders/${r.purchaseOrder.id}`} className="btn-link text-mono">{r.purchaseOrder.number}</Link></dd></>}
@@ -123,10 +139,15 @@ export function RfqDetail() {
                 <DataTable ariaLabel="RFQ lines" rows={r.lines} rowKey={(l) => l.id} columns={LINE_COLUMNS} />
               </section>
               <section>
-                <SectionHeader title="Suppliers asked" description={r.status === 'DRAFT' ? 'They are asked once it is sent.' : 'Quotes are recorded as they come back.'} />
+                <SectionHeader
+                  title="Suppliers asked"
+                  description={r.status === 'DRAFT'
+                    ? 'They are asked once it is sent. A copy downloaded now is marked as a draft.'
+                    : "Download each supplier's copy to email to them. Quotes are recorded as they come back."}
+                />
                 {r.suppliers.length === 0
                   ? <EmptyState title="No suppliers yet" description={canManage && r.status === 'DRAFT' ? 'Edit the RFQ to add the suppliers to ask.' : 'Nobody has been asked.'} />
-                  : <DataTable ariaLabel="Suppliers asked" rows={r.suppliers} rowKey={(s) => s.supplierId} columns={supplierColumns(r)} />}
+                  : <DataTable ariaLabel="Suppliers asked" rows={r.suppliers} rowKey={(s) => s.supplierId} columns={supplierColumns(r, downloadFor, printing)} />}
               </section>
               <section>
                 <SectionHeader title="Activity" description="What has happened to this request for quotation." />
@@ -151,7 +172,7 @@ const LINE_COLUMNS: DataTableColumn<RfqLine>[] = [
   { key: 'qty', header: 'Qty', align: 'right', width: '8rem', className: 'text-num', render: (l) => <span className="font-mono">{formatNumber(Number(l.quantity))}</span> },
 ];
 
-function supplierColumns(r: Rfq): DataTableColumn<RfqSupplier>[] {
+function supplierColumns(r: Rfq, onDownload: (s: RfqSupplier) => void, printing: string | null): DataTableColumn<RfqSupplier>[] {
   return [
     {
       key: 'name', header: 'Supplier', render: (s) => (
@@ -176,6 +197,18 @@ function supplierColumns(r: Rfq): DataTableColumn<RfqSupplier>[] {
         if (s.quotedAt) return <Badge tone="success">Quoted</Badge>;
         return <Badge tone="info">Awaiting quote</Badge>;
       },
+    },
+    {
+      key: 'pdf', header: 'Copy', width: '9rem', render: (s) => (
+        <Button
+          size="sm" variant="secondary" leadingIcon={<Icon.Download size={12} />}
+          onClick={() => onDownload(s)} loading={printing === s.supplierId} disabled={printing !== null && printing !== s.supplierId}
+          aria-label={`Download PDF for ${s.supplier?.name ?? s.supplierId}`}
+          title={r.status === 'DRAFT' ? 'Marked as a draft until it is sent' : `The RFQ to send to ${s.supplier?.name ?? 'this supplier'}`}
+        >
+          PDF
+        </Button>
+      ),
     },
   ];
 }

@@ -163,6 +163,11 @@ export function SettingsPurchaseOrders() {
     useSetting('purchaseOrders.invoiceEmail'),
     useSetting('purchaseOrders.codeOfConduct'),
   ];
+  // On every request for quotation, under the lines.
+  const rfqWording = [
+    useSetting('purchaseOrders.rfqInstructions'),
+    useSetting('purchaseOrders.rfqQuoteEmail'),
+  ];
   if (items.length === 0) return <PanelSkeleton />;
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
@@ -224,6 +229,24 @@ export function SettingsPurchaseOrders() {
           onChange={(v) => setDraft(def.key, v)}
           error={errors[def.key] ?? null}
           multiline={def.key !== 'purchaseOrders.invoiceEmail'}
+        />
+      ))}
+      {rfqWording.some(Boolean) && (
+        <div className="pt-2">
+          <h3 className="text-sm font-semibold text-surface-900">Printed on the request for quotation</h3>
+          <p className="text-xs text-surface-500 mt-0.5">
+            Under the lines on each supplier&rsquo;s copy, as the RFQ sheet&rsquo;s Instructions. Where quotes are returned is left off until it is filled in.
+          </p>
+        </div>
+      )}
+      {rfqWording.map((def) => def && (
+        <TextField
+          key={def.key}
+          def={def}
+          value={(draft[def.key] as string) ?? ''}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+          multiline={def.key === 'purchaseOrders.rfqInstructions'}
         />
       ))}
       <SaveBar items={items} onSave={async () => {
