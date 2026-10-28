@@ -107,10 +107,10 @@ export function SupplierDetail() {
               <h2 className="text-h3 text-surface-900">Contact</h2>
               <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
                 <dt className="text-surface-500">Contact</dt><dd className="col-span-2">{supplier.contactName ?? dash}</dd>
-                <dt className="text-surface-500">Email</dt><dd className="col-span-2 break-words">{supplier.contactEmail ? <a className="text-brand-600 hover:underline" href={`mailto:${supplier.contactEmail}`}>{supplier.contactEmail}</a> : dash}</dd>
+                <dt className="text-surface-500">Email</dt><dd className="col-span-2 wrap-break-word">{supplier.contactEmail ? <a className="text-brand-600 hover:underline" href={`mailto:${supplier.contactEmail}`}>{supplier.contactEmail}</a> : dash}</dd>
                 <dt className="text-surface-500">Phone</dt><dd className="col-span-2">{supplier.contactPhone ?? dash}</dd>
                 <dt className="text-surface-500">Address</dt><dd className="col-span-2 whitespace-pre-line">{supplier.address ?? dash}</dd>
-                <dt className="text-surface-500">Website</dt><dd className="col-span-2 break-words">{website ? <a className="text-brand-600 hover:underline" href={website} target="_blank" rel="noreferrer">{supplier.website}</a> : dash}</dd>
+                <dt className="text-surface-500">Website</dt><dd className="col-span-2 wrap-break-word">{website ? <a className="text-brand-600 hover:underline" href={website} target="_blank" rel="noreferrer">{supplier.website}</a> : dash}</dd>
               </dl>
             </section>
             <section className="surface-card p-4 space-y-3">

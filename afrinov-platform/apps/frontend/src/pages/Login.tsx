@@ -125,7 +125,7 @@ export function Login() {
       <div className="flex-1 grid lg:grid-cols-2">
         {/* Brand panel — desktop only */}
         <aside
-          className="hidden lg:flex flex-col justify-between p-10 bg-gradient-to-br from-brand-600 to-brand-700 text-white"
+          className="hidden lg:flex flex-col justify-between p-10 bg-linear-to-br from-brand-600 to-brand-700 text-white"
           aria-hidden="false"
         >
           <div className="flex items-center gap-3">
