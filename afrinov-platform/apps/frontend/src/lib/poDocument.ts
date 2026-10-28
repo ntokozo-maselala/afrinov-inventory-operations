@@ -60,20 +60,31 @@ export interface PoDocumentOrder {
   createdBy?: { name: string } | null;
   approvedBy?: { name: string } | null;
   approvedAt?: string | null;
+  /** The small print as it was when the order was approved; null before. */
+  printedTerms?: Partial<PoSmallPrintWording> | null;
   lines: PoDocumentLine[];
 }
 
-/** Company details from Settings → Purchase orders. */
-export interface PoCompany {
-  name: string;
-  vatNumber: string;
+/** The wording printed under Remarks, from Settings → Purchase orders. */
+export interface PoSmallPrintWording {
+  terms: string;
+  latePenalty: string;
+  documentation: string;
+  invoicing: string;
   invoiceEmail: string;
   codeOfConduct: string;
 }
 
+/** Company details and the small print as Settings → Purchase orders has them now. */
+export interface PoCompany extends PoSmallPrintWording {
+  name: string;
+  vatNumber: string;
+}
+
 /** The settings the document prints, for GET /settings/values. */
 export const PO_DOCUMENT_SETTINGS = [
-  'general.companyName', 'purchaseOrders.companyVatNumber', 'purchaseOrders.invoiceEmail', 'purchaseOrders.codeOfConduct',
+  'general.companyName', 'purchaseOrders.companyVatNumber', 'purchaseOrders.terms', 'purchaseOrders.latePenalty',
+  'purchaseOrders.documentation', 'purchaseOrders.invoicing', 'purchaseOrders.invoiceEmail', 'purchaseOrders.codeOfConduct',
 ] as const;
 
 export function companyFromSettings(values: Record<string, unknown>): PoCompany {
@@ -81,9 +92,42 @@ export function companyFromSettings(values: Record<string, unknown>): PoCompany 
   return {
     name: s('general.companyName') || 'Afrinov',
     vatNumber: s('purchaseOrders.companyVatNumber'),
+    terms: s('purchaseOrders.terms'),
+    latePenalty: s('purchaseOrders.latePenalty'),
+    documentation: s('purchaseOrders.documentation'),
+    invoicing: s('purchaseOrders.invoicing'),
     invoiceEmail: s('purchaseOrders.invoiceEmail'),
     codeOfConduct: s('purchaseOrders.codeOfConduct'),
   };
+}
+
+export interface SmallPrintSection { heading: string; paragraphs: Array<{ text: string; bold?: boolean }> }
+
+/**
+ * The sections under Remarks, as on the issued orders: Terms (ending with the
+ * late delivery penalty in bold, only when penalties apply), Documentation,
+ * Invoicing & Payment (ending with where invoices go), then the Code of
+ * Conduct. An approved order prints the wording it was approved with; one not
+ * yet approved, or approved before the wording was kept, prints today's.
+ * A section with nothing in it is left off.
+ */
+export function smallPrint(po: Pick<PoDocumentOrder, 'number' | 'penaltiesApply' | 'printedTerms'>, company: PoCompany): SmallPrintSection[] {
+  const kept = po.printedTerms;
+  const wording = (k: keyof PoSmallPrintWording) => (kept ? kept[k] ?? '' : company[k]).trim();
+  const sections: SmallPrintSection[] = [];
+  // A section shows when its own wording is there; the penalty and where
+  // invoices go only finish a section, so blanking its wording leaves it off.
+  const add = (heading: string, main: string, extra: Array<{ text: string; bold?: boolean } | false> = []) => {
+    if (!main) return;
+    const more = extra.filter((p): p is { text: string; bold?: boolean } => !!p && !!p.text);
+    sections.push({ heading, paragraphs: [{ text: main }, ...more] });
+  };
+  add('Terms', wording('terms'), [!!po.penaltiesApply && { text: wording('latePenalty'), bold: true }]);
+  add('Documentation', wording('documentation'));
+  const email = wording('invoiceEmail');
+  add('Invoicing & Payment', wording('invoicing'), [!!email && { text: `Invoices to be submitted to: ${email}, quoting ${po.number}.`, bold: true }]);
+  add('Code of Conduct', wording('codeOfConduct'));
+  return sections;
 }
 
 /** Marked across every page until the order may go to the supplier. */
@@ -263,8 +307,8 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
     doc.text(pdfText(text), SIDE, y + 3);
     y += 5;
   };
-  const paragraph = (text: string, size = 8) => {
-    doc.setFont('helvetica', 'normal');
+  const paragraph = (text: string, size = 8, bold = false) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
     doc.setFontSize(size);
     doc.setTextColor(...INK);
     for (const line of doc.splitTextToSize(pdfText(text), width) as string[]) {
@@ -284,10 +328,9 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   }
   heading('Remarks');
   paragraph(or(po.notes));
-  if (company.invoiceEmail) paragraph(`Note: invoices to be sent to ${company.invoiceEmail}, quoting ${po.number}.`);
-  if (company.codeOfConduct.trim()) {
-    heading('Code of Conduct');
-    paragraph(company.codeOfConduct, 7.5);
+  for (const section of smallPrint(po, company)) {
+    heading(section.heading);
+    for (const p of section.paragraphs) paragraph(p.text, section.heading === 'Code of Conduct' ? 7.5 : 8, p.bold);
   }
 
   // Originator, authorization and supplier acceptance, as at the foot of the Order sheet.

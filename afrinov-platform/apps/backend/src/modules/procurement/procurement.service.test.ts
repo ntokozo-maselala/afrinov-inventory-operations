@@ -19,6 +19,7 @@ interface PO {
   notes: string | null; createdById: string; createdAt: Date; updatedAt: Date;
   expectedDeliveryDate: Date | null;
   approvedAt: Date | null; approvedById: string | null;
+  printedTerms?: unknown;
   shippedAt: Date | null; shippedById: string | null;
   trackingNumber: string | null; carrier: string | null; shipmentNotes: string | null;
   deliveredAt: Date | null; deliveredById: string | null; deliveryNotes: string | null;
@@ -271,6 +272,31 @@ describe('PurchaseOrderService lifecycle', () => {
     expect(approved?.approvedAt).toBeTruthy();
   });
 
+  // The supplier accepts the order's terms: a later change to the settings
+  // must not change what an approved order prints.
+  it('approve keeps the small print on the order, and a later change to the settings leaves it as approved', async () => {
+    const { SettingsService } = await import('../settings/settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('purchaseOrders.terms', 'Deliver by the date on the order.', 'user-1');
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
+    // None before approval (null in the database; this fake leaves it out).
+    expect((await PurchaseOrderService.getById(po.id)).printedTerms ?? null).toBeNull();
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    const approved = await PurchaseOrderService.approve(po.id, 'user-2');
+    expect(approved?.printedTerms).toEqual({
+      terms: 'Deliver by the date on the order.',
+      latePenalty: expect.stringContaining('2% of the contract price per week'),
+      documentation: 'Provide Material Certificates and Material Data Sheets where applicable.',
+      invoicing: expect.stringContaining('withhold payment'),
+      invoiceEmail: 'accounts@afrinov.co.za',
+      codeOfConduct: '',
+    });
+
+    await SettingsService.set('purchaseOrders.terms', 'New wording.', 'user-1');
+    expect((await PurchaseOrderService.getById(po.id)).printedTerms).toMatchObject({ terms: 'Deliver by the date on the order.' });
+  });
+
   it('rejects approve from DRAFT', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
@@ -417,6 +443,8 @@ describe('PurchaseOrderService lifecycle', () => {
     const submitted = await PurchaseOrderService.submit(po.id, 'user-1');
     expect(submitted?.status).toBe('APPROVED');
     expect(submitted?.approvedById).toBe('user-1');
+    // Approved on submission, it keeps its small print as well.
+    expect(submitted?.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za' });
     // Cleanup so other tests are unaffected
     await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', true, 'user-1');
   });
@@ -846,8 +874,14 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === id)!.id;
     await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 200000 }] }, 'user-1'); // R230 000: still within
     expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
+    // Still approved, it keeps the small print it was approved with.
+    expect(db.pos.get(id)!.printedTerms).toBeTruthy();
     await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 450000 }] }, 'user-1'); // R517 500
     expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null, approvedAt: null });
+    // Back for approval, it drops it: its draft prints today's wording, and approving it again takes that.
+    expect(db.pos.get(id)!.printedTerms).toBe(Prisma.DbNull);
+    await PurchaseOrderService.approve(id, 'u-sb');
+    expect(db.pos.get(id)!.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za' });
   });
 });
 

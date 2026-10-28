@@ -252,6 +252,15 @@ function nextPoNumber(): string {
 
 // Approval by value as the server works it out (po-approval.ts), for the
 // signed-in mock user (user-1, an admin without a limit).
+/** The small print as the settings have it now, kept on an order when it is approved. */
+function mockPrintedTerms(): NonNullable<MockPurchaseOrder['printedTerms']> {
+  const wording = (k: string) => String(MOCK_SETTINGS[`purchaseOrders.${k}`]?.value ?? '');
+  return {
+    terms: wording('terms'), latePenalty: wording('latePenalty'), documentation: wording('documentation'),
+    invoicing: wording('invoicing'), invoiceEmail: wording('invoiceEmail'), codeOfConduct: wording('codeOfConduct'),
+  };
+}
+
 function mockApproval(po: MockPurchaseOrder) {
   const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
   const currency = po.currency ?? 'ZAR';
@@ -715,8 +724,18 @@ function route(method: string, path: string, body?: unknown): unknown {
     checkProjectMaterial(po.projectNumber, po.lines.map((l) => l.materialId), 'ordered');
     if (po.projectNumber) assertProjectOpen(po.projectNumber);
     const before = { status: po.status };
-    po.status = 'PENDING_APPROVAL';
     po.history = po.history ?? [];
+    // As the server: with approval not required, submission approves it, and
+    // it keeps the small print it was approved with.
+    if (MOCK_SETTINGS['purchaseOrders.requireApprovalBeforeProcessing']?.value === false) {
+      po.status = 'APPROVED';
+      po.approvedAt = new Date().toISOString();
+      po.approvedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
+      po.printedTerms = mockPrintedTerms();
+      po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT_AUTO_APPROVE', actorId: 'u-admin', before, after: { status: po.status, autoApprove: true }, createdAt: new Date().toISOString() });
+      return po;
+    }
+    po.status = 'PENDING_APPROVAL';
     po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
@@ -732,6 +751,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.status = 'APPROVED';
     po.approvedAt = new Date().toISOString();
     po.approvedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
+    // As the server: the order keeps the small print it was approved with.
+    po.printedTerms = mockPrintedTerms();
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
@@ -1362,7 +1383,11 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.deliveryContactPhone': row('purchaseOrders.deliveryContactPhone', '', 'string', 'purchase_orders', 'Phone number for that person.'),
     'purchaseOrders.firstNumber': row('purchaseOrders.firstNumber', 1, 'number', 'purchase_orders', 'The first AFRI number the app issues: set it to one past the last purchase order number issued from the workbook. The app always continues after the highest AFRI number it has issued.'),
     'purchaseOrders.companyVatNumber': row('purchaseOrders.companyVatNumber', '4010288142', 'string', 'purchase_orders', "Afrinov's VAT number, printed on every purchase order."),
-    'purchaseOrders.invoiceEmail': row('purchaseOrders.invoiceEmail', 'accounts@afrinov.co.za', 'string', 'purchase_orders', 'Where suppliers send invoices, printed under the order lines.'),
+    'purchaseOrders.terms': row('purchaseOrders.terms', 'The Supplier shall deliver all Goods and/or Services by the Purchase Order delivery date and notify the Purchaser in writing within 24 hours of any actual or anticipated delay.', 'string', 'purchase_orders', 'TERMS printed on every purchase order. Each order keeps the wording it was approved with. Leave blank to leave it off.'),
+    'purchaseOrders.latePenalty': row('purchaseOrders.latePenalty', 'Late delivery will incur a penalty of 2% of the contract price per week (or part thereof), up to a maximum of 10%.', 'string', 'purchase_orders', 'The late delivery penalty, printed in bold at the end of TERMS, only on orders where penalties apply.'),
+    'purchaseOrders.documentation': row('purchaseOrders.documentation', 'Provide Material Certificates and Material Data Sheets where applicable.', 'string', 'purchase_orders', 'DOCUMENTATION the supplier must provide, printed on every purchase order. Leave blank to leave it off.'),
+    'purchaseOrders.invoicing': row('purchaseOrders.invoicing', 'The Purchaser may withhold payment for late delivery, missing documentation, or defective/non-conforming Goods or Services.', 'string', 'purchase_orders', 'INVOICING & PAYMENT printed on every purchase order, followed by where invoices are submitted. Leave blank to leave it off.'),
+    'purchaseOrders.invoiceEmail': row('purchaseOrders.invoiceEmail', 'accounts@afrinov.co.za', 'string', 'purchase_orders', 'Where suppliers submit invoices, printed at the end of INVOICING & PAYMENT.'),
     'purchaseOrders.codeOfConduct': row('purchaseOrders.codeOfConduct', '', 'string', 'purchase_orders', 'The supplier code of conduct printed on every purchase order. Leave blank to leave it off.'),
     'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 

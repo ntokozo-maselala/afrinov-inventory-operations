@@ -127,6 +127,8 @@ export interface MockPurchaseOrder {
   settlementDiscount?: string;
   shippingTerms?: string | null;
   penaltiesApply?: boolean;
+  /** The small print as it was when the order was approved; null before. */
+  printedTerms?: Record<'terms' | 'latePenalty' | 'documentation' | 'invoicing' | 'invoiceEmail' | 'codeOfConduct', string> | null;
   deliveryMethod?: 'DELIVERY' | 'COLLECTION';
   deliveryTo?: string | null;
   deliveryAddress?: string | null;

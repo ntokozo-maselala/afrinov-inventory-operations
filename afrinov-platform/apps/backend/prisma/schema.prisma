@@ -308,6 +308,10 @@ model PurchaseOrder {
   settlementDiscount Decimal  @default(0) @map("settlement_discount") @db.Decimal(5, 2)
   shippingTerms      String?  @map("shipping_terms")
   penaltiesApply     Boolean  @default(false) @map("penalties_apply")
+  // The small print (terms, documentation, invoicing, code of conduct) as it
+  // was when the order was approved, so a later change to the settings does
+  // not change what the supplier accepted. Null until approved.
+  printedTerms       Json?    @map("printed_terms")
   // DELIVERY: the supplier delivers to the address below. COLLECTION: Afrinov collects.
   deliveryMethod       String  @default("DELIVERY") @map("delivery_method")
   deliveryTo           String? @map("delivery_to")
