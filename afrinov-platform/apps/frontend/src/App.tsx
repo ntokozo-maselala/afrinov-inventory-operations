@@ -25,6 +25,10 @@ const PurchaseOrders = importPage(() => import('./pages/PurchaseOrders').then(m 
 const PurchaseOrderDetail = importPage(() => import('./pages/PurchaseOrderDetail').then(m => ({ default: m.PurchaseOrderDetail })));
 const NewPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.NewPurchaseOrder })));
 const EditPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.EditPurchaseOrder })));
+const Rfqs = importPage(() => import('./pages/Rfqs').then(m => ({ default: m.Rfqs })));
+const RfqDetail = importPage(() => import('./pages/RfqDetail').then(m => ({ default: m.RfqDetail })));
+const NewRfq = importPage(() => import('./pages/RfqForm').then(m => ({ default: m.NewRfq })));
+const EditRfq = importPage(() => import('./pages/RfqForm').then(m => ({ default: m.EditRfq })));
 const StockStatus = importPage(() => import('./pages/StockStatus').then(m => ({ default: m.StockStatus })));
 const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ default: m.Consumption })));
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
@@ -133,12 +137,17 @@ export function App() {
             <Route path="/purchase-orders/new" element={<Suspense fallback={<PageSkeleton />}><NewPurchaseOrder /></Suspense>} />
             <Route path="/purchase-orders/:id" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrderDetail /></Suspense>} />
             <Route path="/purchase-orders/:id/edit" element={<Suspense fallback={<PageSkeleton />}><EditPurchaseOrder /></Suspense>} />
+            <Route path="/rfqs" element={<Suspense fallback={<PageSkeleton />}><Rfqs /></Suspense>} />
+            <Route path="/rfqs/new" element={<Suspense fallback={<PageSkeleton />}><NewRfq /></Suspense>} />
+            <Route path="/rfqs/:id" element={<Suspense fallback={<PageSkeleton />}><RfqDetail /></Suspense>} />
+            <Route path="/rfqs/:id/edit" element={<Suspense fallback={<PageSkeleton />}><EditRfq /></Suspense>} />
             {/* Goods receipts had its own page; deliveries are booked on Receive stock and an order's Receive delivery. */}
             <Route path="/goods-receipts/*" element={<Navigate to="/purchase-orders" replace />} />
           </>
         ) : (
           <>
             <Route path="/purchase-orders/*" element={<Navigate to="/" replace />} />
+            <Route path="/rfqs/*" element={<Navigate to="/" replace />} />
             <Route path="/goods-receipts/*" element={<Navigate to="/" replace />} />
           </>
         )}

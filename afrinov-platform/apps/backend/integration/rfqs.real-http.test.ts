@@ -15,6 +15,7 @@ import {
   startServer,
   type TestServer,
 } from './helpers.js';
+import { addDays, todayInSouthAfrica } from '../src/modules/procurement/rfq.service.js';
 
 interface Rfq {
   id: string;
@@ -188,13 +189,110 @@ describe('requests for quotation over real HTTP', () => {
     expect(listed.body.every((r) => r.projectNumber === projectNumber)).toBe(true);
   });
 
-  it('refuses to edit an RFQ once it is no longer a draft', async () => {
-    const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }] });
-    // Sending comes in Phase 2; until then the status is set directly.
-    await prisma.rfq.update({ where: { id: created.body.id }, data: { status: 'SENT' } });
-    const res = await api<ApiErrorBody>('PATCH', `/rfqs/${created.body.id}`, { notes: 'Too late' });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('INVALID_STATE');
+  describe('sending (Phase 2)', () => {
+    type Sent = Rfq & { issuedAt: string | null; closingDate: string | null; closed: boolean; sentBy?: { name: string } | null } & ApiErrorBody;
+    const send = (id: string, body: Record<string, unknown> = {}) => api<Sent>('POST', `/rfqs/${id}/send`, body);
+    const day = (iso: string | null) => iso?.slice(0, 10);
+
+    it('needs a supplier to ask before it goes out', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }] });
+      const res = await send(created.body.id);
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/at least one supplier/);
+    });
+
+    it('issues it today and closes it four days later, as the RFQ sheet does', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const res = await send(created.body.id);
+      expect(res.status).toBe(200);
+      const today = todayInSouthAfrica();
+      expect(res.body).toMatchObject({ status: 'SENT', closed: false, sentBy: { name: expect.any(String) } });
+      expect(day(res.body.issuedAt)).toBe(today);
+      expect(day(res.body.closingDate)).toBe(addDays(today, 4));
+
+      // Sent once only.
+      expect((await send(created.body.id)).status).toBe(409);
+      const history = await api<HistoryEntry[]>('GET', `/rfqs/${created.body.id}/history`);
+      expect(history.body[0]).toMatchObject({ action: 'RFQ_SEND', before: { status: 'DRAFT' }, after: { status: 'SENT', closingDate: addDays(today, 4), supplierIds: [supplierA] } });
+    });
+
+    it('takes the closing date given, but not one before today', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      expect((await send(created.body.id, { closingDate: addDays(todayInSouthAfrica(), -1) })).status).toBe(400);
+      // A day that doesn't exist is refused, not saved as 2 March.
+      const impossible = await send(created.body.id, { closingDate: '2099-02-30' });
+      expect(impossible.status).toBe(400);
+      expect(impossible.body.error.message).toMatch(/not a date/);
+      const res = await send(created.body.id, { closingDate: addDays(todayInSouthAfrica(), 10) });
+      expect(day(res.body.closingDate)).toBe(addDays(todayInSouthAfrica(), 10));
+    });
+
+    it('checks its suppliers again as it goes out', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const late = await api<{ id: string }>('POST', '/suppliers', { name: `IT RFQ Late ${run}` });
+      expect((await api('PATCH', `/rfqs/${created.body.id}`, { supplierIds: [supplierA, late.body.id] })).status).toBe(200);
+      expect((await api('PATCH', `/suppliers/${late.body.id}`, { active: false })).status).toBe(200);
+      const res = await send(created.body.id);
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/inactive/);
+    });
+
+    it('once sent, moves only its closing date and adds suppliers, taking none off', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      await send(created.body.id);
+      const id = created.body.id;
+
+      const notes = await api<ApiErrorBody>('PATCH', `/rfqs/${id}`, { notes: 'Too late' });
+      expect(notes.status).toBe(409);
+      expect(notes.body.error.message).toMatch(/only its closing date and the suppliers/);
+      expect((await api('PATCH', `/rfqs/${id}`, { supplierIds: [supplierB] })).status).toBe(409);
+
+      const later = addDays(todayInSouthAfrica(), 7);
+      const moved = await api<Sent>('PATCH', `/rfqs/${id}`, { closingDate: later, supplierIds: [supplierA, supplierB] });
+      expect(moved.status).toBe(200);
+      expect(day(moved.body.closingDate)).toBe(later);
+      expect(moved.body.suppliers.map((s) => s.supplierId)).toEqual([supplierA, supplierB]);
+      expect((await api('PATCH', `/rfqs/${id}`, { closingDate: addDays(todayInSouthAfrica(), -1) })).status).toBe(400);
+    });
+
+    it('adds a supplier to a sent RFQ although one already asked has since been deactivated', async () => {
+      const gone = await api<{ id: string }>('POST', '/suppliers', { name: `IT RFQ Gone ${run}` });
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [gone.body.id] });
+      await send(created.body.id);
+      expect((await api('PATCH', `/suppliers/${gone.body.id}`, { active: false })).status).toBe(200);
+
+      const added = await api<Sent>('PATCH', `/rfqs/${created.body.id}`, { supplierIds: [gone.body.id, supplierA] });
+      expect(added.status).toBe(200);
+      expect(added.body.suppliers.map((s) => s.supplierId)).toEqual([gone.body.id, supplierA]);
+      // A new one is still checked.
+      const inactive = await api<ApiErrorBody>('PATCH', `/rfqs/${created.body.id}`, { supplierIds: [gone.body.id, supplierA, inactiveSupplier] });
+      expect(inactive.status).toBe(400);
+      expect(inactive.body.error.message).toMatch(/inactive/);
+    });
+
+    it('shows a sent RFQ past its closing date as closed', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      await send(created.body.id);
+      // As if it went out last week.
+      await prisma.rfq.update({ where: { id: created.body.id }, data: { issuedAt: new Date('2026-01-05'), closingDate: new Date('2026-01-09') } });
+      expect((await api<Sent>('GET', `/rfqs/${created.body.id}`)).body.closed).toBe(true);
+      const listed = await api<Sent[]>('GET', '/rfqs?status=SENT');
+      expect(listed.body.find((r) => r.id === created.body.id)?.closed).toBe(true);
+    });
+
+    it('cancels a draft or a sent RFQ with a reason, and nothing after that', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      await send(created.body.id);
+      expect((await api('POST', `/rfqs/${created.body.id}/cancel`, { reason: ' ' })).status).toBe(400);
+      const res = await api<Sent & { cancellationReason: string }>('POST', `/rfqs/${created.body.id}/cancel`, { reason: 'Client postponed the job' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ status: 'CANCELLED', cancellationReason: 'Client postponed the job' });
+      expect((await api('POST', `/rfqs/${created.body.id}/cancel`, { reason: 'Again' })).status).toBe(409);
+      expect((await api('PATCH', `/rfqs/${created.body.id}`, { closingDate: addDays(todayInSouthAfrica(), 9) })).status).toBe(409);
+
+      const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }] });
+      expect((await api<Sent>('POST', `/rfqs/${draft.body.id}/cancel`, { reason: 'Raised twice' })).body.status).toBe('CANCELLED');
+    });
   });
 
   it('answers 404 for an RFQ that does not exist', async () => {

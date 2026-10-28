@@ -19,6 +19,7 @@ const rfqLines = z
   .min(1)
   .max(200);
 const supplierIds = z.array(supplierIdSchema).max(50);
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
 export const createRfqSchema = z.object({
   projectNumber: text(64),
@@ -37,7 +38,14 @@ export const updateRfqSchema = z.object({
   penaltiesApply: z.boolean().optional(),
   lines: rfqLines.optional(),
   supplierIds: supplierIds.optional(),
+  /** Only once it is sent. */
+  closingDate: day.optional(),
 });
+
+/** Left out: four days after it is sent, as on the RFQ sheet. */
+export const sendRfqSchema = z.object({ closingDate: day.optional() });
+
+export const cancelRfqSchema = z.object({ reason: z.string().trim().min(1).max(500) });
 
 export const listRfqQuerySchema = z.object({
   status: z.enum(RFQ_STATUSES).optional(),
@@ -76,6 +84,20 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     const parsed = updateRfqSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send(invalid('request for quotation', parsed.error.flatten()));
     return RfqService.update({ id: (req.params as { id: string }).id, ...parsed.data }, actorId(req));
+  });
+
+  app.post('/rfqs/:id/send', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const parsed = sendRfqSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send(invalid('closing date', parsed.error.flatten()));
+    return RfqService.send((req.params as { id: string }).id, parsed.data, actorId(req));
+  });
+
+  app.post('/rfqs/:id/cancel', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const parsed = cancelRfqSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send(invalid('cancellation', parsed.error.flatten()));
+    return RfqService.cancel((req.params as { id: string }).id, parsed.data.reason, actorId(req));
   });
 
   app.get('/rfqs/:id/history', { preHandler: [app.authenticate] }, async (req) => {

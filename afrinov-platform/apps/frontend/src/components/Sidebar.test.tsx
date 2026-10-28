@@ -330,7 +330,8 @@ describe('New purchase order in the menu', () => {
   afterEach(() => { signedIn.roles = ['ADMIN']; });
 
   it.each([
-    ['PROCUREMENT', ['Purchase orders', 'New purchase order']],
+    // Requests for quotation are the buyer's: approvers and the store don't ask for prices.
+    ['PROCUREMENT', ['Purchase orders', 'New purchase order', 'Requests for quotation']],
     ['APPROVER', ['Purchase orders']],
     ['STORE_CONTROLLER', ['Purchase orders']],
   ])('shows a %s only the Procurement entries they can use', (role, expected) => {

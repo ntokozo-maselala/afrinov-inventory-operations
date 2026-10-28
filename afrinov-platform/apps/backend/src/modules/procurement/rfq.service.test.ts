@@ -4,7 +4,20 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../shared/db.js', () => ({ prisma: {} }));
 
-const { nextRfqNumber, rfqNumberPrefix } = await import('./rfq.service.js');
+const { nextRfqNumber, rfqNumberPrefix, todayInSouthAfrica, addDays } = await import('./rfq.service.js');
+
+describe('RFQ dates', () => {
+  it("takes today in South Africa, two hours ahead of the server's UTC clock", () => {
+    expect(todayInSouthAfrica(new Date('2026-10-28T21:59:00Z'))).toBe('2026-10-28');
+    expect(todayInSouthAfrica(new Date('2026-10-28T22:30:00Z'))).toBe('2026-10-29');
+  });
+
+  it('counts days across month and year ends', () => {
+    expect(addDays('2026-10-28', 4)).toBe('2026-11-01');
+    expect(addDays('2026-12-30', 4)).toBe('2027-01-03');
+    expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
+  });
+});
 
 describe('RFQ numbers', () => {
   it('takes the digits of an AFRI-<digits> project, as the workbook files are named', () => {
