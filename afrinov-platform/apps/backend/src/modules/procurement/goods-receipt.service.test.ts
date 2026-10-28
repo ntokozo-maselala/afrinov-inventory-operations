@@ -26,6 +26,8 @@ const db = {
 let grCounter = 0;
 /** The year's highest receipt number, as the numbering query answers it. */
 let highestNumber: number | null = null;
+/** What the transaction did, in order. */
+const steps: string[] = [];
 
 vi.mock('../../shared/db.js', () => ({
   get prisma() { return makePrisma(); },
@@ -89,9 +91,15 @@ function makePrisma(): unknown {
         db.goodsReceipts.push(created);
         return include?.lines ? created : created;
       },
+      update: async ({ where, data }: { where: { id: string }; data: { number: string } }) => {
+        const gr = db.goodsReceipts.find((g) => g.id === where.id)!;
+        gr.number = data.number;
+        return gr;
+      },
     },
-    $executeRaw: async () => void 0,
-    $queryRaw: async () => [{ last: highestNumber ?? (grCounter || null) }],
+    $executeRaw: async () => { steps.push('numbering lock'); },
+    // The highest number among receipts already numbered.
+    $queryRaw: async () => [{ last: highestNumber ?? (db.goodsReceipts.filter((g) => !g.number.startsWith('PENDING-')).length || null) }],
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
   };
 }
@@ -102,6 +110,7 @@ beforeEach(() => {
   db.goodsReceipts.length = 0;
   grCounter = 0;
   highestNumber = null;
+  steps.length = 0;
   db.suppliers.set('sup-1', { id: 'sup-1', name: 'Hydroscand', active: true });
   db.suppliers.set('sup-inactive', { id: 'sup-inactive', name: 'Closed Supplier', active: false });
   db.purchaseOrders.set('po-1', {
@@ -276,6 +285,19 @@ describe('GoodsReceiptService', () => {
         'user-1',
       );
       expect(InventoryService.postGoodsReceipt).toHaveBeenCalledWith({ goodsReceiptId: received.id, actorId: 'user-1' }, expect.anything());
+    });
+
+    it('numbers the receipt after posting, so other receipts do not wait on the numbering lock while stock is booked', async () => {
+      const { GoodsReceiptService } = await import('./goods-receipt.service.js');
+      const { InventoryService } = await import('../inventory/inventory.service.js');
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset().mockImplementation(async () => { steps.push('post'); });
+      const received = await GoodsReceiptService.receive(
+        { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 5 }] },
+        'user-1',
+      );
+      expect(steps).toEqual(['post', 'numbering lock']);
+      expect(received.number).toBe(`GR-${new Date().getFullYear()}-0001`);
+      vi.mocked(InventoryService.postGoodsReceipt).mockReset();
     });
 
     it('fails as a whole when posting fails, rather than leaving the receipt recorded', async () => {
