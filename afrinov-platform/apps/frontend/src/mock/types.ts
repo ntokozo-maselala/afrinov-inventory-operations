@@ -313,6 +313,9 @@ export interface MockRfq {
   createdAt: string;
   updatedAt: string;
   purchaseOrderId: string | null;
+  sentAt?: string | null;
+  cancelledAt?: string | null;
+  cancellationReason?: string | null;
   lines: MockRfqLine[];
   suppliers: MockRfqSupplier[];
   history: NonNullable<MockPurchaseOrder['history']>;

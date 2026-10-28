@@ -1,3 +1,5 @@
+import { rfqStatusLabel } from '../lib/rfq';
+
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'brand';
 
 const tones: Record<Tone, string> = {
@@ -84,6 +86,19 @@ const poLabel: Record<string, string> = {
 
 export function PurchaseOrderStatusBadge({ status }: { status: string }) {
   return <Badge tone={poTone[status] ?? 'neutral'} dot>{poLabel[status] ?? status}</Badge>;
+}
+
+const rfqTone: Record<string, Tone> = {
+  DRAFT: 'neutral',
+  SENT: 'info',
+  AWARDED: 'success',
+  CANCELLED: 'danger',
+};
+
+/** A request for quotation's status; a sent one past its closing date shows Closed. */
+export function RfqStatusBadge({ status, closed }: { status: string; closed?: boolean }) {
+  if (status === 'SENT' && closed) return <Badge tone="warning" dot title="Past its closing date">Closed</Badge>;
+  return <Badge tone={rfqTone[status] ?? 'neutral'} dot>{rfqStatusLabel(status)}</Badge>;
 }
 
 const grTone: Record<string, Tone> = {

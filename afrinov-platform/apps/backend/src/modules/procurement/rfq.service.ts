@@ -4,7 +4,9 @@
 // once it comes back.
 //
 // State machine: DRAFT → SENT → AWARDED, or CANCELLED from DRAFT or SENT.
-// This phase raises and edits drafts; sending, quotes and the award follow.
+// A draft is raised, edited and sent (Phases 1 and 2); once sent, only its
+// closing date moves and suppliers who were missed are added. Quotes and the
+// award follow in Phases 4 and 5.
 //
 // An RFQ is for a project or for Stores, as an order is, and holds a project's
 // material only for that project. Every change is written to the audit log
@@ -40,9 +42,84 @@ export interface UpdateRfqInput {
   penaltiesApply?: boolean;
   lines?: RfqLineInput[];
   supplierIds?: string[];
+  /** YYYY-MM-DD. Only once it is sent, when it and adding suppliers are all that can change. */
+  closingDate?: string;
 }
 
 type Db = Prisma.TransactionClient | typeof prisma;
+
+/** Days from sending to closing when none is given, as the RFQ sheet's Closing = Issued + 4. */
+export const DEFAULT_CLOSING_DAYS = 4;
+
+/**
+ * Today in South Africa, as YYYY-MM-DD: the RFQ sheet's =TODAY() on a buyer's
+ * machine. The server's own clock runs in UTC, two hours behind.
+ */
+export function todayInSouthAfrica(now = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
+/** A YYYY-MM-DD day `days` later. */
+export function addDays(day: string, days: number): string {
+  const d = new Date(`${day}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+const asDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
+const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+
+/** A closing date on or after the day it is sent; an RFQ can't close before it goes out. */
+function checkClosingDate(closing: string, issued: string): void {
+  if (Number.isNaN(asDate(closing).getTime())) throw Errors.validation('Invalid closing date');
+  if (closing < issued) throw Errors.validation(`The closing date can't be before ${issued}, the day it was sent`);
+}
+
+const SENT_FIELDS = ['projectNumber', 'description', 'notes', 'penaltiesApply', 'lines'] as const;
+
+/**
+ * A sent RFQ has gone to its suppliers as it stands, so only its closing date
+ * can move and a supplier who was missed can be added. Nobody already asked
+ * is taken off.
+ */
+async function editSent(
+  rfq: { id: string; number: string; issuedAt: Date | null; closingDate: Date | null; suppliers: Array<{ supplierId: string }> },
+  input: UpdateRfqInput,
+  actorId: string,
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  const fixed = SENT_FIELDS.find((k) => input[k] !== undefined);
+  if (fixed) {
+    throw Errors.invalidState(`${rfq.number} has been sent, so only its closing date and the suppliers asked can change`, { field: fixed });
+  }
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  const data: Prisma.RfqUpdateInput = {};
+  if (input.closingDate !== undefined && input.closingDate !== dayOf(rfq.closingDate)) {
+    checkClosingDate(input.closingDate, dayOf(rfq.issuedAt) ?? todayInSouthAfrica());
+    data.closingDate = asDate(input.closingDate);
+    before.closingDate = dayOf(rfq.closingDate);
+    after.closingDate = input.closingDate;
+  }
+  if (input.supplierIds !== undefined) {
+    const had = rfq.suppliers.map((s) => s.supplierId);
+    const next = await checkSuppliers(input.supplierIds, tx);
+    if (had.some((s) => !next.includes(s))) {
+      throw Errors.invalidState(`${rfq.number} has already gone to its suppliers, so none of them can be taken off. Cancel it to stop asking.`);
+    }
+    const added = next.filter((s) => !had.includes(s));
+    if (added.length > 0) {
+      await tx.rfqSupplier.createMany({ data: added.map((supplierId) => ({ rfqId: rfq.id, supplierId })) });
+      before.supplierIds = had;
+      after.supplierIds = [...had, ...added];
+    }
+  }
+  if (Object.keys(after).length === 0) return;
+  if (Object.keys(data).length > 0) await tx.rfq.update({ where: { id: rfq.id }, data });
+  await tx.auditLogEntry.create({
+    data: { actorId, action: 'UPDATE', entityType: 'Rfq', entityId: rfq.id, before: before as Prisma.InputJsonValue, after: after as Prisma.InputJsonValue },
+  });
+}
 
 /**
  * The number before the sequence: the workbook's document number for a
@@ -138,6 +215,11 @@ const DETAIL = {
 
 type RfqDetail = Prisma.RfqGetPayload<{ include: typeof DETAIL }>;
 
+/** Sent and past its closing date: quotes may still be recorded, but none are expected. */
+function isClosed(rfq: { status: RfqStatus; closingDate: Date | null }, today = todayInSouthAfrica()): boolean {
+  return rfq.status === 'SENT' && !!rfq.closingDate && dayOf(rfq.closingDate)! < today;
+}
+
 /**
  * Each supplier's quote priced as an order would be: per line subtotal, VAT
  * and net from po-pricing, VAT at the setting for rand suppliers and 0% for
@@ -146,6 +228,7 @@ type RfqDetail = Prisma.RfqGetPayload<{ include: typeof DETAIL }>;
 function withQuotes(rfq: RfqDetail, vatSetting: number) {
   return {
     ...rfq,
+    closed: isClosed(rfq),
     suppliers: rfq.suppliers.map((s) => {
       const vatRate = defaultVatRate(s.supplier.currency ?? 'ZAR', vatSetting);
       const priced = rfq.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
@@ -156,7 +239,8 @@ function withQuotes(rfq: RfqDetail, vatSetting: number) {
 
 export const RfqService = {
   async list(filter: { status?: RfqStatus; projectNumber?: string } = {}) {
-    return prisma.rfq.findMany({
+    const today = todayInSouthAfrica();
+    const rfqs = await prisma.rfq.findMany({
       where: filter,
       include: {
         project: { select: { projectNumber: true, name: true } },
@@ -165,6 +249,7 @@ export const RfqService = {
       },
       orderBy: { createdAt: 'desc' },
     });
+    return rfqs.map((r) => ({ ...r, closed: isClosed(r, today) }));
   },
 
   async getById(id: string) {
@@ -236,9 +321,14 @@ export const RfqService = {
       await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${input.id} FOR UPDATE`;
       const rfq = await tx.rfq.findUnique({ where: { id: input.id }, include: { lines: { orderBy: { lineNo: 'asc' } }, suppliers: true } });
       if (!rfq) throw Errors.notFound('Rfq');
+      if (rfq.status === 'SENT') {
+        await editSent(rfq, input, actorId, tx);
+        return;
+      }
       if (rfq.status !== 'DRAFT') {
         throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can no longer be edited`, { status: rfq.status });
       }
+      if (input.closingDate !== undefined) throw Errors.validation('The closing date is set when the request for quotation is sent');
 
       const data: Record<string, string | boolean | null> = {};
       const before: Record<string, unknown> = {};
@@ -303,6 +393,83 @@ export const RfqService = {
     });
     // The same shape as GET /rfqs/:id.
     return RfqService.getById(input.id);
+  },
+
+  /**
+   * Sends a draft: it is issued today and closes on the date given, or four
+   * days later. Its lines and suppliers are checked again as it goes out, as
+   * an order's are when submitted: an item or supplier may have been made
+   * inactive, or its project closed, since it was raised.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is a draft;
+   * VALIDATION_ERROR with no supplier to ask, a closing date before today,
+   * or as for create.
+   */
+  async send(id: string, input: { closingDate?: string }, actorId: string) {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${id} FOR UPDATE`;
+      const rfq = await tx.rfq.findUnique({ where: { id }, include: { lines: true, suppliers: true } });
+      if (!rfq) throw Errors.notFound('Rfq');
+      if (rfq.status !== 'DRAFT') {
+        throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be sent`, { status: rfq.status });
+      }
+      if (rfq.suppliers.length === 0) throw Errors.validation(`Add at least one supplier to ask before sending ${rfq.number}`);
+      if (rfq.projectNumber) await openProjectName(rfq.projectNumber, tx);
+      await checkLines(rfq.lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity.toNumber() })), rfq.projectNumber, tx);
+      await checkSuppliers(rfq.suppliers.map((s) => s.supplierId), tx);
+      const issued = todayInSouthAfrica();
+      const closing = input.closingDate ?? addDays(issued, DEFAULT_CLOSING_DAYS);
+      checkClosingDate(closing, issued);
+      const now = new Date();
+      await tx.rfq.update({
+        where: { id },
+        data: { status: 'SENT', issuedAt: asDate(issued), closingDate: asDate(closing), sentAt: now, sentById: actorId },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'RFQ_SEND',
+          entityType: 'Rfq',
+          entityId: id,
+          before: { status: rfq.status },
+          after: { status: 'SENT', issuedAt: issued, closingDate: closing, supplierIds: rfq.suppliers.map((s) => s.supplierId) },
+        },
+      });
+    });
+    return RfqService.getById(id);
+  },
+
+  /**
+   * Cancels a draft or a sent RFQ, with the reason kept on it.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE once it is awarded or cancelled.
+   */
+  async cancel(id: string, reason: string, actorId: string) {
+    const why = cleanText(reason);
+    if (!why) throw Errors.validation('Give a reason for cancelling');
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${id} FOR UPDATE`;
+      const rfq = await tx.rfq.findUnique({ where: { id } });
+      if (!rfq) throw Errors.notFound('Rfq');
+      if (rfq.status !== 'DRAFT' && rfq.status !== 'SENT') {
+        throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be cancelled`, { status: rfq.status });
+      }
+      await tx.rfq.update({
+        where: { id },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: actorId, cancellationReason: why },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'RFQ_CANCEL',
+          entityType: 'Rfq',
+          entityId: id,
+          before: { status: rfq.status },
+          after: { status: 'CANCELLED', reason: why },
+        },
+      });
+    });
+    return RfqService.getById(id);
   },
 
   /** The RFQ's Activity, newest first, each entry with the name of who did it. */

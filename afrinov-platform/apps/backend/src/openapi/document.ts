@@ -41,7 +41,7 @@ import {
   cancelSchema,
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
-import { createRfqSchema, listRfqQuerySchema, updateRfqSchema } from '../modules/procurement/rfq.routes.js';
+import { cancelRfqSchema, createRfqSchema, listRfqQuerySchema, sendRfqSchema, updateRfqSchema } from '../modules/procurement/rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
@@ -507,8 +507,17 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/rfqs/:id', tag: 'Requests for quotation', summary: 'Change a draft request for quotation',
-    description: "Lines and suppliers, when sent, replace the draft's. A new project gives the draft that project's next number. 409 once it is no longer a draft.",
+    description: "On a draft, lines and suppliers, when sent, replace the draft's, and a new project gives it that project's next number. Once sent, only the closing date changes and suppliers are added, none taken off (409 otherwise).",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: updateRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/rfqs/:id/send', tag: 'Requests for quotation', summary: 'Send a draft to its suppliers',
+    description: 'Issued today (South African time); closes on the date given, or four days later. Needs a supplier to ask; its lines and suppliers are checked again.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: sendRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/rfqs/:id/cancel', tag: 'Requests for quotation', summary: 'Cancel a draft or sent request for quotation',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: cancelRfqSchema, errors: [404, 409],
   },
   {
     method: 'get', path: '/rfqs/:id/history', tag: 'Requests for quotation', summary: 'Activity on a request for quotation',

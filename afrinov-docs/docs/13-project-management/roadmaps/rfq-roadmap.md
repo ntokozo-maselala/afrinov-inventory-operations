@@ -6,12 +6,12 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phase 1 is in review (PR #104). One pull request per phase.
+**Status:** Phase 1 is merged (PR #104). Phase 2 is built on `feature/rfq-send` and not yet committed. One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | RFQ record and numbering | M | In review |
-| 2 | Raise, edit and send an RFQ | M | Planned |
+| 1 | RFQ record and numbering | M | Merged (#104) |
+| 2 | Raise, edit and send an RFQ | M | Built |
 | 3 | The RFQ document for suppliers | M | Planned |
 | 4 | Record the quotes that come back | M to L | Planned |
 | 5 | Compare quotes and award to a purchase order | M | Planned |
@@ -56,7 +56,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 1: RFQ record and numbering
 
-**In review** (PR #104). Size M. Backend, with a migration, and the mock API. 11 new backend unit tests, 9 real-HTTP tests and 7 frontend mock tests. Qodo's 7 findings on the first push are fixed: project number forms that shared a sequence, quantities finer than the 4 decimal places kept, a project archived while an RFQ was raised, the first Activity entry, the mock's validation and response shape, and a description left with the old project's name.
+**Merged** (PR #104). Size M. Backend, with a migration, and the mock API. 11 new backend unit tests, 9 real-HTTP tests and 7 frontend mock tests. Qodo's 7 findings on the first push are fixed: project number forms that shared a sequence, quantities finer than the 4 decimal places kept, a project archived while an RFQ was raised, the first Activity entry, the mock's validation and response shape, and a description left with the old project's name.
 
 - [x] **1.1 The tables.** `Rfq` (number, status, project, description, remarks, penalties apply, issued and closing dates, who created, sent, awarded or cancelled it and when, the cancellation reason, and the purchase order it became). `RfqLine` (line number, item, quantity). `RfqSupplier` (the suppliers asked, each with their quote reference, date received, valid until, lead time, notes and whether they declined). `RfqQuotePrice` (one unit price per supplier per line). Status is `DRAFT`, `SENT`, `AWARDED` or `CANCELLED`. The migration only adds tables.
   Files: `backend/prisma/schema.prisma`, `migrations/20260101000025_rfqs`
@@ -71,15 +71,15 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 2: Raise, edit and send an RFQ
 
-Size M. Frontend and backend.
+**Built** on `feature/rfq-send`. Size M. Frontend and backend. 4 new backend unit tests, 6 real-HTTP tests, 13 page tests and 3 frontend mock tests.
 
-- [ ] **2.1 The RFQ list.** Procurement → **Requests for quotation**: number, project, description, suppliers asked, quotes in, closing date and status. Buyers land on Draft and Sent. Shows **Closed** beside a Sent RFQ past its closing date.
+- [x] **2.1 The RFQ list.** Procurement → **Requests for quotation**: number, project, description, suppliers asked, quotes in, closing date and status. Buyers land on Draft and Sent. Shows **Closed** beside a Sent RFQ past its closing date. Only buyers (and Admin) see it in the menu.
   Files: `pages/Rfqs.tsx`, `hooks/useNavGroups.tsx`, `App.tsx`
-- [ ] **2.2 The RFQ form.** Laid out like the RFQ sheet: project and description at the top, then the lines (item, description, units, quantity), then remarks. Lines are picked from the materials list, with **+ New item** as on the purchase order form; project material only for its own project. The suppliers to ask are picked from active suppliers.
+- [x] **2.2 The RFQ form.** Laid out like the RFQ sheet: project and description at the top, then the lines (item, description, units, quantity), then remarks. Lines are picked from the materials list, with **+ New item** as on the purchase order form; project material only for its own project. The suppliers to ask are picked from active suppliers.
   Files: `pages/RfqForm.tsx`
-- [ ] **2.3 Send.** `POST /rfqs/:id/send`: needs at least one line and one supplier; sets the issue date and the closing date. A sent RFQ's lines are fixed; suppliers can still be added, for one who was missed.
+- [x] **2.3 Send.** `POST /rfqs/:id/send`: needs at least one line and one supplier, and checks them again as it goes out; issued today in South African time, closing four days later unless the buyer picks another date. A sent RFQ's lines are fixed: from its page, only its closing date moves and suppliers who were missed are added. Nobody already asked is taken off.
   Files: `procurement/rfq.service.ts`, `pages/RfqDetail.tsx`
-- [ ] **2.4 Cancel.** `POST /rfqs/:id/cancel` with a reason, from Draft or Sent.
+- [x] **2.4 Cancel.** `POST /rfqs/:id/cancel` with a reason, from Draft or Sent.
 
 **Done when:**
 - A buyer can raise an RFQ for a project, pick three suppliers and send it, and see it in the list as Sent with its closing date.

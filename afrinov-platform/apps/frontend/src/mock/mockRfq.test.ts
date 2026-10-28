@@ -68,6 +68,42 @@ describe('mock: requests for quotation', () => {
     expect((await api.patch<Rfq>(`/rfqs/${draft.id}`, { projectNumber: null })).description).toBeNull();
   });
 
+  it('sends a draft with a supplier, closing four days after today, and then moves only its closing date and adds suppliers', async () => {
+    const lonely = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }] });
+    await expect(api.post(`/rfqs/${lonely.id}/send`, {})).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const sent = await api.post<Rfq & { issuedAt: string; closingDate: string; closed: boolean }>(`/rfqs/${draft.id}/send`, {});
+    const issued = sent.issuedAt.slice(0, 10);
+    const four = new Date(`${issued}T00:00:00Z`);
+    four.setUTCDate(four.getUTCDate() + 4);
+    expect(sent).toMatchObject({ status: 'SENT', closed: false });
+    expect(sent.closingDate.slice(0, 10)).toBe(four.toISOString().slice(0, 10));
+    await expect(api.post(`/rfqs/${draft.id}/send`, {})).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    await expect(api.patch(`/rfqs/${draft.id}`, { notes: 'Too late' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(api.patch(`/rfqs/${draft.id}`, { supplierIds: ['sup-2'] })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    const moved = await api.patch<Rfq & { closingDate: string }>(`/rfqs/${draft.id}`, { closingDate: '2099-01-31', supplierIds: ['sup-1', 'sup-2'] });
+    expect(moved.closingDate.slice(0, 10)).toBe('2099-01-31');
+    expect(moved.suppliers.map((s) => s.supplierId)).toEqual(['sup-1', 'sup-2']);
+
+    const history = await api.get<Array<{ action: string }>>(`/rfqs/${draft.id}/history`);
+    expect(history.map((e) => e.action)).toEqual(['UPDATE', 'RFQ_SEND', 'CREATE']);
+  });
+
+  it('refuses a closing date on a draft, as the server does', async () => {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }] });
+    await expect(api.patch(`/rfqs/${draft.id}`, { closingDate: '2099-01-31' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('cancels a draft or a sent RFQ with a reason, and nothing after that', async () => {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    await api.post(`/rfqs/${draft.id}/send`, {});
+    await expect(api.post(`/rfqs/${draft.id}/cancel`, { reason: ' ' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(await api.post<Rfq & { cancellationReason: string }>(`/rfqs/${draft.id}/cancel`, { reason: 'Client postponed' })).toMatchObject({ status: 'CANCELLED', cancellationReason: 'Client postponed' });
+    await expect(api.post(`/rfqs/${draft.id}/cancel`, { reason: 'Again' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+
   it('answers NOT_FOUND for an unknown RFQ rather than falling through to the order routes', async () => {
     await expect(api.get('/rfqs/rfq-nope')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });

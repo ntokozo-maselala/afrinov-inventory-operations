@@ -382,11 +382,28 @@ const rfqSupplierRow = (supplierId: string): MockRfq['suppliers'][number] => ({
 const rfqLinesForLog = (lines: Array<{ materialId: string; quantity: string | number }>) =>
   lines.map((l) => ({ materialId: l.materialId, quantity: String(Number(l.quantity)) }));
 
-/** The RFQ's own fields: its Activity is read from /history, as on the server. */
-function rfqFields(r: MockRfq): Omit<MockRfq, 'history'> {
+const RFQ_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Today in South Africa, as the server takes it for an RFQ's issue date. */
+function mockToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
+function mockAddDays(day: string, days: number): string {
+  const d = new Date(`${day}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The RFQ's own fields, and whether it is closed (sent and past its closing
+ * date): its Activity is read from /history, as on the server.
+ */
+function rfqFields(r: MockRfq): Omit<MockRfq, 'history'> & { closed: boolean } {
   const copy: Partial<MockRfq> = { ...r };
   delete copy.history;
-  return copy as Omit<MockRfq, 'history'>;
+  const closed = r.status === 'SENT' && !!r.closingDate && r.closingDate.slice(0, 10) < mockToday();
+  return { ...(copy as Omit<MockRfq, 'history'>), closed };
 }
 
 /** The RFQ as the server's detail returns it: names, items, and each supplier's VAT rate and quote totals. */
@@ -467,10 +484,81 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     state.rfqs.push(created);
     return rfqView(created);
   }
+  if (method === 'POST' && rfq && p === `/rfqs/${rfq.id}/send`) {
+    if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be sent`);
+    if (rfq.suppliers.length === 0) throw err('VALIDATION_ERROR', `Add at least one supplier to ask before sending ${rfq.number}`);
+    // As the server: checked again as it goes out.
+    if (rfq.projectNumber) assertProjectOpen(rfq.projectNumber);
+    checkRfqLines(rfq.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity) })), rfq.projectNumber);
+    checkRfqSuppliers(rfq.suppliers.map((s) => s.supplierId));
+    const closingDate = (body as { closingDate?: string } | undefined)?.closingDate;
+    if (closingDate !== undefined && !RFQ_DAY.test(closingDate)) throw err('VALIDATION_ERROR', 'Invalid closing date');
+    const issued = mockToday();
+    const closing = closingDate ?? mockAddDays(issued, 4);
+    if (closing < issued) throw err('VALIDATION_ERROR', `The closing date can't be before ${issued}, the day it was sent`);
+    const now = new Date().toISOString();
+    const sent: MockRfq = {
+      ...rfq, status: 'SENT', issuedAt: `${issued}T00:00:00.000Z`, closingDate: `${closing}T00:00:00.000Z`, sentAt: now, updatedAt: now,
+      history: [...rfq.history, {
+        id: nextId('audit'), action: 'RFQ_SEND', actorId: 'u-admin', before: { status: 'DRAFT' },
+        after: { status: 'SENT', issuedAt: issued, closingDate: closing, supplierIds: rfq.suppliers.map((s) => s.supplierId) }, createdAt: now,
+      }],
+    };
+    state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? sent : r));
+    return rfqView(sent);
+  }
+  if (method === 'POST' && rfq && p === `/rfqs/${rfq.id}/cancel`) {
+    const reason = rfqText((body as { reason?: string } | undefined)?.reason);
+    if (!reason || reason.length > 500) throw err('VALIDATION_ERROR', 'Give a reason for cancelling');
+    if (rfq.status !== 'DRAFT' && rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be cancelled`);
+    const now = new Date().toISOString();
+    const cancelled: MockRfq = {
+      ...rfq, status: 'CANCELLED', cancelledAt: now, cancellationReason: reason, updatedAt: now,
+      history: [...rfq.history, { id: nextId('audit'), action: 'RFQ_CANCEL', actorId: 'u-admin', before: { status: rfq.status }, after: { status: 'CANCELLED', reason }, createdAt: now }],
+    };
+    state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? cancelled : r));
+    return rfqView(cancelled);
+  }
+  if (method === 'PATCH' && rfq && p === `/rfqs/${rfq.id}` && rfq.status === 'SENT') {
+    // As the server: a sent RFQ moves only its closing date and adds suppliers.
+    const b = (body ?? {}) as RfqBody & { closingDate?: string };
+    checkRfqBody(b, false);
+    if ((['projectNumber', 'description', 'notes', 'penaltiesApply', 'lines'] as const).some((k) => b[k] !== undefined)) {
+      throw err('INVALID_STATE', `${rfq.number} has been sent, so only its closing date and the suppliers asked can change`);
+    }
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    const next: MockRfq = { ...rfq };
+    if (b.closingDate !== undefined && b.closingDate !== rfq.closingDate?.slice(0, 10)) {
+      const issued = rfq.issuedAt?.slice(0, 10) ?? mockToday();
+      if (!RFQ_DAY.test(b.closingDate)) throw err('VALIDATION_ERROR', 'Invalid closing date');
+      if (b.closingDate < issued) throw err('VALIDATION_ERROR', `The closing date can't be before ${issued}, the day it was sent`);
+      next.closingDate = `${b.closingDate}T00:00:00.000Z`;
+      before.closingDate = rfq.closingDate?.slice(0, 10) ?? null;
+      after.closingDate = b.closingDate;
+    }
+    if (b.supplierIds !== undefined) {
+      const had = rfq.suppliers.map((s) => s.supplierId);
+      const ids = checkRfqSuppliers(b.supplierIds);
+      if (had.some((s) => !ids.includes(s))) throw err('INVALID_STATE', `${rfq.number} has already gone to its suppliers, so none of them can be taken off. Cancel it to stop asking.`);
+      const added = ids.filter((s) => !had.includes(s));
+      if (added.length > 0) {
+        next.suppliers = [...rfq.suppliers, ...added.map(rfqSupplierRow)];
+        before.supplierIds = had;
+        after.supplierIds = [...had, ...added];
+      }
+    }
+    if (Object.keys(after).length === 0) return rfqView(rfq);
+    next.updatedAt = new Date().toISOString();
+    next.history = [...rfq.history, { id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before, after, createdAt: next.updatedAt }];
+    state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? next : r));
+    return rfqView(next);
+  }
   if (method === 'PATCH' && rfq && p === `/rfqs/${rfq.id}`) {
     if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can no longer be edited`);
     const b = (body ?? {}) as RfqBody;
     checkRfqBody(b, false);
+    if ((b as { closingDate?: string }).closingDate !== undefined) throw err('VALIDATION_ERROR', 'The closing date is set when the request for quotation is sent');
     const before: Record<string, unknown> = {};
     const after: Record<string, unknown> = {};
     const next: MockRfq = { ...rfq };
