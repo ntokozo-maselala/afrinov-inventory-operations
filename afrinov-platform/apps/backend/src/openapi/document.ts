@@ -41,6 +41,7 @@ import {
   cancelSchema,
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
+import { createRfqSchema, listRfqQuerySchema, updateRfqSchema } from '../modules/procurement/rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
@@ -489,6 +490,29 @@ export const OPERATIONS: Operation[] = [
     description:
       'All-or-nothing. 400 when a line would exceed its order line\'s ordered quantity; 409 when already posted.',
     procurement: true, permissions: [P.ReceiveInventory], errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/rfqs', tag: 'Requests for quotation', summary: 'List requests for quotation',
+    procurement: true, permissions: [P.ViewPurchaseOrder], query: listRfqQuerySchema, errors: [400],
+  },
+  {
+    method: 'get', path: '/rfqs/:id', tag: 'Requests for quotation', summary: 'Get a request for quotation with its lines, suppliers and quotes',
+    description: "Each supplier carries its VAT rate and, once its quote is recorded, the quote's totals.",
+    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
+  },
+  {
+    method: 'post', path: '/rfqs', tag: 'Requests for quotation', summary: 'Raise a draft request for quotation',
+    description: "Numbered AFRI-02A-<project>-02-<nn> for a project, else RFQ-<nnnn>. The description defaults to the project's name.",
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
+  },
+  {
+    method: 'patch', path: '/rfqs/:id', tag: 'Requests for quotation', summary: 'Change a draft request for quotation',
+    description: "Lines and suppliers, when sent, replace the draft's. A new project gives the draft that project's next number. 409 once it is no longer a draft.",
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: updateRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/rfqs/:id/history', tag: 'Requests for quotation', summary: 'Activity on a request for quotation',
+    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
   },
 
   // Reports

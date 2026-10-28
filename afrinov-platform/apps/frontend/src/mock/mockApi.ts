@@ -39,6 +39,7 @@ import type {
   MockProject,
   AdjustmentReasonCode,
   MockRecipient,
+  MockRfq,
 } from './types';
 import type { ApiError } from '../api/client';
 import type { ReturnableLine } from '../api/types';
@@ -58,6 +59,7 @@ interface State {
   transactions: MockInventoryTransaction[];
   projects: MockProject[];
   recipients: MockRecipient[];
+  rfqs: MockRfq[];
 }
 
 let state: State = freshState();
@@ -89,6 +91,7 @@ function freshState(): State {
       { id: 'rcp-4', name: 'Northam Platinum', type: 'SITE', active: true },
       { id: 'rcp-5', name: 'KTS', type: 'CONTRACTOR', active: true },
     ],
+    rfqs: [],
   };
 }
 
@@ -295,6 +298,186 @@ function assertSupplierFree(name: string | undefined, vendorCode: string | undef
   }
   const clash = vendorCode ? others.find((s) => s.vendorCode === vendorCode) : undefined;
   if (clash) throw err('CONFLICT', `Vendor code ${vendorCode} is already used by ${clash.name}`);
+}
+
+// ── Requests for quotation ──────────────────────────────────────────────────
+// As the server (rfq.service.ts): drafts are raised and edited, numbered
+// AFRI-02A-<project>-02-<nn> for a project and RFQ-<nnnn> without one.
+
+type RfqBody = {
+  projectNumber?: string | null; description?: string | null; notes?: string | null; penaltiesApply?: boolean;
+  lines?: Array<{ materialId: string; quantity: number }>; supplierIds?: string[];
+};
+
+const rfqText = (v: string | null | undefined) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim() : null);
+
+function nextRfqNumber(projectNumber: string | null): string {
+  const prefix = projectNumber ? `AFRI-02A-${projectNumber.replace(/^AFRI-/i, '')}-02-` : 'RFQ-';
+  const highest = state.rfqs.reduce((max, r) => {
+    const rest = r.number.startsWith(prefix) ? r.number.slice(prefix.length) : '';
+    return /^\d+$/.test(rest) ? Math.max(max, Number(rest)) : max;
+  }, 0);
+  return `${prefix}${String(highest + 1).padStart(projectNumber ? 2 : 4, '0')}`;
+}
+
+function checkRfqLines(lines: RfqBody['lines'], projectNumber: string | null): NonNullable<RfqBody['lines']> {
+  if (!lines || lines.length === 0) throw err('VALIDATION_ERROR', 'A request for quotation needs at least one line');
+  for (const l of lines) {
+    const m = findMaterial(l.materialId);
+    if (!m) throw err('VALIDATION_ERROR', `Material ${l.materialId} does not exist`);
+    if (!m.active) throw err('VALIDATION_ERROR', `${m.sku} is inactive, so it can't be quoted for`);
+    if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', 'Invalid request for quotation');
+    refuseUnassigned(l.materialId, 'ordered');
+  }
+  checkProjectMaterial(projectNumber, lines.map((l) => l.materialId), 'ordered');
+  return lines;
+}
+
+function checkRfqSuppliers(ids: string[]): string[] {
+  const unique = [...new Set(ids.map((s) => s.trim()))];
+  for (const id of unique) {
+    const s = findSupplier(id);
+    if (!s) throw err('VALIDATION_ERROR', `Supplier ${id} does not exist`);
+    if (!s.active) throw err('VALIDATION_ERROR', `${s.name} is inactive. Reactivate the supplier to ask them for a quote.`);
+  }
+  return unique;
+}
+
+const rfqLineRows = (lines: NonNullable<RfqBody['lines']>) =>
+  lines.map((l, i) => ({ id: nextId('rfql'), lineNo: i + 1, materialId: l.materialId, quantity: String(l.quantity) }));
+
+const rfqSupplierRow = (supplierId: string): MockRfq['suppliers'][number] => ({
+  id: nextId('rfqs'), supplierId, quoteReference: null, quotedAt: null, validUntil: null, leadTime: null, notes: null,
+  declined: false, createdAt: new Date().toISOString(), prices: [],
+});
+
+const rfqLinesForLog = (lines: Array<{ materialId: string; quantity: string | number }>) =>
+  lines.map((l) => ({ materialId: l.materialId, quantity: String(Number(l.quantity)) }));
+
+/** The RFQ's own fields: its Activity is read from /history, as on the server. */
+function rfqFields(r: MockRfq): Omit<MockRfq, 'history'> {
+  const copy: Partial<MockRfq> = { ...r };
+  delete copy.history;
+  return copy as Omit<MockRfq, 'history'>;
+}
+
+/** The RFQ as the server's detail returns it: names, items, and each supplier's VAT rate and quote totals. */
+function rfqView(r: MockRfq) {
+  const vatSetting = Number(MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15);
+  const order = r.purchaseOrderId ? state.purchaseOrders.find((po) => po.id === r.purchaseOrderId) : undefined;
+  return {
+    ...rfqFields(r),
+    project: projectRef(r.projectNumber),
+    createdBy: { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] },
+    purchaseOrder: order ? { id: order.id, number: order.number, status: order.status } : null,
+    lines: r.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
+    suppliers: r.suppliers.map((s) => {
+      const supplier = findSupplier(s.supplierId);
+      const vatRate = (supplier?.currency ?? 'ZAR') === 'ZAR' ? vatSetting : 0;
+      const priced = r.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
+      return { ...s, supplier, vatRate, totals: s.quotedAt ? priceLines(priced, vatRate).totals : null };
+    }),
+  };
+}
+
+function routeRfq(method: string, p: string, qs: Record<string, string>, body: unknown): unknown {
+  const id = p.split('/')[2];
+  const rfq = id ? state.rfqs.find((r) => r.id === id) : undefined;
+  if (id && !rfq) throw err('NOT_FOUND', 'Rfq not found');
+
+  if (method === 'GET' && p === '/rfqs') {
+    return state.rfqs
+      .filter((r) => (!qs.status || r.status === qs.status) && (!qs.projectNumber || r.projectNumber === qs.projectNumber))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => ({
+        ...rfqFields(r),
+        project: projectRef(r.projectNumber),
+        lines: r.lines.map((l) => ({ id: l.id })),
+        suppliers: r.suppliers.map((s) => ({
+          supplierId: s.supplierId, quotedAt: s.quotedAt, declined: s.declined,
+          supplier: { id: s.supplierId, name: findSupplier(s.supplierId)?.name ?? s.supplierId },
+        })),
+      }));
+  }
+  if (method === 'GET' && rfq && p === `/rfqs/${rfq.id}`) return rfqView(rfq);
+  if (method === 'GET' && rfq && p === `/rfqs/${rfq.id}/history`) {
+    // As the server: newest first, each entry with the name of who did it.
+    return [...rfq.history].reverse().map((e) => ({ ...e, actorName: (e.actorId && MOCK_ACTOR_NAMES[e.actorId]) || null }));
+  }
+  if (method === 'POST' && p === '/rfqs') {
+    const b = (body ?? {}) as RfqBody;
+    const projectNumber = rfqText(b.projectNumber);
+    if (projectNumber) assertProjectOpen(projectNumber);
+    const lines = checkRfqLines(b.lines, projectNumber);
+    const supplierIds = checkRfqSuppliers(b.supplierIds ?? []);
+    const now = new Date().toISOString();
+    const created: MockRfq = {
+      id: nextId('rfq'),
+      number: nextRfqNumber(projectNumber),
+      status: 'DRAFT',
+      projectNumber,
+      // As the server: the project's name when no description is sent.
+      description: b.description === undefined && projectNumber ? rfqText(projectRef(projectNumber)?.name) : rfqText(b.description),
+      notes: rfqText(b.notes),
+      penaltiesApply: b.penaltiesApply ?? false,
+      issuedAt: null, closingDate: null, purchaseOrderId: null,
+      createdAt: now, updatedAt: now,
+      lines: rfqLineRows(lines),
+      suppliers: supplierIds.map(rfqSupplierRow),
+      history: [],
+    };
+    created.history.push({
+      id: nextId('audit'), action: 'CREATE', actorId: 'u-admin', before: null,
+      after: { number: created.number, status: created.status, lines: rfqLinesForLog(created.lines), supplierIds }, createdAt: now,
+    });
+    state.rfqs.push(created);
+    return rfqView(created);
+  }
+  if (method === 'PATCH' && rfq && p === `/rfqs/${rfq.id}`) {
+    if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can no longer be edited`);
+    const b = (body ?? {}) as RfqBody;
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    const next: MockRfq = { ...rfq };
+    const change = <K extends 'number' | 'projectNumber' | 'description' | 'notes' | 'penaltiesApply'>(key: K, value: MockRfq[K]) => {
+      if (rfq[key] === value) return;
+      next[key] = value;
+      before[key] = rfq[key];
+      after[key] = value;
+    };
+    const projectNumber = b.projectNumber === undefined ? rfq.projectNumber : rfqText(b.projectNumber);
+    if (projectNumber !== rfq.projectNumber) {
+      if (projectNumber) assertProjectOpen(projectNumber);
+      change('projectNumber', projectNumber);
+      change('number', nextRfqNumber(projectNumber));
+    }
+    if (b.description !== undefined) change('description', rfqText(b.description));
+    if (b.notes !== undefined) change('notes', rfqText(b.notes));
+    if (b.penaltiesApply !== undefined) change('penaltiesApply', b.penaltiesApply);
+    if (b.lines !== undefined || 'projectNumber' in after) {
+      checkRfqLines(b.lines ?? rfq.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity) })), projectNumber);
+    }
+    if (b.lines !== undefined && JSON.stringify(rfqLinesForLog(b.lines)) !== JSON.stringify(rfqLinesForLog(rfq.lines))) {
+      next.lines = rfqLineRows(b.lines);
+      before.lines = rfqLinesForLog(rfq.lines);
+      after.lines = rfqLinesForLog(b.lines);
+    }
+    if (b.supplierIds !== undefined) {
+      const had = rfq.suppliers.map((s) => s.supplierId);
+      const ids = checkRfqSuppliers(b.supplierIds);
+      if (ids.length !== had.length || ids.some((s) => !had.includes(s))) {
+        next.suppliers = [...rfq.suppliers.filter((s) => ids.includes(s.supplierId)), ...ids.filter((s) => !had.includes(s)).map(rfqSupplierRow)];
+        before.supplierIds = had;
+        after.supplierIds = next.suppliers.map((s) => s.supplierId);
+      }
+    }
+    if (Object.keys(after).length === 0) return rfqView(rfq);
+    next.updatedAt = new Date().toISOString();
+    next.history = [...rfq.history, { id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before, after, createdAt: next.updatedAt }];
+    state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? next : r));
+    return rfqView(next);
+  }
+  throw err('NOT_FOUND', `No mock route for ${method} ${p}`);
 }
 
 // ── API surface ─────────────────────────────────────────────────────────────
@@ -624,6 +807,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     state.suppliers = state.suppliers.map((x) => (x.id === s.id ? updated : x));
     return updated;
   }
+
+  // Requests for quotation, before the purchase order routes, whose /submit
+  // and /cancel suffix matches would otherwise catch their paths.
+  if (p === '/rfqs' || p.startsWith('/rfqs/')) return routeRfq(method, p, qs, body);
 
   // Purchase Orders
   if (method === 'GET' && p === '/purchase-orders') {
