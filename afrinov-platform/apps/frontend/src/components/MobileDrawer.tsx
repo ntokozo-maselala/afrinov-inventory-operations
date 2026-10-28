@@ -1,11 +1,10 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { MobileNav } from './MobileNav';
 import { useAppShell } from '../hooks/useAppShell';
 import { useNavGroups } from '../hooks/useNavGroups';
 import { Icon } from './Icon';
-import * as React from 'react';
 
-function FocusTrap({ children }: { children: React.ReactNode }) {
+function FocusTrap({ children }: { children: ReactNode }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
