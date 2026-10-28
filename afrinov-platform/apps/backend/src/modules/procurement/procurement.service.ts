@@ -689,6 +689,9 @@ export const PurchaseOrderService = {
         include: { lines: true },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      // The order before its stock, as posting a goods receipt locks them, so
+      // the two cannot deadlock.
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.id} FOR UPDATE`;
       await lockInventoryBalances(po.lines.map((line) => ({ materialId: line.materialId, locationId: input.locationId })), tx);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });

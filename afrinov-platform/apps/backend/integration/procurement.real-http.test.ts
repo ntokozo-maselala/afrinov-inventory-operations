@@ -477,5 +477,30 @@ describe('receiving stock over real HTTP', () => {
       await expectStock(String(Number(before) + 4));
       for (const order of orders) expect((await getOrder(order.id)).status).toBe('RECEIVED');
     });
+
+    // Receive stock once locked the item's balance before the receipt number,
+    // and a receipt against an order the other way round, so the two could
+    // deadlock (Postgres aborted one: "deadlock detected"). Every receiving
+    // path now locks the number first. Twelve of each, as fewer rarely overlap.
+    it('posts receipts against orders and stock receipts for one item at once, none failing', async () => {
+      const each = 12;
+      const orders = await Promise.all(Array.from({ length: each }, () => approvedOrder(1)));
+      const { ledger: before } = await ledgerAndBalance(materialId, locationId);
+
+      const results = await Promise.all([
+        ...orders.map((order) => api('POST', '/goods-receipts', {
+          purchaseOrderId: order.id, supplierId,
+          lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }],
+          post: true,
+        })),
+        ...Array.from({ length: each }, (_, i) => api('POST', '/stock-receipts', {
+          supplierId, deliveryRef: `INV-MIX-${run}-${i}`,
+          lines: [{ materialId, locationId, quantity: 1 }],
+        })),
+      ]);
+
+      expect(results.map((r) => r.status)).toEqual(Array(each * 2).fill(201));
+      await expectStock(String(Number(before) + each * 2));
+    });
   });
 });
