@@ -274,3 +274,46 @@ export interface MockProject {
   createdAt: string;
   updatedAt: string;
 }
+
+// Requests for quotation, as the server keeps them (rfq.service.ts).
+export type RfqStatus = 'DRAFT' | 'SENT' | 'AWARDED' | 'CANCELLED';
+
+export interface MockRfqLine {
+  id: string;
+  /** The RFQ sheet's ITEM column: 1, 2, 3, … */
+  lineNo: number;
+  materialId: string;
+  quantity: string;
+}
+
+/** A supplier asked to quote, and their quote once it is recorded. */
+export interface MockRfqSupplier {
+  id: string;
+  supplierId: string;
+  quoteReference: string | null;
+  quotedAt: string | null;
+  validUntil: string | null;
+  leadTime: string | null;
+  notes: string | null;
+  declined: boolean;
+  createdAt: string;
+  prices: Array<{ rfqLineId: string; unitPrice: string }>;
+}
+
+export interface MockRfq {
+  id: string;
+  number: string;
+  status: RfqStatus;
+  projectNumber: string | null;
+  description: string | null;
+  notes: string | null;
+  penaltiesApply: boolean;
+  issuedAt: string | null;
+  closingDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  purchaseOrderId: string | null;
+  lines: MockRfqLine[];
+  suppliers: MockRfqSupplier[];
+  history: NonNullable<MockPurchaseOrder['history']>;
+}

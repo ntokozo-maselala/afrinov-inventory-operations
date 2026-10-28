@@ -48,6 +48,10 @@ model User {
   goodsReceipts        GoodsReceipt[]    @relation("GR_ReceivedBy")
   inventoryTransactions InventoryTransaction[]
   managedProjects      Project[]         @relation("ProjectManager")
+  rfqs                 Rfq[]             @relation("RFQ_CreatedBy")
+  sentRfqs             Rfq[]             @relation("RFQ_SentBy")
+  awardedRfqs          Rfq[]             @relation("RFQ_AwardedBy")
+  cancelledRfqs        Rfq[]             @relation("RFQ_CancelledBy")
 
   @@map("users")
 }
@@ -127,6 +131,7 @@ model Material {
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
   stockCountLines      StockCountLine[]
+  rfqLines             RfqLine[]
   project              Project?            @relation(fields: [projectNumber], references: [projectNumber])
 
   @@index([category])
@@ -200,6 +205,7 @@ model Supplier {
 
   purchaseOrders PurchaseOrder[]
   goodsReceipts  GoodsReceipt[]
+  rfqSuppliers   RfqSupplier[]
 
   // Case-insensitive name uniqueness is enforced at the database
   // level via a citext unique index (migration
@@ -232,6 +238,7 @@ model Project {
   inventoryTransactions InventoryTransaction[]
   purchaseOrders      PurchaseOrder[]
   materials           Material[]
+  rfqs                Rfq[]
 
   @@index([status])
   @@index([active])
@@ -358,6 +365,8 @@ model PurchaseOrder {
   closedBy     User?               @relation("PO_ClosedBy", fields: [closedById], references: [id])
   lines        PurchaseOrderLine[]
   goodsReceipts GoodsReceipt[]
+  // The request for quotation this order was awarded from, if any.
+  rfq          Rfq?
 
   @@index([status])
   @@index([supplierId])
@@ -381,6 +390,113 @@ model PurchaseOrderLine {
 
   @@index([purchaseOrderId])
   @@map("purchase_order_lines")
+}
+
+// ── Requests for quotation (RFQ roadmap) ─────────────────────────────────
+// As the RFQ sheet of the AFRI-02A-xxxx-02-01 Manhours and Material workbook:
+// the lines to price go to several suppliers, each supplier's quote is kept
+// against the RFQ, and the one awarded becomes a draft purchase order.
+//
+// DRAFT → SENT → AWARDED, or CANCELLED from DRAFT or SENT.
+enum RfqStatus {
+  DRAFT
+  SENT
+  AWARDED
+  CANCELLED
+}
+
+model Rfq {
+  id                 String    @id @default(uuid())
+  // For a project, the workbook's document number, AFRI-02A-1325-02-01 for
+  // AFRI-1325; without one, RFQ-0001 onwards.
+  number             String    @unique
+  status             RfqStatus @default(DRAFT)
+  projectNumber      String?   @map("project_number")
+  description        String?
+  // Remarks, printed under the lines.
+  notes              String?
+  penaltiesApply     Boolean   @default(false) @map("penalties_apply")
+  issuedAt           DateTime? @map("issued_at") @db.Date
+  closingDate        DateTime? @map("closing_date") @db.Date
+  createdById        String    @map("created_by_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  sentAt             DateTime? @map("sent_at")
+  sentById           String?   @map("sent_by_id")
+  awardedAt          DateTime? @map("awarded_at")
+  awardedById        String?   @map("awarded_by_id")
+  // The draft order the award created; its supplier is the one awarded.
+  purchaseOrderId    String?   @unique @map("purchase_order_id")
+  cancelledAt        DateTime? @map("cancelled_at")
+  cancelledById      String?   @map("cancelled_by_id")
+  cancellationReason String?   @map("cancellation_reason")
+
+  project       Project?       @relation(fields: [projectNumber], references: [projectNumber])
+  createdBy     User           @relation("RFQ_CreatedBy", fields: [createdById], references: [id])
+  sentBy        User?          @relation("RFQ_SentBy", fields: [sentById], references: [id])
+  awardedBy     User?          @relation("RFQ_AwardedBy", fields: [awardedById], references: [id])
+  cancelledBy   User?          @relation("RFQ_CancelledBy", fields: [cancelledById], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  lines         RfqLine[]
+  suppliers     RfqSupplier[]
+
+  @@index([status])
+  @@index([projectNumber])
+  @@map("rfqs")
+}
+
+model RfqLine {
+  id         String  @id @default(uuid())
+  rfqId      String  @map("rfq_id")
+  // The sheet's ITEM column: 1, 2, 3, … in the order the lines were entered.
+  lineNo     Int     @map("line_no")
+  materialId String  @map("material_id")
+  quantity   Decimal @db.Decimal(18, 4)
+
+  rfq      Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  material Material        @relation(fields: [materialId], references: [id])
+  prices   RfqQuotePrice[]
+
+  @@unique([rfqId, lineNo])
+  @@index([materialId])
+  @@map("rfq_lines")
+}
+
+// A supplier asked to quote, and their quote once it is recorded.
+model RfqSupplier {
+  id             String    @id @default(uuid())
+  rfqId          String    @map("rfq_id")
+  supplierId     String    @map("supplier_id")
+  quoteReference String?   @map("quote_reference")
+  // When the quote came in; null until it is recorded.
+  quotedAt       DateTime? @map("quoted_at") @db.Date
+  validUntil     DateTime? @map("valid_until") @db.Date
+  leadTime       String?   @map("lead_time")
+  notes          String?
+  declined       Boolean   @default(false)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  rfq      Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier Supplier        @relation(fields: [supplierId], references: [id])
+  prices   RfqQuotePrice[]
+
+  @@unique([rfqId, supplierId])
+  @@index([supplierId])
+  @@map("rfq_suppliers")
+}
+
+// One supplier's unit price for one line, excluding VAT, in the supplier's currency.
+model RfqQuotePrice {
+  rfqSupplierId String  @map("rfq_supplier_id")
+  rfqLineId     String  @map("rfq_line_id")
+  unitPrice     Decimal @map("unit_price") @db.Decimal(18, 4)
+
+  rfqSupplier RfqSupplier @relation(fields: [rfqSupplierId], references: [id], onDelete: Cascade)
+  rfqLine     RfqLine     @relation(fields: [rfqLineId], references: [id], onDelete: Cascade)
+
+  @@id([rfqSupplierId, rfqLineId])
+  @@index([rfqLineId])
+  @@map("rfq_quote_prices")
 }
 
 enum GoodsReceiptStatus {

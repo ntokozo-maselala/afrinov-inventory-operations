@@ -251,7 +251,7 @@ function cleanLines(s: string | null | undefined): string | null {
 }
 
 /** Orders are raised only for an open project: a completed or cancelled one's leftovers go to Stores. */
-async function assertProjectOpen(projectNumber: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
+export async function assertProjectOpen(projectNumber: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
   const project = await client.project.findUnique({ where: { projectNumber } });
   if (!project) throw Errors.validation(`No project ${projectNumber}`);
   if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
