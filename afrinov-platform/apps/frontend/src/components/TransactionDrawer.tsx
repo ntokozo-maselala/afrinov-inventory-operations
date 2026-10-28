@@ -29,8 +29,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   // eslint-disable react-hooks/set-state-in-effect
   useEffect(() => {
     setReversing(false); // eslint-disable-line react-hooks/set-state-in-effect
-    setReason(''); // eslint-disable-line react-hooks/set-state-in-effect
-    setValidation(null); // eslint-disable-line react-hooks/set-state-in-effect
+    setReason('');  
+    setValidation(null);  
   }, [transaction.id]);
   // eslint-enable react-hooks/set-state-in-effect
 
