@@ -2,10 +2,16 @@
 #
 # The repository is public, so any credential in the tree or in history is
 # disclosed. The gate must therefore fail on a real secret but stay quiet on the
-# known, intentional test placeholders below. Every entry here is a value that is
-# already published in this repository by design, is explicitly rejected by
-# production configuration (see INSECURE_SECRETS in
-# apps/backend/src/shared/config.ts), and grants no access to anything.
+# known, intentional test placeholders below. Every value listed here is already
+# published in this repository by design, is explicitly rejected by production
+# configuration (see INSECURE_SECRETS in apps/backend/src/shared/config.ts), and
+# grants no access to anything.
+#
+# The allowlist matches on VALUE ONLY, never on a path. Gitleaks combines an
+# allowlist's `paths` and `regexes` criteria with OR (and ignores
+# `condition = "AND"` in 8.30.x), so a path entry suppresses *every* finding in
+# that file — a real credential committed to config.ts would pass CI unnoticed.
+# Matching the placeholder value alone cannot hide an unrelated secret.
 #
 # Do not add a real credential to this file. If a real secret is ever found,
 # rotate it first, then decide whether history needs rewriting.
@@ -16,18 +22,13 @@ title = "Afrinov gitleaks config"
 useDefault = true
 
 [[allowlists]]
-description = "Committed test placeholders and the archived reports that quote them."
-paths = [
-  # The production config module lists these values so it can reject them.
-  '''apps/backend/src/shared/config\.ts''',
-  # Regression test asserting the .env.example placeholder is rejected.
-  '''apps/backend/src/security\.regression\.test\.ts''',
-  # Archived audits quote the .env.example placeholder as evidence.
-  '''docs/archive/.*''',
-]
+description = "Known public test placeholders, matched by value. Never add a real credential here."
 regexTarget = "match"
 regexes = [
+  # The .env.example placeholder and the config module's denylist entry.
   '''a1b2c3d4-e5f6-7890-abcd-ef1234567890''',
+  '''REPLACE_WITH_RANDOM_SECRET_generate_one_above''',
+  # Values the production config rejects as insecure.
   '''test-secret-do-not-use-in-prod''',
   '''insecure-dev-secret-change-me''',
   '''change-me-in-production''',

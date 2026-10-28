@@ -118,6 +118,17 @@ failing on **new** secrets while not re-printing this known one. The baseline
 stores only the finding's location and fingerprint, never the value, and a
 negative test confirmed the gate still catches a newly planted secret.
 
+**Allowlist correctness (review finding, fixed).** The first version of
+`.gitleaks.toml` paired a `paths` list with the placeholder `regexes`. Gitleaks
+combines those two criteria with OR, so a path match alone suppressed *every*
+finding in the listed files — a real credential committed to `config.ts` or
+`security.regression.test.ts` would have passed the scan. This was reproduced:
+planting a token in each file was silently ignored. `condition = "AND"` does not
+fix it; gitleaks 8.30.1 ignores that key. The allowlist now matches **values
+only** (no `paths`), which cannot hide an unrelated secret. Verified both ways:
+a planted token in each previously-blinded file now fails the scan, and the
+published placeholders still pass.
+
 ### SUPPLY-01 — Mutable action references (fixed)
 
 CI workflows referenced actions by tag (`@v4`, `@v7`), which an upstream owner

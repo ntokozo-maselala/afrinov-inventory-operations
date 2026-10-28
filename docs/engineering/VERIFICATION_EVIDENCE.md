@@ -35,8 +35,9 @@ Environment: Node v24.21.0, npm 11.21.0, PostgreSQL 16 (Docker), worktree at
 | Drift detection (after fix) | same | 0 | `-- This is an empty migration.` — schema and migrations agree |
 | Drift exit-code semantics | `... --script --exit-code` | 2 | Confirms a non-empty diff is a failing gate; 0 when empty, 1 on error |
 | FK enforcement | `INSERT INTO inventory_balances(...) VALUES ('ghost','ghost2',...)` | 1 | Rejected: `violates foreign key constraint "inventory_balances_material_id_fkey"` |
-| Orphan refusal | migrate against a DB seeded with an orphan row | 1 | `ERROR: inventory_balances has 1 orphan material row(s) and 1 orphan location row(s)...` |
-| Orphan recovery | delete orphan, clear `_prisma_migrations` row, redeploy | 0 | Migration applied |
+| Orphan refusal | migrate against a DB seeded with an orphan row | 1 | `ERROR: inventory_balances has 1 orphan material row(s) and 1 orphan location row(s)...`; no partial DDL left (FKs absent) |
+| Failed-migration state | `prisma migrate deploy` again after the refusal | 1 | `Error: P3009 — migrate found failed migrations in the target database`; the row in `_prisma_migrations` has `finished_at` NULL |
+| Orphan recovery | delete orphan, `prisma migrate resolve --rolled-back 20260101000027_inventory_balance_foreign_keys`, redeploy | 0 | `All migrations have been successfully applied` |
 
 ## Integration tests (real HTTP + real PostgreSQL)
 

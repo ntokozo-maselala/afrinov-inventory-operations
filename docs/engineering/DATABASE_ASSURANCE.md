@@ -55,9 +55,22 @@ forward-only and additive — no column or row is modified.
 **Why it cannot half-apply.** The migration runs inside a single `DO` block
 that first takes an `ACCESS EXCLUSIVE` lock on `inventory_balances`, then counts
 orphan rows. If any orphan exists it raises an exception with the counts and
-refuses, so it never leaves the migration recorded as failed halfway through
-(P3009) on a populated database. The same pattern is used by
+refuses. The `DO` block is one transaction, so the refusal is atomic: no partial
+schema change is left behind. The same pattern is used by
 `20260101000022_drop_racks`.
+
+**What the refusal does not avoid.** The failed-migration state is real. Prisma
+records the attempt in `_prisma_migrations` with a null `finished_at`, and every
+subsequent `prisma migrate deploy` stops with:
+
+```
+Error: P3009
+migrate found failed migrations in the target database, new migrations will not be applied.
+The `20260101000027_inventory_balance_foreign_keys` migration started at … failed
+```
+
+The refusal is therefore safe for the schema, not invisible to the operator.
+Clearing it requires an explicit step (see the recovery procedure below).
 
 **Verified behaviour (see `VERIFICATION_EVIDENCE.md`):**
 

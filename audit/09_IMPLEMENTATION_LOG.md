@@ -39,6 +39,27 @@ real-PostgreSQL integration 17 files / 124 tests passing on a fresh database.
   the tree, present in reachable history). Rotation is required; see
   `docs/engineering/SECURITY_CONTROLS.md` and `docs/engineering/EXCEPTIONS.md`.
 
+### Code-review follow-up (2026-10-28)
+
+Qodo reviewed PR #109 and raised two findings. Both were reproduced before
+being accepted, and both were real.
+
+- **Secret-scan allowlist was ineffective.** `.gitleaks.toml` paired `paths`
+  with placeholder `regexes`, which gitleaks combines with OR, so a path match
+  alone suppressed every finding in those files. Reproduced: a planted
+  `github-pat` token in `config.ts` and in `security.regression.test.ts` was
+  silently ignored (`no leaks found`). `condition = "AND"` is ignored by
+  gitleaks 8.30.1 (verified in isolation). Fixed by matching on value only;
+  the planted tokens are now caught and the published placeholders still pass.
+- **Migration comment overstated the refusal.** The header claimed the orphan
+  preflight avoided a P3009 failed-migration record. Reproduced on a real
+  PostgreSQL 16 database: after the refusal the row in `_prisma_migrations` has
+  a null `finished_at`, and the next `prisma migrate deploy` fails with
+  `Error: P3009`. The atomic-abort claim was correct; the P3009 claim was not.
+  The comment, `DATABASE_ASSURANCE.md` and `VERIFICATION_EVIDENCE.md` now state
+  the actual behaviour and the `migrate resolve --rolled-back` recovery step,
+  which was verified end to end.
+
 Engineering assurance documentation for this pass lives in `docs/engineering/`.
 
 ## Changes and residual risks

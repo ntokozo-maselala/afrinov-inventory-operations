@@ -4,10 +4,15 @@
 -- material or location no longer exists, and reports then show stock against a
 -- deleted item.
 --
--- Forward-only and additive: no existing column or row is changed. It refuses
--- to run while any orphan row remains, so it can never fail halfway on a
--- populated database and leave the migration recorded as failed (P3009). If it
--- refuses, delete or repair the orphan rows it names and deploy again.
+-- Forward-only and additive: no existing column or row is changed. It checks for
+-- orphan rows first and aborts atomically, so a populated database is never left
+-- with a partial schema change. It does NOT avoid the failed-migration state:
+-- Prisma still records this migration as failed, and every later deploy stops
+-- with P3009 until the orphans are fixed and the migration is cleared with
+-- `npx prisma migrate resolve --rolled-back 20260101000027_inventory_balance_foreign_keys`.
+-- See docs/engineering/DATABASE_ASSURANCE.md, "DATA-03", for the full recovery
+-- procedure. If it refuses, delete or repair the orphan rows it names, run
+-- migrate resolve, then deploy again.
 DO $$
 DECLARE
   orphan_material integer;
