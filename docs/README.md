@@ -18,6 +18,7 @@ audits, project entry points, and code-adjacent guides.
 - **Architecture:** [`06-system-architecture`](../afrinov-docs/docs/06-system-architecture/), with decisions in [`decision-log.md`](../afrinov-docs/docs/00-governance/decision-log.md).
 - **Security:** [`10-security`](../afrinov-docs/docs/10-security/).
 - **Testing and quality:** [`11-testing`](../afrinov-docs/docs/11-testing/) and the CI workflows in `.github/workflows/`.
+- **Engineering assurance:** [`docs/engineering/`](engineering/README.md) — the verification controls, quality gates, security controls, database assurance, CI/CD architecture, risk register, exceptions, and roadmap that govern this repository. Start there to understand how a change is verified before it merges.
 - **Infrastructure:** environment, deployment, and CI/CD references in [`12-operations`](../afrinov-docs/docs/12-operations/).
 - **Operations:** monitoring, logging, alerting, backup and recovery, and incident management in [`12-operations`](../afrinov-docs/docs/12-operations/).
 

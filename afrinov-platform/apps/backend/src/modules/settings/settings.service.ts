@@ -343,19 +343,24 @@ export const SettingsService = {
     const coerced = coerceAndValidate(def, rawValue);
     const before = await prisma.setting.findUnique({ where: { key } });
     if (!before) throw Errors.notFound('Setting');
-    const updated = await prisma.setting.update({
-      where: { key },
-      data: { value: coerced as Prisma.InputJsonValue, updatedById: actorId },
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'SETTING_UPDATE',
-        entityType: 'Setting',
-        entityId: key,
-        before: { value: before.value as Prisma.InputJsonValue },
-        after: { value: updated.value as Prisma.InputJsonValue },
-      },
+    // The setting row and its audit record commit together, so a configuration
+    // change can never be recorded without the history entry that explains it.
+    const updated = await prisma.$transaction(async (tx) => {
+      const setting = await tx.setting.update({
+        where: { key },
+        data: { value: coerced as Prisma.InputJsonValue, updatedById: actorId },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'SETTING_UPDATE',
+          entityType: 'Setting',
+          entityId: key,
+          before: { value: before.value as Prisma.InputJsonValue },
+          after: { value: setting.value as Prisma.InputJsonValue },
+        },
+      });
+      return setting;
     });
     invalidateSettingsCache();
     return rowToValue(updated);

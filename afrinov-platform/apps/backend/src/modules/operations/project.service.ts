@@ -106,34 +106,38 @@ export const ProjectService = {
       if (existing) throw Errors.conflict(`Project code "${input.code}" is already in use.`);
     }
 
-    const created = await prisma.project.create({
-      data: {
-        projectNumber,
-        name,
-        code: input.code ?? null,
-        description: input.description ?? null,
-        status: input.status ?? 'PLANNING',
-        managerId: input.managerId ?? null,
-        client: input.client ?? null,
-        startDate: toDateOrNull(input.startDate),
-        endDate: toDateOrNull(input.endDate),
-        notes: input.notes ?? null,
-        active: input.active ?? true,
-      },
-      include: { manager: { select: { id: true, name: true, email: true } } },
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'CREATE',
-        entityType: 'Project',
-        entityId: created.projectNumber,
-        after: created as unknown as Prisma.InputJsonValue,
-      },
+    const created = await prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: {
+          projectNumber,
+          name,
+          code: input.code ?? null,
+          description: input.description ?? null,
+          status: input.status ?? 'PLANNING',
+          managerId: input.managerId ?? null,
+          client: input.client ?? null,
+          startDate: toDateOrNull(input.startDate),
+          endDate: toDateOrNull(input.endDate),
+          notes: input.notes ?? null,
+          active: input.active ?? true,
+        },
+        include: { manager: { select: { id: true, name: true, email: true } } },
+      });
+      // The project row and its audit record commit together, so a change can
+      // never be recorded without the history entry that explains it.
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'CREATE',
+          entityType: 'Project',
+          entityId: project.projectNumber,
+          after: project as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return project;
     });
     return created;
   },
-
   async update(input: UpdateProjectInput, actorId: string) {
     const before = await prisma.project.findUnique({ where: { projectNumber: input.projectNumber } });
     if (!before) throw Errors.notFound('Project');
@@ -169,20 +173,23 @@ export const ProjectService = {
     if (input.notes !== undefined) data.notes = input.notes;
     if (input.active !== undefined) data.active = input.active;
 
-    const after = await prisma.project.update({
-      where: { projectNumber: input.projectNumber },
-      data,
-      include: { manager: { select: { id: true, name: true, email: true } } },
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'UPDATE',
-        entityType: 'Project',
-        entityId: input.projectNumber,
-        before: before as unknown as Prisma.InputJsonValue,
-        after: after as unknown as Prisma.InputJsonValue,
-      },
+    const after = await prisma.$transaction(async (tx) => {
+      const project = await tx.project.update({
+        where: { projectNumber: input.projectNumber },
+        data,
+        include: { manager: { select: { id: true, name: true, email: true } } },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'UPDATE',
+          entityType: 'Project',
+          entityId: input.projectNumber,
+          before: before as unknown as Prisma.InputJsonValue,
+          after: project as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return project;
     });
     return after;
   },
@@ -190,20 +197,23 @@ export const ProjectService = {
   async archive(projectNumber: string, actorId: string) {
     const p = await prisma.project.findUnique({ where: { projectNumber } });
     if (!p) throw Errors.notFound('Project');
-    const after = await prisma.project.update({
-      where: { projectNumber },
-      data: { active: false, status: 'CANCELLED' },
-      include: { manager: { select: { id: true, name: true, email: true } } },
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'ARCHIVE',
-        entityType: 'Project',
-        entityId: projectNumber,
-        before: { active: p.active, status: p.status },
-        after: { active: false, status: 'CANCELLED' },
-      },
+    const after = await prisma.$transaction(async (tx) => {
+      const project = await tx.project.update({
+        where: { projectNumber },
+        data: { active: false, status: 'CANCELLED' },
+        include: { manager: { select: { id: true, name: true, email: true } } },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'ARCHIVE',
+          entityType: 'Project',
+          entityId: projectNumber,
+          before: { active: p.active, status: p.status },
+          after: { active: false, status: 'CANCELLED' },
+        },
+      });
+      return project;
     });
     return after;
   },

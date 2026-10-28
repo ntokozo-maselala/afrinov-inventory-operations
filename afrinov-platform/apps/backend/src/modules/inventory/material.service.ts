@@ -80,28 +80,33 @@ export const MaterialService = {
     if (serialNumber) await checkSerial(serialNumber, input.category);
     const projectNumber = await projectForNewMaterial(input, prisma);
 
-    const created = await prisma.material.create({
-      data: {
-        sku,
-        name: input.name,
-        category: input.category,
-        unitOfMeasure: input.unitOfMeasure,
-        requiredStock: input.requiredStock ?? 0,
-        unitCost: input.unitCost ?? null,
-        description: input.description ?? null,
-        serialNumber,
-        projectNumber,
-      },
-      include: withProject,
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'CREATE',
-        entityType: 'Material',
-        entityId: created.id,
-        after: created as unknown as Prisma.InputJsonValue,
-      },
+    const created = await prisma.$transaction(async (tx) => {
+      const material = await tx.material.create({
+        data: {
+          sku,
+          name: input.name,
+          category: input.category,
+          unitOfMeasure: input.unitOfMeasure,
+          requiredStock: input.requiredStock ?? 0,
+          unitCost: input.unitCost ?? null,
+          description: input.description ?? null,
+          serialNumber,
+          projectNumber,
+        },
+        include: withProject,
+      });
+      // The material row and its audit record commit together, so a change can
+      // never be recorded without the history entry that explains it.
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'CREATE',
+          entityType: 'Material',
+          entityId: material.id,
+          after: material as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return material;
     });
     return shape(created);
   },
@@ -125,16 +130,19 @@ export const MaterialService = {
       data.serialNumber = serialNumber;
     }
 
-    const after = await prisma.material.update({ where: { id: input.id }, data, include: withProject });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'UPDATE',
-        entityType: 'Material',
-        entityId: input.id,
-        before: before as unknown as Prisma.InputJsonValue,
-        after: after as unknown as Prisma.InputJsonValue,
-      },
+    const after = await prisma.$transaction(async (tx) => {
+      const material = await tx.material.update({ where: { id: input.id }, data, include: withProject });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'UPDATE',
+          entityType: 'Material',
+          entityId: input.id,
+          before: before as unknown as Prisma.InputJsonValue,
+          after: material as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return material;
     });
     return shape(after);
   },

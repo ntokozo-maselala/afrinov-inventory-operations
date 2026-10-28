@@ -78,22 +78,28 @@ export const UserService = {
     const roles = await prisma.role.findMany({ where: { name: { in: input.roleNames as Role['name'][] } } });
     if (roles.length !== input.roleNames.length) throw Errors.validation('One or more roles not found');
 
-    const created = await prisma.user.create({
-      data: {
-        email: input.email.toLowerCase(),
-        name: input.name,
-        passwordHash: hash,
-        roles: { create: roles.map((r) => ({ roleId: r.id })) },
-      },
-    });
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'CREATE',
-        entityType: 'User',
-        entityId: created.id,
-        after: { email: created.email, name: created.name, roles: input.roleNames } as Prisma.InputJsonValue,
-      },
+    // The user row and its audit record commit together or not at all. An
+    // audit write that failed on its own would otherwise leave an
+    // administrative change with no trace of who made it.
+    const created = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: input.email.toLowerCase(),
+          name: input.name,
+          passwordHash: hash,
+          roles: { create: roles.map((r) => ({ roleId: r.id })) },
+        },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'CREATE',
+          entityType: 'User',
+          entityId: user.id,
+          after: { email: user.email, name: user.name, roles: input.roleNames } as Prisma.InputJsonValue,
+        },
+      });
+      return user;
     });
     return { id: created.id, email: created.email, name: created.name };
   },
@@ -115,6 +121,9 @@ export const UserService = {
       if (nextRoles.length !== input.roleNames.length) throw Errors.validation('One or more roles not found');
     }
 
+    // The role/permission change and its audit record share one transaction, so
+    // an administrative change can never commit without the history entry that
+    // explains it (AUD-01).
     const updated = await prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: input.id }, data });
       if (nextRoles !== undefined) {
@@ -128,30 +137,30 @@ export const UserService = {
         include: { roles: { include: { role: true } } },
       });
       if (!fresh) throw Errors.notFound('User');
+
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'UPDATE',
+          entityType: 'User',
+          entityId: input.id,
+          before: {
+            name: before.name,
+            active: before.active,
+            roles: before.roles.map((r) => r.role.name),
+            approvalLimit: before.approvalLimit?.toString() ?? null,
+          } as Prisma.InputJsonValue,
+          after: {
+            name: fresh.name,
+            active: fresh.active,
+            roles: fresh.roles.map((r) => r.role.name),
+            approvalLimit: fresh.approvalLimit?.toString() ?? null,
+          } as Prisma.InputJsonValue,
+        },
+      });
       return fresh;
     });
     if (!updated) throw Errors.notFound('User');
-
-    await prisma.auditLogEntry.create({
-      data: {
-        actorId,
-        action: 'UPDATE',
-        entityType: 'User',
-        entityId: input.id,
-        before: {
-          name: before.name,
-          active: before.active,
-          roles: before.roles.map((r) => r.role.name),
-          approvalLimit: before.approvalLimit?.toString() ?? null,
-        } as Prisma.InputJsonValue,
-        after: {
-          name: updated.name,
-          active: updated.active,
-          roles: updated.roles.map((r) => r.role.name),
-          approvalLimit: updated.approvalLimit?.toString() ?? null,
-        } as Prisma.InputJsonValue,
-      },
-    });
     return updated;
   },
 };

@@ -1,0 +1,21 @@
+[
+  {
+    "RuleID": "generic-api-key",
+    "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+    "StartLine": 6,
+    "EndLine": 6,
+    "StartColumn": 15,
+    "EndColumn": 56,
+    "File": "afrinov-platform/apps/backend/src/shared/defaultAdmin.ts",
+    "SymlinkFile": "",
+    "Commit": "db1501ac0b8e743788e6392a39ee622d1b75ceac",
+    "Link": "https://github.com/ntokozo-maselala/afrinov-inventory-operations/blob/db1501ac0b8e743788e6392a39ee622d1b75ceac/afrinov-platform/apps/backend/src/shared/defaultAdmin.ts#L6",
+    "Entropy": 3.640224,
+    "Author": "Sbonakaliso Ngcobo",
+    "Email": "338013982+sbona-afrinov@users.noreply.github.com",
+    "Date": "2026-10-22T13:26:44Z",
+    "Message": "Retire the Racks page, keeping the Rack table and its guard\n\nRacks and locations roadmap, Phase 3.2. Racks are locations of type Rack, inside their room:\n- The Racks page, its menu entry, the /racks routes and the manage:racks permission go; /racks opens Locations filtered to racks (?type=RACK).\n- The Movements history names an archived rack from the rack's own audit entries, not the Rack table, and links rack entries to Locations.\n- The seed no longer creates demo Rack records, which would refill the table Phase 3.3 needs empty; it puts the demo location D-1 in Main Storeroom instead.\n- The Rack table stays, and the location delete check still counts racks, until 3.3 drops it.\n- The frontend-only mock drops its Rack records; the docs and roadmap no longer list the page or API.",
+    "Tags": [],
+    "Fingerprint": "db1501ac0b8e743788e6392a39ee622d1b75ceac:afrinov-platform/apps/backend/src/shared/defaultAdmin.ts:generic-api-key:6"
+  }
+]

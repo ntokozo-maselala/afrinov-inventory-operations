@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 848, frontend 844)
+npm test               # both workspaces (backend 852, frontend 856)
 npm run build          # both workspaces
 ```
 
@@ -38,6 +38,21 @@ Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`
 for the exact environment (`DATABASE_URL`, `JWT_SECRET`, `SEED_ADMIN_PASSWORD`),
 then `npm run test:integration --workspace=@afrinov/backend`.
+
+## Engineering assurance
+
+`docs/engineering/` documents how this repository is verified and released:
+quality gates, security controls, database assurance, CI/CD architecture, the
+risk register and the exceptions register. Read `docs/engineering/README.md`
+before changing CI, migrations, authentication or authorization. Two rules from
+there matter day to day:
+
+- **Do not add a `gitleaks` allowlist entry for a real secret.** The repository
+  is public. Rotate first, then record it in `docs/engineering/EXCEPTIONS.md`.
+- **A migration that matches `schema.prisma` is enforced by CI.** A change to
+  `prisma/schema.prisma` without a matching migration fails the `migration-drift`
+  job in `backend-ci.yml`. Use `npx prisma migrate diff --from-config-datasource
+  --to-schema prisma/schema.prisma --script --exit-code` locally to check.
 
 ## Dependency upgrades
 

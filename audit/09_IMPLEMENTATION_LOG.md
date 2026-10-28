@@ -15,10 +15,31 @@
 | 2 | DATA-01 | Real PostgreSQL/HTTP tracer: two simultaneous one-unit issues from a one-unit balance both returned 201, failing the required [201, 422] result. | Added transaction-scoped, stable-order PostgreSQL advisory locks for every application balance-changing workflow: issues, returns, reversals, transfers, adjustments, goods receipts, stock receipts/counts, purchase-order receipts, opening balances, and tool loans. Focused inventory unit suite: 77/77; TypeScript check passed; new disposable PostgreSQL 16 database applied 23/23 migrations; inventory HTTP suite: 13/13; complete real-PostgreSQL integration suite: 15 files / 100 tests. | Complete |
 | 3 | DATA-02, DATA-04 | Initial fresh PostgreSQL run showed distinct receipts racing the same PO line returned a nondeterministic [200, 409] outcome instead of the deterministic cap-rejection assertion, establishing the missing serialized claim/line-check seam. | Added an atomic SUBMITTED-to-POSTED claim and stable-order PostgreSQL advisory locks for affected purchase-order lines before goods-receipt ledger writes and PO quantity checks. Fresh disposable PostgreSQL procurement integration suite passes 20/20, including same-receipt and distinct-receipt concurrency, rollback and sequential conflict behavior. Complete backend unit suite passes 57 files / 824 tests; TypeScript check passes. | Complete |
 | 4 | SEC-02 | Focused parser test failed on a 101-value location filter before implementation; Zod 4 compatibility tests initially exposed seven legacy UUID-fixture regressions. | Added max(100) to category/locationId/supplierId/materialId, upgraded backend Zod to 4.6.7 and zod-to-openapi to 9.1.0, patched fast-uri branches to 4.2.3, and added a scoped structural UUID compatibility schema. Focused parser tests: 3/3; backend unit suite: 57 files / 825 tests; backend typecheck passed; production-only audit clean. Full audit retains 5 unrelated frontend/dev findings. | Complete |
-| 5 | DATA-03 | Pending | Pending | Not started |
-| 6 | AUD-01 | Pending | Pending | Not started |
+| 5 | DATA-03 | `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` against a freshly migrated database emitted exactly two `AddForeignKey` statements for `inventory_balances`, confirming the schema declared constraints no migration created. | Added migration `20260101000027_inventory_balance_foreign_keys`. Verified on a fresh disposable PostgreSQL 16 database: applies cleanly; drift check now returns an empty diff; inserting a balance with a non-existent material is rejected by `inventory_balances_material_id_fkey`. Refusal path exercised against a database containing a deliberately orphaned row (raises with row counts), and recovery verified after cleanup. Enforced in CI by the new `migration-drift` job. | Complete |
+| 6 | AUD-01 | Failure-injection regression test installed a test-only trigger on `audit_log_entries` and, against the unfixed code, observed the user update committed while the audit write failed (`expected 'Should Not Persist' to be 'Audit Fail'`). | `UserService.create` and `update` now write the user/role change and the audit entry inside one `prisma.$transaction`. The same defect class was found by inspection in `MaterialService.create/update`, `ProjectService.create/update/archive` and `SettingsService.set` and fixed the same way. `integration/identity-audit-atomicity.real-http.test.ts` covers all four services and passes 5/5; reverting one fix (project `create`) makes the matching case fail. Backend unit suite passes 60 files / 852 tests. | Complete |
 
 Record each failing test's intended failure reason before changing the corresponding production code. For database behavior, record whether a real disposable PostgreSQL run completed; mocked transaction behavior alone does not close an acceptance criterion.
+
+### Post-audit verification pass (2026-10-28)
+
+WP5 and WP6 were completed and re-verified in a later pass on branch `main`
+(commit `59e30ad` plus the changes below). The full test toolchain was exercised:
+`npm ci`; typecheck, lint and build clean; backend unit 852, frontend unit 856;
+real-PostgreSQL integration 17 files / 124 tests passing on a fresh database.
+`npm audit --omit=dev` reports 0 vulnerabilities.
+
+- WP5 (DATA-03): see the row above; the migration was added in this pass.
+- WP6 (AUD-01): see the row above; the transaction wrapping and its regression
+  test were added in this pass.
+- Additional controls added in this pass: dependency-audit and secret-scanning
+  CI (`.github/workflows/security-ci.yml`), a migration-drift CI job
+  (`backend-ci.yml`), and pinning of all workflow actions to commit SHAs.
+- New finding SEC-07: `gitleaks` over full history found a real bootstrap admin
+  password committed in `defaultAdmin.ts` at commit `db1501ac0b` (removed from
+  the tree, present in reachable history). Rotation is required; see
+  `docs/engineering/SECURITY_CONTROLS.md` and `docs/engineering/EXCEPTIONS.md`.
+
+Engineering assurance documentation for this pass lives in `docs/engineering/`.
 
 ## Changes and residual risks
 

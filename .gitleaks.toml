@@ -1,0 +1,34 @@
+# Gitleaks configuration.
+#
+# The repository is public, so any credential in the tree or in history is
+# disclosed. The gate must therefore fail on a real secret but stay quiet on the
+# known, intentional test placeholders below. Every entry here is a value that is
+# already published in this repository by design, is explicitly rejected by
+# production configuration (see INSECURE_SECRETS in
+# apps/backend/src/shared/config.ts), and grants no access to anything.
+#
+# Do not add a real credential to this file. If a real secret is ever found,
+# rotate it first, then decide whether history needs rewriting.
+
+title = "Afrinov gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Committed test placeholders and the archived reports that quote them."
+paths = [
+  # The production config module lists these values so it can reject them.
+  '''apps/backend/src/shared/config\.ts''',
+  # Regression test asserting the .env.example placeholder is rejected.
+  '''apps/backend/src/security\.regression\.test\.ts''',
+  # Archived audits quote the .env.example placeholder as evidence.
+  '''docs/archive/.*''',
+]
+regexTarget = "match"
+regexes = [
+  '''a1b2c3d4-e5f6-7890-abcd-ef1234567890''',
+  '''test-secret-do-not-use-in-prod''',
+  '''insecure-dev-secret-change-me''',
+  '''change-me-in-production''',
+]
