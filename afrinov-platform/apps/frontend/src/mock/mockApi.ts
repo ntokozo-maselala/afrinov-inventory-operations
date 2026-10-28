@@ -101,6 +101,9 @@ export function resetMockState(): void {
 }
 
 let idCounter = 1000;
+/** Names of the users the mock's order events are by; u-admin is the one approving, closing and so on. */
+const MOCK_ACTOR_NAMES: Record<string, string> = { 'u-admin': 'You (admin)' };
+
 function nextId(prefix: string): string {
   return `${prefix}-${++idCounter}`;
 }
@@ -639,8 +642,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/history'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    // As the server: each entry with the name of who did it.
-    return (po.history ?? []).map((e) => ({ ...e, actorName: e.actorId ? devUser().name : null }));
+    // As the server: each entry with the name of who did it, and none for an
+    // id that is no user.
+    return (po.history ?? []).map((e) => ({ ...e, actorName: (e.actorId && MOCK_ACTOR_NAMES[e.actorId]) || null }));
   }
   if (method === 'GET' && p.startsWith('/purchase-orders/')) {
     const id = p.slice('/purchase-orders/'.length);

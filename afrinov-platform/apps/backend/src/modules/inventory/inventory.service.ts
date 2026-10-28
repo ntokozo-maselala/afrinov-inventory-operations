@@ -855,6 +855,11 @@ export const InventoryService = {
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
       // The order may have been cancelled or closed since the receipt was recorded.
       if (gr.purchaseOrderId) {
+        // Postings against one order wait for each other, so each reads the
+        // status the last one left and its Activity entry shows the real
+        // transition. The order row is locked before stock, as receiving a
+        // whole order does, so the two cannot deadlock.
+        await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${gr.purchaseOrderId} FOR UPDATE`;
         const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
         if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
           throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
