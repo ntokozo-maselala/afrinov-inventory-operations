@@ -26,6 +26,9 @@ function makePrisma(): unknown {
       },
     },
     auditLogEntry: { create: async ({ data }: { data: { action: string; entityId: string } }) => { db.audit.push(data); return data; } },
+    // The service wraps each mutation and its audit write in one transaction;
+    // the mock runs the callback against the same in-memory client.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
   };
 }
 

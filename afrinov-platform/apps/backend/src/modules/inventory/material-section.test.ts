@@ -45,6 +45,9 @@ function makePrisma(): unknown {
       count: async ({ where }: { where: { materialId: string } }) => db.movements.get(where.materialId) ?? 0,
     },
     auditLogEntry: { create: async ({ data }: { data: unknown }) => data },
+    // The service wraps each mutation and its audit write in one transaction;
+    // the mock runs the callback against the same in-memory client.
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
   };
 }
 

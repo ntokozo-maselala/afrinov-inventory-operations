@@ -31,11 +31,11 @@ jobs:
     name: Typecheck, lint, unit tests, build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Vitest 5 requires Node 22.12 or later; use the same supported major as
       # the frontend workflow and local development guidance.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -53,6 +53,58 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  migration-drift:
+    name: Migration drift and database integrity
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: afrinov
+          POSTGRES_PASSWORD: afrinov
+          POSTGRES_DB: afrinov_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U afrinov -d afrinov_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://afrinov:afrinov@localhost:5432/afrinov_test?schema=public
+      LOG_LEVEL: silent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: afrinov-platform/package-lock.json
+
+      - name: Install dependencies
+        working-directory: afrinov-platform
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Applies every committed migration to an empty database. A migration
+      # that cannot run fails here, before it can reach a real environment.
+      - name: Apply migrations to a clean database
+        run: npx prisma migrate deploy
+
+      # Proves the migrated database matches the Prisma schema exactly. A
+      # missing constraint or column (like DATA-03) shows up as a non-empty
+      # diff, and `--exit-code` turns that into a failing exit status (2).
+      - name: Verify migrations match the schema
+        run: |
+          set -euo pipefail
+          npx prisma migrate diff \
+            --from-config-datasource \
+            --to-schema prisma/schema.prisma \
+            --script --exit-code
 
   integration:
     name: Integration tests (real Postgres)
@@ -76,9 +128,9 @@ jobs:
       DATABASE_URL: postgresql://afrinov:afrinov@localhost:5432/afrinov_test?schema=public
       LOG_LEVEL: silent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm

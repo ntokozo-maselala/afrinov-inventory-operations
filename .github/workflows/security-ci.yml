@@ -1,0 +1,87 @@
+name: Security CI
+
+# Repo-wide security gates. These are intentionally not path-filtered: a change
+# anywhere in the repository can introduce a secret or a vulnerable lockfile, so
+# the checks must run on every pull request and every push to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published advisory fails even without a code change.
+    - cron: '17 6 * * 1'
+
+concurrency:
+  group: security-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    name: Dependency security audit (production)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: afrinov-platform/package-lock.json
+
+      - name: Install dependencies
+        working-directory: afrinov-platform
+        run: npm ci
+
+      # The lockfile is the unit of review. --omit=dev ignores findings that
+      # only affect build/test tooling, so a real production risk fails the
+      # build while a dev-only advisory does not. --audit-level=high leaves
+      # low/moderate advisories as visible output rather than a hard stop.
+      # Any accepted exception is recorded in docs/engineering/EXCEPTIONS.md
+      # with an owner and a review date.
+      - name: Audit production dependencies
+        working-directory: afrinov-platform
+        run: npm audit --omit=dev --audit-level=high
+
+      # Advisory, not blocking: prints the full tree including dev-only findings
+      # so they stay visible without failing the build.
+      - name: Full audit report (informational)
+        if: always()
+        working-directory: afrinov-platform
+        run: npm audit || true
+
+  secret-scan:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history so the scan covers every commit, not just the tip.
+          fetch-depth: 0
+
+      # Pinned release, verified against its published checksum. A scanner is
+      # itself supply-chain surface, so the binary is not fetched by tag alone.
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          tarball="gitleaks_${version}_linux_x64.tar.gz"
+          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/${tarball}" | sha256sum -c -
+          tar -xzf "/tmp/${tarball}" -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+
+      # The baseline holds one known finding from history: a bootstrap admin
+      # password committed in commit db1501ac0b and removed since (the file is
+      # gone from the tree). It is recorded without the secret value and is
+      # tracked for rotation in docs/engineering/EXCEPTIONS.md. A NEW secret,
+      # anywhere in the tree or history, still fails this job.
+      - name: Scan repository history for secrets
+        run: |
+          gitleaks detect --source . --redact --no-banner \
+            --config .gitleaks.toml \
+            --baseline-path .gitleaks-baseline.json \
+            --exit-code 1
