@@ -318,6 +318,22 @@ describe('F-05: account status is database-authoritative', () => {
     await app.close();
   });
 
+  it('answers a malformed request with 400, not as a server failure', async () => {
+    process.env.NODE_ENV = 'test';
+    const app = await buildServer({ skipConfigValidation: true });
+    const token = app.jwt.sign({ sub: 'user-ok', email: 'ok@e', name: 'Ok', roles: [] });
+    // Posting a goods receipt sends no body; labelled JSON, Fastify refuses it.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/goods-receipts/some-id/post',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('BAD_REQUEST');
+    expect(res.json().error.message).toMatch(/body cannot be empty/i);
+    await app.close();
+  });
+
   it('still rejects a malformed token with 401', async () => {
     process.env.NODE_ENV = 'test';
     const app = await buildServer({ skipConfigValidation: true });

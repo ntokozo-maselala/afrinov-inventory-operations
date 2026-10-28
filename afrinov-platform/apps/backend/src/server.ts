@@ -189,6 +189,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
         error: { code: err.code, message: err.message, details: err.details },
       });
     }
+    // Fastify's own refusals of a malformed request (an empty JSON body, bad
+    // JSON, an unsupported content type) are the caller's mistake, not ours.
+    const status = (err as { statusCode?: unknown }).statusCode;
+    if (err instanceof Error && typeof status === 'number' && status >= 400 && status < 500) {
+      req.log.warn({ requestId, code: (err as { code?: unknown }).code, message: err.message, statusCode: status }, 'Bad request');
+      return reply.code(status).send({ error: { code: 'BAD_REQUEST', message: err.message } });
+    }
     if (err instanceof Error) {
       app.log.error({ err, requestId }, 'Unhandled error');
       return reply.code(500).send({
