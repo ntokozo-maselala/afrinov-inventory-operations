@@ -11,7 +11,7 @@ import { AdjustmentReasonCode, InventoryTransactionType, Prisma } from '@prisma/
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
-import { getCurrentBalance, recomputeBalance } from '../../shared/inventory/balances.js';
+import { getCurrentBalance, recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 
@@ -140,6 +140,7 @@ export const StockCountService = {
     return prisma.$transaction(async (tx) => {
       // One count at a time per location, so two counters cannot both correct the same difference.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`afrinov:stock-count:${input.locationId}`}))`;
+      await lockInventoryBalances(lines.map((line) => ({ materialId: line.materialId, locationId: input.locationId })), tx);
 
       const location = await tx.location.findUnique({ where: { id: input.locationId } });
       if (!location) throw Errors.notFound('Location');

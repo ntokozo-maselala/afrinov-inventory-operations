@@ -49,10 +49,10 @@ describe('receiving stock over real HTTP', () => {
   }
 
   /** Creates a purchase order for `qty` units and takes it to APPROVED. */
-  async function approvedOrder(qty: number): Promise<PurchaseOrder> {
+  async function approvedOrder(qty: number, selectedMaterialId = materialId): Promise<PurchaseOrder> {
     const created = await api<PurchaseOrder>('POST', '/purchase-orders', {
       supplierId,
-      lines: [{ materialId, orderedQty: qty, unitPrice: 12.5 }],
+      lines: [{ materialId: selectedMaterialId, orderedQty: qty, unitPrice: 12.5 }],
     });
     expect(created.status).toBe(201);
     expect(created.body.status).toBe('DRAFT');
@@ -74,7 +74,7 @@ describe('receiving stock over real HTTP', () => {
       purchaseOrderId: order.id,
       supplierId,
       deliveryRef: `DN-${run}`,
-      lines: [{ materialId, locationId, quantity, purchaseOrderLineId: order.lines[0]!.id }],
+      lines: [{ materialId: order.lines[0]!.materialId, locationId, quantity, purchaseOrderLineId: order.lines[0]!.id }],
     });
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('SUBMITTED');
@@ -152,6 +152,35 @@ describe('receiving stock over real HTTP', () => {
       expect(again.status).toBe(409);
       expect(again.body.error.code).toBe('INVALID_STATE');
       await expectStock('4');
+    });
+
+    it('posts a receipt at most once when the same receipt is posted concurrently', async () => {
+      const concurrentMaterial = await api<{ id: string }>('POST', '/materials', { sku: 'IT-WP3-SAME-' + run, name: 'WP3 same receipt ' + run, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+      const concurrentOrder = await approvedOrder(1, concurrentMaterial.body.id);
+      const receipt = await receive(concurrentOrder, 1);
+      const results = await Promise.all([
+        api('POST', '/goods-receipts/' + receipt.id + '/post'),
+        api('POST', '/goods-receipts/' + receipt.id + '/post'),
+      ]);
+
+      expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+      expect(await prisma.inventoryTransaction.count({ where: { referenceId: receipt.id } })).toBe(1);
+      expect(Number((await getOrder(concurrentOrder.id)).lines[0]!.receivedQty)).toBe(1);
+    });
+
+    it('serializes distinct receipts against one PO line when their total exceeds the order', async () => {
+      const concurrentMaterial = await api<{ id: string }>('POST', '/materials', { sku: 'IT-WP3-DISTINCT-' + run, name: 'WP3 distinct receipts ' + run, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+      const concurrentOrder = await approvedOrder(1, concurrentMaterial.body.id);
+      const first = await receive(concurrentOrder, 1);
+      const second = await receive(concurrentOrder, 1);
+      const results = await Promise.all([
+        api('POST', '/goods-receipts/' + first.id + '/post'),
+        api('POST', '/goods-receipts/' + second.id + '/post'),
+      ]);
+
+      expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+      expect(await prisma.inventoryTransaction.count({ where: { referenceType: 'GoodsReceipt', referenceId: { in: [first.id, second.id] } } })).toBe(1);
+      expect(Number((await getOrder(concurrentOrder.id)).lines[0]!.receivedQty)).toBe(1);
     });
 
     it('refuses to record a receipt for more than is outstanding', async () => {

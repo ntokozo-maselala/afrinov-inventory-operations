@@ -12,7 +12,7 @@ import { InventoryTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
-import { recomputeBalance } from '../../shared/inventory/balances.js';
+import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { assertParent, lockLocationTree } from '../inventory/location.service.js';
 import type { MappedImport } from './mapping.js';
 import { PROBLEM_TEXT } from './workbook-analysis.js';
@@ -190,6 +190,7 @@ export const OpeningBalanceService = {
           });
         }
       }
+      await lockInventoryBalances(receipts, tx);
       await tx.inventoryTransaction.createMany({ data: receipts });
       for (const r of receipts) await recomputeBalance(r.materialId, r.locationId, tx);
 

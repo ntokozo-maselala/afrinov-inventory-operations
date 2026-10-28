@@ -68,7 +68,7 @@ export interface Operation {
   permissions?: PermissionCodeValue[];
   /** ADMIN role required in addition to the permission. */
   adminOnly?: boolean;
-  query?: z.AnyZodObject;
+  query?: z.ZodObject<any>;
   body?: ZodTypeAny;
   success?: number;
   successDescription?: string;

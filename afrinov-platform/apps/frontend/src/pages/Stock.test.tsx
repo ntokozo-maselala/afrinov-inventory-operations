@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
@@ -34,6 +34,14 @@ function renderAt(url: string) {
 describe('Stock page filters from the address', () => {
   beforeEach(() => {
     mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations' ? [] : ROWS));
+  });
+
+  it('labels the Stores threshold column as Required, not Reorder', async () => {
+    renderAt('/stock');
+
+    const table = await screen.findByRole('table', { name: 'Stock lines' });
+    expect(within(table).getByRole('columnheader', { name: 'Required' })).toBeInTheDocument();
+    expect(within(table).queryByRole('columnheader', { name: 'Reorder' })).not.toBeInTheDocument();
   });
 
   it('searches for ?q=, as an item page links with its SKU', async () => {

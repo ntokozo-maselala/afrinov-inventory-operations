@@ -89,6 +89,7 @@ const purchaseOrderLines = new Map<string, POLineEntry>();
 const purchaseOrders = new Map<string, POEntry>();
 
 const fakeTx = {
+  $executeRaw: async () => undefined,
   inventoryTransaction: {
     create: async ({ data }: { data: Omit<TxRow, 'id'> }) => {
       const row: TxRow = { id: `trx-${++idSeq}`, ...data, postedAt: data.postedAt ?? new Date() };
@@ -217,6 +218,12 @@ const fakeTx = {
       if (!gr) throw new Error('not found');
       Object.assign(gr, data);
       return gr;
+    },
+    updateMany: async ({ where, data }: { where: { id: string; status: string }; data: Partial<GREntry> }) => {
+      const gr = goodsReceipts.get(where.id);
+      if (!gr || gr.status !== where.status) return { count: 0 };
+      Object.assign(gr, data);
+      return { count: 1 };
     },
   },
   purchaseOrderLine: {

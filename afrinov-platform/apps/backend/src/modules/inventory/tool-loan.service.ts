@@ -13,7 +13,7 @@ import { AdjustmentReasonCode, InventoryTransactionType, Prisma } from '@prisma/
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
+import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 
@@ -173,6 +173,7 @@ export const ToolLoanService = {
 
     return prisma.$transaction(async (tx) => {
       await lock(tx, totals.keys());
+      await lockInventoryBalances([...totals.values()], tx);
       await checkRecipientActive(input.recipientId, tx);
       if (input.projectNumber) await checkProjectActive(input.projectNumber, tx);
       for (const t of totals.values()) {
@@ -244,6 +245,7 @@ export const ToolLoanService = {
         if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out can be checked in');
       }
       await lock(tx, loans.map((l) => `${l.materialId}:${l.locationId}`));
+      await lockInventoryBalances(loans, tx);
 
       // Read after the lock, so two check-ins of one loan cannot both pass.
       const returned = await returnedByLoan(tx, loanIds);

@@ -10,12 +10,17 @@ Those results do not establish production readiness. Code inspection identified 
 
 The disposition is based on verified code paths and missing operational evidence. It does not claim that an external production system currently uses the risky configuration or has been compromised.
 
+### Remediation authorization update — 2026-10-26
+
+The owner approved application work packages 1–6 as mapped in `08_REMEDIATION_ROADMAP.md`. This includes SEC-01, DATA-01, DATA-02/DATA-04, SEC-02, DATA-03 and AUD-01. SEC-03 deployment configuration and all production changes remain outside that approval. The readiness verdict below remains the pre-remediation assessment until package acceptance evidence is recorded.
+
 ## Findings register
 
 | ID | Severity | Category | Confidence | Status |
 |---|---|---|---|---|
 | DATA-01 | High | Data integrity / concurrency | High for hazard; not reproduced against PostgreSQL | Confirmed by source |
 | DATA-02 | High | Data integrity / duplicate effects | High for hazard; not reproduced concurrently | Confirmed by source |
+| DATA-04 | High | Procurement / over-receipt concurrency | High for race pattern; not reproduced concurrently | Confirmed by source |
 | SEC-01 | High | Configuration / authentication | High | Probe reproduced |
 | SEC-03 | High if Compose is deployed on an untrusted/reachable host | Infrastructure / database access | High for config; deployment applicability unknown | Conditional |
 | SEC-02 | Medium local risk; upstream advisories include High severity | Dependency security | High for lockfile versions; exploitability not tested | Confirmed by npm audit |
@@ -24,6 +29,7 @@ The disposition is based on verified code paths and missing operational evidence
 | OPS-01 | High release gate; evidence gap, not a demonstrated implementation defect | Backup / deployment readiness | High that repository evidence is absent; external state unknown | Unverified |
 | SEC-04 | Low | CORS configuration | High | Confirmed conditional hardening risk |
 | SEC-05 | Medium conditional | Availability / rate limiting | Medium | Depends on proxy/replica topology |
+| SEC-06 | Medium conditional | Browser token exposure / XSS impact | High that localStorage is used; no injection sink found in searched sources | Confirmed architecture; host CSP unknown |
 | ARCH-01 | Medium conditional | Administrator recovery | Medium-high | Confirmed behavior; business acceptance unknown |
 | DOC-01 | Low | Operational documentation | High | Confirmed drift |
 | ARCH-02 | Informational pending product decision | Retry/idempotency contract | Medium | Design question, not confirmed defect |
@@ -53,6 +59,18 @@ The disposition is based on verified code paths and missing operational evidence
 - **Regression/acceptance:** concurrent POST calls against one submitted receipt in isolated PostgreSQL produce exactly one success, one conflict, one set of ledger entries and one PO increment. Sequential duplicate and failure rollback tests continue to pass.
 - **Rollback:** revert application change if necessary; preserve ledger data and use audited reversal/correction for any duplicate already posted.
 - **Verification status:** source-reviewed; existing sequential duplicate test was found, concurrent execution not run.
+
+### DATA-04 — Concurrent goods receipts can exceed a purchase-order line quantity
+
+- **Severity/confidence:** High / high confidence in the check-then-increment race; no concurrent PostgreSQL test was run during the audit.
+- **Affected:** `apps/backend/src/modules/inventory/inventory.service.ts` around 894–912; PO line receipt quantity updates.
+- **Evidence/reproduction:** each submitted goods receipt loads a purchase-order line, checks `receivedQty + receipt quantity <= orderedQty`, then increments `receivedQty`. Two different receipts for the same line can read the same remaining quantity, both pass, and both increment. DATA-02 is a separate race where two requests post the same receipt.
+- **Expected vs actual:** concurrent receipt commits must preserve `receivedQty <= orderedQty`; independent checks can each observe available quantity and collectively exceed the ordered cap.
+- **Impact/root cause:** over-receipt of a purchase-order line and divergence between procurement quantities and accepted stock.
+- **Remediation:** serialize updates to each affected PO line inside the transaction before reading `receivedQty` and applying the cap check. Keep receipt status claim and all line/ledger updates atomic.
+- **Regression/acceptance:** two distinct submitted receipts targeting one PO line race against the same remaining quantity; exactly one may consume the remaining capacity, the other conflicts, and final `receivedQty` never exceeds `orderedQty`. Existing sequential receipt behavior remains intact.
+- **Rollback:** revert the application change if required; reconcile any already over-received line through an approved procurement correction process, not direct history rewriting.
+- **Verification status:** source-reviewed; PostgreSQL reproduction pending.
 
 ### SEC-01 — Invalid NODE_ENV bypasses production-only secret checks
 
@@ -155,6 +173,16 @@ The disposition is based on verified code paths and missing operational evidence
 - **Remediation/acceptance:** confirm network topology, configure only known trusted proxies, and use a shared store if cluster-wide enforcement is required. Test client-specific limits in the actual topology.
 - **Verification status:** configuration inspected; deployment topology unknown.
 
+### SEC-06 — Browser token storage makes XSS impact high
+
+- **Severity/confidence:** Medium conditional / high confidence that the SPA stores bearer tokens in `localStorage`; no obvious injection sink was found in the searched application source.
+- **Affected:** frontend authentication/token persistence and the production static host's security headers, which are not defined in this repository.
+- **Evidence/reproduction:** the frontend persists the bearer token in browser local storage. Any successful same-origin script execution could read it. The audit did not identify an obvious script injection sink or inspect production Content Security Policy headers.
+- **Impact/root cause:** an XSS defect or unsafe third-party script could expose a reusable bearer token until expiry or revocation.
+- **Remediation:** retain as a security design risk for the frontend and static-host owner; review CSP and token lifetime/storage strategy in a separately scoped frontend security package.
+- **Regression/acceptance:** host-level CSP and script-source policy are verified against the deployed origin; any storage redesign includes session renewal, logout, refresh and XSS/CSRF trade-off tests.
+- **Verification status:** token storage confirmed; exploitability and production headers unverified. This finding is outside the approved work packages.
+
 ### DOC-01 — Operations documentation is stale
 
 - **Severity/confidence:** Low / high.
@@ -173,7 +201,7 @@ The disposition is based on verified code paths and missing operational evidence
 
 ## Release blockers
 
-1. Resolve DATA-01 and DATA-02 with isolated PostgreSQL concurrency tests and reviewed transaction/locking design.
+1. Resolve DATA-01, DATA-02 and DATA-04 with isolated PostgreSQL concurrency tests and reviewed transaction/locking design.
 2. Fix SEC-01 and verify configuration failure behavior before any production deployment.
 3. Confirm the actual Compose/deployment topology; remove production DB network exposure and superuser use if applicable.
 4. Provide production deployment, backup/restore and recovery evidence required by OPS-01.
@@ -181,7 +209,7 @@ The disposition is based on verified code paths and missing operational evidence
 
 ## Evidence limitations and residual risks
 
-The audit did not access a production host, production database, secret manager, CI run history, GitHub security alerts or network perimeter. No integration/E2E test, migration, seed, Docker build, restore drill, production configuration render or deployment was run. The configuration and concurrency defects are established from application source/probe, but real-world exploitability and deployment applicability remain unknown.
+The audit did not access a production host, production database, secret manager, CI run history, GitHub security alerts or network perimeter. No integration/E2E test, migration, seed, Docker build, restore drill, production configuration render or deployment was run during the audit. The configuration and concurrency defects are established from application source/probe, but real-world exploitability and deployment applicability remain unknown. The implementation evidence log records subsequent authorized work and any unavailable checks.
 
 ## Evidence references
 

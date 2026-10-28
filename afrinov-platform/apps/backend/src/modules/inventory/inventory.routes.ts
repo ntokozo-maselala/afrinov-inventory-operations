@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+
+// Keep the pre-Zod-4 API contract: validate UUID shape without requiring RFC version bits.
+const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 import { supplierIdSchema } from '../../shared/ids.js';
 import { InventoryService, type HistoryFilter } from './inventory.service.js';
 import { buildMovementsXlsx, movementsFilename, MOVEMENTS_EXPORT_LIMIT } from './movements-export.js';
@@ -56,25 +59,25 @@ async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>)
 }
 
 export const issueSchema = z.object({
-  recipientId: z.string().uuid(),
+  recipientId: uuidSchema,
   projectNumber: z.string().trim().min(1).max(64).optional(),
   lines: z.array(z.object({
-    materialId: z.string().uuid(),
-    locationId: z.string().uuid(),
+    materialId: uuidSchema,
+    locationId: uuidSchema,
     quantity: z.number().positive(),
   })).min(1).max(50),
 });
 
 export const transferSchema = z.object({
-  materialId: z.string().uuid(),
-  fromLocationId: z.string().uuid(),
-  toLocationId: z.string().uuid(),
+  materialId: uuidSchema,
+  fromLocationId: uuidSchema,
+  toLocationId: uuidSchema,
   quantity: z.number().positive(),
 });
 
 export const adjustmentSchema = z.object({
-  materialId: z.string().uuid(),
-  locationId: z.string().uuid(),
+  materialId: uuidSchema,
+  locationId: uuidSchema,
   quantity: z.number(),
   reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER']),
   reasonNote: z.string().optional(),
@@ -85,17 +88,17 @@ export const stockReceiptSchema = z.object({
   deliveryRef: z.string().trim().min(1).max(120),
   receivedAt: z.string().optional(),
   lines: z.array(z.object({
-    materialId: z.string().uuid(),
-    locationId: z.string().uuid(),
+    materialId: uuidSchema,
+    locationId: uuidSchema,
     quantity: z.number().positive(),
   })).min(1).max(50),
 });
 
 export const stockCountSchema = z.object({
-  locationId: z.string().uuid(),
+  locationId: uuidSchema,
   note: z.string().trim().max(500).optional(),
   lines: z.array(z.object({
-    materialId: z.string().uuid(),
+    materialId: uuidSchema,
     expectedQuantity: z.number().min(0),
     countedQuantity: z.number().min(0),
     note: z.string().trim().max(200).optional(),
@@ -104,7 +107,7 @@ export const stockCountSchema = z.object({
 
 export const returnSchema = z.object({
   quantity: z.number().positive(),
-  locationId: z.string().uuid().optional(),
+  locationId: uuidSchema.optional(),
   reason: z.string().trim().max(500).optional(),
 });
 
@@ -113,7 +116,7 @@ export const returnManySchema = z.object({
   lines: z.array(z.object({
     issueTransactionId: z.string().min(1),
     quantity: z.number().positive(),
-    locationId: z.string().uuid().optional(),
+    locationId: uuidSchema.optional(),
   })).min(1).max(100),
   reason: z.string().trim().max(500).optional(),
 });

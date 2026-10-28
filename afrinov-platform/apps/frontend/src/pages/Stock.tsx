@@ -270,7 +270,7 @@ function columns({ section, placeOf, onAction, canTransfer, canAdjust }: {
     { key: 'uom', header: 'UoM', render: (r) => r.unitOfMeasure, width: '6rem' },
     // Re-ordering is for Stores: Projects material is bought per job.
     ...(section === 'STORES' ? [
-      { key: 'reorder', header: 'Reorder', align: 'right' as const, className: 'text-num', render: (r: CurrentStockRow) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span>, width: '8rem' },
+      { key: 'reorder', header: 'Required', align: 'right' as const, className: 'text-num', render: (r: CurrentStockRow) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span>, width: '8rem' },
       { key: 'status', header: 'Status', render: (r: CurrentStockRow) => statusBadge(r), width: '10rem' },
     ] : []),
     // Each button only for those the server lets do it; no column for those who can do neither.

@@ -141,6 +141,8 @@
 | 2026-10-20 | `01-product/*`, `02-business-analysis/*`, `03-domain/*`, `06-system-architecture/*`, `07-data/migration-strategy.md`, `08-api/*`, `09-frontend/frontend-architecture.md`, `11-testing/*`, `13-project-management/onboarding.md`, `technical-debt.md`, `14-validation/*`, `00-governance/glossary.md` | Corrected: procurement on by default; tool check-out/check-in implemented (was Planned); tools imported; supplier update exists; TD-015 partly resolved | Engineering (reconciliation against code at a7a7360) |
 | 2026-10-22 | Repository `README.md`, `docs/README.md`, documentation inventory and reorganization report, project roadmaps, documentation guide, product roadmap, and migration README | Added repository-wide navigation and a complete document disposition inventory; grouped audit reports and specialist roadmaps; corrected moved references and migration-folder name | Engineering (repository maintenance) |
 
+| 2026-10-28 | `00-governance/change-log.md`, `09-frontend/page-inventory.md`, `11-testing/test-traceability.md` | Corrected: the Stores Stock table's threshold column is labelled **Required**; recorded its user-facing regression test | Engineering |
+
 Add one row per meaningful revision (not typo fixes). For architecture-level
 changes, also add an ADR in `decision-log.md` and reference its ID here.
 The 2026-10-09 rows record a reconciliation of every document with the code;

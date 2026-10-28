@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Login (`/login`) | Identity | Sign in | `POST /auth/login` |
 | Dashboard (`/`) | Cross-domain | Stock value, items in stock, urgent, warning, out of stock, tools checked out (and overdue); stock status and value charts; re-order candidates; "Waiting for your approval" for approvers | `GET /reports/inventory`, `/reports/low-stock`, `/reports/stock-value`, `/tools`, `/purchase-orders?awaitingMyApproval=true` |
-| Stock (`/stock`) | Inventory | Current balances; transfer and adjust from a row | `GET /reports/current-stock`; `POST /inventory-transfers`, `/inventory-adjustments` |
+| Stock (`/stock`) | Inventory | Current balances; Stores table shows each item's **Required** stock threshold; transfer and adjust from a row | `GET /reports/current-stock`; `POST /inventory-transfers`, `/inventory-adjustments` |
 | Issue stock (`/stock/issue`) | Inventory | Issue several items to one recipient, optional project | `POST /inventory-issues` |
 | Return stock (`/stock/return`) | Inventory | Return unused stock from a recipient against the issues it came from (last 30 days unless changed) | `GET /inventory-returns/returnable`, `POST /inventory-returns` |
 | Receive stock (`/stock/receive`) | Inventory | Counter receipt: supplier, delivery/invoice number, several items; add a new supplier or item from the form; offers the supplier's open purchase orders | `POST /stock-receipts`, `POST /suppliers`, `POST /materials` |

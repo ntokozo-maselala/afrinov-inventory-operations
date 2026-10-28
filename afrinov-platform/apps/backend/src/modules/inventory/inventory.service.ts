@@ -12,7 +12,7 @@ import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance, getCurrentBalance } from '../../shared/inventory/balances.js';
+import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
@@ -115,6 +115,13 @@ async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.Transac
   }
 }
 
+
+async function lockPurchaseOrderLines(lineIds: string[], tx: Prisma.TransactionClient): Promise<void> {
+  for (const lineId of [...new Set(lineIds)].sort()) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`afrinov:purchase-order-line:${lineId}`}))`;
+  }
+}
+
 async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): Promise<Decimal> {
   const agg = await tx.inventoryTransaction.aggregate({
     where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: issueId },
@@ -142,6 +149,8 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   if (issue.reversedBy) throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
 
   const issued = issue.quantity.negated();
+  const locationId = input.locationId ?? issue.locationId;
+  await lockInventoryBalances([{ materialId: issue.materialId, locationId: issue.locationId }, { materialId: issue.materialId, locationId }], tx);
   const alreadyReturned = await returnedAgainst(issue.id, tx);
   const returnable = issued.minus(alreadyReturned);
   if (input.qty.gt(returnable)) {
@@ -151,7 +160,6 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
     );
   }
 
-  const locationId = input.locationId ?? issue.locationId;
   await checkLocationActive(locationId, tx);
 
   const trx = await tx.inventoryTransaction.create({
@@ -484,6 +492,7 @@ export const InventoryService = {
         }
 
         // A reversal must not take any balance below zero.
+        await lockInventoryBalances(legs, tx);
         for (const leg of legs) {
           if (!leg.quantity.isPositive()) continue;
           const balance = await getCurrentBalance(leg.materialId, leg.locationId, tx);
@@ -565,6 +574,7 @@ export const InventoryService = {
     }
 
     return prisma.$transaction(async (tx) => {
+      await lockInventoryBalances([...totals.values()], tx);
       await checkRecipientActive(input.recipientId, tx);
       if (input.projectNumber) await checkProjectTakesIssues(input.projectNumber, tx);
 
@@ -744,6 +754,7 @@ export const InventoryService = {
     }
 
     return prisma.$transaction(async (tx) => {
+      await lockInventoryBalances([{ materialId: input.materialId, locationId: input.fromLocationId }, { materialId: input.materialId, locationId: input.toLocationId }], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.fromLocationId, tx);
       await checkLocationActive(input.toLocationId, tx);
@@ -804,6 +815,7 @@ export const InventoryService = {
     if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
 
     return prisma.$transaction(async (tx) => {
+      await lockInventoryBalances([{ materialId: input.materialId, locationId: input.locationId }], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
 
@@ -852,6 +864,8 @@ export const InventoryService = {
         include: { lines: true },
       });
       if (!gr) throw Errors.notFound('GoodsReceipt');
+      await lockPurchaseOrderLines(gr.lines.map((line) => line.purchaseOrderLineId).filter((id): id is string => Boolean(id)), tx);
+      await lockInventoryBalances(gr.lines, tx);
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
       // The order may have been cancelled or closed since the receipt was recorded.
@@ -882,6 +896,12 @@ export const InventoryService = {
           }
         }
       }
+
+      const claimed = await tx.goodsReceipt.updateMany({
+        where: { id: gr.id, status: 'SUBMITTED' },
+        data: { status: 'POSTED' },
+      });
+      if (claimed.count === 0) throw Errors.invalidState('Goods receipt already posted');
 
       for (const line of gr.lines) {
         const qty = toDecimal(line.quantity);

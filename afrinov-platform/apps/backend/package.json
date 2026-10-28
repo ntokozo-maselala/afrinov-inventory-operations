@@ -29,7 +29,7 @@
     "diag:admin": "tsx --env-file=.env scripts/diagnostic.ts"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "^7.3.4",
+    "@asteasolutions/zod-to-openapi": "9.1.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.0.0",
     "@fastify/jwt": "^10.2.2",
@@ -42,7 +42,7 @@
     "fastify": "^5.0.0",
     "pdfkit": "^0.20.2",
     "prisma": "^5.18.0",
-    "zod": "^3.23.8"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

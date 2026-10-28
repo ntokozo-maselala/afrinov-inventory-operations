@@ -71,6 +71,7 @@ vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValue:
 vi.mock('../../shared/inventory/balances.js', () => ({
   getCurrentBalance: async (materialId: string, locationId: string) => balance(materialId, locationId),
   recomputeBalance: async () => undefined,
+  lockInventoryBalances: async () => undefined,
 }));
 
 const { ToolLoanService } = await import('./tool-loan.service.js');
