@@ -10,7 +10,9 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     include: ['src/**/*.test.ts'],
-    singleFork: true,
+    // Vitest 5 removed `singleFork`; run every file in one worker process so
+    // the mocked singleton Prisma client stays shared across test files.
+    fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

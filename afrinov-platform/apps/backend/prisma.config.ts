@@ -1,19 +1,16 @@
 import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
+import { requiresDatabaseUrl } from './src/shared/databaseUrlGuard.js';
 
-// Commands that never open a connection. They run in pretypecheck/pretest/prebuild
-// where DATABASE_URL may be absent, so a placeholder URL is harmless.
-const OFFLINE_COMMANDS = new Set(['generate', 'validate', 'format']);
-
-// Every other command (migrate, db seed, introspect, …) does touch the database.
-// Falling back to a local URL there could apply migrations to the wrong server,
-// so require the variable to be set explicitly.
-const command = process.argv[2] ?? '';
 const databaseUrl = process.env.DATABASE_URL;
 
-if (!OFFLINE_COMMANDS.has(command) && !databaseUrl) {
+// The datasource falls back to a local URL so schema-only commands (generate,
+// validate, format) work without DATABASE_URL in pretypecheck/pretest/prebuild.
+// For every other command a missing variable is an error: silently migrating
+// the local `afrinov` database instead of the intended server is worse.
+if (requiresDatabaseUrl(process.argv) && !databaseUrl) {
   throw new Error(
-    `DATABASE_URL is required for "prisma ${command}" but was not set. ` +
+    'DATABASE_URL is required for this Prisma command but was not set. ' +
       'Set it in the environment or in apps/backend/.env.',
   );
 }

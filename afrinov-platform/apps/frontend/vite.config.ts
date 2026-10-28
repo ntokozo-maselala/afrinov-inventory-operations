@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { demoBuildRefusal } from './src/config/buildGuard';
+import { demoBuildRefusal } from './src/config/buildGuard.ts';
 
 // Fails a production build that would ship demo login or mock data.
 function refuseDemoFlagsInProduction(): Plugin {
@@ -23,6 +23,10 @@ export default defineConfig({
     },
   },
   build: {
+    // exceljs ships as a ~930 kB lazy chunk. It is only fetched on demand by
+    // the export actions (`await import('exceljs')`), so it never affects first
+    // paint; the default 500 kB budget is meant for eagerly-loaded code.
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks: (id: string) => {
