@@ -81,6 +81,8 @@ interface HistoryEntry {
   entityId: string;
   entityType: string;
   actorId: string | null;
+  /** Who did it; null when the account no longer exists. */
+  actorName?: string | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   createdAt: string;
@@ -385,7 +387,7 @@ function History({ entries, loading }: { entries: HistoryEntry[]; loading: boole
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-surface-900">{describeEntry(e)}</div>
             <div className="text-xs text-surface-500">
-              {formatDateTime(e.createdAt)} · {e.actorId ?? 'system'}
+              {formatDateTime(e.createdAt)} · {e.actorName ?? (e.actorId ? 'A removed user' : 'System')}
             </div>
           </div>
         </li>
@@ -395,12 +397,16 @@ function History({ entries, loading }: { entries: HistoryEntry[]; loading: boole
 }
 
 function describeEntry(e: HistoryEntry): string {
-  const after = (e.after ?? {}) as { status?: string };
+  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string };
   const before = (e.before ?? {}) as { status?: string };
-  if (before.status && after.status) {
-    return `${labelForAction(e.action)}: ${before.status} → ${after.status}`;
+  const label = e.action === 'PO_GOODS_RECEIVED' && after.goodsReceiptNumber
+    ? `Received on ${after.goodsReceiptNumber}`
+    : labelForAction(e.action);
+  // A later delivery that leaves the order Partly received changes no status.
+  if (before.status && after.status && before.status !== after.status) {
+    return `${label}: ${statusLabel(before.status as POStatus)} → ${statusLabel(after.status as POStatus)}`;
   }
-  return labelForAction(e.action);
+  return label;
 }
 
 function labelForAction(action: string): string {
@@ -411,6 +417,7 @@ function labelForAction(action: string): string {
     PO_APPROVE: 'Approved',
     PO_SUBMIT_AUTO_APPROVE: 'Submitted and approved',
     PO_RECEIVE: 'Received all outstanding',
+    PO_GOODS_RECEIVED: 'Delivery received',
     PO_CLOSE: 'Closed',
     PO_CANCEL: 'Cancelled',
     // From the earlier shipping flow; kept so older history still reads well.

@@ -639,7 +639,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/history'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    return po.history ?? [];
+    // As the server: each entry with the name of who did it.
+    return (po.history ?? []).map((e) => ({ ...e, actorName: e.actorId ? devUser().name : null }));
   }
   if (method === 'GET' && p.startsWith('/purchase-orders/')) {
     const id = p.slice('/purchase-orders/'.length);
@@ -696,6 +697,7 @@ function route(method: string, path: string, body?: unknown): unknown {
         deliveryDate: l.deliveryDate ?? null,
       })),
     };
+    po.history!.push({ id: nextId('audit'), action: 'CREATE', actorId: 'u-admin', before: null, after: { number: po.number, status: po.status }, createdAt: po.createdAt });
     state.purchaseOrders.push(po);
     return { ...po, supplier: findSupplier(po.supplierId), lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })) };
   }
@@ -956,9 +958,12 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (gr.purchaseOrderId) {
       const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
       if (po) {
+        const before = { status: po.status };
         const allFully = po.lines.every((l) => Number(l.receivedQty) >= Number(l.orderedQty));
         const anyReceived = po.lines.some((l) => Number(l.receivedQty) > 0);
         if (allFully || anyReceived) po.status = allFully ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+        po.history = po.history ?? [];
+        po.history.push({ id: nextId('audit'), action: 'PO_GOODS_RECEIVED', actorId: 'u-admin', before, after: { status: po.status, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number }, createdAt: new Date().toISOString() });
       }
     }
     return {

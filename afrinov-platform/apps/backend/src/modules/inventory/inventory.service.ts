@@ -928,14 +928,30 @@ export const InventoryService = {
         });
         const allFully = lines.every((l) => toDecimal(l.receivedQty).gte(toDecimal(l.orderedQty)));
         const anyReceived = lines.some((l) => gtZero(toDecimal(l.receivedQty)));
+        const order = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId }, select: { status: true } });
+        const statusBefore = order?.status ?? null;
+        let status = statusBefore;
         if (allFully || anyReceived) {
-          await tx.purchaseOrder.update({
+          const updated = await tx.purchaseOrder.update({
             where: { id: gr.purchaseOrderId },
             data: allFully
               ? { status: 'RECEIVED', deliveredAt: new Date(), deliveredById: input.actorId }
               : { status: 'PARTIALLY_RECEIVED' },
           });
+          status = updated.status;
         }
+        // On the order's Activity: which receipt it was received on, and the
+        // status it moved to (it stays Partly received until the last line).
+        await tx.auditLogEntry.create({
+          data: {
+            actorId: input.actorId,
+            action: 'PO_GOODS_RECEIVED',
+            entityType: 'PurchaseOrder',
+            entityId: gr.purchaseOrderId,
+            before: { status: statusBefore } as Prisma.InputJsonValue,
+            after: { status, goodsReceiptId: gr.id, goodsReceiptNumber: gr.number } as Prisma.InputJsonValue,
+          },
+        });
       }
 
       await dispatchDomainEvents([

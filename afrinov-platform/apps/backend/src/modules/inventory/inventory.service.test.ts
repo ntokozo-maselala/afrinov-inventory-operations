@@ -1119,6 +1119,27 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(purchaseOrders.get('po-1')?.status).toBe('PARTIALLY_RECEIVED');
     });
 
+    // The order's Activity once had no entry for a delivery, though its status changed.
+    it('records on the order which receipt it was received on, and the status it moved to', async () => {
+      purchaseOrderLines.set('pol-1', {
+        id: 'pol-1', purchaseOrderId: 'po-1', materialId: 'm-1',
+        orderedQty: new Prisma.Decimal(10), receivedQty: new Prisma.Decimal(0),
+      });
+      goodsReceipts.set('gr-1', {
+        id: 'gr-1', number: 'GR-2026-0007', status: 'SUBMITTED', purchaseOrderId: 'po-1',
+        lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: new Prisma.Decimal(5), purchaseOrderLineId: 'pol-1' }],
+      } as never);
+      purchaseOrders.set('po-1', { id: 'po-1', status: 'APPROVED' });
+
+      await InventoryService.postGoodsReceipt({ goodsReceiptId: 'gr-1', actorId: 'user-1' });
+
+      expect(auditLog.filter((e) => e.entityType === 'PurchaseOrder')).toEqual([expect.objectContaining({
+        actorId: 'user-1', action: 'PO_GOODS_RECEIVED', entityId: 'po-1',
+        before: { status: 'APPROVED' },
+        after: { status: 'PARTIALLY_RECEIVED', goodsReceiptId: 'gr-1', goodsReceiptNumber: 'GR-2026-0007' },
+      })]);
+    });
+
     it('does not transition PO status when purchaseOrderId is null', async () => {
       goodsReceipts.set('gr-1', {
         id: 'gr-1', status: 'SUBMITTED', purchaseOrderId: null,

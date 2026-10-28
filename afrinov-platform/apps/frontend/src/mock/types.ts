@@ -148,7 +148,7 @@ export interface MockPurchaseOrder {
   closeReason?: string | null;
   createdBy?: MockUser | null;
   lines: MockPurchaseOrderLine[];
-  history?: Array<{ id: string; action: string; actorId: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; createdAt: string }>;
+  history?: Array<{ id: string; action: string; actorId: string | null; actorName?: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; createdAt: string }>;
   goodsReceipts?: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }>;
 }
 

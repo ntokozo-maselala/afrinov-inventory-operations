@@ -73,8 +73,11 @@ function makePrisma(): unknown {
     },
     user: {
       findUnique: async ({ where }: { where: { id: string } }) => db.users.get(where.id) ?? null,
-      // Stands in for "active users whose role holds approve:purchase_order".
-      findMany: async () => [...db.users.values()].filter((u) => u.canApprove),
+      // By id (names on the order's Activity), or else stands in for "active
+      // users whose role holds approve:purchase_order".
+      findMany: async ({ where }: { where?: { id?: { in: string[] } } } = {}) => where?.id
+        ? where.id.in.map((id) => db.users.get(id)).filter((u) => !!u)
+        : [...db.users.values()].filter((u) => u.canApprove),
     },
     material: {
       findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null,
@@ -391,6 +394,15 @@ describe('PurchaseOrderService lifecycle', () => {
     const actions = hist.map((h) => h.action);
     expect(actions).toContain('PO_SUBMIT');
     expect(actions).toContain('PO_APPROVE');
+  });
+
+  it('history starts with the order being created, and names who did each step', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    const hist = await PurchaseOrderService.history(po.id);
+    expect(hist.find((h) => h.action === 'CREATE')).toMatchObject({ actorId: 'user-1', actorName: 'Thandi Buyer', after: { number: po.number, status: 'DRAFT' } });
+    expect(hist.every((h) => h.actorName === 'Thandi Buyer')).toBe(true);
   });
 
   it('with requireApprovalBeforeProcessing off, submit auto-approves', async () => {
