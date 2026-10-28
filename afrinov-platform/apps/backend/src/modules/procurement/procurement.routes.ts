@@ -136,6 +136,8 @@ export const createGRSchema = z.object({
       }),
     )
     .min(1),
+  /** Post it into stock as well, in the same step. */
+  post: z.boolean().optional(),
 });
 
 function actorId(req: unknown): string {
@@ -305,7 +307,10 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid goods receipt payload', details: parsed.error.flatten() },
       });
     }
-    const created = await GoodsReceiptService.create(parsed.data, actorId(req));
+    const { post, ...input } = parsed.data;
+    const created = post
+      ? await GoodsReceiptService.receive(input, actorId(req))
+      : await GoodsReceiptService.create(input, actorId(req));
     return reply.code(201).send(created);
   });
 

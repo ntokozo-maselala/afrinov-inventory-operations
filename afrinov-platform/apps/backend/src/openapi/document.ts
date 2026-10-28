@@ -480,7 +480,7 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.ViewGoodsReceipt], errors: [404],
   },
   {
-    method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED)',
+    method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED), or with post: true record and post it in one step',
     description: 'Stock does not change until the receipt is posted.',
     procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404],
   },

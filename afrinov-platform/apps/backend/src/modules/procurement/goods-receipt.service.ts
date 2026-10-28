@@ -74,7 +74,12 @@ export const GoodsReceiptService = {
     return gr;
   },
 
-  async create(input: CreateGoodsReceiptInput, actorId: string) {
+  /**
+   * Records a delivery. With `post`, it is also posted into stock in the same
+   * transaction: if posting fails, nothing is recorded, so a failed attempt
+   * leaves no unposted receipt behind.
+   */
+  async create(input: CreateGoodsReceiptInput, actorId: string, opts: { post?: boolean } = {}) {
     if (input.lines.length === 0) throw Errors.validation('Goods receipt must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
@@ -98,7 +103,7 @@ export const GoodsReceiptService = {
       // collide on the same sequential number.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
       const number = await generateGRNumber(tx);
-      return tx.goodsReceipt.create({
+      const gr = await tx.goodsReceipt.create({
         data: {
           number,
           purchaseOrderId: input.purchaseOrderId ?? null,
@@ -117,7 +122,15 @@ export const GoodsReceiptService = {
         },
         include: { lines: true },
       });
+      if (opts.post) await InventoryService.postGoodsReceipt({ goodsReceiptId: gr.id, actorId }, tx);
+      return gr;
     });
+  },
+
+  /** Records a delivery and posts it into stock, as one step. */
+  async receive(input: CreateGoodsReceiptInput, actorId: string) {
+    const gr = await this.create(input, actorId, { post: true });
+    return this.getById(gr.id);
   },
 
   async post(id: string, actorId: string) {
@@ -126,10 +139,18 @@ export const GoodsReceiptService = {
   },
 };
 
+/**
+ * The next number after this year's highest. Counting the year's receipts
+ * instead reissued a number once a receipt was deleted, and then collided
+ * with a later one. Callers hold the gr-number advisory lock.
+ */
 export async function generateGRNumber(tx: Prisma.TransactionClient): Promise<string> {
-  const year = new Date().getFullYear();
-  const count = await tx.goodsReceipt.count({
-    where: { createdAt: { gte: new Date(`${year}-01-01T00:00:00Z`) } },
-  });
-  return `GR-${year}-${String(count + 1).padStart(4, '0')}`;
+  const prefix = `GR-${new Date().getFullYear()}-`;
+  // Numbers past 9999 are longer, so the highest is found as a number, not as text.
+  const ours = `^${prefix}[0-9]+$`;
+  const [row] = await tx.$queryRaw<Array<{ last: number | null }>>`
+    SELECT MAX(CAST(substring(number FROM ${prefix.length + 1}::integer) AS integer)) AS last
+    FROM goods_receipts
+    WHERE number ~ ${ours}`;
+  return `${prefix}${String((row?.last ?? 0) + 1).padStart(4, '0')}`;
 }

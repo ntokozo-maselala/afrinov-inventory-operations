@@ -51,6 +51,8 @@ function makeTx() {
     },
     auditLogEntry: { create: async ({ data }: { data: { action: string; entityId: string } }) => { db.audit.push(data); return data; } },
     $executeRaw: async () => 0,
+    // The year's highest receipt number.
+    $queryRaw: async () => [{ last: db.receipts.length || null }],
   };
 }
 
