@@ -18,7 +18,9 @@ describe('mock: purchase order Activity', () => {
     const history = await api.get<Array<{ action: string; actorId: string | null; actorName: string | null; after: Record<string, unknown> | null }>>(`/purchase-orders/${po.id}/history`);
     const order = await api.get<{ status: string; approvedBy?: { id: string; name: string } }>(`/purchase-orders/${po.id}`);
 
-    expect(history[0]).toMatchObject({ action: 'CREATE', after: { number: po.number, status: 'DRAFT' } });
+    // Newest first, as the server returns it.
+    expect(history.map((e) => e.action)).toEqual(['PO_APPROVE', 'PO_SUBMIT', 'CREATE']);
+    expect(history.at(-1)).toMatchObject({ action: 'CREATE', after: { number: po.number, status: 'DRAFT' } });
     const approval = history.find((e) => e.action === 'PO_APPROVE');
     expect(order.approvedBy).toBeDefined();
     expect(approval).toMatchObject({ actorId: order.approvedBy!.id, actorName: order.approvedBy!.name });

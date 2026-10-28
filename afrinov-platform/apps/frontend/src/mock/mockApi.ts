@@ -642,9 +642,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/history'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    // As the server: each entry with the name of who did it, and none for an
-    // id that is no user.
-    return (po.history ?? []).map((e) => ({ ...e, actorName: (e.actorId && MOCK_ACTOR_NAMES[e.actorId]) || null }));
+    // As the server: newest first (entries are kept in the order they
+    // happened), each with the name of who did it, and none for an id that is
+    // no user.
+    return [...(po.history ?? [])].reverse().map((e) => ({ ...e, actorName: (e.actorId && MOCK_ACTOR_NAMES[e.actorId]) || null }));
   }
   if (method === 'GET' && p.startsWith('/purchase-orders/')) {
     const id = p.slice('/purchase-orders/'.length);
