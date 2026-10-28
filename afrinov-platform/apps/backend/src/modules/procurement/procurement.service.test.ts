@@ -19,6 +19,7 @@ interface PO {
   notes: string | null; createdById: string; createdAt: Date; updatedAt: Date;
   expectedDeliveryDate: Date | null;
   approvedAt: Date | null; approvedById: string | null;
+  printedTerms?: unknown;
   shippedAt: Date | null; shippedById: string | null;
   trackingNumber: string | null; carrier: string | null; shipmentNotes: string | null;
   deliveredAt: Date | null; deliveredById: string | null; deliveryNotes: string | null;
@@ -873,8 +874,14 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === id)!.id;
     await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 200000 }] }, 'user-1'); // R230 000: still within
     expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
+    // Still approved, it keeps the small print it was approved with.
+    expect(db.pos.get(id)!.printedTerms).toBeTruthy();
     await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 450000 }] }, 'user-1'); // R517 500
     expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null, approvedAt: null });
+    // Back for approval, it drops it: its draft prints today's wording, and approving it again takes that.
+    expect(db.pos.get(id)!.printedTerms).toBe(Prisma.DbNull);
+    await PurchaseOrderService.approve(id, 'u-sb');
+    expect(db.pos.get(id)!.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za' });
   });
 });
 

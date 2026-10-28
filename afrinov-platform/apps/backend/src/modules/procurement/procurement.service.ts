@@ -533,7 +533,9 @@ export const PurchaseOrderService = {
         const approver = await tx.user.findUnique({ where: { id: po.approvedById }, select: { approvalLimit: true } });
         const vat = input.vatRate ?? po.vatRate;
         if (approvalBlock({ currency: po.currency, vatRate: vat, lines }, approver?.approvalLimit ?? null)) {
-          Object.assign(data, { status: 'PENDING_APPROVAL', approvedAt: null, approvedById: null });
+          // Back for approval, it has no approved wording until approved again:
+          // its draft prints today's small print, and approval takes that.
+          Object.assign(data, { status: 'PENDING_APPROVAL', approvedAt: null, approvedById: null, printedTerms: Prisma.DbNull });
         }
       }
       const after = await tx.purchaseOrder.update({ where: { id: input.id }, data });

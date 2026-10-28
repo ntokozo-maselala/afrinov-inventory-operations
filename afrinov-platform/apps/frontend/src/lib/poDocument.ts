@@ -115,15 +115,18 @@ export function smallPrint(po: Pick<PoDocumentOrder, 'number' | 'penaltiesApply'
   const kept = po.printedTerms;
   const wording = (k: keyof PoSmallPrintWording) => (kept ? kept[k] ?? '' : company[k]).trim();
   const sections: SmallPrintSection[] = [];
-  const add = (heading: string, paragraphs: Array<{ text: string; bold?: boolean } | false>) => {
-    const kept = paragraphs.filter((p): p is { text: string; bold?: boolean } => !!p && !!p.text);
-    if (kept.length) sections.push({ heading, paragraphs: kept });
+  // A section shows when its own wording is there; the penalty and where
+  // invoices go only finish a section, so blanking its wording leaves it off.
+  const add = (heading: string, main: string, extra: Array<{ text: string; bold?: boolean } | false> = []) => {
+    if (!main) return;
+    const more = extra.filter((p): p is { text: string; bold?: boolean } => !!p && !!p.text);
+    sections.push({ heading, paragraphs: [{ text: main }, ...more] });
   };
-  add('Terms', [{ text: wording('terms') }, !!po.penaltiesApply && { text: wording('latePenalty'), bold: true }]);
-  add('Documentation', [{ text: wording('documentation') }]);
+  add('Terms', wording('terms'), [!!po.penaltiesApply && { text: wording('latePenalty'), bold: true }]);
+  add('Documentation', wording('documentation'));
   const email = wording('invoiceEmail');
-  add('Invoicing & Payment', [{ text: wording('invoicing') }, !!email && { text: `Invoices to be submitted to: ${email}, quoting ${po.number}.`, bold: true }]);
-  add('Code of Conduct', [{ text: wording('codeOfConduct') }]);
+  add('Invoicing & Payment', wording('invoicing'), [!!email && { text: `Invoices to be submitted to: ${email}, quoting ${po.number}.`, bold: true }]);
+  add('Code of Conduct', wording('codeOfConduct'));
   return sections;
 }
 

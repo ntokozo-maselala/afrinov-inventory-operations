@@ -252,6 +252,15 @@ function nextPoNumber(): string {
 
 // Approval by value as the server works it out (po-approval.ts), for the
 // signed-in mock user (user-1, an admin without a limit).
+/** The small print as the settings have it now, kept on an order when it is approved. */
+function mockPrintedTerms(): NonNullable<MockPurchaseOrder['printedTerms']> {
+  const wording = (k: string) => String(MOCK_SETTINGS[`purchaseOrders.${k}`]?.value ?? '');
+  return {
+    terms: wording('terms'), latePenalty: wording('latePenalty'), documentation: wording('documentation'),
+    invoicing: wording('invoicing'), invoiceEmail: wording('invoiceEmail'), codeOfConduct: wording('codeOfConduct'),
+  };
+}
+
 function mockApproval(po: MockPurchaseOrder) {
   const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
   const currency = po.currency ?? 'ZAR';
@@ -715,8 +724,18 @@ function route(method: string, path: string, body?: unknown): unknown {
     checkProjectMaterial(po.projectNumber, po.lines.map((l) => l.materialId), 'ordered');
     if (po.projectNumber) assertProjectOpen(po.projectNumber);
     const before = { status: po.status };
-    po.status = 'PENDING_APPROVAL';
     po.history = po.history ?? [];
+    // As the server: with approval not required, submission approves it, and
+    // it keeps the small print it was approved with.
+    if (MOCK_SETTINGS['purchaseOrders.requireApprovalBeforeProcessing']?.value === false) {
+      po.status = 'APPROVED';
+      po.approvedAt = new Date().toISOString();
+      po.approvedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
+      po.printedTerms = mockPrintedTerms();
+      po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT_AUTO_APPROVE', actorId: 'u-admin', before, after: { status: po.status, autoApprove: true }, createdAt: new Date().toISOString() });
+      return po;
+    }
+    po.status = 'PENDING_APPROVAL';
     po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
@@ -733,11 +752,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.approvedAt = new Date().toISOString();
     po.approvedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
     // As the server: the order keeps the small print it was approved with.
-    const wording = (k: string) => String(MOCK_SETTINGS[`purchaseOrders.${k}`]?.value ?? '');
-    po.printedTerms = {
-      terms: wording('terms'), latePenalty: wording('latePenalty'), documentation: wording('documentation'),
-      invoicing: wording('invoicing'), invoiceEmail: wording('invoiceEmail'), codeOfConduct: wording('codeOfConduct'),
-    };
+    po.printedTerms = mockPrintedTerms();
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;

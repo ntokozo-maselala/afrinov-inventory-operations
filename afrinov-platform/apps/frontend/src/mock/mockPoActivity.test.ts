@@ -27,3 +27,30 @@ describe('mock: purchase order Activity', () => {
     expect(history.every((e) => e.actorName === history[0]!.actorName && e.actorName)).toBe(true);
   });
 });
+
+// As the server: an order keeps the small print it was approved with, whether
+// an approver approved it or submission did, with approval not required.
+describe('mock: small print kept on approval', () => {
+  type Order = { id: string; status: string; printedTerms?: Record<string, string> | null };
+  const draft = () => api.post<Order>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] });
+
+  it('keeps it when an approver approves the order', async () => {
+    const po = await draft();
+    expect((await api.post<Order>(`/purchase-orders/${po.id}/submit`, {})).printedTerms ?? null).toBeNull();
+    const approved = await api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
+    expect(approved.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za', terms: expect.stringContaining('Purchase Order delivery date') });
+  });
+
+  it('keeps it when submission approves the order, with approval not required', async () => {
+    // Settings outlive resetMockState, so it is put back however the test ends.
+    await api.patch('/settings', { updates: { 'purchaseOrders.requireApprovalBeforeProcessing': false } });
+    try {
+      const po = await draft();
+      const submitted = await api.post<Order>(`/purchase-orders/${po.id}/submit`, {});
+      expect(submitted.status).toBe('APPROVED');
+      expect(submitted.printedTerms).toMatchObject({ documentation: expect.stringContaining('Material Certificates') });
+    } finally {
+      await api.patch('/settings', { updates: { 'purchaseOrders.requireApprovalBeforeProcessing': true } });
+    }
+  });
+});

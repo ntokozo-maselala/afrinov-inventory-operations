@@ -194,6 +194,13 @@ describe('smallPrint', () => {
     expect(headings(s)).toEqual(['Invoicing & Payment']);
   });
 
+  // The penalty and where invoices go only finish a section: blanking the
+  // section's own wording leaves it off, as the settings say.
+  it('leaves Terms and Invoicing & Payment off when their wording is blank, though the penalty and invoice email are set', () => {
+    const s = smallPrint({ number: 'AFRI-0412', penaltiesApply: true }, { ...COMPANY, terms: '', invoicing: ' ' });
+    expect(headings(s)).toEqual(['Documentation', 'Code of Conduct']);
+  });
+
   it('prints an approved order with the wording it was approved with, not today\'s', () => {
     const kept = { terms: 'Old terms.', latePenalty: 'Old penalty.', documentation: '', invoicing: 'Old invoicing.', invoiceEmail: 'old@afrinov.co.za', codeOfConduct: '' };
     const s = smallPrint({ number: 'AFRI-0412', penaltiesApply: true, printedTerms: kept }, COMPANY);
