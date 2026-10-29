@@ -97,6 +97,24 @@ describe('Requests for quotation list', () => {
     appAt('/rfqs');
     expect(await screen.findByRole('link', { name: /New RFQ/ })).toHaveAttribute('href', '/rfqs/new');
   });
+
+  it.each(['APPROVER', 'STORE_CONTROLLER'])('lets a %s look, with nothing to raise, send, edit or cancel', async (role) => {
+    auth.roles = [role];
+    const { unmount } = appAt('/rfqs');
+    await screen.findByRole('table', { name: 'Requests for quotation' });
+    expect(screen.queryByRole('link', { name: /New RFQ/ })).not.toBeInTheDocument();
+    unmount();
+    appAt('/rfqs/r-d');
+    await screen.findByRole('heading', { name: 'AFRI-02A-1325-02-01' });
+    for (const name of ['Send to suppliers', 'Edit', 'Cancel RFQ']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  });
+
+  it('keeps New RFQ from someone who may not raise one', async () => {
+    auth.roles = ['APPROVER'];
+    appAt('/rfqs/new');
+    expect(await screen.findByText(/raise requests for quotation/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
+  });
 });
 
 describe('New request for quotation', () => {

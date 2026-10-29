@@ -251,6 +251,7 @@ The steps are in Cutover and go-live below.
 These are built only once the business asks for them (see Open decisions).
 
 - ~~Procurement switched on with the simplified purchase-order flow~~ Done: aligned to the purchase order template and on by default (ADR-019; `afrinov-docs/docs/13-project-management/roadmaps/procurement-alignment-roadmap.md`, `afrinov-docs/docs/13-project-management/roadmaps/procurement-workflow-roadmap.md`)
+- ~~Requests for quotation from the RFQ sheet of the Manhours and Material workbook~~ Done: raised for a project or Stores, sent to suppliers as a PDF each, quotes recorded with the supplier's own PDF, compared side by side and awarded as a draft purchase order (`afrinov-docs/docs/13-project-management/roadmaps/rfq-roadmap.md`). The date from which RFQs are raised in the app only is still to be set.
 - Low-stock email alerts to the buyer
 - Office asset register (from the Office Device List)
 - Scrap sales log (kg per metal, rand value)
