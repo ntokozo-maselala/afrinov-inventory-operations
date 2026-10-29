@@ -44,7 +44,10 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
  * pending but need prices or a higher limit. Links to their approval queue.
  */
 function approvalCard(mine: Waiting[], pending: Waiting[] | null, sides: { projects: boolean; stores: boolean }) {
-  const others = pending ? Math.max(0, pending.length - mine.length) : 0;
+  // Only the kinds this person approves count as "more": a storeman isn't
+  // told about project orders waiting for an approver (Qodo, PR #120).
+  const theirs = pending?.filter((o) => (o.projectNumber ? sides.projects : sides.stores)) ?? null;
+  const others = theirs ? Math.max(0, theirs.length - mine.length) : 0;
   const more = others === 1 ? '1 more needs prices or a higher limit' : `${formatNumber(others)} more need prices or a higher limit`;
   // Each side approves in its own section (Stores and Procurement Separation
   // Roadmap): stock orders in Order stock, project orders in Procurement.

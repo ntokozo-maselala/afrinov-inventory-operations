@@ -138,7 +138,7 @@ describe('Dashboard: Stores counts against the Stores total', () => {
 
 describe('Dashboard: pending approvals card', () => {
   const order = (id: string, number: string, net: string) => ({
-    id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' },
+    id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1402' as string | null,
     totals: { subtotal: net, vat: '0.00', net, unpricedLines: 0 },
   });
   beforeEach(() => {
@@ -190,6 +190,26 @@ describe('Dashboard: pending approvals card', () => {
     const card = await approvalCard();
     expect(card).toHaveAttribute('href', '/stock/orders?status=mine');
     expect(await within(card).findByText('1')).toBeInTheDocument();
+  });
+
+  it("counts only stock orders as the storeman's others, not project orders waiting for an approver", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      if (path === '/purchase-orders?status=PENDING_APPROVAL') {
+        return [
+          { ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null },
+          { ...order('po-1', 'AFRI-0101', '920.00'), projectNumber: 'AFRI-1402' },
+          { ...order('po-2', 'AFRI-0102', '900.00'), projectNumber: 'AFRI-1402' },
+        ];
+      }
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(await within(card).findByText('waiting for your approval')).toBeInTheDocument();
+    expect(within(card).queryByText(/more need prices/)).not.toBeInTheDocument();
   });
 
   it('counts both kinds for someone who approves both, and opens the side with project orders waiting', async () => {

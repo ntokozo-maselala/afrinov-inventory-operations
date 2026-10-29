@@ -43,7 +43,7 @@ Admin keeps access to both. The Director's access is decided after this roadmap.
 | Who sees Stores orders | Only those who order Stores stock: the storeman and Admin. Buyers and approvers don't | 29 Oct 2026 |
 | Who approves Stores orders | The storeman, on the order's page in Order stock | 29 Oct 2026 |
 | Project material at the workshop | It doesn't come there: it goes from the supplier straight to site, so the storeman doesn't receive it | 29 Oct 2026 |
-| Storeman's approval limit | By value as for approvers: his limit is set in Settings → Users, and blank means no limit. A limit can be added later without rebuilding | Built in Phase 2 |
+| Storeman's approval limit | He may approve Stores orders he raised himself, by value against his own limit. **Each storeman is given a limit** (for example R 50 000) in Settings → Users before Phase 2 is released; above it, Admin approves. Blank means no limit, which is how every storeman starts (Qodo, PR #120) | 29 Oct 2026 |
 | How a project order is finished | **Open.** 1) Procurement confirms delivery on the order, no stock added (recommended); 2) received into a site location; 3) nobody confirms, the buyer closes it | Open |
 | Orders from before | Untouched: Stores orders already approved by an approver stay approved; old links redirect to each order's own section | Proposed |
 
@@ -105,6 +105,10 @@ Size S. Tests and docs.
 - [ ] **4.2 Docs.** ADR-021 records the separation and amends ADR-020 (each side no longer sees the other's orders; the storeman approves Stores orders). Also the purchase order lifecycle, the role table, the menu and page inventory, `task_context.md`, and the Stores Ordering Roadmap.
 
 **Done when:** each role sees only its own side of the business.
+
+## Releasing Phase 2
+
+Set an approval limit on every store controller in **Settings → Users** before Phase 2 is deployed. Until then a storeman's limit is blank, which means he may approve any Stores order, including his own.
 
 ## Before each pull request
 
