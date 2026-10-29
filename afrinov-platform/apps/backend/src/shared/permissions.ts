@@ -16,6 +16,9 @@ export const PermissionCode = {
   CancelPurchaseOrder: 'cancel:purchase_order',
   ReceivePurchaseOrder: 'receive:purchase_order',
   ClosePurchaseOrder: 'close:purchase_order',
+  // Raising, editing, submitting, cancelling and closing a Stores order (one
+  // without a project); the purchase order codes above cover project orders.
+  OrderStoresStock: 'order:stores_stock',
   ViewGoodsReceipt: 'view:goods_receipt',
   ReceiveInventory: 'receive:inventory',
   IssueInventory: 'issue:inventory',
@@ -62,6 +65,8 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.ManageRecipients,
     PermissionCode.ViewPurchaseOrder,
     PermissionCode.ReceivePurchaseOrder,
+    // The storeman orders stock for the stores; Procurement buys for projects.
+    PermissionCode.OrderStoresStock,
     PermissionCode.ViewGoodsReceipt,
     PermissionCode.ViewReports,
     PermissionCode.ViewUsers,

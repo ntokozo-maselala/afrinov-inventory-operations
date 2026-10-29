@@ -69,6 +69,11 @@ export interface Operation {
   public?: boolean;
   /** Every permission the route checks; all are required. */
   permissions?: PermissionCodeValue[];
+  /**
+   * The permission for a project order, where a Stores order (no project)
+   * needs order:stores_stock instead (Stores ordering roadmap).
+   */
+  byOrderKind?: PermissionCodeValue;
   /** ADMIN role required in addition to the permission. */
   adminOnly?: boolean;
   query?: z.ZodObject<z.ZodRawShape>;
@@ -435,11 +440,13 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/purchase-orders', tag: 'Purchase orders', summary: 'Create a draft purchase order',
-    procurement: true, permissions: [P.CreatePurchaseOrder], body: createPOSchema, success: 201, errors: [404],
+    description: 'With a project, a project order holding that project\'s material only; without one, a Stores order of Stores items.',
+    procurement: true, byOrderKind: P.CreatePurchaseOrder, body: createPOSchema, success: 201, errors: [404],
   },
   {
     method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices or delivery dates',
-    procurement: true, permissions: [P.CreatePurchaseOrder], body: updatePOSchema, errors: [404, 409],
+    description: 'A project order stays on a project and a Stores order off one (400).',
+    procurement: true, byOrderKind: P.CreatePurchaseOrder, body: updatePOSchema, errors: [404, 409],
   },
   {
     method: 'get', path: '/purchase-orders/:id/history', tag: 'Purchase orders', summary: 'Status change history',
@@ -448,7 +455,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/purchase-orders/:id/submit', tag: 'Purchase orders', summary: 'Submit a draft',
     description: 'Goes to PENDING_APPROVAL, or straight to APPROVED when approval is turned off in settings.',
-    procurement: true, permissions: [P.SubmitPurchaseOrder], errors: [404, 409],
+    procurement: true, byOrderKind: P.SubmitPurchaseOrder, errors: [404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/approve', tag: 'Purchase orders', summary: 'Approve a submitted order',
@@ -469,12 +476,12 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/purchase-orders/:id/close', tag: 'Purchase orders', summary: 'Close an order that will receive nothing more',
     description: 'Allowed when PARTIALLY_RECEIVED or RECEIVED. Closing an order that is not fully received needs a reason.',
-    procurement: true, permissions: [P.ClosePurchaseOrder], body: closeSchema, errors: [400, 404, 409],
+    procurement: true, byOrderKind: P.ClosePurchaseOrder, body: closeSchema, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/cancel', tag: 'Purchase orders', summary: 'Cancel an order with a reason',
     description: 'Refused with 403 when cancellation is turned off in settings.',
-    procurement: true, permissions: [P.CancelPurchaseOrder], body: cancelSchema, errors: [404, 409],
+    procurement: true, byOrderKind: P.CancelPurchaseOrder, body: cancelSchema, errors: [404, 409],
   },
   {
     method: 'get', path: '/goods-receipts', tag: 'Goods receipts', summary: 'List goods receipts', procurement: true,
@@ -506,7 +513,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/rfqs', tag: 'Requests for quotation', summary: 'Raise a draft request for quotation',
-    description: "Numbered AFRI-02A-<project>-02-<nn> for a project, else RFQ-<nnnn>. The description defaults to the project's name.",
+    description: "For one project and its material only: Stores stock is ordered without an RFQ. Numbered AFRI-02A-<project>-02-<nn> (other project numbers RFQ-<project>-<nn>). The description defaults to the project's name.",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
   },
   {
@@ -712,6 +719,9 @@ function describe(op: Operation): string | undefined {
     const codes = op.permissions.map((p) => `\`${p}\``).join(' and ');
     parts.push(`Requires ${op.adminOnly ? 'the ADMIN role and ' : ''}permission ${codes}.`);
   }
+  if (op.byOrderKind) {
+    parts.push(`Requires permission \`${op.byOrderKind}\` for a project order, or \`${PermissionCode.OrderStoresStock}\` for a Stores order (one without a project).`);
+  }
   return parts.length ? parts.join('\n\n') : undefined;
 }
 
@@ -743,7 +753,7 @@ export function buildOpenApiDocument(opts: { procurementEnabled: boolean }) {
   for (const op of operationsFor(opts)) {
     const errors = new Set(op.errors ?? []);
     if (!op.public) errors.add(401);
-    if (op.permissions?.length) errors.add(403);
+    if (op.permissions?.length || op.byOrderKind) errors.add(403);
     if (op.body || op.query || op.consumes) errors.add(400);
 
     const params = [...op.path.matchAll(/:(\w+)/g)].map((m) => m[1]!);

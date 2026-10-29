@@ -124,10 +124,15 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect((await order(pipe.body.id)).status).toBe(400);
     expect([200, 201]).toContain((await order(pipe.body.id, projectNumber)).status);
 
-    const draft = await order(disc.body.id, other);
+    // A project order holds project material only (Stores ordering roadmap).
+    const onProject = await order(disc.body.id, other);
+    expect(onProject.status).toBe(400);
+    expect(onProject.body.error?.message).toMatch(/is a Stores item, so it isn't bought for project/);
+    const beam = await create({ sku: `IT-SEC-BEAM3-${run}`, category: 'PROJECT_MATERIAL', projectNumber: other });
+    const draft = await order(beam.body.id, other);
     expect([200, 201]).toContain(draft.status);
     expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
-    const closed = await order(disc.body.id, other);
+    const closed = await order(beam.body.id, other);
     expect(closed.status).toBe(400);
     expect(closed.body.error?.message).toMatch(/is completed, so nothing more is ordered for it/);
     const submit = await api<{ error?: { message: string } }>('POST', `/purchase-orders/${draft.body.id}/submit`);

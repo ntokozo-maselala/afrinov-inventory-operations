@@ -5,7 +5,14 @@ import { createMockApi, resetMockState } from './mockApi';
 
 const api = createMockApi();
 
-beforeEach(() => resetMockState());
+// RFQs are for one project and its material (Stores ordering roadmap): the
+// seed's two plates and angles become AFRI-1325's, and AFRI-1402 gets a pipe.
+let otherItem: string;
+beforeEach(async () => {
+  resetMockState();
+  for (const id of ['mat-9', 'mat-10']) await api.patch(`/materials/${id}`, { projectNumber: 'AFRI-1325' });
+  otherItem = (await api.post<{ id: string }>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402' })).id;
+});
 
 interface Rfq {
   id: string; number: string; status: string; projectNumber: string | null; description: string | null;
@@ -15,26 +22,27 @@ interface Rfq {
 const raise = (body: Record<string, unknown>) => api.post<Rfq>('/rfqs', body);
 
 describe('mock: requests for quotation', () => {
-  it("numbers a project's RFQs as the workbook's documents, and the rest RFQ-0001 onwards", async () => {
-    const first = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-1', quantity: 4 }], supplierIds: ['sup-1', 'sup-2', 'sup-1'] });
+  it("numbers a project's RFQs as the workbook's documents", async () => {
+    const first = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 4 }], supplierIds: ['sup-1', 'sup-2', 'sup-1'] });
     expect(first).toMatchObject({ number: 'AFRI-02A-1325-02-01', status: 'DRAFT', description: 'Hydroscand line build Q4' });
-    expect(first.lines).toMatchObject([{ lineNo: 1, materialId: 'mat-1', quantity: '4' }]);
+    expect(first.lines).toMatchObject([{ lineNo: 1, materialId: 'mat-9', quantity: '4' }]);
     expect(first.suppliers.map((s) => s.supplierId)).toEqual(['sup-1', 'sup-2']);
     expect(first.suppliers[0]).toMatchObject({ vatRate: 15, totals: null, supplier: { name: 'Hydroscand' } });
 
-    expect((await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-2', quantity: 1 }] })).number).toBe('AFRI-02A-1325-02-02');
-    expect((await raise({ lines: [{ materialId: 'mat-2', quantity: 1 }] })).number).toBe('RFQ-0001');
+    expect((await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-10', quantity: 1 }] })).number).toBe('AFRI-02A-1325-02-02');
   });
 
-  it('refuses project material with no project, an unknown supplier and no lines', async () => {
-    await expect(raise({ lines: [{ materialId: 'mat-9', quantity: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-nope'] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(raise({ lines: [] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  it('refuses no project, a Stores item, an unknown supplier and no lines', async () => {
+    await expect(raise({ lines: [{ materialId: 'mat-9', quantity: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('is for one project') });
+    await expect(raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-1', quantity: 1 }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('is a Stores item') });
+    await expect(raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-nope'] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(raise({ projectNumber: 'AFRI-1325', lines: [] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('edits a draft, renumbers it on a new project, and keeps the change on its Activity', async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 3 }], supplierIds: ['sup-1'] });
-    const edited = await api.patch<Rfq>(`/rfqs/${draft.id}`, { projectNumber: 'AFRI-1325', supplierIds: ['sup-3'] });
+    const draft = await raise({ projectNumber: 'AFRI-1402', lines: [{ materialId: otherItem, quantity: 3 }], supplierIds: ['sup-1'] });
+    const edited = await api.patch<Rfq>(`/rfqs/${draft.id}`, { projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 3 }], supplierIds: ['sup-3'] });
     expect(edited.number).toBe('AFRI-02A-1325-02-01');
     expect(edited.suppliers.map((s) => s.supplierId)).toEqual(['sup-3']);
     // An unchanged save logs nothing.
@@ -49,30 +57,31 @@ describe('mock: requests for quotation', () => {
   });
 
   it('refuses what the server refuses: finer than 4 decimal places, overlong text, too many lines', async () => {
-    const line = { materialId: 'mat-1', quantity: 1 };
-    await expect(raise({ lines: [{ ...line, quantity: 0.00001 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(raise({ lines: [line], description: 'x'.repeat(501) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(raise({ lines: Array.from({ length: 201 }, () => line) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    expect((await raise({ lines: [{ ...line, quantity: 254.466 }], description: 'x'.repeat(500) })).lines[0]!.quantity).toBe('254.466');
+    const line = { materialId: 'mat-9', quantity: 1 };
+    await expect(raise({ projectNumber: 'AFRI-1325', lines: [{ ...line, quantity: 0.00001 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(raise({ projectNumber: 'AFRI-1325', lines: [line], description: 'x'.repeat(501) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(raise({ projectNumber: 'AFRI-1325', lines: Array.from({ length: 201 }, () => line) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect((await raise({ projectNumber: 'AFRI-1325', lines: [{ ...line, quantity: 254.466 }], description: 'x'.repeat(500) })).lines[0]!.quantity).toBe('254.466');
   });
 
   it('starts the Activity with everything the draft was raised with', async () => {
-    const created = await raise({ lines: [{ materialId: 'mat-1', quantity: 2 }], notes: 'Mill certificates required', penaltiesApply: true });
+    const created = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 2 }], notes: 'Mill certificates required', penaltiesApply: true });
     const [entry] = await api.get<Array<{ after: Record<string, unknown> }>>(`/rfqs/${created.id}/history`);
-    expect(entry!.after).toMatchObject({ projectNumber: null, description: null, notes: 'Mill certificates required', penaltiesApply: true });
+    expect(entry!.after).toMatchObject({ projectNumber: 'AFRI-1325', description: 'Hydroscand line build Q4', notes: 'Mill certificates required', penaltiesApply: true });
   });
 
   it("moves a description that was the project's name with the project", async () => {
-    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-1', quantity: 1 }] });
-    expect((await api.patch<Rfq>(`/rfqs/${draft.id}`, { projectNumber: 'AFRI-1402' })).description).toBe('Boiler refurb – Site A');
-    expect((await api.patch<Rfq>(`/rfqs/${draft.id}`, { projectNumber: null })).description).toBeNull();
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }] });
+    expect((await api.patch<Rfq>(`/rfqs/${draft.id}`, { projectNumber: 'AFRI-1402', lines: [{ materialId: otherItem, quantity: 1 }] })).description).toBe('Boiler refurb – Site A');
+    // It stays on a project.
+    await expect(api.patch(`/rfqs/${draft.id}`, { projectNumber: null })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('sends a draft with a supplier, closing four days after today, and then moves only its closing date and adds suppliers', async () => {
-    const lonely = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }] });
+    const lonely = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }] });
     await expect(api.post(`/rfqs/${lonely.id}/send`, {})).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
 
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     const sent = await api.post<Rfq & { issuedAt: string; closingDate: string; closed: boolean }>(`/rfqs/${draft.id}/send`, {});
     const issued = sent.issuedAt.slice(0, 10);
     const four = new Date(`${issued}T00:00:00Z`);
@@ -92,7 +101,7 @@ describe('mock: requests for quotation', () => {
   });
 
   it('adds a supplier to a sent RFQ although one already asked has since been deactivated', async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     await api.post(`/rfqs/${draft.id}/send`, {});
     await api.patch('/suppliers/sup-1', { active: false });
     const added = await api.patch<Rfq>(`/rfqs/${draft.id}`, { supplierIds: ['sup-1', 'sup-2'] });
@@ -102,7 +111,7 @@ describe('mock: requests for quotation', () => {
   });
 
   it('refuses a day that does not exist, and names who sent it, as the server does', async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     await expect(api.post(`/rfqs/${draft.id}/send`, { closingDate: '2099-02-30' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     expect((await api.get<Rfq & { sentBy: unknown }>(`/rfqs/${draft.id}`)).sentBy).toBeNull();
     const sent = await api.post<Rfq & { sentBy: { name: string } }>(`/rfqs/${draft.id}/send`, {});
@@ -111,12 +120,12 @@ describe('mock: requests for quotation', () => {
   });
 
   it('refuses a closing date on a draft, as the server does', async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }] });
     await expect(api.patch(`/rfqs/${draft.id}`, { closingDate: '2099-01-31' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('cancels a draft or a sent RFQ with a reason, and nothing after that', async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     await api.post(`/rfqs/${draft.id}/send`, {});
     await expect(api.post(`/rfqs/${draft.id}/cancel`, { reason: ' ' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     expect(await api.post<Rfq & { cancellationReason: string }>(`/rfqs/${draft.id}/cancel`, { reason: 'Client postponed' })).toMatchObject({ status: 'CANCELLED', cancellationReason: 'Client postponed' });
@@ -132,7 +141,7 @@ describe('mock: requests for quotation', () => {
 describe('mock: quotes', () => {
   type Quoted = Omit<Rfq, 'lines' | 'suppliers'> & { lines: Array<{ id: string }>; suppliers: Array<{ supplierId: string; declined: boolean; totals: { net: string; unpricedLines: number } | null; quoteFile: { fileName: string; size: number } | null }> };
   async function sent(): Promise<Quoted> {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 4 }, { materialId: 'mat-2', quantity: 2 }], supplierIds: ['sup-1', 'sup-2'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 4 }, { materialId: 'mat-10', quantity: 2 }], supplierIds: ['sup-1', 'sup-2'] });
     return api.post<Quoted>(`/rfqs/${draft.id}/send`, {});
   }
 
@@ -142,7 +151,7 @@ describe('mock: quotes', () => {
     // 4 x 160 = 640, plus 15% VAT; the second line not offered.
     expect(quoted.suppliers.find((s) => s.supplierId === 'sup-1')!.totals).toMatchObject({ net: '736.00', unpricedLines: 1 });
     await expect(api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    const draft = await api.post<Quoted>('/rfqs', { lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await api.post<Quoted>('/rfqs', { projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     await expect(api.put(`/rfqs/${draft.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: draft.lines[0]!.id, unitPrice: 1 }] })).rejects.toMatchObject({ code: 'INVALID_STATE' });
   });
 
@@ -192,7 +201,7 @@ describe('mock: quotes', () => {
 describe('mock: award', () => {
   type Awarded = Omit<Rfq, 'lines' | 'status'> & { status: string; lines: Array<{ id: string }>; purchaseOrder: { id: string; number: string; supplierId: string } | null };
   async function quoted(): Promise<Awarded> {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 4 }, { materialId: 'mat-2', quantity: 2 }], supplierIds: ['sup-1', 'sup-2'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 4 }, { materialId: 'mat-10', quantity: 2 }], supplierIds: ['sup-1', 'sup-2'] });
     const rfq = await api.post<Awarded>(`/rfqs/${draft.id}/send`, {});
     const [l1, l2] = rfq.lines;
     await api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { quoteReference: 'H-1', prices: [{ rfqLineId: l1!.id, unitPrice: 150 }, { rfqLineId: l2!.id, unitPrice: 20 }] });
@@ -217,7 +226,7 @@ describe('mock: award', () => {
     await expect(api.post(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-2' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', details: { concerns: [expect.stringContaining('quoted less')] } });
     expect((await api.post<Awarded>(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-2', reason: 'Faster delivery' })).status).toBe('AWARDED');
 
-    const other = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-3'] });
+    const other = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-3'] });
     await api.post(`/rfqs/${other.id}/send`, {});
     await expect(api.post(`/rfqs/${other.id}/award`, { supplierId: 'sup-3' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
@@ -225,7 +234,7 @@ describe('mock: award', () => {
 
 describe('mock: quote currency', () => {
   it('works out VAT at the currency a quote was given in, not the one the supplier moved to', async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     const rfq = await api.post<Rfq & { lines: Array<{ id: string }> }>(`/rfqs/${draft.id}/send`, {});
     await api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: rfq.lines[0]!.id, unitPrice: 100 }] });
     await api.patch('/suppliers/sup-1', { currency: 'EUR' });
@@ -237,7 +246,7 @@ describe('mock: quote currency', () => {
 
 describe('mock: award currency', () => {
   it("won't award a quote given in another currency than the supplier trades in now", async () => {
-    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const draft = await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }], supplierIds: ['sup-1'] });
     const rfq = await api.post<Rfq & { lines: Array<{ id: string }> }>(`/rfqs/${draft.id}/send`, {});
     await api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: rfq.lines[0]!.id, unitPrice: 10 }] });
     await api.patch('/suppliers/sup-1', { currency: 'EUR' });

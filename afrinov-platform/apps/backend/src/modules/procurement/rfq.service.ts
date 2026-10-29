@@ -17,7 +17,7 @@ import { Prisma, type RfqStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
+import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
 import { defaultVatRate, lineMoney, orderTotals } from './po-pricing.js';
 import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
@@ -266,8 +266,14 @@ async function openProjectName(projectNumber: string, tx: Prisma.TransactionClie
   return cleanText((await tx.project.findUnique({ where: { projectNumber }, select: { name: true } }))?.name);
 }
 
-/** Refuses missing or inactive items, project material with no project, and another project's material. */
+/**
+ * Refuses an RFQ without a project, missing or inactive items, Stores items,
+ * project material with no project, and another project's material. RFQs are
+ * Procurement's, for one project (Stores ordering roadmap); Stores stock is
+ * ordered by the store at known prices.
+ */
 async function checkLines(lines: RfqLineInput[], projectNumber: string | null, tx: Prisma.TransactionClient): Promise<void> {
+  if (!projectNumber) throw Errors.validation('A request for quotation is for one project: choose its project. Stores stock is ordered from Stores → Order stock.');
   if (lines.length === 0) throw Errors.validation('A request for quotation needs at least one line');
   const ids = [...new Set(lines.map((l) => l.materialId))];
   // Held until the RFQ is written, so an item can't be deactivated between the check and the save.
@@ -282,6 +288,7 @@ async function checkLines(lines: RfqLineInput[], projectNumber: string | null, t
   if (inactive) throw Errors.validation(`${inactive.sku} is inactive, so it can't be quoted for`);
   for (const m of materials) refuseUnassigned(m, 'ordered');
   checkProjectMaterial(projectNumber, materials, 'ordered');
+  refuseStoresOnProjectOrder(projectNumber, materials);
 }
 
 /** The suppliers to ask, each once; missing or inactive ones are refused. */
@@ -384,9 +391,9 @@ export const RfqService = {
   /**
    * Creates a numbered draft with its lines and the suppliers to ask.
    *
-   * @throws {ApiError} VALIDATION_ERROR for no lines, a missing or inactive
-   * item or supplier, a missing or closed project, unassigned project material,
-   * or another project's material.
+   * @throws {ApiError} VALIDATION_ERROR for no project or no lines, a missing
+   * or inactive item or supplier, a missing or closed project, a Stores item,
+   * unassigned project material, or another project's material.
    */
   async create(input: CreateRfqInput, actorId: string) {
     const projectNumber = cleanText(input.projectNumber);
