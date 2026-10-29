@@ -18,8 +18,21 @@ export interface RfqLine {
 export interface RfqSupplier {
   id?: string;
   supplierId: string;
+  /** When the quote came in; null until it is recorded. */
   quotedAt: string | null;
   declined: boolean;
+  quoteReference?: string | null;
+  validUntil?: string | null;
+  leadTime?: string | null;
+  notes?: string | null;
+  /** A unit price per line the supplier priced, excluding VAT, in their currency. */
+  prices?: Array<{ rfqLineId: string; unitPrice: string }>;
+  /** VAT at the supplier's currency: the setting for rand, 0% otherwise. */
+  vatRate?: number;
+  /** The quote priced as an order would be; null until it is recorded. */
+  totals?: { subtotal: string; vat: string; net: string; unpricedLines: number } | null;
+  /** The supplier's own quotation PDF, if attached. */
+  quoteFile?: { fileName: string; size: number; uploadedAt: string } | null;
   supplier?: {
     id: string; name: string; vendorCode?: string | null; contactName?: string | null; contactEmail?: string | null;
     contactPhone?: string | null; address?: string | null; currency?: string;

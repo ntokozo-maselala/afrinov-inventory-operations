@@ -384,6 +384,36 @@ const rfqLinesForLog = (lines: Array<{ materialId: string; quantity: string | nu
 
 const RFQ_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Frontend-only mode's quotation PDFs, as PUT and GET .../quote-file handle
+ * them on the server: a PDF only, up to 10 MB, while the RFQ is sent.
+ */
+export async function mockPutQuoteFile(rfqId: string, supplierId: string, fileName: string, data: Uint8Array): Promise<unknown> {
+  await new Promise((res) => setTimeout(res, 60));
+  const rfq = state.rfqs.find((r) => r.id === rfqId);
+  const asked = rfq?.suppliers.find((s) => s.supplierId === supplierId);
+  if (!rfq || !asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
+  if (rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so its quotes can no longer change`);
+  if (data.length === 0) throw err('VALIDATION_ERROR', 'The file is empty');
+  if (String.fromCharCode(...data.subarray(0, 5)) !== '%PDF-') throw err('VALIDATION_ERROR', 'Attach the quotation as a PDF');
+  if (data.length > 10 * 1024 * 1024) throw err('PAYLOAD_TOO_LARGE', 'The quotation is larger than 10 MB');
+  const now = new Date().toISOString();
+  const name = fileName.split(/[\\/]/).pop()?.trim() || 'quotation.pdf';
+  const updated: MockRfq = {
+    ...rfq, updatedAt: now,
+    suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? { ...s, quoteFile: { fileName: name, size: data.length, uploadedAt: now, data } } : s)),
+    history: [...rfq.history, { id: nextId('audit'), action: 'RFQ_QUOTE_FILE', actorId: 'u-admin', before: null, after: { supplierId, fileName: name, size: data.length }, createdAt: now }],
+  };
+  state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? updated : r));
+  return rfqView(updated);
+}
+
+export function mockGetQuoteFile(rfqId: string, supplierId: string): { fileName: string; data: Uint8Array } {
+  const file = state.rfqs.find((r) => r.id === rfqId)?.suppliers.find((s) => s.supplierId === supplierId)?.quoteFile;
+  if (!file) throw err('NOT_FOUND', 'Quotation file not found');
+  return { fileName: file.fileName, data: file.data };
+}
+
 /** As the server: a YYYY-MM-DD day that exists (not 2026-02-30). */
 function isRealDay(day: string): boolean {
   if (!RFQ_DAY.test(day)) return false;
@@ -429,7 +459,9 @@ function rfqView(r: MockRfq) {
       const supplier = findSupplier(s.supplierId);
       const vatRate = (supplier?.currency ?? 'ZAR') === 'ZAR' ? vatSetting : 0;
       const priced = r.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
-      return { ...s, supplier, vatRate, totals: s.quotedAt ? priceLines(priced, vatRate).totals : null };
+      // As the server: the file's name and size, never its contents.
+      const quoteFile = s.quoteFile ? { fileName: s.quoteFile.fileName, size: s.quoteFile.size, uploadedAt: s.quoteFile.uploadedAt } : null;
+      return { ...s, supplier, vatRate, quoteFile, totals: s.quotedAt ? priceLines(priced, vatRate).totals : null };
     }),
   };
 }
@@ -492,6 +524,55 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     });
     state.rfqs.push(created);
     return rfqView(created);
+  }
+  // Quotes (Phase 4), as the server: only while the RFQ is sent, for a supplier it asked.
+  const quoteMatch = /^\/rfqs\/[^/]+\/suppliers\/([^/]+)\/(quote|decline|quote-file)$/.exec(p);
+  if (rfq && quoteMatch) {
+    const supplierId = decodeURIComponent(quoteMatch[1]!);
+    const what = quoteMatch[2]!;
+    const asked = rfq.suppliers.find((s) => s.supplierId === supplierId);
+    if (!asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
+    if (rfq.status !== 'SENT') {
+      throw err('INVALID_STATE', rfq.status === 'DRAFT'
+        ? `${rfq.number} hasn't been sent yet, so there are no quotes to record`
+        : `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so its quotes can no longer change`);
+    }
+    const now = new Date().toISOString();
+    const save = (next: MockRfq['suppliers'][number], action: string, after: Record<string, unknown>) => {
+      const updated: MockRfq = {
+        ...rfq, updatedAt: now,
+        suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? next : s)),
+        history: [...rfq.history, { id: nextId('audit'), action, actorId: 'u-admin', before: null, after: { supplierId, ...after }, createdAt: now }],
+      };
+      state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? updated : r));
+      return rfqView(updated);
+    };
+    if (method === 'PUT' && what === 'quote') {
+      const b = (body ?? {}) as { quotedAt?: string; quoteReference?: string | null; validUntil?: string | null; leadTime?: string | null; notes?: string | null; prices?: Array<{ rfqLineId: string; unitPrice: number }> };
+      const today = mockToday();
+      const quotedAt = b.quotedAt ?? today;
+      if (!isRealDay(quotedAt) || (b.validUntil && !isRealDay(b.validUntil))) throw err('VALIDATION_ERROR', 'Invalid quote');
+      if (quotedAt > today) throw err('VALIDATION_ERROR', `${quotedAt} is still to come: record the day the quote came in`);
+      if (!Array.isArray(b.prices) || b.prices.length === 0) throw err('VALIDATION_ERROR', 'Price at least one line, or mark the supplier as declined');
+      for (const pr of b.prices) {
+        if (!rfq.lines.some((l) => l.id === pr.rfqLineId)) throw err('VALIDATION_ERROR', `Line ${pr.rfqLineId} is not on ${rfq.number}`);
+        const n = pr.unitPrice;
+        if (typeof n !== 'number' || !(n >= 0 && n <= 1e12) || Math.abs(n * 1e4 - Math.round(n * 1e4)) >= 1e-4) throw err('VALIDATION_ERROR', 'Invalid quote');
+      }
+      const prices = [...new Map(b.prices.map((pr) => [pr.rfqLineId, String(pr.unitPrice)])).entries()].map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice }));
+      return save({
+        ...asked, declined: false, quotedAt: `${quotedAt}T00:00:00.000Z`, quoteReference: rfqText(b.quoteReference),
+        validUntil: b.validUntil ? `${b.validUntil}T00:00:00.000Z` : null, leadTime: rfqText(b.leadTime), notes: rfqText(b.notes), prices,
+      }, asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE', { quoteReference: rfqText(b.quoteReference), quotedAt, prices });
+    }
+    if (method === 'POST' && what === 'decline') {
+      const notes = rfqText((body as { notes?: string | null } | undefined)?.notes);
+      return save({ ...asked, declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, notes, prices: [] }, 'RFQ_DECLINED', { notes });
+    }
+    if (method === 'DELETE' && what === 'quote-file') {
+      if (!asked.quoteFile) throw err('NOT_FOUND', 'Quotation file not found');
+      return save({ ...asked, quoteFile: null }, 'RFQ_QUOTE_FILE_REMOVED', {});
+    }
   }
   if (method === 'POST' && rfq && p === `/rfqs/${rfq.id}/send`) {
     if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be sent`);
@@ -625,6 +706,7 @@ export interface MockApi {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;
   patch: <T>(path: string, body?: unknown) => Promise<T>;
+  put: <T>(path: string, body?: unknown) => Promise<T>;
   del: <T>(path: string) => Promise<T>;
 }
 
@@ -645,6 +727,7 @@ export function createMockApi(): MockApi {
     get: <T>(path: string) => handle<T>(() => route('GET', path) as T),
     post: <T>(path: string, body?: unknown) => handle<T>(() => route('POST', path, body) as T),
     patch: <T>(path: string, body?: unknown) => handle<T>(() => route('PATCH', path, body) as T),
+    put: <T>(path: string, body?: unknown) => handle<T>(() => route('PUT', path, body) as T),
     del: <T>(path: string) => handle<T>(() => route('DELETE', path) as T),
   };
 }

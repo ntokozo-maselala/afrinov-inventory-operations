@@ -47,6 +47,26 @@ export const sendRfqSchema = z.object({ closingDate: day.optional() });
 
 export const cancelRfqSchema = z.object({ reason: z.string().trim().min(1).max(500) });
 
+/** Prices are kept to 4 decimal places, excluding VAT, in the supplier's currency. */
+const unitPrice = z.number().min(0).max(1e12)
+  .refine((n) => Math.abs(n * 1e4 - Math.round(n * 1e4)) < 1e-4, 'At most 4 decimal places');
+
+export const recordQuoteSchema = z.object({
+  /** When the quote came in; today unless given. */
+  quotedAt: day.optional(),
+  quoteReference: text(100),
+  validUntil: day.nullable().optional(),
+  leadTime: text(100),
+  notes: text(2000),
+  /** A price per line the supplier priced; lines they don't offer are left out. */
+  prices: z.array(z.object({ rfqLineId: z.uuid(), unitPrice })).min(1).max(200),
+});
+
+export const declineQuoteSchema = z.object({ notes: text(2000) });
+
+/** The supplier's quotation PDF; the rest of the API takes 1 MB. */
+export const QUOTE_FILE_LIMIT = 10 * 1024 * 1024;
+
 export const listRfqQuerySchema = z.object({
   status: z.enum(RFQ_STATUSES).optional(),
   projectNumber: z.string().max(64).optional(),
@@ -58,8 +78,13 @@ function actorId(req: unknown): string {
 
 const invalid = (what: string, details: unknown) => ({ error: { code: 'VALIDATION_ERROR', message: `Invalid ${what}`, details } });
 
+type QuoteParams = { id: string; supplierId: string };
+
 // Registered with the purchase order routes, behind PROCUREMENT_ENABLED.
 export async function rfqRoutes(app: FastifyInstance): Promise<void> {
+  // A quotation PDF is sent as itself, not as JSON, with its name in a header.
+  app.addContentTypeParser('application/pdf', { parseAs: 'buffer', bodyLimit: QUOTE_FILE_LIMIT }, (_req, body, done) => done(null, body));
+
   app.get('/rfqs', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ViewPurchaseOrder);
     const parsed = listRfqQuerySchema.safeParse(req.query ?? {});
@@ -98,6 +123,56 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     const parsed = cancelRfqSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send(invalid('cancellation', parsed.error.flatten()));
     return RfqService.cancel((req.params as { id: string }).id, parsed.data.reason, actorId(req));
+  });
+
+  app.put('/rfqs/:id/suppliers/:supplierId/quote', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const parsed = recordQuoteSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send(invalid('quote', parsed.error.flatten()));
+    const { id, supplierId } = req.params as QuoteParams;
+    return RfqService.recordQuote(id, supplierId, parsed.data, actorId(req));
+  });
+
+  app.post('/rfqs/:id/suppliers/:supplierId/decline', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const parsed = declineQuoteSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send(invalid('decline', parsed.error.flatten()));
+    const { id, supplierId } = req.params as QuoteParams;
+    return RfqService.decline(id, supplierId, parsed.data, actorId(req));
+  });
+
+  app.put('/rfqs/:id/suppliers/:supplierId/quote-file', { preHandler: [app.authenticate], bodyLimit: QUOTE_FILE_LIMIT }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    if (!Buffer.isBuffer(req.body)) {
+      return reply.code(415).send({ error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Send the quotation as application/pdf' } });
+    }
+    const header = req.headers['x-file-name'];
+    let fileName = 'quotation.pdf';
+    try {
+      if (typeof header === 'string' && header) fileName = decodeURIComponent(header);
+    } catch {
+      return reply.code(400).send(invalid('file name', {}));
+    }
+    const { id, supplierId } = req.params as QuoteParams;
+    return RfqService.putQuoteFile(id, supplierId, { fileName, data: req.body }, actorId(req));
+  });
+
+  app.get('/rfqs/:id/suppliers/:supplierId/quote-file', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewPurchaseOrder);
+    const { id, supplierId } = req.params as QuoteParams;
+    const file = await RfqService.getQuoteFile(id, supplierId);
+    // The name as attached, safely quoted for any browser.
+    const ascii = file.fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+    return reply
+      .type('application/pdf')
+      .header('content-disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
+      .send(file.data);
+  });
+
+  app.delete('/rfqs/:id/suppliers/:supplierId/quote-file', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const { id, supplierId } = req.params as QuoteParams;
+    return RfqService.removeQuoteFile(id, supplierId, actorId(req));
   });
 
   app.get('/rfqs/:id/history', { preHandler: [app.authenticate] }, async (req) => {
