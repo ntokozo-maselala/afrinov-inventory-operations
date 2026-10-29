@@ -38,6 +38,20 @@ export function formatMoney(value: string | null | undefined, currency = 'ZAR'):
   return formatCurrency(Number(value), currency);
 }
 
+const unitPriceFormatters: Record<string, Intl.NumberFormat> = {};
+
+/**
+ * A unit price as it is kept, to 4 decimal places ("R 0,0001"), where
+ * formatMoney rounds to cents: two prices a fraction of a cent apart stay apart.
+ */
+export function formatUnitPrice(value: string | null | undefined, currency = 'ZAR'): string {
+  if (value === null || value === undefined) return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  unitPriceFormatters[currency] ??= new Intl.NumberFormat('en-ZA', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  return unitPriceFormatters[currency].format(n);
+}
+
 /** "15%" or "0%"; up to two decimals. */
 export function formatRate(rate: string | number | null | undefined): string {
   const n = Number(rate ?? 0);

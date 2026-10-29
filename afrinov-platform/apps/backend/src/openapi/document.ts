@@ -42,7 +42,7 @@ import {
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
 import {
-  cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
+  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
 } from '../modules/procurement/rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
 import {
@@ -545,6 +545,11 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'delete', path: '/rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Requests for quotation', summary: "Take off the supplier's quotation PDF",
     procurement: true, permissions: [P.CreatePurchaseOrder], errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/rfqs/:id/award', tag: 'Requests for quotation', summary: 'Award to one supplier, raising a draft purchase order',
+    description: "A draft order for the supplier, with the RFQ's project, penalties and lines at their quoted prices, saved with the award or not at all. A reason is required (400, listing why) when they didn't price every line, their quote has run out, or a complete quote in the same currency is cheaper. Only while sent (409 otherwise).",
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: awardRfqSchema, errors: [404, 409],
   },
   {
     method: 'get', path: '/rfqs/:id/history', tag: 'Requests for quotation', summary: 'Activity on a request for quotation',

@@ -73,6 +73,9 @@ export const recordQuoteSchema = z.object({
 
 export const declineQuoteSchema = z.object({ notes: text(2000) });
 
+/** The supplier to award to; a reason when the award isn't the clear choice. */
+export const awardRfqSchema = z.object({ supplierId: supplierIdSchema, reason: text(500) });
+
 /** The supplier's quotation PDF; the rest of the API takes 1 MB. */
 export const QUOTE_FILE_LIMIT = 10 * 1024 * 1024;
 
@@ -187,6 +190,13 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     await requirePermission(req, PermissionCode.CreatePurchaseOrder);
     const { id, supplierId } = req.params as QuoteParams;
     return RfqService.removeQuoteFile(id, supplierId, actorId(req));
+  });
+
+  app.post('/rfqs/:id/award', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const parsed = awardRfqSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send(invalid('award', parsed.error.flatten()));
+    return RfqService.award((req.params as { id: string }).id, parsed.data, actorId(req));
   });
 
   app.get('/rfqs/:id/history', { preHandler: [app.authenticate] }, async (req) => {

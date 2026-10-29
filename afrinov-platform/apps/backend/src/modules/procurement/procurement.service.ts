@@ -367,6 +367,8 @@ export const PurchaseOrderService = {
         closedBy: { select: { id: true, name: true, email: true } },
         lines: { include: { material: true } },
         goodsReceipts: { include: { lines: true } },
+        // The request for quotation it was awarded from, if any.
+        rfq: { select: { id: true, number: true } },
       },
     });
     if (!po) throw Errors.notFound('PurchaseOrder');
@@ -386,18 +388,32 @@ export const PurchaseOrderService = {
    * project, unassigned project material, or an invalid order or line delivery date.
    * @throws {Error} Propagates database errors, including delivery settings
    * lookup and transaction failures.
+   *
+   * @param opts.within The caller's transaction, so the order is saved with
+   * the rest of its change or not at all (an RFQ's award).
+   * @param opts.fromRfq The request for quotation it was awarded from, named
+   * on its first Activity entry.
    */
-  async create(input: CreatePOInput, actorId: string) {
+  async create(input: CreatePOInput, actorId: string, opts: { within?: Prisma.TransactionClient; fromRfq?: { id: string; number: string } } = {}) {
     if (input.lines.length === 0) throw Errors.validation('Purchase order must have at least one line');
-    const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
+    // Inside a caller's transaction every check reads through it, with the
+    // supplier, project and items held until it ends, so none of them can be
+    // deactivated or closed between the check and the order being written.
+    const db = opts.within ?? prisma;
+    if (opts.within) {
+      await opts.within.$executeRaw`SELECT 1 FROM suppliers WHERE id = ${input.supplierId} FOR SHARE`;
+      if (input.projectNumber) await opts.within.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${input.projectNumber} FOR SHARE`;
+      await opts.within.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join([...new Set(input.lines.map((l) => l.materialId))])}) FOR SHARE`;
+    }
+    const supplier = await db.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
     if (!supplier.active) throw Errors.validation(`${supplier.name} is inactive. Reactivate the supplier to order from them.`);
     const currency = supplier.currency ?? 'ZAR';
-    const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate'));
-    if (input.projectNumber) await assertProjectOpen(input.projectNumber);
+    const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate', opts.within));
+    if (input.projectNumber) await assertProjectOpen(input.projectNumber, db);
     // Project material with no project yet is not ordered until it has one,
     // and is ordered only for its own project.
-    const lineMaterials = await lineMaterialsOf(input.lines.map((l) => l.materialId), prisma);
+    const lineMaterials = await lineMaterialsOf(input.lines.map((l) => l.materialId), db);
     for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
     checkProjectMaterial(cleanText(input.projectNumber), lineMaterials, 'ordered');
 
@@ -416,7 +432,7 @@ export const PurchaseOrderService = {
       const defaults = await SettingsService.getValues([
         'purchaseOrders.deliveryTo', 'purchaseOrders.deliveryAddress', 'purchaseOrders.deliveryCountry',
         'purchaseOrders.deliveryContactName', 'purchaseOrders.deliveryContactPhone',
-      ]);
+      ], opts.within);
       for (const k of ['deliveryTo', 'deliveryAddress', 'deliveryCountry', 'deliveryContactName', 'deliveryContactPhone'] as const) {
         if (input[k] === undefined) {
           const v = defaults[`purchaseOrders.${k}`];
@@ -425,11 +441,11 @@ export const PurchaseOrderService = {
       }
     }
     if (input.afrinovContact === undefined) {
-      const actor = await prisma.user.findUnique({ where: { id: actorId } });
+      const actor = await db.user.findUnique({ where: { id: actorId } });
       details.afrinovContact = actor?.name ?? null;
     }
 
-    return prisma.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
       // Serialize PO-number generation so two concurrent creates cannot
       // collide on the same sequential number. The advisory lock is scoped
       // to this transaction and auto-released on commit/rollback.
@@ -466,11 +482,15 @@ export const PurchaseOrderService = {
           action: 'CREATE',
           entityType: 'PurchaseOrder',
           entityId: po.id,
-          after: { number, status: po.status } as Prisma.InputJsonValue,
+          after: {
+            number, status: po.status,
+            ...(opts.fromRfq ? { rfqId: opts.fromRfq.id, rfqNumber: opts.fromRfq.number } : {}),
+          } as Prisma.InputJsonValue,
         },
       });
       return po;
-    });
+    };
+    return opts.within ? write(opts.within) : prisma.$transaction(write);
   },
 
   async update(input: UpdatePOInput, actorId: string) {
