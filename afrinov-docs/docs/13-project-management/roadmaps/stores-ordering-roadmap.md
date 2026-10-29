@@ -8,12 +8,12 @@ Four phases that split ordering the way Afrinov works. The **Procurement team** 
 
 Both kinds stay ordinary purchase orders underneath: the same AFRI numbering, approval by value, PDF and receiving. What changes is who may raise which kind, from which page, with which items. The server enforces the split, so it holds even if someone bypasses the screens.
 
-**Status:** Phase 1 built on `feature/stores-ordering`, not yet merged. One pull request per phase.
+**Status:** Phases 1 and 2 built on `feature/stores-ordering`, in one pull request (#117), not yet merged: Phase 1 needs Phase 2's page.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Permission and server rules | M | Built |
-| 2 | Order stock page under Stores | M | Planned |
+| 2 | Order stock page under Stores | M | Built |
 | 3 | Procurement for projects only | M | Planned |
 | 4 | Roles end to end and docs | S | Planned |
 
@@ -48,7 +48,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
 ### Order of work
 
-One branch and pull request per phase, in order. Phase 2 needs Phase 1's permission; Phase 3 can follow Phase 2 or run beside it.
+One branch and pull request per phase, in order, except Phases 1 and 2, which share #117 so the server rules and the store's page arrive together. Phase 3 can follow Phase 2 or run beside it.
 
 ## Phase 1: Permission and server rules
 
@@ -67,19 +67,19 @@ Size M. Backend, with a migration, and the mock.
 
 **Done when:** the server refuses a storeman's project order, a buyer's Stores order, a Stores item on a project order and an RFQ without a project.
 
-**Until Phases 2 and 3:** the screens still offer what the server now refuses. A buyer who picks "No project", or uses Stock status's **Create PO**, gets a 403; the storeman has no page to order from yet. Merge Phase 1 with Phase 2, or soon before it.
+**Until Phase 3:** Procurement's New purchase order still offers "No project", which the server refuses a buyer. Phase 2 moved Stock status's re-order list to the store, and gave the storeman the Order stock page.
 
 ## Phase 2: Order stock page under Stores
 
 Size M. Frontend. Needs Phase 1.
 
-- [ ] **2.1 The page.** Stores → **Order stock**: the store's orders (draft, waiting for approval, on order, received), newest first, and **New order**.
-  Files: `pages/StoresOrders.tsx`, `hooks/useNavGroups.tsx`, `App.tsx`
-- [ ] **2.2 The order form.** The purchase order form in its Stores form: supplier, delivery, lines of Stores items, **+ New item** adding Stores items, no project. Save draft or submit for approval.
-  Files: `pages/PurchaseOrderForm.tsx`
-- [ ] **2.3 Where re-ordering starts.** Stock status's re-order list (**Create PO**) and a Stores item's **Order** button open the Stores order form, filled in as today.
+- [x] **2.1 The page.** Store → **Order stock** (`/stock/orders`): the store's orders from `?kind=stores`, newest first, with search and a status filter, and **New order** for the storeman. Anyone who may see orders can open it; the menu entry shows to those who order Stores stock, when procurement is on.
+  Files: `pages/StoresOrders.tsx`, `hooks/useNavGroups.tsx`, `hooks/usePermissions.ts` (`stores:order`), `App.tsx`
+- [x] **2.2 The order form.** `/stock/orders/new`: the purchase order form in its Stores form: supplier, delivery, lines of Stores items, **+ New item** adding Stores items, no Project field. Save draft or submit for approval. Its edit page follows the order's kind.
+  Files: `pages/PurchaseOrderForm.tsx`, `components/PurchaseOrderDetailsFields.tsx`, `lib/orderKind.ts`
+- [x] **2.3 Where re-ordering starts.** Stock status's re-order list (**Order these**, **New stock order**) and a Stores item's **Order** button open the Stores order form, filled in as before, for the storeman. A Projects item's **Order** stays with Procurement; a supplier's **New order** stays Procurement's until Phase 3.
   Files: `pages/StockStatus.tsx`, `pages/MaterialDetail.tsx`
-- [ ] **2.4 The order's own page.** Shared with project orders; its breadcrumb and actions follow its kind and who is looking.
+- [x] **2.4 The order's own page.** Shared with project orders; its breadcrumb (Order stock or Purchase orders) and its Edit, Submit, Cancel and Close follow its kind and who is looking. Approve and Receive are as before.
   Files: `pages/PurchaseOrderDetail.tsx`
 
 **Done when:** a storeman orders Stores stock from the Stores section, it goes for approval, and it is received as now.

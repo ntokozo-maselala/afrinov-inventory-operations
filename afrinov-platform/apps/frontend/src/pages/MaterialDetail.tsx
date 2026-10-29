@@ -55,7 +55,11 @@ export function MaterialDetail() {
   const canReceive = hasPermission('inventory:receive');
   const canIssue = hasPermission('inventory:issue');
   const canLend = hasPermission('tools:lend');
-  const canOrder = PROCUREMENT_ENABLED && hasPermission('procurement:manage');
+  // A Stores item is ordered by the store from Order stock, a Projects item by
+  // Procurement (Stores ordering roadmap).
+  const storesItem = !!material.data && sectionOf(material.data.category) === 'STORES';
+  const canOrder = PROCUREMENT_ENABLED && hasPermission(storesItem ? 'stores:order' : 'procurement:manage');
+  const orderForm = storesItem ? '/stock/orders/new' : '/purchase-orders/new';
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
@@ -104,7 +108,7 @@ export function MaterialDetail() {
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
             <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
-            {active && canOrder && !needsProject(material.data) && !projectClosed(material.data) && <Link to={`/purchase-orders/new?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
+            {active && canOrder && !needsProject(material.data) && !projectClosed(material.data) && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
             {active && total > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active

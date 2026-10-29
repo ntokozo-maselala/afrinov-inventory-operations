@@ -90,7 +90,8 @@ export function StockStatus() {
   const items = useApi<StockStatusItem[]>('/reports/stock-status');
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
-  const canOrder = PROCUREMENT_ENABLED && hasPermission('procurement:manage');
+  // The re-order list is Stores stock, ordered by the store (Stores ordering roadmap).
+  const canOrder = PROCUREMENT_ENABLED && hasPermission('stores:order');
   // Kept for this tab, so the items left after one order are still ticked on return.
   const [tickedIds, setTickedIds] = useState<string[]>(() => (canOrder ? readTicked() : []));
   const [choosing, setChoosing] = useState<SupplierGroup[] | null>(null);
@@ -101,7 +102,7 @@ export function StockStatus() {
     const ids = group.items.map((r) => r.materialId);
     setTicked(tickedIds.filter((id) => !ids.includes(id)));
     const qs = new URLSearchParams({ ...(group.supplierId ? { supplierId: group.supplierId } : {}), materialIds: ids.join(',') });
-    navigate(`/purchase-orders/new?${qs.toString()}`);
+    navigate(`/stock/orders/new?${qs.toString()}`);
   }
   function orderTicked() {
     const groups = bySupplier(ticked);
@@ -164,8 +165,8 @@ export function StockStatus() {
               </Link>
             </RoleGuard>
             {canOrder && (
-              <Link to="/purchase-orders/new" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                <Icon.Cart size={14} /> New purchase order
+              <Link to="/stock/orders/new" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+                <Icon.Cart size={14} /> New stock order
               </Link>
             )}
           </div>

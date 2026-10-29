@@ -23,6 +23,7 @@ import {
   EveryLineInto, OrderReceiptRow, checkReceiptLines, receiptLinesBody, receiptLinesFromOrder, type ReceiptLineDraft,
 } from '../components/OrderReceiptLines';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { ORDER_PERMISSION, ORDER_SECTION, orderKindOf } from '../lib/orderKind';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -133,7 +134,10 @@ export function PurchaseOrderDetail() {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission('procurement:manage');
+  // Stores ordering roadmap: a Stores order (no project) is the store's to
+  // change, a project order Procurement's; the server holds each to its own.
+  const kind = po.data ? orderKindOf(po.data) : null;
+  const canManage = kind !== null && hasPermission(ORDER_PERMISSION[kind]);
   // Receive delivery is for those who receive orders (not the buyer who raised
   // it), and posts a goods receipt, so needs the server's permission for that too.
   const canReceive = hasPermission('orders:receive') && hasPermission('inventory:receive');
@@ -214,7 +218,7 @@ export function PurchaseOrderDetail() {
       <PageHeader
         title={fresh?.number ?? (po.loading ? 'Loading…' : 'Purchase order')}
         description={fresh ? `${revisionLabel(fresh.revision)} · Supplier: ${fresh.supplier?.name}` : ''}
-        breadcrumb={[{ label: 'Purchase orders', to: '/purchase-orders' }, { label: fresh?.number ?? 'PO' }]}
+        breadcrumb={[kind ? ORDER_SECTION[kind] : ORDER_SECTION.projects, { label: fresh?.number ?? 'PO' }]}
         actions={fresh && (
           <div className="flex flex-wrap items-center gap-2">
             <PurchaseOrderStatusBadge status={fresh.status} />

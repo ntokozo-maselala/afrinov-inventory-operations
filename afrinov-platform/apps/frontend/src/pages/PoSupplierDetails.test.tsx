@@ -25,7 +25,7 @@ const SUPPLIERS = [
 ];
 const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: null, active: true }];
 const ORDER = {
-  id: 'po-1', number: 'AFRI-0001', status: 'DRAFT', currency: 'ZAR', vatRate: '15', supplier: { id: 's-1', name: 'Amalgum Welding', vendorCode: 'V001' },
+  id: 'po-1', number: 'AFRI-0001', status: 'DRAFT', projectNumber: 'AFRI-1325', currency: 'ZAR', vatRate: '15', supplier: { id: 's-1', name: 'Amalgum Welding', vendorCode: 'V001' },
   supplierContactName: 'Nicole', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@welding.co.za', supplierAddress: 'Branch 2',
   deliveryMethod: 'DELIVERY', penaltiesApply: false, settlementDiscount: '0',
   lines: [{ id: 'l-1', material: { sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each' }, orderedQty: '2', unitPrice: null, deliveryDate: null }],

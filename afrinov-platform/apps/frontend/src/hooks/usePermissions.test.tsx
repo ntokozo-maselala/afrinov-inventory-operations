@@ -181,6 +181,8 @@ describe('usePermissions — the role check sheet', () => {
       'materials:manage', 'materials:create', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
       'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage',
       'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:view', 'orders:receive', 'receipts:view',
+      // Stores orders: those without a project (Stores ordering roadmap).
+      'stores:order',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
     PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],

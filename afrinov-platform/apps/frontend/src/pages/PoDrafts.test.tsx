@@ -25,7 +25,7 @@ const line = (id: string, unitPrice: string | null) => ({
   orderedQty: '2', receivedQty: '0', unitPrice, subtotal: null, vat: null, net: null,
 });
 const order = (id: string, number: string, status: string, lines = [line('l-1', '10')]) => ({
-  id, number, status, supplierId: 's-1', supplier: { name: 'Hydac' }, createdAt: '2026-10-19T08:00:00Z',
+  id, number, status, supplierId: 's-1', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-19T08:00:00Z',
   currency: 'ZAR', vatRate: '15', totals: { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0 }, lines,
 });
 const DRAFT = order('po-d', 'AFRI-0101', 'DRAFT', [line('l-1', '10'), line('l-2', null)]);

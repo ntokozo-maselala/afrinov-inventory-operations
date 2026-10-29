@@ -9,6 +9,10 @@
 // details and remarks while the order is editable; materials and quantities
 // are fixed once raised.
 //
+// Stores → Order stock uses the same form in its Stores form (Stores ordering
+// roadmap): no project, Stores items only, and + New item adds a Stores item.
+// An order's edit page follows its kind, as the server does.
+//
 // The re-order list, a supplier's page and an item's page link to the new
 // form with what to order: ?supplierId=…&materialIds=a,b. The supplier and
 // lines are filled in, prices from unit cost and quantities up to Required
@@ -35,6 +39,7 @@ import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
 import { needsProject, sectionOf } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
+import { ORDER_PERMISSION, ORDER_SECTION, orderKindOf } from '../lib/orderKind';
 import {
   PurchaseOrderDetailsFields, SupplierDetailsFields, checkDetails, detailsBody, draftFromOrder, supplierDetails,
   type OrderDetails, type OrderDetailsDraft,
@@ -100,12 +105,19 @@ function FormFooter({ children }: { children: React.ReactNode }) {
 }
 
 // ── New purchase order ──────────────────────────────────────────────────
-export function NewPurchaseOrder() {
+export function NewPurchaseOrder() { return <NewOrder stores={false} />; }
+
+/** Stores → Order stock → New order: the same form, for Stores items without a project. */
+export function NewStockOrder() { return <NewOrder stores />; }
+
+function NewOrder({ stores }: { stores: boolean }) {
   const { hasPermission } = usePermissions();
-  if (!hasPermission('procurement:manage')) {
-    return <NoAccess title="New purchase order" action="raise purchase orders" section={ORDERS} />;
+  if (!hasPermission(stores ? 'stores:order' : 'procurement:manage')) {
+    return stores
+      ? <NoAccess title="New stock order" action="order stock for the store" section={ORDER_SECTION.stores} />
+      : <NoAccess title="New purchase order" action="raise purchase orders" section={ORDERS} />;
   }
-  return <NewPurchaseOrderForm />;
+  return <NewPurchaseOrderForm stores={stores} />;
 }
 
 /**
@@ -113,7 +125,8 @@ export function NewPurchaseOrder() {
  * Saves a draft and optionally submits it; a failed submission opens the saved
  * draft with an error toast, while a failed save leaves the form open.
  */
-function NewPurchaseOrderForm() {
+function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
+  const section = stores ? ORDER_SECTION.stores : ORDERS;
   const { user } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
@@ -126,7 +139,9 @@ function NewPurchaseOrderForm() {
   // Project material with no project yet isn't ordered until it has one, and a
   // completed or cancelled project's isn't ordered at all: its leftovers go to Stores.
   const materials = catalogue.filter((m) => !needsProject(m)
-    && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED')));
+    && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED'))
+    // A Stores order holds Stores items only.
+    && (!stores || sectionOf(m.category) === 'STORES'));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
   const [expected, setExpected] = useState('');
@@ -146,7 +161,7 @@ function NewPurchaseOrderForm() {
   // sets the order's project, which can't change while it is there, and other
   // projects' material is not offered.
   const lockedBy = lines.map((l) => materials.find((m) => m.id === l.materialId)).find((m) => m && sectionOf(m.category) === 'PROJECTS');
-  const orderProject = lockedBy?.projectNumber ?? details.projectNumber;
+  const orderProject = stores ? '' : lockedBy?.projectNumber ?? details.projectNumber;
   const lineMaterials = materials.filter((m) => sectionOf(m.category) === 'STORES' || !orderProject || m.projectNumber === orderProject);
   // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
   const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: Number(l.orderedQty) > 0 ? l.orderedQty : 0 })), Number(vatRate) || 0).lines;
@@ -297,9 +312,11 @@ function NewPurchaseOrderForm() {
   return (
     <div>
       <PageHeader
-        title="New purchase order"
-        description="Laid out like the purchase order template. Save a draft to finish later, or submit it for approval."
-        breadcrumb={[ORDERS, { label: 'New' }]}
+        title={stores ? 'New stock order' : 'New purchase order'}
+        description={stores
+          ? 'Stores items for the shelf, laid out like the purchase order template. Save a draft to finish later, or submit it for approval.'
+          : 'Laid out like the purchase order template. Save a draft to finish later, or submit it for approval.'}
+        breadcrumb={[section, { label: 'New' }]}
       />
       <form onSubmit={(e) => { e.preventDefault(); void save(true); }} className="surface-card p-5 space-y-6 max-w-5xl" noValidate>
         <fieldset className="space-y-3">
@@ -330,6 +347,7 @@ function NewPurchaseOrderForm() {
           onChange={(next) => setDetails(lockedBy ? { ...next, projectNumber: details.projectNumber } : next)}
           idPrefix="po-new"
           projectSetBy={lockedBy?.sku}
+          hideProject={stores}
         />
 
         <fieldset>
@@ -404,7 +422,7 @@ function NewPurchaseOrderForm() {
         {validation && supplierId && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
 
         <FormFooter>
-          <Link to="/purchase-orders" className="btn-ghost">Cancel</Link>
+          <Link to={section.to} className="btn-ghost">Cancel</Link>
           <Button variant="secondary" type="button" onClick={() => void save(false)} loading={busy === 'draft'} disabled={busy !== null}>Save draft</Button>
           <Button variant="primary" type="submit" loading={busy === 'submit'} disabled={busy !== null}>Create &amp; submit</Button>
         </FormFooter>
@@ -459,16 +477,28 @@ const EDITABLE = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
 export function EditPurchaseOrder() {
   const { id } = useParams<{ id: string }>();
   const { hasPermission } = usePermissions();
-  const po = useApi<EditableOrder>(id && hasPermission('procurement:manage') ? `/purchase-orders/${id}` : null);
-  if (!hasPermission('procurement:manage')) {
+  // Each kind of order is edited by its own team: Stores orders by the store, project orders by Procurement.
+  const mayEdit = hasPermission(ORDER_PERMISSION.projects) || hasPermission(ORDER_PERMISSION.stores);
+  const po = useApi<EditableOrder>(id && mayEdit ? `/purchase-orders/${id}` : null);
+  if (!mayEdit) {
     return <NoAccess title="Edit purchase order" action="edit purchase orders" section={ORDERS} />;
   }
   if (po.error) return <ErrorState error={po.error} onRetry={po.reload} />;
   if (!po.data) return <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>;
+  const kind = orderKindOf(po.data);
+  if (!hasPermission(ORDER_PERMISSION[kind])) {
+    return (
+      <NoAccess
+        title={`Edit ${po.data.number}`}
+        action={kind === 'stores' ? "edit the store's stock orders" : 'edit purchase orders for projects'}
+        section={ORDER_SECTION[kind]}
+      />
+    );
+  }
   if (!EDITABLE.includes(po.data.status)) {
     return (
       <div>
-        <PageHeader title={`Edit ${po.data.number}`} breadcrumb={[ORDERS, { label: po.data.number, to: `/purchase-orders/${po.data.id}` }, { label: 'Edit' }]} />
+        <PageHeader title={`Edit ${po.data.number}`} breadcrumb={[ORDER_SECTION[kind], { label: po.data.number, to: `/purchase-orders/${po.data.id}` }, { label: 'Edit' }]} />
         <Alert tone="info" title="This order can no longer be edited" className="max-w-2xl">
           Orders can be edited until stock is received against them. <Link to={`/purchase-orders/${po.data.id}`} className="btn-link">Back to {po.data.number}</Link>
         </Alert>
@@ -487,6 +517,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const navigate = useNavigate();
   const toast = useToast();
   const back = `/purchase-orders/${po.id}`;
+  const stores = orderKindOf(po) === 'stores';
   const [notes, setNotes] = useState(po.notes ?? '');
   const [expectedDeliveryDate, setExpected] = useState(po.expectedDeliveryDate?.slice(0, 10) ?? '');
   const [vatRate, setVatRate] = useState(String(Number(po.vatRate ?? 15)));
@@ -542,7 +573,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
       <PageHeader
         title={`Edit ${po.number}`}
         description={`Prices exclude VAT, in ${po.currency ?? 'ZAR'}. Materials and quantities are fixed once the order is raised.`}
-        breadcrumb={[ORDERS, { label: po.number, to: back }, { label: 'Edit' }]}
+        breadcrumb={[ORDER_SECTION[orderKindOf(po)], { label: po.number, to: back }, { label: 'Edit' }]}
       />
       <form onSubmit={submit} className="surface-card p-5 space-y-6 max-w-5xl" noValidate>
         <fieldset className="space-y-2">
@@ -587,6 +618,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
           value={details}
           onChange={setDetails}
           idPrefix="po-edit"
+          hideProject={stores}
           projectSetBy={po.lines.find((l) => l.material.category && sectionOf(l.material.category) === 'PROJECTS' && l.material.projectNumber)?.material.sku}
         />
         <Field label="Remarks" htmlFor="po-edit-notes">

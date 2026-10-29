@@ -16,7 +16,7 @@ import { useAuth } from '../auth';
 import { revisionLabel } from '../lib/poDocument';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
-interface PO {
+export interface PO {
   id: string; number: string; revision?: number; status: string;
   supplier: { name: string };
   projectNumber?: string | null;
@@ -32,7 +32,7 @@ const OPEN_WORK = 'DRAFT,PENDING_APPROVAL';
 /** Orders the signed-in user may approve now: priced and within their limit (server-side). */
 export const MINE = 'mine';
 
-const STATUS_OPTIONS = [
+export const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: OPEN_WORK, label: 'Draft & pending approval' },
   { value: 'DRAFT', label: 'Draft' },
@@ -126,7 +126,7 @@ export function PurchaseOrders() {
           isLoading={pos.loading}
           rowKey={(p) => p.id}
           rows={filtered}
-          columns={columns()}
+          columns={orderColumns()}
           emptyState={mine && !q && !project ? (
             <EmptyState
               title="Nothing is waiting for your approval"
@@ -150,7 +150,8 @@ export function PurchaseOrders() {
   );
 }
 
-function columns(): DataTableColumn<PO>[] {
+/** The order list's columns, shared with Stores → Order stock. */
+export function orderColumns(): DataTableColumn<PO>[] {
   return [
     {
       key: 'num', header: 'PO', width: '10rem',
