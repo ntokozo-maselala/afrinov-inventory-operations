@@ -115,6 +115,22 @@ export function checkProjectMaterial(
 }
 
 /**
+ * A project order is bought by Procurement for its project, so it holds
+ * Projects material only (Stores ordering roadmap): Stores stock is ordered by
+ * the store, on an order without a project. Issues are not affected.
+ */
+export function refuseStoresOnProjectOrder(
+  projectNumber: string | null | undefined,
+  materials: Array<{ sku: string; category: string }>,
+): void {
+  if (!projectNumber) return;
+  const stores = materials.find((m) => sectionOf(m.category) === 'STORES');
+  if (stores) {
+    throw Errors.validation(`${stores.sku} is a Stores item, so it isn't bought for project ${projectNumber}. The store orders Stores stock from Stores → Order stock.`);
+  }
+}
+
+/**
  * Refuses a Projects material that has no project yet: until it is given one,
  * it keeps its stock and history but is not issued or ordered.
  */

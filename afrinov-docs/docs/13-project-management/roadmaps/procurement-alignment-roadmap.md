@@ -4,7 +4,7 @@ Oct 19, 2026 · Sbonakaliso Ngcobo
 
 ## Summary
 
-Seven phases that bring purchase orders in the app up to the **AFRI-0000_x R0 - Item Description** workbook, which is the company's purchase order template. The app already had the order workflow (approval, receiving, close and cancel). What it lacked was what the template prints: prices, VAT, terms, delivery details, the project and a document to send the supplier.
+Seven phases that bring purchase orders in the app up to the **AFRI-0000_x R0 - Item Description** workbook, which is the company's purchase order template. The template serves both kinds of order since the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (ADR-020): Procurement's project orders and the store's Stores orders. The app already had the order workflow (approval, receiving, close and cancel). What it lacked was what the template prints: prices, VAT, terms, delivery details, the project and a document to send the supplier.
 
 **Status:** Phases 1 to 6 are built, pushed and waiting for review. All 30 rows of the [field map](#field-map) now match the template. Phase 7, switching procurement on everywhere, is next.
 

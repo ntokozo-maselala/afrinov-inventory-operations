@@ -25,7 +25,7 @@ import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './s
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { approvalBlock, approversFor, listApprovers, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
-import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
+import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -328,10 +328,18 @@ function toDateOnly(iso: string): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+/**
+ * The two kinds of order (Stores ordering roadmap): a Stores order has no
+ * project and is raised by the store; a project order is Procurement's.
+ */
+export const ORDER_KINDS = ['stores', 'projects'] as const;
+export type OrderKind = (typeof ORDER_KINDS)[number];
+
 export const PurchaseOrderService = {
-  async list(filter: { status?: PurchaseOrderStatus; projectNumber?: string } = {}) {
+  async list(filter: { status?: PurchaseOrderStatus; projectNumber?: string; kind?: OrderKind } = {}) {
+    const { kind, ...where } = filter;
     const orders = await prisma.purchaseOrder.findMany({
-      where: filter,
+      where: { ...where, ...(kind ? { AND: [{ projectNumber: kind === 'stores' ? null : { not: null } }] } : {}) },
       include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -343,11 +351,11 @@ export const PurchaseOrderService = {
    * Approve: every line priced and the total within their limit. Oldest first,
    * as they have waited longest. Empty for anyone who may not approve.
    */
-  async awaitingApproval(actorId: string) {
+  async awaitingApproval(actorId: string, kind?: OrderKind) {
     const me = (await listApprovers()).find((a) => a.id === actorId);
     if (!me) return [];
     const orders = await prisma.purchaseOrder.findMany({
-      where: { status: 'PENDING_APPROVAL' },
+      where: { status: 'PENDING_APPROVAL', ...(kind ? { projectNumber: kind === 'stores' ? null : { not: null } } : {}) },
       include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
       orderBy: { createdAt: 'asc' },
     });
@@ -416,6 +424,9 @@ export const PurchaseOrderService = {
     const lineMaterials = await lineMaterialsOf(input.lines.map((l) => l.materialId), db);
     for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
     checkProjectMaterial(cleanText(input.projectNumber), lineMaterials, 'ordered');
+    // A project order holds its project's material only. An RFQ sent before
+    // that rule may still hold Stores items, and its award keeps them.
+    if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), lineMaterials);
 
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods
@@ -513,6 +524,13 @@ export const PurchaseOrderService = {
       // An order left on its project can still be edited after the project closes.
       const nextProject = input.projectNumber === undefined ? undefined : cleanText(input.projectNumber);
       if (nextProject !== undefined && nextProject !== po.projectNumber) {
+        // A Stores order and a project order are raised by different teams,
+        // so neither becomes the other; a project order can change project.
+        if (!nextProject !== !po.projectNumber) {
+          throw Errors.validation(po.projectNumber
+            ? 'A project order stays on a project. Stores stock is ordered from Stores → Order stock.'
+            : 'A Stores order has no project. Raise a purchase order for the project instead.');
+        }
         if (nextProject) await assertProjectOpen(nextProject, tx);
         checkProjectMaterial(nextProject, await lineMaterialsOf(po.lines.map((l) => l.materialId), tx), 'ordered');
       }

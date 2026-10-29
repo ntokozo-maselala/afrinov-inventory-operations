@@ -4,7 +4,7 @@ Oct 19, 2026 · Sbonakaliso Ngcobo
 
 ## Summary
 
-Seven phases that make the procurement screens connect the way a buyer, an approver and a storeman actually work. The [Procurement Alignment Roadmap](procurement-alignment-roadmap.md) made the purchase order match the template; this one fixes how people get from one step to the next. Do it **before** that roadmap's Phase 7 switches procurement on for everyone.
+Seven phases that make the procurement screens connect the way a buyer, an approver and a storeman actually work. Since the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (ADR-020), the storeman orders Stores stock from Store → Order stock, and the re-order list leads there; buyers raise project orders. The [Procurement Alignment Roadmap](procurement-alignment-roadmap.md) made the purchase order match the template; this one fixes how people get from one step to the next. Do it **before** that roadmap's Phase 7 switches procurement on for everyone.
 
 **Phase 1 fixes a bug:** a goods receipt booked against an order from the Goods receipts page books the stock but never credits the order, so the same goods could later be received a second time.
 

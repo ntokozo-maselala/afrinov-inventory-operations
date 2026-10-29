@@ -352,3 +352,38 @@ both variables to `false`, and keep the two in step.
 **Evidence:** `afrinov-platform/apps/backend/src/shared/config.ts`
 (`isProcurementEnabled`), `afrinov-platform/apps/frontend/src/config/features.ts`,
 `afrinov-platform/apps/backend/docker-compose.yml`.
+
+---
+
+### ADR-020 — The store orders Stores stock; Procurement buys for projects
+**Date:** 2026-10-29 · **Status:** Accepted
+
+**Context:** One New purchase order form, held by Procurement, raised every
+order: project material for a job and Stores stock for the shelf alike, and
+the store controller, who sees what the shelf needs, could not order at all.
+Afrinov's workflow splits the two: the Procurement team buys project items
+for one project, and the storeman or inventory controller orders stock for
+the stores.
+
+**Decision:** An order's kind follows its project. An order with a project
+is a project order: raised, edited, submitted, cancelled and closed with the
+purchase order permissions, from Procurement, holding that project's
+material only. An order without a project is a Stores order: the same
+actions need the new `order:stores_stock`, held by `STORE_CONTROLLER` (and
+Admin), from Store → Order stock, holding Stores items only. An order can't
+change kind. Requests for quotation are for a project only. Approval by
+value, receiving and viewing are unchanged and shared.
+
+**Consequences:** Each team sees and does only its own ordering, and the
+server refuses the rest, whatever the screens show. Both kinds stay ordinary
+purchase orders: one numbering, one approval, one order document. Existing
+orders keep what they hold; orders without a project became Stores orders,
+changed by the store controller from then on, and an RFQ sent before the rule
+is still awarded with its Stores items. Migration `20260101000030` adds the
+permission to existing databases.
+
+**Evidence:** `afrinov-platform/apps/backend/src/shared/permissions.ts`,
+`afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts`
+(`requireForKind`, `requireForOrder`), `procurement.service.ts`,
+`rfq.service.ts`, `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
+`afrinov-docs/docs/13-project-management/roadmaps/stores-ordering-roadmap.md`.

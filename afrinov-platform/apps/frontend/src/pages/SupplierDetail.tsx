@@ -36,7 +36,9 @@ export function SupplierDetail() {
   // Editing needs edit:supplier on the server (Store controller and Procurement, ADR-018).
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('suppliers:manage');
-  const canOrder = PROCUREMENT_ENABLED && hasPermission('procurement:manage');
+  // Procurement orders for projects, the store for the shelf (Stores ordering roadmap).
+  const orderForm = !PROCUREMENT_ENABLED ? null
+    : hasPermission('procurement:manage') ? '/purchase-orders/new' : hasPermission('stores:order') ? '/stock/orders/new' : null;
   const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
@@ -87,8 +89,8 @@ export function SupplierDetail() {
             {canManage && (supplier.active
               ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
               : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
-            {canOrder && supplier.active && (
-              <Link to={`/purchase-orders/new?supplierId=${encodeURIComponent(supplier.id)}`} className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+            {orderForm && supplier.active && (
+              <Link to={`${orderForm}?supplierId=${encodeURIComponent(supplier.id)}`} className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.Cart size={14} /> New order
               </Link>
             )}

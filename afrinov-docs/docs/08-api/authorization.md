@@ -12,8 +12,8 @@ role's grants each time it runs.
 | Role | Permissions |
 |---|---|
 | ADMIN | All 32 permission codes |
-| STORE_CONTROLLER | create/edit material; create/edit/delete location, manage location status; receive, issue, transfer, adjust inventory; reverse inventory transaction; manage racks, projects, recipients; view and receive purchase orders; view goods receipts; view reports; view users (lookup); check out/in tool |
-| PROCUREMENT | create/edit supplier; view, create, submit, cancel, close purchase orders; receive inventory; view goods receipts; manage projects; view reports |
+| STORE_CONTROLLER | create/edit material; create/edit/delete location, manage location status; receive, issue, transfer, adjust inventory; reverse inventory transaction; manage racks, projects, recipients; view and receive purchase orders; order Stores stock (raise, edit, submit, cancel and close orders without a project, ADR-020); view goods receipts; view reports; view users (lookup); check out/in tool |
+| PROCUREMENT | create/edit supplier; view purchase orders; create, submit, cancel, close project orders (those with a project, ADR-020) and requests for quotation; receive inventory; view goods receipts; manage projects; view reports |
 | APPROVER | approve purchase orders; view reports |
 | TECHNICIAN | issue inventory; view reports; view users (lookup); check out/in tool |
 | VIEWER | view reports |

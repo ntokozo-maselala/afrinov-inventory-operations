@@ -40,6 +40,8 @@ describe('requests for quotation over real HTTP', () => {
   let token: string;
   let storesItem: string;
   let projectItem: string;
+  let projectItem2: string;
+  let otherItem: string;
   let supplierA: string;
   let supplierB: string;
   let inactiveSupplier: string;
@@ -58,6 +60,12 @@ describe('requests for quotation over real HTTP', () => {
     const own = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-P-${run}`, name: 'Door C-channel frame 180x70', category: 'PROJECT_MATERIAL', unitOfMeasure: 'LOTS', projectNumber });
     expect(own.status).toBe(200);
     projectItem = own.body.id;
+    const own2 = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-P2-${run}`, name: 'Door rail 40x40', category: 'PROJECT_MATERIAL', unitOfMeasure: 'M', projectNumber });
+    expect(own2.status).toBe(200);
+    projectItem2 = own2.body.id;
+    const others = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-O-${run}`, name: 'Gate hinge', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber: otherProject });
+    expect(others.status).toBe(200);
+    otherItem = others.body.id;
 
     const supplier = async (name: string) => {
       const res = await api<{ id: string }>('POST', '/suppliers', { name });
@@ -79,7 +87,7 @@ describe('requests for quotation over real HTTP', () => {
   it("raises a draft for a project, numbered as the workbook's documents, with the project's name as description", async () => {
     const res = await raise({
       projectNumber,
-      lines: [{ materialId: projectItem, quantity: 109.318 }, { materialId: storesItem, quantity: 4 }],
+      lines: [{ materialId: projectItem, quantity: 109.318 }, { materialId: projectItem2, quantity: 4 }],
       supplierIds: [supplierA, supplierB, supplierA],
     });
     expect(res.status).toBe(201);
@@ -92,84 +100,89 @@ describe('requests for quotation over real HTTP', () => {
     expect(rfq.status).toBe(200);
     expect(rfq.body.lines.map((l) => [l.lineNo, l.material?.sku, Number(l.quantity)])).toEqual([
       [1, `IT-RFQ-P-${run}`, 109.318],
-      [2, `IT-RFQ-S-${run}`, 4],
+      [2, `IT-RFQ-P2-${run}`, 4],
     ]);
     // Each supplier once, in the order asked, with no quote yet.
     expect(rfq.body.suppliers.map((s) => s.supplierId)).toEqual([supplierA, supplierB]);
     expect(rfq.body.suppliers.every((s) => s.totals === null && typeof s.vatRate === 'number')).toBe(true);
 
-    const second = await raise({ projectNumber, lines: [{ materialId: storesItem, quantity: 1 }] });
+    const second = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] });
     expect(second.body.number).toBe(`AFRI-02A-${digits}-02-02`);
   });
 
-  it('numbers an RFQ for Stores RFQ-0001 onwards, and never twice when raised at once', async () => {
-    const stores = await raise({ lines: [{ materialId: storesItem, quantity: 2 }] });
-    expect(stores.status).toBe(201);
-    expect(stores.body.number).toMatch(/^RFQ-\d{4,}$/);
-    expect(stores.body.description).toBeNull();
+  it('is for a project and its material only (Stores ordering roadmap): Stores stock is ordered by the store', async () => {
+    const noProject = await raise({ lines: [{ materialId: storesItem, quantity: 2 }] });
+    expect(noProject.status).toBe(400);
+    expect(noProject.body.error.message).toMatch(/is for one project/);
+    const storesLine = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }, { materialId: storesItem, quantity: 2 }] });
+    expect(storesLine.status).toBe(400);
+    expect(storesLine.body.error.message).toMatch(/is a Stores item, so it isn't bought for project/);
+  });
 
-    const together = await Promise.all([1, 2, 3, 4].map(() => raise({ projectNumber: otherProject, lines: [{ materialId: storesItem, quantity: 1 }] })));
+  it('never gives two RFQs raised at once the same number', async () => {
+    const together = await Promise.all([1, 2, 3, 4].map(() => raise({ projectNumber: otherProject, lines: [{ materialId: otherItem, quantity: 1 }] })));
     expect(together.map((r) => r.status)).toEqual([201, 201, 201, 201]);
     expect(together.map((r) => r.body.number).sort()).toEqual([1, 2, 3, 4].map((n) => `RFQ-IT-${run}-0${n}`));
   });
 
   it("refuses another project's material, an inactive supplier and an unknown project", async () => {
-    const forStores = await raise({ lines: [{ materialId: projectItem, quantity: 1 }] });
-    expect(forStores.status).toBe(400);
-    expect(forStores.body.error.message).toMatch(/material for project/);
-
     const forOther = await raise({ projectNumber: otherProject, lines: [{ materialId: projectItem, quantity: 1 }] });
     expect(forOther.status).toBe(400);
+    expect(forOther.body.error.message).toMatch(/material for project/);
 
-    const closed = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [inactiveSupplier] });
+    const closed = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [inactiveSupplier] });
     expect(closed.status).toBe(400);
     expect(closed.body.error.message).toMatch(/inactive/);
 
-    expect((await raise({ projectNumber: `NOPE-${run}`, lines: [{ materialId: storesItem, quantity: 1 }] })).status).toBe(400);
+    expect((await raise({ projectNumber: `NOPE-${run}`, lines: [{ materialId: projectItem, quantity: 1 }] })).status).toBe(400);
 
     // Quantities are kept to 4 decimal places: a finer one would be saved as 0.
-    expect((await raise({ lines: [{ materialId: storesItem, quantity: 0.00001 }] })).status).toBe(400);
+    expect((await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 0.00001 }] })).status).toBe(400);
   });
 
   it('refuses an archived project', async () => {
     const archived = `IT-ARC-${run}`;
     expect((await api('POST', '/projects', { projectNumber: archived, name: `Archived ${run}` })).status).toBe(201);
     expect((await api('DELETE', `/projects/${archived}`)).status).toBe(200);
-    const res = await raise({ projectNumber: archived, lines: [{ materialId: storesItem, quantity: 1 }] });
+    const res = await raise({ projectNumber: archived, lines: [{ materialId: projectItem, quantity: 1 }] });
     expect(res.status).toBe(400);
   });
 
   it('starts the Activity with everything the draft was raised with', async () => {
-    const created = await raise({ lines: [{ materialId: storesItem, quantity: 2.5 }], description: 'Round bars', notes: 'Mill certificates required', penaltiesApply: true, supplierIds: [supplierA] });
+    const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 2.5 }], description: 'Round bars', notes: 'Mill certificates required', penaltiesApply: true, supplierIds: [supplierA] });
     const history = await api<HistoryEntry[]>('GET', `/rfqs/${created.body.id}/history`);
     expect(history.body).toHaveLength(1);
     expect(history.body[0]!.after).toMatchObject({
-      number: created.body.number, status: 'DRAFT', projectNumber: null, description: 'Round bars',
-      notes: 'Mill certificates required', penaltiesApply: true, lines: [{ materialId: storesItem, quantity: '2.5' }], supplierIds: [supplierA],
+      number: created.body.number, status: 'DRAFT', projectNumber, description: 'Round bars',
+      notes: 'Mill certificates required', penaltiesApply: true, lines: [{ materialId: projectItem, quantity: '2.5' }], supplierIds: [supplierA],
     });
   });
 
   it("moves a description that was the project's name with the project, and keeps one the buyer wrote", async () => {
-    const named = await raise({ projectNumber, lines: [{ materialId: storesItem, quantity: 1 }] });
+    const named = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] });
     expect(named.body.description).toBe(`Door rails ${run}`);
-    const moved = await api<Rfq>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: otherProject });
+    const moved = await api<Rfq>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: otherProject, lines: [{ materialId: otherItem, quantity: 1 }] });
     expect(moved.body.description).toBe(`Other job ${run}`);
-    const off = await api<Rfq>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: null });
-    expect(off.body.description).toBeNull();
+    // Its material stays with its project.
+    expect((await api('PATCH', `/rfqs/${named.body.id}`, { projectNumber })).status).toBe(400);
+    // And it stays on a project.
+    const off = await api<ApiErrorBody>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: null });
+    expect(off.status).toBe(400);
+    expect(off.body.error.message).toMatch(/is for one project/);
 
-    const written = await raise({ projectNumber, description: 'Round bars for the door rails', lines: [{ materialId: storesItem, quantity: 1 }] });
-    const kept = await api<Rfq>('PATCH', `/rfqs/${written.body.id}`, { projectNumber: otherProject });
+    const written = await raise({ projectNumber, description: 'Round bars for the door rails', lines: [{ materialId: projectItem, quantity: 1 }] });
+    const kept = await api<Rfq>('PATCH', `/rfqs/${written.body.id}`, { projectNumber: otherProject, lines: [{ materialId: otherItem, quantity: 1 }] });
     expect(kept.body.description).toBe('Round bars for the door rails');
   });
 
   it('edits a draft, renumbers it on a new project, and logs only what changed', async () => {
-    const created = await raise({ lines: [{ materialId: storesItem, quantity: 3 }], supplierIds: [supplierA] });
+    const created = await raise({ projectNumber: otherProject, lines: [{ materialId: otherItem, quantity: 3 }], supplierIds: [supplierA] });
     const id = created.body.id;
 
     const edited = await api<Rfq>('PATCH', `/rfqs/${id}`, {
       projectNumber,
       notes: 'Quote in rand, delivered to site',
-      lines: [{ materialId: projectItem, quantity: 7 }, { materialId: storesItem, quantity: 3 }],
+      lines: [{ materialId: projectItem, quantity: 7 }, { materialId: projectItem2, quantity: 3 }],
       supplierIds: [supplierB],
     });
     expect(edited.status).toBe(200);
@@ -184,7 +197,7 @@ describe('requests for quotation over real HTTP', () => {
     expect(history.body.map((e) => e.action)).toEqual(['UPDATE', 'CREATE']);
     expect(history.body[0]!.actorName).toBeTruthy();
     expect(history.body[0]!.after).toMatchObject({ projectNumber, number: edited.body.number, supplierIds: [supplierB] });
-    expect(history.body[0]!.before).toMatchObject({ projectNumber: null, number: created.body.number, supplierIds: [supplierA] });
+    expect(history.body[0]!.before).toMatchObject({ projectNumber: otherProject, number: created.body.number, supplierIds: [supplierA] });
 
     const listed = await api<Rfq[]>('GET', `/rfqs?projectNumber=${projectNumber}`);
     expect(listed.body.map((r) => r.id)).toContain(id);
@@ -197,14 +210,14 @@ describe('requests for quotation over real HTTP', () => {
     const day = (iso: string | null) => iso?.slice(0, 10);
 
     it('needs a supplier to ask before it goes out', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] });
       const res = await send(created.body.id);
       expect(res.status).toBe(400);
       expect(res.body.error.message).toMatch(/at least one supplier/);
     });
 
     it('issues it today and closes it four days later, as the RFQ sheet does', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       const res = await send(created.body.id);
       expect(res.status).toBe(200);
       const today = todayInSouthAfrica();
@@ -219,7 +232,7 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('takes the closing date given, but not one before today', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       expect((await send(created.body.id, { closingDate: addDays(todayInSouthAfrica(), -1) })).status).toBe(400);
       // A day that doesn't exist is refused, not saved as 2 March.
       const impossible = await send(created.body.id, { closingDate: '2099-02-30' });
@@ -230,7 +243,7 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('checks its suppliers again as it goes out', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       const late = await api<{ id: string }>('POST', '/suppliers', { name: `IT RFQ Late ${run}` });
       expect((await api('PATCH', `/rfqs/${created.body.id}`, { supplierIds: [supplierA, late.body.id] })).status).toBe(200);
       expect((await api('PATCH', `/suppliers/${late.body.id}`, { active: false })).status).toBe(200);
@@ -240,7 +253,7 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('once sent, moves only its closing date and adds suppliers, taking none off', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       await send(created.body.id);
       const id = created.body.id;
 
@@ -259,7 +272,7 @@ describe('requests for quotation over real HTTP', () => {
 
     it('adds a supplier to a sent RFQ although one already asked has since been deactivated', async () => {
       const gone = await api<{ id: string }>('POST', '/suppliers', { name: `IT RFQ Gone ${run}` });
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [gone.body.id] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [gone.body.id] });
       await send(created.body.id);
       expect((await api('PATCH', `/suppliers/${gone.body.id}`, { active: false })).status).toBe(200);
 
@@ -273,7 +286,7 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('shows a sent RFQ past its closing date as closed', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       await send(created.body.id);
       // As if it went out last week.
       await prisma.rfq.update({ where: { id: created.body.id }, data: { issuedAt: new Date('2026-01-05'), closingDate: new Date('2026-01-09') } });
@@ -283,7 +296,7 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('cancels a draft or a sent RFQ with a reason, and nothing after that', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       await send(created.body.id);
       expect((await api('POST', `/rfqs/${created.body.id}/cancel`, { reason: ' ' })).status).toBe(400);
       const res = await api<Sent & { cancellationReason: string }>('POST', `/rfqs/${created.body.id}/cancel`, { reason: 'Client postponed the job' });
@@ -292,7 +305,7 @@ describe('requests for quotation over real HTTP', () => {
       expect((await api('POST', `/rfqs/${created.body.id}/cancel`, { reason: 'Again' })).status).toBe(409);
       expect((await api('PATCH', `/rfqs/${created.body.id}`, { closingDate: addDays(todayInSouthAfrica(), 9) })).status).toBe(409);
 
-      const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }] });
+      const draft = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] });
       expect((await api<Sent>('POST', `/rfqs/${draft.body.id}/cancel`, { reason: 'Raised twice' })).body.status).toBe('CANCELLED');
     });
   });
@@ -311,7 +324,7 @@ describe('requests for quotation over real HTTP', () => {
 
     /** A sent RFQ with two lines, asking both suppliers. */
     async function sentRfq(): Promise<Quoted> {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 4 }, { materialId: storesItem, quantity: 2.5 }], supplierIds: [supplierA, supplierB] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 4 }, { materialId: projectItem2, quantity: 2.5 }], supplierIds: [supplierA, supplierB] });
       return (await api<Quoted>('POST', `/rfqs/${created.body.id}/send`, {})).body;
     }
     const quote = (rfqId: string, supplierId: string, body: Record<string, unknown>) => api<Quoted>('PUT', `/rfqs/${rfqId}/suppliers/${supplierId}/quote`, body);
@@ -359,7 +372,7 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('takes quotes only while the RFQ is out with suppliers', async () => {
-      const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const draft = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       const line = (await api<Quoted>('GET', `/rfqs/${draft.body.id}`)).body.lines[0]!.id;
       expect((await quote(draft.body.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(409);
       await api('POST', `/rfqs/${draft.body.id}/send`, {});
@@ -455,7 +468,7 @@ describe('requests for quotation over real HTTP', () => {
     async function quoted(): Promise<Awarded> {
       const created = await raise({
         projectNumber, penaltiesApply: true, notes: 'Deliver to site',
-        lines: [{ materialId: storesItem, quantity: 4 }, { materialId: projectItem, quantity: 1 }], supplierIds: [supplierA, supplierB],
+        lines: [{ materialId: projectItem2, quantity: 4 }, { materialId: projectItem, quantity: 1 }], supplierIds: [supplierA, supplierB],
       });
       const sent = (await api<Awarded>('POST', `/rfqs/${created.body.id}/send`, {})).body;
       const [l1, l2] = sent.lines;
@@ -475,7 +488,7 @@ describe('requests for quotation over real HTTP', () => {
       const order = (await api<Order>('GET', `/purchase-orders/${res.body.purchaseOrder!.id}`)).body;
       expect(order).toMatchObject({ status: 'DRAFT', supplierId: supplierB, projectNumber, penaltiesApply: true, rfq: { id: rfq.id, number: rfq.number } });
       expect(order.notes).toBe(`As per your quotation B-7 for ${rfq.number}.\nDeliver to site`);
-      expect(order.lines.map((l) => [l.materialId, Number(l.orderedQty), Number(l.unitPrice)])).toEqual([[storesItem, 4, 150], [projectItem, 1, 0.0001]]);
+      expect(order.lines.map((l) => [l.materialId, Number(l.orderedQty), Number(l.unitPrice)])).toEqual([[projectItem2, 4, 150], [projectItem, 1, 0.0001]]);
 
       const poHistory = await api<HistoryEntry[]>('GET', `/purchase-orders/${order.id}/history`);
       expect(poHistory.body.at(-1)).toMatchObject({ action: 'CREATE', after: { rfqId: rfq.id, rfqNumber: rfq.number } });
@@ -506,7 +519,7 @@ describe('requests for quotation over real HTTP', () => {
       const rfq = await quoted();
       await api('POST', `/rfqs/${rfq.id}/suppliers/${supplierB}/decline`, { notes: 'Changed their mind' });
       expect((await award(rfq.id, { supplierId: supplierB })).status).toBe(400);
-      const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const draft = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       expect((await award(draft.body.id, { supplierId: supplierA })).status).toBe(409);
     });
 
@@ -523,13 +536,43 @@ describe('requests for quotation over real HTTP', () => {
     });
 
     it('gives each quoted line its subtotal rounded as the order rounds it', async () => {
-      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
       const sent = (await api<Awarded>('POST', `/rfqs/${created.body.id}/send`, {})).body;
       const res = await api<{ suppliers: Array<{ supplierId: string; lineSubtotals: Array<{ rfqLineId: string; subtotal: string }> }> }>(
         'PUT', `/rfqs/${sent.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: sent.lines[0]!.id, unitPrice: 1.005 }] },
       );
       // 1.005 x 1 rounds half up to 1.01, as the order will; a double would show 1.00.
       expect(res.body.suppliers.find((s) => s.supplierId === supplierA)!.lineSubtotals).toEqual([{ rfqLineId: sent.lines[0]!.id, subtotal: '1.01' }]);
+    });
+
+    it('awards an RFQ sent before Stores ordering, Stores items and all, but sends no such draft now', async () => {
+      const created = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }, { materialId: projectItem2, quantity: 2 }], supplierIds: [supplierA] });
+      const sent = (await api<Awarded>('POST', `/rfqs/${created.body.id}/send`, {})).body;
+      // As one sent before the rule would be: its second line a Stores item.
+      await prisma.rfqLine.update({ where: { id: sent.lines[1]!.id }, data: { materialId: storesItem } });
+      await api('PUT', `/rfqs/${sent.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: sent.lines[0]!.id, unitPrice: 5 }, { rfqLineId: sent.lines[1]!.id, unitPrice: 7 }] });
+      const res = await award(sent.id, { supplierId: supplierA });
+      expect(res.status).toBe(200);
+      const order = (await api<Order>('GET', `/purchase-orders/${res.body.purchaseOrder!.id}`)).body;
+      expect(order.lines.map((l) => l.materialId)).toEqual([projectItem, storesItem]);
+
+      // A draft from before the rule, with no project, can't go out.
+      const draft = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
+      await prisma.rfq.update({ where: { id: draft.body.id }, data: { projectNumber: null } });
+      const refused = await api<ApiErrorBody>('POST', `/rfqs/${draft.body.id}/send`, {});
+      expect(refused.status).toBe(400);
+      expect(refused.body.error.message).toMatch(/is for one project/);
+
+      // Nor is one already sent awarded: its order would be a Stores order,
+      // the store's to change, not the buyer's (Qodo, PR #117).
+      const old = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
+      const oldSent = (await api<Awarded>('POST', `/rfqs/${old.body.id}/send`, {})).body;
+      await api('PUT', `/rfqs/${oldSent.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: oldSent.lines[0]!.id, unitPrice: 5 }] });
+      await prisma.rfq.update({ where: { id: oldSent.id }, data: { projectNumber: null } });
+      const noProject = await award(oldSent.id, { supplierId: supplierA });
+      expect(noProject.status).toBe(400);
+      expect(noProject.body.error.message).toMatch(/has no project, so it can't be awarded/);
+      expect(await prisma.purchaseOrder.count({ where: { rfq: { id: oldSent.id } } })).toBe(0);
     });
 
     it('raises one order when two buyers award at once', async () => {
@@ -559,7 +602,7 @@ describe('requests for quotation over real HTTP', () => {
       try {
         const buyer = await as('PROCUREMENT');
         const raised = await buyer<Rfq & { lines: Array<{ id: string }> }>('POST', '/rfqs', {
-          projectNumber, lines: [{ materialId: storesItem, quantity: 4 }, { materialId: projectItem, quantity: 2 }], supplierIds: [supplierA, supplierB],
+          projectNumber, lines: [{ materialId: projectItem2, quantity: 4 }, { materialId: projectItem, quantity: 2 }], supplierIds: [supplierA, supplierB],
         });
         expect(raised.status).toBe(201);
         const id = raised.body.id;
@@ -592,14 +635,14 @@ describe('requests for quotation over real HTTP', () => {
 
     it.each(['APPROVER', 'STORE_CONTROLLER'])('lets a %s open RFQs and their quotations, and change nothing', async (role) => {
       const user = await as(role);
-      const draft = (await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] })).body;
-      const rfq = (await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] })).body;
+      const draft = (await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] })).body;
+      const rfq = (await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] })).body;
       await api('POST', `/rfqs/${rfq.id}/send`, {});
       expect((await user('GET', '/rfqs')).status).toBe(200);
       expect((await user('GET', `/rfqs/${rfq.id}`)).status).toBe(200);
       expect((await user('GET', `/rfqs/${rfq.id}/history`)).status).toBe(200);
       for (const [method, path, body] of [
-        ['POST', '/rfqs', { lines: [{ materialId: storesItem, quantity: 1 }] }],
+        ['POST', '/rfqs', { projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] }],
         ['PATCH', `/rfqs/${rfq.id}`, { closingDate: '2099-01-01' }],
         ['POST', `/rfqs/${draft.id}/send`, {}],
         ['PUT', `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`, {}],
@@ -615,7 +658,7 @@ describe('requests for quotation over real HTTP', () => {
 
     it.each(['TECHNICIAN', 'VIEWER'])('keeps RFQs from a %s altogether', async (role) => {
       const user = await as(role);
-      const rfq = (await raise({ lines: [{ materialId: storesItem, quantity: 1 }] })).body;
+      const rfq = (await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] })).body;
       expect((await user('GET', '/rfqs')).status).toBe(403);
       expect((await user('GET', `/rfqs/${rfq.id}`)).status).toBe(403);
     });

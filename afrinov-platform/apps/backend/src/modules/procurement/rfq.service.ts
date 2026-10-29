@@ -17,7 +17,7 @@ import { Prisma, type RfqStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
+import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
 import { defaultVatRate, lineMoney, orderTotals } from './po-pricing.js';
 import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
@@ -266,8 +266,14 @@ async function openProjectName(projectNumber: string, tx: Prisma.TransactionClie
   return cleanText((await tx.project.findUnique({ where: { projectNumber }, select: { name: true } }))?.name);
 }
 
-/** Refuses missing or inactive items, project material with no project, and another project's material. */
+/**
+ * Refuses an RFQ without a project, missing or inactive items, Stores items,
+ * project material with no project, and another project's material. RFQs are
+ * Procurement's, for one project (Stores ordering roadmap); Stores stock is
+ * ordered by the store at known prices.
+ */
 async function checkLines(lines: RfqLineInput[], projectNumber: string | null, tx: Prisma.TransactionClient): Promise<void> {
+  if (!projectNumber) throw Errors.validation('A request for quotation is for one project: choose its project. Stores stock is ordered from Stores → Order stock.');
   if (lines.length === 0) throw Errors.validation('A request for quotation needs at least one line');
   const ids = [...new Set(lines.map((l) => l.materialId))];
   // Held until the RFQ is written, so an item can't be deactivated between the check and the save.
@@ -282,6 +288,7 @@ async function checkLines(lines: RfqLineInput[], projectNumber: string | null, t
   if (inactive) throw Errors.validation(`${inactive.sku} is inactive, so it can't be quoted for`);
   for (const m of materials) refuseUnassigned(m, 'ordered');
   checkProjectMaterial(projectNumber, materials, 'ordered');
+  refuseStoresOnProjectOrder(projectNumber, materials);
 }
 
 /** The suppliers to ask, each once; missing or inactive ones are refused. */
@@ -384,9 +391,9 @@ export const RfqService = {
   /**
    * Creates a numbered draft with its lines and the suppliers to ask.
    *
-   * @throws {ApiError} VALIDATION_ERROR for no lines, a missing or inactive
-   * item or supplier, a missing or closed project, unassigned project material,
-   * or another project's material.
+   * @throws {ApiError} VALIDATION_ERROR for no project or no lines, a missing
+   * or inactive item or supplier, a missing or closed project, a Stores item,
+   * unassigned project material, or another project's material.
    */
   async create(input: CreateRfqInput, actorId: string) {
     const projectNumber = cleanText(input.projectNumber);
@@ -735,8 +742,9 @@ export const RfqService = {
    * clear choice (see awardConcerns), and is kept on the Activity.
    *
    * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is sent;
-   * VALIDATION_ERROR for a supplier who hasn't quoted, a missing reason, or
-   * what the order itself refuses (an inactive supplier or item, a closed project).
+   * VALIDATION_ERROR for an RFQ without a project, a supplier who hasn't
+   * quoted, a missing reason, or what the order itself refuses (an inactive
+   * supplier or item, a closed project).
    */
   async award(rfqId: string, input: { supplierId: string; reason?: string | null }, actorId: string) {
     const vatSetting = Number(await SettingsService.getValue<number>('purchaseOrders.vatRate')) || 0;
@@ -750,6 +758,11 @@ export const RfqService = {
       if (!rfq) throw Errors.notFound('Rfq');
       if (rfq.status !== 'SENT') {
         throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`, { status: rfq.status });
+      }
+      // One sent before RFQs were project-only would raise a Stores order,
+      // which is the store's to raise and change, not the buyer's (ADR-020).
+      if (!rfq.projectNumber) {
+        throw Errors.validation(`${rfq.number} has no project, so it can't be awarded: an order from it would be a Stores order. Cancel it, and the store orders that stock from Store → Order stock.`);
       }
       const asked = rfq.suppliers.find((s) => s.supplierId === input.supplierId);
       if (!asked) throw Errors.notFound('Supplier on this request for quotation');

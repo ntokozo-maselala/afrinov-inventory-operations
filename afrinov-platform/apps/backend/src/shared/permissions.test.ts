@@ -26,6 +26,14 @@ describe('RolePermissions', () => {
     expect(holders(PermissionCode.EditMaterial)).toEqual(['ADMIN', 'STORE_CONTROLLER']);
   });
 
+  it('splits ordering: the store controller orders Stores stock, procurement buys for projects', () => {
+    const holders = (code: string) => Object.entries(RolePermissions).filter(([, p]) => (p as string[]).includes(code)).map(([role]) => role).sort();
+    expect(holders(PermissionCode.OrderStoresStock)).toEqual(['ADMIN', 'STORE_CONTROLLER']);
+    for (const code of [PermissionCode.CreatePurchaseOrder, PermissionCode.SubmitPurchaseOrder, PermissionCode.CancelPurchaseOrder, PermissionCode.ClosePurchaseOrder]) {
+      expect(holders(code)).toEqual(['ADMIN', 'PROCUREMENT']);
+    }
+  });
+
   it('only references known permission codes', () => {
     const valid = new Set<string>(ALL_PERMISSION_CODES);
     for (const [role, perms] of Object.entries(RolePermissions)) {

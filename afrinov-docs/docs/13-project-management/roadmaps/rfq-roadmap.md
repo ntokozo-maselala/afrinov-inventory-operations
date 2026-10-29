@@ -6,7 +6,7 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phases 1 to 5 are merged (PRs #104, #105, #107, #112 and #113). Phase 6 is built on `feature/rfq-rollout` and not yet committed; its last step, the date from which RFQs are raised in the app only, is the business's to set. One pull request per phase.
+**Status:** All six phases are merged (PRs #104, #105, #107, #112, #113 and #115). Phase 6's last step, the date from which RFQs are raised in the app only, is the business's to set. Since the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (ADR-020), an RFQ is for one project and its material only: Stores stock is ordered by the store at known prices, and RFQ-0001 style numbers are no longer issued.
 
 | Phase | What | Size | Status |
 |---|---|---|---|

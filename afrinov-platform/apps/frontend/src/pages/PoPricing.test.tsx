@@ -17,12 +17,12 @@ const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
 const { NewPurchaseOrder, EditPurchaseOrder } = await import('./PurchaseOrderForm');
 
-const material = (id: string, sku: string, unitCost: string | null) => ({ id, sku, name: `Item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost, active: true });
+const material = (id: string, sku: string, unitCost: string | null) => ({ id, sku, name: `Item ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost, active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } });
 const SUPPLIERS = [{ id: 's-za', name: 'Hydac', active: true, currency: 'ZAR' }, { id: 's-eu', name: 'HS SRL', active: true, currency: 'EUR' }];
 const MATERIALS = [material('m-1', 'DISC-115', '12.50'), material('m-2', 'BOLT-M16', null)];
 
 const PRICED = {
-  id: 'po-1', number: 'PO-2026-0001', status: 'PENDING_APPROVAL', supplierId: 's-za', supplier: { name: 'Hydac' }, createdAt: '2026-10-19T08:00:00Z',
+  id: 'po-1', number: 'PO-2026-0001', status: 'PENDING_APPROVAL', supplierId: 's-za', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-19T08:00:00Z',
   currency: 'ZAR', vatRate: '15',
   lines: [
     { id: 'l-1', materialId: 'm-1', material: { sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each' }, orderedQty: '3', receivedQty: '0', unitPrice: '12.5', subtotal: '37.50', vat: '5.63', net: '43.13' },

@@ -6,7 +6,9 @@
 // The first choice is the section: Stores (kept on the shelf, with a category
 // and Required Stock) or Projects (bought for one project, never re-ordered).
 // Both are fixed once the item exists; an item moved in from the old Project
-// Material category without a project can be given one here.
+// Material category without a project can be given one here. Added from an
+// order or RFQ line, both are fixed by it (`fixedBy`): a stock order takes a
+// Stores item, a project order or RFQ a Projects item for its own project.
 import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
@@ -32,13 +34,18 @@ const isOpen = (p: ProjectOpt) => p.active !== false && p.status !== 'COMPLETED'
  * Editing fixes the SKU, section, and category; a Projects item can be assigned
  * a project only while it has none. Saves call `onSaved`; save errors call `onError`.
  */
-export function MaterialForm({ initial, section: startSection = 'STORES', projectNumber: startProject = '', onCancel, onSaved, onError }: {
+export function MaterialForm({ initial, section: startSection = 'STORES', projectNumber: startProject = '', fixedBy, onCancel, onSaved, onError }: {
   /** The item to edit. Leave it out to add a new item. */
   initial?: Material;
   /** For a new item: the section it starts in, e.g. the Materials tab it was added from. */
   section?: MaterialSection;
   /** For a new Projects item: the project it starts on. */
   projectNumber?: string;
+  /**
+   * What fixes the section, and a Projects item's project, for a new item,
+   * e.g. "a stock order": the section and project given can't be changed.
+   */
+  fixedBy?: string;
   onCancel: () => void; onSaved: (material: CreatedMaterial) => void; onError: (e: ApiError) => void;
 }) {
   const editing = !!initial;
@@ -57,7 +64,9 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
   const bands = useStatusBands();
   const projects = section === 'PROJECTS';
   // A Projects item's project is fixed once it has one; one without can be given it here.
-  const projectFixed = editing && !!initial?.projectNumber;
+  // A new item for an order line takes the order's project.
+  const projectFixed = editing ? !!initial?.projectNumber : !!fixedBy && !!startProject;
+  const sectionFixed = editing || !!fixedBy;
   const projectList = useApi<ProjectOpt[]>(projects && !projectFixed ? '/projects?active=true' : null);
   const openProjects = (projectList.data ?? []).filter(isOpen);
 
@@ -110,13 +119,14 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
         <legend className="field-label mb-1">Section</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup">
           {([['STORES', 'Stores', 'Kept on the shelf and topped up'], ['PROJECTS', 'Projects', 'Bought for one project, not re-ordered']] as const).map(([value, label, help]) => (
-            <label key={value} className={`flex items-start gap-2 p-3 rounded border ${section === value ? 'border-brand-500 bg-brand-50' : 'border-surface-200'} ${editing ? 'opacity-70' : 'cursor-pointer'}`}>
-              <input type="radio" name="m-section" value={value} checked={section === value} onChange={() => setSection(value)} disabled={editing} className="mt-1" />
+            <label key={value} className={`flex items-start gap-2 p-3 rounded border ${section === value ? 'border-brand-500 bg-brand-50' : 'border-surface-200'} ${sectionFixed ? 'opacity-70' : 'cursor-pointer'}`}>
+              <input type="radio" name="m-section" value={value} checked={section === value} onChange={() => setSection(value)} disabled={sectionFixed} className="mt-1" />
               <span><span className="block text-sm font-medium text-surface-900">{label}</span><span className="block text-xs text-surface-500">{help}</span></span>
             </label>
           ))}
         </div>
         {editing && <p className="text-xs text-surface-500 mt-1">Fixed once the item exists.</p>}
+        {!editing && fixedBy && <p className="text-xs text-surface-500 mt-1">Set by {fixedBy}.</p>}
       </fieldset>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="SKU / item code" htmlFor="m-sku" required help={fixed ?? (projects ? 'e.g. the project number first: 1369-PIPE-150NB' : undefined)}>
@@ -131,8 +141,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
       </Field>
       {projects ? (
         projectFixed ? (
-          <Field label="Project" htmlFor="m-project" help="Fixed once the item has its project.">
-            <Input id="m-project" value={`${initial!.projectNumber}${initial!.project?.name ? ` · ${initial!.project.name}` : ''}`} disabled />
+          <Field label="Project" htmlFor="m-project" help={editing ? 'Fixed once the item has its project.' : `Set by ${fixedBy}.`}>
+            <Input id="m-project" value={editing ? `${initial!.projectNumber}${initial!.project?.name ? ` · ${initial!.project.name}` : ''}` : projectNumber} disabled />
           </Field>
         ) : (
           <Field label="Project" htmlFor="m-project" required help={editing ? 'This item has no project yet. Choose the one it was bought for.' : 'The project this material is bought for. Only open projects are listed.'} error={projectList.error ? 'Couldn’t load projects. Close and reopen to try again.' : null}>

@@ -61,7 +61,8 @@ describe('the new-order form with project material', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
     const line2 = optionsOf('Line 2 material');
-    expect(line2).toContain('DISC — Cutting disc');
+    // Procurement buys for projects: Stores items are the store's to order (Stores ordering roadmap).
+    expect(line2).not.toContain('DISC — Cutting disc');
     expect(line2).not.toContain('1402-PIPE — Pipe for 1402');
 
     fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
@@ -88,7 +89,32 @@ describe('the new-order form with project material', () => {
     const line1 = optionsOf('Line 1 material');
     expect(line1).toContain('1402-PIPE — Pipe for 1402');
     expect(line1).not.toContain('1369-PIPE — Pipe for 1369');
-    expect(line1).toContain('DISC — Cutting disc');
+    expect(line1).not.toContain('DISC — Cutting disc');
+  });
+
+  // Stores ordering roadmap: Procurement buys for one project.
+  it('needs its project before it saves, and offers + New item once it has one', async () => {
+    form();
+    await waitFor(() => expect(optionsOf('Project')).toContain('1369 — Plant upgrade'));
+    expect(optionsOf('Project')).not.toContain('No project');
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    // Offered, but a Projects item needs the order's project first.
+    expect(optionsOf('Line 1 material')).toContain('+ New item…');
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
+    expect(await screen.findByText('Choose the project first')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Choose the project this order is for.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1369' } });
+    // The New item button opens the drawer on a new line, fixed to a Projects item for 1369.
+    fireEvent.click(screen.getByRole('button', { name: 'New item' }));
+    const drawer = await screen.findByRole('dialog', { name: 'New item' });
+    expect(within(drawer).getByRole('radio', { name: /Stores/ })).toBeDisabled();
+    expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeChecked();
+    expect(within(drawer).getByLabelText('Project')).toHaveValue('1369');
+    expect(within(drawer).getByLabelText('Project')).toBeDisabled();
   });
 
   it('offers neither a closed project nor its material', async () => {

@@ -21,7 +21,7 @@ const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
 
 const order = (status: string) => ({
-  id: 'po-1', number: 'PO-2026-0007', status, supplierId: 's-1', supplier: { name: 'Hydac' }, createdAt: '2026-10-19T08:00:00Z',
+  id: 'po-1', number: 'PO-2026-0007', status, supplierId: 's-1', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-19T08:00:00Z',
   currency: 'ZAR', vatRate: '15', totals: { subtotal: '600000.00', vat: '90000.00', net: '690000.00', unpricedLines: 0 },
   lines: [{ id: 'l-1', materialId: 'm-1', material: { sku: 'PUMP-1', name: 'Hydraulic pump', unitOfMeasure: 'each' }, orderedQty: '1', receivedQty: '0', unitPrice: '600000', subtotal: '600000.00', vat: '90000.00', net: '690000.00' }],
 });
@@ -139,5 +139,22 @@ describe('only the actions each role may take', () => {
     await screen.findByText('Hydraulic pump');
     expect(button('Receive delivery')).toBeInTheDocument();
     expect(button('Edit')).not.toBeInTheDocument();
+  });
+
+  // Stores ordering roadmap: an order without a project is the store's.
+  it('a store controller edits and cancels a Stores order, listed under Order stock', async () => {
+    current.po = { ...order('APPROVED'), projectNumber: null } as unknown as typeof current.po;
+    page(['STORE_CONTROLLER']);
+    await screen.findByText('Hydraulic pump');
+    expect(button('Edit')).toBeInTheDocument();
+    expect(button('Cancel PO')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Order stock' })).toHaveAttribute('href', '/stock/orders');
+  });
+
+  it('procurement opens a Stores order, and changes nothing on it', async () => {
+    current.po = { ...order('DRAFT'), projectNumber: null } as unknown as typeof current.po;
+    page(['PROCUREMENT']);
+    await screen.findByText('Hydraulic pump');
+    for (const name of ['Edit', 'Cancel PO', 'Submit for approval']) expect(button(name)).not.toBeInTheDocument();
   });
 });

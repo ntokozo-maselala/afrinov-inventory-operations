@@ -46,7 +46,12 @@ describe('useNavGroups', () => {
   });
 
   it('puts the counter actions in Store, after Stock', () => {
-    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools']);
+    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Order stock', 'Tools']);
+  });
+
+  it('offers Order stock only with procurement on, as the orders it raises are purchase orders', () => {
+    features.procurement = false;
+    expect(useLabelsIn('Store')).not.toContain('Order stock');
   });
 
   it('puts Movements, the history of every movement, with the other reports', () => {
@@ -66,7 +71,8 @@ describe('useNavGroups', () => {
     ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Tools']],
     ['PROCUREMENT', ['Stock', 'Receive stock', 'Tools']],
     ['VIEWER', ['Stock', 'Tools']],
-    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Tools']],
+    // The storeman orders stock for the shelf (Stores ordering roadmap); Procurement doesn't.
+    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Order stock', 'Tools']],
   ])('shows a %s only the Store actions the server lets them do', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Store')).toEqual(expected);
@@ -346,5 +352,24 @@ describe('New purchase order in the menu', () => {
     expect(active('/purchase-orders/po-1')).toEqual(['Purchase orders']);
     expect(active('/purchase-orders/po-1/edit')).toEqual(['Purchase orders']);
     expect(active('/purchase-orders/new')).toEqual(['New purchase order']);
+  });
+
+  // Stores ordering roadmap, Phase 4: each role sees only its own ordering.
+  it.each([
+    ['STORE_CONTROLLER', ['Order stock']],
+    ['PROCUREMENT', ['New purchase order', 'RFQ']],
+    ['APPROVER', []],
+    ['TECHNICIAN', []],
+    ['VIEWER', []],
+    ['ADMIN', ['Order stock', 'New purchase order', 'RFQ']],
+  ])('offers a %s only the ordering it does', (role, expected) => {
+    signedIn.roles = [role];
+    const ordering = ['Order stock', 'New purchase order', 'RFQ'];
+    expect(useNavGroups().flatMap((g) => g.items).map((i) => i.label).filter((l) => ordering.includes(l))).toEqual(expected);
+  });
+
+  it('lights Order stock on its new-order page, and nothing in Procurement', () => {
+    const items = useNavGroups().flatMap((g) => g.items);
+    expect(items.filter((i) => isNavItemActive(i, '/stock/orders/new')).map((i) => i.label)).toEqual(['Order stock']);
   });
 });

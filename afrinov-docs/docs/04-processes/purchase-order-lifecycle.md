@@ -10,10 +10,24 @@ its Order sheet for the copy the supplier receives, and its vendor list for
 suppliers (`supplier-management.md`).
 
 Pages: Purchase orders (`/purchase-orders`), New purchase order
-(`/purchase-orders/new`), the order (`/purchase-orders/:id`) and Edit
+(`/purchase-orders/new`), Store → Order stock (`/stock/orders`) and its new
+order (`/stock/orders/new`), the order (`/purchase-orders/:id`) and Edit
 (`/purchase-orders/:id/edit`). There is no Goods receipts page any more:
 deliveries are received from the order's page, and `/goods-receipts/*`
 redirects to Purchase orders.
+
+## Two kinds of order (ADR-020)
+| | Project order | Stores order |
+|---|---|---|
+| Raised by | Procurement, on New purchase order | The store controller, on Store → Order stock |
+| Project | Required | None |
+| Lines | That project's material | Stores items |
+| Raise, edit, submit, cancel, close | `create`/`submit`/`cancel`/`close:purchase_order` | `order:stores_stock` |
+| RFQ first | Possible | No: Stores stock is ordered at known prices |
+
+Approval by value, receiving, the order document and the numbering are the
+same for both. An order can't change kind. Orders raised before the split
+keep what they hold; those without a project are Stores orders.
 
 ## States
 `DRAFT → PENDING_APPROVAL → APPROVED → PARTIALLY_RECEIVED → RECEIVED → CLOSED`,
@@ -22,16 +36,18 @@ with `CANCELLED` before anything is received (ADR-007; full rules in
 `REJECTED` status.
 
 ## Steps
-1. **Raise** (`POST /purchase-orders`, PROCUREMENT or ADMIN) on the New
-   purchase order page: supplier, lines (material, quantity, unit price
-   excluding VAT, optional delivery date), VAT rate, expected delivery and
-   the template's order details (below). **Save draft** keeps it as a
+1. **Raise** (`POST /purchase-orders`) on the New purchase order page
+   (a project order, PROCUREMENT or ADMIN) or Order stock's New order (a
+   Stores order, STORE_CONTROLLER or ADMIN): supplier, lines (material,
+   quantity, unit price excluding VAT, optional delivery date), VAT rate,
+   expected delivery and the template's order details (below). **Save draft** keeps it as a
    `DRAFT` to finish later, for example once the quote arrives;
    **Create & submit** raises and submits it in one go.
    The order can also be started from where the need shows: the re-order
-   list on Stock status, an item's page and a supplier's page link to
-   `/purchase-orders/new?supplierId=…&materialIds=…`, which fills in the
-   supplier and lines, prices from each item's unit cost and quantities up to
+   list on Stock status and a Stores item's page link to
+   `/stock/orders/new?supplierId=…&materialIds=…`, a Projects item's page to
+   `/purchase-orders/new?materialIds=…`, and a supplier's page to the form
+   the viewer orders from; each fills in the supplier and lines, prices from each item's unit cost and quantities up to
    Required Stock where it is set. Without a supplier, the items' last
    supplier is suggested when they share one.
 2. **Submit** (`POST /:id/submit`): from `DRAFT` to `PENDING_APPROVAL`, or

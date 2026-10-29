@@ -23,6 +23,8 @@ const Movements = importPage(() => import('./pages/Movements').then(m => ({ defa
 const Suppliers = importPage(() => import('./pages/Suppliers').then(m => ({ default: m.Suppliers })));
 const SupplierDetail = importPage(() => import('./pages/SupplierDetail').then(m => ({ default: m.SupplierDetail })));
 const PurchaseOrders = importPage(() => import('./pages/PurchaseOrders').then(m => ({ default: m.PurchaseOrders })));
+const NewStockOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.NewStockOrder })));
+const StoresOrders = importPage(() => import('./pages/StoresOrders').then(m => ({ default: m.StoresOrders })));
 const PurchaseOrderDetail = importPage(() => import('./pages/PurchaseOrderDetail').then(m => ({ default: m.PurchaseOrderDetail })));
 const NewPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.NewPurchaseOrder })));
 const EditPurchaseOrder = importPage(() => import('./pages/PurchaseOrderForm').then(m => ({ default: m.EditPurchaseOrder })));
@@ -139,6 +141,8 @@ export function App() {
         <Route path="/suppliers/:id" element={<RouteBoundary name="Supplier"><SupplierDetail /></RouteBoundary>} />
         {PROCUREMENT_ENABLED ? (
           <>
+            <Route path="/stock/orders" element={<RouteBoundary name="Order stock"><StoresOrders /></RouteBoundary>} />
+            <Route path="/stock/orders/new" element={<RouteBoundary name="New stock order"><NewStockOrder /></RouteBoundary>} />
             <Route path="/purchase-orders" element={<RouteBoundary name="Purchase orders"><PurchaseOrders /></RouteBoundary>} />
             <Route path="/purchase-orders/new" element={<RouteBoundary name="New purchase order"><NewPurchaseOrder /></RouteBoundary>} />
             <Route path="/purchase-orders/:id" element={<RouteBoundary name="Purchase order"><PurchaseOrderDetail /></RouteBoundary>} />
@@ -152,6 +156,7 @@ export function App() {
           </>
         ) : (
           <>
+            <Route path="/stock/orders/*" element={<Navigate to="/stock" replace />} />
             <Route path="/purchase-orders/*" element={<Navigate to="/" replace />} />
             <Route path="/rfqs/*" element={<Navigate to="/" replace />} />
             <Route path="/goods-receipts/*" element={<Navigate to="/" replace />} />

@@ -64,7 +64,8 @@ export const PERMISSION_ROLES = {
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
   'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
-  'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order
+  'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order (project orders)
+  'stores:order': ['STORE_CONTROLLER'], // order:stores_stock (Stores orders: those without a project)
   'orders:approve': ['APPROVER'], // approve:purchase_order (within the user's approval limit)
   'orders:view': ['STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER'], // view:purchase_order
   'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order

@@ -25,7 +25,7 @@ const line = (id: string, unitPrice: string | null) => ({
   orderedQty: '2', receivedQty: '0', unitPrice, subtotal: null, vat: null, net: null,
 });
 const order = (id: string, number: string, status: string, lines = [line('l-1', '10')]) => ({
-  id, number, status, supplierId: 's-1', supplier: { name: 'Hydac' }, createdAt: '2026-10-19T08:00:00Z',
+  id, number, status, supplierId: 's-1', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-19T08:00:00Z',
   currency: 'ZAR', vatRate: '15', totals: { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0 }, lines,
 });
 const DRAFT = order('po-d', 'AFRI-0101', 'DRAFT', [line('l-1', '10'), line('l-2', null)]);
@@ -43,7 +43,7 @@ beforeEach(() => {
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
     if (path === '/suppliers') return [{ id: 's-1', name: 'Hydac', active: true, currency: 'ZAR' }];
-    if (path === '/materials') return [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: '5', active: true }];
+    if (path === '/materials') return [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: '5', active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } }];
     if (path.startsWith('/settings/values')) return { 'purchaseOrders.vatRate': 15 };
     return [];
   });

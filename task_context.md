@@ -74,10 +74,18 @@ database; CI runs them on every backend pull request.
   PARTIALLY_RECEIVED → RECEIVED → CLOSED, or CANCELLED (ADR-007). Procurement
   is on by default; `PROCUREMENT_ENABLED=false` (backend) and
   `VITE_PROCUREMENT_ENABLED=false` (frontend) switch it off (ADR-019).
+- **Ordering is split by kind** (ADR-020). An order with a project is
+  Procurement's (New purchase order, the purchase order permissions) and
+  holds that project's material only. An order without a project is a Stores
+  order, raised by the store controller from Store → Order stock with
+  `order:stores_stock`, and holds Stores items only. The server enforces it
+  (`requireForKind` in `procurement.routes.ts`); the screens follow
+  `lib/orderKind.ts`. Approval and receiving are the same for both.
 - **Requests for quotation** go DRAFT → SENT → AWARDED, or CANCELLED from
   DRAFT or SENT (`rfq.service.ts`). Quotes are recorded while SENT; the
-  award raises a draft purchase order in the same transaction. They use the
-  purchase order permissions and sit behind the same procurement switch.
+  award raises a draft purchase order in the same transaction. They are for
+  one project and its material only, use the purchase order permissions and
+  sit behind the same procurement switch.
 - **Settings** come from the catalog in `settings.service.ts`. Removing a key
   there retires it; the seed deletes its row.
 - **Production builds** of the frontend fail if `VITE_FRONTEND_ONLY` or

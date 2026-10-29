@@ -1,11 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
-import { DELIVERY_METHODS, PurchaseOrderService, SupplierService } from './procurement.service.js';
+import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService } from './procurement.service.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
-import { EMAIL_PATTERN, SUPPLIER_CURRENCIES } from './supplier-fields.js';
-import { PermissionCode } from '../../shared/permissions.js';
-import { requirePermission } from '../../shared/authorization.js';
+import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
+import { PermissionCode, type PermissionCodeValue } from '../../shared/permissions.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
 
 const supplierCurrency = z.enum(SUPPLIER_CURRENCIES);
@@ -105,6 +105,8 @@ export const PO_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_
 export const listPOQuerySchema = z.object({
   status: z.enum(PO_STATUSES).optional(),
   projectNumber: z.string().max(64).optional(),
+  /** Stores orders (no project) or project orders. */
+  kind: z.enum(ORDER_KINDS).optional(),
   /** Only the orders pending approval that the signed-in user may approve now, oldest first. */
   awaitingMyApproval: z.enum(['true', 'false']).optional(),
 });
@@ -142,6 +144,28 @@ export const createGRSchema = z.object({
 
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
+}
+
+/**
+ * Ordering is split by kind (Stores ordering roadmap): an order with a
+ * project is Procurement's, needing the purchase order permission given; one
+ * without is Stores stock, ordered by the store with order:stores_stock.
+ */
+async function requireForKind(req: FastifyRequest, projectNumber: string | null | undefined, forProject: PermissionCodeValue): Promise<void> {
+  await requirePermission(req, cleanText(projectNumber) ? forProject : PermissionCode.OrderStoresStock);
+}
+
+/**
+ * As requireForKind, for an existing order. Someone who may change neither
+ * kind is refused before the order is looked up, so they can't learn which
+ * orders exist; for an order that doesn't exist, the service answers 404.
+ */
+async function requireForOrder(req: FastifyRequest, id: string, forProject: PermissionCodeValue): Promise<void> {
+  if (!(await userHasPermission(req, forProject)) && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) {
+    await requirePermission(req, forProject);
+  }
+  const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
+  if (po) await requireForKind(req, po.projectNumber, forProject);
 }
 
 // Suppliers are shared with inventory (stock items, reports), so they are
@@ -193,11 +217,11 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     const parsed = listPOQuerySchema.safeParse(req.query ?? {});
     if (!parsed.success) {
       return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Unknown purchase order status', details: parsed.error.flatten() },
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid purchase order filter', details: parsed.error.flatten() },
       });
     }
-    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req));
-    return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber });
+    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req), parsed.data.kind);
+    return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber, kind: parsed.data.kind });
   });
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewPurchaseOrder);
@@ -206,20 +230,21 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/purchase-orders', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    if (!(await userHasPermission(req, PermissionCode.OrderStoresStock))) await requirePermission(req, PermissionCode.CreatePurchaseOrder);
     const parsed = createPOSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
         error: { code: 'VALIDATION_ERROR', message: 'Invalid PO payload', details: parsed.error.flatten() },
       });
     }
+    await requireForKind(req, parsed.data.projectNumber, PermissionCode.CreatePurchaseOrder);
     const created = await PurchaseOrderService.create(parsed.data, actorId(req));
     return reply.code(201).send(created);
   });
 
   app.patch('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
     const id = (req.params as { id: string }).id;
+    await requireForOrder(req, id, PermissionCode.CreatePurchaseOrder);
     const parsed = updatePOSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -236,8 +261,8 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/purchase-orders/:id/submit', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.SubmitPurchaseOrder);
     const id = (req.params as { id: string }).id;
+    await requireForOrder(req, id, PermissionCode.SubmitPurchaseOrder);
     return PurchaseOrderService.submit(id, actorId(req));
   });
 
@@ -266,8 +291,8 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/purchase-orders/:id/close', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.ClosePurchaseOrder);
     const id = (req.params as { id: string }).id;
+    await requireForOrder(req, id, PermissionCode.ClosePurchaseOrder);
     const parsed = closeSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return reply.code(400).send({
@@ -278,8 +303,8 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/purchase-orders/:id/cancel', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.CancelPurchaseOrder);
     const id = (req.params as { id: string }).id;
+    await requireForOrder(req, id, PermissionCode.CancelPurchaseOrder);
     const parsed = cancelSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({

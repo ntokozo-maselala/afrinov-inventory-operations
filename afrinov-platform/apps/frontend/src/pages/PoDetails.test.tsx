@@ -18,7 +18,7 @@ const { ToastProvider } = await import('../components/Toast');
 const { NewPurchaseOrder, EditPurchaseOrder } = await import('./PurchaseOrderForm');
 
 const SUPPLIERS = [{ id: 's-1', name: 'Hydac', vendorCode: 'V006', active: true, currency: 'ZAR', paymentTerms: '30 DAYS NETT' }];
-const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: null, active: true }];
+const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: null, active: true, projectNumber: 'M-1325', project: { projectNumber: 'M-1325', name: 'Plant upgrade', status: 'ACTIVE' } }];
 const PROJECTS = [{ projectNumber: 'M-1325', name: 'Plant upgrade', active: true }];
 const SETTINGS = {
   'purchaseOrders.vatRate': 15, 'purchaseOrders.deliveryTo': 'Afrinov (PTY) Ltd',
@@ -39,11 +39,13 @@ const ORDER = {
   deliveryContactName: 'Site storeman', deliveryContactPhone: '011 000 0000', afrinovContact: 'Thandi Buyer',
   expectedDeliveryDate: '2026-01-10', lines: [line()],
 };
-const OTHER = { ...ORDER, id: 'po-2', number: 'PO-2026-0002', projectNumber: null, project: null };
+const OTHER = { ...ORDER, id: 'po-2', number: 'PO-2026-0002', projectNumber: 'M-2001', project: { projectNumber: 'M-2001', name: 'Second job' } };
+// The store's own order: no project (Stores ordering roadmap).
+const STORES = { ...ORDER, id: 'po-3', number: 'PO-2026-0003', projectNumber: null, project: null };
 
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders') return [ORDER, OTHER];
+    if (path === '/purchase-orders') return [ORDER, OTHER, STORES];
     if (path === '/purchase-orders/po-1') return ORDER;
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
@@ -146,6 +148,16 @@ describe('Purchase orders list by project', () => {
     expect(screen.getByLabelText('Filter by project')).toHaveValue('M-1325');
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(screen.getByText('PO-2026-0002')).toBeInTheDocument();
+  });
+
+  it("shows a buyer project orders, with the store's own a filter away", async () => {
+    listPage('/purchase-orders?status=all');
+    expect(await screen.findByText('PO-2026-0001')).toBeInTheDocument();
+    expect(screen.queryByText('PO-2026-0003')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by kind of order')).toHaveValue('projects');
+    fireEvent.change(screen.getByLabelText('Filter by kind of order'), { target: { value: 'stores' } });
+    expect(screen.getByText('PO-2026-0003')).toBeInTheDocument();
+    expect(screen.queryByText('PO-2026-0001')).not.toBeInTheDocument();
   });
 });
 

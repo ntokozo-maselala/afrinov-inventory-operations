@@ -237,6 +237,16 @@ function checkProjectMaterial(projectNumber: string | null | undefined, material
   }
 }
 
+// As the server (Stores ordering roadmap): a project order holds Projects
+// material only; Stores stock is ordered by the store, without a project.
+function refuseStoresOnProjectOrder(projectNumber: string | null | undefined, materialIds: string[]) {
+  if (!projectNumber) return;
+  const stores = [...new Set(materialIds)].map(findMaterial).find((m) => !!m && m.category !== 'PROJECT_MATERIAL');
+  if (stores) {
+    throw err('VALIDATION_ERROR', `${stores.sku} is a Stores item, so it isn't bought for project ${projectNumber}. The store orders Stores stock from Stores → Order stock.`);
+  }
+}
+
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
   const p = state.projects.find((x) => x.projectNumber === projectNumber);
@@ -350,6 +360,7 @@ function nextRfqNumber(projectNumber: string | null): string {
 }
 
 function checkRfqLines(lines: RfqBody['lines'], projectNumber: string | null): NonNullable<RfqBody['lines']> {
+  if (!projectNumber) throw err('VALIDATION_ERROR', 'A request for quotation is for one project: choose its project. Stores stock is ordered from Stores → Order stock.');
   if (!lines || lines.length === 0) throw err('VALIDATION_ERROR', 'A request for quotation needs at least one line');
   for (const l of lines) {
     const m = findMaterial(l.materialId);
@@ -359,6 +370,7 @@ function checkRfqLines(lines: RfqBody['lines'], projectNumber: string | null): N
     refuseUnassigned(l.materialId, 'ordered');
   }
   checkProjectMaterial(projectNumber, lines.map((l) => l.materialId), 'ordered');
+  refuseStoresOnProjectOrder(projectNumber, lines.map((l) => l.materialId));
   return lines;
 }
 
@@ -597,6 +609,9 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     if (typeof b.supplierId !== 'string' || !b.supplierId.trim()) throw err('VALIDATION_ERROR', 'Invalid award');
     if (b.reason !== undefined && b.reason !== null && (typeof b.reason !== 'string' || b.reason.length > 500)) throw err('VALIDATION_ERROR', 'Invalid award');
     if (rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`);
+    if (!rfq.projectNumber) {
+      throw err('VALIDATION_ERROR', `${rfq.number} has no project, so it can't be awarded: an order from it would be a Stores order. Cancel it, and the store orders that stock from Store → Order stock.`);
+    }
     const asked = rfq.suppliers.find((s) => s.supplierId === b.supplierId);
     if (!asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
     const name = findSupplier(asked.supplierId)?.name ?? asked.supplierId;
@@ -1100,8 +1115,12 @@ function route(method: string, path: string, body?: unknown): unknown {
     // As the server: ?awaitingMyApproval=true is the pending orders the signed-in
     // user may approve now, oldest first.
     const awaiting = qs.awaitingMyApproval === 'true';
+    // As the server: only stores or projects.
+    if (qs.kind && qs.kind !== 'stores' && qs.kind !== 'projects') throw err('VALIDATION_ERROR', 'Invalid purchase order filter');
     const list = [...state.purchaseOrders]
       .filter((po) => !qs.projectNumber || po.projectNumber === qs.projectNumber)
+      // As the server: ?kind=stores is the orders without a project, ?kind=projects those with one.
+      .filter((po) => !qs.kind || (qs.kind === 'stores') === !po.projectNumber)
       .filter((po) => !qs.status || po.status === qs.status)
       .filter((po) => !awaiting || mockApproval(po).canApprove)
       .sort((a, b) => (awaiting ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt)));
@@ -1150,6 +1169,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
     for (const l of b.lines) refuseUnassigned(l.materialId, 'ordered');
     checkProjectMaterial(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId), 'ordered');
+    refuseStoresOnProjectOrder(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId));
     // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
     const details = poDetails(b);
     if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
@@ -1319,6 +1339,12 @@ function route(method: string, path: string, body?: unknown): unknown {
     const before = snapshot(po);
     const nextProject = b.projectNumber === undefined ? undefined : (b.projectNumber?.trim() || null);
     if (nextProject !== undefined && nextProject !== (po.projectNumber ?? null)) {
+      // As the server: neither kind of order becomes the other.
+      if (!nextProject !== !po.projectNumber) {
+        throw err('VALIDATION_ERROR', po.projectNumber
+          ? 'A project order stays on a project. Stores stock is ordered from Stores → Order stock.'
+          : 'A Stores order has no project. Raise a purchase order for the project instead.');
+      }
       if (nextProject) assertProjectOpen(nextProject);
       checkProjectMaterial(nextProject, po.lines.map((l) => l.materialId), 'ordered');
     }

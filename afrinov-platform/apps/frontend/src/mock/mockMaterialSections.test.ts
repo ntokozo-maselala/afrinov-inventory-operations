@@ -72,13 +72,31 @@ describe('mock: project material is ordered only for its own project (Phase 6)',
     expect(await messageOf(order('AFRI-1402', 'mat-9'))).toMatch(/is material for project AFRI-1325, so it can't be ordered for project AFRI-1402/);
     expect(await messageOf(order(undefined, 'mat-9'))).toMatch(/is material for project AFRI-1325: order it for that project/);
     expect(await messageOf(order('AFRI-1325', 'mat-9', other.id))).toMatch(/One order can't hold material for two projects/);
-    expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-1'))).toBeUndefined();
+    expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-10'))).toMatch(/has no project yet/);
+    await api.patch('/materials/mat-10', { projectNumber: 'AFRI-1325' });
+    expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-10'))).toBeUndefined();
+  });
+
+  it('keeps Stores items off a project order, and neither kind of order becomes the other (Stores ordering)', async () => {
+    await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
+    expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-1'))).toMatch(/is a Stores item, so it isn't bought for project AFRI-1325/);
+    const project = await order('AFRI-1325', 'mat-9');
+    expect(await messageOf(api.patch(`/purchase-orders/${project.id}`, { projectNumber: null }))).toMatch(/A project order stays on a project/);
+    const stores = await order(undefined, 'mat-1');
+    expect(await messageOf(api.patch(`/purchase-orders/${stores.id}`, { projectNumber: 'AFRI-1325' }))).toMatch(/A Stores order has no project/);
+    const kind = async (k: string) => (await api.get<Array<{ id: string }>>(`/purchase-orders?kind=${k}`)).map((o) => o.id);
+    expect(await kind('stores')).toContain(stores.id);
+    expect(await kind('stores')).not.toContain(project.id);
+    expect(await kind('projects')).toContain(project.id);
+    // As the server: an unknown kind is refused, not read as projects (Qodo, PR #117).
+    expect(await messageOf(api.get('/purchase-orders?kind=shelf'))).toMatch(/Invalid purchase order filter/);
   });
 
   it('refuses an order for a completed project, and submitting a draft whose project has closed since', async () => {
-    const draft = await order('AFRI-1402', 'mat-1');
+    const pipe = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402' });
+    const draft = await order('AFRI-1402', pipe.id);
     await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
-    expect(await messageOf(order('AFRI-1402', 'mat-1'))).toMatch(/Project AFRI-1402 is completed, so nothing more is ordered for it/);
+    expect(await messageOf(order('AFRI-1402', pipe.id))).toMatch(/Project AFRI-1402 is completed, so nothing more is ordered for it/);
     expect(await messageOf(api.post(`/purchase-orders/${draft.id}/submit`))).toMatch(/is completed/);
   });
 });
