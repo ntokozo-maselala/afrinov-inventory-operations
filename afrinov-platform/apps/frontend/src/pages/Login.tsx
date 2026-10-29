@@ -32,7 +32,7 @@ interface FieldErrors {
 }
 
 export function Login() {
-  const { login, user, loading } = useAuth();
+  const { login, user, loading, sessionExpired } = useAuth();
   const nav = useNavigate();
   const location = useLocation();
 
@@ -53,6 +53,11 @@ export function Login() {
     document.title = 'Sign in · Afrinov IMS';
     return () => { document.title = 'Afrinov IMS'; };
   }, []);
+
+  // A rejected token is announced by the auth provider; a guarded navigation
+  // carries the same fact in router state. Either source is enough to explain
+  // why the user is looking at sign-in again.
+  const expired = sessionExpired || Boolean((location.state as { sessionExpired?: boolean } | null)?.sessionExpired);
 
   // If the user is already authenticated, bounce them to the dashboard.
   // The `loading` flag avoids a flash while we restore the session from
@@ -177,6 +182,12 @@ export function Login() {
               <h2 className="text-h1 text-surface-900">{SIGN_IN_TITLE}</h2>
               <p className="text-sm text-surface-500 mt-1">{SIGN_IN_SUBTITLE}</p>
             </div>
+
+            {expired && (
+              <Alert tone="warning" title="Your session has ended">
+                For your security you have been signed out. Sign in again to continue where you left off.
+              </Alert>
+            )}
 
             {FRONTEND_ONLY && (
               <Alert tone="warning" title="Frontend-only mode">

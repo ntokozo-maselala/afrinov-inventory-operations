@@ -18,6 +18,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
 import { LeftoversNotice } from '../components/LeftoversNotice';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface UserOpt { id: string; name: string }
 
@@ -279,9 +280,10 @@ export function Projects() {
         </label>
       </FilterBar>
 
-      {projects.error && <ErrorState message={projects.error.message} onRetry={projects.reload} />}
+      {projects.error && !projects.stale && <ErrorState error={projects.error} onRetry={projects.reload} />}
+      {projects.stale && <StaleDataNotice error={projects.error} onRetry={projects.reload} />}
 
-      {!projects.error && (
+      {(!projects.error || projects.stale) && (
         <DataTable<Project>
           ariaLabel="Projects"
           isLoading={projects.loading}

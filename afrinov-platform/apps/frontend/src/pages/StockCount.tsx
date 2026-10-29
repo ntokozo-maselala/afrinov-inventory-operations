@@ -21,6 +21,7 @@ import type { CountRecord, CurrentStockRow, Material } from '../api/types';
 import { formatDateTime } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { locationLabel } from '../lib/locations';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
@@ -189,6 +190,8 @@ export function StockCount() {
   }
 
   const loadError = locations.error ?? materials.error;
+  const loadStale = locations.stale || materials.stale;
+  const loadFailed = !!loadError && !loadStale;
 
   // Reached by a typed or old link: say so rather than offer a form the server would refuse.
   const allowed = usePermissions().hasPermission('inventory:count');
@@ -202,9 +205,10 @@ export function StockCount() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Count stock' }]}
       />
 
-      {loadError && <ErrorState message={loadError.message} onRetry={() => { locations.reload(); materials.reload(); }} />}
+      {loadFailed && <ErrorState error={loadError} onRetry={() => { locations.reload(); materials.reload(); }} />}
+      {loadStale && <StaleDataNotice error={loadError} onRetry={() => { locations.reload(); materials.reload(); }} label="Some lists could not be refreshed" />}
 
-      {!loadError && (
+      {!loadFailed && (
         <div className="space-y-4">
           <div className="surface-card p-4 grid grid-cols-1 md:grid-cols-[16rem_1fr] gap-4 items-end no-print">
             <Field label="Location" htmlFor="count-location" required>
@@ -252,9 +256,10 @@ export function StockCount() {
             </div>
           )}
 
-          {locationId && stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
+          {locationId && stock.error && !stock.stale && <ErrorState error={stock.error} onRetry={stock.reload} />}
+          {locationId && stock.stale && <StaleDataNotice error={stock.error} onRetry={stock.reload} />}
 
-          {locationId && !stock.error && (
+          {locationId && (!stock.error || stock.stale) && (
             <>
               <div className="hidden print:block">
                 <h1>Stock count: {location?.name}</h1>

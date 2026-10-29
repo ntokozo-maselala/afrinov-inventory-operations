@@ -18,6 +18,7 @@ import { CheckInForm, CheckOutForm } from '../components/ToolLoanForms';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDate, formatNumber } from '../lib/format';
 import type { ToolRow } from '../api/types';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 const VIEWS = [
   { value: 'all', label: 'All tools' },
@@ -135,8 +136,9 @@ export function Tools() {
         </Field>
       </FilterBar>
 
-      {tools.error && <ErrorState message={tools.error.message} onRetry={tools.reload} />}
-      {!tools.error && (
+      {tools.error && !tools.stale && <ErrorState error={tools.error} onRetry={tools.reload} />}
+      {tools.stale && <StaleDataNotice error={tools.error} onRetry={tools.reload} />}
+      {(!tools.error || tools.stale) && (
         <DataTable
           ariaLabel="Tools"
           rows={filtered}

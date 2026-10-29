@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from './auth';
 import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { GlobalPreferencesApplier } from './components/GlobalPreferencesApplier';
 import { PROCUREMENT_ENABLED } from './config/features';
 import { applyTheme, getAppearance } from './hooks/useAppearance';
@@ -88,12 +89,15 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
 }
 
 function Protected() {
-  const { user, loading } = useAuth();
+  const { user, loading, sessionExpired } = useAuth();
   const location = useLocation();
   const [themeReady, setThemeReady] = useState(false);
   if (loading) return <AuthLoading />;
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    // Send the user to sign-in. When the loss of session was a rejected token
+    // rather than an ordinary visit, say so on the sign-in page: the provider
+    // holds the flag, so no effect has to win a race to carry it across.
+    return <Navigate to="/login" state={{ from: location, sessionExpired }} replace />;
   }
   return (
     <ToastProvider>
@@ -112,35 +116,37 @@ export function App() {
           path="/login"
           element={
             <PublicOnly>
-              <Suspense fallback={<PageSkeleton />}>
-                <Login />
-              </Suspense>
+              <ErrorBoundary name="Sign in">
+                <Suspense fallback={<PageSkeleton />}>
+                  <Login />
+                </Suspense>
+              </ErrorBoundary>
             </PublicOnly>
           }
         />
 
       <Route element={<Protected />}>
-        <Route path="/" element={<Suspense fallback={<PageSkeleton />}><Dashboard /></Suspense>} />
-        <Route path="/stock" element={<Suspense fallback={<PageSkeleton />}><Stock /></Suspense>} />
-        <Route path="/stock/issue" element={<Suspense fallback={<PageSkeleton />}><IssueStock /></Suspense>} />
-        <Route path="/stock/return" element={<Suspense fallback={<PageSkeleton />}><ReturnStock /></Suspense>} />
-        <Route path="/stock/receive" element={<Suspense fallback={<PageSkeleton />}><ReceiveStock /></Suspense>} />
-        <Route path="/stock/count" element={<Suspense fallback={<PageSkeleton />}><StockCount /></Suspense>} />
-        <Route path="/materials" element={<Suspense fallback={<PageSkeleton />}><Materials /></Suspense>} />
-        <Route path="/materials/:id" element={<Suspense fallback={<PageSkeleton />}><MaterialDetail /></Suspense>} />
-        <Route path="/movements" element={<Suspense fallback={<PageSkeleton />}><Movements /></Suspense>} />
-        <Route path="/suppliers" element={<Suspense fallback={<PageSkeleton />}><Suppliers /></Suspense>} />
-        <Route path="/suppliers/:id" element={<Suspense fallback={<PageSkeleton />}><SupplierDetail /></Suspense>} />
+        <Route path="/" element={<RouteBoundary name="Dashboard"><Dashboard /></RouteBoundary>} />
+        <Route path="/stock" element={<RouteBoundary name="Stock"><Stock /></RouteBoundary>} />
+        <Route path="/stock/issue" element={<RouteBoundary name="Issue stock"><IssueStock /></RouteBoundary>} />
+        <Route path="/stock/return" element={<RouteBoundary name="Return stock"><ReturnStock /></RouteBoundary>} />
+        <Route path="/stock/receive" element={<RouteBoundary name="Receive stock"><ReceiveStock /></RouteBoundary>} />
+        <Route path="/stock/count" element={<RouteBoundary name="Count stock"><StockCount /></RouteBoundary>} />
+        <Route path="/materials" element={<RouteBoundary name="Materials"><Materials /></RouteBoundary>} />
+        <Route path="/materials/:id" element={<RouteBoundary name="Material"><MaterialDetail /></RouteBoundary>} />
+        <Route path="/movements" element={<RouteBoundary name="Movements"><Movements /></RouteBoundary>} />
+        <Route path="/suppliers" element={<RouteBoundary name="Suppliers"><Suppliers /></RouteBoundary>} />
+        <Route path="/suppliers/:id" element={<RouteBoundary name="Supplier"><SupplierDetail /></RouteBoundary>} />
         {PROCUREMENT_ENABLED ? (
           <>
-            <Route path="/purchase-orders" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrders /></Suspense>} />
-            <Route path="/purchase-orders/new" element={<Suspense fallback={<PageSkeleton />}><NewPurchaseOrder /></Suspense>} />
-            <Route path="/purchase-orders/:id" element={<Suspense fallback={<PageSkeleton />}><PurchaseOrderDetail /></Suspense>} />
-            <Route path="/purchase-orders/:id/edit" element={<Suspense fallback={<PageSkeleton />}><EditPurchaseOrder /></Suspense>} />
-            <Route path="/rfqs" element={<Suspense fallback={<PageSkeleton />}><Rfqs /></Suspense>} />
-            <Route path="/rfqs/new" element={<Suspense fallback={<PageSkeleton />}><NewRfq /></Suspense>} />
-            <Route path="/rfqs/:id" element={<Suspense fallback={<PageSkeleton />}><RfqDetail /></Suspense>} />
-            <Route path="/rfqs/:id/edit" element={<Suspense fallback={<PageSkeleton />}><EditRfq /></Suspense>} />
+            <Route path="/purchase-orders" element={<RouteBoundary name="Purchase orders"><PurchaseOrders /></RouteBoundary>} />
+            <Route path="/purchase-orders/new" element={<RouteBoundary name="New purchase order"><NewPurchaseOrder /></RouteBoundary>} />
+            <Route path="/purchase-orders/:id" element={<RouteBoundary name="Purchase order"><PurchaseOrderDetail /></RouteBoundary>} />
+            <Route path="/purchase-orders/:id/edit" element={<RouteBoundary name="Edit purchase order"><EditPurchaseOrder /></RouteBoundary>} />
+            <Route path="/rfqs" element={<RouteBoundary name="Requests for quotation"><Rfqs /></RouteBoundary>} />
+            <Route path="/rfqs/new" element={<RouteBoundary name="New request for quotation"><NewRfq /></RouteBoundary>} />
+            <Route path="/rfqs/:id" element={<RouteBoundary name="Request for quotation"><RfqDetail /></RouteBoundary>} />
+            <Route path="/rfqs/:id/edit" element={<RouteBoundary name="Edit request for quotation"><EditRfq /></RouteBoundary>} />
             {/* Goods receipts had its own page; deliveries are booked on Receive stock and an order's Receive delivery. */}
             <Route path="/goods-receipts/*" element={<Navigate to="/purchase-orders" replace />} />
           </>
@@ -151,9 +157,9 @@ export function App() {
             <Route path="/goods-receipts/*" element={<Navigate to="/" replace />} />
           </>
         )}
-        <Route path="/reports/stock-status" element={<Suspense fallback={<PageSkeleton />}><StockStatus /></Suspense>} />
-        <Route path="/reports/consumption" element={<Suspense fallback={<PageSkeleton />}><Consumption /></Suspense>} />
-        <Route path="/reports/stock-report" element={<Suspense fallback={<PageSkeleton />}><MonthEnd /></Suspense>} />
+        <Route path="/reports/stock-status" element={<RouteBoundary name="Stock status report"><StockStatus /></RouteBoundary>} />
+        <Route path="/reports/consumption" element={<RouteBoundary name="Consumption report"><Consumption /></RouteBoundary>} />
+        <Route path="/reports/stock-report" element={<RouteBoundary name="Stock report"><MonthEnd /></RouteBoundary>} />
         <Route path="/reports/month-end" element={<Navigate to="/reports/stock-report" replace />} />
         {/* The old Low stock page: kept so bookmarks still land. */}
         <Route path="/reports/low-stock" element={<Navigate to="/reports/stock-status" replace />} />
@@ -161,29 +167,44 @@ export function App() {
         <Route path="/reports/inventory" element={<Navigate to="/" replace />} />
         {/* Racks are locations of type Rack, inside their room (racks and locations roadmap, Phase 3.2). */}
         <Route path="/racks" element={<Navigate to="/locations?type=RACK" replace />} />
-        <Route path="/locations" element={<Suspense fallback={<PageSkeleton />}><Locations /></Suspense>} />
-        <Route path="/projects" element={<Suspense fallback={<PageSkeleton />}><Projects /></Suspense>} />
-        <Route path="/projects/:projectNumber/leftovers" element={<Suspense fallback={<PageSkeleton />}><ProjectLeftovers /></Suspense>} />
-        <Route path="/recipients" element={<Suspense fallback={<PageSkeleton />}><Recipients /></Suspense>} />
-        <Route path="/tools" element={<Suspense fallback={<PageSkeleton />}><Tools /></Suspense>} />
-        <Route path="/settings" element={<Suspense fallback={<PageSkeleton />}><Settings /></Suspense>}>
-          <Route index element={<Suspense fallback={<PageSkeleton />}><SettingsGeneral /></Suspense>} />
-          <Route path="notifications" element={<Suspense fallback={<PageSkeleton />}><SettingsNotifications /></Suspense>} />
-          <Route path="inventory" element={<Suspense fallback={<PageSkeleton />}><SettingsInventory /></Suspense>} />
+        <Route path="/locations" element={<RouteBoundary name="Locations"><Locations /></RouteBoundary>} />
+        <Route path="/projects" element={<RouteBoundary name="Projects"><Projects /></RouteBoundary>} />
+        <Route path="/projects/:projectNumber/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
+        <Route path="/recipients" element={<RouteBoundary name="Recipients"><Recipients /></RouteBoundary>} />
+        <Route path="/tools" element={<RouteBoundary name="Tools"><Tools /></RouteBoundary>} />
+        <Route path="/settings" element={<RouteBoundary name="Settings"><Settings /></RouteBoundary>}>
+          <Route index element={<RouteBoundary name="Settings: general"><SettingsGeneral /></RouteBoundary>} />
+          <Route path="notifications" element={<RouteBoundary name="Settings: notifications"><SettingsNotifications /></RouteBoundary>} />
+          <Route path="inventory" element={<RouteBoundary name="Settings: inventory"><SettingsInventory /></RouteBoundary>} />
           {PROCUREMENT_ENABLED
-            ? <Route path="purchase-orders" element={<Suspense fallback={<PageSkeleton />}><SettingsPurchaseOrders /></Suspense>} />
+            ? <Route path="purchase-orders" element={<RouteBoundary name="Settings: purchase orders"><SettingsPurchaseOrders /></RouteBoundary>} />
             : <Route path="purchase-orders" element={<Navigate to="/settings" replace />} />}
-          <Route path="appearance" element={<Suspense fallback={<PageSkeleton />}><SettingsAppearance /></Suspense>} />
-          <Route path="users" element={<Suspense fallback={<PageSkeleton />}><SettingsUsers /></Suspense>} />
-          <Route path="security" element={<Suspense fallback={<PageSkeleton />}><SettingsSecurity /></Suspense>} />
-          <Route path="system" element={<Suspense fallback={<PageSkeleton />}><SettingsSystem /></Suspense>} />
-          <Route path="data" element={<Suspense fallback={<PageSkeleton />}><SettingsData /></Suspense>} />
-          <Route path="history" element={<Suspense fallback={<PageSkeleton />}><SettingsHistory /></Suspense>} />
+          <Route path="appearance" element={<RouteBoundary name="Settings: appearance"><SettingsAppearance /></RouteBoundary>} />
+          <Route path="users" element={<RouteBoundary name="Settings: users"><SettingsUsers /></RouteBoundary>} />
+          <Route path="security" element={<RouteBoundary name="Settings: security"><SettingsSecurity /></RouteBoundary>} />
+          <Route path="system" element={<RouteBoundary name="Settings: system"><SettingsSystem /></RouteBoundary>} />
+          <Route path="data" element={<RouteBoundary name="Settings: data"><SettingsData /></RouteBoundary>} />
+          <Route path="history" element={<RouteBoundary name="Settings: history"><SettingsHistory /></RouteBoundary>} />
         </Route>
-        <Route path="*" element={<Suspense fallback={<PageSkeleton />}><NotFound /></Suspense>} />
+        <Route path="*" element={<RouteBoundary name="Page"><NotFound /></RouteBoundary>} />
       </Route>
       </Routes>
     </>
+  );
+}
+
+/**
+ * A route's Suspense fallback wrapped in an Error Boundary, reset when the
+ * route changes so a failure on one page does not strand the next. The
+ * boundary keeps the shell (sidebar, header) usable: only the page content is
+ * replaced by the fallback.
+ */
+function RouteBoundary({ name, children }: { name: string; children: React.ReactNode }) {
+  const location = useLocation();
+  return (
+    <ErrorBoundary name={name} key={location.pathname}>
+      <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+    </ErrorBoundary>
   );
 }
 

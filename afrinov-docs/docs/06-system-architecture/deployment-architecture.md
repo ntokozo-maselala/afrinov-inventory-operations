@@ -1,10 +1,10 @@
 # Deployment Architecture
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** 4e6d76f, 2026-10-09
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** working tree, 2026-10-29
 
 ## What the repository provides
 - **Backend container:** `apps/backend/Dockerfile`, a two-stage
-  `node:20-alpine` build. It compiles TypeScript, prunes dev dependencies,
+  `node:24-alpine` build. It compiles TypeScript, prunes dev dependencies,
   runs as an unprivileged `app` user and exposes port 4000.
 - **Compose stack:** `apps/backend/docker-compose.yml` runs two services:
   `db` (`postgres:16-alpine`, named volume `afrinov_pg`, health check) and

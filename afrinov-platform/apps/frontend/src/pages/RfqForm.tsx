@@ -65,7 +65,7 @@ export function EditRfq() {
   const allowed = usePermissions().hasPermission('procurement:manage');
   const rfq = useApi<Rfq>(id && allowed ? `/rfqs/${id}` : null);
   if (!allowed) return <NoAccess title="Edit request for quotation" action="edit requests for quotation" section={RFQS} />;
-  if (rfq.error) return <ErrorState message={rfq.error.message} onRetry={rfq.reload} />;
+  if (rfq.error) return <ErrorState error={rfq.error} onRetry={rfq.reload} />;
   if (!rfq.data) return <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>;
   if (rfq.data.status !== 'DRAFT') {
     return (
@@ -179,7 +179,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   }
 
   if ((suppliersReq.error && !suppliersReq.data) || (materialsReq.error && !materialsReq.data)) {
-    return <ErrorState message={(suppliersReq.error ?? materialsReq.error)!.message} onRetry={() => { suppliersReq.reload(); materialsReq.reload(); }} />;
+    return <ErrorState error={suppliersReq.error ?? materialsReq.error} onRetry={() => { suppliersReq.reload(); materialsReq.reload(); }} />;
   }
 
   const back = rfq ? `/rfqs/${rfq.id}` : '/rfqs';

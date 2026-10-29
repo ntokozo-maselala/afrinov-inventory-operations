@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import type { StaticDocumentSpec } from '@fastify/swagger';
-import { ApiError, Errors } from './shared/errors.js';
+import { ApiError, Errors, classifyPrismaError, toErrorEnvelope } from './shared/errors.js';
 import {
   loadConfig,
   ConfigError,
@@ -157,15 +157,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       await req.jwtVerify();
       payload = req.user as typeof payload;
     } catch {
-      return reply.code(401).send({
-        error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
-      });
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated(), req.id));
     }
 
     if (!payload?.sub) {
-      return reply.code(401).send({
-        error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
-      });
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated(), req.id));
     }
 
     // DB-authoritative account status: revocation is immediate rather than
@@ -175,15 +171,32 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // the error handler (500) — access is never granted on an unknown state.
     const active = await isActiveInDb(payload.sub, req);
     if (!active) {
-      return reply.code(401).send({
-        error: { code: 'UNAUTHENTICATED', message: 'Account unavailable' },
-      });
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Account unavailable'), req.id));
     }
     (req as unknown as { user: typeof payload & { id: string; active: boolean } }).user = {
       ...payload,
       id: payload.sub,
       active,
     };
+  });
+
+  // Every response carries the correlation id back to the caller, so a user
+  // reporting a problem ("it said something went wrong") can be matched to the
+  // server log line for that exact request. The header is set on the reply
+  // before the body is written, so it is present on success and error alike.
+  app.addHook('onSend', async (req, reply, payload) => {
+    reply.header('x-request-id', req.id);
+    return payload;
+  });
+
+  // Unmatched routes answer with the same error envelope as every other
+  // failure. Fastify's built-in 404 returns a raw `{ message, error,
+  // statusCode }` body, which does not carry a stable `code` the client can
+  // classify; the frontend would fall back to "unknown error" for a mistyped or
+  // retired URL. This is not a server fault and must not be logged as one.
+  app.setNotFoundHandler((req, reply) => {
+    req.log.info({ requestId: req.id, method: req.method, url: req.url }, 'Route not found');
+    return reply.code(404).send(toErrorEnvelope(Errors.notFound('Route'), req.id));
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -193,9 +206,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
         { requestId, code: err.code, message: err.message, statusCode: err.statusCode },
         'ApiError',
       );
-      return reply.code(err.statusCode).send({
-        error: { code: err.code, message: err.message, details: err.details },
-      });
+      return reply.code(err.statusCode).send(toErrorEnvelope(err, requestId));
     }
     // Fastify's own refusals of a malformed request (an empty JSON body, bad
     // JSON, an unsupported content type) are the caller's mistake, not ours.
@@ -204,16 +215,30 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     if (err instanceof Error && typeof code === 'string' && code.startsWith('FST_ERR_')
       && typeof status === 'number' && status >= 400 && status < 500) {
       req.log.warn({ requestId, code, message: err.message, statusCode: status }, 'Bad request');
-      return reply.code(status).send({ error: { code: FRAMEWORK_ERROR_CODES[status] ?? 'BAD_REQUEST', message: err.message } });
+      return reply.code(status).send(toErrorEnvelope(
+        new ApiError(status, FRAMEWORK_ERROR_CODES[status] ?? 'BAD_REQUEST', err.message),
+        requestId,
+      ));
+    }
+    // A recognisable database fault (unreachable, unique clash, missing row) is
+    // classified into the documented contract with a safe message; its raw
+    // driver text — which can carry the connection string, schema and SQL — is
+    // never returned. Anything else is an unexpected defect: logged in full,
+    // answered generically.
+    const classified = classifyPrismaError(err);
+    if (classified) {
+      req.log.warn(
+        { requestId, code: classified.code, statusCode: classified.statusCode, err },
+        'Database error',
+      );
+      return reply.code(classified.statusCode).send(toErrorEnvelope(classified, requestId));
     }
     if (err instanceof Error) {
       app.log.error({ err, requestId }, 'Unhandled error');
-      return reply.code(500).send({
-        error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
-      });
+      return reply.code(500).send(toErrorEnvelope(err, requestId));
     }
     app.log.error({ requestId }, 'Non-Error thrown in handler');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
+    return reply.code(500).send(toErrorEnvelope(err, requestId));
   });
 
   // Service/API identification: answers whether this backend process is running.

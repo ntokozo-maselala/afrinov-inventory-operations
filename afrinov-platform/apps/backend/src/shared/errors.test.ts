@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ApiError, Errors } from './errors.js';
+import { ApiError, Errors, classifyPrismaError, toErrorEnvelope } from './errors.js';
 
 describe('shared/errors', () => {
   describe('Errors factory', () => {
@@ -63,6 +63,86 @@ describe('shared/errors', () => {
       const e = Errors.notFound('Test');
       expect(e).toBeInstanceOf(Error);
       expect(e.name).toBe('ApiError');
+    });
+
+    it('serviceUnavailable has status 503 and a safe message', () => {
+      const e = Errors.serviceUnavailable();
+      expect(e.statusCode).toBe(503);
+      expect(e.code).toBe('SERVICE_UNAVAILABLE');
+    });
+
+    it('badRequest has status 400', () => {
+      const e = Errors.badRequest();
+      expect(e.statusCode).toBe(400);
+      expect(e.code).toBe('BAD_REQUEST');
+    });
+
+    it('rateLimited has status 429, not 500', () => {
+      const e = Errors.rateLimited();
+      expect(e.statusCode).toBe(429);
+      expect(e.code).toBe('TOO_MANY_REQUESTS');
+    });
+  });
+
+  describe('classifyPrismaError', () => {
+    it('treats an unreachable database as 503, never as a client error', () => {
+      for (const code of ['P1001', 'P1002', 'P1017', 'P1008']) {
+        const e = classifyPrismaError({ code });
+        expect(e?.statusCode).toBe(503);
+        expect(e?.code).toBe('SERVICE_UNAVAILABLE');
+      }
+    });
+
+    it('maps a unique-constraint violation to a conflict', () => {
+      const e = classifyPrismaError({ code: 'P2002' });
+      expect(e?.statusCode).toBe(409);
+      expect(e?.code).toBe('CONFLICT');
+    });
+
+    it('maps a missing-row operation to not-found', () => {
+      const e = classifyPrismaError({ code: 'P2025' });
+      expect(e?.statusCode).toBe(404);
+      expect(e?.code).toBe('NOT_FOUND');
+    });
+
+    it('never leaks the raw driver message', () => {
+      const e = classifyPrismaError({
+        code: 'P1001',
+        message: 'Can\'t reach database server at `db.internal:5432`: ECONNREFUSED',
+      });
+      expect(e?.message).not.toMatch(/ECONNREFUSED|5432|db\.internal/);
+    });
+
+    it('returns null for a non-Prisma error', () => {
+      expect(classifyPrismaError(new Error('boom'))).toBeNull();
+      expect(classifyPrismaError({ code: 'NOT_A_CODE' })).toBeNull();
+      expect(classifyPrismaError(null)).toBeNull();
+    });
+  });
+
+  describe('toErrorEnvelope', () => {
+    it('passes an ApiError through with its code and message', () => {
+      const env = toErrorEnvelope(Errors.conflict('Duplicate SKU', { sku: 'A-1' }), 'req-7');
+      expect(env.error).toEqual({ code: 'CONFLICT', message: 'Duplicate SKU', details: { sku: 'A-1' }, requestId: 'req-7' });
+    });
+
+    it('omits details when there are none', () => {
+      const env = toErrorEnvelope(Errors.notFound('Material'), 'req-1');
+      expect(env.error).not.toHaveProperty('details');
+    });
+
+    it('classifies a database fault instead of returning a bare 500', () => {
+      const env = toErrorEnvelope({ code: 'P1001', message: 'secret connection string' }, 'req-2');
+      expect(env.error.code).toBe('SERVICE_UNAVAILABLE');
+      expect(env.error.message).not.toContain('secret');
+      expect(env.error.requestId).toBe('req-2');
+    });
+
+    it('answers an unrecognised throw with a generic internal error', () => {
+      const env = toErrorEnvelope(new TypeError('x.y is not a function'), 'req-3');
+      expect(env.error.code).toBe('INTERNAL_ERROR');
+      expect(env.error.message).toBe('Internal server error');
+      expect(JSON.stringify(env)).not.toContain('is not a function');
     });
   });
 });

@@ -54,7 +54,7 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
   const [selected, setSelected] = useState<MovementRow | null>(null);
   const toast = useToast();
 
-  if (list.error) return <ErrorState message={list.error.message} onRetry={list.reload} />;
+  if (list.error) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows: Row[] = list.rows.flatMap((s) => s.lines.map((l) => ({ s, l })));
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No stock issued" description="No stock was issued for these dates and filters." />;

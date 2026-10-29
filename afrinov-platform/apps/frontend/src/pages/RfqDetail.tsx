@@ -25,6 +25,7 @@ import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
 import { DEFAULT_CLOSING_DAYS, addDays, formatDay, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface HistoryEntry {
   id: string;
@@ -102,7 +103,8 @@ export function RfqDetail() {
         )}
       />
 
-      {rfq.error && <ErrorState message={rfq.error.message} onRetry={reload} />}
+      {rfq.error && !rfq.stale && <ErrorState error={rfq.error} onRetry={reload} />}
+      {rfq.stale && <StaleDataNotice error={rfq.error} onRetry={reload} />}
       {rfq.loading && !r && <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>}
 
       {r && (

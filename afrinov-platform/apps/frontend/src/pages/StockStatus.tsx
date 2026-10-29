@@ -28,6 +28,7 @@ import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
 import { DownloadMenu } from '../components/DownloadMenu';
 import { downloadReorderList, downloadReorderListPdf } from '../api/exportReorderList';
 import { STORES_CATEGORIES } from '../lib/categories';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 /** One item, as GET /reports/stock-status returns it. */
 export interface StockStatusItem {
@@ -222,9 +223,10 @@ export function StockStatus() {
         </div>
       )}
 
-      {items.error && <ErrorState message={items.error.message} onRetry={items.reload} />}
+      {items.error && !items.stale && <ErrorState error={items.error} onRetry={items.reload} />}
+      {items.stale && <StaleDataNotice error={items.error} onRetry={items.reload} />}
 
-      {!items.error && (
+      {(!items.error || items.stale) && (
         <DataTable
           ariaLabel="Stock status"
           isLoading={items.loading}

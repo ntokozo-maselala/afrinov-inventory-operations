@@ -1,5 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { cleanup } from '@testing-library/react';
 import { readPersistedSession, writePersistedSession, clearPersistedSession } from './auth';
+
+// Testing Library's automatic cleanup only registers once its module is first
+// imported, which these tests do dynamically. Unmount explicitly so a second
+// render cannot see the first test's DOM.
+afterEach(() => cleanup());
 
 const sessionStore = new Map<string, string>();
 const sessionStorageStub = {
@@ -69,5 +75,79 @@ describe('auth.tsx — session persistence', () => {
     sessionStorageStub.setItem = () => { throw new Error('Quota exceeded'); };
     expect(() => writePersistedSession(makeUser())).not.toThrow();
     sessionStorageStub.setItem = originalSetItem;
+  });
+});
+
+describe('auth.tsx — session expiry handling', () => {
+  beforeEach(() => {
+    sessionStorageStub.clear();
+    localStorage.clear();
+  });
+
+  it('signs the user out once when the API client reports a rejected token', async () => {
+    const { render, screen, act } = await import('@testing-library/react');
+    const { AuthProvider, useAuth } = await import('./auth');
+    const { SESSION_EXPIRED_EVENT, setToken } = await import('./api/client');
+
+    setToken('a-stale-token');
+    writePersistedSession(makeUser());
+
+    function Probe() {
+      const { user, sessionExpired, logout } = useAuth();
+      return (
+        <div>
+          <span data-testid="state">{user ? 'signed-in' : 'signed-out'}</span>
+          <span data-testid="expired">{sessionExpired ? 'yes' : 'no'}</span>
+          <button onClick={logout}>out</button>
+        </div>
+      );
+    }
+
+    render(<AuthProvider><Probe /></AuthProvider>);
+    expect(screen.getByTestId('state').textContent).toBe('signed-in');
+    expect(screen.getByTestId('expired').textContent).toBe('no');
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    });
+
+    expect(screen.getByTestId('state').textContent).toBe('signed-out');
+    expect(screen.getByTestId('expired').textContent).toBe('yes');
+    expect(localStorage.getItem('afrinov.token')).toBeNull();
+  });
+
+  it('keeps the session when the backend is merely unavailable', async () => {
+    const { render, screen, act } = await import('@testing-library/react');
+    const { AuthProvider, useAuth } = await import('./auth');
+    const { setToken, api } = await import('./api/client');
+
+    setToken('a-valid-token');
+    writePersistedSession(makeUser());
+
+    // The token is fine; the server is down. Revalidation fails with a service
+    // error, which says nothing about the session.
+    const spy = vi.spyOn(api, 'get').mockRejectedValue({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'down',
+      status: 503,
+    });
+
+    function Probe() {
+      const { user, sessionExpired } = useAuth();
+      return (
+        <div>
+          <span data-testid="state">{user ? 'signed-in' : 'signed-out'}</span>
+          <span data-testid="expired">{sessionExpired ? 'yes' : 'no'}</span>
+        </div>
+      );
+    }
+
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('state').textContent).toBe('signed-in');
+    expect(screen.getByTestId('expired').textContent).toBe('no');
+    expect(localStorage.getItem('afrinov.token')).not.toBeNull();
+    spy.mockRestore();
   });
 });

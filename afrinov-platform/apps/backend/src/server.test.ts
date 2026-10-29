@@ -78,4 +78,50 @@ describe('HTTP server', () => {
     expect(res.json().error.code).toBe('FORBIDDEN');
     await app.close();
   });
+
+  it('an unknown route answers with the standard error envelope, not Fastify default', async () => {
+    const app = await buildServer({ skipConfigValidation: true });
+    const res = await app.inject({ method: 'GET', url: '/api/v1/does-not-exist' });
+    expect(res.statusCode).toBe(404);
+    const body = res.json();
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(typeof body.error.message).toBe('string');
+    // Fastify's default body would be { message, error: 'Not Found', statusCode }.
+    expect(body).not.toHaveProperty('statusCode');
+    expect(typeof body.error).toBe('object');
+    await app.close();
+  });
+
+  it('carries a correlation id on the response and in the error envelope', async () => {
+    const app = await buildServer({ skipConfigValidation: true });
+    const res = await app.inject({ method: 'GET', url: '/api/v1/materials' });
+    expect(res.statusCode).toBe(401);
+    const header = res.headers['x-request-id'];
+    expect(typeof header).toBe('string');
+    expect(res.json().error.requestId).toBe(header);
+    await app.close();
+  });
+
+  it('answers a malformed JSON body with 400, not a 500', async () => {
+    const app = await buildServer({ skipConfigValidation: true });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { 'content-type': 'application/json' },
+      payload: '{"email": "a@b.c",',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(typeof res.json().error.code).toBe('string');
+    await app.close();
+  });
+
+  it('never returns a stack trace or internal path in an error body', async () => {
+    const app = await buildServer({ skipConfigValidation: true });
+    const res = await app.inject({ method: 'GET', url: '/api/v1/materials' });
+    const text = res.body;
+    expect(text).not.toMatch(/at\s+\S+\s+\(/);
+    expect(text).not.toMatch(/node_modules/);
+    expect(text).not.toMatch(/\.ts:\d+/);
+    await app.close();
+  });
 });

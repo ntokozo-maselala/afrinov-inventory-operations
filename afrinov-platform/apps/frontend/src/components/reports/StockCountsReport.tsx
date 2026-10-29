@@ -80,7 +80,7 @@ const COLUMNS: DataTableColumn<Row>[] = [
 
 export function StockCountsReport({ query, view, onView }: { query: string; view: ReportView; onView: (v: ReportView) => void }) {
   const list = usePagedList<CountRecord>(`/stock-counts?${query}`, 50);
-  if (list.error) return <ErrorState message={list.error.message} onRetry={list.reload} />;
+  if (list.error) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows = list.rows.flatMap(rowsOf);
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No counts" description="No stock count was posted for these dates and filters." />;

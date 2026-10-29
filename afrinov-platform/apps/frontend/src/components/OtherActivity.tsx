@@ -22,7 +22,7 @@ export const ACTIVITY_TYPE_LABEL: Record<string, string> = {
 
 export function OtherActivity({ query }: { query: string }) {
   const list = usePagedList<ActivityRow>(`/activity?${query}`, 50);
-  if (list.error) return <ErrorState message={list.error.message} onRetry={list.reload} />;
+  if (list.error) return <ErrorState error={list.error} onRetry={list.reload} />;
   return (
     <>
       <p className="text-meta mb-2">{list.loaded ? `${list.rows.length}${list.hasMore ? '+' : ''} entries` : ' '}</p>

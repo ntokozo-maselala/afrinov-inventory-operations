@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildInventoryExportPath, getPdfBlob } from './exportReport';
+import { buildInventoryExportPath, errorMessage, getPdfBlob } from './exportReport';
 import type { ReportResult } from './reportTypes';
 
 const report = {
@@ -61,5 +61,31 @@ describe('buildInventoryExportPath', () => {
     expect(result.filename).toBe('filtered-report.pdf');
     expect(result.blob.type).toBe('application/pdf');
     expect(result.blob.size).toBeGreaterThan(0);
+  });
+});
+
+describe('errorMessage', () => {
+  function response(body: unknown, status = 500): Response {
+    return {
+      status,
+      json: async () => body,
+    } as unknown as Response;
+  }
+
+  it('shows a safe server message verbatim', async () => {
+    await expect(errorMessage(response({ error: { message: 'That report range is not available.' } }, 400)))
+      .resolves.toBe('That report range is not available.');
+  });
+
+  it('falls back to the status when the server message looks like a leak', async () => {
+    await expect(errorMessage(response({ error: { message: 'at Object.<anonymous> (/app/src/db.ts:12:9)' } }, 500)))
+      .resolves.toBe('Request failed (500)');
+    await expect(errorMessage(response({ error: { message: 'PrismaClientKnownRequestError: ECONNREFUSED' } }, 503)))
+      .resolves.toBe('Request failed (503)');
+  });
+
+  it('falls back to the status when the body is not JSON', async () => {
+    const notJson = { status: 502, json: async () => { throw new SyntaxError('Unexpected token <'); } } as unknown as Response;
+    await expect(errorMessage(notJson)).resolves.toBe('Request failed (502)');
   });
 });

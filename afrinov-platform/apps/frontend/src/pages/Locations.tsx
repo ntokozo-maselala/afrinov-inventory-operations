@@ -19,6 +19,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import type { ReportResult } from '../api/reportTypes';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 type LocationType = 'RACK' | 'STOREROOM' | 'SHOP_FLOOR_AREA' | 'CONTAINER' | 'OFF_SITE';
 type LocationStatus = 'ACTIVE' | 'INACTIVE';
@@ -444,9 +445,10 @@ export function Locations() {
         )}
       </FilterBar>
 
-      {locations.error && <ErrorState message={locations.error.message} onRetry={locations.reload} />}
+      {locations.error && !locations.stale && <ErrorState error={locations.error} onRetry={locations.reload} />}
+      {locations.stale && <StaleDataNotice error={locations.error} onRetry={locations.reload} />}
 
-      {!locations.error && (
+      {(!locations.error || locations.stale) && (
         <DataTable<Location>
           ariaLabel="Locations"
           isLoading={locations.loading}

@@ -71,4 +71,136 @@ describe('api/client.ts — API client utilities', () => {
       expect(typeof FRONTEND_ONLY).toBe('boolean');
     });
   });
+
+  describe('error response handling', () => {
+    afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+    async function withFetch(response: Response | (() => Promise<Response>)) {
+      vi.stubEnv('VITE_FRONTEND_ONLY', 'false');
+      vi.stubGlobal('fetch', vi.fn(typeof response === 'function' ? response : async () => response));
+      const mod = await import('../api/client');
+      return mod;
+    }
+
+    async function rejection(promise: Promise<unknown>): Promise<{ code: string; message: string }> {
+      return promise.then(
+        () => { throw new Error('expected the request to reject'); },
+        (e: unknown) => e as { code: string; message: string },
+      );
+    }
+
+    it('parses the standard error envelope', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'CONFLICT', message: 'Duplicate SKU', requestId: 'req-5' } }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ));
+      await expect(api.post('/materials', {})).rejects.toMatchObject({
+        code: 'CONFLICT', message: 'Duplicate SKU', requestId: 'req-5', status: 409,
+      });
+    });
+
+    it('substitutes client copy for a non-domain code, discarding the server message', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({
+          error: { code: 'SERVICE_UNAVAILABLE', message: 'connect ECONNREFUSED 10.0.0.5:5432' },
+        }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      ));
+      const err = await rejection(api.get("/stock"));
+      expect(err.message).not.toMatch(/ECONNREFUSED/);
+      expect(err.message).toBe('Afrinov Inventory is temporarily unavailable. Please try again shortly.');
+    });
+
+    it('rejects a domain message that looks like a stack trace', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({
+          error: { code: 'VALIDATION_ERROR', message: 'at Object.<anonymous> (/srv/app/node_modules/x.js:1:1)' },
+        }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      ));
+      const err = await rejection(api.post("/materials", {}));
+      expect(err.message).not.toMatch(/node_modules|\.js:1:1/);
+    });
+
+    it('keeps a safe domain message (the constraint the server enforced)', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'INSUFFICIENT_BALANCE', message: 'Only 2 of SKU A-1 are available at D-1.' } }),
+        { status: 422, headers: { 'content-type': 'application/json' } },
+      ));
+      await expect(api.post('/inventory-issues', {})).rejects.toMatchObject({
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'Only 2 of SKU A-1 are available at D-1.',
+      });
+    });
+
+    it('never exposes a raw server message for an unrecognised code', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'WAT', message: 'PrismaClientKnownRequestError P2025' } }),
+        { status: 500, headers: { 'content-type': 'application/json' } },
+      ));
+      const err = await rejection(api.get("/x"));
+      expect(err.message).not.toMatch(/Prisma|P2025/);
+    });
+
+    it('falls back to a status-derived code when the body is not an envelope', async () => {
+      const { api } = await withFetch(new Response('<html>502 Bad Gateway</html>', { status: 502 }));
+      await expect(api.get('/stock')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 502 });
+    });
+
+    it('treats an empty 503 as an unavailable service, not a crash', async () => {
+      const { api } = await withFetch(new Response(null, { status: 503 }));
+      await expect(api.get('/stock')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    });
+
+    it('maps 401 to an unauthenticated error with the approved message', async () => {
+      const { api } = await withFetch(new Response(null, { status: 401 }));
+      await expect(api.get('/materials')).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+    });
+
+    it('maps 403 to forbidden and 404 to not-found', async () => {
+      const a = await withFetch(new Response(null, { status: 403 }));
+      await expect(a.api.get('/x')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      vi.unstubAllGlobals();
+      const b = await withFetch(new Response(null, { status: 404 }));
+      await expect(b.api.get('/x')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('maps 429 to a rate-limit error', async () => {
+      const { api } = await withFetch(new Response(null, { status: 429 }));
+      await expect(api.get('/x')).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    });
+
+    it('reports a network failure as NETWORK_ERROR, never as a thrown TypeError', async () => {
+      const { api } = await withFetch(async () => { throw new TypeError('Failed to fetch'); });
+      await expect(api.get('/x')).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    });
+
+    it('reports an aborted/timed-out request as TIMEOUT', async () => {
+      const { api } = await withFetch(async () => {
+        const err = new Error('The operation was aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      });
+      await expect(api.get('/x')).rejects.toMatchObject({ code: 'TIMEOUT' });
+    });
+
+    it('emits a session-expired event on a 401', async () => {
+      const { api, SESSION_EXPIRED_EVENT } = await withFetch(new Response(null, { status: 401 }));
+      const seen = vi.fn();
+      window.addEventListener(SESSION_EXPIRED_EVENT, seen);
+      await api.get('/materials').catch(() => {});
+      window.removeEventListener(SESSION_EXPIRED_EVENT, seen);
+      expect(seen).toHaveBeenCalledTimes(1);
+    });
+
+    it('attaches a request timeout signal', async () => {
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
+      vi.stubEnv('VITE_FRONTEND_ONLY', 'false');
+      vi.stubGlobal('fetch', fetchMock);
+      const { api } = await import('../api/client');
+      await api.get('/materials');
+      const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+  });
 });

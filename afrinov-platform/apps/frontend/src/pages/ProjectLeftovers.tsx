@@ -56,7 +56,7 @@ export function ProjectLeftovers() {
 
   const title = `Project ${projectNumber} leftovers`;
   const breadcrumb = [{ label: 'Projects', to: '/projects' }, { label: projectNumber }, { label: 'Leftovers' }];
-  if (leftovers.error) return <><PageHeader title={title} breadcrumb={breadcrumb} /><ErrorState message={leftovers.error.message} onRetry={leftovers.reload} /></>;
+  if (leftovers.error) return <><PageHeader title={title} breadcrumb={breadcrumb} /><ErrorState error={leftovers.error} onRetry={leftovers.reload} /></>;
   if (!data) return <><PageHeader title={title} breadcrumb={breadcrumb} /><div className="surface-card p-6"><Skeleton h={160} /></div></>;
 
   const { project, items } = data;

@@ -56,7 +56,7 @@ export function LedgerReport({ kind, query }: { kind: LedgerReportKind; query: s
     summary.reload();
   }
 
-  if (list.error) return <ErrorState message={list.error.message} onRetry={reload} />;
+  if (list.error) return <ErrorState error={list.error} onRetry={reload} />;
   return (
     <>
       <p className="text-meta mb-2">{list.loaded && summary.data ? `${formatNumber(list.rows.length)} of ${formatNumber(summary.data.total)} shown` : ' '}</p>

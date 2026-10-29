@@ -26,6 +26,7 @@ import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 import { STORES_CATEGORIES, categoryLabel, needsProject, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 import { LeftoversNotice } from '../components/LeftoversNotice';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 const hasPrice = (m: Material) => m.unitCost !== null && m.unitCost !== undefined && m.unitCost !== '';
 
@@ -197,9 +198,10 @@ export function Materials() {
         )}
       </FilterBar>
 
-      {mats.error && <ErrorState message={mats.error.message} onRetry={mats.reload} />}
+      {mats.error && !mats.stale && <ErrorState error={mats.error} onRetry={mats.reload} />}
+      {mats.stale && <StaleDataNotice error={mats.error} onRetry={mats.reload} />}
 
-      {!mats.error && (
+      {(!mats.error || mats.stale) && (
         <DataTable
           ariaLabel={section === 'STORES' ? 'Stores materials' : 'Projects materials'}
           isLoading={mats.loading}

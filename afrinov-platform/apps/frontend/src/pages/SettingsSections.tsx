@@ -16,7 +16,7 @@ import { Icon } from '../components/Icon';
 import { Input, Select, Field } from '../components/Field';
 import { Drawer } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { api, FRONTEND_ONLY, type ApiError } from '../api/client';
+import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
@@ -690,7 +690,7 @@ async function downloadReport(format: 'xlsx' | 'pdf', filename: string, exporter
     let detail = `HTTP ${res.status}`;
     try {
       const body = (await res.json()) as { error?: { message?: string } };
-      if (body?.error?.message) detail = body.error.message;
+      if (body?.error?.message && isSafeServerMessage(body.error.message)) detail = body.error.message;
     } catch { /* ignore */ }
     throw { code: 'EXPORT_FAILED', message: detail } as ApiError;
   }

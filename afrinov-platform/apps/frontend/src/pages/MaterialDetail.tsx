@@ -21,6 +21,7 @@ import { TransactionDrawer } from '../components/TransactionDrawer';
 import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 
 /** Project material of a completed or cancelled project: nothing more is ordered for it; its leftovers go to Stores. */
@@ -114,7 +115,8 @@ export function MaterialDetail() {
         )}
       />
 
-      {material.error && <ErrorState message={material.error.message} onRetry={material.reload} />}
+      {material.error && !material.stale && <ErrorState error={material.error} onRetry={material.reload} />}
+      {material.stale && <StaleDataNotice error={material.error} onRetry={material.reload} />}
 
       {material.data && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -30,9 +30,12 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 852, frontend 856)
+npm test               # both workspaces (backend 874, frontend 905)
 npm run build          # both workspaces
 ```
+
+Counts are a guide, not a contract; they move with every feature. Run
+`npm test` and read the totals rather than trusting the numbers here.
 
 Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`
@@ -103,6 +106,14 @@ Use these forms; the older spellings still work but are deprecated or removed.
 
 ## Notes
 
+- **Error handling has one entry point per side.** The backend answers every
+  non-2xx through `toErrorEnvelope` (`src/shared/errors.ts`) — do not hand-build
+  an error body. The frontend decides what a user reads in
+  `src/lib/errorPresentation.ts`; `api/client.ts` also substitutes its own copy
+  for any non-domain server message at the boundary, so a screen that renders
+  `err.message` cannot leak server text. Never render a raw exception message.
+  See `afrinov-docs/docs/12-operations/error-handling.md` and
+  `afrinov-docs/docs/08-api/error-model.md`.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

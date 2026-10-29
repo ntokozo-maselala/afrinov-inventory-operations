@@ -18,6 +18,7 @@ import { downloadConsumption, downloadConsumptionPdf } from '../api/exportConsum
 import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
 import { thisMonth, today as todayIso } from '../lib/dates';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Project { projectNumber: string; name?: string | null }
 interface Recipient { id: string; name: string; type: string; active: boolean }
@@ -150,7 +151,8 @@ export function Consumption() {
       </FilterBar>
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
-      {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}
+      {report.error && !report.stale && <ErrorState error={report.error} onRetry={report.reload} />}
+      {report.stale && <StaleDataNotice error={report.error} onRetry={report.reload} />}
 
       {report.data && (
         <div className="space-y-6">

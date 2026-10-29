@@ -25,6 +25,7 @@ import type { CurrentStockRow, Material } from '../api/types';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
@@ -92,6 +93,10 @@ export function ReceiveStock() {
     detail: stockText(m, heldAt.get(m.id)),
   })), [activeMaterials, heldAt]);
   const loadError = suppliers.error ?? materials.error ?? locations.error;
+  // A refresh that failed while the option lists were already loaded is a
+  // stale warning, not a blocker: the form stays usable with the last data.
+  const loadStale = suppliers.stale || materials.stale || locations.stale;
+  const loadFailed = !!loadError && !loadStale;
   const loading = suppliers.loading || materials.loading || locations.loading;
 
   // An item's page links here with ?materialId=: once the catalogue, locations
@@ -175,9 +180,10 @@ export function ReceiveStock() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Receive stock' }]}
       />
 
-      {loadError && <ErrorState message={loadError.message} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} />}
+      {loadFailed && <ErrorState error={loadError} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} />}
+      {loadStale && <StaleDataNotice error={loadError} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
 
-      {!loadError && (
+      {!loadFailed && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field label="Supplier" htmlFor="rcv-supplier" required>

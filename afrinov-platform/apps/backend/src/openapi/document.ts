@@ -696,6 +696,9 @@ export function buildOpenApiDocument(opts: { procurementEnabled: boolean }) {
         code: z.string().openapi({ example: 'VALIDATION_ERROR' }),
         message: z.string(),
         details: z.unknown().optional(),
+        requestId: z.string().optional().openapi({
+          description: 'Correlation id for this request; quote it to support. Matches the x-request-id response header and the server log line.',
+        }),
       }),
     }),
   );
@@ -748,7 +751,8 @@ export function buildOpenApiDocument(opts: { procurementEnabled: boolean }) {
       version: serviceVersion,
       description:
         'Log in with `POST /auth/login`, then send the token as `Authorization: Bearer <token>`. ' +
-        'Errors always have the shape `{ "error": { "code", "message", "details" } }`.' +
+        'Errors always have the shape `{ "error": { "code", "message", "details"?, "requestId"? } }`; ' +
+        'the `x-request-id` response header carries the same correlation id.' +
         (opts.procurementEnabled ? '' : '\n\nPurchase orders and goods receipts are switched off on this server.'),
     },
     servers: [{ url: API_PREFIX }],

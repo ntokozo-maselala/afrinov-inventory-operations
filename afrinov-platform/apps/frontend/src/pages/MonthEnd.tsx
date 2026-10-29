@@ -15,6 +15,7 @@ import { formatCurrency } from '../lib/currency';
 import { downloadMonthEnd, downloadMonthEndPdf } from '../api/exportMonthEnd';
 import type { MonthEndReport } from '../api/reportTypes';
 import { categoryLabel } from '../lib/categories';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -87,7 +88,8 @@ export function MonthEnd() {
       </FilterBar>
 
       {problem && <p className="text-sm text-danger-600 mb-3">{problem}</p>}
-      {report.error && <ErrorState message={report.error.message} onRetry={report.reload} />}
+      {report.error && !report.stale && <ErrorState error={report.error} onRetry={report.reload} />}
+      {report.stale && <StaleDataNotice error={report.error} onRetry={report.reload} />}
 
       {r && (
         <section aria-label="Stock report overview" className="surface-card overflow-x-auto">

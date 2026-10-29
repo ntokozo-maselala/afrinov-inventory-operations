@@ -29,7 +29,7 @@ const COLUMNS: DataTableColumn<Row>[] = [
 
 export function ReceivedStockReport({ query, view, onView }: { query: string; view: ReportView; onView: (v: ReportView) => void }) {
   const list = usePagedList<ReceiptRecord>(`/stock-receipts?${query}`, 50);
-  if (list.error) return <ErrorState message={list.error.message} onRetry={list.reload} />;
+  if (list.error) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows: Row[] = list.rows.flatMap((r) => r.lines.map((l, i) => ({ r, l, i })));
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No stock received" description="No delivery was recorded for these dates and filters." />;
