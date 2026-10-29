@@ -23,7 +23,10 @@ const lines = [
 ];
 const quote = (id: string, name: string, prices: Record<string, string>, totals: { subtotal: string; vat: string; net: string; unpricedLines: number }, extra: Record<string, unknown> = {}) => ({
   supplierId: id, supplier: { id, name, currency: 'ZAR' }, declined: false, quotedAt: '2026-10-29T00:00:00.000Z', vatRate: 15,
-  prices: Object.entries(prices).map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice })), totals, quoteFile: null, ...extra,
+  prices: Object.entries(prices).map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice })), totals, quoteFile: null,
+  // As the server rounds them for the order.
+  lineSubtotals: Object.entries(prices).map(([rfqLineId, unitPrice]) => ({ rfqLineId, subtotal: (Number(unitPrice) * (rfqLineId === 'l-1' ? 4 : 2)).toFixed(2) })),
+  ...extra,
 });
 // EMV: both lines, 690 incl. VAT. Macsteel: both lines, 736. Hydac: line 1 only.
 const EMV = quote('s-1', 'EMV Africa', { 'l-1': '140', 'l-2': '20' }, { subtotal: '600.00', vat: '90.00', net: '690.00', unpricedLines: 0 }, { leadTime: '2 weeks', validUntil: '2099-12-31T00:00:00.000Z' });
@@ -87,6 +90,21 @@ describe('Comparing quotes', () => {
     const net = within(table).getByRole('rowheader', { name: 'Net value' }).closest('tr')!;
     expect(within(net).getByText(/lowest complete quote/).closest('td')).toHaveTextContent('690');
     expect(within(within(table).getByRole('rowheader', { name: 'Valid until' }).closest('tr')!).getByText(/Ran out/)).toBeInTheDocument();
+  });
+
+  it('shows prices to the 4 decimal places they are kept, and the server’s rounded subtotals', async () => {
+    current = rfq('SENT', {
+      suppliers: [
+        quote('s-1', 'EMV Africa', { 'l-1': '0.0001' }, { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1 }, { lineSubtotals: [{ rfqLineId: 'l-1', subtotal: '0.01' }] }),
+        quote('s-2', 'Macsteel', { 'l-1': '0.0002' }, { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1 }),
+      ],
+    });
+    appAt('/rfqs/r-1');
+    const line1 = within(await comparison()).getByRole('rowheader', { name: /WHEEL-SS/ }).closest('tr')!;
+    expect(line1).toHaveTextContent('0,0001');
+    expect(line1).toHaveTextContent('0,0002');
+    // The subtotal is the server's, not worked out again here.
+    expect(within(line1).getByText(/lowest/).closest('td')).toHaveTextContent('0,01');
   });
 
   it('awards the clear choice without a reason and opens its new order', async () => {

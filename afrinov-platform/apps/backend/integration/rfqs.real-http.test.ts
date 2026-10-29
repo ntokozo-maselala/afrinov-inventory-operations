@@ -510,6 +510,28 @@ describe('requests for quotation over real HTTP', () => {
       expect((await award(draft.body.id, { supplierId: supplierA })).status).toBe(409);
     });
 
+    it("won't award a quote given in another currency than the supplier trades in now", async () => {
+      const rfq = await quoted();
+      expect((await api('PATCH', `/suppliers/${supplierB}`, { currency: 'EUR' })).status).toBe(200);
+      try {
+        const res = await award(rfq.id, { supplierId: supplierB });
+        expect(res.status).toBe(400);
+        expect(res.body.error.message).toMatch(/quoted in ZAR but now trades in EUR/);
+      } finally {
+        await api('PATCH', `/suppliers/${supplierB}`, { currency: 'ZAR' });
+      }
+    });
+
+    it('gives each quoted line its subtotal rounded as the order rounds it', async () => {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const sent = (await api<Awarded>('POST', `/rfqs/${created.body.id}/send`, {})).body;
+      const res = await api<{ suppliers: Array<{ supplierId: string; lineSubtotals: Array<{ rfqLineId: string; subtotal: string }> }> }>(
+        'PUT', `/rfqs/${sent.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: sent.lines[0]!.id, unitPrice: 1.005 }] },
+      );
+      // 1.005 x 1 rounds half up to 1.01, as the order will; a double would show 1.00.
+      expect(res.body.suppliers.find((s) => s.supplierId === supplierA)!.lineSubtotals).toEqual([{ rfqLineId: sent.lines[0]!.id, subtotal: '1.01' }]);
+    });
+
     it('raises one order when two buyers award at once', async () => {
       const rfq = await quoted();
       const both = await Promise.all([award(rfq.id, { supplierId: supplierB }), award(rfq.id, { supplierId: supplierB })]);

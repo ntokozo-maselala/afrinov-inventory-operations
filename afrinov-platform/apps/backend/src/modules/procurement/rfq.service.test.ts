@@ -57,10 +57,10 @@ describe('RFQ numbers', () => {
 });
 
 describe('awardConcerns', () => {
-  const quote = (supplierId: string, net: number | null, extra: Record<string, unknown> = {}) => ({
+  const quote = (supplierId: string, net: string | null, extra: Record<string, unknown> = {}) => ({
     supplierId, name: supplierId.toUpperCase(), currency: 'ZAR', quoted: net !== null, net, unpricedLines: 0, validUntil: null, ...extra,
   });
-  const quotes = [quote('a', 736), quote('b', 690), quote('c', 600, { unpricedLines: 1 }), quote('d', 500, { currency: 'EUR' }), quote('e', null)];
+  const quotes = [quote('a', '736.00'), quote('b', '690.00'), quote('c', '600.00', { unpricedLines: 1 }), quote('d', '500.00', { currency: 'EUR' }), quote('e', null)];
 
   it('needs no reason for the lowest complete quote in its currency', () => {
     expect(awardConcerns(quotes, 'b', '2026-10-29')).toEqual([]);
@@ -71,6 +71,12 @@ describe('awardConcerns', () => {
   it('asks why for a dearer quote, one with lines not priced, or one that has run out', () => {
     expect(awardConcerns(quotes, 'a', '2026-10-29')).toEqual(['B quoted less for every line: ZAR 690.00 against 736.00']);
     expect(awardConcerns(quotes, 'c', '2026-10-29')).toEqual(["C didn't price 1 line: the order has it without a price"]);
-    expect(awardConcerns([quote('b', 690, { validUntil: '2026-10-01' })], 'b', '2026-10-29')).toEqual(["B's quote ran out on 2026-10-01"]);
+    expect(awardConcerns([quote('b', '690.00', { validUntil: '2026-10-01' })], 'b', '2026-10-29')).toEqual(["B's quote ran out on 2026-10-01"]);
+  });
+
+  it('tells apart totals a cent apart however large, which doubles would round together', () => {
+    const big = [quote('a', '9999999999999999.99'), quote('b', '9999999999999999.98')];
+    expect(Number('9999999999999999.99')).toBe(Number('9999999999999999.98'));
+    expect(awardConcerns(big, 'a', '2026-10-29')).toEqual(['B quoted less for every line: ZAR 9999999999999999.98 against 9999999999999999.99']);
   });
 });

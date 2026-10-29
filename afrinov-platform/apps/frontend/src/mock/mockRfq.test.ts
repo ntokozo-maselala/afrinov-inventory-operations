@@ -222,3 +222,13 @@ describe('mock: award', () => {
     await expect(api.post(`/rfqs/${other.id}/award`, { supplierId: 'sup-3' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 });
+
+describe('mock: award currency', () => {
+  it("won't award a quote given in another currency than the supplier trades in now", async () => {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const rfq = await api.post<Rfq & { lines: Array<{ id: string }> }>(`/rfqs/${draft.id}/send`, {});
+    await api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: rfq.lines[0]!.id, unitPrice: 10 }] });
+    await api.patch('/suppliers/sup-1', { currency: 'EUR' });
+    await expect(api.post(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('quoted in ZAR but now trades in EUR') });
+  });
+});

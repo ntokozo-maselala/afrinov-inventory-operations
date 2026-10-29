@@ -13,16 +13,18 @@ import { Field, Textarea } from './Field';
 import { Alert } from './Alert';
 import { Badge } from './Badge';
 import { api, type ApiError } from '../api/client';
-import { formatMoney } from '../lib/poMoney';
+import { formatMoney, formatUnitPrice } from '../lib/poMoney';
 import { formatNumber } from '../lib/format';
-import { awardConcerns, formatDay, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
+import { awardConcerns, cents, formatDay, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
 
 const nameOf = (s: RfqSupplier) => s.supplier?.name ?? s.supplierId;
-const currencyOf = (s: RfqSupplier) => s.supplier?.currency ?? 'ZAR';
+const currencyOf = quoteCurrency;
 const priceOf = (s: RfqSupplier, lineId: string) => {
   const p = s.prices?.find((x) => x.rfqLineId === lineId);
   return p ? Number(p.unitPrice) : null;
 };
+/** The line's subtotal as the server rounds it for the order (half up, in decimals). */
+const subtotalOf = (s: RfqSupplier, lineId: string) => s.lineSubtotals?.find((x) => x.rfqLineId === lineId)?.subtotal ?? null;
 
 export function RfqComparison({ rfq, onAward }: {
   rfq: Rfq;
@@ -39,8 +41,8 @@ export function RfqComparison({ rfq, onAward }: {
     return prices.length > 1 ? Math.min(...prices) : null;
   };
   const lowestNet = (currency: string) => {
-    const nets = quotes.filter((s) => currencyOf(s) === currency && s.totals!.unpricedLines === 0).map((s) => Number(s.totals!.net));
-    return nets.length > 1 ? Math.min(...nets) : null;
+    const nets = quotes.filter((s) => currencyOf(s) === currency && s.totals!.unpricedLines === 0).map((s) => cents(s.totals!.net));
+    return nets.length > 1 ? nets.reduce((a, b) => (b < a ? b : a)) : null;
   };
   const currencies = new Set(quotes.map(currencyOf));
 
@@ -74,9 +76,9 @@ export function RfqComparison({ rfq, onAward }: {
                   <td key={s.supplierId} className={`px-3 py-2 text-right whitespace-nowrap ${best ? 'bg-success-50 dark:bg-success-900/30' : ''}`}>
                     {price === null ? <span className="text-meta">Not offered</span> : (
                       <>
-                        <span className="font-mono">{formatMoney(String(price), currencyOf(s))}</span>
+                        <span className="font-mono">{formatUnitPrice(String(price), currencyOf(s))}</span>
                         {best && <span className="sr-only"> (lowest)</span>}
-                        <div className="text-meta font-mono">{formatMoney((price * Number(l.quantity)).toFixed(2), currencyOf(s))}</div>
+                        <div className="text-meta font-mono">{formatMoney(subtotalOf(s, l.id), currencyOf(s))}</div>
                       </>
                     )}
                   </td>
@@ -89,7 +91,7 @@ export function RfqComparison({ rfq, onAward }: {
           <Row label="Total (excl. VAT)" quotes={quotes} cell={(s) => <span className="font-mono">{formatMoney(s.totals!.subtotal, currencyOf(s))}</span>} />
           <Row label="VAT" quotes={quotes} cell={(s) => <span className="font-mono">{formatMoney(s.totals!.vat, currencyOf(s))}</span>} />
           <Row label="Net value" quotes={quotes} cell={(s) => {
-            const best = s.totals!.unpricedLines === 0 && Number(s.totals!.net) === lowestNet(currencyOf(s));
+            const best = s.totals!.unpricedLines === 0 && cents(s.totals!.net) === lowestNet(currencyOf(s));
             return (
               <span className={`font-mono font-semibold ${best ? 'text-success-700' : ''}`}>
                 {formatMoney(s.totals!.net, currencyOf(s))}{best && <span className="sr-only"> (lowest complete quote)</span>}

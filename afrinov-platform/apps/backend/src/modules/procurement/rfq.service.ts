@@ -19,7 +19,7 @@ import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
-import { defaultVatRate, orderTotals } from './po-pricing.js';
+import { defaultVatRate, lineMoney, orderTotals } from './po-pricing.js';
 import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
 
 export interface RfqLineInput { materialId: string; quantity: number }
@@ -90,8 +90,8 @@ export interface QuoteForAward {
   currency: string;
   /** Recorded and not declined. */
   quoted: boolean;
-  /** Net value including VAT; null until quoted. */
-  net: number | null;
+  /** Net value including VAT, as the exact decimal it is kept as; null until quoted. */
+  net: string | null;
   unpricedLines: number;
   /** YYYY-MM-DD, or null when the quote gave none. */
   validUntil: string | null;
@@ -113,10 +113,12 @@ export function awardConcerns(quotes: QuoteForAward[], chosenId: string, today: 
   }
   if (chosen.validUntil && chosen.validUntil < today) concerns.push(`${chosen.name}'s quote ran out on ${chosen.validUntil}`);
   if (chosen.unpricedLines === 0 && chosen.net !== null) {
+    // Compared as decimals: large totals lose their cents as doubles, and two different ones could look equal.
+    const net = new Prisma.Decimal(chosen.net);
     const cheaper = quotes
-      .filter((q) => q.supplierId !== chosenId && q.quoted && q.currency === chosen.currency && q.unpricedLines === 0 && q.net !== null && q.net < chosen.net!)
-      .sort((a, b) => a.net! - b.net!);
-    if (cheaper[0]) concerns.push(`${cheaper[0].name} quoted less for every line: ${cheaper[0].currency} ${cheaper[0].net!.toFixed(2)} against ${chosen.net.toFixed(2)}`);
+      .filter((q) => q.supplierId !== chosenId && q.quoted && q.currency === chosen.currency && q.unpricedLines === 0 && q.net !== null && new Prisma.Decimal(q.net).lessThan(net))
+      .sort((a, b) => new Prisma.Decimal(a.net!).comparedTo(b.net!));
+    if (cheaper[0]) concerns.push(`${cheaper[0].name} quoted less for every line: ${cheaper[0].currency} ${new Prisma.Decimal(cheaper[0].net!).toFixed(2)} against ${net.toFixed(2)}`);
   }
   return concerns;
 }
@@ -345,9 +347,15 @@ function withQuotes(rfq: RfqDetail, vatSetting: number) {
     ...rfq,
     closed: isClosed(rfq),
     suppliers: rfq.suppliers.map((s) => {
-      const vatRate = defaultVatRate(s.supplier.currency ?? 'ZAR', vatSetting);
-      const priced = rfq.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
-      return { ...s, vatRate, totals: s.quotedAt ? orderTotals(priced, vatRate) : null };
+      const vatRate = defaultVatRate(s.currency ?? s.supplier.currency ?? 'ZAR', vatSetting);
+      const priced = rfq.lines.map((l) => ({ rfqLineId: l.id, orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
+      return {
+        ...s,
+        vatRate,
+        totals: s.quotedAt ? orderTotals(priced, vatRate) : null,
+        // Each priced line's subtotal, rounded as the order will round it, for the comparison.
+        lineSubtotals: s.quotedAt ? priced.flatMap((p) => { const m = lineMoney(p, vatRate); return m ? [{ rfqLineId: p.rfqLineId, subtotal: m.subtotal }] : []; }) : [],
+      };
     }),
   };
 }
@@ -616,10 +624,12 @@ export const RfqService = {
       const prices = [...new Map(input.prices.map((p) => [p.rfqLineId, p.unitPrice])).entries()];
       await tx.rfqQuotePrice.deleteMany({ where: { rfqSupplierId: asked.id } });
       await tx.rfqQuotePrice.createMany({ data: prices.map(([rfqLineId, unitPrice]) => ({ rfqSupplierId: asked.id, rfqLineId, unitPrice })) });
+      const quotedIn = (await tx.supplier.findUnique({ where: { id: supplierId }, select: { currency: true } }))?.currency ?? 'ZAR';
       await tx.rfqSupplier.update({
         where: { id: asked.id },
         data: {
           declined: false,
+          currency: quotedIn,
           quotedAt: asDate(quotedAt),
           quoteReference: cleanText(input.quoteReference),
           validUntil: input.validUntil ? asDate(input.validUntil) : null,
@@ -658,7 +668,7 @@ export const RfqService = {
       await tx.rfqQuotePrice.deleteMany({ where: { rfqSupplierId: asked.id } });
       await tx.rfqSupplier.update({
         where: { id: asked.id },
-        data: { declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, notes: cleanText(input.notes) },
+        data: { declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, currency: null, notes: cleanText(input.notes) },
       });
       await tx.auditLogEntry.create({
         data: {
@@ -744,15 +754,20 @@ export const RfqService = {
       const asked = rfq.suppliers.find((s) => s.supplierId === input.supplierId);
       if (!asked) throw Errors.notFound('Supplier on this request for quotation');
       if (!asked.quotedAt || asked.declined) throw Errors.validation(`${asked.supplier.name} hasn't quoted, so the RFQ can't be awarded to them`);
+      // The order is priced in the supplier's currency now; their quote must have been given in it.
+      const supplierCurrency = asked.supplier.currency ?? 'ZAR';
+      if (asked.currency && asked.currency !== supplierCurrency) {
+        throw Errors.validation(`${asked.supplier.name} quoted in ${asked.currency} but now trades in ${supplierCurrency}. Record their quote again in ${supplierCurrency} before awarding.`);
+      }
 
       const quotes: QuoteForAward[] = rfq.suppliers.map((s) => {
-        const currency = s.supplier.currency ?? 'ZAR';
+        const currency = s.currency ?? s.supplier.currency ?? 'ZAR';
         const priced = rfq.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
         const totals = orderTotals(priced, defaultVatRate(currency, vatSetting));
         const quoted = !!s.quotedAt && !s.declined;
         return {
           supplierId: s.supplierId, name: s.supplier.name, currency, quoted,
-          net: quoted ? Number(totals.net) : null, unpricedLines: totals.unpricedLines, validUntil: dayOf(s.validUntil),
+          net: quoted ? totals.net : null, unpricedLines: totals.unpricedLines, validUntil: dayOf(s.validUntil),
         };
       });
       const concerns = awardConcerns(quotes, asked.supplierId, today);

@@ -6,7 +6,7 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phases 1 to 4 are merged (PRs #104, #105, #107 and #112). Phase 5 is built on `feature/rfq-award` and not yet committed. One pull request per phase.
+**Status:** Phases 1 to 4 are merged (PRs #104, #105, #107 and #112). Phase 5 is in review (PR #113). One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
@@ -14,7 +14,7 @@ Six phases that add requests for quotation to Procurement, aligned with the **RF
 | 2 | Raise, edit and send an RFQ | M | Merged (#105) |
 | 3 | The RFQ document for suppliers | M | Merged (#107) |
 | 4 | Record the quotes that come back | M to L | Merged (#112) |
-| 5 | Compare quotes and award to a purchase order | M | Built |
+| 5 | Compare quotes and award to a purchase order | M | In review |
 | 6 | Roll out | S | Planned |
 
 Sizes used below: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
@@ -116,7 +116,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 5: Compare quotes and award to a purchase order
 
-**Built** on `feature/rfq-award`. Size M. Backend and frontend. 4 real-HTTP tests, 2 unit tests, 6 page tests and 2 mock tests.
+**In review** (PR #113). Size M. Backend and frontend, with a small migration (`20260101000029_rfq_quote_currency`). 6 real-HTTP tests, 3 unit tests, 7 page tests, 3 mock tests and 3 helper tests. Qodo's findings on the first push are fixed: each quote keeps the currency it was given in, and an award is refused when the supplier now trades in another; the award's order checks read through its transaction with the supplier, project and items held; totals are compared as exact decimals (in whole cents on screen), so two large totals a cent apart can't look equal; the comparison shows the server's line subtotals, rounded as the order rounds them, and unit prices to 4 decimal places.
 
 **Where it shows:** an RFQ with quotes → **Compare quotes** → **Award** under a supplier.
 
