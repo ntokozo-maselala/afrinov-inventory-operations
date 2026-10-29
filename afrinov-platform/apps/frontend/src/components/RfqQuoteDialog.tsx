@@ -15,7 +15,7 @@ import { api, type ApiError } from '../api/client';
 import { QUOTE_FILE_LIMIT, uploadQuoteFile } from '../api/rfqQuoteFile';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import { formatNumber } from '../lib/format';
-import { fourDecimals, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
+import { fourDecimals, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
 
 const LINE_GRID = 'grid grid-cols-12 sm:grid-cols-[2.5rem_minmax(0,1fr)_4.5rem_5.5rem_8rem_8.5rem] gap-2 items-center';
 
@@ -37,8 +37,13 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
   onChanged: () => void;
 }) {
   const name = asked.supplier?.name ?? asked.supplierId;
+  // Saving records the quote in the currency the supplier trades in now. A
+  // quote recorded in another is said so, rather than its prices being
+  // relabelled; VAT follows the new currency (none outside rand).
   const currency = asked.supplier?.currency ?? 'ZAR';
-  const vatRate = asked.vatRate ?? 0;
+  const recordedIn = asked.quotedAt ? quoteCurrency(asked) : currency;
+  const switched = recordedIn !== currency;
+  const vatRate = !switched ? asked.vatRate ?? 0 : currency === 'ZAR' ? 15 : 0;
   const today = todayInSouthAfrica();
   const lines = [...rfq.lines].sort((a, b) => a.lineNo - b.lineNo);
   const [answer, setAnswer] = useState<'quoted' | 'declined'>(asked.declined ? 'declined' : 'quoted');
@@ -112,6 +117,11 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
       )}
     >
       <div className="space-y-4">
+        {switched && (
+          <Alert tone="warning" title={`Recorded in ${recordedIn}; ${name} now trades in ${currency}`}>
+            Their last quote was given in {recordedIn}. Saving records it again in {currency}: enter their prices in {currency}.
+          </Alert>
+        )}
         <fieldset className="flex flex-wrap gap-4 text-sm" aria-label="Their answer">
           <label className="inline-flex items-center gap-2">
             <input type="radio" name="rfq-answer" checked={answer === 'quoted'} onChange={() => setAnswer('quoted')} /> Quoted

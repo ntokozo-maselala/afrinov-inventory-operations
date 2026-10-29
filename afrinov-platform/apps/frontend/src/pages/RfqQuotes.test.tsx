@@ -168,6 +168,20 @@ describe('Quotes on an RFQ’s page', () => {
     expect(await within(dialog).findByText(/Their answer is saved, but the PDF change isn't: Attach the quotation as a PDF/)).toBeInTheDocument();
   });
 
+  it("labels a quote in the currency it was given in, and says so when the supplier's has changed since", async () => {
+    // Recorded in rand; the supplier has since moved to euros.
+    const switched = { ...QUOTED, currency: 'ZAR', supplier: { ...QUOTED.supplier, currency: 'EUR' } };
+    current = { ...rfq('SENT'), suppliers: [switched, AWAITING, FOREIGN] };
+    page();
+    const table = await suppliersTable();
+    const emv = within(table).getByText('EMV Africa').closest('tr')!;
+    expect(within(emv).getByText(/R\s?736/)).toBeInTheDocument();
+    fireEvent.click(within(table).getByRole('button', { name: 'Edit quote for EMV Africa' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Recorded in ZAR; EMV Africa now trades in EUR')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('excluding VAT, in EUR');
+  });
+
   it('offers no quote recording on a draft, or to someone who may not record quotes', async () => {
     current = rfq('DRAFT');
     const { unmount } = page();

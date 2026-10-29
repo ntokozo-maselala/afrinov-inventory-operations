@@ -23,7 +23,7 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { downloadQuoteFile } from '../api/rfqQuoteFile';
 import { RfqQuoteDialog } from '../components/RfqQuoteDialog';
@@ -278,7 +278,7 @@ function supplierColumns(r: Rfq, { onDownload, printing, onRecord, onQuoteFile }
           return (
             <div className="text-sm">
               <Badge tone="success">Quoted</Badge>
-              {s.totals && <div className="font-mono mt-0.5">{formatMoney(s.totals.net, s.supplier?.currency)} <span className="text-meta">incl. VAT</span></div>}
+              {s.totals && <div className="font-mono mt-0.5">{formatMoney(s.totals.net, quoteCurrency(s))} <span className="text-meta">incl. VAT</span></div>}
               {!!s.totals?.unpricedLines && <div className="text-meta">{s.totals.unpricedLines} line{s.totals.unpricedLines === 1 ? '' : 's'} not offered</div>}
               <div className="text-meta">{[s.quoteReference && `Ref ${s.quoteReference}`, s.validUntil && `valid to ${formatDay(s.validUntil)}`, s.leadTime].filter(Boolean).join(' · ')}</div>
               {file}
