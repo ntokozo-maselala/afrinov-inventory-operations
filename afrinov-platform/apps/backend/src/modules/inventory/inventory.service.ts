@@ -13,6 +13,7 @@ import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
+import { PROJECT_DELIVERY_REFUSED } from '../procurement/procurement.service.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -880,6 +881,9 @@ export const InventoryService = {
       // The order may have been cancelled or closed since the receipt was recorded.
       if (gr.purchaseOrderId) {
         const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
+        // Project material goes to site, never into stock: a receipt saved
+        // against a project order (before that rule, too) isn't posted.
+        if (po && po.projectNumber != null) throw Errors.validation(PROJECT_DELIVERY_REFUSED);
         if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
           throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
         }

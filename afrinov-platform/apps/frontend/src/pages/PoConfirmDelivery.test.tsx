@@ -67,6 +67,22 @@ describe('Confirm delivery on a project order', () => {
     }));
   });
 
+  // Qodo, PR #121: quantities to 4 decimal places, as the order line keeps them.
+  it('starts a fractional line at its outstanding to 4 places, and refuses finer', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders/po-1') return { ...ORDER, lines: [{ ...ORDER.lines[0]!, orderedQty: '2.5', receivedQty: '1.2' }] };
+      return [];
+    });
+    page();
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm delivery' }));
+    // 2.5 − 1.2 is 1.3 here, not 1.2999999999999998.
+    expect(await screen.findByLabelText('1402-RAIL delivered')).toHaveValue(1.3);
+    fireEvent.change(screen.getByLabelText('1402-RAIL delivered'), { target: { value: '1.23456' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Confirm delivery' }).at(-1)!);
+    expect(await screen.findByText(/to at most 4 decimal places/)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
   it('refuses more than is outstanding before asking the server', async () => {
     page();
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm delivery' }));

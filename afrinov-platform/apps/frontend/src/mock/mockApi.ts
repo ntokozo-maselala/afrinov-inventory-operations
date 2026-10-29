@@ -1264,23 +1264,24 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', 'Only an approved or partly delivered purchase order can have its delivery confirmed');
     const b = (body ?? {}) as { lines?: Array<{ lineId: string; quantity: number }>; deliveryRef?: string; deliveredOn?: string };
     if (!b.lines?.length) throw err('VALIDATION_ERROR', 'Confirm what arrived on at least one line.');
-    if (b.deliveredOn && b.deliveredOn > new Date().toISOString().slice(0, 10)) throw err('VALIDATION_ERROR', 'The delivery date is still to come.');
+    if (b.deliveredOn && b.deliveredOn > mockToday()) throw err('VALIDATION_ERROR', 'The delivery date is still to come.');
     const credited = new Map<string, number>();
     for (const l of b.lines) {
       const line = po.lines.find((x) => x.id === l.lineId);
       if (!line) throw err('VALIDATION_ERROR', `Line ${l.lineId} is not on purchase order ${po.number}`);
       const sku = findMaterial(line.materialId)?.sku ?? line.materialId;
       if (credited.has(line.id)) throw err('VALIDATION_ERROR', `${sku} is given twice.`);
-      const outstanding = Number(line.orderedQty) - Number(line.receivedQty);
+      const outstanding = Math.round((Number(line.orderedQty) - Number(line.receivedQty)) * 1e4) / 1e4;
+      if (!fourDecimals(Number(l.quantity))) throw err('VALIDATION_ERROR', 'Invalid delivery confirmation');
       if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', `Enter what arrived of ${sku}, or leave the line out.`);
       if (Number(l.quantity) > outstanding) throw err('VALIDATION_ERROR', `${sku}: ${l.quantity} is more than the ${outstanding} still outstanding.`);
       credited.set(line.id, Number(l.quantity));
     }
     const before = { status: po.status };
-    for (const line of po.lines) if (credited.has(line.id)) line.receivedQty = String(Number(line.receivedQty) + credited.get(line.id)!);
+    for (const line of po.lines) if (credited.has(line.id)) line.receivedQty = String(Math.round((Number(line.receivedQty) + credited.get(line.id)!) * 1e4) / 1e4);
     const allIn = po.lines.every((line) => Number(line.receivedQty) >= Number(line.orderedQty));
     po.status = allIn ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
-    const at = b.deliveredOn ?? new Date().toISOString().slice(0, 10);
+    const at = b.deliveredOn ?? mockToday();
     if (allIn) {
       po.deliveredAt = new Date(`${at}T00:00:00Z`).toISOString();
       po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };

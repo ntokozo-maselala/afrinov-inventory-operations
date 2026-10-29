@@ -60,7 +60,7 @@ function assertLinesOnOrder(po: OrderForReceipt, input: CreateGoodsReceiptInput)
 export const GoodsReceiptService = {
   async list() {
     return prisma.goodsReceipt.findMany({
-      include: { supplier: true, purchaseOrder: { select: { id: true, number: true } }, lines: { include: { material: true, location: true } } },
+      include: { supplier: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } }, lines: { include: { material: true, location: true } } },
       orderBy: { receivedAt: 'desc' },
     });
   },
@@ -68,7 +68,7 @@ export const GoodsReceiptService = {
   async getById(id: string) {
     const gr = await prisma.goodsReceipt.findUnique({
       where: { id },
-      include: { supplier: true, purchaseOrder: { select: { id: true, number: true } }, lines: { include: { material: true, location: true } } },
+      include: { supplier: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } }, lines: { include: { material: true, location: true } } },
     });
     if (!gr) throw Errors.notFound('GoodsReceipt');
     return gr;

@@ -313,6 +313,11 @@ export interface CloseInput {
   reason?: string;
 }
 
+/** Today in South Africa, as YYYY-MM-DD: the server's own clock runs in UTC, two hours behind. */
+function todayInSouthAfrica(now = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
 /** Statuses a purchase order can be received against. */
 export const RECEIVABLE_STATUSES: PurchaseOrderStatus[] = ['APPROVED', 'PARTIALLY_RECEIVED'];
 
@@ -849,15 +854,17 @@ export const PurchaseOrderService = {
         throw Errors.invalidState('Only an approved or partly delivered purchase order can have its delivery confirmed', { status: po.status });
       }
       if (input.lines.length === 0) throw Errors.validation('Confirm what arrived on at least one line.');
+      // Calendar days in South Africa, as the buyer picks them: the server's clock runs in UTC.
+      if (input.deliveredOn && input.deliveredOn > todayInSouthAfrica()) throw Errors.validation('The delivery date is still to come.');
       const deliveredOn = input.deliveredOn ? toDateOnly(input.deliveredOn) : null;
-      if (deliveredOn && deliveredOn.getTime() > Date.now()) throw Errors.validation('The delivery date is still to come.');
 
       const credited = new Map<string, Prisma.Decimal>();
       for (const l of input.lines) {
         const line = po.lines.find((x) => x.id === l.lineId);
         if (!line) throw Errors.validation(`Line ${l.lineId} is not on purchase order ${po.number}`);
         if (credited.has(line.id)) throw Errors.validation(`${line.material.sku} is given twice.`);
-        const quantity = new Prisma.Decimal(l.quantity);
+        // As the order line keeps it, to 4 decimal places, so the check, the credit and the record agree.
+        const quantity = new Prisma.Decimal(l.quantity).toDecimalPlaces(4);
         if (!gtZero(quantity)) throw Errors.validation(`Enter what arrived of ${line.material.sku}, or leave the line out.`);
         const outstanding = toDecimal(line.orderedQty).minus(toDecimal(line.receivedQty));
         if (quantity.gt(outstanding)) {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
 import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService, kindOfOrder } from './procurement.service.js';
 import { Errors } from '../../shared/errors.js';
+import { fourDecimals } from './rfq.routes.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
 import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
 import { PermissionCode, type PermissionCodeValue } from '../../shared/permissions.js';
@@ -118,7 +119,8 @@ export const receiveSchema = z.object({
 });
 
 export const confirmDeliverySchema = z.object({
-  lines: z.array(z.object({ lineId: z.uuid(), quantity: z.number().positive().max(1e9) })).min(1).max(500),
+  // Kept to 4 decimal places, as the order line keeps it, so what is recorded is what is credited.
+  lines: z.array(z.object({ lineId: z.uuid(), quantity: z.number().positive().max(1e9).refine(fourDecimals, 'At most 4 decimal places') })).min(1).max(500),
   deliveryRef: z.string().trim().max(120).optional(),
   deliveredOn: z.iso.date().optional(),
 });
@@ -355,14 +357,22 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     return PurchaseOrderService.cancel({ id, ...parsed.data }, actorId(req));
   });
 
+  // A receipt against a Stores order is the store's, as the order is: left
+  // out of the list, and not found, for anyone outside the store.
   app.get('/goods-receipts', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewGoodsReceipt);
-    return GoodsReceiptService.list();
+    const receipts = await GoodsReceiptService.list();
+    if (await userHasPermission(req, PermissionCode.OrderStoresStock)) return receipts;
+    return receipts.filter((gr) => !gr.purchaseOrder || kindOfOrder(gr.purchaseOrder) === 'projects');
   });
   app.get('/goods-receipts/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewGoodsReceipt);
     const id = (req.params as { id: string }).id;
-    return GoodsReceiptService.getById(id);
+    const gr = await GoodsReceiptService.getById(id);
+    if (gr.purchaseOrder && kindOfOrder(gr.purchaseOrder) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) {
+      throw Errors.notFound('GoodsReceipt');
+    }
+    return gr;
   });
 
   app.post('/goods-receipts', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -386,6 +396,10 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.post('/goods-receipts/:id/post', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ReceiveInventory);
     const id = (req.params as { id: string }).id;
+    // As when it was recorded (Qodo, PR #121): a Stores order's receipt is the
+    // store's; a project order's is refused while posting, as it goes to site.
+    const saved = await prisma.goodsReceipt.findUnique({ where: { id }, select: { purchaseOrderId: true } });
+    if (saved?.purchaseOrderId) await requireForOrder(req, saved.purchaseOrderId, PermissionCode.ReceiveInventory);
     const posted = await GoodsReceiptService.post(id, actorId(req));
     return reply.send(posted);
   });

@@ -24,6 +24,7 @@ import {
 } from '../components/OrderReceiptLines';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
+import { fourDecimals, todayInSouthAfrica } from '../lib/rfq';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -620,14 +621,14 @@ function ReceiveDeliveryDialog({ po, onClose, onReceived }: { po: PO; onClose: (
 // order isn't received into stock: Procurement records what arrived, line by
 // line, from the supplier's delivery note or the site's confirmation, and the
 // order is credited without any stock being added.
-function today(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+/** Today in South Africa, as the server reads the delivery date. */
+const today = () => todayInSouthAfrica();
+/** To 4 decimal places, as the order line keeps quantities: 2.5 − 1.2 is 1.3, not 1.2999999999999998. */
+const fourPlaces = (n: number) => Math.round(n * 1e4) / 1e4;
 
 function ConfirmDeliveryDialog({ po, onClose, onConfirmed }: { po: PO; onClose: () => void; onConfirmed: (status: string) => void }) {
   const owed = po.lines
-    .map((l) => ({ line: l, outstanding: Number(l.orderedQty) - Number(l.receivedQty) }))
+    .map((l) => ({ line: l, outstanding: fourPlaces(Number(l.orderedQty) - Number(l.receivedQty)) }))
     .filter((o) => o.outstanding > 0);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(owed.map((o) => [o.line.id, String(o.outstanding)])));
   const [deliveryRef, setDeliveryRef] = useState('');
@@ -640,8 +641,8 @@ function ConfirmDeliveryDialog({ po, onClose, onConfirmed }: { po: PO; onClose: 
     const lines = owed
       .map((o) => ({ ...o, quantity: (quantities[o.line.id] ?? '').trim() === '' ? 0 : Number(quantities[o.line.id]) }))
       .filter((o) => o.quantity !== 0);
-    const bad = lines.find((o) => !(o.quantity > 0) || o.quantity > o.outstanding);
-    if (bad) { setProblem(`${bad.line.material.sku}: enter what arrived, from 0 to the ${formatNumber(bad.outstanding)} outstanding.`); return; }
+    const bad = lines.find((o) => !(o.quantity > 0) || o.quantity > o.outstanding || !fourDecimals(o.quantity));
+    if (bad) { setProblem(`${bad.line.material.sku}: enter what arrived, from 0 to the ${formatNumber(bad.outstanding)} outstanding, to at most 4 decimal places.`); return; }
     if (lines.length === 0) { setProblem('Enter what arrived on at least one line.'); return; }
     if (deliveredOn > today()) { setProblem('The delivery date is still to come.'); return; }
     setBusy(true);

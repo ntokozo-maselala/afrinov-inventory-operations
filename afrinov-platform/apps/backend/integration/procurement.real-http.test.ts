@@ -726,9 +726,9 @@ describe('receiving stock over real HTTP', () => {
     describe('delivery of a project order', () => {
       interface Lined { id: string; status: string; lines: Array<{ id: string; orderedQty: string; receivedQty: string }> }
 
-      /** A project order for 4 beams, approved. */
-      async function approvedProjectOrder(): Promise<Lined> {
-        const created = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 4, unitPrice: 40 }] });
+      /** A project order for 4 beams (or as many as given), approved. */
+      async function approvedProjectOrder(orderedQty = 4): Promise<Lined> {
+        const created = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty, unitPrice: 40 }] });
         expect(created.status).toBe(201);
         const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${created.body.id}/submit`);
         if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
@@ -793,6 +793,53 @@ describe('receiving stock over real HTTP', () => {
         expect(receipt.body.error.message).toMatch(/goes from the supplier straight to site/);
         expect((await confirm(storeman, order.id, { lines: [{ lineId: line.id, quantity: 1 }] })).status).toBe(403);
         expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('APPROVED');
+      });
+
+      // Qodo, PR #121.
+      it('keeps quantities to 4 decimal places, so a fractional order reaches Received', async () => {
+        const order = await approvedProjectOrder(2.5);
+        const line = order.lines[0]!.id;
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.23456 }] })).status).toBe(400);
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 0.00001 }] })).status).toBe(400);
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.2 }] })).body.status).toBe('PARTIALLY_RECEIVED');
+        // 2.5 − 1.2, worked out in a browser, is 1.2999999999999998; the dialog sends 1.3.
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.3 }] })).body.status).toBe('RECEIVED');
+      });
+
+      it('takes today in South Africa as the delivery day', async () => {
+        const order = await approvedProjectOrder();
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }], deliveredOn: today })).status).toBe(200);
+      });
+
+      it("won't post a receipt saved against a project order before Phase 3", async () => {
+        const order = await approvedProjectOrder();
+        const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+        const saved = await prisma.goodsReceipt.create({
+          data: {
+            number: `GR-IT-${run}`, purchaseOrderId: order.id, supplierId, receivedById: admin.id, status: 'SUBMITTED',
+            lines: { create: [{ materialId: beamId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }] },
+          },
+        });
+        const posted = await api<{ error: { message: string } }>('POST', `/goods-receipts/${saved.id}/post`);
+        expect(posted.status).toBe(400);
+        expect(posted.body.error.message).toMatch(/goes from the supplier straight to site/);
+        expect(await prisma.inventoryTransaction.count({ where: { referenceId: saved.id } })).toBe(0);
+        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.lines[0]!.receivedQty).toMatch(/^0/);
+      });
+
+      it("keeps a saved receipt for the store's order from a buyer: not listed, not found, not posted", async () => {
+        const store = await approvedOrder(2);
+        const saved = await storeman<{ id: string }>('POST', '/goods-receipts', {
+          purchaseOrderId: store.id, supplierId,
+          lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: store.lines[0]!.id }],
+        });
+        expect(saved.status).toBe(201);
+        expect((await buyer<Array<{ id: string }>>('GET', '/goods-receipts')).body.map((r) => r.id)).not.toContain(saved.body.id);
+        expect((await buyer('GET', `/goods-receipts/${saved.body.id}`)).status).toBe(404);
+        expect((await buyer('POST', `/goods-receipts/${saved.body.id}/post`)).status).toBe(404);
+        // The store posts its own.
+        expect((await storeman('POST', `/goods-receipts/${saved.body.id}/post`)).status).toBe(200);
       });
 
       it("keeps a buyer from receiving the store's order through a goods receipt", async () => {
