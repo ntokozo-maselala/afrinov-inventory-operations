@@ -73,7 +73,7 @@ Phases 2 and 3 closed the gaps Phase 1 left on screen: nothing offers a buyer a 
 
 Size M. Frontend. Needs Phase 1.
 
-- [x] **2.1 The page.** Store → **Order stock** (`/stock/orders`): the store's orders from `?kind=stores`, newest first, with search and a status filter, and **New order** for the storeman. Anyone who may see orders can open it; the menu entry shows to those who order Stores stock, when procurement is on.
+- [x] **2.1 The page.** Store → **Order stock** (`/stock/orders`): the store's orders from `?kind=stores`, newest first, with search and a status filter, and **New order** for the storeman. Added 29 Oct 2026: an **On order** view (approved, not yet fully received) and **Receive** on those orders, which opens the order's Receive delivery as Receive stock's "Receive against" does. Anyone who may see orders can open it; the menu entry shows to those who order Stores stock, when procurement is on.
   Files: `pages/StoresOrders.tsx`, `hooks/useNavGroups.tsx`, `hooks/usePermissions.ts` (`stores:order`), `App.tsx`
 - [x] **2.2 The order form.** `/stock/orders/new`: the purchase order form in its Stores form: supplier, delivery, lines of Stores items from the catalogue (no **+ New item**: the store re-orders what it stocks, decided 29 Oct 2026), no Project field. Save draft or submit for approval. Its edit page follows the order's kind.
   Files: `pages/PurchaseOrderForm.tsx`, `components/PurchaseOrderDetailsFields.tsx`, `lib/orderKind.ts`
