@@ -313,8 +313,31 @@ export interface CloseInput {
   reason?: string;
 }
 
+/** Today in South Africa, as YYYY-MM-DD: the server's own clock runs in UTC, two hours behind. */
+function todayInSouthAfrica(now = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
 /** Statuses a purchase order can be received against. */
 export const RECEIVABLE_STATUSES: PurchaseOrderStatus[] = ['APPROVED', 'PARTIALLY_RECEIVED'];
+
+/**
+ * Project material goes from the supplier straight to site, so a project
+ * order is never received into stock (Stores and Procurement Separation
+ * Roadmap, Phase 3): Procurement confirms its delivery on the order instead.
+ */
+export const PROJECT_DELIVERY_REFUSED =
+  "Project material goes from the supplier straight to site, so it isn't received into stock: Procurement confirms its delivery on the order.";
+
+export interface ConfirmDeliveryInput {
+  id: string;
+  /** What arrived on site, line by line; each at most what is still outstanding. */
+  lines: Array<{ lineId: string; quantity: number }>;
+  /** The supplier's delivery note or the site's confirmation. */
+  deliveryRef?: string;
+  /** YYYY-MM-DD the material arrived on site; today when left out. */
+  deliveredOn?: string;
+}
 
 export interface CancelInput {
   id: string;
@@ -740,6 +763,7 @@ export const PurchaseOrderService = {
         include: { lines: true },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      if (kindOfOrder(po) === 'projects') throw Errors.validation(PROJECT_DELIVERY_REFUSED);
       // The order before its stock, as posting a goods receipt locks them, so
       // the two cannot deadlock.
       await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.id} FOR UPDATE`;
@@ -803,6 +827,82 @@ export const PurchaseOrderService = {
         },
       });
       return tx.purchaseOrder.findUnique({ where: { id: input.id } });
+    });
+  },
+
+  /**
+   * Procurement confirms what arrived on site against a project order. Its
+   * lines are credited and the order moves to Partly received, or Received
+   * once nothing is outstanding, as a delivery into stock would; but no stock
+   * is added anywhere, as the material never reaches the workshop.
+   *
+   * @throws {ApiError} NOT_FOUND; VALIDATION_ERROR for a Stores order, a line
+   * not on the order or given twice, a quantity of 0 or more than is
+   * outstanding, or a day to come; INVALID_STATE unless approved or partly
+   * received; CONFLICT when the order changed meanwhile.
+   */
+  async confirmDelivery(input: ConfirmDeliveryInput, actorId: string) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${input.id} FOR UPDATE`;
+      const po = await tx.purchaseOrder.findUnique({
+        where: { id: input.id },
+        include: { lines: { include: { material: { select: { sku: true } } } } },
+      });
+      if (!po) throw Errors.notFound('PurchaseOrder');
+      if (kindOfOrder(po) === 'stores') throw Errors.validation('A Stores order is received into stock: use Receive delivery on the order, or Receive stock.');
+      if (!RECEIVABLE_STATUSES.includes(po.status)) {
+        throw Errors.invalidState('Only an approved or partly delivered purchase order can have its delivery confirmed', { status: po.status });
+      }
+      if (input.lines.length === 0) throw Errors.validation('Confirm what arrived on at least one line.');
+      // Calendar days in South Africa, as the buyer picks them: the server's clock runs in UTC.
+      if (input.deliveredOn && input.deliveredOn > todayInSouthAfrica()) throw Errors.validation('The delivery date is still to come.');
+      const deliveredOn = input.deliveredOn ? toDateOnly(input.deliveredOn) : null;
+
+      const credited = new Map<string, Prisma.Decimal>();
+      for (const l of input.lines) {
+        const line = po.lines.find((x) => x.id === l.lineId);
+        if (!line) throw Errors.validation(`Line ${l.lineId} is not on purchase order ${po.number}`);
+        if (credited.has(line.id)) throw Errors.validation(`${line.material.sku} is given twice.`);
+        // As the order line keeps it, to 4 decimal places, so the check, the credit and the record agree.
+        const quantity = new Prisma.Decimal(l.quantity).toDecimalPlaces(4);
+        if (!gtZero(quantity)) throw Errors.validation(`Enter what arrived of ${line.material.sku}, or leave the line out.`);
+        const outstanding = toDecimal(line.orderedQty).minus(toDecimal(line.receivedQty));
+        if (quantity.gt(outstanding)) {
+          throw Errors.validation(`${line.material.sku}: ${quantity.toString()} is more than the ${outstanding.toString()} still outstanding.`);
+        }
+        credited.set(line.id, quantity);
+      }
+      const receivedAfter = (line: (typeof po.lines)[number]) => toDecimal(line.receivedQty).plus(credited.get(line.id) ?? 0);
+      const allIn = po.lines.every((line) => receivedAfter(line).gte(toDecimal(line.orderedQty)));
+      const status: PurchaseOrderStatus = allIn ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+      const at = deliveredOn ?? new Date();
+
+      const claimed = await tx.purchaseOrder.updateMany({
+        where: { id: po.id, status: po.status },
+        data: { status, ...(allIn ? { deliveredAt: at, deliveredById: actorId } : {}) },
+      });
+      if (claimed.count === 0) {
+        throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
+      }
+      for (const line of po.lines) {
+        if (credited.has(line.id)) await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { receivedQty: receivedAfter(line) } });
+      }
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'PO_DELIVERY_CONFIRMED',
+          entityType: 'PurchaseOrder',
+          entityId: po.id,
+          before: { status: po.status },
+          after: {
+            status,
+            deliveredOn: at.toISOString().slice(0, 10),
+            deliveryRef: cleanText(input.deliveryRef),
+            lines: [...credited].map(([lineId, quantity]) => ({ lineId, quantity: quantity.toString() })),
+          },
+        },
+      });
+      return tx.purchaseOrder.findUnique({ where: { id: po.id } });
     });
   },
 

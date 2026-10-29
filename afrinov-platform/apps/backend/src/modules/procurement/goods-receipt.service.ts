@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
-import { RECEIVABLE_STATUSES } from './procurement.service.js';
+import { PROJECT_DELIVERY_REFUSED, RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 
 export interface CreateGoodsReceiptInput {
@@ -60,7 +60,7 @@ function assertLinesOnOrder(po: OrderForReceipt, input: CreateGoodsReceiptInput)
 export const GoodsReceiptService = {
   async list() {
     return prisma.goodsReceipt.findMany({
-      include: { supplier: true, purchaseOrder: { select: { id: true, number: true } }, lines: { include: { material: true, location: true } } },
+      include: { supplier: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } }, lines: { include: { material: true, location: true } } },
       orderBy: { receivedAt: 'desc' },
     });
   },
@@ -68,7 +68,7 @@ export const GoodsReceiptService = {
   async getById(id: string) {
     const gr = await prisma.goodsReceipt.findUnique({
       where: { id },
-      include: { supplier: true, purchaseOrder: { select: { id: true, number: true } }, lines: { include: { material: true, location: true } } },
+      include: { supplier: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } }, lines: { include: { material: true, location: true } } },
     });
     if (!gr) throw Errors.notFound('GoodsReceipt');
     return gr;
@@ -90,6 +90,8 @@ export const GoodsReceiptService = {
         include: { lines: { include: { material: { select: { sku: true } } } } },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
+      // Project material goes to site, not into stock: its delivery is confirmed on the order.
+      if (po.projectNumber != null) throw Errors.validation(PROJECT_DELIVERY_REFUSED);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
       }

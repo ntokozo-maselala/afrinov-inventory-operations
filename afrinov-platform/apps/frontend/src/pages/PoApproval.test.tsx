@@ -139,11 +139,19 @@ describe('only the actions each role may take', () => {
     expect(button('Receive delivery')).not.toBeInTheDocument();
   });
 
-  it('a store controller receives an approved order, and edits nothing', async () => {
+  it('a store controller receives an approved Stores order', async () => {
+    current.po = { ...order('APPROVED'), projectNumber: null } as unknown as typeof current.po;
+    page(['STORE_CONTROLLER'], '/stock/orders/po-1');
+    await screen.findByText('Hydraulic pump');
+    expect(button('Receive delivery')).toBeInTheDocument();
+  });
+
+  // Stores and Procurement Separation Roadmap, Phase 3: project material goes to site.
+  it('a store controller neither receives nor edits a project order', async () => {
     current.po = order('APPROVED');
     page(['STORE_CONTROLLER']);
     await screen.findByText('Hydraulic pump');
-    expect(button('Receive delivery')).toBeInTheDocument();
+    expect(button('Receive delivery')).not.toBeInTheDocument();
     expect(button('Edit')).not.toBeInTheDocument();
   });
 

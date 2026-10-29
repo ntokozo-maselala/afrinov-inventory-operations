@@ -37,6 +37,7 @@ import {
   updatePOSchema,
   listPOQuerySchema,
   receiveSchema,
+  confirmDeliverySchema,
   closeSchema,
   cancelSchema,
   createGRSchema,
@@ -472,8 +473,17 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',
     summary: 'Receive everything still outstanding',
     description: 'Receives each line\'s outstanding quantity into the given location and marks the order RECEIVED. '
-      + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts.',
-    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [404, 409],
+      + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts. '
+      + 'A Stores order only (also needs `order:stores_stock`): a project order goes to site, so it is refused (400) and its delivery is confirmed instead.',
+    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [400, 404, 409],
+  },
+  {
+    method: 'post', path: '/purchase-orders/:id/confirm-delivery', tag: 'Purchase orders',
+    summary: 'Confirm what arrived on site against a project order',
+    description: 'Project material goes from the supplier straight to site, so no stock is added: each line is credited with what arrived, '
+      + 'and the order moves to PARTIALLY_RECEIVED, or RECEIVED once nothing is outstanding. A project order only (400 for a Stores order); '
+      + 'allowed when APPROVED or PARTIALLY_RECEIVED. A quantity may not exceed what is outstanding.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: confirmDeliverySchema, errors: [400, 404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/close', tag: 'Purchase orders', summary: 'Close an order that will receive nothing more',
