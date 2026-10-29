@@ -40,7 +40,8 @@ const rfq = (status: string) => ({
   penaltiesApply: false, issuedAt: '2026-10-28T00:00:00.000Z', closingDate: '2026-11-01T00:00:00.000Z', createdAt: '2026-10-28T08:00:00Z',
   lines, suppliers: [QUOTED, AWAITING, FOREIGN],
 });
-let current = rfq('SENT');
+// What the mocked API answers for the RFQ; tests swap in their own shapes.
+let current: unknown = rfq('SENT');
 
 beforeEach(() => {
   auth.roles = ['PROCUREMENT'];
@@ -180,6 +181,22 @@ describe('Quotes on an RFQ’s page', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('Recorded in ZAR; EMV Africa now trades in EUR')).toBeInTheDocument();
     expect(dialog).toHaveTextContent('excluding VAT, in EUR');
+  });
+
+  it('previews VAT at the setting when a supplier has moved to rand since they quoted', async () => {
+    const toRand = { ...FOREIGN, quotedAt: '2026-10-29T00:00:00.000Z', currency: 'EUR', prices: [{ rfqLineId: 'l-1', unitPrice: '10' }], totals: { subtotal: '40.00', vat: '0.00', net: '40.00', unpricedLines: 1 }, supplier: { ...FOREIGN.supplier, currency: 'ZAR' } };
+    current = { ...rfq('SENT'), suppliers: [QUOTED, AWAITING, toRand] };
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/rfqs/r-1') return current;
+      if (path === '/settings/values?keys=purchaseOrders.vatRate') return { 'purchaseOrders.vatRate': 14 };
+      return [];
+    });
+    page();
+    fireEvent.click(within(await suppliersTable()).getByRole('button', { name: 'Edit quote for Hydac GmbH' }));
+    const total = within(await screen.findByRole('dialog')).getByLabelText('Quote total');
+    // 4 x 10 = 40, at the 14% setting rather than an assumed 15%.
+    await waitFor(() => expect(total).toHaveTextContent('VAT 14%'));
+    expect(total).toHaveTextContent('5,60');
   });
 
   it('offers no quote recording on a draft, or to someone who may not record quotes', async () => {

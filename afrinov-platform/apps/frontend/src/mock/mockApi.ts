@@ -461,7 +461,8 @@ function rfqView(r: MockRfq) {
     lines: r.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     suppliers: r.suppliers.map((s) => {
       const supplier = findSupplier(s.supplierId);
-      const vatRate = (supplier?.currency ?? 'ZAR') === 'ZAR' ? vatSetting : 0;
+      // As the server: VAT at the currency the quote was given in, not the supplier's now.
+      const vatRate = (s.currency ?? supplier?.currency ?? 'ZAR') === 'ZAR' ? vatSetting : 0;
       const priced = r.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
       // As the server: the file's name and size, never its contents.
       const quoteFile = s.quoteFile ? { fileName: s.quoteFile.fileName, size: s.quoteFile.size, uploadedAt: s.quoteFile.uploadedAt } : null;

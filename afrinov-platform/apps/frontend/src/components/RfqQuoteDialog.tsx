@@ -12,6 +12,7 @@ import { Button } from './Button';
 import { Field, Input, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { useApi } from '../hooks/useApi';
 import { QUOTE_FILE_LIMIT, uploadQuoteFile } from '../api/rfqQuoteFile';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import { formatNumber } from '../lib/format';
@@ -39,11 +40,13 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
   const name = asked.supplier?.name ?? asked.supplierId;
   // Saving records the quote in the currency the supplier trades in now. A
   // quote recorded in another is said so, rather than its prices being
-  // relabelled; VAT follows the new currency (none outside rand).
+  // relabelled; VAT follows the new currency, as the server will work it out:
+  // the VAT setting for rand, none for other currencies.
   const currency = asked.supplier?.currency ?? 'ZAR';
   const recordedIn = asked.quotedAt ? quoteCurrency(asked) : currency;
   const switched = recordedIn !== currency;
-  const vatRate = !switched ? asked.vatRate ?? 0 : currency === 'ZAR' ? 15 : 0;
+  const setting = useApi<Record<string, unknown>>(switched && currency === 'ZAR' ? '/settings/values?keys=purchaseOrders.vatRate' : null);
+  const vatRate = !switched ? asked.vatRate ?? 0 : currency === 'ZAR' ? Number(setting.data?.['purchaseOrders.vatRate'] ?? 15) : 0;
   const today = todayInSouthAfrica();
   const lines = [...rfq.lines].sort((a, b) => a.lineNo - b.lineNo);
   const [answer, setAnswer] = useState<'quoted' | 'declined'>(asked.declined ? 'declined' : 'quoted');

@@ -223,6 +223,18 @@ describe('mock: award', () => {
   });
 });
 
+describe('mock: quote currency', () => {
+  it('works out VAT at the currency a quote was given in, not the one the supplier moved to', async () => {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    const rfq = await api.post<Rfq & { lines: Array<{ id: string }> }>(`/rfqs/${draft.id}/send`, {});
+    await api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: rfq.lines[0]!.id, unitPrice: 100 }] });
+    await api.patch('/suppliers/sup-1', { currency: 'EUR' });
+    const after = await api.get<{ suppliers: Array<{ supplierId: string; totals: { vat: string } | null }> }>(`/rfqs/${rfq.id}`);
+    // Quoted in rand, so still with 15% VAT.
+    expect(after.suppliers.find((s) => s.supplierId === 'sup-1')!.totals!.vat).toBe('15.00');
+  });
+});
+
 describe('mock: award currency', () => {
   it("won't award a quote given in another currency than the supplier trades in now", async () => {
     const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
