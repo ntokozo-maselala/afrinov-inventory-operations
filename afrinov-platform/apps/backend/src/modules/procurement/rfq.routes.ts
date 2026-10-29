@@ -15,7 +15,7 @@ const text = (max: number) => z.string().max(max).nullable().optional();
 export const rfqQuantity = z.number().min(0.0001).max(1e9)
   .refine((q) => Math.abs(q * 1e4 - Math.round(q * 1e4)) < 1e-6, 'At most 4 decimal places');
 const rfqLines = z
-  .array(z.object({ materialId: z.string().uuid(), quantity: rfqQuantity }))
+  .array(z.object({ materialId: z.uuid(), quantity: rfqQuantity }))
   .min(1)
   .max(200);
 const supplierIds = z.array(supplierIdSchema).max(50);

@@ -1,5 +1,10 @@
-import type { ReactNode, InputHTMLAttributes, TextareaHTMLAttributes, SelectHTMLAttributes } from 'react';
-import { forwardRef } from 'react';
+import type {
+  ReactNode,
+  Ref,
+  InputHTMLAttributes,
+  TextareaHTMLAttributes,
+  SelectHTMLAttributes,
+} from 'react';
 
 interface FieldProps {
   label?: string;
@@ -31,29 +36,31 @@ export function Field({ label, htmlFor, required, help, error, children, classNa
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
+  ref?: Ref<HTMLInputElement>;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(({ invalid, className = '', ...rest }, ref) => (
-  <input ref={ref} className={`input ${invalid ? 'input-error' : ''} ${className}`} {...rest} />
-));
-Input.displayName = 'Input';
+export function Input({ invalid, className = '', ref, ...rest }: InputProps) {
+  return <input ref={ref} className={`input ${invalid ? 'input-error' : ''} ${className}`} {...rest} />;
+}
 
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   invalid?: boolean;
+  ref?: Ref<HTMLTextAreaElement>;
 }
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(({ invalid, className = '', ...rest }, ref) => (
-  <textarea ref={ref} className={`textarea ${invalid ? 'input-error' : ''} ${className}`} {...rest} />
-));
-Textarea.displayName = 'Textarea';
+export function Textarea({ invalid, className = '', ref, ...rest }: TextareaProps) {
+  return <textarea ref={ref} className={`textarea ${invalid ? 'input-error' : ''} ${className}`} {...rest} />;
+}
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   invalid?: boolean;
+  ref?: Ref<HTMLSelectElement>;
 }
 
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(({ invalid, className = '', children, ...rest }, ref) => (
-  <select ref={ref} className={`select ${invalid ? 'input-error' : ''} ${className}`} {...rest}>
-    {children}
-  </select>
-));
-Select.displayName = 'Select';
+export function Select({ invalid, className = '', children, ref, ...rest }: SelectProps) {
+  return (
+    <select ref={ref} className={`select ${invalid ? 'input-error' : ''} ${className}`} {...rest}>
+      {children}
+    </select>
+  );
+}

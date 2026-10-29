@@ -84,6 +84,23 @@ update the pins.
 Re-check these with `npm outdated --workspaces --long` before assuming they are
 still blocked.
 
+### API conventions introduced by the current majors
+
+Use these forms; the older spellings still work but are deprecated or removed.
+
+- **Zod 4** — use the top-level validators, not the string-method forms:
+  `z.email()`, `z.uuid()`, `z.iso.datetime()` (was `z.string().email()`,
+  `z.string().uuid()`, `z.string().datetime()`). They chain the same
+  (`.optional()`, `.nullable()`, `.max()`). `.openapi({…})` still comes from
+  `extendZodWithOpenApi`.
+- **React 19** — components take `ref` as a normal prop. Declare `ref?: Ref<T>`
+  on the props interface instead of wrapping in `forwardRef`; do not
+  `import * as React`.
+- **Vitest 5** — `singleFork` is gone; use `fileParallelism: false` (plus
+  `isolate: false` where a shared real-database state must persist).
+- **Vite 8** — config imports of local TypeScript modules need the explicit
+  `.ts` extension.
+
 ## Notes
 
 - `pino-pretty` is loaded by name as a Fastify transport target

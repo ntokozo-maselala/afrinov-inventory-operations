@@ -23,7 +23,7 @@ export const createStockItemSchema = z
     requiredStock: z.number().nonnegative().optional(),
     unitCost: z.number().nonnegative().optional(),
     initialQuantity: z.number().nonnegative().optional(),
-    locationId: z.string().uuid().optional(),
+    locationId: z.uuid().optional(),
     supplierId: supplierIdSchema.optional(),
     /** Project Material only, and required there: the project it is bought for. */
     projectNumber: z.string().trim().min(1).max(64).optional(),

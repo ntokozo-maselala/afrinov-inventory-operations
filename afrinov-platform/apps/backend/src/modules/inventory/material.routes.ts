@@ -126,12 +126,12 @@ export const createLocationSchema = z.object({
   type: locationTypeEnum,
   active: z.boolean().optional(),
   // The room or area it stands in (one level; never a rack).
-  parentId: z.string().uuid().optional(),
+  parentId: z.uuid().optional(),
   address: z.string().max(200).optional(),
   description: z.string().max(1000).optional(),
   contactPerson: z.string().max(120).optional(),
   contactPhone: z.string().max(40).optional(),
-  contactEmail: z.string().email().max(120).optional(),
+  contactEmail: z.email().max(120).optional(),
   notes: z.string().max(2000).optional(),
 });
 
@@ -141,12 +141,12 @@ export const updateLocationSchema = z.object({
   type: locationTypeEnum.optional(),
   active: z.boolean().optional(),
   // The room or area it stands in; null takes it out.
-  parentId: z.string().uuid().nullable().optional(),
+  parentId: z.uuid().nullable().optional(),
   address: z.string().max(200).nullable().optional(),
   description: z.string().max(1000).nullable().optional(),
   contactPerson: z.string().max(120).nullable().optional(),
   contactPhone: z.string().max(40).nullable().optional(),
-  contactEmail: z.string().email().max(120).nullable().optional(),
+  contactEmail: z.email().max(120).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
 });
 

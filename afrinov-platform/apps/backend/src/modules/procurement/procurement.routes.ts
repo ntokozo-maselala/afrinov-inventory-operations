@@ -14,7 +14,7 @@ const vendorCode = z.string().trim().max(20).regex(/^[A-Za-z0-9-]*$/, 'Letters, 
 export const createSupplierSchema = z.object({
   name: z.string().trim().min(1).max(200),
   contactName: z.string().max(200).optional(),
-  contactEmail: z.string().email().optional(),
+  contactEmail: z.email().optional(),
   contactPhone: z.string().max(50).optional(),
   notes: z.string().max(2000).optional(),
   vendorCode: vendorCode.optional(),
@@ -29,7 +29,7 @@ export const createSupplierSchema = z.object({
 export const updateSupplierSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   contactName: z.string().max(200).nullable().optional(),
-  contactEmail: z.union([z.string().email(), z.literal('')]).nullable().optional(),
+  contactEmail: z.union([z.email(), z.literal('')]).nullable().optional(),
   contactPhone: z.string().max(50).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   vendorCode: vendorCode.nullable().optional(),
@@ -82,7 +82,7 @@ export const createPOSchema = z.object({
   lines: z
     .array(
       z.object({
-        materialId: z.string().uuid(),
+        materialId: z.uuid(),
         orderedQty: z.number().positive(),
         unitPrice: z.number().nonnegative().max(1e12).optional(),
         deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').optional(),
@@ -95,8 +95,8 @@ export const updatePOSchema = z.object({
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().nullable().optional(),
   vatRate: vatRate.optional(),
-  linePrices: z.array(z.object({ lineId: z.string().uuid(), unitPrice: unitPrice.nullable() })).max(500).optional(),
-  lineDeliveryDates: z.array(z.object({ lineId: z.string().uuid(), deliveryDate: day.nullable() })).max(500).optional(),
+  linePrices: z.array(z.object({ lineId: z.uuid(), unitPrice: unitPrice.nullable() })).max(500).optional(),
+  lineDeliveryDates: z.array(z.object({ lineId: z.uuid(), deliveryDate: day.nullable() })).max(500).optional(),
   ...orderDetails,
 });
 
@@ -110,7 +110,7 @@ export const listPOQuerySchema = z.object({
 });
 
 export const receiveSchema = z.object({
-  locationId: z.string().uuid(),
+  locationId: z.uuid(),
   deliveryNotes: z.string().max(2000).optional(),
 });
 
@@ -123,16 +123,16 @@ export const closeSchema = z.object({
 });
 
 export const createGRSchema = z.object({
-  purchaseOrderId: z.string().uuid().optional(),
+  purchaseOrderId: z.uuid().optional(),
   supplierId: supplierIdSchema,
   deliveryRef: z.string().optional(),
   lines: z
     .array(
       z.object({
-        materialId: z.string().uuid(),
-        locationId: z.string().uuid(),
+        materialId: z.uuid(),
+        locationId: z.uuid(),
         quantity: z.number().positive(),
-        purchaseOrderLineId: z.string().uuid().optional(),
+        purchaseOrderLineId: z.uuid().optional(),
       }),
     )
     .min(1),

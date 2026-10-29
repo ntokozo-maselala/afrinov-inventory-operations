@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AuthService } from './identity.service.js';
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1).regex(/[^\0]/),
 });
 
