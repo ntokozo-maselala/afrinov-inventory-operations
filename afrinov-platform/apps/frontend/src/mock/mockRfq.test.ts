@@ -127,3 +127,63 @@ describe('mock: requests for quotation', () => {
     await expect(api.get('/rfqs/rfq-nope')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
+
+// As the server (Phase 4): quotes, declines and the supplier's own PDF, only while it is sent.
+describe('mock: quotes', () => {
+  type Quoted = Omit<Rfq, 'lines' | 'suppliers'> & { lines: Array<{ id: string }>; suppliers: Array<{ supplierId: string; declined: boolean; totals: { net: string; unpricedLines: number } | null; quoteFile: { fileName: string; size: number } | null }> };
+  async function sent(): Promise<Quoted> {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 4 }, { materialId: 'mat-2', quantity: 2 }], supplierIds: ['sup-1', 'sup-2'] });
+    return api.post<Quoted>(`/rfqs/${draft.id}/send`, {});
+  }
+
+  it('records a quote with its totals, and refuses one on a draft or with no price', async () => {
+    const rfq = await sent();
+    const quoted = await api.put<Quoted>(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { quoteReference: 'Q-1', prices: [{ rfqLineId: rfq.lines[0]!.id, unitPrice: 160 }] });
+    // 4 x 160 = 640, plus 15% VAT; the second line not offered.
+    expect(quoted.suppliers.find((s) => s.supplierId === 'sup-1')!.totals).toMatchObject({ net: '736.00', unpricedLines: 1 });
+    await expect(api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    const draft = await api.post<Quoted>('/rfqs', { lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-1'] });
+    await expect(api.put(`/rfqs/${draft.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: draft.lines[0]!.id, unitPrice: 1 }] })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+
+  it('records a decline, setting a quote aside', async () => {
+    const rfq = await sent();
+    await api.put(`/rfqs/${rfq.id}/suppliers/sup-2/quote`, { prices: [{ rfqLineId: rfq.lines[0]!.id, unitPrice: 99 }] });
+    const declined = await api.post<Quoted>(`/rfqs/${rfq.id}/suppliers/sup-2/decline`, { notes: 'No stock' });
+    expect(declined.suppliers.find((s) => s.supplierId === 'sup-2')).toMatchObject({ declined: true, totals: null });
+    const history = await api.get<Array<{ action: string }>>(`/rfqs/${rfq.id}/history`);
+    expect(history.slice(0, 2).map((e) => e.action)).toEqual(['RFQ_DECLINED', 'RFQ_QUOTE']);
+  });
+
+  it('refuses what the server refuses: overlong text, over 200 prices, a price too fine to keep, a quote expired before it came', async () => {
+    const rfq = await sent();
+    const line = rfq.lines[0]!.id;
+    const put = (body: Record<string, unknown>) => api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: line, unitPrice: 1 }], ...body });
+    await expect(put({ quoteReference: 'x'.repeat(101) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(put({ prices: Array.from({ length: 201 }, () => ({ rfqLineId: line, unitPrice: 1 })) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(put({ prices: [{ rfqLineId: line, unitPrice: 0.000000001 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(put({ validUntil: '2020-01-01' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(api.post(`/rfqs/${rfq.id}/suppliers/sup-1/decline`, { notes: 'x'.repeat(2001) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('keeps a quotation under a .pdf name whatever it was called', async () => {
+    const { mockPutQuoteFile } = await import('./mockApi');
+    const rfq = await sent();
+    const saved = await mockPutQuoteFile(rfq.id, 'sup-1', 'quote.html', new TextEncoder().encode('%PDF-<script>')) as Quoted;
+    expect(saved.suppliers.find((s) => s.supplierId === 'sup-1')!.quoteFile?.fileName).toBe('quote.pdf');
+  });
+
+  it("keeps the supplier's PDF, gives it back, refuses one that isn't a PDF, and takes it off", async () => {
+    const { mockPutQuoteFile, mockGetQuoteFile } = await import('./mockApi');
+    const rfq = await sent();
+    const pdf = new TextEncoder().encode('%PDF-1.4 quote');
+    await expect(mockPutQuoteFile(rfq.id, 'sup-1', 'quote.txt', new TextEncoder().encode('hello'))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    const saved = await mockPutQuoteFile(rfq.id, 'sup-1', 'EMV quote.pdf', pdf) as Quoted;
+    expect(saved.suppliers.find((s) => s.supplierId === 'sup-1')!.quoteFile).toEqual(expect.objectContaining({ fileName: 'EMV quote.pdf', size: pdf.length }));
+    // The detail carries the name and size, never the contents.
+    expect(JSON.stringify(await api.get(`/rfqs/${rfq.id}`))).not.toContain('"data"');
+    expect(mockGetQuoteFile(rfq.id, 'sup-1').data).toEqual(pdf);
+    await api.del(`/rfqs/${rfq.id}/suppliers/sup-1/quote-file`);
+    expect(() => mockGetQuoteFile(rfq.id, 'sup-1')).toThrow();
+  });
+});

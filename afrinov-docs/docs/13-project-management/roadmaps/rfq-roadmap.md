@@ -6,14 +6,14 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phases 1 and 2 are merged (PRs #104 and #105). Phase 3 is in review (PR #107). One pull request per phase.
+**Status:** Phases 1 to 3 are merged (PRs #104, #105 and #107). Phase 4 is in review (PR #112). One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | RFQ record and numbering | M | Merged (#104) |
 | 2 | Raise, edit and send an RFQ | M | Merged (#105) |
-| 3 | The RFQ document for suppliers | M | In review |
-| 4 | Record the quotes that come back | M to L | Planned |
+| 3 | The RFQ document for suppliers | M | Merged (#107) |
+| 4 | Record the quotes that come back | M to L | In review |
 | 5 | Compare quotes and award to a purchase order | M | Planned |
 | 6 | Roll out | S | Planned |
 
@@ -86,7 +86,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 3: The RFQ document for suppliers
 
-**In review** (PR #107). Size M. Frontend, with a settings migration. 11 document tests and 1 page test. Qodo's findings on the first push are fixed: a long supplier name is cut short in the footer, the penalties read as applying to the order placed (there is no order yet), and the two detail blocks are one table, so a long address keeps them side by side.
+**Merged** (PR #107). Size M. Frontend, with a settings migration. 11 document tests and 1 page test. Qodo's findings on the first push are fixed: a long supplier name is cut short in the footer, the penalties read as applying to the order placed (there is no order yet), and the two detail blocks are one table, so a long address keeps them side by side.
 
 **Where it shows:** an RFQ → each supplier → **Download PDF**.
 
@@ -101,13 +101,15 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 4: Record the quotes that come back
 
-Size M to L. Backend and frontend, with a migration.
+**In review** (PR #112), on top of the dependency upgrades in PRs #108 to #110. Size M to L. Backend and frontend, with a migration. 8 real-HTTP tests, 9 page tests, 5 mock tests, 2 upload tests and a price-precision test. Qodo's findings on the first push are fixed: a quotation is always kept and downloaded as a .pdf (with nosniff), so a file disguised as a PDF can't open as a web page; who is uploading is checked before the 10 MB body is read; prices too fine to keep at 4 decimal places are refused; a quote can't be valid only until before it came in; corrections and declines keep the whole quote they replace in the Activity; the price boxes step by 0.0001; and the mock refuses what the server refuses. Found on the way: suppliers saved together shared a time, so they could be listed in any order; each is now a millisecond after the one before, keeping the order they were asked.
 
-- [ ] **4.1 Record a quote.** `PUT /rfqs/:id/suppliers/:supplierId/quote`: a unit price per line (a line can be left unpriced when the supplier doesn't offer it), quote reference, date received, valid until, lead time and notes. Can be corrected until the RFQ is awarded; each change goes in the Activity. **Declined** records a supplier who won't quote.
+**Where it shows:** a sent RFQ → each supplier → **Record quote** (or **Edit quote**).
+
+- [x] **4.1 Record a quote.** `PUT /rfqs/:id/suppliers/:supplierId/quote`: a unit price per line (a line can be left unpriced when the supplier doesn't offer it), quote reference, date received (today unless given, never later), valid until, lead time and notes. Prices are kept to 4 decimal places, excluding VAT, in the supplier's currency. Can be corrected while the RFQ is sent; each change goes in the Activity (recorded, corrected). **Declined** (`POST …/decline`) records a supplier who won't quote, with their reason, and sets aside a quote recorded before; a later quote replaces the decline. The dialog shows each line's subtotal and the total, VAT and net value as they are typed.
   Files: `procurement/rfq.service.ts`, `pages/RfqDetail.tsx` (a Record quote dialog with the lines, as the RFQ sheet)
-- [ ] **4.2 Attach the supplier's PDF.** The app stores no files yet. Add `RfqQuoteFile` (file name, size, uploaded by and when, and the file itself), PDF only, up to 10 MB. The upload route has its own body limit, as the API's is 1 MB. Anyone who can open the RFQ can download it.
-  Files: `schema.prisma`, `migrations/20260101000027_rfq_quote_files`, `procurement/rfq.routes.ts`, `server.ts`
-- [ ] **4.3 Totals.** Each quote's subtotal per line, total, VAT and net value, worked out by `po-pricing.ts` so they round as orders do. VAT from the supplier's currency, as on orders.
+- [x] **4.2 Attach the supplier's PDF.** `RfqQuoteFile` (file name, size, uploaded by and when, and the file itself, in the database), one per supplier asked, a new one replacing it. `PUT …/quote-file` takes the PDF itself as the body (`application/pdf`, its name in `X-File-Name`), up to 10 MB against the API's 1 MB, and refuses anything that doesn't start like a PDF; the screen checks size and type before sending. `GET` downloads it as attached, for anyone who can open the RFQ; `DELETE` takes it off. The RFQ's detail carries each file's name and size, never its contents.
+  Files: `schema.prisma`, `migrations/20260101000028_rfq_quote_files` (000027 was taken by the dependency upgrades), `procurement/rfq.routes.ts`, `api/rfqQuoteFile.ts`, `components/RfqQuoteDialog.tsx`
+- [x] **4.3 Totals.** Each quote's subtotal per line, total, VAT and net value, worked out by `po-pricing.ts` so they round as orders do. VAT from the supplier's currency, as on orders.
 
 **Done when:**
 - Every supplier asked shows Awaiting quote, Quoted (with its total) or Declined, and a quoted supplier's PDF opens from the RFQ.

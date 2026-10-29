@@ -40,6 +40,7 @@ interface ApiShape {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;
   patch: <T>(path: string, body?: unknown) => Promise<T>;
+  put: <T>(path: string, body?: unknown) => Promise<T>;
   del: <T>(path: string) => Promise<T>;
 }
 
@@ -94,6 +95,7 @@ const realApi: ApiShape = {
   get: <T>(path: string) => realRequest<T>('GET', path),
   post: <T>(path: string, body?: unknown) => realRequest<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown) => realRequest<T>('PATCH', path, body),
+  put: <T>(path: string, body?: unknown) => realRequest<T>('PUT', path, body),
   del: <T>(path: string) => realRequest<T>('DELETE', path),
 };
 

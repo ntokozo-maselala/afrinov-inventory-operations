@@ -298,6 +298,8 @@ export interface MockRfqSupplier {
   declined: boolean;
   createdAt: string;
   prices: Array<{ rfqLineId: string; unitPrice: string }>;
+  /** The supplier's own quotation PDF, kept in memory as the server keeps it in the database. */
+  quoteFile?: { fileName: string; size: number; uploadedAt: string; data: Uint8Array } | null;
 }
 
 export interface MockRfq {

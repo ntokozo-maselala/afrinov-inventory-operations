@@ -37,6 +37,7 @@ describe('requests for quotation over real HTTP', () => {
   const otherProject = `IT-${run}`;
   let server: TestServer;
   let api: ReturnType<typeof client>;
+  let token: string;
   let storesItem: string;
   let projectItem: string;
   let supplierA: string;
@@ -45,7 +46,8 @@ describe('requests for quotation over real HTTP', () => {
 
   beforeAll(async () => {
     server = await startServer({ procurementEnabled: true });
-    api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
+    token = await login(server.port, ADMIN_EMAIL, requireAdminPassword());
+    api = client(server.port, token);
 
     for (const [number, name] of [[projectNumber, `Door rails ${run}`], [otherProject, `Other job ${run}`]]) {
       expect((await api('POST', '/projects', { projectNumber: number, name })).status).toBe(201);
@@ -292,6 +294,147 @@ describe('requests for quotation over real HTTP', () => {
 
       const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }] });
       expect((await api<Sent>('POST', `/rfqs/${draft.body.id}/cancel`, { reason: 'Raised twice' })).body.status).toBe('CANCELLED');
+    });
+  });
+
+  describe('quotes (Phase 4)', () => {
+    type Quoted = Omit<Rfq, 'lines' | 'suppliers'> & ApiErrorBody & {
+      lines: Array<{ id: string; lineNo: number }>;
+      suppliers: Array<{
+        supplierId: string; quotedAt: string | null; declined: boolean; quoteReference: string | null; validUntil: string | null;
+        leadTime: string | null; prices: Array<{ rfqLineId: string; unitPrice: string }>;
+        totals: { subtotal: string; vat: string; net: string; unpricedLines: number } | null;
+        quoteFile: { fileName: string; size: number } | null;
+      }>;
+    };
+    const PDF = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n', 'latin1');
+
+    /** A sent RFQ with two lines, asking both suppliers. */
+    async function sentRfq(): Promise<Quoted> {
+      const created = await raise({ lines: [{ materialId: storesItem, quantity: 4 }, { materialId: storesItem, quantity: 2.5 }], supplierIds: [supplierA, supplierB] });
+      return (await api<Quoted>('POST', `/rfqs/${created.body.id}/send`, {})).body;
+    }
+    const quote = (rfqId: string, supplierId: string, body: Record<string, unknown>) => api<Quoted>('PUT', `/rfqs/${rfqId}/suppliers/${supplierId}/quote`, body);
+    const upload = (path: string, data: Buffer, type = 'application/pdf', name = 'EMV quote 1094.pdf') => fetch(`http://127.0.0.1:${server.port}/api/v1${path}`, {
+      method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': type, 'x-file-name': encodeURIComponent(name) }, body: new Uint8Array(data),
+    });
+
+    it("records a supplier's prices and works out their totals, leaving a line they don't offer unpriced", async () => {
+      const rfq = await sentRfq();
+      const [first, second] = rfq.lines;
+      const res = await quote(rfq.id, supplierA, {
+        quoteReference: 'Q-2291', validUntil: '2099-12-31', leadTime: '2 weeks', prices: [{ rfqLineId: first!.id, unitPrice: 160 }],
+      });
+      expect(res.status).toBe(200);
+      const a = res.body.suppliers.find((s) => s.supplierId === supplierA)!;
+      expect(a).toMatchObject({ quoteReference: 'Q-2291', leadTime: '2 weeks', declined: false });
+      expect(a.quotedAt?.slice(0, 10)).toBe(todayInSouthAfrica());
+      // 4 x 160 = 640, VAT 15% for a rand supplier; the second line has no price.
+      expect(a.totals).toEqual({ subtotal: '640.00', vat: '96.00', net: '736.00', unpricedLines: 1 });
+      expect(res.body.suppliers.find((s) => s.supplierId === supplierB)!.totals).toBeNull();
+
+      // Corrected: both lines now priced.
+      const corrected = await quote(rfq.id, supplierA, { prices: [{ rfqLineId: first!.id, unitPrice: 150 }, { rfqLineId: second!.id, unitPrice: 10.5 }] });
+      expect(corrected.body.suppliers.find((s) => s.supplierId === supplierA)!.totals).toMatchObject({ subtotal: '626.25', unpricedLines: 0 });
+      const history = await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`);
+      expect(history.body.slice(0, 2).map((e) => e.action)).toEqual(['RFQ_QUOTE_CORRECTED', 'RFQ_QUOTE']);
+      // The correction keeps the whole quote it replaced.
+      expect(history.body[0]!.before).toMatchObject({ quoteReference: 'Q-2291', leadTime: '2 weeks', validUntil: '2099-12-31', prices: [{ rfqLineId: first!.id, unitPrice: '160' }] });
+    });
+
+    it('refuses a quote with no price, a line from elsewhere, a day to come, or a price finer than 4 decimals', async () => {
+      const rfq = await sentRfq();
+      const line = rfq.lines[0]!.id;
+      expect((await quote(rfq.id, supplierA, { prices: [] })).status).toBe(400);
+      expect((await quote(rfq.id, supplierA, { prices: [{ rfqLineId: '00000000-0000-4000-8000-000000000000', unitPrice: 1 }] })).status).toBe(400);
+      expect((await quote(rfq.id, supplierA, { quotedAt: addDays(todayInSouthAfrica(), 2), prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(400);
+      expect((await quote(rfq.id, supplierA, { validUntil: '2099-02-30', prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(400);
+      expect((await quote(rfq.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 1.23456 }] })).status).toBe(400);
+      // A price too small to keep at 4 decimal places would be saved as 0.
+      expect((await quote(rfq.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 0.000000001 }] })).status).toBe(400);
+      // A quote can't run out before it came in.
+      expect((await quote(rfq.id, supplierA, { validUntil: '2020-01-01', prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(400);
+      // A supplier who wasn't asked.
+      expect((await quote(rfq.id, inactiveSupplier, { prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(404);
+    });
+
+    it('takes quotes only while the RFQ is out with suppliers', async () => {
+      const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      const line = (await api<Quoted>('GET', `/rfqs/${draft.body.id}`)).body.lines[0]!.id;
+      expect((await quote(draft.body.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(409);
+      await api('POST', `/rfqs/${draft.body.id}/send`, {});
+      await api('POST', `/rfqs/${draft.body.id}/cancel`, { reason: 'Not needed' });
+      expect((await quote(draft.body.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(409);
+    });
+
+    it('records a decline, setting aside a quote recorded before, and a later quote replaces it', async () => {
+      const rfq = await sentRfq();
+      const line = rfq.lines[0]!.id;
+      await quote(rfq.id, supplierB, { prices: [{ rfqLineId: line, unitPrice: 99 }] });
+      const declined = await api<Quoted>('POST', `/rfqs/${rfq.id}/suppliers/${supplierB}/decline`, { notes: 'No stock of 304' });
+      expect(declined.body.suppliers.find((s) => s.supplierId === supplierB)).toMatchObject({ declined: true, quotedAt: null, prices: [], totals: null });
+      const declinedEntry = (await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`)).body[0]!;
+      expect(declinedEntry).toMatchObject({ action: 'RFQ_DECLINED', before: { declined: false, prices: [{ rfqLineId: line, unitPrice: '99' }] } });
+      const requoted = await quote(rfq.id, supplierB, { prices: [{ rfqLineId: line, unitPrice: 98 }] });
+      expect(requoted.body.suppliers.find((s) => s.supplierId === supplierB)).toMatchObject({ declined: false });
+    });
+
+    it("keeps the supplier's quotation PDF, gives it back as attached, and takes it off", async () => {
+      const rfq = await sentRfq();
+      const path = `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`;
+      expect((await upload(path, Buffer.from('not a pdf'))).status).toBe(400);
+      expect((await upload(path, PDF, 'application/octet-stream')).status).toBe(415);
+
+      const put = await upload(path, PDF);
+      expect(put.status).toBe(200);
+      const saved = (await put.json()) as Quoted;
+      expect(saved.suppliers.find((s) => s.supplierId === supplierA)!.quoteFile).toMatchObject({ fileName: 'EMV quote 1094.pdf', size: PDF.length });
+      // The detail carries the file's name and size, never its contents.
+      expect(JSON.stringify(saved)).not.toContain('%PDF');
+
+      const got = await fetch(`http://127.0.0.1:${server.port}/api/v1${path}`, { headers: { authorization: `Bearer ${token}` } });
+      expect(got.status).toBe(200);
+      expect(got.headers.get('content-type')).toBe('application/pdf');
+      expect(got.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(got.headers.get('content-disposition')).toContain("filename*=UTF-8''EMV%20quote%201094.pdf");
+      expect(Buffer.from(await got.arrayBuffer()).equals(PDF)).toBe(true);
+
+      expect((await api('DELETE', path)).status).toBe(200);
+      expect((await api('GET', path)).status).toBe(404);
+      const history = await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`);
+      expect(history.body.slice(0, 2).map((e) => e.action)).toEqual(['RFQ_QUOTE_FILE_REMOVED', 'RFQ_QUOTE_FILE']);
+    });
+
+    it('keeps a quotation under a .pdf name whatever it was called, so it never opens as a web page', async () => {
+      const rfq = await sentRfq();
+      const path = `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`;
+      const disguised = Buffer.from('%PDF-<script>alert(1)</script>', 'latin1');
+      const saved = (await (await upload(path, disguised, 'application/pdf', 'quote.html')).json()) as Quoted;
+      expect(saved.suppliers.find((s) => s.supplierId === supplierA)!.quoteFile?.fileName).toBe('quote.pdf');
+      const got = await fetch(`http://127.0.0.1:${server.port}/api/v1${path}`, { headers: { authorization: `Bearer ${token}` } });
+      expect(got.headers.get('content-disposition')).toContain('filename="quote.pdf"');
+    });
+
+    it('refuses an upload from someone not signed in before reading it', async () => {
+      const rfq = await sentRfq();
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`, {
+        method: 'PUT', headers: { 'content-type': 'application/pdf' }, body: new Uint8Array(PDF),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('takes a quotation PDF larger than the 1 MB the rest of the API allows, up to 10 MB', async () => {
+      const rfq = await sentRfq();
+      const path = `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`;
+      const big = Buffer.concat([PDF, Buffer.alloc(3 * 1024 * 1024, 0x20)]);
+      expect((await upload(path, big)).status).toBe(200);
+      // Over 10 MB is refused: with a 413, or by the server closing the
+      // connection before the upload finishes. Either way nothing is kept.
+      const tooBig = Buffer.concat([PDF, Buffer.alloc(10 * 1024 * 1024, 0x20)]);
+      const refused = await upload(path, tooBig).then((r) => r.status, () => 'closed');
+      expect([413, 'closed']).toContain(refused);
+      const kept = (await api<Quoted>('GET', `/rfqs/${rfq.id}`)).body.suppliers.find((s) => s.supplierId === supplierA)!.quoteFile;
+      expect(kept?.size).toBe(big.length);
     });
   });
 

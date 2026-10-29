@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../shared/db.js', () => ({ prisma: {} }));
 
-const { createRfqSchema, updateRfqSchema, listRfqQuerySchema } = await import('./rfq.routes.js');
+const { createRfqSchema, updateRfqSchema, listRfqQuerySchema, fourDecimals } = await import('./rfq.routes.js');
 
 const line = { materialId: '20000000-0000-4000-8000-000000000001', quantity: 4.37 };
 
@@ -34,5 +34,12 @@ describe('request for quotation payloads', () => {
   it('filters only by a known status', () => {
     expect(listRfqQuerySchema.parse({ status: 'SENT' })).toEqual({ status: 'SENT' });
     expect(listRfqQuerySchema.safeParse({ status: 'APPROVED' }).success).toBe(false);
+  });
+});
+
+describe('quote prices', () => {
+  it('keeps prices to the 4 decimal places they are saved with, large or tiny', () => {
+    for (const ok of [0, 160, 254.466, 12.3456, 0.0001, 999_999_999_999.9999, 1e12]) expect(fourDecimals(ok)).toBe(true);
+    for (const bad of [1.23456, 0.00001, 0.000000001, 0.1 + 0.00004]) expect(fourDecimals(bad)).toBe(false);
   });
 });

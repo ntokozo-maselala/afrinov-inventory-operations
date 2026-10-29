@@ -41,7 +41,9 @@ import {
   cancelSchema,
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
-import { cancelRfqSchema, createRfqSchema, listRfqQuerySchema, sendRfqSchema, updateRfqSchema } from '../modules/procurement/rfq.routes.js';
+import {
+  cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
+} from '../modules/procurement/rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
@@ -77,6 +79,8 @@ export interface Operation {
   errors?: number[];
   /** Non-JSON success content types (file downloads). */
   produces?: string[];
+  /** A request body sent as a file of this type (an upload), not as JSON. */
+  consumes?: string;
   /** Only registered when PROCUREMENT_ENABLED is on. */
   procurement?: boolean;
 }
@@ -520,6 +524,29 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.CreatePurchaseOrder], body: cancelRfqSchema, errors: [404, 409],
   },
   {
+    method: 'put', path: '/rfqs/:id/suppliers/:supplierId/quote', tag: 'Requests for quotation', summary: "Record or correct a supplier's quote",
+    description: 'A unit price per line the supplier priced (excluding VAT, in their currency); lines they don\'t offer are left out. Only while the RFQ is sent (409 otherwise). A supplier who had declined has now quoted.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: recordQuoteSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/rfqs/:id/suppliers/:supplierId/decline', tag: 'Requests for quotation', summary: "Record that a supplier won't quote",
+    description: 'Sets aside a quote recorded for them before. Only while the RFQ is sent.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: declineQuoteSchema, errors: [404, 409],
+  },
+  {
+    method: 'put', path: '/rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Requests for quotation', summary: "Attach the supplier's quotation PDF",
+    description: 'The PDF itself as the body, up to 10 MB, with its name URI-encoded in the X-File-Name header. Replaces one attached before. Only while the RFQ is sent.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], consumes: 'application/pdf', errors: [404, 409, 413, 415],
+  },
+  {
+    method: 'get', path: '/rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Requests for quotation', summary: "Download the supplier's quotation PDF",
+    procurement: true, permissions: [P.ViewPurchaseOrder], produces: ['application/pdf'], errors: [404],
+  },
+  {
+    method: 'delete', path: '/rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Requests for quotation', summary: "Take off the supplier's quotation PDF",
+    procurement: true, permissions: [P.CreatePurchaseOrder], errors: [404, 409],
+  },
+  {
     method: 'get', path: '/rfqs/:id/history', tag: 'Requests for quotation', summary: 'Activity on a request for quotation',
     procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
   },
@@ -709,7 +736,7 @@ export function buildOpenApiDocument(opts: { procurementEnabled: boolean }) {
     const errors = new Set(op.errors ?? []);
     if (!op.public) errors.add(401);
     if (op.permissions?.length) errors.add(403);
-    if (op.body || op.query) errors.add(400);
+    if (op.body || op.query || op.consumes) errors.add(400);
 
     const params = [...op.path.matchAll(/:(\w+)/g)].map((m) => m[1]!);
     const success = op.success ?? 200;
@@ -727,7 +754,9 @@ export function buildOpenApiDocument(opts: { procurementEnabled: boolean }) {
       request: {
         params: params.length ? z.object(Object.fromEntries(params.map((p) => [p, z.string()]))) : undefined,
         query: op.query,
-        body: op.body ? { content: { 'application/json': { schema: op.body } }, required: true } : undefined,
+        body: op.consumes
+          ? { content: { [op.consumes]: { schema: z.string().openapi({ format: 'binary' }) } }, required: true }
+          : op.body ? { content: { 'application/json': { schema: op.body } }, required: true } : undefined,
       },
       responses: {
         [success]: { description: op.successDescription ?? 'Success', content: successContent },
