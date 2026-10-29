@@ -88,7 +88,7 @@ describe('ReturnStock page', () => {
         { issueTransactionId: 'a', quantity: 3, locationId: undefined },
         { issueTransactionId: 'b', quantity: 4, locationId: 'l-2' },
       ],
-    });
+    }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
     // A confirmation stays on the page, linking to today's returns from them in the Returned stock report.
     const link = await screen.findByRole('link', { name: 'See it in Returned stock' });
     expect(link.getAttribute('href')).toMatch(/^\/movements\?report=returned&recipientId=r-1&from=(\d{4}-\d\d-\d\d)&to=\1$/);
@@ -123,6 +123,26 @@ describe('ReturnStock page', () => {
     fireEvent.change(qtyFor('Cutting disc'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Return stock' }));
     expect(await screen.findByText(/only 1 of the 12 issued is still out/)).toBeInTheDocument();
+  });
+
+  it('mints a fresh key when the recipient changes, so the new return is not refused as a reuse', async () => {
+    renderAt('/stock/return?recipientId=r-1');
+    await screen.findByText('Cutting disc');
+    fireEvent.change(qtyFor('Cutting disc'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Return stock' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    const firstKey = (mockPost.mock.calls[0]![2] as { idempotencyKey: string }).idempotencyKey;
+
+    // A different recipient is a different return; its key must differ or the
+    // server would refuse it as a key reused with different details.
+    returnable = [line('c', 'Safety boots', '5')];
+    fireEvent.change(screen.getByLabelText(/Returned by/), { target: { value: 'r-2' } });
+    await screen.findByText('Safety boots');
+    fireEvent.change(qtyFor('Safety boots'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Return stock' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
+    const secondKey = (mockPost.mock.calls[1]![2] as { idempotencyKey: string }).idempotencyKey;
+    expect(secondKey).not.toBe(firstKey);
   });
 
   it('says when nothing is out in the period', async () => {

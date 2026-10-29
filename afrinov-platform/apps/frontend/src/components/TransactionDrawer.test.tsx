@@ -151,7 +151,7 @@ describe('TransactionDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reverse movement' }));
 
     await waitFor(() => expect(onReversed).toHaveBeenCalled());
-    expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/reversal', { reason: 'Wrong item issued' });
+    expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/reversal', { reason: 'Wrong item issued' }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
   });
 
   it('asks for a reason before posting', () => {
@@ -217,7 +217,7 @@ describe('TransactionDrawer', () => {
       fireEvent.change(screen.getByLabelText(/Note/), { target: { value: '  Job finished early ' } });
       fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
       await waitFor(() => expect(onReturned).toHaveBeenCalledTimes(1));
-      expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/returns', { quantity: 3, locationId: 'l-2', reason: 'Job finished early' });
+      expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/returns', { quantity: 3, locationId: 'l-2', reason: 'Job finished early' }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
     });
 
     it('names the location it was issued from with its room, like the other choices', async () => {

@@ -72,6 +72,13 @@ describe('errorPresentation', () => {
       expect(p.retryable).toBe(false);
       expect(p.message).toMatch(/check|confirm/i);
     });
+
+    it('presents a reused submission identifier as a resubmit, not a defect', () => {
+      const p = presentError({ code: 'IDEMPOTENCY_KEY_REUSED', message: 'x' });
+      expect(p.retryable).toBe(false);
+      expect(p.tone).not.toBe('danger');
+      expect(p.message).not.toMatch(/error|exception|500/i);
+    });
   });
 
   describe('domain wording', () => {

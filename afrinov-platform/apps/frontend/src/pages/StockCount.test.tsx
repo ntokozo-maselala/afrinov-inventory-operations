@@ -84,7 +84,7 @@ describe('StockCount page', () => {
         { materialId: 'm-1', expectedQuantity: 10, countedQuantity: 7.5 },
         { materialId: 'm-2', expectedQuantity: 4, countedQuantity: 4 },
       ],
-    }));
+    }, expect.objectContaining({ idempotencyKey: expect.any(String) })));
     expect(await screen.findByText('Count posted at A-1: 1 adjustment')).toBeInTheDocument();
     expect(screen.getByLabelText('Counted Cutting disc')).toHaveValue('');
   });

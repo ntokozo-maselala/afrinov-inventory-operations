@@ -1,40 +1,79 @@
 # Frontend production build failure analysis
 
-**Date:** 2026-10-08  
+**Date:** 2026-10-08, revised 2026-10-29.
 **Scope:** Diagnosis and remediation of the Tailwind/PostCSS build failure.
 
 ## Finding
 
-The build stops while Vite processes `apps/frontend/src/index.css` because Tailwind CSS v4 is configured using the Tailwind v3 PostCSS plugin entry point.
+The build stops while Vite processes `apps/frontend/src/index.css`:
 
-Evidence in the frontend workspace:
+```
+[plugin:vite:css] [postcss] postcss-import: .../node_modules/tailwindcss/lib/index.js:1:1: Unknown word "use strict"
+```
 
-- `apps/frontend/package.json` declares `tailwindcss` as `^4.3.3`.
-- The lockfile resolves `tailwindcss` to `4.3.3`.
-- `apps/frontend/postcss.config.js` registers `{ tailwindcss: {}, autoprefixer: {} }`.
-- `apps/frontend/src/index.css` begins with the older `@tailwind base`, `@tailwind components`, and `@tailwind utilities` directives.
-- The build output explicitly says Tailwind cannot be used directly as a PostCSS plugin and that the PostCSS integration moved to `@tailwindcss/postcss`.
+The cause is a **version mismatch**: a Tailwind **v3** PostCSS setup run against
+Tailwind **v4**. Tailwind v4 moved the PostCSS plugin into a separate package,
+`@tailwindcss/postcss`, and its `tailwindcss` package no longer exposes a
+`lib/index.js` CommonJS entry. When PostCSS is pointed at the v4 `tailwindcss`
+package (v3-style `postcss.config.js`) it loads that package's JavaScript as
+CSS, which is where `Unknown word "use strict"` comes from. The reported
+`index.css:undefined:NaN` location is a consequence of that plugin error, not
+evidence of a malformed CSS line.
 
-These versions and configuration did not agree. Tailwind v4 separates the PostCSS plugin from the `tailwindcss` package. When PostCSS loads `tailwindcss` directly, it throws before Vite can finish CSS processing. The reported `index.css:undefined:NaN` location was a consequence of the PostCSS plugin error, not evidence of a malformed CSS line at that location.
+## Historical remediation (superseded)
+
+The 2026-10-08 pass resolved the error by restoring Tailwind `^3.4.6` and
+keeping the v3-style `@tailwind` directives and PostCSS config. That left the
+tree on v3 and predates the v4 migration.
+
+## Current state (2026-10-29)
+
+The repository has since migrated to Tailwind v4 (`chore(deps): migrate Tailwind
+CSS to 4`). The configuration and CSS now agree on v4, and the error does not
+reproduce:
+
+- `apps/frontend/package.json` declares `tailwindcss` and `@tailwindcss/postcss`
+  at `^4.3.3`; the platform lockfile resolves both to `4.3.3`.
+- `apps/frontend/postcss.config.js` registers `{ '@tailwindcss/postcss': {} }`.
+- `apps/frontend/src/index.css` uses `@import 'tailwindcss'` and
+  `@plugin 'tailwindcss-animate'`, not the v3 `@tailwind` directives.
+- There is no workspace-local Tailwind install; the platform lockfile is the
+  single source of the version.
+
+Reproduction check: temporarily restoring the v3-style config
+(`plugins: { tailwindcss: {} }`) against the v4 tree fails with
+
+```
+[postcss] It looks like you're trying to use `tailwindcss` directly as a
+PostCSS plugin. The PostCSS plugin has moved to a separate package ...
+```
+
+which confirms the diagnosis above. The committed v4 config builds cleanly.
 
 ## Build stage
 
-The frontend build script is `tsc -b && vite build`. Since the log reaches Vite's production build and reports a CSS plugin error, the TypeScript build completed successfully; the failure is in the later Vite CSS/PostCSS stage.
+The frontend build script is `tsc -b && vite build`. The failure occurs in the
+Vite CSS/PostCSS stage, after TypeScript has compiled successfully.
 
-## Other messages
+## Remediation applied (current)
 
-The `esbuild` and `optimizeDeps.esbuildOptions` notices are deprecation warnings emitted by the React Vite plugin. They are not the fatal error in this run. They indicate that the plugin is setting options that Vite 8 is migrating toward Oxc and Rolldown equivalents; the log shows CSS processing is what actually aborts the build.
+- `postcss.config.js` uses the v4 plugin, `@tailwindcss/postcss`.
+- `index.css` uses the v4 `@import 'tailwindcss'` form.
+- No CSS import was removed and no styling was changed to hide an error.
 
-## Remediation applied
+## Verification
 
-- Restored the frontend's Tailwind dependency to `^3.4.6`, matching the existing v3-style directives, PostCSS configuration, JavaScript config, theme extensions, and `tailwindcss-animate` plugin.
-- Updated the root lockfile through npm so the installed dependency and lockfile state match the manifest. The lockfile now resolves the compatible Tailwind v3 line.
-- No CSS, PostCSS, or Tailwind config rewrite was needed.
+`npm run build --workspace=@afrinov/frontend` succeeds: TypeScript compilation
+passes, Vite transforms the frontend and emits the production bundle. The
+development server serves `/src/index.css` with no PostCSS error. The build now
+reports zero warnings (the earlier plugin-config deprecation, ExcelJS `eval` and
+chunk-size warnings are gone). `npm audit` reports 0 vulnerabilities on the
+current tree.
 
-## Verification and remaining warnings
+## Relationship to other records
 
-`npm run build --workspace=@afrinov/frontend` now completes successfully: TypeScript compilation passes, Vite transforms the frontend, and the production bundle is emitted.
-
-The React plugin's Vite `esbuild` / `optimizeDeps.esbuildOptions` deprecation warnings remain nonfatal. The build also reports an existing large ExcelJS chunk and a direct `eval` warning from ExcelJS. None of these warnings stopped this production build.
-
-The build command reported 7 npm audit findings (2 moderate, 5 high) during dependency installation. They were not automatically changed as part of this focused build fix.
+This file is the historical, focused analysis. The superseding re-verification
+(F-02, F-08, F-09) and the Qodo review round are recorded in
+`docs/audits/system/FAILURE_REGISTER.md`; the runtime error-handling behaviour
+and its test coverage are in
+`afrinov-docs/docs/12-operations/error-handling.md`.

@@ -32,6 +32,14 @@ describe('api/client.ts — API client utilities', () => {
       expect(init.body).toBe('{"supplierId":"s-1"}');
       expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
     });
+
+    it('sends an Idempotency-Key header when one is given, and none otherwise', async () => {
+      const withKey = await sent((api) => api.post('/inventory-issues', { recipientId: 'r-1' }, { idempotencyKey: 'key-123' }));
+      expect((withKey.headers as Record<string, string>)['Idempotency-Key']).toBe('key-123');
+
+      const withoutKey = await sent((api) => api.post('/inventory-issues', { recipientId: 'r-1' }));
+      expect((withoutKey.headers as Record<string, string>)['Idempotency-Key']).toBeUndefined();
+    });
   });
 
   describe('isApiError', () => {

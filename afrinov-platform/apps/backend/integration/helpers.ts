@@ -45,21 +45,23 @@ export async function startServer(opts: BuildServerOptions = {}): Promise<TestSe
 export interface ApiResponse<T> {
   status: number;
   body: T;
+  headers: Headers;
 }
 
 /** Calls the API over a real socket. `token` is sent as a bearer token. */
 export function client(port: number, token?: string) {
-  return async function call<T = unknown>(method: string, path: string, body?: unknown): Promise<ApiResponse<T>> {
+  return async function call<T = unknown>(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {};
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (token) headers.authorization = `Bearer ${token}`;
+    if (extraHeaders) Object.assign(headers, extraHeaders);
     const res = await fetch(`http://127.0.0.1:${port}/api/v1${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
-    return { status: res.status, body: (text ? JSON.parse(text) : null) as T };
+    return { status: res.status, body: (text ? JSON.parse(text) : null) as T, headers: res.headers };
   };
 }
 

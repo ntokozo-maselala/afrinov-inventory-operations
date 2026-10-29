@@ -116,6 +116,16 @@ function titleFor(code: string): { title: string; message: string; tone: ErrorTo
         retryable: false,
         retryLabel: 'Back',
       };
+    // A form resubmitted with a stale submission identifier. Not the user's
+    // fault and not a data problem: invite them to submit again.
+    case 'IDEMPOTENCY_KEY_REUSED':
+      return {
+        title: 'Please submit this again',
+        message: 'This form was already submitted with different details. Review what you entered and submit it once more.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
     // A field-level validation failure. Not a defect and not retryable
     // unchanged: the user must correct the highlighted input first.
     case 'VALIDATION_ERROR':

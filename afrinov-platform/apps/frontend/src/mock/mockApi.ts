@@ -765,10 +765,10 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
 
 export interface MockApi {
   get: <T>(path: string) => Promise<T>;
-  post: <T>(path: string, body?: unknown) => Promise<T>;
-  patch: <T>(path: string, body?: unknown) => Promise<T>;
-  put: <T>(path: string, body?: unknown) => Promise<T>;
-  del: <T>(path: string) => Promise<T>;
+  post: <T>(path: string, body?: unknown, options?: unknown) => Promise<T>;
+  patch: <T>(path: string, body?: unknown, options?: unknown) => Promise<T>;
+  put: <T>(path: string, body?: unknown, options?: unknown) => Promise<T>;
+  del: <T>(path: string, options?: unknown) => Promise<T>;
 }
 
 export function createMockApi(): MockApi {
@@ -786,10 +786,10 @@ export function createMockApi(): MockApi {
 
   return {
     get: <T>(path: string) => handle<T>(() => route('GET', path) as T),
-    post: <T>(path: string, body?: unknown) => handle<T>(() => route('POST', path, body) as T),
-    patch: <T>(path: string, body?: unknown) => handle<T>(() => route('PATCH', path, body) as T),
-    put: <T>(path: string, body?: unknown) => handle<T>(() => route('PUT', path, body) as T),
-    del: <T>(path: string) => handle<T>(() => route('DELETE', path) as T),
+    post: <T>(path: string, body?: unknown, _options?: unknown) => handle<T>(() => route('POST', path, body) as T),
+    patch: <T>(path: string, body?: unknown, _options?: unknown) => handle<T>(() => route('PATCH', path, body) as T),
+    put: <T>(path: string, body?: unknown, _options?: unknown) => handle<T>(() => route('PUT', path, body) as T),
+    del: <T>(path: string, _options?: unknown) => handle<T>(() => route('DELETE', path) as T),
   };
 }
 

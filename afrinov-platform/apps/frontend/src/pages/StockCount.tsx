@@ -21,6 +21,7 @@ import type { CountRecord, CurrentStockRow, Material } from '../api/types';
 import { formatDateTime } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { locationLabel } from '../lib/locations';
+import { useIdempotencyKey } from '../lib/idempotency';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
@@ -74,6 +75,7 @@ export function StockCount() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; moved: boolean } | null>(null);
   const toast = useToast();
+  const idem = useIdempotencyKey('stock-count');
 
   useEffect(() => { if (locationId) saveDraft(locationId, draft); }, [locationId, draft]);
 
@@ -166,22 +168,27 @@ export function StockCount() {
   async function post() {
     setBusy(true);
     setError(null);
+    const countBody = {
+      locationId,
+      note: draft.note.trim() || undefined,
+      lines: counted.map((r) => {
+        const lineNote = offersNote(r) ? draft.notes[r.materialId]?.trim() : '';
+        return { materialId: r.materialId, expectedQuantity: r.system, countedQuantity: parseCount(draft.counts[r.materialId])!, ...(lineNote ? { note: lineNote } : {}) };
+      }),
+    };
     try {
-      const result = await api.post<{ adjusted: number }>('/stock-counts', {
-        locationId,
-        note: draft.note.trim() || undefined,
-        lines: counted.map((r) => {
-          const lineNote = offersNote(r) ? draft.notes[r.materialId]?.trim() : '';
-          return { materialId: r.materialId, expectedQuantity: r.system, countedQuantity: parseCount(draft.counts[r.materialId])!, ...(lineNote ? { note: lineNote } : {}) };
-        }),
-      });
+      const result = await api.post<{ adjusted: number }>('/stock-counts', countBody, { idempotencyKey: idem.keyFor(countBody) });
       toast.success(`Count posted at ${location?.name ?? 'the location'}: ${result.adjusted} adjustment${result.adjusted === 1 ? '' : 's'}`);
+      idem.confirm();
       setDraft(EMPTY);
       setConfirming(false);
       stock.reload();
       recent.reload();
     } catch (err) {
       const e = err as ApiError;
+      // A failed or unconfirmed attempt keeps its key so a retry replays the
+      // committed count rather than posting a second one.
+      idem.resolve(err);
       setError({ message: e.message, moved: e.code === 'CONFLICT' });
       setConfirming(false);
     } finally {

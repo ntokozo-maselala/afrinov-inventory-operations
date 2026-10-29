@@ -52,6 +52,7 @@ model User {
   awardedRfqs          Rfq[]             @relation("RFQ_AwardedBy")
   cancelledRfqs        Rfq[]             @relation("RFQ_CancelledBy")
   rfqQuoteFiles        RfqQuoteFile[]    @relation("RFQ_QuoteFileUploadedBy")
+  idempotencyKeys      IdempotencyKey[]
 
   @@map("users")
 }
@@ -732,4 +733,41 @@ model AuditLogEntry {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_log_entries")
+}
+
+// ─── Idempotency (retry-safe mutations) ───────────────────────────────────
+//
+// ADR/API principle 3: a mutating endpoint is idempotent-safe for retries, so a
+// network retry never double-posts a transaction (TD-019). A client sends an
+// `Idempotency-Key` header; the first request runs, and its response is stored
+// here. A repeat with the same key and the same request body replays the stored
+// response without running the operation again. A repeat with the same key but
+// a *different* body is a client mistake and is refused with a 409, rather than
+// silently replaying an unrelated answer.
+//
+// Scope is (actor, endpoint, key): a key is meaningful only to the user who
+// minted it, so one user cannot probe or collide with another's operations.
+model IdempotencyKey {
+  id          String   @id @default(uuid())
+  // The user the key belongs to. Cascades: a deleted user's keys are worthless.
+  actorId     String   @map("actor_id")
+  // The route template the key was used on, e.g. "POST /inventory-issues".
+  endpoint    String
+  key         String
+  // Hash of the request (concrete path + body), so a reused key with a
+  // different payload or record is caught rather than replayed.
+  requestHash String   @map("request_hash")
+  // The HTTP status and body of the original response, replayed verbatim.
+  statusCode  Int      @map("status_code")
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  // The lookup is always by this triple; the unique index makes the insert the
+  // concurrency control — two simultaneous retries race on it, and the loser
+  // re-reads and replays instead of running the operation twice.
+  @@unique([actorId, endpoint, key])
+  @@index([createdAt])
+  @@map("idempotency_keys")
 }

@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { AdjustmentReasonCode, InventoryTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
 import { getCurrentBalance, recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
@@ -129,7 +130,7 @@ export const StockCountService = {
   },
 
 
-  async post(input: StockCountInput): Promise<StockCountResult> {
+  async post(input: StockCountInput, within?: Prisma.TransactionClient): Promise<StockCountResult> {
     if (input.lines.length === 0) throw Errors.validation('Count at least one item');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, expected: toDecimal(l.expectedQuantity), counted: toDecimal(l.countedQuantity), note: l.note?.trim() || null }));
     if (lines.some((l) => l.counted.isNegative())) throw Errors.validation('A counted quantity cannot be negative');
@@ -137,7 +138,7 @@ export const StockCountService = {
     const note = input.note?.trim() || null;
 
     const countId = randomUUID();
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       // One count at a time per location, so two counters cannot both correct the same difference.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`afrinov:stock-count:${input.locationId}`}))`;
       await lockInventoryBalances(lines.map((line) => ({ materialId: line.materialId, locationId: input.locationId })), tx);

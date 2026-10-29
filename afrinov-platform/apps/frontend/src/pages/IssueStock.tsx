@@ -16,6 +16,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import { today } from '../lib/dates';
+import { useIdempotencyKey } from '../lib/idempotency';
 import type { CurrentStockRow } from '../api/types';
 import { needsProject, sectionOf } from '../lib/categories';
 import { useLocationLabel } from '../hooks/useLocationLabel';
@@ -46,6 +47,7 @@ export function IssueStock() {
   const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
   const locationName = useLocationLabel();
+  const idem = useIdempotencyKey('issue-stock');
 
   // Only items with stock can be issued, and tools are lent on the Tools page
   // instead. A closed project's material waits to move to Stores.
@@ -109,21 +111,29 @@ export function IssueStock() {
 
     setBusy(true);
     try {
-      await api.post('/inventory-issues', {
+      const issueBody = {
         recipientId,
         projectNumber: issueProject || undefined,
         lines: filled.map((l) => {
           const r = byKey.get(l.stockKey)!;
           return { materialId: r.materialId, locationId: r.locationId, quantity: Number(l.quantity) };
         }),
-      });
+      };
+      await api.post('/inventory-issues', issueBody, { idempotencyKey: idem.keyFor(issueBody) });
       const who = recipients.find((r) => r.id === recipientId)?.name ?? 'recipient';
       toast.success(`Issued ${filled.length} item${filled.length === 1 ? '' : 's'} to ${who}`);
       setLast({ who, recipientId, count: filled.length });
       setLines([emptyLine()]);
       setProjectNumber('');
+      // The submission succeeded: the next one is a new operation, so it gets a
+      // fresh key rather than replaying this one.
+      idem.confirm();
       stock.reload();
     } catch (err) {
+      // A failed or unconfirmed attempt keeps its key, so a retry of the same
+      // request replays rather than posting the issue twice. Only a "key reused
+      // for different details" refusal clears it.
+      idem.resolve(err);
       setError((err as ApiError).message);
     } finally {
       setBusy(false);

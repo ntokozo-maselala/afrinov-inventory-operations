@@ -23,6 +23,7 @@ import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import type { CurrentStockRow, Material } from '../api/types';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -65,6 +66,7 @@ export function ReceiveStock() {
   const { hasPermission } = usePermissions();
   const canAddSupplier = hasPermission('suppliers:manage');
   const toast = useToast();
+  const idem = useIdempotencyKey('receive-stock');
   // The supplier's orders that can still be received, for those who receive
   // orders on the order's page (so the link never leads to a page without it).
   const orders = useApi<OpenOrder[]>(PROCUREMENT_ENABLED && hasPermission('orders:receive') ? '/purchase-orders' : null);
@@ -156,17 +158,20 @@ export function ReceiveStock() {
 
     setBusy(true);
     try {
-      const result = await api.post<{ number: string }>('/stock-receipts', {
+      const receiptBody = {
         supplierId,
         deliveryRef: deliveryRef.trim(),
         receivedAt: receivedAt || undefined,
         lines: filled.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity) })),
-      });
+      };
+      const result = await api.post<{ number: string }>('/stock-receipts', receiptBody, { idempotencyKey: idem.keyFor(receiptBody) });
       toast.success(`Received ${filled.length} item${filled.length === 1 ? '' : 's'} as ${result.number}`);
       setDeliveryRef('');
       setLines([emptyLine(filled[filled.length - 1]!.locationId)]);
+      idem.confirm();
       stock.reload();
     } catch (err) {
+      idem.resolve(err);
       setError((err as ApiError).message);
     } finally {
       setBusy(false);
