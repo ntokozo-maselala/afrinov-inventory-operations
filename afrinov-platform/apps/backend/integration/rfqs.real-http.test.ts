@@ -541,6 +541,86 @@ describe('requests for quotation over real HTTP', () => {
     });
   });
 
+  describe('roll out (Phase 6)', () => {
+    /** Signs in as a new user holding just this role. */
+    async function as(role: string) {
+      const email = `it-rfq-${role.toLowerCase()}-${run}@afrinov.local`;
+      const password = `It-${run}-${role.toLowerCase()}`;
+      expect((await api('POST', '/users', { email, name: `IT RFQ ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
+      return client(server.port, await login(server.port, email, password));
+    }
+
+    it('takes a buyer from raising an RFQ to an order awaiting approval, with both sides of the story kept', async () => {
+      // Approval on, so the order really waits for an approver, whatever the
+      // test database was left with; put back however the test ends.
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const buyer = await as('PROCUREMENT');
+        const raised = await buyer<Rfq & { lines: Array<{ id: string }> }>('POST', '/rfqs', {
+          projectNumber, lines: [{ materialId: storesItem, quantity: 4 }, { materialId: projectItem, quantity: 2 }], supplierIds: [supplierA, supplierB],
+        });
+        expect(raised.status).toBe(201);
+        const id = raised.body.id;
+        const [l1, l2] = raised.body.lines;
+        expect((await buyer('POST', `/rfqs/${id}/send`, {})).status).toBe(200);
+        expect((await buyer('PUT', `/rfqs/${id}/suppliers/${supplierA}/quote`, { quoteReference: 'A-9', prices: [{ rfqLineId: l1!.id, unitPrice: 150 }, { rfqLineId: l2!.id, unitPrice: 30 }] })).status).toBe(200);
+        expect((await buyer('PUT', `/rfqs/${id}/suppliers/${supplierB}/quote`, { prices: [{ rfqLineId: l1!.id, unitPrice: 155 }, { rfqLineId: l2!.id, unitPrice: 30 }] })).status).toBe(200);
+        const awarded = await buyer<{ status: string; purchaseOrder: { id: string; number: string } }>('POST', `/rfqs/${id}/award`, { supplierId: supplierA });
+        expect(awarded.status).toBe(200);
+        const orderId = awarded.body.purchaseOrder.id;
+
+        // The order goes on through approval like any other.
+        const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${orderId}/submit`);
+        expect(submitted.status).toBe(200);
+        expect(submitted.body.status).toBe('PENDING_APPROVAL');
+
+        // Both stories, every entry under the buyer's name.
+        const buyerName = `IT RFQ PROCUREMENT ${run}`;
+        const rfqStory = (await buyer<HistoryEntry[]>('GET', `/rfqs/${id}/history`)).body.reverse();
+        expect(rfqStory.map((e) => [e.action, e.actorName])).toEqual(
+          ['CREATE', 'RFQ_SEND', 'RFQ_QUOTE', 'RFQ_QUOTE', 'RFQ_AWARD'].map((action) => [action, buyerName]),
+        );
+        const orderStory = (await buyer<HistoryEntry[]>('GET', `/purchase-orders/${orderId}/history`)).body.reverse();
+        expect(orderStory.map((e) => [e.action, e.actorName])).toEqual([['CREATE', buyerName], ['PO_SUBMIT', buyerName]]);
+        expect(orderStory[0]).toMatchObject({ after: { rfqId: id } });
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    it.each(['APPROVER', 'STORE_CONTROLLER'])('lets a %s open RFQs and their quotations, and change nothing', async (role) => {
+      const user = await as(role);
+      const draft = (await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] })).body;
+      const rfq = (await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] })).body;
+      await api('POST', `/rfqs/${rfq.id}/send`, {});
+      expect((await user('GET', '/rfqs')).status).toBe(200);
+      expect((await user('GET', `/rfqs/${rfq.id}`)).status).toBe(200);
+      expect((await user('GET', `/rfqs/${rfq.id}/history`)).status).toBe(200);
+      for (const [method, path, body] of [
+        ['POST', '/rfqs', { lines: [{ materialId: storesItem, quantity: 1 }] }],
+        ['PATCH', `/rfqs/${rfq.id}`, { closingDate: '2099-01-01' }],
+        ['POST', `/rfqs/${draft.id}/send`, {}],
+        ['PUT', `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`, {}],
+        ['DELETE', `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`, undefined],
+        ['PUT', `/rfqs/${rfq.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: rfq.lines[0]!.materialId, unitPrice: 1 }] }],
+        ['POST', `/rfqs/${rfq.id}/suppliers/${supplierA}/decline`, {}],
+        ['POST', `/rfqs/${rfq.id}/award`, { supplierId: supplierA }],
+        ['POST', `/rfqs/${rfq.id}/cancel`, { reason: 'Not mine to cancel' }],
+      ] as const) {
+        expect([method, path, (await user(method, path, body)).status]).toEqual([method, path, 403]);
+      }
+    });
+
+    it.each(['TECHNICIAN', 'VIEWER'])('keeps RFQs from a %s altogether', async (role) => {
+      const user = await as(role);
+      const rfq = (await raise({ lines: [{ materialId: storesItem, quantity: 1 }] })).body;
+      expect((await user('GET', '/rfqs')).status).toBe(403);
+      expect((await user('GET', `/rfqs/${rfq.id}`)).status).toBe(403);
+    });
+  });
+
   it('answers 404 for an RFQ that does not exist', async () => {
     expect((await api('GET', '/rfqs/00000000-0000-4000-8000-000000000000')).status).toBe(404);
     expect((await api('GET', '/rfqs/00000000-0000-4000-8000-000000000000/history')).status).toBe(404);

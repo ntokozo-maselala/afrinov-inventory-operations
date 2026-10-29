@@ -82,7 +82,7 @@ export function useNavGroups(): NavGroup[] {
         { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new'] },
         { to: '/purchase-orders/new', label: 'New purchase order', icon: <Icon.Plus />, permissions: ['procurement:manage'] },
         // Buyers ask suppliers for prices before ordering; approvers and the store don't.
-        { to: '/rfqs', label: 'Requests for quotation', icon: <Icon.Doc />, permissions: ['procurement:manage'] },
+        { to: '/rfqs', label: 'RFQ', icon: <Icon.Doc />, permissions: ['procurement:manage'] },
       ],
     }] : []),
     {

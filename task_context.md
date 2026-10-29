@@ -74,6 +74,10 @@ database; CI runs them on every backend pull request.
   PARTIALLY_RECEIVED → RECEIVED → CLOSED, or CANCELLED (ADR-007). Procurement
   is on by default; `PROCUREMENT_ENABLED=false` (backend) and
   `VITE_PROCUREMENT_ENABLED=false` (frontend) switch it off (ADR-019).
+- **Requests for quotation** go DRAFT → SENT → AWARDED, or CANCELLED from
+  DRAFT or SENT (`rfq.service.ts`). Quotes are recorded while SENT; the
+  award raises a draft purchase order in the same transaction. They use the
+  purchase order permissions and sit behind the same procurement switch.
 - **Settings** come from the catalog in `settings.service.ts`. Removing a key
   there retires it; the seed deletes its row.
 - **Production builds** of the frontend fail if `VITE_FRONTEND_ONLY` or
