@@ -15,14 +15,14 @@ import { api, type ApiError } from '../api/client';
 import { QUOTE_FILE_LIMIT, uploadQuoteFile } from '../api/rfqQuoteFile';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import { formatNumber } from '../lib/format';
-import { todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
+import { fourDecimals, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
 
 const LINE_GRID = 'grid grid-cols-12 sm:grid-cols-[2.5rem_minmax(0,1fr)_4.5rem_5.5rem_8rem_8.5rem] gap-2 items-center';
 
 /** As the server takes it: 0 or more, to at most 4 decimal places. */
 function badPrice(v: string): boolean {
   const n = Number(v);
-  return !(n >= 0 && n <= 1e12) || Math.abs(n * 1e4 - Math.round(n * 1e4)) >= 1e-4;
+  return !(n >= 0 && n <= 1e12) || !fourDecimals(n);
 }
 
 const sizeLabel = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -65,6 +65,7 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
     const bad = priced.find((l) => badPrice(prices[l.id]!));
     if (bad) return `Line ${bad.lineNo} needs a price of 0 or more, to at most 4 decimal places.`;
     if (!quotedAt || quotedAt > today) return 'Enter the day the quote came in; it can’t be later than today.';
+    if (validUntil && validUntil < quotedAt) return 'The quote can’t be valid only until a day before it came in. Check the valid-until date.';
     return null;
   }
 
@@ -135,7 +136,7 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
                     <span className="col-span-3 sm:col-span-1 text-sm text-surface-600">{l.material?.unitOfMeasure ?? '—'}</span>
                     <span className="col-span-3 sm:col-span-1 text-sm text-right font-mono">{formatNumber(Number(l.quantity))}</span>
                     <Input
-                      className="col-span-3 sm:col-span-1 text-right" type="number" min="0" step="0.01" inputMode="decimal" placeholder="Not offered"
+                      className="col-span-3 sm:col-span-1 text-right" type="number" min="0" step="0.0001" inputMode="decimal" placeholder="Not offered"
                       value={prices[l.id] ?? ''} onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))}
                       aria-label={`Line ${l.lineNo} unit price`}
                     />
@@ -157,7 +158,7 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Their quote reference" htmlFor="rfq-quote-ref"><Input id="rfq-quote-ref" maxLength={100} value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
               <Field label="Received" htmlFor="rfq-quote-at"><Input id="rfq-quote-at" type="date" max={today} value={quotedAt} onChange={(e) => setQuotedAt(e.target.value)} /></Field>
-              <Field label="Valid until" htmlFor="rfq-quote-valid" help="How long their prices hold."><Input id="rfq-quote-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
+              <Field label="Valid until" htmlFor="rfq-quote-valid" help="How long their prices hold."><Input id="rfq-quote-valid" type="date" min={quotedAt} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
               <Field label="Lead time" htmlFor="rfq-quote-lead" help="e.g. 2 weeks from order."><Input id="rfq-quote-lead" maxLength={100} value={leadTime} onChange={(e) => setLeadTime(e.target.value)} /></Field>
             </div>
           </>

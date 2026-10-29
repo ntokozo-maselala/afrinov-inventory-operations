@@ -338,6 +338,8 @@ describe('requests for quotation over real HTTP', () => {
       expect(corrected.body.suppliers.find((s) => s.supplierId === supplierA)!.totals).toMatchObject({ subtotal: '626.25', unpricedLines: 0 });
       const history = await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`);
       expect(history.body.slice(0, 2).map((e) => e.action)).toEqual(['RFQ_QUOTE_CORRECTED', 'RFQ_QUOTE']);
+      // The correction keeps the whole quote it replaced.
+      expect(history.body[0]!.before).toMatchObject({ quoteReference: 'Q-2291', leadTime: '2 weeks', validUntil: '2099-12-31', prices: [{ rfqLineId: first!.id, unitPrice: '160' }] });
     });
 
     it('refuses a quote with no price, a line from elsewhere, a day to come, or a price finer than 4 decimals', async () => {
@@ -348,6 +350,10 @@ describe('requests for quotation over real HTTP', () => {
       expect((await quote(rfq.id, supplierA, { quotedAt: addDays(todayInSouthAfrica(), 2), prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(400);
       expect((await quote(rfq.id, supplierA, { validUntil: '2099-02-30', prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(400);
       expect((await quote(rfq.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 1.23456 }] })).status).toBe(400);
+      // A price too small to keep at 4 decimal places would be saved as 0.
+      expect((await quote(rfq.id, supplierA, { prices: [{ rfqLineId: line, unitPrice: 0.000000001 }] })).status).toBe(400);
+      // A quote can't run out before it came in.
+      expect((await quote(rfq.id, supplierA, { validUntil: '2020-01-01', prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(400);
       // A supplier who wasn't asked.
       expect((await quote(rfq.id, inactiveSupplier, { prices: [{ rfqLineId: line, unitPrice: 1 }] })).status).toBe(404);
     });
@@ -367,6 +373,8 @@ describe('requests for quotation over real HTTP', () => {
       await quote(rfq.id, supplierB, { prices: [{ rfqLineId: line, unitPrice: 99 }] });
       const declined = await api<Quoted>('POST', `/rfqs/${rfq.id}/suppliers/${supplierB}/decline`, { notes: 'No stock of 304' });
       expect(declined.body.suppliers.find((s) => s.supplierId === supplierB)).toMatchObject({ declined: true, quotedAt: null, prices: [], totals: null });
+      const declinedEntry = (await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`)).body[0]!;
+      expect(declinedEntry).toMatchObject({ action: 'RFQ_DECLINED', before: { declined: false, prices: [{ rfqLineId: line, unitPrice: '99' }] } });
       const requoted = await quote(rfq.id, supplierB, { prices: [{ rfqLineId: line, unitPrice: 98 }] });
       expect(requoted.body.suppliers.find((s) => s.supplierId === supplierB)).toMatchObject({ declined: false });
     });
@@ -387,6 +395,7 @@ describe('requests for quotation over real HTTP', () => {
       const got = await fetch(`http://127.0.0.1:${server.port}/api/v1${path}`, { headers: { authorization: `Bearer ${token}` } });
       expect(got.status).toBe(200);
       expect(got.headers.get('content-type')).toBe('application/pdf');
+      expect(got.headers.get('x-content-type-options')).toBe('nosniff');
       expect(got.headers.get('content-disposition')).toContain("filename*=UTF-8''EMV%20quote%201094.pdf");
       expect(Buffer.from(await got.arrayBuffer()).equals(PDF)).toBe(true);
 
@@ -394,6 +403,24 @@ describe('requests for quotation over real HTTP', () => {
       expect((await api('GET', path)).status).toBe(404);
       const history = await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`);
       expect(history.body.slice(0, 2).map((e) => e.action)).toEqual(['RFQ_QUOTE_FILE_REMOVED', 'RFQ_QUOTE_FILE']);
+    });
+
+    it('keeps a quotation under a .pdf name whatever it was called, so it never opens as a web page', async () => {
+      const rfq = await sentRfq();
+      const path = `/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`;
+      const disguised = Buffer.from('%PDF-<script>alert(1)</script>', 'latin1');
+      const saved = (await (await upload(path, disguised, 'application/pdf', 'quote.html')).json()) as Quoted;
+      expect(saved.suppliers.find((s) => s.supplierId === supplierA)!.quoteFile?.fileName).toBe('quote.pdf');
+      const got = await fetch(`http://127.0.0.1:${server.port}/api/v1${path}`, { headers: { authorization: `Bearer ${token}` } });
+      expect(got.headers.get('content-disposition')).toContain('filename="quote.pdf"');
+    });
+
+    it('refuses an upload from someone not signed in before reading it', async () => {
+      const rfq = await sentRfq();
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/rfqs/${rfq.id}/suppliers/${supplierA}/quote-file`, {
+        method: 'PUT', headers: { 'content-type': 'application/pdf' }, body: new Uint8Array(PDF),
+      });
+      expect(res.status).toBe(401);
     });
 
     it('takes a quotation PDF larger than the 1 MB the rest of the API allows, up to 10 MB', async () => {

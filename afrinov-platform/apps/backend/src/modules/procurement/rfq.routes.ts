@@ -47,9 +47,18 @@ export const sendRfqSchema = z.object({ closingDate: day.optional() });
 
 export const cancelRfqSchema = z.object({ reason: z.string().trim().min(1).max(500) });
 
+/**
+ * A number with at most 4 decimal places, as a DECIMAL(18, 4) column keeps
+ * it: its 4-place rounding must be the same number, to within the last bit a
+ * double holds, so 0.000000001 is refused rather than saved as 0.
+ */
+export function fourDecimals(n: number): boolean {
+  const kept = Math.round(n * 1e4) / 1e4;
+  return Math.abs(n - kept) <= Number.EPSILON * Math.max(1, Math.abs(n)) * 8;
+}
+
 /** Prices are kept to 4 decimal places, excluding VAT, in the supplier's currency. */
-const unitPrice = z.number().min(0).max(1e12)
-  .refine((n) => Math.abs(n * 1e4 - Math.round(n * 1e4)) < 1e-4, 'At most 4 decimal places');
+const unitPrice = z.number().min(0).max(1e12).refine(fourDecimals, 'At most 4 decimal places');
 
 export const recordQuoteSchema = z.object({
   /** When the quote came in; today unless given. */
@@ -141,8 +150,12 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     return RfqService.decline(id, supplierId, parsed.data, actorId(req));
   });
 
-  app.put('/rfqs/:id/suppliers/:supplierId/quote-file', { preHandler: [app.authenticate], bodyLimit: QUOTE_FILE_LIMIT }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+  // Who is sending it, and may they, is checked when the request arrives,
+  // before up to 10 MB is read: nobody else gets that much held in memory.
+  app.put('/rfqs/:id/suppliers/:supplierId/quote-file', {
+    onRequest: [app.authenticate, async (req) => { await requirePermission(req, PermissionCode.CreatePurchaseOrder); }],
+    bodyLimit: QUOTE_FILE_LIMIT,
+  }, async (req, reply) => {
     if (!Buffer.isBuffer(req.body)) {
       return reply.code(415).send({ error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Send the quotation as application/pdf' } });
     }
@@ -165,6 +178,7 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     const ascii = file.fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
     return reply
       .type('application/pdf')
+      .header('x-content-type-options', 'nosniff')
       .header('content-disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
       .send(file.data);
   });

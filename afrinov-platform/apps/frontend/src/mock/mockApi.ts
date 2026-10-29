@@ -24,6 +24,7 @@ import { buildReport } from './mockReport';
 import type { ReportQuery as MockReportQuery } from '../api/reportTypes';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
 import { priceLines } from '../lib/poMoney';
+import { fourDecimals } from '../lib/rfq';
 import { computeConsumption } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import type {
@@ -398,7 +399,9 @@ export async function mockPutQuoteFile(rfqId: string, supplierId: string, fileNa
   if (String.fromCharCode(...data.subarray(0, 5)) !== '%PDF-') throw err('VALIDATION_ERROR', 'Attach the quotation as a PDF');
   if (data.length > 10 * 1024 * 1024) throw err('PAYLOAD_TOO_LARGE', 'The quotation is larger than 10 MB');
   const now = new Date().toISOString();
-  const name = fileName.split(/[\\/]/).pop()?.trim() || 'quotation.pdf';
+  // As the server: always a .pdf, so it opens as the PDF it was checked to be.
+  const base = fileName.split(/[\\/]/).pop()?.trim() ?? '';
+  const name = !base ? 'quotation.pdf' : /\.pdf$/i.test(base) ? base : `${base.replace(/\.[^.]*$/, '')}.pdf`;
   const updated: MockRfq = {
     ...rfq, updatedAt: now,
     suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? { ...s, quoteFile: { fileName: name, size: data.length, uploadedAt: now, data } } : s)),
@@ -549,15 +552,20 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     };
     if (method === 'PUT' && what === 'quote') {
       const b = (body ?? {}) as { quotedAt?: string; quoteReference?: string | null; validUntil?: string | null; leadTime?: string | null; notes?: string | null; prices?: Array<{ rfqLineId: string; unitPrice: number }> };
+      // As the server's recordQuoteSchema: field types and lengths, and at most 200 prices.
+      const text = (v: unknown, max: number) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
+      if (!text(b.quoteReference, 100) || !text(b.leadTime, 100) || !text(b.notes, 2000)) throw err('VALIDATION_ERROR', 'Invalid quote');
       const today = mockToday();
       const quotedAt = b.quotedAt ?? today;
       if (!isRealDay(quotedAt) || (b.validUntil && !isRealDay(b.validUntil))) throw err('VALIDATION_ERROR', 'Invalid quote');
       if (quotedAt > today) throw err('VALIDATION_ERROR', `${quotedAt} is still to come: record the day the quote came in`);
+      if (b.validUntil && b.validUntil < quotedAt) throw err('VALIDATION_ERROR', `A quote received on ${quotedAt} can't be valid only until ${b.validUntil}: check the date`);
       if (!Array.isArray(b.prices) || b.prices.length === 0) throw err('VALIDATION_ERROR', 'Price at least one line, or mark the supplier as declined');
+      if (b.prices.length > 200) throw err('VALIDATION_ERROR', 'Invalid quote');
       for (const pr of b.prices) {
         if (!rfq.lines.some((l) => l.id === pr.rfqLineId)) throw err('VALIDATION_ERROR', `Line ${pr.rfqLineId} is not on ${rfq.number}`);
         const n = pr.unitPrice;
-        if (typeof n !== 'number' || !(n >= 0 && n <= 1e12) || Math.abs(n * 1e4 - Math.round(n * 1e4)) >= 1e-4) throw err('VALIDATION_ERROR', 'Invalid quote');
+        if (typeof n !== 'number' || !(n >= 0 && n <= 1e12) || !fourDecimals(n)) throw err('VALIDATION_ERROR', 'Invalid quote');
       }
       const prices = [...new Map(b.prices.map((pr) => [pr.rfqLineId, String(pr.unitPrice)])).entries()].map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice }));
       return save({
@@ -566,7 +574,9 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
       }, asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE', { quoteReference: rfqText(b.quoteReference), quotedAt, prices });
     }
     if (method === 'POST' && what === 'decline') {
-      const notes = rfqText((body as { notes?: string | null } | undefined)?.notes);
+      const raw = (body as { notes?: unknown } | undefined)?.notes;
+      if (raw !== undefined && raw !== null && (typeof raw !== 'string' || raw.length > 2000)) throw err('VALIDATION_ERROR', 'Invalid decline');
+      const notes = rfqText(raw as string | null | undefined);
       return save({ ...asked, declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, notes, prices: [] }, 'RFQ_DECLINED', { notes });
     }
     if (method === 'DELETE' && what === 'quote-file') {

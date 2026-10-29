@@ -122,6 +122,19 @@ describe('Quotes on an RFQ’s page', () => {
     expect(mockPut).not.toHaveBeenCalled();
   });
 
+  it('takes prices to 4 decimal places, and refuses a quote valid only until before it came in', async () => {
+    page();
+    fireEvent.click(within(await suppliersTable()).getByRole('button', { name: 'Record quote for Macsteel' }));
+    const dialog = await screen.findByRole('dialog');
+    // The box steps by 0.0001, as prices are kept.
+    expect(within(dialog).getByLabelText('Line 1 unit price')).toHaveAttribute('step', '0.0001');
+    fireEvent.change(within(dialog).getByLabelText('Line 1 unit price'), { target: { value: '12.3456' } });
+    fireEvent.change(within(dialog).getByLabelText('Valid until'), { target: { value: '2020-01-01' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await within(dialog).findByText(/valid only until a day before it came in/)).toBeInTheDocument();
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
   it('records that a supplier declined, with their reason', async () => {
     page();
     fireEvent.click(within(await suppliersTable()).getByRole('button', { name: 'Record quote for Macsteel' }));

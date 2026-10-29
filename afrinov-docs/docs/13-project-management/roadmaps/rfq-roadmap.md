@@ -6,14 +6,14 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phases 1 to 3 are merged (PRs #104, #105 and #107). Phase 4 is built on `feature/rfq-quotes` and not yet committed. One pull request per phase.
+**Status:** Phases 1 to 3 are merged (PRs #104, #105 and #107). Phase 4 is in review (PR #112). One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | RFQ record and numbering | M | Merged (#104) |
 | 2 | Raise, edit and send an RFQ | M | Merged (#105) |
 | 3 | The RFQ document for suppliers | M | Merged (#107) |
-| 4 | Record the quotes that come back | M to L | Built |
+| 4 | Record the quotes that come back | M to L | In review |
 | 5 | Compare quotes and award to a purchase order | M | Planned |
 | 6 | Roll out | S | Planned |
 
@@ -101,7 +101,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 4: Record the quotes that come back
 
-**Built** on `feature/rfq-quotes`, on top of the dependency upgrades in PRs #108 to #110. Size M to L. Backend and frontend, with a migration. 6 real-HTTP tests, 8 page tests, 3 mock tests and 2 upload tests.
+**In review** (PR #112), on top of the dependency upgrades in PRs #108 to #110. Size M to L. Backend and frontend, with a migration. 8 real-HTTP tests, 9 page tests, 5 mock tests, 2 upload tests and a price-precision test. Qodo's findings on the first push are fixed: a quotation is always kept and downloaded as a .pdf (with nosniff), so a file disguised as a PDF can't open as a web page; who is uploading is checked before the 10 MB body is read; prices too fine to keep at 4 decimal places are refused; a quote can't be valid only until before it came in; corrections and declines keep the whole quote they replace in the Activity; the price boxes step by 0.0001; and the mock refuses what the server refuses. Found on the way: suppliers saved together shared a time, so they could be listed in any order; each is now a millisecond after the one before, keeping the order they were asked.
 
 **Where it shows:** a sent RFQ → each supplier → **Record quote** (or **Edit quote**).
 

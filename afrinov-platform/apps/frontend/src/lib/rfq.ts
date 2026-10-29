@@ -95,6 +95,16 @@ export function addDays(day: string, days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * A number with at most 4 decimal places, as the server keeps prices: its
+ * 4-place rounding must be the same number, so 0.000000001 is refused rather
+ * than saved as 0. As fourDecimals in rfq.routes.ts.
+ */
+export function fourDecimals(n: number): boolean {
+  const kept = Math.round(n * 1e4) / 1e4;
+  return Math.abs(n - kept) <= Number.EPSILON * Math.max(1, Math.abs(n)) * 8;
+}
+
 /** Quotes in so far, out of the suppliers asked; one who declined has answered too. */
 export function quotesIn(rfq: Pick<Rfq, 'suppliers'>): { answered: number; asked: number } {
   return { answered: rfq.suppliers.filter((s) => s.quotedAt || s.declined).length, asked: rfq.suppliers.length };

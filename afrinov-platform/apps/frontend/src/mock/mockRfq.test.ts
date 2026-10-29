@@ -155,6 +155,24 @@ describe('mock: quotes', () => {
     expect(history.slice(0, 2).map((e) => e.action)).toEqual(['RFQ_DECLINED', 'RFQ_QUOTE']);
   });
 
+  it('refuses what the server refuses: overlong text, over 200 prices, a price too fine to keep, a quote expired before it came', async () => {
+    const rfq = await sent();
+    const line = rfq.lines[0]!.id;
+    const put = (body: Record<string, unknown>) => api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: line, unitPrice: 1 }], ...body });
+    await expect(put({ quoteReference: 'x'.repeat(101) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(put({ prices: Array.from({ length: 201 }, () => ({ rfqLineId: line, unitPrice: 1 })) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(put({ prices: [{ rfqLineId: line, unitPrice: 0.000000001 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(put({ validUntil: '2020-01-01' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(api.post(`/rfqs/${rfq.id}/suppliers/sup-1/decline`, { notes: 'x'.repeat(2001) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('keeps a quotation under a .pdf name whatever it was called', async () => {
+    const { mockPutQuoteFile } = await import('./mockApi');
+    const rfq = await sent();
+    const saved = await mockPutQuoteFile(rfq.id, 'sup-1', 'quote.html', new TextEncoder().encode('%PDF-<script>')) as Quoted;
+    expect(saved.suppliers.find((s) => s.supplierId === 'sup-1')!.quoteFile?.fileName).toBe('quote.pdf');
+  });
+
   it("keeps the supplier's PDF, gives it back, refuses one that isn't a PDF, and takes it off", async () => {
     const { mockPutQuoteFile, mockGetQuoteFile } = await import('./mockApi');
     const rfq = await sent();

@@ -116,8 +116,22 @@ async function quotable(rfqId: string, supplierId: string, tx: Prisma.Transactio
 /** A file name safe to keep and to send back in a download: no folders, no control characters. */
 function cleanFileName(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? '';
-  const clean = [...base].filter((c) => c.charCodeAt(0) >= 0x20 && c !== '\u007f' && c !== '"').join('').trim().slice(0, 200);
-  return clean || 'quotation.pdf';
+  const clean = [...base].filter((c) => c.charCodeAt(0) >= 0x20 && c !== '\u007f' && c !== '"').join('').trim().slice(0, 196);
+  // Always a .pdf, so a download opens as the PDF it was checked to be, never as a page a browser runs.
+  if (!clean) return 'quotation.pdf';
+  return /\.pdf$/i.test(clean) ? clean : `${clean.replace(/\.[^.]*$/, '')}.pdf`;
+}
+
+/** A recorded quote, or decline, as the audit log keeps it before it changes. */
+function quoteForLog(asked: {
+  supplierId: string; declined: boolean; quotedAt: Date | null; quoteReference: string | null; validUntil: Date | null;
+  leadTime: string | null; notes: string | null; prices: Array<{ rfqLineId: string; unitPrice: Prisma.Decimal }>;
+}) {
+  return {
+    supplierId: asked.supplierId, declined: asked.declined, quotedAt: dayOf(asked.quotedAt), quoteReference: asked.quoteReference,
+    validUntil: dayOf(asked.validUntil), leadTime: asked.leadTime, notes: asked.notes,
+    prices: asked.prices.map((p) => ({ rfqLineId: p.rfqLineId, unitPrice: p.unitPrice.toString() })),
+  };
 }
 
 /**
@@ -154,7 +168,7 @@ async function editSent(
     // since been deactivated stays on it, and doesn't stop anyone else being asked.
     const added = await checkSuppliers(next.filter((s) => !had.includes(s)), tx);
     if (added.length > 0) {
-      await tx.rfqSupplier.createMany({ data: added.map((supplierId) => ({ rfqId: rfq.id, supplierId })) });
+      await tx.rfqSupplier.createMany({ data: askedInOrder(added).map((row) => ({ rfqId: rfq.id, ...row })) });
       before.supplierIds = had;
       after.supplierIds = [...had, ...added];
     }
@@ -241,6 +255,15 @@ async function checkSuppliers(supplierIds: string[], tx: Prisma.TransactionClien
   const inactive = suppliers.find((s) => !s.active);
   if (inactive) throw Errors.validation(`${inactive.name} is inactive. Reactivate the supplier to ask them for a quote.`);
   return ids;
+}
+
+/**
+ * The suppliers to ask, each a millisecond after the one before: they are
+ * listed by when they were asked, and rows saved together would otherwise
+ * share a time and come back in any order.
+ */
+function askedInOrder(supplierIds: string[], from = Date.now()) {
+  return supplierIds.map((supplierId, i) => ({ supplierId, createdAt: new Date(from + i) }));
 }
 
 const lineRows = (lines: RfqLineInput[]) => lines.map((l, i) => ({ lineNo: i + 1, materialId: l.materialId, quantity: l.quantity }));
@@ -336,7 +359,7 @@ export const RfqService = {
           penaltiesApply: input.penaltiesApply ?? false,
           createdById: actorId,
           lines: { create: lineRows(input.lines) },
-          suppliers: { create: supplierIds.map((supplierId) => ({ supplierId })) },
+          suppliers: { create: askedInOrder(supplierIds) },
         },
         include: { lines: { orderBy: { lineNo: 'asc' } } },
       });
@@ -425,7 +448,7 @@ export const RfqService = {
       const removed = had.filter((s) => !nextSuppliers.includes(s));
       const added = nextSuppliers.filter((s) => !had.includes(s));
       if (removed.length > 0) await tx.rfqSupplier.deleteMany({ where: { rfqId: rfq.id, supplierId: { in: removed } } });
-      if (added.length > 0) await tx.rfqSupplier.createMany({ data: added.map((supplierId) => ({ rfqId: rfq.id, supplierId })) });
+      if (added.length > 0) await tx.rfqSupplier.createMany({ data: askedInOrder(added).map((row) => ({ rfqId: rfq.id, ...row })) });
       if (removed.length > 0 || added.length > 0) {
         before.supplierIds = had;
         after.supplierIds = nextSuppliers;
@@ -540,7 +563,10 @@ export const RfqService = {
     const quotedAt = input.quotedAt ?? today;
     checkDay(quotedAt);
     if (quotedAt > today) throw Errors.validation(`${quotedAt} is still to come: record the day the quote came in`);
-    if (input.validUntil) checkDay(input.validUntil);
+    if (input.validUntil) {
+      checkDay(input.validUntil);
+      if (input.validUntil < quotedAt) throw Errors.validation(`A quote received on ${quotedAt} can't be valid only until ${input.validUntil}: check the date`);
+    }
     if (input.prices.length === 0) throw Errors.validation('Price at least one line, or mark the supplier as declined');
     await prisma.$transaction(async (tx) => {
       const { rfq, asked } = await quotable(rfqId, supplierId, tx);
@@ -568,11 +594,11 @@ export const RfqService = {
           action: asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE',
           entityType: 'Rfq',
           entityId: rfq.id,
-          before: asked.quotedAt
-            ? { supplierId, prices: asked.prices.map((p) => ({ rfqLineId: p.rfqLineId, unitPrice: p.unitPrice.toString() })) }
-            : Prisma.DbNull,
+          // The whole quote it replaces, so the Activity can say what changed.
+          before: asked.quotedAt || asked.declined ? quoteForLog(asked) : Prisma.DbNull,
           after: {
-            supplierId, quoteReference: cleanText(input.quoteReference), quotedAt, validUntil: input.validUntil ?? null,
+            supplierId, declined: false, quoteReference: cleanText(input.quoteReference), quotedAt, validUntil: input.validUntil ?? null,
+            leadTime: cleanText(input.leadTime), notes: cleanText(input.notes),
             prices: prices.map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice: String(unitPrice) })),
           } as Prisma.InputJsonValue,
         },
@@ -596,7 +622,12 @@ export const RfqService = {
         data: { declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, notes: cleanText(input.notes) },
       });
       await tx.auditLogEntry.create({
-        data: { actorId, action: 'RFQ_DECLINED', entityType: 'Rfq', entityId: rfq.id, after: { supplierId, notes: cleanText(input.notes) } as Prisma.InputJsonValue },
+        data: {
+          actorId, action: 'RFQ_DECLINED', entityType: 'Rfq', entityId: rfq.id,
+          // A quote it sets aside is kept here, as it was.
+          before: asked.quotedAt || asked.declined ? quoteForLog(asked) : Prisma.DbNull,
+          after: { supplierId, declined: true, notes: cleanText(input.notes) } as Prisma.InputJsonValue,
+        },
       });
     });
     return RfqService.getById(rfqId);
