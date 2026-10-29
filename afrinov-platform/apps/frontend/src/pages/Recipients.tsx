@@ -15,6 +15,7 @@ import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
 import type { ToolRow } from '../api/types';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 export type RecipientType = 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR';
 
@@ -98,9 +99,10 @@ export function Recipients() {
         </label>
       </FilterBar>
 
-      {recipients.error && <ErrorState message={recipients.error.message} onRetry={recipients.reload} />}
+      {recipients.error && !recipients.stale && <ErrorState error={recipients.error} onRetry={recipients.reload} />}
+      {recipients.stale && <StaleDataNotice error={recipients.error} onRetry={recipients.reload} />}
 
-      {!recipients.error && (
+      {(!recipients.error || recipients.stale) && (
         <DataTable
           ariaLabel="Recipients"
           isLoading={recipients.loading}

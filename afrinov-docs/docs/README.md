@@ -64,6 +64,6 @@ implementation has continued (Phases 0–3 of the root roadmap).
 | `09-frontend` | Frontend architecture, information architecture, navigation, page inventory, interaction model, design system, accessibility |
 | `10-security` | Requirements, threat model, access control, authn/authz model, audit & accountability, secrets, security testing |
 | `11-testing` | Strategy, pyramid, unit/integration/API/contract/E2E/acceptance/performance testing, traceability |
-| `12-operations` | Environments, deployment, CI/CD, monitoring, logging, alerting, backup/DR, incident management |
+| `12-operations` | Environments, deployment, CI/CD, monitoring, logging, alerting, backup/DR, incident management, error handling |
 | `13-project-management` | Developer onboarding (run, test, deploy), workflow, branching, coding standards, PR guidelines, DoR/DoD, release process, tech debt, specialist implementation roadmaps |
 | `14-validation` | Prototype validation, stakeholder review, UAT plan, acceptance criteria, readiness checklist, production readiness |

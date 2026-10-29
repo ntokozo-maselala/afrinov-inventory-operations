@@ -291,7 +291,7 @@ function NewPurchaseOrderForm() {
 
   // Only when they never loaded: a failed refresh keeps what was loaded, and the order being typed.
   if ((suppliersReq.error && !suppliersReq.data) || (materialsReq.error && !materialsReq.data)) {
-    return <ErrorState message={(suppliersReq.error ?? materialsReq.error)!.message} onRetry={() => { suppliersReq.reload(); materialsReq.reload(); }} />;
+    return <ErrorState error={suppliersReq.error ?? materialsReq.error} onRetry={() => { suppliersReq.reload(); materialsReq.reload(); }} />;
   }
 
   return (
@@ -463,7 +463,7 @@ export function EditPurchaseOrder() {
   if (!hasPermission('procurement:manage')) {
     return <NoAccess title="Edit purchase order" action="edit purchase orders" section={ORDERS} />;
   }
-  if (po.error) return <ErrorState message={po.error.message} onRetry={po.reload} />;
+  if (po.error) return <ErrorState error={po.error} onRetry={po.reload} />;
   if (!po.data) return <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>;
   if (!EDITABLE.includes(po.data.status)) {
     return (

@@ -19,6 +19,7 @@ import { formatDate } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import type { ReturnableLine } from '../api/types';
 import { locationLabel } from '../lib/locations';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 
@@ -103,7 +104,12 @@ export function ReturnStock() {
     }
   }
 
-  const loadError = recipients.error ?? locations.error;
+  // Each required list is judged on its own: a stale result from one must not
+  // conceal a hard failure in another and leave the form with an empty list.
+  const sources = [recipients, locations];
+  const hardError = sources.find((s) => s.error && !s.stale)?.error ?? null;
+  const loadFailed = hardError !== null;
+  const loadStale = !loadFailed && sources.some((s) => s.stale);
 
   // Reached by a typed or old link: say so rather than offer a form the server would refuse.
   const allowed = usePermissions().hasPermission('inventory:return');
@@ -117,7 +123,8 @@ export function ReturnStock() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Return stock' }]}
       />
 
-      {loadError && <ErrorState message={loadError.message} onRetry={() => { recipients.reload(); locations.reload(); }} />}
+      {loadFailed && <ErrorState error={hardError} onRetry={() => { recipients.reload(); locations.reload(); }} />}
+      {loadStale && <StaleDataNotice error={sources.find((s) => s.stale)?.error} onRetry={() => { recipients.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
 
       {last && (
         <Alert tone="success" title={`Returned ${last.count} item${last.count === 1 ? '' : 's'} from ${last.who}`} className="mb-4 max-w-5xl">
@@ -128,7 +135,7 @@ export function ReturnStock() {
         </Alert>
       )}
 
-      {!loadError && (
+      {!loadFailed && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-5xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <RecipientSelect
@@ -146,9 +153,10 @@ export function ReturnStock() {
             </Field>
           </div>
 
-          {recipientId && !badSince && lines.error && <ErrorState message={lines.error.message} onRetry={lines.reload} />}
+          {recipientId && !badSince && lines.error && !lines.stale && <ErrorState error={lines.error} onRetry={lines.reload} />}
+          {recipientId && !badSince && lines.stale && <StaleDataNotice error={lines.error} onRetry={lines.reload} />}
 
-          {recipientId && !badSince && !lines.error && (
+          {recipientId && !badSince && (!lines.error || lines.stale) && (
             <fieldset className="space-y-3">
               <legend className="text-h3 text-surface-900 mb-2">Still out{who ? ` with ${who}` : ''}</legend>
               {lines.loading && <p className="text-sm text-surface-500">Loading…</p>}

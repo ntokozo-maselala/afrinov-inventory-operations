@@ -10,6 +10,7 @@ import { Button } from '../Button';
 import { DataTable, type DataTableColumn } from '../DataTable';
 import { MovementBadge } from '../Badge';
 import { EmptyState, ErrorState } from '../EmptyState';
+import { StaleDataNotice } from '../StaleDataNotice';
 import { Drawer } from '../Modal';
 import { useToast } from '../Toast';
 import { TransactionDrawer } from '../TransactionDrawer';
@@ -56,9 +57,10 @@ export function LedgerReport({ kind, query }: { kind: LedgerReportKind; query: s
     summary.reload();
   }
 
-  if (list.error) return <ErrorState message={list.error.message} onRetry={reload} />;
+  if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={reload} />;
   return (
     <>
+      {list.stale && <StaleDataNotice error={list.error} onRetry={reload} />}
       <p className="text-meta mb-2">{list.loaded && summary.data ? `${formatNumber(list.rows.length)} of ${formatNumber(summary.data.total)} shown` : ' '}</p>
       <DataTable
         ariaLabel="Movements report"

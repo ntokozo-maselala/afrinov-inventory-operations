@@ -8,6 +8,7 @@ import { usePagedList } from '../../hooks/usePagedList';
 import { Button } from '../Button';
 import { DataTable, type DataTableColumn } from '../DataTable';
 import { EmptyState, ErrorState } from '../EmptyState';
+import { StaleDataNotice } from '../StaleDataNotice';
 import { Skeleton } from '../Skeleton';
 import { formatDateTime } from '../../lib/format';
 import { ReportBar, countWords, type ReportView } from './ReportView';
@@ -80,12 +81,13 @@ const COLUMNS: DataTableColumn<Row>[] = [
 
 export function StockCountsReport({ query, view, onView }: { query: string; view: ReportView; onView: (v: ReportView) => void }) {
   const list = usePagedList<CountRecord>(`/stock-counts?${query}`, 50);
-  if (list.error) return <ErrorState message={list.error.message} onRetry={list.reload} />;
+  if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows = list.rows.flatMap(rowsOf);
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No counts" description="No stock count was posted for these dates and filters." />;
   return (
     <div>
+      {list.stale && <StaleDataNotice error={list.error} onRetry={list.reload} />}
       <ReportBar view={view} onView={onView}>{list.loaded ? countWords(list.rows.length, rows.length, list.hasMore, 'count') : ' '}</ReportBar>
       {view === 'table' ? (
         <DataTable ariaLabel="Stock counts" isLoading={loading} rowKey={rowKey} rows={rows} columns={COLUMNS} emptyState={empty} />

@@ -22,6 +22,7 @@ import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
 import {
   EveryLineInto, OrderReceiptRow, checkReceiptLines, receiptLinesBody, receiptLinesFromOrder, type ReceiptLineDraft,
 } from '../components/OrderReceiptLines';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -241,7 +242,8 @@ export function PurchaseOrderDetail() {
         )}
       />
 
-      {po.error && <ErrorState message={po.error.message} onRetry={reload} />}
+      {po.error && !po.stale && <ErrorState error={po.error} onRetry={reload} />}
+      {po.stale && <StaleDataNotice error={po.error} onRetry={reload} />}
 
       {fresh && (
         <div className="space-y-6">

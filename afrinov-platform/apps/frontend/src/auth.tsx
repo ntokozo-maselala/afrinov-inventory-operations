@@ -19,7 +19,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, FRONTEND_ONLY, getToken, setToken } from './api/client';
+import { api, FRONTEND_ONLY, getToken, isApiError, setToken, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api/client';
 import { login as serviceLogin, type AuthUser } from './api/authService';
 
 export type { AuthUser } from './api/authService';
@@ -67,6 +67,9 @@ export function clearPersistedSession(): void {
 export interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
+  /** Set when the session ended because the server rejected the token, so the
+   * sign-in page can explain why the user is suddenly signed out. */
+  sessionExpired: boolean;
   login: (email: string, password: string) => Promise<{ user: AuthUser; landingPath: string }>;
   logout: () => void;
 }
@@ -85,6 +88,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // `setTimeout`-style race fix on protected routes.
   const [user, setUser] = useState<AuthUser | null>(() => readPersistedSession()?.user ?? null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
+
+  // A 401 from any request means the token that request carried is no longer
+  // accepted. The API client announces it once, with the rejected token; here
+  // it is turned into a single, consistent transition to signed-out. The token
+  // is checked first so that a late 401 from a request made before a new
+  // sign-in cannot clear the session that sign-in just created, and a failed
+  // sign-in (which carries no token) cannot present itself as an expiry.
+  useEffect(() => {
+    if (FRONTEND_ONLY) return;
+    const onExpired = (event: Event) => {
+      const rejected = (event as CustomEvent<SessionExpiredDetail>).detail?.token;
+      if (!rejected || rejected !== getToken()) return;
+      setToken(null);
+      clearPersistedSession();
+      setUser(null);
+      setSessionExpired(true);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
 
   // On mount, revalidate the session against the backend when a JWT is
   // present. If the token is stale, drop it and revert to logged-out.
@@ -111,11 +135,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
             writePersistedSession(u);
           }
         })
-        .catch(() => {
-          if (isMounted) {
+        .catch((e: unknown) => {
+          if (!isMounted) return;
+          // A rejected token (or a disabled account) means the session really
+          // is over: drop it and say so. A network fault or a backend outage
+          // says nothing about the token, so keep the persisted session and let
+          // the individual screens report the degraded service. Signing a user
+          // out because the server was briefly unreachable loses their work.
+          const rejected = isApiError(e) && (e.code === 'UNAUTHENTICATED' || e.code === 'FORBIDDEN');
+          if (rejected) {
             setToken(null);
             clearPersistedSession();
             setUser(null);
+            if (e.code === 'UNAUTHENTICATED') setSessionExpired(true);
           }
         })
         .finally(() => {
@@ -130,6 +162,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const result = await serviceLogin(email, password);
     setUser(result.user);
     writePersistedSession(result.user);
+    setSessionExpired(false);
     return result;
   }, []);
 
@@ -137,11 +170,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setToken(null);
     clearPersistedSession();
     setUser(null);
+    setSessionExpired(false);
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, login, logout }),
-    [user, loading, login, logout],
+    () => ({ user, loading, sessionExpired, login, logout }),
+    [user, loading, sessionExpired, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

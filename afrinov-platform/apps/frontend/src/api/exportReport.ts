@@ -10,7 +10,7 @@
 //
 // The two paths are designed to produce byte-identical *kinds* of files
 // with the same data and column ordering.
-import { getToken } from './client';
+import { getToken, isSafeServerMessage } from './client';
 import type { ReportResult } from './reportTypes';
 import { FRONTEND_ONLY } from './client';
 import { useToast } from '../components/Toast';
@@ -76,7 +76,9 @@ export function buildInventoryExportPath(format: ExportFormat, queryString = '')
 export async function errorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: { message?: string } };
-    if (body.error?.message) return body.error.message;
+    // The server message is shown only when it passes the safety check; a
+    // download failure is a toast, and a raw driver/HTML body must not reach it.
+    if (body.error?.message && isSafeServerMessage(body.error.message)) return body.error.message;
   } catch {
     // A proxy may return a non-JSON error page.
   }

@@ -14,6 +14,7 @@ import { useCanManageProcurement, usePermissions } from '../hooks/usePermissions
 import { formatMoney, type PoTotals } from '../lib/poMoney';
 import { useAuth } from '../auth';
 import { revisionLabel } from '../lib/poDocument';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface PO {
   id: string; number: string; revision?: number; status: string;
@@ -116,9 +117,10 @@ export function PurchaseOrders() {
         right={<span className="text-meta">{pos.loading ? 'Loading…' : `${filtered.length} of ${pos.data?.length ?? 0}`}</span>}
       />
 
-      {pos.error && <ErrorState message={pos.error.message} onRetry={pos.reload} />}
+      {pos.error && !pos.stale && <ErrorState error={pos.error} onRetry={pos.reload} />}
+      {pos.stale && <StaleDataNotice error={pos.error} onRetry={pos.reload} />}
 
-      {!pos.error && (
+      {(!pos.error || pos.stale) && (
         <DataTable
           ariaLabel="Purchase orders"
           isLoading={pos.loading}

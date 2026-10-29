@@ -20,6 +20,7 @@ import { Badge } from '../components/Badge';
 import type { CurrentStockRow } from '../api/types';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { locationLabel, type NamedLocation } from '../lib/locations';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 
 const STATUS_OPTIONS = [
@@ -195,10 +196,12 @@ export function Stock() {
         )}
       </FilterBar>
 
-      {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
-      {!stock.error && locations.error && <ErrorState message={`Rooms could not be loaded: ${locations.error.message}`} onRetry={locations.reload} />}
+      {stock.error && !stock.stale && <ErrorState error={stock.error} onRetry={stock.reload} />}
+      {stock.stale && <StaleDataNotice error={stock.error} onRetry={stock.reload} />}
+      {!stock.error && locations.error && !locations.stale && <ErrorState title="Rooms could not be loaded" error={locations.error} onRetry={locations.reload} />}
+      {!stock.error && locations.stale && <StaleDataNotice error={locations.error} onRetry={locations.reload} label="Rooms could not be refreshed" />}
 
-      {!stock.error && !(room && locations.error) && (
+      {(!stock.error || stock.stale) && !(room && locations.error && !locations.stale) && (
         <DataTable<CurrentStockRow>
           ariaLabel="Stock lines"
           isLoading={stock.loading || roomPending}

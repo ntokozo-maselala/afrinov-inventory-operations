@@ -15,6 +15,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { SupplierForm } from '../components/SupplierForm';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { Supplier } from '../api/types';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 export function Suppliers() {
   const suppliers = useApi<Supplier[]>('/suppliers');
@@ -48,9 +49,10 @@ export function Suppliers() {
         right={<span className="text-meta">{suppliers.loading ? 'Loading…' : `${filtered.length} of ${suppliers.data?.length ?? 0}`}</span>}
       />
 
-      {suppliers.error && <ErrorState message={suppliers.error.message} onRetry={suppliers.reload} />}
+      {suppliers.error && !suppliers.stale && <ErrorState error={suppliers.error} onRetry={suppliers.reload} />}
+      {suppliers.stale && <StaleDataNotice error={suppliers.error} onRetry={suppliers.reload} />}
 
-      {!suppliers.error && (
+      {(!suppliers.error || suppliers.stale) && (
         <DataTable
           ariaLabel="Suppliers"
           isLoading={suppliers.loading}

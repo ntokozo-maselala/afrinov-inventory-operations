@@ -123,15 +123,18 @@ describe('Stock report loading and failures', () => {
   });
 
   it('shows a report failure and retries the chosen period', async () => {
-    mockGet.mockRejectedValueOnce({ code: 'FORBIDDEN', message: 'Reports permission required' });
+    // A retryable failure: the approved copy is shown (not raw server text) and
+    // the retry reloads the chosen period.
+    mockGet.mockRejectedValueOnce({ code: 'SERVICE_UNAVAILABLE', message: 'Internal detail: upstream refused' });
     renderPage();
-    expect(await screen.findByText('Reports permission required')).toBeInTheDocument();
+    expect(await screen.findByText("We're having trouble connecting")).toBeInTheDocument();
+    expect(screen.queryByText('Internal detail: upstream refused')).not.toBeInTheDocument();
     expect(download()).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await screen.findByLabelText('Stock report overview');
     expect(mockGet).toHaveBeenCalledTimes(2);
     expect(mockGet).toHaveBeenLastCalledWith(SEPT);
-    expect(screen.queryByText('Reports permission required')).not.toBeInTheDocument();
+    expect(screen.queryByText("We're having trouble connecting")).not.toBeInTheDocument();
   });
 
   it('prevents duplicate downloads while pending and recovers after a failure', async () => {

@@ -6,6 +6,7 @@ import { usePagedList } from '../hooks/usePagedList';
 import { Button } from './Button';
 import { DataTable, type DataTableColumn } from './DataTable';
 import { EmptyState, ErrorState } from './EmptyState';
+import { StaleDataNotice } from './StaleDataNotice';
 import { formatDateTime } from '../lib/format';
 import type { ActivityRow } from '../api/types';
 
@@ -22,9 +23,12 @@ export const ACTIVITY_TYPE_LABEL: Record<string, string> = {
 
 export function OtherActivity({ query }: { query: string }) {
   const list = usePagedList<ActivityRow>(`/activity?${query}`, 50);
-  if (list.error) return <ErrorState message={list.error.message} onRetry={list.reload} />;
+  // A failed first-page refresh keeps its rows: show the stale warning beside
+  // them rather than replacing them with a hard error.
+  if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={list.reload} />;
   return (
     <>
+      {list.stale && <StaleDataNotice error={list.error} onRetry={list.reload} />}
       <p className="text-meta mb-2">{list.loaded ? `${list.rows.length}${list.hasMore ? '+' : ''} entries` : ' '}</p>
       <DataTable
         ariaLabel="Other changes"

@@ -120,7 +120,7 @@ function SettingsShell({ isAdmin }: { isAdmin: boolean }) {
         }
       />
 
-      {error && <div className="mb-4"><ErrorState message={error.message} onRetry={reload} /></div>}
+      {error && <div className="mb-4"><ErrorState error={error} onRetry={reload} /></div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <aside className="lg:col-span-1">

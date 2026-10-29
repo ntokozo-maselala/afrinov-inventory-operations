@@ -19,6 +19,7 @@ import { today } from '../lib/dates';
 import type { CurrentStockRow } from '../api/types';
 import { needsProject, sectionOf } from '../lib/categories';
 import { useLocationLabel } from '../hooks/useLocationLabel';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -141,7 +142,8 @@ export function IssueStock() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Issue stock' }]}
       />
 
-      {stock.error && <ErrorState message={stock.error.message} onRetry={stock.reload} />}
+      {stock.error && !stock.stale && <ErrorState error={stock.error} onRetry={stock.reload} />}
+      {stock.stale && <StaleDataNotice error={stock.error} onRetry={stock.reload} />}
 
       {last && (
         <Alert tone="success" title={`Issued ${last.count} item${last.count === 1 ? '' : 's'} to ${last.who}`} className="mb-4 max-w-4xl">
@@ -153,7 +155,7 @@ export function IssueStock() {
         </Alert>
       )}
 
-      {!stock.error && (
+      {(!stock.error || stock.stale) && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <RecipientSelect id="issue-recipient" value={recipientId} onChange={setRecipientId} recipients={recipients} disabled={loading} invalid={!!error && !recipientId} />

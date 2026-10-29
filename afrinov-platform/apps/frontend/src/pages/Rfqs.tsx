@@ -15,6 +15,7 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useCanManageProcurement } from '../hooks/usePermissions';
 import { formatDay, quotesIn, type Rfq } from '../lib/rfq';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 /** RFQs a buyer still has to send or chase: the default view. */
 const IN_HAND = 'DRAFT,SENT';
@@ -83,9 +84,10 @@ export function Rfqs() {
         right={<span className="text-meta">{rfqs.loading ? 'Loading…' : `${filtered.length} of ${rfqs.data?.length ?? 0}`}</span>}
       />
 
-      {rfqs.error && <ErrorState message={rfqs.error.message} onRetry={rfqs.reload} />}
+      {rfqs.error && !rfqs.stale && <ErrorState error={rfqs.error} onRetry={rfqs.reload} />}
+      {rfqs.stale && <StaleDataNotice error={rfqs.error} onRetry={rfqs.reload} />}
 
-      {!rfqs.error && (
+      {(!rfqs.error || rfqs.stale) && (
         <DataTable
           ariaLabel="Requests for quotation"
           isLoading={rfqs.loading}

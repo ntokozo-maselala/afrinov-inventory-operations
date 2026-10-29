@@ -20,6 +20,7 @@ import { api, type ApiError } from '../api/client';
 import type { Supplier } from '../api/types';
 import { formatDate, formatNumber } from '../lib/format';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface PO {
   id: string; number: string; status: string; supplierId: string;
@@ -96,9 +97,10 @@ export function SupplierDetail() {
         )}
       />
 
-      {supplierReq.error && (supplierReq.error.code === 'NOT_FOUND'
+      {supplierReq.stale && <StaleDataNotice error={supplierReq.error} onRetry={supplierReq.reload} />}
+      {supplierReq.error && !supplierReq.stale && (supplierReq.error.code === 'NOT_FOUND'
         ? <EmptyState title="Supplier not found" description="It may have been deleted or the link is incorrect." />
-        : <ErrorState message={supplierReq.error.message} onRetry={supplierReq.reload} />)}
+        : <ErrorState error={supplierReq.error} onRetry={supplierReq.reload} />)}
 
       {supplier && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

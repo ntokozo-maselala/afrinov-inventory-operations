@@ -4,7 +4,8 @@ import { downloadMonthEnd, stockReportFilename } from './exportMonthEnd';
 import type { MonthEndReport } from './reportTypes';
 
 const mocks = vi.hoisted(() => ({ frontendOnly: false, get: vi.fn(), token: vi.fn(), download: vi.fn(), fetch: vi.fn() }));
-vi.mock('./client', () => ({
+vi.mock('./client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./client')>(),
   get FRONTEND_ONLY() { return mocks.frontendOnly; }, api: { get: mocks.get }, getToken: mocks.token,
 }));
 vi.mock('./exportReport', async (importOriginal) => ({
