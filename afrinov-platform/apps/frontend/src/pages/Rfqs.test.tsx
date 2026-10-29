@@ -53,8 +53,8 @@ beforeEach(() => {
     if (path === '/suppliers') return SUPPLIERS;
     if (path.startsWith('/settings/values')) return { 'general.companyName': 'Afrinov', 'purchaseOrders.rfqInstructions': 'Fill in the prices.', 'purchaseOrders.rfqQuoteEmail': 'quotes@afrinov.co.za' };
     if (path === '/materials') return [
-      { id: 'm-1', sku: 'WHEEL-SS', name: 'Overhead rail wheel', category: 'CONSUMABLES', unitOfMeasure: 'LOTS', requiredStock: '0', active: true },
-      { id: 'm-old', sku: 'OLD-PIN', name: 'Clevis pin (old)', category: 'CONSUMABLES', unitOfMeasure: 'PC', requiredStock: '0', active: false },
+      { id: 'm-1', sku: 'WHEEL-SS', name: 'Overhead rail wheel', category: 'PROJECT_MATERIAL', unitOfMeasure: 'LOTS', requiredStock: '0', active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } },
+      { id: 'm-old', sku: 'OLD-PIN', name: 'Clevis pin (old)', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', requiredStock: '0', active: false, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } },
     ];
     if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1325', name: 'Door rails', status: 'ACTIVE' }];
     return [];
@@ -133,6 +133,16 @@ describe('New request for quotation', () => {
       projectNumber: 'AFRI-1325', description: undefined, lines: [{ materialId: 'm-1', quantity: 4.37 }], supplierIds: ['s-1', 's-3'],
     })));
     await screen.findByRole('heading', { name: 'AFRI-02A-1325-02-01' });
+  });
+
+  // Stores ordering roadmap: an RFQ is for one project's material.
+  it('needs its project before it saves', async () => {
+    appAt('/rfqs/new');
+    await screen.findByRole('heading', { name: 'New request for quotation' });
+    expect(within(await screen.findByLabelText('Project')).queryByRole('option', { name: /No project/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Choose the project this RFQ is for.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 
   it("doesn't offer inactive items, which the server would refuse", async () => {

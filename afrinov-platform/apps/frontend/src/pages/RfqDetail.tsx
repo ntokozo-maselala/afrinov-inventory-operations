@@ -98,7 +98,7 @@ export function RfqDetail() {
     <div>
       <PageHeader
         title={r?.number ?? (rfq.loading ? 'Loading…' : 'Request for quotation')}
-        description={r ? [r.description, r.projectNumber ? `Project ${r.projectNumber}` : 'Stores'].filter(Boolean).join(' · ') : ''}
+        description={r ? [r.description, r.projectNumber ? `Project ${r.projectNumber}` : null].filter(Boolean).join(' · ') : ''}
         breadcrumb={[{ label: 'Requests for quotation', to: '/rfqs' }, { label: r?.number ?? 'RFQ' }]}
         actions={r && (
           <div className="flex flex-wrap items-center gap-2">
@@ -157,7 +157,7 @@ export function RfqDetail() {
               <h2 className="text-h3 text-surface-900">Summary</h2>
               <dl className="text-sm grid grid-cols-3 gap-y-2">
                 <dt className="text-surface-500">RFQ no.</dt><dd className="col-span-2 text-mono">{r.number}</dd>
-                <dt className="text-surface-500">Project</dt><dd className="col-span-2">{r.projectNumber ? `${r.projectNumber}${r.project?.name ? ` — ${r.project.name}` : ''}` : 'Stores'}</dd>
+                <dt className="text-surface-500">Project</dt><dd className="col-span-2">{r.projectNumber ? `${r.projectNumber}${r.project?.name ? ` — ${r.project.name}` : ''}` : '—'}</dd>
                 <dt className="text-surface-500">Description</dt><dd className="col-span-2">{r.description ?? '—'}</dd>
                 <dt className="text-surface-500">Issued</dt><dd className="col-span-2">{r.issuedAt ? formatDay(r.issuedAt) : 'Not sent yet'}</dd>
                 <dt className="text-surface-500">Closing</dt><dd className="col-span-2">{r.closingDate ? formatDay(r.closingDate) : `${DEFAULT_CLOSING_DAYS} days after it is sent`}</dd>
@@ -368,7 +368,7 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
       if (removed.length) parts.push(`no longer asking ${removed.join(', ')}`);
     }
     if ('lines' in after) parts.push('lines changed');
-    if ('projectNumber' in after) parts.push(after.projectNumber ? `moved to project ${String(after.projectNumber)}` : 'moved to Stores');
+    if ('projectNumber' in after) parts.push(after.projectNumber ? `moved to project ${String(after.projectNumber)}` : 'taken off its project');
     if (['description', 'notes', 'penaltiesApply'].some((k) => k in after)) parts.push('details changed');
     return parts.length ? `${parts[0]!.charAt(0).toUpperCase()}${parts.join('; ').slice(1)}` : 'Details updated';
   }

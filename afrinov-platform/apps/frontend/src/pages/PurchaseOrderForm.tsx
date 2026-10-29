@@ -9,9 +9,11 @@
 // details and remarks while the order is editable; materials and quantities
 // are fixed once raised.
 //
-// Stores → Order stock uses the same form in its Stores form (Stores ordering
-// roadmap): no project, Stores items only, and + New item adds a Stores item.
-// An order's edit page follows its kind, as the server does.
+// Ordering is split by kind (Stores ordering roadmap). New purchase order is
+// Procurement's: for one project, holding that project's material, and + New
+// item adds a Projects item for it. Store → Order stock uses the same form in
+// its Stores form: no project, Stores items only, and + New item adds a Stores
+// item. An order's edit page follows its kind, as the server does.
 //
 // The re-order list, a supplier's page and an item's page link to the new
 // form with what to order: ?supplierId=…&materialIds=a,b. The supplier and
@@ -140,8 +142,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   // completed or cancelled project's isn't ordered at all: its leftovers go to Stores.
   const materials = catalogue.filter((m) => !needsProject(m)
     && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED'))
-    // A Stores order holds Stores items only.
-    && (!stores || sectionOf(m.category) === 'STORES'));
+    // A Stores order holds Stores items only, a project order Projects items only.
+    && sectionOf(m.category) === (stores ? 'STORES' : 'PROJECTS'));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
   const [expected, setExpected] = useState('');
@@ -266,6 +268,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   async function save(submit: boolean) {
     setValidation(null);
     if (!supplierId) { setValidation('Select a supplier.'); return; }
+    if (!stores && !orderProject) { setValidation('Choose the project this order is for.'); return; }
     const validLines = lines.filter((l) => l.materialId && Number(l.orderedQty) > 0);
     if (validLines.length === 0) { setValidation('Add at least one line with a positive quantity.'); return; }
     if (validLines.some((l) => l.unitPrice.trim() !== '' && !(Number(l.unitPrice) >= 0))) { setValidation('A unit price must be 0 or more, or left blank.'); return; }
@@ -315,7 +318,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
         title={stores ? 'New stock order' : 'New purchase order'}
         description={stores
           ? 'Stores items for the shelf, laid out like the purchase order template. Save a draft to finish later, or submit it for approval.'
-          : 'Laid out like the purchase order template. Save a draft to finish later, or submit it for approval.'}
+          : "One project's material, laid out like the purchase order template. Save a draft to finish later, or submit it for approval."}
         breadcrumb={[section, { label: 'New' }]}
       />
       <form onSubmit={(e) => { e.preventDefault(); void save(true); }} className="surface-card p-5 space-y-6 max-w-5xl" noValidate>
@@ -348,6 +351,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
           idPrefix="po-new"
           projectSetBy={lockedBy?.sku}
           hideProject={stores}
+          requireProject={!stores}
         />
 
         <fieldset>
@@ -368,7 +372,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
-                    {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
+                    {/* A Projects item is added for the order's project, so it waits for one. */}
+                    {canAddItem && (stores || orderProject) && <option value={NEW_ITEM}>+ New item…</option>}
                     {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
@@ -619,6 +624,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
           onChange={setDetails}
           idPrefix="po-edit"
           hideProject={stores}
+          requireProject={!stores}
           projectSetBy={po.lines.find((l) => l.material.category && sectionOf(l.material.category) === 'PROJECTS' && l.material.projectNumber)?.material.sku}
         />
         <Field label="Remarks" htmlFor="po-edit-notes">

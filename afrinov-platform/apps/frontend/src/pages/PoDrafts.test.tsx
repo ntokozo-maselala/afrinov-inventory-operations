@@ -43,7 +43,7 @@ beforeEach(() => {
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
     if (path === '/suppliers') return [{ id: 's-1', name: 'Hydac', active: true, currency: 'ZAR' }];
-    if (path === '/materials') return [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: '5', active: true }];
+    if (path === '/materials') return [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: '5', active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } }];
     if (path.startsWith('/settings/values')) return { 'purchaseOrders.vatRate': 15 };
     return [];
   });

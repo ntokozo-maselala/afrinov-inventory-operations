@@ -8,13 +8,13 @@ Four phases that split ordering the way Afrinov works. The **Procurement team** 
 
 Both kinds stay ordinary purchase orders underneath: the same AFRI numbering, approval by value, PDF and receiving. What changes is who may raise which kind, from which page, with which items. The server enforces the split, so it holds even if someone bypasses the screens.
 
-**Status:** Phases 1 and 2 built on `feature/stores-ordering`, in one pull request (#117), not yet merged: Phase 1 needs Phase 2's page.
+**Status:** Phases 1 to 3 built on `feature/stores-ordering`, in one pull request (#117), not yet merged.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Permission and server rules | M | Built |
 | 2 | Order stock page under Stores | M | Built |
-| 3 | Procurement for projects only | M | Planned |
+| 3 | Procurement for projects only | M | Built |
 | 4 | Roles end to end and docs | S | Planned |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
@@ -48,7 +48,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
 ### Order of work
 
-One branch and pull request per phase, in order, except Phases 1 and 2, which share #117 so the server rules and the store's page arrive together. Phase 3 can follow Phase 2 or run beside it.
+Phases 1 to 3 share pull request #117, so the server rules, the store's page and Procurement's project-only forms arrive together. Phase 4 follows.
 
 ## Phase 1: Permission and server rules
 
@@ -67,7 +67,7 @@ Size M. Backend, with a migration, and the mock.
 
 **Done when:** the server refuses a storeman's project order, a buyer's Stores order, a Stores item on a project order and an RFQ without a project.
 
-**Until Phase 3:** Procurement's New purchase order still offers "No project", which the server refuses a buyer. Phase 2 moved Stock status's re-order list to the store, and gave the storeman the Order stock page.
+Phases 2 and 3 closed the gaps Phase 1 left on screen: nothing offers a buyer a Stores order, or the storeman a project order.
 
 ## Phase 2: Order stock page under Stores
 
@@ -88,13 +88,13 @@ Size M. Frontend. Needs Phase 1.
 
 Size M. Frontend. Needs Phase 1.
 
-- [ ] **3.1 New purchase order needs a project.** No "No project" choice; lines offer that project's material only; **+ New item** adds Projects items only.
+- [x] **3.1 New purchase order needs a project.** No "No project" choice ("Choose the project…"), and saving without one is refused; lines offer Projects items only, that project's once chosen (picking one still sets the project); **+ New item** shows once the order has its project and adds a Projects item for it. A project order's edit page can't clear its project.
   Files: `pages/PurchaseOrderForm.tsx`, `components/PurchaseOrderDetailsFields.tsx`
-- [ ] **3.2 RFQs need a project.** The same on the RFQ form; "Stores" wording leaves the RFQ list, page and PDF.
+- [x] **3.2 RFQs need a project.** The same on the RFQ form (a draft's own lines stay listed so they can be changed); "Stores" wording leaves the RFQ list, page, Activity and PDF: an older RFQ without a project shows "No project" or a dash.
   Files: `pages/RfqForm.tsx`, `pages/Rfqs.tsx`, `pages/RfqDetail.tsx`, `lib/rfqDocument.ts`
-- [ ] **3.3 The Purchase orders list.** Project orders by default, with the store's orders a filter away, read-only.
+- [x] **3.3 The Purchase orders list.** A kind filter (Project orders, Stores orders, All orders, kept in the link as `?kind=`). Buyers land on project orders; approvers and Admin on all orders, so a Stores order waiting for approval isn't hidden. A buyer opens the store's orders read-only.
   Files: `pages/PurchaseOrders.tsx`
-- [ ] **3.4 A Projects item's Order button** opens New purchase order for its project.
+- [x] **3.4 A Projects item's Order button** opens New purchase order with the item, which sets its project. A supplier's **New order** opens the form the viewer orders from: Procurement's for a buyer, Order stock's for the storeman.
 
 **Done when:** nothing in the Procurement section offers or accepts Stores items.
 

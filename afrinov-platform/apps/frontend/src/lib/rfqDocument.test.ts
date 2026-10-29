@@ -64,7 +64,7 @@ describe('rfqDocumentBlocks, rfqDocumentLines and rfqReturnNote', () => {
     const blocks = rfqDocumentBlocks(rfq({ issuedAt: null, closingDate: null, projectNumber: null, sentBy: null }), { supplierId: 's-9', quotedAt: null, declined: false }, COMPANY);
     expect(blocks.supplier).toContainEqual(['Supplier', 's-9']);
     expect(blocks.supplier).toContainEqual(['Phone', '-']);
-    expect(blocks.rfq).toContainEqual(['Project', 'Stores']);
+    expect(blocks.rfq).toContainEqual(['Project', '-']);
     expect(blocks.rfq).toContainEqual(['Issued', '-']);
   });
 

@@ -121,7 +121,7 @@ const COLUMNS: DataTableColumn<Rfq>[] = [
     key: 'desc', header: 'Description', render: (r) => (
       <div className="min-w-0">
         <div className="truncate">{r.description ?? <span className="text-surface-400">—</span>}</div>
-        <div className="text-meta">{r.projectNumber ? `Project ${r.projectNumber}` : 'Stores'} · {r.lines.length} line{r.lines.length === 1 ? '' : 's'}</div>
+        <div className="text-meta">{r.projectNumber ? `Project ${r.projectNumber}` : 'No project'} · {r.lines.length} line{r.lines.length === 1 ? '' : 's'}</div>
       </div>
     ),
   },

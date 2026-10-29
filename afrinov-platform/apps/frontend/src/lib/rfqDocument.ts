@@ -64,7 +64,7 @@ export function rfqDocumentBlocks(rfq: Rfq, to: RfqSupplier, company: RfqCompany
     rfq: [
       ['RFQ no.', rfq.number],
       ['Description', or(rfq.description)],
-      ['Project', rfq.projectNumber ? rfq.projectNumber : 'Stores'],
+      ['Project', or(rfq.projectNumber)],
       ['Issued', rfq.issuedAt ? formatDay(rfq.issuedAt) : dash],
       ['Closing', rfq.closingDate ? formatDay(rfq.closingDate) : dash],
       [`${company.name} contact`, or(rfq.sentBy?.name ?? rfq.createdBy?.name)],

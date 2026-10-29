@@ -17,7 +17,7 @@ const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
 const { NewPurchaseOrder, EditPurchaseOrder } = await import('./PurchaseOrderForm');
 
-const material = (id: string, sku: string, unitCost: string | null) => ({ id, sku, name: `Item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost, active: true });
+const material = (id: string, sku: string, unitCost: string | null) => ({ id, sku, name: `Item ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost, active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } });
 const SUPPLIERS = [{ id: 's-za', name: 'Hydac', active: true, currency: 'ZAR' }, { id: 's-eu', name: 'HS SRL', active: true, currency: 'EUR' }];
 const MATERIALS = [material('m-1', 'DISC-115', '12.50'), material('m-2', 'BOLT-M16', null)];
 

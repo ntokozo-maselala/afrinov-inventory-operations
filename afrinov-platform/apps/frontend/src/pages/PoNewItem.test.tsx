@@ -1,6 +1,7 @@
 // + New item on a purchase order line: material the client needs that isn't in
 // the catalogue yet is added from its line, as a Projects item for the order's
-// project when it has one, and goes straight onto that line.
+// project, and goes straight onto that line. Procurement buys for projects
+// (Stores ordering roadmap), so it is offered once the order has its project.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -16,7 +17,10 @@ vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: true }));
 const { NewPurchaseOrder } = await import('./PurchaseOrderForm');
 const { ToastProvider } = await import('../components/Toast');
 
-const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '10', unitCost: '12.5', active: true }];
+const MATERIALS = [{
+  id: 'm-1', sku: '1369-DISC', name: 'Cutting disc', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: '12.5', active: true,
+  projectNumber: '1369', project: { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE' },
+}];
 const PROJECTS = [{ projectNumber: '1369', name: 'Plant upgrade', active: true, status: 'ACTIVE' }];
 const created = (over: Record<string, unknown> = {}) => ({
   id: 'm-new', sku: '1369-FLANGE-150', name: 'Flange 150NB', category: 'PROJECT_MATERIAL', section: 'PROJECTS', unitOfMeasure: 'each',
@@ -46,6 +50,7 @@ function renderForm() {
 
 async function lineWithNewItem() {
   await waitFor(() => expect(screen.getByRole('option', { name: /1369 — Plant upgrade/ })).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1369' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
   fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
   return screen.findByRole('dialog', { name: 'New item' });
@@ -113,13 +118,13 @@ describe('+ New item on an order line', () => {
       fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument());
     };
-    mockPost.mockImplementation(async () => created({ id: 'm-new', category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null }));
+    mockPost.mockImplementation(async () => created({ id: 'm-new' }));
     await add();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new');
     expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(850);
 
     fireEvent.change(screen.getByLabelText('Line 1 unit price'), { target: { value: '99' } });
-    mockPost.mockImplementation(async () => created({ id: 'm-new2', sku: 'FLANGE-2', category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null, unitCost: '500' }));
+    mockPost.mockImplementation(async () => created({ id: 'm-new2', sku: 'FLANGE-2', unitCost: '500' }));
     await add();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new2');
     expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(99);
@@ -154,14 +159,14 @@ describe('+ New item on an order line', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
     fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument());
-    finish(created({ category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null }));
+    finish(created());
     expect(await screen.findByText('1369-FLANGE-150 added to the catalogue')).toBeInTheDocument();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
   });
 
   // Qodo: a unit cost of 0 must price the line at 0, not leave it unpriced.
   it('prices the line at 0 for an item whose unit cost is 0', async () => {
-    mockPost.mockImplementation(async () => created({ category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null, unitCost: '0' }));
+    mockPost.mockImplementation(async () => created({ unitCost: '0' }));
     renderForm();
     const drawer = await lineWithNewItem();
     fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: 'FREE-SAMPLE' } });
@@ -186,7 +191,7 @@ describe('+ New item on an order line', () => {
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
     const second = await screen.findByRole('dialog', { name: 'New item' });
     expect(within(second).getByLabelText(/SKU/)).toHaveValue('');
-    finish(created({ category: 'CONSUMABLES', section: 'STORES', projectNumber: null, project: null }));
+    finish(created());
     expect(await screen.findByText('1369-FLANGE-150 added to the catalogue')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'New item' })).toBeInTheDocument();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('');

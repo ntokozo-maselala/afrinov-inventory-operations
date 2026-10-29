@@ -61,9 +61,10 @@ function Where() {
 }
 const at = () => screen.getByTestId('at').textContent;
 
+// The re-order list's items are Stores stock, so its link opens the store's order form.
 const form = (query: string) => render(
-  <MemoryRouter initialEntries={[`/purchase-orders/new?${query}`]}>
-    <ToastProvider><Routes><Route path="/purchase-orders/new" element={<NewPurchaseOrder />} /></Routes></ToastProvider>
+  <MemoryRouter initialEntries={[`/stock/orders/new?${query}`]}>
+    <ToastProvider><Routes><Route path="/stock/orders/new" element={<NewStockOrder />} /></Routes></ToastProvider>
   </MemoryRouter>,
 );
 
@@ -94,6 +95,19 @@ describe('a new stock order (Stores → Order stock)', () => {
     expect(at()).toBe('/stock/orders');
   });
 
+  it("opens Procurement's form on a Projects item's link, for its project", async () => {
+    auth.roles = ['PROCUREMENT'];
+    render(
+      <MemoryRouter initialEntries={['/purchase-orders/new?materialIds=m-beam,m-1']}>
+        <ToastProvider><Routes><Route path="/purchase-orders/new" element={<NewPurchaseOrder />} /></Routes></ToastProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByLabelText('Line 1 material')).toHaveValue('m-beam');
+    // The Stores item is the store's to order, so it is left off.
+    expect(screen.queryByLabelText('Line 2 material')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Project/)).toHaveValue('AFRI-1325');
+  });
+
   it('is not for a buyer, who buys for projects', async () => {
     auth.roles = ['PROCUREMENT'];
     stockOrder('materialIds=m-1');
@@ -102,6 +116,8 @@ describe('a new stock order (Stores → Order stock)', () => {
 });
 
 describe('the new-order form filled in from its link', () => {
+  beforeEach(() => { auth.roles = ['STORE_CONTROLLER']; });
+
   it('fills in the supplier and the lines: up to Required Stock, priced from unit cost', async () => {
     form('supplierId=s-1&materialIds=m-1,m-2');
     expect(await screen.findByLabelText('Line 2 material')).toHaveValue('m-2');
@@ -195,6 +211,16 @@ describe('ordering from a supplier or an item', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByRole('link', { name: /New order/ })).toHaveAttribute('href', '/purchase-orders/new?supplierId=s-1');
+  });
+
+  it("New order on a supplier opens the store's order form for the storeman", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    render(
+      <MemoryRouter initialEntries={['/suppliers/s-1']}>
+        <ToastProvider><Routes><Route path="/suppliers/:id" element={<SupplierDetail />} /></Routes></ToastProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('link', { name: /New order/ })).toHaveAttribute('href', '/stock/orders/new?supplierId=s-1');
   });
 
   const item = (id: string) => render(

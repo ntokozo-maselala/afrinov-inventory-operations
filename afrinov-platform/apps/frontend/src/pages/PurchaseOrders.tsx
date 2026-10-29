@@ -32,6 +32,17 @@ const OPEN_WORK = 'DRAFT,PENDING_APPROVAL';
 /** Orders the signed-in user may approve now: priced and within their limit (server-side). */
 export const MINE = 'mine';
 
+/**
+ * Which kind of order to list (Stores ordering roadmap): Procurement buys for
+ * projects, so buyers land on project orders; the store's own orders, raised
+ * from Store → Order stock, are a filter away and read-only to them.
+ */
+const KIND_OPTIONS = [
+  { value: 'projects', label: 'Project orders' },
+  { value: 'stores', label: 'Stores orders' },
+  { value: 'all', label: 'All orders' },
+];
+
 export const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: OPEN_WORK, label: 'Draft & pending approval' },
@@ -60,6 +71,10 @@ export function PurchaseOrders() {
   const approver = canApprove && !buyer && !roles.includes('ADMIN');
   const landingStatus = buyer ? OPEN_WORK : approver ? MINE : '';
   const defaultStatus = project ? '' : landingStatus;
+  // Approvers and Admin see both kinds, so a Stores order waiting for approval isn't hidden.
+  const defaultKind = buyer ? 'projects' : 'all';
+  const rawKind = params.get('kind');
+  const kind = KIND_OPTIONS.some((o) => o.value === rawKind) ? rawKind! : defaultKind;
   const rawStatus = params.get('status');
   const requested = rawStatus === null ? defaultStatus : rawStatus === 'all' ? '' : rawStatus;
   const status = requested === MINE && !canApprove ? '' : requested;
@@ -70,6 +85,7 @@ export function PurchaseOrders() {
   const setParam = (key: string, v: string | null) => setParams((p) => { if (v === null) p.delete(key); else p.set(key, v); return p; }, { replace: true });
   const setStatus = (v: string) => setParam('status', v === defaultStatus ? null : v || 'all');
   const setProject = (v: string) => setParam('project', v || null);
+  const setKind = (v: string) => setParam('kind', v === defaultKind ? null : v);
   const canManage = useCanManageProcurement();
   const projectOptions = [...new Set((pos.data ?? []).map((p) => p.projectNumber).filter((n): n is string => !!n)), ...(project ? [project] : [])]
     .filter((n, i, all) => all.indexOf(n) === i).sort();
@@ -82,6 +98,7 @@ export function PurchaseOrders() {
   const needle = q.trim().toLowerCase();
   const filtered = (pos.data ?? []).filter((p) => {
     if (statuses.length > 0 && !statuses.includes(p.status)) return false;
+    if (kind !== 'all' && (kind === 'stores') !== !p.projectNumber) return false;
     if (project && p.projectNumber !== project) return false;
     if (needle) {
       const hay = `${p.number} ${p.supplier?.name ?? ''} ${p.projectNumber ?? ''}`.toLowerCase();
@@ -104,6 +121,9 @@ export function PurchaseOrders() {
               <span aria-hidden="true" className="absolute left-2.5 top-2.5 text-surface-400"><Icon.Search /></span>
               <Input className="pl-8" placeholder="Search PO, supplier or project…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search purchase orders" />
             </div>
+            <Select className="sm:w-44" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Filter by kind of order">
+              {KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
             <Select className="sm:w-56" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
               {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
@@ -111,7 +131,7 @@ export function PurchaseOrders() {
               <option value="">All projects</option>
               {projectOptions.map((n) => <option key={n} value={n}>{n}</option>)}
             </Select>
-            {(q || status || project) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setParams((p) => { p.delete('project'); if (landingStatus) p.set('status', 'all'); else p.delete('status'); return p; }, { replace: true }); }}>Clear</Button>}
+            {(q || status || project || kind !== defaultKind) && <Button variant="ghost" size="sm" onClick={() => { setQ(''); setParams((p) => { p.delete('project'); p.delete('kind'); if (landingStatus) p.set('status', 'all'); else p.delete('status'); return p; }, { replace: true }); }}>Clear</Button>}
           </>
         )}
         right={<span className="text-meta">{pos.loading ? 'Loading…' : `${filtered.length} of ${pos.data?.length ?? 0}`}</span>}
@@ -132,7 +152,7 @@ export function PurchaseOrders() {
               title="Nothing is waiting for your approval"
               description="Orders within your limit appear here once they are submitted and priced."
             />
-          ) : (pos.data?.length ?? 0) > 0 || q || project ? (
+          ) : (pos.data?.length ?? 0) > 0 || q || project || kind !== 'all' ? (
             <EmptyState
               title={status === OPEN_WORK && !q && !project ? 'No drafts or orders awaiting approval' : 'No POs match your filters'}
               description="Try another status, or clear the filters."

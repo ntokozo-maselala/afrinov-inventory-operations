@@ -23,7 +23,7 @@ const SUPPLIERS = [
   },
   { id: 's-2', name: 'Fast Flame', vendorCode: 'V003', active: true, currency: 'ZAR', paymentTerms: null, contactName: 'Sean', contactPhone: null, contactEmail: null, address: null },
 ];
-const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: null, active: true }];
+const MATERIALS = [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: null, active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } }];
 const ORDER = {
   id: 'po-1', number: 'AFRI-0001', status: 'DRAFT', projectNumber: 'AFRI-1325', currency: 'ZAR', vatRate: '15', supplier: { id: 's-1', name: 'Amalgum Welding', vendorCode: 'V001' },
   supplierContactName: 'Nicole', supplierContactPhone: '011 452 8413', supplierContactEmail: 'nicole@welding.co.za', supplierAddress: 'Branch 2',
