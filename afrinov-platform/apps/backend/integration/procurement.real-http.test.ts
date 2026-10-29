@@ -719,5 +719,90 @@ describe('receiving stock over real HTTP', () => {
       expect((await user('GET', `/purchase-orders/${store.body.id}`)).status).toBe(403);
       expect((await user('GET', '/purchase-orders?kind=stores')).status).toBe(403);
     });
+
+    // Stores and Procurement Separation Roadmap, Phase 3: project material goes
+    // from the supplier straight to site, so Procurement confirms its delivery
+    // on the order and nothing is added to stock; the store receives Stores orders only.
+    describe('delivery of a project order', () => {
+      interface Lined { id: string; status: string; lines: Array<{ id: string; orderedQty: string; receivedQty: string }> }
+
+      /** A project order for 4 beams, approved. */
+      async function approvedProjectOrder(): Promise<Lined> {
+        const created = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 4, unitPrice: 40 }] });
+        expect(created.status).toBe(201);
+        const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${created.body.id}/submit`);
+        if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
+        const order = (await api<Lined>('GET', `/purchase-orders/${created.body.id}`)).body;
+        expect(order.status).toBe('APPROVED');
+        return order;
+      }
+      const confirm = (who: typeof api, id: string, body: Record<string, unknown>) => who<Lined & { error: { message: string } }>('POST', `/purchase-orders/${id}/confirm-delivery`, body);
+
+      it('lets the buyer confirm what arrived on site, line by line, adding no stock', async () => {
+        const order = await approvedProjectOrder();
+        const line = order.lines[0]!.id;
+        const part = await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.5 }], deliveryRef: 'DN-4410', deliveredOn: '2026-10-28' });
+        expect(part.status).toBe(200);
+        expect(part.body.status).toBe('PARTIALLY_RECEIVED');
+        const rest = await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 2.5 }] });
+        expect(rest.body.status).toBe('RECEIVED');
+        const after = (await api<Lined & { deliveredAt: string | null }>('GET', `/purchase-orders/${order.id}`)).body;
+        expect(Number(after.lines[0]!.receivedQty)).toBe(4);
+        expect(after.deliveredAt).toBeTruthy();
+
+        // Nothing went into stock: no stock movement points at the order.
+        expect(await prisma.inventoryTransaction.count({ where: { referenceId: order.id } })).toBe(0);
+        // Each confirmation is on the order's Activity, with what arrived.
+        const history = (await api<Array<{ action: string; after: Record<string, unknown> }>>('GET', `/purchase-orders/${order.id}/history`)).body;
+        const confirmed = history.filter((e) => e.action === 'PO_DELIVERY_CONFIRMED');
+        expect(confirmed).toHaveLength(2);
+        expect(confirmed.map((e) => e.after)).toContainEqual(expect.objectContaining({ deliveryRef: 'DN-4410', deliveredOn: '2026-10-28', lines: [{ lineId: line, quantity: '1.5' }] }));
+        // Then closed as any received order.
+        expect((await buyer<{ status: string }>('POST', `/purchase-orders/${order.id}/close`, {})).body.status).toBe('CLOSED');
+      });
+
+      it('refuses more than is outstanding, a day to come, an order not yet approved, and a Stores order', async () => {
+        const order = await approvedProjectOrder();
+        const line = order.lines[0]!.id;
+        const tooMuch = await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 5 }] });
+        expect(tooMuch.status).toBe(400);
+        expect(tooMuch.body.error.message).toMatch(/more than the 4 still outstanding/);
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1 }], deliveredOn: '2099-01-01' })).status).toBe(400);
+
+        const draft = await buyer<{ id: string; lines: Array<{ id: string }> }>('POST', '/purchase-orders', projectOrder());
+        const draftLine = (await api<Lined>('GET', `/purchase-orders/${draft.body.id}`)).body.lines[0]!.id;
+        expect((await confirm(buyer, draft.body.id, { lines: [{ lineId: draftLine, quantity: 1 }] })).status).toBe(409);
+
+        // The store's own order is received into stock, not confirmed; to a buyer it isn't even found.
+        const store = await approvedOrder(2);
+        expect((await confirm(api, store.id, { lines: [{ lineId: store.lines[0]!.id, quantity: 1 }] })).status).toBe(400);
+        expect((await confirm(buyer, store.id, { lines: [{ lineId: store.lines[0]!.id, quantity: 1 }] })).status).toBe(404);
+      });
+
+      it("keeps the storeman from receiving a project order into stock, or confirming its delivery", async () => {
+        const order = await approvedProjectOrder();
+        const line = order.lines[0]!;
+        const received = await storeman<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
+        expect(received.status).toBe(400);
+        expect(received.body.error.message).toMatch(/goes from the supplier straight to site/);
+        const receipt = await storeman<{ error: { message: string } }>('POST', '/goods-receipts', {
+          purchaseOrderId: order.id, supplierId, post: true,
+          lines: [{ materialId: beamId, locationId, quantity: 1, purchaseOrderLineId: line.id }],
+        });
+        expect(receipt.status).toBe(400);
+        expect(receipt.body.error.message).toMatch(/goes from the supplier straight to site/);
+        expect((await confirm(storeman, order.id, { lines: [{ lineId: line.id, quantity: 1 }] })).status).toBe(403);
+        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('APPROVED');
+      });
+
+      it("keeps a buyer from receiving the store's order through a goods receipt", async () => {
+        const store = await approvedOrder(2);
+        const receipt = await buyer('POST', '/goods-receipts', {
+          purchaseOrderId: store.id, supplierId, post: true,
+          lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: store.lines[0]!.id }],
+        });
+        expect(receipt.status).toBe(404);
+      });
+    });
   });
 });

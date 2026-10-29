@@ -140,8 +140,13 @@ export function PurchaseOrderDetail() {
   const canManage = kind !== null && hasPermission(ORDER_PERMISSION[kind]);
   // Receive delivery is for those who receive orders (not the buyer who raised
   // it), and posts a goods receipt, so needs the server's permission for that too.
-  const canReceive = hasPermission('orders:receive') && hasPermission('inventory:receive');
+  // Only a Stores order is received into stock: project material goes from the
+  // supplier straight to site, so Procurement confirms its delivery instead
+  // (Stores and Procurement Separation Roadmap, Phase 3).
+  const canReceive = kind === 'stores' && hasPermission('orders:receive') && hasPermission('inventory:receive');
+  const canConfirm = kind === 'projects' && canManage;
   const [receiving, setReceiving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const editOrder = () => navigate(`${po.data ? orderPath(po.data) : `/purchase-orders/${id}`}/edit`);
   // An order opened at the other side's address moves to its own, so a
   // Stores order never shows inside Procurement, nor a project order in Order stock.
@@ -197,11 +202,13 @@ export function PurchaseOrderDetail() {
     if (isSubmittable(fresh.status)) return canManage ? { kind: 'submit', label: 'Submit for approval' } : null;
     if (isApprovable(fresh.status)) return approval.data?.canApprove ? { kind: 'approve', label: 'Approve' } : null;
     if (isReceivable(fresh.status) && canReceive) return { kind: 'receive', label: 'Receive delivery' };
+    if (isReceivable(fresh.status) && canConfirm) return { kind: 'confirm', label: 'Confirm delivery' };
     return null;
-  }, [fresh, approval.data, canReceive, canManage]);
+  }, [fresh, approval.data, canReceive, canConfirm, canManage]);
 
   function openPrimary(kind: PrimaryKind) {
     if (kind === 'receive') setReceiving(true);
+    else if (kind === 'confirm') setConfirming(true);
     else setDraft({ kind });
   }
 
@@ -281,7 +288,7 @@ export function PurchaseOrderDetail() {
                   <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {fresh.approvedBy?.name ?? '—'}</span></dd></>
                 )}
                 {fresh.deliveredAt && (
-                  <><dt className="text-surface-500">Received</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
+                  <><dt className="text-surface-500">{kind === 'projects' ? 'Delivered to site' : 'Received'}</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
                 )}
                 {fresh.closedAt && (
                   <><dt className="text-surface-500">Closed</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.closedAt)}<br /><span className="text-surface-400">{fresh.closeReason ?? `by ${fresh.closedBy?.name ?? '—'}`}</span></dd></>
@@ -336,6 +343,17 @@ export function PurchaseOrderDetail() {
           po={fresh}
           onClose={() => setReceiving(false)}
           onReceived={(number) => { setReceiving(false); reload(); toast.success(`Received on ${number}`, `${fresh.number} is credited with what arrived.`); }}
+        />
+      )}
+
+      {confirming && fresh && (
+        <ConfirmDeliveryDialog
+          po={fresh}
+          onClose={() => setConfirming(false)}
+          onConfirmed={(status) => {
+            setConfirming(false); reload();
+            toast.success(status === 'RECEIVED' ? `${fresh.number} delivered in full` : `Delivery confirmed on ${fresh.number}`, 'Recorded on the order; no stock was added.');
+          }}
         />
       )}
 
@@ -440,6 +458,7 @@ function labelForAction(action: string): string {
     PO_SUBMIT_AUTO_APPROVE: 'Submitted and approved',
     PO_RECEIVE: 'Received all outstanding',
     PO_GOODS_RECEIVED: 'Delivery received',
+    PO_DELIVERY_CONFIRMED: 'Delivery confirmed on site',
     PO_CLOSE: 'Closed',
     PO_CANCEL: 'Cancelled',
     // From the earlier shipping flow; kept so older history still reads well.
@@ -596,11 +615,101 @@ function ReceiveDeliveryDialog({ po, onClose, onReceived }: { po: PO; onClose: (
   );
 }
 
-type PrimaryKind = 'submit' | 'approve' | 'receive';
+// ── Confirm delivery ─────────────────────────────────────────────────────
+// Project material goes from the supplier straight to site, so a project
+// order isn't received into stock: Procurement records what arrived, line by
+// line, from the supplier's delivery note or the site's confirmation, and the
+// order is credited without any stock being added.
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function ConfirmDeliveryDialog({ po, onClose, onConfirmed }: { po: PO; onClose: () => void; onConfirmed: (status: string) => void }) {
+  const owed = po.lines
+    .map((l) => ({ line: l, outstanding: Number(l.orderedQty) - Number(l.receivedQty) }))
+    .filter((o) => o.outstanding > 0);
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(owed.map((o) => [o.line.id, String(o.outstanding)])));
+  const [deliveryRef, setDeliveryRef] = useState('');
+  const [deliveredOn, setDeliveredOn] = useState(today);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  async function confirm() {
+    setProblem(null);
+    const lines = owed
+      .map((o) => ({ ...o, quantity: (quantities[o.line.id] ?? '').trim() === '' ? 0 : Number(quantities[o.line.id]) }))
+      .filter((o) => o.quantity !== 0);
+    const bad = lines.find((o) => !(o.quantity > 0) || o.quantity > o.outstanding);
+    if (bad) { setProblem(`${bad.line.material.sku}: enter what arrived, from 0 to the ${formatNumber(bad.outstanding)} outstanding.`); return; }
+    if (lines.length === 0) { setProblem('Enter what arrived on at least one line.'); return; }
+    if (deliveredOn > today()) { setProblem('The delivery date is still to come.'); return; }
+    setBusy(true);
+    try {
+      const saved = await api.post<{ status: string }>(`/purchase-orders/${po.id}/confirm-delivery`, {
+        lines: lines.map((o) => ({ lineId: o.line.id, quantity: o.quantity })),
+        deliveryRef: deliveryRef.trim() || undefined,
+        deliveredOn: deliveredOn || undefined,
+      });
+      onConfirmed(saved.status);
+    } catch (err) {
+      setProblem((err as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open onClose={() => { if (!busy) onClose(); }} size="lg" title="Confirm delivery"
+      description={`What arrived on site from ${po.supplier.name} against ${po.number}. Project material goes straight to site, so no stock is added. Lines left at 0 stay outstanding.`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="primary" onClick={() => void confirm()} loading={busy}>Confirm delivery</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Delivery note / reference" htmlFor="po-cfm-ref" help="The supplier's delivery note, or the site's confirmation.">
+            <Input id="po-cfm-ref" value={deliveryRef} onChange={(e) => setDeliveryRef(e.target.value)} maxLength={120} />
+          </Field>
+          <Field label="Delivered on" htmlFor="po-cfm-date">
+            <Input id="po-cfm-date" type="date" max={today()} value={deliveredOn} onChange={(e) => setDeliveredOn(e.target.value)} />
+          </Field>
+        </div>
+        <div>
+          <span className="field-label">What arrived</span>
+          {owed.length === 0 && <p className="text-meta italic">Nothing is outstanding on this order.</p>}
+          <div className="space-y-2 mt-2">
+            {owed.map(({ line, outstanding }) => (
+              <div key={line.id} className="grid grid-cols-12 gap-2 items-center">
+                <div className="col-span-12 sm:col-span-7 text-sm min-w-0">
+                  <span className="text-mono text-xs">{line.material.sku}</span> {line.material.name}
+                  <span className="block text-meta">{formatNumber(outstanding)} {line.material.unitOfMeasure} outstanding</span>
+                </div>
+                <div className="col-span-12 sm:col-span-5">
+                  <Input
+                    type="number" min="0" max={outstanding} step="0.0001" inputMode="decimal" aria-label={`${line.material.sku} delivered`}
+                    value={quantities[line.id] ?? ''} onChange={(e) => setQuantities((q) => ({ ...q, [line.id]: e.target.value }))}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {problem && <Alert tone="danger" title="Cannot confirm">{problem}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
+type PrimaryKind = 'submit' | 'approve' | 'receive' | 'confirm';
 
 function primaryIcon(kind: PrimaryKind): React.ReactNode {
   if (kind === 'submit') return <Icon.ArrowRight size={14} />;
-  if (kind === 'approve') return <Icon.Check size={14} />;
+  if (kind === 'approve' || kind === 'confirm') return <Icon.Check size={14} />;
   return <Icon.Box size={14} />;
 }
 

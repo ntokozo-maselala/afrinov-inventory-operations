@@ -117,6 +117,12 @@ export const receiveSchema = z.object({
   deliveryNotes: z.string().max(2000).optional(),
 });
 
+export const confirmDeliverySchema = z.object({
+  lines: z.array(z.object({ lineId: z.uuid(), quantity: z.number().positive().max(1e9) })).min(1).max(500),
+  deliveryRef: z.string().trim().max(120).optional(),
+  deliveredOn: z.iso.date().optional(),
+});
+
 export const cancelSchema = z.object({
   reason: z.string().min(1).max(500),
 });
@@ -299,6 +305,8 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.post('/purchase-orders/:id/receive', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ReceivePurchaseOrder);
     const id = (req.params as { id: string }).id;
+    // Only a Stores order is received into stock, by the store; the service refuses a project order.
+    await requireForOrder(req, id, PermissionCode.ReceivePurchaseOrder);
     const parsed = receiveSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -306,6 +314,21 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     return PurchaseOrderService.receive({ id, ...parsed.data }, actorId(req));
+  });
+
+  // Project material goes from the supplier straight to site: Procurement
+  // confirms what arrived, and no stock is added (Stores and Procurement
+  // Separation Roadmap, Phase 3). The buyers who raise project orders confirm them.
+  app.post('/purchase-orders/:id/confirm-delivery', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    await requireForOrder(req, id, PermissionCode.CreatePurchaseOrder);
+    const parsed = confirmDeliverySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid delivery confirmation', details: parsed.error.flatten() },
+      });
+    }
+    return PurchaseOrderService.confirmDelivery({ id, ...parsed.data }, actorId(req));
   });
 
   app.post('/purchase-orders/:id/close', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -351,6 +374,9 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const { post, ...input } = parsed.data;
+    // Against an order: a Stores order is the store's (not found to anyone
+    // else); a project order is refused by the service, as it goes to site.
+    if (input.purchaseOrderId) await requireForOrder(req, input.purchaseOrderId, PermissionCode.ReceiveInventory);
     const created = post
       ? await GoodsReceiptService.receive(input, actorId(req))
       : await GoodsReceiptService.create(input, actorId(req));

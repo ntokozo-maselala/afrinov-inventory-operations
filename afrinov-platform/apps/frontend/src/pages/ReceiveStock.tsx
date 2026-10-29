@@ -6,7 +6,7 @@
 // is received from the order's page, so the order is credited.
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { orderPath } from '../lib/orderKind';
+import { orderKindOf, orderPath } from '../lib/orderKind';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -71,7 +71,8 @@ export function ReceiveStock() {
   // The supplier's orders that can still be received, for those who receive
   // orders on the order's page (so the link never leads to a page without it).
   const orders = useApi<OpenOrder[]>(PROCUREMENT_ENABLED && hasPermission('orders:receive') ? '/purchase-orders' : null);
-  const openOrders = (orders.data ?? []).filter((o) => supplierId && o.supplierId === supplierId && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(o.status));
+  // Only Stores orders arrive here: project material goes from the supplier straight to site.
+  const openOrders = (orders.data ?? []).filter((o) => supplierId && o.supplierId === supplierId && orderKindOf(o) === 'stores' && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(o.status));
   // Answered "not against an order" for this supplier: a counter receipt as before.
   const [counterFor, setCounterFor] = useState<string | null>(null);
   const askAboutOrders = openOrders.length > 0 && counterFor !== supplierId;

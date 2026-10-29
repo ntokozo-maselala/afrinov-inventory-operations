@@ -8,13 +8,13 @@ Four phases that take every connection out between the **Stores** side of the bu
 
 It builds on the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (merged as #117), which split who *raises* each kind but still let each side see the other's orders and sent Stores orders to Procurement's approvers.
 
-**Status:** Phase 1 is in PR #119. Phase 2 is built on `feature/stores-approval` (branched from #119), not yet committed. Phase 3 waits for one decision (how a project order is finished).
+**Status:** Phase 1 is in PR #119 and Phase 2 in PR #120. Phase 3 is built on `feature/stores-receiving` (branched from #120), not yet committed. Phase 4 is next.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Separate homes for each kind of order | M | Built |
 | 2 | Access and approval on the server | M | Built |
-| 3 | Receiving, and finishing project orders | M | Waiting on a decision |
+| 3 | Receiving, and finishing project orders | M | Built |
 | 4 | Roles end to end and docs | S | Planned |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days.
@@ -44,7 +44,7 @@ Admin keeps access to both. The Director's access is decided after this roadmap.
 | Who approves Stores orders | The storeman, on the order's page in Order stock | 29 Oct 2026 |
 | Project material at the workshop | It doesn't come there: it goes from the supplier straight to site, so the storeman doesn't receive it | 29 Oct 2026 |
 | Storeman's approval limit | He may approve Stores orders he raised himself, by value against his own limit. **Each storeman is given a limit** (for example R 50 000) in Settings → Users before Phase 2 is released; above it, Admin approves. Blank means no limit, which is how every storeman starts (Qodo, PR #120) | 29 Oct 2026 |
-| How a project order is finished | **Open.** 1) Procurement confirms delivery on the order, no stock added (recommended); 2) received into a site location; 3) nobody confirms, the buyer closes it | Open |
+| How a project order is finished | Procurement **confirms delivery** on the order, line by line, from the supplier's delivery note or the site's confirmation; no stock is added. (Not chosen: receiving it into a site location; the buyer closing it with no confirmation) | 29 Oct 2026 |
 | Orders from before | Untouched: Stores orders already approved by an approver stay approved; old links redirect to each order's own section | Proposed |
 
 ### Order of work
@@ -87,13 +87,15 @@ Tests: `procurement.real-http.test.ts` (a buyer gets *not found* for a Stores or
 
 ## Phase 3: Receiving, and finishing project orders
 
-Size M. Backend and frontend. **Waits on the open decision:** how a project order is finished, since its material goes from the supplier straight to site.
+Size M. Backend and frontend. No migration: the order's lines and statuses already record what arrived.
 
-- [ ] **3.1 The store receives Stores orders only.** Receive stock's "has an open order" lists the supplier's Stores orders only, and receiving against an order (the order's Receive delivery, or a goods receipt against it) needs `order:stores_stock` as well as the receive permissions. The storeman is no longer offered Receive delivery on a project order.
+- [x] **3.1 The store receives Stores orders only.** Receive stock's "has an open order" lists the supplier's Stores orders only, and receiving against an order (the order's Receive delivery, or a goods receipt against it) needs `order:stores_stock` as well as the receive permissions. The storeman is no longer offered Receive delivery on a project order.
   Files: `pages/ReceiveStock.tsx`, `procurement/procurement.routes.ts`, `goods-receipt.service.ts`
-- [ ] **3.2 Finishing a project order.** Today only Admin could still mark one delivered once the storeman stops. The recommended rule: Procurement **confirms delivery** on the order (from the supplier's delivery note or the site's confirmation), which takes it to Received and then Closed without adding stock anywhere. The other choices: receive it into a site location, or let the buyer close it with no confirmation. Built as decided.
-  Files: `procurement.service.ts`, `procurement.routes.ts`, `pages/PurchaseOrderDetail.tsx`, a migration if it needs new fields
-- [ ] **3.3 Projects stock.** If project material never reaches the workshop, Projects items bought from now hold no stock to issue. Existing Projects stock and its issues stay as they are; whether Issue stock keeps offering Projects items is decided with 3.2.
+- [x] **3.2 Finishing a project order.** Procurement **confirms delivery** on the order (`POST /purchase-orders/:id/confirm-delivery`, for those who raise project orders): what arrived on each line, the delivery note and the day it arrived. Each line is credited, and the order moves to Partly received, or Received once nothing is outstanding, then is closed as any order. No stock is added anywhere, and the Activity records each confirmation. Receiving into stock (Receive delivery, or a goods receipt against the order) refuses a project order.
+  Files: `procurement.service.ts` (`confirmDelivery`), `procurement.routes.ts`, `goods-receipt.service.ts`, `pages/PurchaseOrderDetail.tsx` (Confirm delivery), `mock/mockApi.ts`, `openapi/document.ts`
+- [x] **3.3 Projects stock.** Projects items bought from now hold no stock, as nothing is received into stock against a project order. Existing Projects stock stays as it is, and Issue stock still offers it to its own project until it is used up or moved to Stores (Project leftovers); nothing changed there.
+
+Tests: `procurement.real-http.test.ts` (a buyer confirms part, then the rest, and no stock movement points at the order; more than outstanding, a day to come and a draft are refused; the storeman can't receive a project order by either way in, nor confirm it; a buyer can't receive the store's order through a goods receipt), `PoConfirmDelivery.test.tsx`, `PoApproval.test.tsx`, `mock/mockDelivery.test.ts`.
 
 **Done when:** the storeman receives only Stores orders, and a project order can be finished by Procurement as decided.
 

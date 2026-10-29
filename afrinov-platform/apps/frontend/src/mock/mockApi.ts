@@ -247,6 +247,9 @@ function refuseStoresOnProjectOrder(projectNumber: string | null | undefined, ma
   }
 }
 
+// As the server: a project order goes to site, so it isn't received into stock.
+const PROJECT_DELIVERY_REFUSED = "Project material goes from the supplier straight to site, so it isn't received into stock: Procurement confirms its delivery on the order.";
+
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
   const p = state.projects.find((x) => x.projectNumber === projectNumber);
@@ -1250,10 +1253,51 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
+  // As the server (Stores and Procurement Separation Roadmap, Phase 3): project
+  // material goes from the supplier straight to site, so Procurement confirms
+  // what arrived on the order, and no stock is added.
+  if (method === 'POST' && /^\/purchase-orders\/[^/]+\/confirm-delivery$/.test(p)) {
+    const id = p.slice('/purchase-orders/'.length, -'/confirm-delivery'.length);
+    const po = state.purchaseOrders.find((x) => x.id === id);
+    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    if (po.projectNumber == null) throw err('VALIDATION_ERROR', 'A Stores order is received into stock: use Receive delivery on the order, or Receive stock.');
+    if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', 'Only an approved or partly delivered purchase order can have its delivery confirmed');
+    const b = (body ?? {}) as { lines?: Array<{ lineId: string; quantity: number }>; deliveryRef?: string; deliveredOn?: string };
+    if (!b.lines?.length) throw err('VALIDATION_ERROR', 'Confirm what arrived on at least one line.');
+    if (b.deliveredOn && b.deliveredOn > new Date().toISOString().slice(0, 10)) throw err('VALIDATION_ERROR', 'The delivery date is still to come.');
+    const credited = new Map<string, number>();
+    for (const l of b.lines) {
+      const line = po.lines.find((x) => x.id === l.lineId);
+      if (!line) throw err('VALIDATION_ERROR', `Line ${l.lineId} is not on purchase order ${po.number}`);
+      const sku = findMaterial(line.materialId)?.sku ?? line.materialId;
+      if (credited.has(line.id)) throw err('VALIDATION_ERROR', `${sku} is given twice.`);
+      const outstanding = Number(line.orderedQty) - Number(line.receivedQty);
+      if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', `Enter what arrived of ${sku}, or leave the line out.`);
+      if (Number(l.quantity) > outstanding) throw err('VALIDATION_ERROR', `${sku}: ${l.quantity} is more than the ${outstanding} still outstanding.`);
+      credited.set(line.id, Number(l.quantity));
+    }
+    const before = { status: po.status };
+    for (const line of po.lines) if (credited.has(line.id)) line.receivedQty = String(Number(line.receivedQty) + credited.get(line.id)!);
+    const allIn = po.lines.every((line) => Number(line.receivedQty) >= Number(line.orderedQty));
+    po.status = allIn ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+    const at = b.deliveredOn ?? new Date().toISOString().slice(0, 10);
+    if (allIn) {
+      po.deliveredAt = new Date(`${at}T00:00:00Z`).toISOString();
+      po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
+    }
+    po.history ??= [];
+    po.history.push({
+      id: nextId('audit'), action: 'PO_DELIVERY_CONFIRMED', actorId: 'u-admin', before,
+      after: { status: po.status, deliveredOn: at, deliveryRef: b.deliveryRef?.trim() || null, lines: [...credited].map(([lineId, quantity]) => ({ lineId, quantity: String(quantity) })) },
+      createdAt: new Date().toISOString(),
+    });
+    return po;
+  }
   if (method === 'POST' && p.endsWith('/receive')) {
     const id = p.slice('/purchase-orders/'.length, -'/receive'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    if (po.projectNumber != null) throw err('VALIDATION_ERROR', PROJECT_DELIVERY_REFUSED);
     if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive from ${po.status}`);
     const b = (body as { locationId?: string; deliveryNotes?: string }) ?? {};
     if (!b.locationId) throw err('VALIDATION_ERROR', 'locationId is required');
@@ -1408,6 +1452,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.purchaseOrderId) {
       const po = state.purchaseOrders.find((p) => p.id === b.purchaseOrderId);
       if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+      if (po.projectNumber != null) throw err('VALIDATION_ERROR', PROJECT_DELIVERY_REFUSED);
       if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive against a purchase order in status ${po.status}`);
       // As the server: every line names its order line, on this order, within what is outstanding.
       if (po.supplierId !== b.supplierId) throw err('VALIDATION_ERROR', `${po.number} is with another supplier. Choose the order's supplier, or another order.`);
