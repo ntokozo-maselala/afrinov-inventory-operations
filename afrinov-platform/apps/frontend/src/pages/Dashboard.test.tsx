@@ -138,7 +138,7 @@ describe('Dashboard: Stores counts against the Stores total', () => {
 
 describe('Dashboard: pending approvals card', () => {
   const order = (id: string, number: string, net: string) => ({
-    id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' },
+    id, number, createdAt: '2026-10-01T08:00:00Z', currency: 'ZAR', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1402' as string | null,
     totals: { subtotal: net, vat: '0.00', net, unpricedLines: 0 },
   });
   beforeEach(() => {
@@ -171,10 +171,84 @@ describe('Dashboard: pending approvals card', () => {
   });
 
   it('is not shown to those who do not approve', async () => {
-    auth.roles = ['STORE_CONTROLLER'];
+    auth.roles = ['TECHNICIAN'];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await screen.findByText('Stock value by category');
     expect(screen.queryByText('Pending Approvals')).not.toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
+  });
+
+  // Stores and Procurement Separation Roadmap: the store approves its own stock orders, in Order stock.
+  it("opens the storeman's queue in Order stock", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(card).toHaveAttribute('href', '/stock/orders?status=mine');
+    expect(await within(card).findByText('1')).toBeInTheDocument();
+  });
+
+  it("counts only stock orders as the storeman's others, not project orders waiting for an approver", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      if (path === '/purchase-orders?status=PENDING_APPROVAL') {
+        return [
+          { ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null },
+          { ...order('po-1', 'AFRI-0101', '920.00'), projectNumber: 'AFRI-1402' },
+          { ...order('po-2', 'AFRI-0102', '900.00'), projectNumber: 'AFRI-1402' },
+        ];
+      }
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(await within(card).findByText('waiting for your approval')).toBeInTheDocument();
+    expect(within(card).queryByText(/more need prices/)).not.toBeInTheDocument();
+  });
+
+  // Qodo, PR #120: the Dashboard tells the kinds apart as the server does, by a null project.
+  it('counts an order with an empty project number as a project order, as the server does', async () => {
+    auth.roles = ['ADMIN'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-8', 'AFRI-0108', '500.00'), projectNumber: '' }];
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await approvalCard()).toHaveAttribute('href', '/purchase-orders?status=mine');
+  });
+
+  it("doesn't count an order with an empty project number among the storeman's", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [];
+      if (path === '/purchase-orders?status=PENDING_APPROVAL') return [{ ...order('po-8', 'AFRI-0108', '500.00'), projectNumber: '' }];
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(await within(card).findByText('nothing waiting for you')).toBeInTheDocument();
+  });
+
+  it('counts both kinds for someone who approves both, and opens the side with project orders waiting', async () => {
+    auth.roles = ['ADMIN'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') {
+        return [{ ...order('po-1', 'AFRI-0101', '920.00'), projectNumber: 'AFRI-1402' }, { ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      }
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(card).toHaveAttribute('href', '/purchase-orders?status=mine');
+    expect(await within(card).findByText('waiting for your approval (1 purchase, 1 stock)')).toBeInTheDocument();
   });
 });

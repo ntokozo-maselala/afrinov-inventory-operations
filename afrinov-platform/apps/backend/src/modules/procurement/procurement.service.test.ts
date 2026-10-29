@@ -16,7 +16,7 @@ type TxType = 'RECEIPT' | 'ISSUE' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'ADJUSTMENT
 
 interface PO {
   id: string; number: string; revision?: number; supplierId: string; status: POStatus;
-  notes: string | null; createdById: string; createdAt: Date; updatedAt: Date;
+  notes: string | null; createdById: string; createdAt: Date; updatedAt: Date; projectNumber?: string | null;
   expectedDeliveryDate: Date | null;
   approvedAt: Date | null; approvedById: string | null;
   printedTerms?: unknown;
@@ -49,7 +49,7 @@ const db = {
   audit: [] as AuditRow[],
   settings: new Map<string, SettingRow>(),
   projects: new Map<string, { projectNumber: string; active: boolean; status?: string }>(),
-  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean }>(),
+  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean; canApproveStores?: boolean }>(),
 };
 let poCounter = 0;
 let lineCounter = 0;
@@ -75,10 +75,14 @@ function makePrisma(): unknown {
     user: {
       findUnique: async ({ where }: { where: { id: string } }) => db.users.get(where.id) ?? null,
       // By id (names on the order's Activity), or else stands in for "active
-      // users whose role holds approve:purchase_order".
-      findMany: async ({ where }: { where?: { id?: { in: string[] } } } = {}) => where?.id
-        ? where.id.in.map((id) => db.users.get(id)).filter((u) => !!u)
-        : [...db.users.values()].filter((u) => u.canApprove),
+      // users whose role holds" the permission that approves the kind asked
+      // for. Approval by value is the same for both kinds, so these approvers
+      // approve either, unless a test marks them for one kind only.
+      findMany: async ({ where }: { where?: { id?: { in: string[] }; roles?: { some: { role: { permissions: { some: { permission: { code: string } } } } } } } } = {}) => {
+        if (where?.id) return where.id.in.map((id) => db.users.get(id)).filter((u) => !!u);
+        const stores = where?.roles?.some.role.permissions.some.permission.code === 'order:stores_stock';
+        return [...db.users.values()].filter((u) => (stores ? u.canApproveStores ?? u.canApprove : u.canApprove));
+      },
     },
     material: {
       findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null,
@@ -98,10 +102,12 @@ function makePrisma(): unknown {
         return po;
       },
       count: async () => db.pos.size,
-      findMany: async ({ where, include, orderBy }: { where?: { number?: { startsWith?: string }; status?: POStatus }; include?: { lines?: unknown }; orderBy?: { createdAt?: 'asc' | 'desc' } } = {}) => {
+      findMany: async ({ where, include, orderBy }: { where?: { number?: { startsWith?: string }; status?: POStatus; projectNumber?: null | { not: null } }; include?: { lines?: unknown }; orderBy?: { createdAt?: 'asc' | 'desc' } } = {}) => {
         const rows = [...db.pos.values()]
           .filter((p) => !where?.number?.startsWith || p.number.startsWith(where.number.startsWith))
           .filter((p) => !where?.status || p.status === where.status)
+          // A Stores order (no project), or a project order.
+          .filter((p) => where?.projectNumber === undefined || (where.projectNumber === null ? !p.projectNumber : !!p.projectNumber))
           .map((p) => (include?.lines ? { ...p, lines: [...db.lines.values()].filter((l) => l.purchaseOrderId === p.id) } : p));
         if (orderBy?.createdAt) rows.sort((a, b) => (a.createdAt.getTime() - b.createdAt.getTime()) * (orderBy.createdAt === 'asc' ? 1 : -1));
         return rows;
@@ -893,6 +899,24 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((p) => p.id)).toEqual([older, newer]);
     expect((await PurchaseOrderService.awaitingApproval('u-sb')).map((p) => p.id)).toEqual([older, newer, over]);
     expect(await PurchaseOrderService.awaitingApproval('user-1')).toEqual([]);
+  });
+
+  // Stores and Procurement Separation Roadmap: each kind has its own approvers.
+  it("gives each approver only their own kind's orders to approve", async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.users.set('u-proc', { id: 'u-proc', name: 'Project approver', approvalLimit: null, canApprove: true, canApproveStores: false });
+    db.users.set('u-store', { id: 'u-store', name: 'Storeman', approvalLimit: null, canApprove: false, canApproveStores: true });
+    const stores = await submitted(1000);
+    expect((await PurchaseOrderService.awaitingApproval('u-store')).map((p) => p.id)).toEqual([stores]);
+    expect(await PurchaseOrderService.awaitingApproval('u-proc')).toEqual([]);
+    // Asked for project orders, the storeman has none.
+    expect(await PurchaseOrderService.awaitingApproval('u-store', 'projects')).toEqual([]);
+    // The order's approval panel names the store, not the project approver.
+    const panel = await PurchaseOrderService.approval(stores, 'u-store');
+    expect(panel).toMatchObject({ canApprove: true });
+    expect(panel.approvers.map((a) => a.id)).toContain('u-store');
+    expect(panel.approvers.map((a) => a.id)).not.toContain('u-proc');
+    expect(await PurchaseOrderService.approval(stores, 'u-proc')).toMatchObject({ canApprove: false });
   });
 
   it('sends an approved order back for approval when an edit takes it past the approver\'s limit', async () => {

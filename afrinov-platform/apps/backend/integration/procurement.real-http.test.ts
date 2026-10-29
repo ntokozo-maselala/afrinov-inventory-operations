@@ -333,8 +333,15 @@ describe('receiving stock over real HTTP', () => {
       expect((await api('PATCH', `/users/${created.body.id}`, { approvalLimit: 1000 })).status).toBe(200);
       const approver = client(server.port, await login(server.port, email, password));
 
+      // Approvers approve project orders; the store approves its own (Stores and Procurement Separation Roadmap).
+      const projectNumber = `IT-AV-${run}`;
+      expect((await api('POST', '/projects', { projectNumber, name: `IT approval ${run}` })).status).toBe(201);
+      const beam = await api<{ id: string }>('POST', '/materials', {
+        sku: `IT-AV-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber,
+      });
+      expect(beam.status).toBe(200);
       const order = async (price: number) => {
-        const res = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: price }] });
+        const res = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber, vatRate: 15, lines: [{ materialId: beam.body.id, orderedQty: 1, unitPrice: price }] });
         await api('POST', `/purchase-orders/${res.body.id}/submit`);
         return res.body.id;
       };
@@ -577,17 +584,32 @@ describe('receiving stock over real HTTP', () => {
       ] as const) {
         expect([method, path, (await storeman(method, path, body)).status]).toEqual([method, path, 403]);
       }
-      // Both can still open each other's orders.
-      expect((await storeman('GET', `/purchase-orders/${theirs.body.id}`)).status).toBe(200);
-      expect((await buyer('GET', `/purchase-orders/${created.body.id}`)).status).toBe(200);
+      // A Stores order is the store's alone (Stores and Procurement Separation
+      // Roadmap, Phase 2): to a buyer it is not found, in any way of opening it.
+      for (const path of [`/purchase-orders/${created.body.id}`, `/purchase-orders/${created.body.id}/history`, `/purchase-orders/${created.body.id}/approval`]) {
+        expect([path, (await buyer('GET', path)).status]).toEqual([path, 404]);
+      }
+      expect((await storeman('GET', `/purchase-orders/${created.body.id}`)).status).toBe(200);
     });
 
     it('lets a buyer raise a project order, and no Stores order', async () => {
       expect((await buyer('POST', '/purchase-orders', projectOrder())).status).toBe(201);
       expect((await buyer('POST', '/purchase-orders', storesOrder())).status).toBe(403);
       const theirs = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
-      expect((await buyer('PATCH', `/purchase-orders/${theirs.body.id}`, { notes: 'Not mine' })).status).toBe(403);
-      expect((await buyer('POST', `/purchase-orders/${theirs.body.id}/submit`)).status).toBe(403);
+      // Not found, rather than refused, so a buyer can't tell a Stores order exists.
+      expect((await buyer('PATCH', `/purchase-orders/${theirs.body.id}`, { notes: 'Not mine' })).status).toBe(404);
+      expect((await buyer('POST', `/purchase-orders/${theirs.body.id}/submit`)).status).toBe(404);
+      expect((await buyer('POST', `/purchase-orders/${theirs.body.id}/cancel`, { reason: 'Not mine' })).status).toBe(404);
+    });
+
+    it("lists a buyer no Stores order, even when asked for them", async () => {
+      const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+      const listed = (await buyer<Array<{ id: string; projectNumber: string | null }>>('GET', '/purchase-orders')).body;
+      expect(listed.map((o) => o.id)).not.toContain(store.body.id);
+      expect(listed.every((o) => o.projectNumber !== null)).toBe(true);
+      expect((await buyer<unknown[]>('GET', '/purchase-orders?kind=stores')).body).toEqual([]);
+      // The store lists its own.
+      expect((await storeman<Array<{ id: string }>>('GET', '/purchase-orders?kind=stores')).body.map((o) => o.id)).toContain(store.body.id);
     });
 
     it('keeps Stores items off a project order, and neither kind becomes the other', async () => {
@@ -623,7 +645,8 @@ describe('receiving stock over real HTTP', () => {
     });
 
     // Phase 4: every role end to end.
-    it('lets an approver approve both kinds, and raise neither', async () => {
+    // Stores and Procurement Separation Roadmap, Phase 2: each kind has its own approvers.
+    it('lets the storeman approve Stores orders and an approver project orders, each only their own', async () => {
       const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
       const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
       expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
@@ -633,18 +656,55 @@ describe('receiving stock over real HTTP', () => {
         const project = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 2, unitPrice: 40 }] });
         expect((await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
         expect((await buyer<{ status: string }>('POST', `/purchase-orders/${project.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
-        // "Waiting for my approval" takes the kind filter too (Qodo, PR #117).
-        const waiting = async (kind: string) => (await approver<Array<{ id: string }>>('GET', `/purchase-orders?awaitingMyApproval=true&kind=${kind}`)).body.map((o) => o.id);
-        expect(await waiting('stores')).toContain(store.body.id);
-        expect(await waiting('stores')).not.toContain(project.body.id);
-        expect(await waiting('projects')).toContain(project.body.id);
-        expect(await waiting('projects')).not.toContain(store.body.id);
-        for (const id of [store.body.id, project.body.id]) {
-          const approved = await approver<{ status: string }>('POST', `/purchase-orders/${id}/approve`);
-          expect([id, approved.status, approved.body.status]).toEqual([id, 200, 'APPROVED']);
-        }
+
+        // Each one's "Waiting for my approval" holds only their own kind.
+        const waiting = async (who: typeof api) => (await who<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id);
+        expect(await waiting(storeman)).toContain(store.body.id);
+        expect(await waiting(storeman)).not.toContain(project.body.id);
+        expect(await waiting(approver)).toContain(project.body.id);
+        expect(await waiting(approver)).not.toContain(store.body.id);
+        const panel = await storeman<{ canApprove: boolean }>('GET', `/purchase-orders/${store.body.id}/approval`);
+        expect(panel.body.canApprove).toBe(true);
+
+        // Neither approves the other's: the approver doesn't even find a Stores order.
+        expect((await approver('POST', `/purchase-orders/${store.body.id}/approve`)).status).toBe(404);
+        expect((await storeman('POST', `/purchase-orders/${project.body.id}/approve`)).status).toBe(403);
+
+        const storeApproved = await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/approve`);
+        expect([storeApproved.status, storeApproved.body.status]).toEqual([200, 'APPROVED']);
+        const projectApproved = await approver<{ status: string }>('POST', `/purchase-orders/${project.body.id}/approve`);
+        expect([projectApproved.status, projectApproved.body.status]).toEqual([200, 'APPROVED']);
+
         expect((await approver('POST', '/purchase-orders', storesOrder())).status).toBe(403);
         expect((await approver('POST', '/purchase-orders', projectOrder())).status).toBe(403);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    it("holds the storeman to his approval limit, as an approver is held to theirs", async () => {
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        // A storeman whose limit is R 100 including VAT.
+        const email = `it-so-limited-${run}@afrinov.local`;
+        const password = `It-${run}-limited`;
+        const made = await api<{ id: string }>('POST', '/users', { email, name: `IT SO limited ${run}`, password, roleNames: ['STORE_CONTROLLER'] });
+        expect(made.status).toBe(201);
+        expect((await api('PATCH', `/users/${made.body.id}`, { approvalLimit: 100 })).status).toBe(200);
+        const limited = client(server.port, await login(server.port, email, password));
+
+        // 3 x 12.50 = 37.50, R 43.13 with VAT: within it. 30 x 12.50 = R 431.25: over it.
+        const small = await limited<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        const big = await limited<{ id: string }>('POST', '/purchase-orders', { supplierId, lines: [{ materialId, orderedQty: 30, unitPrice: 12.5 }] });
+        for (const id of [small.body.id, big.body.id]) await limited('POST', `/purchase-orders/${id}/submit`);
+        expect((await limited<{ status: string }>('POST', `/purchase-orders/${small.body.id}/approve`)).body.status).toBe('APPROVED');
+        const refused = await limited<{ error: { message: string } }>('POST', `/purchase-orders/${big.body.id}/approve`);
+        expect(refused.status).toBe(403);
+        expect(refused.body.error.message).toMatch(/approval limit/);
+        const waiting = (await limited<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id);
+        expect(waiting).not.toContain(big.body.id);
       } finally {
         await api('PUT', approvalKey, { value: approvalWas });
       }

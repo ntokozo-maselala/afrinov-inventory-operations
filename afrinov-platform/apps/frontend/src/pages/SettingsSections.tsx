@@ -346,8 +346,12 @@ interface AdminUser {
   approvalLimit?: string | null;
 }
 
-/** Roles that may approve purchase orders, so have an approval limit. */
-const APPROVING_ROLES: RoleName[] = ['ADMIN', 'APPROVER'];
+/**
+ * Roles that approve orders, so have an approval limit: approvers approve
+ * project orders, the store controller the store's own (Stores and
+ * Procurement Separation Roadmap).
+ */
+const APPROVING_ROLES: RoleName[] = ['ADMIN', 'APPROVER', 'STORE_CONTROLLER'];
 
 interface UserFormProps {
   initial?: Partial<AdminUser>;
@@ -465,7 +469,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       </Field>
       {approves && (
         <Field label="Approval limit (R, including VAT)" htmlFor="usr-limit" error={fieldErrors.approvalLimit}
-          help="The largest purchase order this person may approve. Leave blank for no limit. Orders in other currencies need someone without a limit.">
+          help="The largest order this person may approve: project orders for an approver, stock orders for a store controller. Leave blank for no limit. Orders in other currencies need someone without a limit.">
           <Input id="usr-limit" type="number" min="0" step="0.01" inputMode="decimal" placeholder="No limit" value={limit} onChange={(e) => setLimit(e.target.value)} invalid={!!fieldErrors.approvalLimit} />
         </Field>
       )}
@@ -543,7 +547,8 @@ export function SettingsUsers() {
                 </div>
                 {PROCUREMENT_ENABLED && u.roles.some((r) => APPROVING_ROLES.includes(r.role.name)) && (
                   <div className="text-xs text-surface-500 mt-1">
-                    Approves orders {u.approvalLimit == null ? 'of any value' : `up to ${formatCurrency(Number(u.approvalLimit), 'ZAR')}`}
+                    {/* A store controller approves the store's own stock orders; approvers, project orders. */}
+                    Approves {u.roles.some((r) => r.role.name === 'ADMIN' || r.role.name === 'APPROVER') ? 'orders' : 'stock orders'} {u.approvalLimit == null ? 'of any value' : `up to ${formatCurrency(Number(u.approvalLimit), 'ZAR')}`}
                   </div>
                 )}
               </div>

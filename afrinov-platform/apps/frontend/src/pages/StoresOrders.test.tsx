@@ -22,6 +22,7 @@ const order = (id: string, number: string, status: string, supplier: string) => 
 beforeEach(() => {
   auth.roles = ['STORE_CONTROLLER'];
   mockGet.mockReset().mockImplementation(async (path: string) => {
+    if (path === '/purchase-orders?awaitingMyApproval=true&kind=stores') return [order('po-5', 'AFRI-0205', 'PENDING_APPROVAL', 'Hydac')];
     if (path === '/purchase-orders?kind=stores') {
       return [
         order('po-1', 'AFRI-0201', 'DRAFT', 'Hydac'), order('po-2', 'AFRI-0202', 'APPROVED', 'Weldco'),
@@ -32,7 +33,7 @@ beforeEach(() => {
   });
 });
 
-const page = () => render(<MemoryRouter><StoresOrders /></MemoryRouter>);
+const page = (url = '/stock/orders') => render(<MemoryRouter initialEntries={[url]}><StoresOrders /></MemoryRouter>);
 
 describe('Order stock', () => {
   it("lists the store's orders, asking the server for Stores orders only", async () => {
@@ -71,11 +72,18 @@ describe('Order stock', () => {
     expect(screen.queryByRole('link', { name: 'Receive AFRI-0204' })).not.toBeInTheDocument();
   });
 
-  it('offers a buyer no Receive, as receiving is the store’s', async () => {
-    auth.roles = ['PROCUREMENT'];
-    page();
-    await screen.findByRole('link', { name: 'AFRI-0202' });
-    expect(screen.queryByRole('link', { name: /^Receive / })).not.toBeInTheDocument();
+  // Stores and Procurement Separation Roadmap, Phase 2: the storeman approves the store's orders here.
+  it("lists the storeman's orders waiting for his approval, from the server's choice", async () => {
+    page('/stock/orders?status=mine');
+    expect(await screen.findByRole('link', { name: 'AFRI-0205' })).toHaveAttribute('href', '/stock/orders/po-5');
+    expect(screen.queryByRole('link', { name: 'AFRI-0201' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('mine');
+  });
+
+  it('says when nothing is waiting for his approval', async () => {
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?kind=stores' ? [order('po-1', 'AFRI-0201', 'DRAFT', 'Hydac')] : []));
+    page('/stock/orders?status=mine');
+    expect(await screen.findByText('Nothing is waiting for your approval')).toBeInTheDocument();
   });
 
   it('offers New order to the storeman', async () => {
@@ -83,11 +91,11 @@ describe('Order stock', () => {
     expect(await screen.findByRole('link', { name: /New order/ })).toHaveAttribute('href', '/stock/orders/new');
   });
 
-  it('shows a buyer the orders, without New order', async () => {
-    auth.roles = ['PROCUREMENT'];
+  it.each(['PROCUREMENT', 'APPROVER'])("keeps the store's orders from a %s", async (role) => {
+    auth.roles = [role];
     page();
-    await screen.findByRole('link', { name: 'AFRI-0201' });
-    expect(screen.queryByRole('link', { name: /New order/ })).not.toBeInTheDocument();
+    expect(await screen.findByText(/Your role cannot see the store's orders/)).toBeInTheDocument();
+    expect(mockGet.mock.calls.map((c) => c[0])).not.toContain('/purchase-orders?kind=stores');
   });
 
   it('keeps them from those who may not see orders', async () => {

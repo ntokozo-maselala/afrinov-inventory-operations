@@ -8,6 +8,7 @@ import { StockStatusBadge } from '../components/StockStatusBadge';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { formatNumber, formatDateTime } from '../lib/format';
+import { orderKindOf } from '../lib/orderKind';
 import { formatCurrency } from '../lib/currency';
 import { categoryLabel } from '../lib/categories';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
@@ -43,18 +44,33 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
  * total within their limit, as the server decides), and how many more are
  * pending but need prices or a higher limit. Links to their approval queue.
  */
-function approvalCard(mine: unknown[], pending: unknown[] | null) {
-  const others = pending ? Math.max(0, pending.length - mine.length) : 0;
+function approvalCard(mine: Waiting[], pending: Waiting[] | null, sides: { projects: boolean; stores: boolean }) {
+  // Only the kinds this person approves count as "more": a storeman isn't
+  // told about project orders waiting for an approver (Qodo, PR #120).
+  const theirs = pending?.filter((o) => (orderKindOf(o) === 'projects' ? sides.projects : sides.stores)) ?? null;
+  const others = theirs ? Math.max(0, theirs.length - mine.length) : 0;
   const more = others === 1 ? '1 more needs prices or a higher limit' : `${formatNumber(others)} more need prices or a higher limit`;
+  // Each side approves in its own section (Stores and Procurement Separation
+  // Roadmap): stock orders in Order stock, project orders in Procurement.
+  // Someone who approves both opens the side that has orders waiting.
+  const projectsWaiting = mine.filter((o) => orderKindOf(o) === 'projects').length;
+  const storesWaiting = mine.length - projectsWaiting;
+  const toProjects = sides.projects && (!sides.stores || projectsWaiting > 0 || storesWaiting === 0);
+  const both = projectsWaiting > 0 && storesWaiting > 0
+    ? ` (${formatNumber(projectsWaiting)} purchase, ${formatNumber(storesWaiting)} stock)`
+    : '';
   return {
     label: 'Pending Approvals', value: formatNumber(mine.length),
     tone: mine.length > 0 ? 'warning' as const : 'neutral' as const,
     note: mine.length > 0
-      ? (others > 0 ? `waiting for you · ${more}` : 'waiting for your approval')
+      ? (others > 0 ? `waiting for you${both} · ${more}` : `waiting for your approval${both}`)
       : (others > 0 ? more : 'nothing waiting for you'),
-    to: '/purchase-orders?status=mine',
+    to: toProjects ? '/purchase-orders?status=mine' : '/stock/orders?status=mine',
   };
 }
+
+/** An order in an approval queue: its project tells which side approves it. */
+interface Waiting { projectNumber?: string | null }
 
 /** Tools out on loan and how many are overdue, linking to the Tools page. */
 function toolsCard(tools: ToolRow[]) {
@@ -83,7 +99,10 @@ function stores(v: StockValue): { items: number; itemsInStock: number } {
 
 export function Dashboard() {
   const { hasPermission } = usePermissions();
-  const canApprove = PROCUREMENT_ENABLED && hasPermission('orders:approve');
+  // Approvers approve project orders; the store approves its own stock orders.
+  const approvesProjects = PROCUREMENT_ENABLED && hasPermission('orders:approve');
+  const approvesStores = PROCUREMENT_ENABLED && hasPermission('stores:order');
+  const canApprove = approvesProjects || approvesStores;
 
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
@@ -95,8 +114,8 @@ export function Dashboard() {
     .filter((l) => l.parent).map((l) => [l.id, { id: l.parent!.id, name: l.parent!.name }])), [locationList]);
   const { urgentBelowPercent, warningBelowPercent } = useStatusBands();
   // Only for those who may approve: the queue the server picks for them, and every pending order.
-  const { data: mine, loading: mineLoading, error: mineError, reload: reloadMine } = useApi<unknown[]>(canApprove ? '/purchase-orders?awaitingMyApproval=true' : null);
-  const { data: pending, reload: reloadPending } = useApi<unknown[]>(canApprove ? '/purchase-orders?status=PENDING_APPROVAL' : null);
+  const { data: mine, loading: mineLoading, error: mineError, reload: reloadMine } = useApi<Waiting[]>(canApprove ? '/purchase-orders?awaitingMyApproval=true' : null);
+  const { data: pending, reload: reloadPending } = useApi<Waiting[]>(canApprove ? '/purchase-orders?status=PENDING_APPROVAL' : null);
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -122,10 +141,11 @@ export function Dashboard() {
       ...(!canApprove ? [] : mineError
         ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
         : mine
-          ? [approvalCard(mine, pending)]
+          // Lists, as the server sends them; anything else counts as nothing.
+          ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [

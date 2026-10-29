@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { orderPath } from '../lib/orderKind';
+import { orderKindOf, orderPath } from '../lib/orderKind';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -66,12 +66,10 @@ export function PurchaseOrders() {
   const status = requested === MINE && !canApprove ? '' : requested;
   const mine = status === MINE;
   const statuses = status && !mine ? status.split(',') : [];
-  // Procurement lists project orders only: the store's are kept in Store →
-  // Order stock (Stores and Procurement Separation Roadmap). "Waiting for my
-  // approval" depends on the approver's limit, so the server picks those, and
-  // until the storeman approves Stores orders (that roadmap's Phase 2) it keeps
-  // them too, so it matches the Dashboard's count; each opens in Order stock.
-  const pos = useApi<PO[]>(mine ? '/purchase-orders?awaitingMyApproval=true' : '/purchase-orders?kind=projects');
+  // Procurement lists project orders only: the store's are kept, and approved,
+  // in Store → Order stock (Stores and Procurement Separation Roadmap).
+  // "Waiting for my approval" depends on the approver's limit, so the server picks those.
+  const pos = useApi<PO[]>(mine ? '/purchase-orders?awaitingMyApproval=true&kind=projects' : '/purchase-orders?kind=projects');
   const setParam = (key: string, v: string | null) => setParams((p) => { if (v === null) p.delete(key); else p.set(key, v); return p; }, { replace: true });
   const setStatus = (v: string) => setParam('status', v === defaultStatus ? null : v || 'all');
   const setProject = (v: string) => setParam('project', v || null);
@@ -87,8 +85,8 @@ export function PurchaseOrders() {
   const needle = q.trim().toLowerCase();
   const filtered = (pos.data ?? []).filter((p) => {
     if (statuses.length > 0 && !statuses.includes(p.status)) return false;
-    // As the server answers, but held here too so a Stores order shows in Procurement only while it waits for its approver.
-    if (!p.projectNumber && !mine) return false;
+    // As the server answers, but held here too so a Stores order never shows in Procurement.
+    if (orderKindOf(p) === 'stores') return false;
     if (project && p.projectNumber !== project) return false;
     if (needle) {
       const hay = `${p.number} ${p.supplier?.name ?? ''} ${p.projectNumber ?? ''}`.toLowerCase();

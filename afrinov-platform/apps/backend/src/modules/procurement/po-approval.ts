@@ -5,10 +5,15 @@
 // means any order. Limits are in rand, so an order in another currency needs
 // an approver without a limit. Every line must have a price first, or the
 // total the limit is checked against is not known.
+//
+// Each kind of order has its own approvers (Stores and Procurement Separation
+// Roadmap): a project order those who approve purchase orders, a Stores order
+// the store, who order Stores stock. Limits work the same for both.
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { orderTotals } from './po-pricing.js';
+import type { OrderKind } from './procurement.service.js';
 
 type Num = Prisma.Decimal | number | string;
 type Priceable = { orderedQty: Num; unitPrice?: Num | null };
@@ -49,12 +54,17 @@ export function approvalBlock(po: OrderForApproval, limit: Num | null | undefine
   return { code: 'OVER_LIMIT', message: `This order is ${rand(totals.net)} including VAT; your approval limit is ${rand(limit!)}.` };
 }
 
-/** Active users whose role may approve orders, with their limits, most senior first. */
-export async function listApprovers(): Promise<Approver[]> {
+/** The permission that approves an order of this kind. */
+export function approvePermissionFor(kind: OrderKind) {
+  return kind === 'stores' ? PermissionCode.OrderStoresStock : PermissionCode.ApprovePurchaseOrder;
+}
+
+/** Active users who may approve orders of this kind, with their limits, most senior first. */
+export async function listApprovers(kind: OrderKind = 'projects'): Promise<Approver[]> {
   const users = await prisma.user.findMany({
     where: {
       active: true,
-      roles: { some: { role: { permissions: { some: { permission: { code: PermissionCode.ApprovePurchaseOrder } } } } } },
+      roles: { some: { role: { permissions: { some: { permission: { code: approvePermissionFor(kind) } } } } } },
     },
     select: { id: true, name: true, approvalLimit: true },
   });
