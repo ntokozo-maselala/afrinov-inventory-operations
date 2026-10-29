@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { orderPath } from '../lib/orderKind';
 import { useApi } from '../hooks/useApi';
 import { ReceivedStockReport } from '../components/reports/ReceivedStockReport';
 import type { ReportView } from '../components/reports/ReportView';
@@ -23,7 +24,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface PO {
-  id: string; number: string; status: string; supplierId: string;
+  id: string; number: string; status: string; supplierId: string; projectNumber?: string | null;
   createdAt: string; supplier: { id?: string; name: string };
   lines: Array<{ id: string; orderedQty: string; receivedQty: string; material: { sku: string; name: string } }>;
 }
@@ -204,7 +205,7 @@ export function SupplierDetail() {
 
 function poColumns(): DataTableColumn<PO>[] {
   return [
-    { key: 'num', header: 'PO', className: 'text-mono', render: (p) => <Link to={`/purchase-orders/${p.id}`} className="btn-link text-mono">{p.number}</Link> },
+    { key: 'num', header: 'PO', className: 'text-mono', render: (p) => <Link to={orderPath(p)} className="btn-link text-mono">{p.number}</Link> },
     { key: 'created', header: 'Created', render: (p) => <span className="text-meta whitespace-nowrap">{formatDate(p.createdAt)}</span> },
     { key: 'lines', header: 'Lines', align: 'right', render: (p) => formatNumber(p.lines.length) },
     { key: 'status', header: 'Status', render: (p) => <PurchaseOrderStatusBadge status={p.status} /> },

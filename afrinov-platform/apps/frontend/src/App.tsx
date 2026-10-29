@@ -143,6 +143,9 @@ export function App() {
           <>
             <Route path="/stock/orders" element={<RouteBoundary name="Order stock"><StoresOrders /></RouteBoundary>} />
             <Route path="/stock/orders/new" element={<RouteBoundary name="New stock order"><NewStockOrder /></RouteBoundary>} />
+            {/* A Stores order lives in Order stock: the same order page, at the store's address. */}
+            <Route path="/stock/orders/:id" element={<RouteBoundary name="Stock order"><PurchaseOrderDetail /></RouteBoundary>} />
+            <Route path="/stock/orders/:id/edit" element={<RouteBoundary name="Edit stock order"><EditPurchaseOrder /></RouteBoundary>} />
             <Route path="/purchase-orders" element={<RouteBoundary name="Purchase orders"><PurchaseOrders /></RouteBoundary>} />
             <Route path="/purchase-orders/new" element={<RouteBoundary name="New purchase order"><NewPurchaseOrder /></RouteBoundary>} />
             <Route path="/purchase-orders/:id" element={<RouteBoundary name="Purchase order"><PurchaseOrderDetail /></RouteBoundary>} />

@@ -6,6 +6,7 @@
 // is received from the order's page, so the order is credited.
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { orderPath } from '../lib/orderKind';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -31,7 +32,7 @@ import { StaleDataNotice } from '../components/StaleDataNotice';
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 interface OpenOrder {
-  id: string; number: string; status: string; supplierId: string; expectedDeliveryDate?: string | null;
+  id: string; number: string; status: string; supplierId: string; projectNumber?: string | null; expectedDeliveryDate?: string | null;
   lines: Array<{ orderedQty: string; receivedQty: string }>;
 }
 
@@ -230,7 +231,7 @@ export function ReceiveStock() {
                   const owed = o.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty)).length;
                   return (
                     <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <Link to={`/purchase-orders/${o.id}?receive=1`} className="btn-secondary btn-sm">Receive against {o.number}</Link>
+                      <Link to={`${orderPath(o)}?receive=1`} className="btn-secondary btn-sm">Receive against {o.number}</Link>
                       <span className="text-meta">
                         {owed} line{owed === 1 ? '' : 's'} outstanding{o.expectedDeliveryDate ? ` · expected ${formatDate(o.expectedDeliveryDate)}` : ''}
                       </span>

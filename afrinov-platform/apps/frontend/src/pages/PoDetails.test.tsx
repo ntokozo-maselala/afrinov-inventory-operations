@@ -45,7 +45,7 @@ const STORES = { ...ORDER, id: 'po-3', number: 'PO-2026-0003', projectNumber: nu
 
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders') return [ORDER, OTHER, STORES];
+    if (path === '/purchase-orders?kind=projects') return [ORDER, OTHER, STORES];
     if (path === '/purchase-orders/po-1') return ORDER;
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
@@ -150,14 +150,13 @@ describe('Purchase orders list by project', () => {
     expect(screen.getByText('PO-2026-0002')).toBeInTheDocument();
   });
 
-  it("shows a buyer project orders, with the store's own a filter away", async () => {
+  // Stores and Procurement Separation Roadmap: the store's orders are kept in Order stock.
+  it('lists project orders only, with no way to the store\'s', async () => {
     listPage('/purchase-orders?status=all');
     expect(await screen.findByText('PO-2026-0001')).toBeInTheDocument();
+    // Even were the server to answer one, a Stores order isn't listed.
     expect(screen.queryByText('PO-2026-0003')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Filter by kind of order')).toHaveValue('projects');
-    fireEvent.change(screen.getByLabelText('Filter by kind of order'), { target: { value: 'stores' } });
-    expect(screen.getByText('PO-2026-0003')).toBeInTheDocument();
-    expect(screen.queryByText('PO-2026-0001')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Filter by kind of order')).not.toBeInTheDocument();
   });
 });
 

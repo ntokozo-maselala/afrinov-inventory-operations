@@ -23,7 +23,7 @@
 // Stock where it is set. Without a supplier, the items' last supplier is
 // suggested when they share one.
 import { useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -43,7 +43,7 @@ import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
 import { needsProject, sectionOf } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
-import { ORDER_PERMISSION, ORDER_SECTION, orderKindOf } from '../lib/orderKind';
+import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
 import {
   PurchaseOrderDetailsFields, SupplierDetailsFields, checkDetails, detailsBody, draftFromOrder, supplierDetails,
   type OrderDetails, type OrderDetailsDraft,
@@ -313,13 +313,13 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
       createdId = created.id;
       if (submit) await api.post(`/purchase-orders/${created.id}/submit`);
       toast.success(submit ? `${created.number} submitted for approval` : `${created.number} saved as a draft`);
-      navigate(`/purchase-orders/${created.id}`);
+      navigate(orderPath({ id: created.id, projectNumber: orderProject || null }));
     } catch (err) {
       const e = err as ApiError;
       // The draft was saved but submitting failed: open it, where it can be submitted again.
       if (createdId) {
         toast.error('Saved as a draft, but not submitted', e.message);
-        navigate(`/purchase-orders/${createdId}`);
+        navigate(orderPath({ id: createdId, projectNumber: orderProject || null }));
       } else {
         toast.error('Could not save the purchase order', e.message);
         setValidation(e.message);
@@ -504,6 +504,7 @@ const EDITABLE = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
 export function EditPurchaseOrder() {
   const { id } = useParams<{ id: string }>();
   const { hasPermission } = usePermissions();
+  const location = useLocation();
   // Each kind of order is edited by its own team: Stores orders by the store, project orders by Procurement.
   const mayEdit = hasPermission(ORDER_PERMISSION.projects) || hasPermission(ORDER_PERMISSION.stores);
   const po = useApi<EditableOrder>(id && mayEdit ? `/purchase-orders/${id}` : null);
@@ -513,6 +514,8 @@ export function EditPurchaseOrder() {
   if (po.error) return <ErrorState error={po.error} onRetry={po.reload} />;
   if (!po.data) return <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>;
   const kind = orderKindOf(po.data);
+  // Opened at the other side's address: the order's own edit page.
+  if (kindOfPath(location.pathname) !== kind) return <Navigate to={`${orderPath(po.data)}/edit`} replace />;
   if (!hasPermission(ORDER_PERMISSION[kind])) {
     return (
       <NoAccess
@@ -525,9 +528,9 @@ export function EditPurchaseOrder() {
   if (!EDITABLE.includes(po.data.status)) {
     return (
       <div>
-        <PageHeader title={`Edit ${po.data.number}`} breadcrumb={[ORDER_SECTION[kind], { label: po.data.number, to: `/purchase-orders/${po.data.id}` }, { label: 'Edit' }]} />
+        <PageHeader title={`Edit ${po.data.number}`} breadcrumb={[ORDER_SECTION[kind], { label: po.data.number, to: orderPath(po.data) }, { label: 'Edit' }]} />
         <Alert tone="info" title="This order can no longer be edited" className="max-w-2xl">
-          Orders can be edited until stock is received against them. <Link to={`/purchase-orders/${po.data.id}`} className="btn-link">Back to {po.data.number}</Link>
+          Orders can be edited until stock is received against them. <Link to={orderPath(po.data)} className="btn-link">Back to {po.data.number}</Link>
         </Alert>
       </div>
     );
@@ -543,7 +546,7 @@ export function EditPurchaseOrder() {
 function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const back = `/purchase-orders/${po.id}`;
+  const back = orderPath(po);
   const stores = orderKindOf(po) === 'stores';
   const [notes, setNotes] = useState(po.notes ?? '');
   const [expectedDeliveryDate, setExpected] = useState(po.expectedDeliveryDate?.slice(0, 10) ?? '');

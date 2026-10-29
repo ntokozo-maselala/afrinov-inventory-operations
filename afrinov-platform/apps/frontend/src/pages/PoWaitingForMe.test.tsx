@@ -15,14 +15,14 @@ vi.mock('../auth', () => ({ useAuth: () => ({ user: { name: 'Ona', roles: auth.r
 const { PurchaseOrders } = await import('./PurchaseOrders');
 
 const order = (id: string, number: string, status: string) => ({
-  id, number, status, supplier: { name: 'Hydac' }, createdAt: '2026-10-01T08:00:00Z', lines: [],
+  id, number, status, supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-01T08:00:00Z', lines: [],
 });
 const MINE = [order('po-1', 'AFRI-0101', 'PENDING_APPROVAL')];
 const ALL = [...MINE, order('po-2', 'AFRI-0102', 'PENDING_APPROVAL'), order('po-3', 'AFRI-0103', 'APPROVED')];
 
 beforeEach(() => {
   auth.roles = ['APPROVER'];
-  mockGet.mockReset().mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true' ? MINE : ALL));
+  mockGet.mockReset().mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true&kind=projects' ? MINE : ALL));
 });
 
 const list = (url = '/purchase-orders') => render(
@@ -35,7 +35,8 @@ describe('Waiting for my approval', () => {
     expect(await screen.findByText('AFRI-0101')).toBeInTheDocument();
     expect(screen.queryByText('AFRI-0102')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Filter by status')).toHaveValue('mine');
-    expect(mockGet).toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
+    // Procurement's queue: project orders only.
+    expect(mockGet).toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true&kind=projects');
   });
 
   it('can be left for all statuses, and back', async () => {
@@ -48,7 +49,7 @@ describe('Waiting for my approval', () => {
   });
 
   it('says when nothing is waiting', async () => {
-    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true' ? [] : ALL));
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true&kind=projects' ? [] : ALL));
     list();
     expect(await screen.findByText('Nothing is waiting for your approval')).toBeInTheDocument();
   });

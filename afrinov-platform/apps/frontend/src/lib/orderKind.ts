@@ -17,6 +17,20 @@ export const ORDER_PERMISSION: Record<OrderKind, Permission> = {
   projects: 'procurement:manage',
 };
 
+/**
+ * Where an order lives (Stores and Procurement Separation Roadmap): a Stores
+ * order inside Store → Order stock, a project order inside Procurement. Every
+ * link to an order goes through this, so neither side opens the other's.
+ */
+export function orderPath(order: { id: string; projectNumber?: string | null }): string {
+  return `${ORDER_SECTION[orderKindOf(order)].to}/${order.id}`;
+}
+
+/** The kind of order a page address is for: under Order stock or under Procurement. */
+export function kindOfPath(pathname: string): OrderKind {
+  return pathname.startsWith(`${ORDER_SECTION.stores.to}/`) ? 'stores' : 'projects';
+}
+
 /** Where an order of this kind is listed, for its breadcrumb. */
 export const ORDER_SECTION: Record<OrderKind, { label: string; to: string }> = {
   stores: { label: 'Order stock', to: '/stock/orders' },
