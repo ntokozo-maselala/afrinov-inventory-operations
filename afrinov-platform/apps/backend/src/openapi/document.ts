@@ -452,7 +452,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/purchase-orders/:id/history', tag: 'Purchase orders', summary: 'Status change history',
-    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
+    description: 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404).',
+    procurement: true, errors: [403, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/submit', tag: 'Purchase orders', summary: 'Submit a draft',
@@ -466,7 +467,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/purchase-orders/:id/approval', tag: 'Purchase orders', summary: 'Who may approve this order, and whether you can',
-    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
+    description: 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404). A Stores order is approved by the store, a store controller only once his approval limit is set.',
+    procurement: true, errors: [403, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',

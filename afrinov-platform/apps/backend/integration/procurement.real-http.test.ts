@@ -561,6 +561,11 @@ describe('receiving stock over real HTTP', () => {
       beamId = beam.body.id;
       storeman = await as('STORE_CONTROLLER');
       buyer = await as('PROCUREMENT');
+      // A store controller approves the store's orders once an admin has set his limit.
+      await prisma.user.updateMany({
+        where: { email: { endsWith: `-${run}@afrinov.local` }, roles: { some: { role: { name: 'STORE_CONTROLLER' } } } },
+        data: { approvalLimit: 1000000 },
+      });
     });
 
     const storesOrder = () => ({ supplierId, lines: [{ materialId, orderedQty: 3, unitPrice: 12.5 }] });
@@ -690,6 +695,38 @@ describe('receiving stock over real HTTP', () => {
       }
     });
 
+    // Qodo, PR #122: a blank limit would mean any value, unchecked.
+    it("won't let a store controller approve until an admin sets his limit", async () => {
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const fresh = await as('STORE_CONTROLLER');
+        const order = await fresh<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        await fresh('POST', `/purchase-orders/${order.body.id}/submit`);
+        expect((await fresh<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id)).not.toContain(order.body.id);
+        expect((await fresh<{ canApprove: boolean }>('GET', `/purchase-orders/${order.body.id}/approval`)).body.canApprove).toBe(false);
+        const refused = await fresh<{ error: { message: string } }>('POST', `/purchase-orders/${order.body.id}/approve`);
+        expect(refused.status).toBe(403);
+        expect(refused.body.error.message).toMatch(/approval limit isn't set yet/);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    it("keeps project orders' Activity out of the store's audit log, and the store's out of Procurement's", async () => {
+      const project = await buyer<{ id: string }>('POST', '/purchase-orders', projectOrder());
+      const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+      const entries = async (who: typeof api, id: string) => (await who<Array<{ entityId: string }>>('GET', `/audit?entityType=PurchaseOrder&entityId=${id}`)).body;
+      expect(await entries(storeman, project.body.id)).toEqual([]);
+      expect(await entries(storeman, store.body.id)).not.toEqual([]);
+      // Admin sees both.
+      expect(await entries(api, project.body.id)).not.toEqual([]);
+      // With no filter either.
+      const all = (await storeman<Array<{ entityId: string }>>('GET', '/audit?limit=500')).body.map((e) => e.entityId);
+      expect(all).not.toContain(project.body.id);
+    });
+
     it("holds the storeman to his approval limit, as an approver is held to theirs", async () => {
       const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
       const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
@@ -816,10 +853,14 @@ describe('receiving stock over real HTTP', () => {
         expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.3 }] })).body.status).toBe('RECEIVED');
       });
 
-      it('takes today in South Africa as the delivery day', async () => {
+      it('takes today in South Africa as the delivery day, given or left out', async () => {
         const order = await approvedProjectOrder();
         const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
         expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }], deliveredOn: today })).status).toBe(200);
+        // Left out, it is recorded as today in South Africa, not in UTC (Qodo, PR #122).
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }] })).status).toBe(200);
+        const history = (await api<Array<{ action: string; after: { deliveredOn?: string } }>>('GET', `/purchase-orders/${order.id}/history`)).body;
+        expect(history.filter((e) => e.action === 'PO_DELIVERY_CONFIRMED').map((e) => e.after.deliveredOn)).toEqual([today, today]);
       });
 
       it("won't post a receipt saved against a project order before Phase 3", async () => {

@@ -469,7 +469,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       </Field>
       {approves && (
         <Field label="Approval limit (R, including VAT)" htmlFor="usr-limit" error={fieldErrors.approvalLimit}
-          help="The largest order this person may approve: project orders for an approver, stock orders for a store controller. Leave blank for no limit. Orders in other currencies need someone without a limit.">
+          help="The largest order this person may approve: project orders for an approver, stock orders for a store controller. Leave blank for no limit, except for a store controller, who approves nothing until a limit is set. Orders in other currencies need someone without a limit.">
           <Input id="usr-limit" type="number" min="0" step="0.01" inputMode="decimal" placeholder="No limit" value={limit} onChange={(e) => setLimit(e.target.value)} invalid={!!fieldErrors.approvalLimit} />
         </Field>
       )}
@@ -547,8 +547,10 @@ export function SettingsUsers() {
                 </div>
                 {PROCUREMENT_ENABLED && u.roles.some((r) => APPROVING_ROLES.includes(r.role.name)) && (
                   <div className="text-xs text-surface-500 mt-1">
-                    {/* A store controller approves the store's own stock orders; approvers, project orders. */}
-                    Approves {u.roles.some((r) => r.role.name === 'ADMIN' || r.role.name === 'APPROVER') ? 'orders' : 'stock orders'} {u.approvalLimit == null ? 'of any value' : `up to ${formatCurrency(Number(u.approvalLimit), 'ZAR')}`}
+                    {/* A store controller approves the store's own stock orders, once his limit is set; approvers, project orders. */}
+                    {u.roles.some((r) => r.role.name === 'ADMIN' || r.role.name === 'APPROVER')
+                      ? `Approves orders ${u.approvalLimit == null ? 'of any value' : `up to ${formatCurrency(Number(u.approvalLimit), 'ZAR')}`}`
+                      : u.approvalLimit == null ? 'Approves no stock orders until a limit is set' : `Approves stock orders up to ${formatCurrency(Number(u.approvalLimit), 'ZAR')}`}
                   </div>
                 )}
               </div>

@@ -410,15 +410,17 @@ straight to site.
   controller no longer holds `view:purchase_order`. Each side's orders are not
   found (404) to the other, so neither can tell the other's exist.
 - **Who approves:** the storeman approves Stores orders, by value against his
-  own limit, including orders he raised (his limit is set in Settings → Users;
-  above it, Admin approves); approvers approve project orders, as before.
+  own limit, including orders he raised. His limit is set in Settings → Users,
+  and until it is, he approves none (a blank limit would otherwise mean any
+  value, unchecked); above it, Admin approves. Approvers approve project
+  orders, as before.
 - **Delivery:** a Stores order is received into stock by the store; a project
   order is never received into stock: Procurement confirms its delivery on
   the order, line by line, and no stock is added.
 
 **Consequences:** Each role sees and does only its own side. Admin sees both.
-Store controllers start with no approval limit, which means none, so a limit
-is set on each before release. Projects items bought from now hold no stock;
+A store controller approves nothing until an admin sets his limit, so a
+limit is set on each at release. Projects items bought from now hold no stock;
 existing Projects stock stays issuable to its project. Migration
 `20260101000031` removes the store controller's `view:purchase_order`.
 

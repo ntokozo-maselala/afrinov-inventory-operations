@@ -5,7 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../shared/db.js';
-import { requirePermission } from '../../shared/authorization.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { ActivityService } from './activity.service.js';
 
@@ -26,9 +26,21 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid query', details: parsed.error.flatten() } });
     }
-    const where: { entityType?: string; entityId?: string } = {};
+    const where: { entityType?: string; entityId?: string; NOT?: object[] } = {};
     if (parsed.data.entityType) where.entityType = parsed.data.entityType;
     if (parsed.data.entityId) where.entityId = parsed.data.entityId;
+    // The Activity of orders and RFQs follows who may see them (Stores and
+    // Procurement Separation Roadmap): Stores orders' to the store, project
+    // orders' and RFQs' to Procurement and approvers. Admin sees both.
+    const hidden: object[] = [];
+    const seesStores = await userHasPermission(req, PermissionCode.OrderStoresStock);
+    const seesProjects = await userHasPermission(req, PermissionCode.ViewPurchaseOrder);
+    if (!seesProjects) hidden.push({ entityType: 'Rfq' });
+    if (!seesStores || !seesProjects) {
+      const unseen = await prisma.purchaseOrder.findMany({ where: { projectNumber: seesProjects ? null : { not: null } }, select: { id: true } });
+      if (unseen.length > 0) hidden.push({ entityType: 'PurchaseOrder', entityId: { in: unseen.map((po) => po.id) } });
+    }
+    if (hidden.length > 0) where.NOT = hidden;
     const rows = await prisma.auditLogEntry.findMany({
       where,
       orderBy: { createdAt: 'desc' },

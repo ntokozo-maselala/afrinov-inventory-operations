@@ -49,7 +49,7 @@ const db = {
   audit: [] as AuditRow[],
   settings: new Map<string, SettingRow>(),
   projects: new Map<string, { projectNumber: string; active: boolean; status?: string }>(),
-  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean; canApproveStores?: boolean }>(),
+  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean; canApproveStores?: boolean; roles?: Array<{ role: { name: string } }> }>(),
 };
 let poCounter = 0;
 let lineCounter = 0;
@@ -917,6 +917,19 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect(panel.approvers.map((a) => a.id)).toContain('u-store');
     expect(panel.approvers.map((a) => a.id)).not.toContain('u-proc');
     expect(await PurchaseOrderService.approval(stores, 'u-proc')).toMatchObject({ canApprove: false });
+  });
+
+  // Qodo, PR #122: a blank limit would mean any value, unchecked.
+  it('lets a store controller approve Stores orders only once his limit is set', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const storeman = { role: { name: 'STORE_CONTROLLER' } };
+    db.users.set('u-new', { id: 'u-new', name: 'New storeman', approvalLimit: null, canApprove: false, canApproveStores: true, roles: [storeman] });
+    const stores = await submitted(1000);
+    expect(await PurchaseOrderService.awaitingApproval('u-new')).toEqual([]);
+    expect(await PurchaseOrderService.approval(stores, 'u-new')).toMatchObject({ canApprove: false });
+    await expect(PurchaseOrderService.approve(stores, 'u-new')).rejects.toMatchObject({ code: 'FORBIDDEN', message: expect.stringMatching(/approval limit isn't set yet/) });
+    db.users.set('u-new', { ...db.users.get('u-new')!, approvalLimit: new Prisma.Decimal(5000) });
+    expect(await PurchaseOrderService.approve(stores, 'u-new')).toMatchObject({ status: 'APPROVED' });
   });
 
   it('sends an approved order back for approval when an edit takes it past the approver\'s limit', async () => {
