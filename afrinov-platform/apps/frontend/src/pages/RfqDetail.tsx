@@ -27,6 +27,7 @@ import { DEFAULT_CLOSING_DAYS, addDays, formatDay, todayInSouthAfrica, type Rfq,
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { downloadQuoteFile } from '../api/rfqQuoteFile';
 import { RfqQuoteDialog } from '../components/RfqQuoteDialog';
+import { RfqAwardDialog, RfqComparison } from '../components/RfqComparison';
 import { formatMoney } from '../lib/poMoney';
 
 interface HistoryEntry {
@@ -54,6 +55,7 @@ export function RfqDetail() {
 
   // Recording a supplier's answer, and opening their own quotation.
   const [recording, setRecording] = useState<string | null>(null);
+  const [awarding, setAwarding] = useState<string | null>(null);
   async function quoteFileFor(s: RfqSupplier) {
     if (!r || !s.quoteFile) return;
     try {
@@ -129,6 +131,24 @@ export function RfqDetail() {
           {r.status === 'CANCELLED' && (
             <Alert tone="danger" title="Cancelled">{r.cancellationReason ?? 'No reason given.'}</Alert>
           )}
+          {r.status === 'AWARDED' && r.purchaseOrder && (
+            <Alert tone="success" title={`Awarded to ${awardedTo(r) ?? 'a supplier'}`}>
+              Raised as order <Link to={`/purchase-orders/${r.purchaseOrder.id}`} className="btn-link text-mono">{r.purchaseOrder.number}</Link>
+              {r.awardedAt ? ` on ${formatDateTime(r.awardedAt)}` : ''}{r.awardedBy ? ` by ${r.awardedBy.name}` : ''}. It goes for approval as any order does.
+            </Alert>
+          )}
+
+          {r.suppliers.some((s) => s.quotedAt && !s.declined) && (
+            <section>
+              <SectionHeader
+                title="Compare quotes"
+                description={r.status === 'SENT'
+                  ? 'Each supplier’s prices side by side, the lowest on each line marked. Award one to raise its purchase order.'
+                  : 'Each supplier’s prices side by side, as they stood when it was awarded.'}
+              />
+              <RfqComparison rfq={r} onAward={canManage && r.status === 'SENT' ? (s) => setAwarding(s.supplierId) : undefined} />
+            </section>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <aside className="lg:col-span-1 surface-card p-4 space-y-3">
@@ -179,6 +199,21 @@ export function RfqDetail() {
 
       {r && dialog === 'send' && <SendDialog rfq={r} onClose={() => setDialog(null)} onSend={(closingDate) => act('{n} sent', () => api.post<Rfq>(`/rfqs/${r.id}/send`, { closingDate }))} />}
       {r && dialog === 'cancel' && <CancelDialog rfq={r} onClose={() => setDialog(null)} onCancel={(reason) => act('{n} cancelled', () => api.post<Rfq>(`/rfqs/${r.id}/cancel`, { reason }))} />}
+      {r && awarding && (() => {
+        const chosen = r.suppliers.find((s) => s.supplierId === awarding);
+        return chosen && (
+          <RfqAwardDialog
+            rfq={r} chosen={chosen}
+            onClose={() => setAwarding(null)}
+            onAwarded={(saved) => {
+              setAwarding(null);
+              toast.success(`${saved.number} awarded`, saved.purchaseOrder ? `Draft order ${saved.purchaseOrder.number} raised.` : undefined);
+              if (saved.purchaseOrder) navigate(`/purchase-orders/${saved.purchaseOrder.id}`);
+              else reload();
+            }}
+          />
+        );
+      })()}
       {r && recording && (() => {
         const asked = r.suppliers.find((s) => s.supplierId === recording);
         return asked && (
@@ -294,6 +329,11 @@ function History({ entries, loading, suppliers }: { entries: HistoryEntry[]; loa
   );
 }
 
+/** The supplier an awarded RFQ's order went to. */
+function awardedTo(r: Rfq): string | null {
+  return r.suppliers.find((s) => s.supplierId === r.purchaseOrder?.supplierId)?.supplier?.name ?? null;
+}
+
 /** One Activity entry in plain words. */
 function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (id) => id): string {
   const after = (e.after ?? {}) as Record<string, unknown>;
@@ -304,6 +344,9 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
     return `Sent to ${n} supplier${n === 1 ? '' : 's'}, closing ${formatDay(String(after.closingDate ?? ''))}`;
   }
   if (e.action === 'RFQ_CANCEL') return `Cancelled: ${String(after.reason ?? '')}`;
+  if (e.action === 'RFQ_AWARD') {
+    return `Awarded to ${supplierName(String(after.supplierId ?? ''))}, raising order ${String(after.purchaseOrderNumber ?? '')}${after.reason ? `: ${String(after.reason)}` : ''}`;
+  }
   const who = supplierName(String(after.supplierId ?? ''));
   if (e.action === 'RFQ_QUOTE') return `Quote recorded from ${who}${after.quoteReference ? ` (ref ${String(after.quoteReference)})` : ''}`;
   if (e.action === 'RFQ_QUOTE_CORRECTED') return `Quote from ${who} corrected`;

@@ -438,6 +438,87 @@ describe('requests for quotation over real HTTP', () => {
     });
   });
 
+  describe('award (Phase 5)', () => {
+    type Awarded = Omit<Rfq, 'lines' | 'suppliers'> & ApiErrorBody & {
+      lines: Array<{ id: string }>;
+      suppliers: Array<{ supplierId: string }>;
+      purchaseOrder: { id: string; number: string; status: string } | null;
+      error: { code: string; message: string; details?: { concerns?: string[] } };
+    };
+    interface Order {
+      id: string; number: string; status: string; supplierId: string; projectNumber: string | null; penaltiesApply: boolean; notes: string | null;
+      rfq: { id: string; number: string } | null;
+      lines: Array<{ materialId: string; orderedQty: string; unitPrice: string | null }>;
+    }
+
+    /** A sent RFQ for the project with two lines; A quotes 736 incl. VAT for line 1 only, B 690 for line 1 and 10 for line 2. */
+    async function quoted(): Promise<Awarded> {
+      const created = await raise({
+        projectNumber, penaltiesApply: true, notes: 'Deliver to site',
+        lines: [{ materialId: storesItem, quantity: 4 }, { materialId: projectItem, quantity: 1 }], supplierIds: [supplierA, supplierB],
+      });
+      const sent = (await api<Awarded>('POST', `/rfqs/${created.body.id}/send`, {})).body;
+      const [l1, l2] = sent.lines;
+      await api('PUT', `/rfqs/${sent.id}/suppliers/${supplierA}/quote`, { quoteReference: 'A-1', prices: [{ rfqLineId: l1!.id, unitPrice: 160 }] });
+      await api('PUT', `/rfqs/${sent.id}/suppliers/${supplierB}/quote`, { quoteReference: 'B-7', prices: [{ rfqLineId: l1!.id, unitPrice: 150 }, { rfqLineId: l2!.id, unitPrice: 0.0001 }] });
+      return sent;
+    }
+    const award = (id: string, body: Record<string, unknown>) => api<Awarded>('POST', `/rfqs/${id}/award`, body);
+
+    it('raises a draft order at the quoted prices for the clear choice, linked both ways', async () => {
+      const rfq = await quoted();
+      const res = await award(rfq.id, { supplierId: supplierB });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('AWARDED');
+      expect(res.body.purchaseOrder).toMatchObject({ status: 'DRAFT' });
+
+      const order = (await api<Order>('GET', `/purchase-orders/${res.body.purchaseOrder!.id}`)).body;
+      expect(order).toMatchObject({ status: 'DRAFT', supplierId: supplierB, projectNumber, penaltiesApply: true, rfq: { id: rfq.id, number: rfq.number } });
+      expect(order.notes).toBe(`As per your quotation B-7 for ${rfq.number}.\nDeliver to site`);
+      expect(order.lines.map((l) => [l.materialId, Number(l.orderedQty), Number(l.unitPrice)])).toEqual([[storesItem, 4, 150], [projectItem, 1, 0.0001]]);
+
+      const poHistory = await api<HistoryEntry[]>('GET', `/purchase-orders/${order.id}/history`);
+      expect(poHistory.body.at(-1)).toMatchObject({ action: 'CREATE', after: { rfqId: rfq.id, rfqNumber: rfq.number } });
+      const rfqHistory = await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`);
+      expect(rfqHistory.body[0]).toMatchObject({ action: 'RFQ_AWARD', after: { supplierId: supplierB, purchaseOrderNumber: order.number, concerns: [] } });
+
+      // Awarded once only, and its quotes no longer change.
+      expect((await award(rfq.id, { supplierId: supplierB })).status).toBe(409);
+      expect((await api('POST', `/rfqs/${rfq.id}/suppliers/${supplierA}/decline`, {})).status).toBe(409);
+    });
+
+    it('asks why before awarding to a quote that left a line unpriced, and keeps the reason', async () => {
+      const rfq = await quoted();
+      const refused = await award(rfq.id, { supplierId: supplierA });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error.details?.concerns).toEqual([expect.stringContaining("didn't price 1 line")]);
+
+      const res = await award(rfq.id, { supplierId: supplierA, reason: 'B can only deliver in six weeks' });
+      expect(res.status).toBe(200);
+      const order = (await api<Order>('GET', `/purchase-orders/${res.body.purchaseOrder!.id}`)).body;
+      // The line A didn't price goes on the order without a price, to be added before approval.
+      expect(order.lines.map((l) => l.unitPrice === null ? null : Number(l.unitPrice))).toEqual([160, null]);
+      const history = await api<HistoryEntry[]>('GET', `/rfqs/${rfq.id}/history`);
+      expect(history.body[0]!.after).toMatchObject({ reason: 'B can only deliver in six weeks' });
+    });
+
+    it("won't award to a supplier who hasn't quoted, nor a draft", async () => {
+      const rfq = await quoted();
+      await api('POST', `/rfqs/${rfq.id}/suppliers/${supplierB}/decline`, { notes: 'Changed their mind' });
+      expect((await award(rfq.id, { supplierId: supplierB })).status).toBe(400);
+      const draft = await raise({ lines: [{ materialId: storesItem, quantity: 1 }], supplierIds: [supplierA] });
+      expect((await award(draft.body.id, { supplierId: supplierA })).status).toBe(409);
+    });
+
+    it('raises one order when two buyers award at once', async () => {
+      const rfq = await quoted();
+      const both = await Promise.all([award(rfq.id, { supplierId: supplierB }), award(rfq.id, { supplierId: supplierB })]);
+      expect(both.map((r) => r.status).sort()).toEqual([200, 409]);
+      const orders = await prisma.purchaseOrder.count({ where: { rfq: { id: rfq.id } } });
+      expect(orders).toBe(1);
+    });
+  });
+
   it('answers 404 for an RFQ that does not exist', async () => {
     expect((await api('GET', '/rfqs/00000000-0000-4000-8000-000000000000')).status).toBe(404);
     expect((await api('GET', '/rfqs/00000000-0000-4000-8000-000000000000/history')).status).toBe(404);

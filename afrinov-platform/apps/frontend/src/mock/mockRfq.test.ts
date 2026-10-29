@@ -187,3 +187,38 @@ describe('mock: quotes', () => {
     expect(() => mockGetQuoteFile(rfq.id, 'sup-1')).toThrow();
   });
 });
+
+// As the server (Phase 5): the award raises a draft order at the quoted prices, linked both ways.
+describe('mock: award', () => {
+  type Awarded = Omit<Rfq, 'lines' | 'status'> & { status: string; lines: Array<{ id: string }>; purchaseOrder: { id: string; number: string; supplierId: string } | null };
+  async function quoted(): Promise<Awarded> {
+    const draft = await raise({ lines: [{ materialId: 'mat-1', quantity: 4 }, { materialId: 'mat-2', quantity: 2 }], supplierIds: ['sup-1', 'sup-2'] });
+    const rfq = await api.post<Awarded>(`/rfqs/${draft.id}/send`, {});
+    const [l1, l2] = rfq.lines;
+    await api.put(`/rfqs/${rfq.id}/suppliers/sup-1/quote`, { quoteReference: 'H-1', prices: [{ rfqLineId: l1!.id, unitPrice: 150 }, { rfqLineId: l2!.id, unitPrice: 20 }] });
+    await api.put(`/rfqs/${rfq.id}/suppliers/sup-2/quote`, { prices: [{ rfqLineId: l1!.id, unitPrice: 160 }, { rfqLineId: l2!.id, unitPrice: 20 }] });
+    return rfq;
+  }
+
+  it('raises a draft order for the clear choice at its prices, named on both sides', async () => {
+    const rfq = await quoted();
+    const awarded = await api.post<Awarded>(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-1' });
+    expect(awarded).toMatchObject({ status: 'AWARDED', purchaseOrder: { supplierId: 'sup-1' } });
+    const order = await api.get<{ status: string; notes: string; rfq: { number: string }; lines: Array<{ unitPrice: string }> }>(`/purchase-orders/${awarded.purchaseOrder!.id}`);
+    expect(order).toMatchObject({ status: 'DRAFT', rfq: { number: rfq.number }, notes: `As per your quotation H-1 for ${rfq.number}.` });
+    expect(order.lines.map((l) => Number(l.unitPrice))).toEqual([150, 20]);
+    const orderHistory = await api.get<Array<{ after: Record<string, unknown> }>>(`/purchase-orders/${awarded.purchaseOrder!.id}/history`);
+    expect(orderHistory.at(-1)!.after).toMatchObject({ rfqNumber: rfq.number });
+    await expect(api.post(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-1' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+
+  it('asks why for a dearer quote, and refuses a supplier who has not quoted', async () => {
+    const rfq = await quoted();
+    await expect(api.post(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-2' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', details: { concerns: [expect.stringContaining('quoted less')] } });
+    expect((await api.post<Awarded>(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-2', reason: 'Faster delivery' })).status).toBe('AWARDED');
+
+    const other = await raise({ lines: [{ materialId: 'mat-1', quantity: 1 }], supplierIds: ['sup-3'] });
+    await api.post(`/rfqs/${other.id}/send`, {});
+    await expect(api.post(`/rfqs/${other.id}/award`, { supplierId: 'sup-3' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+});

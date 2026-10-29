@@ -315,6 +315,7 @@ export interface MockRfq {
   createdAt: string;
   updatedAt: string;
   purchaseOrderId: string | null;
+  awardedAt?: string | null;
   sentAt?: string | null;
   cancelledAt?: string | null;
   cancellationReason?: string | null;

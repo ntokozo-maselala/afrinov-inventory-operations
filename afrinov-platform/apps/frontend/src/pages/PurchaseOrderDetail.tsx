@@ -73,6 +73,8 @@ interface PO extends OrderDetails {
   createdBy?: POUser | null;
   lines: POLine[];
   goodsReceipts?: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }>;
+  /** The request for quotation it was awarded from, if any. */
+  rfq?: { id: string; number: string } | null;
 }
 
 interface HistoryEntry {
@@ -253,6 +255,9 @@ export function PurchaseOrderDetail() {
               <h2 className="text-h3 text-surface-900">Summary</h2>
               <dl className="text-sm grid grid-cols-3 gap-y-2">
                 <dt className="text-surface-500">Supplier</dt><dd className="col-span-2">{fresh.supplier?.name ?? '—'}</dd>
+                {fresh.rfq && (
+                  <><dt className="text-surface-500">From RFQ</dt><dd className="col-span-2"><Link to={`/rfqs/${fresh.rfq.id}`} className="btn-link text-mono">{fresh.rfq.number}</Link></dd></>
+                )}
                 <dt className="text-surface-500">Created</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.createdAt)}</dd>
                 {fresh.expectedDeliveryDate && (
                   <><dt className="text-surface-500">Expected</dt><dd className="col-span-2 text-meta">{formatDate(fresh.expectedDeliveryDate)}</dd></>
@@ -397,8 +402,10 @@ function History({ entries, loading }: { entries: HistoryEntry[]; loading: boole
 }
 
 function describeEntry(e: HistoryEntry): string {
-  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string };
+  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string; rfqNumber?: string };
   const before = (e.before ?? {}) as { status?: string };
+  // An order awarded from a request for quotation says which.
+  if (e.action === 'CREATE' && after.rfqNumber) return `Purchase order raised from ${after.rfqNumber}`;
   const label = e.action === 'PO_GOODS_RECEIVED' && after.goodsReceiptNumber
     ? `Received on ${after.goodsReceiptNumber}`
     : labelForAction(e.action);

@@ -6,15 +6,15 @@ Oct 28, 2026 · Sbonakaliso Ngcobo
 
 Six phases that add requests for quotation to Procurement, aligned with the **RFQ sheet of the AFRI-02A-1094-02-01 Manhours and Material** workbook. Today a buyer fills in that sheet, sends it to suppliers, collects their prices in the "02-Recieved Quotation" folder, compares them by hand and then types the winning prices into a purchase order. In the app, an RFQ is raised from the materials list, sent to several suppliers as a PDF, their quotes are recorded and compared side by side, and the winner becomes a draft purchase order with the quoted prices.
 
-**Status:** Phases 1 to 3 are merged (PRs #104, #105 and #107). Phase 4 is in review (PR #112). One pull request per phase.
+**Status:** Phases 1 to 4 are merged (PRs #104, #105, #107 and #112). Phase 5 is built on `feature/rfq-award` and not yet committed. One pull request per phase.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | RFQ record and numbering | M | Merged (#104) |
 | 2 | Raise, edit and send an RFQ | M | Merged (#105) |
 | 3 | The RFQ document for suppliers | M | Merged (#107) |
-| 4 | Record the quotes that come back | M to L | In review |
-| 5 | Compare quotes and award to a purchase order | M | Planned |
+| 4 | Record the quotes that come back | M to L | Merged (#112) |
+| 5 | Compare quotes and award to a purchase order | M | Built |
 | 6 | Roll out | S | Planned |
 
 Sizes used below: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
@@ -101,7 +101,7 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 4: Record the quotes that come back
 
-**In review** (PR #112), on top of the dependency upgrades in PRs #108 to #110. Size M to L. Backend and frontend, with a migration. 8 real-HTTP tests, 9 page tests, 5 mock tests, 2 upload tests and a price-precision test. Qodo's findings on the first push are fixed: a quotation is always kept and downloaded as a .pdf (with nosniff), so a file disguised as a PDF can't open as a web page; who is uploading is checked before the 10 MB body is read; prices too fine to keep at 4 decimal places are refused; a quote can't be valid only until before it came in; corrections and declines keep the whole quote they replace in the Activity; the price boxes step by 0.0001; and the mock refuses what the server refuses. Found on the way: suppliers saved together shared a time, so they could be listed in any order; each is now a millisecond after the one before, keeping the order they were asked.
+**Merged** (PR #112), on top of the dependency upgrades in PRs #108 to #110. Size M to L. Backend and frontend, with a migration. 8 real-HTTP tests, 9 page tests, 5 mock tests, 2 upload tests and a price-precision test. Qodo's findings on the first push are fixed: a quotation is always kept and downloaded as a .pdf (with nosniff), so a file disguised as a PDF can't open as a web page; who is uploading is checked before the 10 MB body is read; prices too fine to keep at 4 decimal places are refused; a quote can't be valid only until before it came in; corrections and declines keep the whole quote they replace in the Activity; the price boxes step by 0.0001; and the mock refuses what the server refuses. Found on the way: suppliers saved together shared a time, so they could be listed in any order; each is now a millisecond after the one before, keeping the order they were asked.
 
 **Where it shows:** a sent RFQ → each supplier → **Record quote** (or **Edit quote**).
 
@@ -116,13 +116,15 @@ Copy what the RFQ sheet means, not how it works. Its formulas have faults (see [
 
 ## Phase 5: Compare quotes and award to a purchase order
 
-Size M. Backend and frontend.
+**Built** on `feature/rfq-award`. Size M. Backend and frontend. 4 real-HTTP tests, 2 unit tests, 6 page tests and 2 mock tests.
 
-- [ ] **5.1 Comparison.** On the RFQ, a table with a row per line and a column per quoting supplier: unit price and subtotal, the lowest per line marked, and each supplier's total, VAT and net value at the foot, with lead time and validity. Shows a warning beside a quote past its valid-until date, and the number of lines a supplier left unpriced. Suppliers in other currencies are not compared on value, only shown.
+**Where it shows:** an RFQ with quotes → **Compare quotes** → **Award** under a supplier.
+
+- [x] **5.1 Comparison.** On the RFQ, a table with a row per line and a column per quoting supplier: unit price and subtotal, the lowest per line marked (among quotes in the same currency), and each supplier's total, VAT and net value at the foot, the lowest complete quote marked, with lines not offered, lead time and validity ("Ran out" once past). Suppliers in other currencies are shown side by side but only compared with their own currency.
   Files: `pages/RfqDetail.tsx`, `lib/rfqCompare.ts`
-- [ ] **5.2 Award.** `POST /rfqs/:id/award` with the chosen supplier. In one transaction: the RFQ is locked, checked still Sent, a draft purchase order is created (supplier, project, penalties, remarks, lines with the quoted prices) and the RFQ becomes Awarded with a link to the order. The order's Activity starts "Raised from RFQ …". Awarding someone other than the lowest asks for a reason, kept in the Activity.
+- [x] **5.2 Award.** `POST /rfqs/:id/award` with the chosen supplier. In one transaction: the RFQ is locked, checked still Sent, a draft purchase order is created (supplier, project, penalties, "As per your quotation … for <RFQ number>" and the RFQ's remarks, lines at the quoted prices; a line not offered goes on without a price) and the RFQ becomes Awarded with a link to the order. Two awards at once raise one order. The order's Activity starts "Purchase order raised from <RFQ number>". A reason is required, and kept in the Activity, when the supplier didn't price every line, their quote has run out, or a complete quote in the same currency is cheaper (`awardConcerns`, the same rule on the server, the screen and the mock).
   Files: `procurement/rfq.service.ts`, `procurement.service.ts` (`create` takes an optional transaction, as `postGoodsReceipt` does)
-- [ ] **5.3 Links both ways.** The order shows "From RFQ …" in its summary; the RFQ shows the order and its status.
+- [x] **5.3 Links both ways.** The order shows "From RFQ …" in its summary; the RFQ shows the order and its status.
   Files: `pages/PurchaseOrderDetail.tsx`, `pages/RfqDetail.tsx`
 
 **Done when:**

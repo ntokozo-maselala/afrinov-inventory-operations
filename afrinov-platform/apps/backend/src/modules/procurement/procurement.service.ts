@@ -367,6 +367,8 @@ export const PurchaseOrderService = {
         closedBy: { select: { id: true, name: true, email: true } },
         lines: { include: { material: true } },
         goodsReceipts: { include: { lines: true } },
+        // The request for quotation it was awarded from, if any.
+        rfq: { select: { id: true, number: true } },
       },
     });
     if (!po) throw Errors.notFound('PurchaseOrder');
@@ -386,8 +388,13 @@ export const PurchaseOrderService = {
    * project, unassigned project material, or an invalid order or line delivery date.
    * @throws {Error} Propagates database errors, including delivery settings
    * lookup and transaction failures.
+   *
+   * @param opts.within The caller's transaction, so the order is saved with
+   * the rest of its change or not at all (an RFQ's award).
+   * @param opts.fromRfq The request for quotation it was awarded from, named
+   * on its first Activity entry.
    */
-  async create(input: CreatePOInput, actorId: string) {
+  async create(input: CreatePOInput, actorId: string, opts: { within?: Prisma.TransactionClient; fromRfq?: { id: string; number: string } } = {}) {
     if (input.lines.length === 0) throw Errors.validation('Purchase order must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
@@ -429,7 +436,7 @@ export const PurchaseOrderService = {
       details.afrinovContact = actor?.name ?? null;
     }
 
-    return prisma.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
       // Serialize PO-number generation so two concurrent creates cannot
       // collide on the same sequential number. The advisory lock is scoped
       // to this transaction and auto-released on commit/rollback.
@@ -466,11 +473,15 @@ export const PurchaseOrderService = {
           action: 'CREATE',
           entityType: 'PurchaseOrder',
           entityId: po.id,
-          after: { number, status: po.status } as Prisma.InputJsonValue,
+          after: {
+            number, status: po.status,
+            ...(opts.fromRfq ? { rfqId: opts.fromRfq.id, rfqNumber: opts.fromRfq.number } : {}),
+          } as Prisma.InputJsonValue,
         },
       });
       return po;
-    });
+    };
+    return opts.within ? write(opts.within) : prisma.$transaction(write);
   },
 
   async update(input: UpdatePOInput, actorId: string) {

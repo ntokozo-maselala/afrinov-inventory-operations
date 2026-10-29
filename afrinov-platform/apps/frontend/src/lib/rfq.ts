@@ -56,10 +56,13 @@ export interface Rfq {
   createdBy?: RfqPerson | null;
   sentAt?: string | null;
   sentBy?: RfqPerson | null;
+  awardedAt?: string | null;
+  awardedBy?: RfqPerson | null;
   cancelledAt?: string | null;
   cancelledBy?: RfqPerson | null;
   cancellationReason?: string | null;
-  purchaseOrder?: { id: string; number: string; status: string } | null;
+  /** The order it was awarded as, and the supplier it went to. */
+  purchaseOrder?: { id: string; number: string; status: string; supplierId?: string } | null;
   lines: RfqLine[];
   suppliers: RfqSupplier[];
 }
@@ -103,6 +106,33 @@ export function addDays(day: string, days: number): string {
 export function fourDecimals(n: number): boolean {
   const kept = Math.round(n * 1e4) / 1e4;
   return Math.abs(n - kept) <= Number.EPSILON * Math.max(1, Math.abs(n)) * 8;
+}
+
+/**
+ * What a buyer should say why about before awarding to a supplier, as the
+ * server works it out (awardConcerns in rfq.service.ts): lines they didn't
+ * price, a quote that has run out, a cheaper complete quote in the same
+ * currency. Empty: the clear choice.
+ */
+export function awardConcerns(rfq: Pick<Rfq, 'suppliers'>, chosenId: string, today: string): string[] {
+  const quoted = (s: RfqSupplier) => !!s.quotedAt && !s.declined && !!s.totals;
+  const name = (s: RfqSupplier) => s.supplier?.name ?? s.supplierId;
+  const currency = (s: RfqSupplier) => s.supplier?.currency ?? 'ZAR';
+  const chosen = rfq.suppliers.find((s) => s.supplierId === chosenId);
+  if (!chosen || !quoted(chosen)) return [];
+  const concerns: string[] = [];
+  const unpriced = chosen.totals!.unpricedLines;
+  if (unpriced > 0) concerns.push(`${name(chosen)} didn't price ${unpriced === 1 ? '1 line' : `${unpriced} lines`}: the order has ${unpriced === 1 ? 'it' : 'them'} without a price`);
+  const until = chosen.validUntil?.slice(0, 10);
+  if (until && until < today) concerns.push(`${name(chosen)}'s quote ran out on ${until}`);
+  if (unpriced === 0) {
+    const net = Number(chosen.totals!.net);
+    const cheaper = rfq.suppliers
+      .filter((s) => s.supplierId !== chosenId && quoted(s) && currency(s) === currency(chosen) && s.totals!.unpricedLines === 0 && Number(s.totals!.net) < net)
+      .sort((a, b) => Number(a.totals!.net) - Number(b.totals!.net));
+    if (cheaper[0]) concerns.push(`${name(cheaper[0])} quoted less for every line: ${currency(cheaper[0])} ${Number(cheaper[0].totals!.net).toFixed(2)} against ${net.toFixed(2)}`);
+  }
+  return concerns;
 }
 
 /** Quotes in so far, out of the suppliers asked; one who declined has answered too. */

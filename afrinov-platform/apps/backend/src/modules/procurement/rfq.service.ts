@@ -7,7 +7,8 @@
 // A draft is raised, edited and sent (Phases 1 and 2); once sent, only its
 // closing date moves and suppliers who were missed are added, and each
 // supplier's quote is recorded, with their own PDF, or their decline (Phase 4).
-// The award follows in Phase 5.
+// Phase 5 compares the quotes and awards the RFQ to one supplier: a draft
+// purchase order at their prices, saved with the award or not at all.
 //
 // An RFQ is for a project or for Stores, as an order is, and holds a project's
 // material only for that project. Every change is written to the audit log
@@ -19,7 +20,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
 import { defaultVatRate, orderTotals } from './po-pricing.js';
-import { assertProjectOpen } from './procurement.service.js';
+import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
 
 export interface RfqLineInput { materialId: string; quantity: number }
 
@@ -81,6 +82,44 @@ function checkClosingDate(closing: string, issued: string): void {
 }
 
 const SENT_FIELDS = ['projectNumber', 'description', 'notes', 'penaltiesApply', 'lines'] as const;
+
+/** One supplier's quote as the award weighs it. */
+export interface QuoteForAward {
+  supplierId: string;
+  name: string;
+  currency: string;
+  /** Recorded and not declined. */
+  quoted: boolean;
+  /** Net value including VAT; null until quoted. */
+  net: number | null;
+  unpricedLines: number;
+  /** YYYY-MM-DD, or null when the quote gave none. */
+  validUntil: string | null;
+}
+
+/**
+ * What a buyer should say why about before awarding to `chosen`: lines it
+ * didn't price (the order has them without a price), a quote that has run
+ * out, and a cheaper complete quote in the same currency. Quotes in another
+ * currency aren't weighed against it. Empty: the clear choice, no reason
+ * needed.
+ */
+export function awardConcerns(quotes: QuoteForAward[], chosenId: string, today: string): string[] {
+  const chosen = quotes.find((q) => q.supplierId === chosenId);
+  if (!chosen?.quoted) return [];
+  const concerns: string[] = [];
+  if (chosen.unpricedLines > 0) {
+    concerns.push(`${chosen.name} didn't price ${chosen.unpricedLines === 1 ? '1 line' : `${chosen.unpricedLines} lines`}: the order has ${chosen.unpricedLines === 1 ? 'it' : 'them'} without a price`);
+  }
+  if (chosen.validUntil && chosen.validUntil < today) concerns.push(`${chosen.name}'s quote ran out on ${chosen.validUntil}`);
+  if (chosen.unpricedLines === 0 && chosen.net !== null) {
+    const cheaper = quotes
+      .filter((q) => q.supplierId !== chosenId && q.quoted && q.currency === chosen.currency && q.unpricedLines === 0 && q.net !== null && q.net < chosen.net!)
+      .sort((a, b) => a.net! - b.net!);
+    if (cheaper[0]) concerns.push(`${cheaper[0].name} quoted less for every line: ${cheaper[0].currency} ${cheaper[0].net!.toFixed(2)} against ${chosen.net.toFixed(2)}`);
+  }
+  return concerns;
+}
 
 export interface RecordQuoteInput {
   /** YYYY-MM-DD; today unless given. */
@@ -280,7 +319,7 @@ const DETAIL = {
   sentBy: person,
   awardedBy: person,
   cancelledBy: person,
-  purchaseOrder: { select: { id: true, number: true, status: true } },
+  purchaseOrder: { select: { id: true, number: true, status: true, supplierId: true } },
   lines: { include: { material: true }, orderBy: { lineNo: 'asc' } },
   suppliers: {
     // The quotation file's details, never its contents: those are downloaded on their own.
@@ -673,6 +712,87 @@ export const RfqService = {
       if (removed.count === 0) throw Errors.notFound('Quotation file');
       await tx.auditLogEntry.create({
         data: { actorId, action: 'RFQ_QUOTE_FILE_REMOVED', entityType: 'Rfq', entityId: rfq.id, after: { supplierId } },
+      });
+    });
+    return RfqService.getById(rfqId);
+  },
+
+  /**
+   * Awards the RFQ to one supplier who quoted: a draft purchase order for
+   * them, with the RFQ's project, penalties and lines at their quoted prices,
+   * saved together with the award or not at all. It then goes through
+   * approval as any order does. A reason is needed when the award isn't the
+   * clear choice (see awardConcerns), and is kept on the Activity.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is sent;
+   * VALIDATION_ERROR for a supplier who hasn't quoted, a missing reason, or
+   * what the order itself refuses (an inactive supplier or item, a closed project).
+   */
+  async award(rfqId: string, input: { supplierId: string; reason?: string | null }, actorId: string) {
+    const vatSetting = Number(await SettingsService.getValue<number>('purchaseOrders.vatRate')) || 0;
+    const today = todayInSouthAfrica();
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${rfqId} FOR UPDATE`;
+      const rfq = await tx.rfq.findUnique({
+        where: { id: rfqId },
+        include: { lines: { orderBy: { lineNo: 'asc' } }, suppliers: { include: { supplier: true, prices: true } } },
+      });
+      if (!rfq) throw Errors.notFound('Rfq');
+      if (rfq.status !== 'SENT') {
+        throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`, { status: rfq.status });
+      }
+      const asked = rfq.suppliers.find((s) => s.supplierId === input.supplierId);
+      if (!asked) throw Errors.notFound('Supplier on this request for quotation');
+      if (!asked.quotedAt || asked.declined) throw Errors.validation(`${asked.supplier.name} hasn't quoted, so the RFQ can't be awarded to them`);
+
+      const quotes: QuoteForAward[] = rfq.suppliers.map((s) => {
+        const currency = s.supplier.currency ?? 'ZAR';
+        const priced = rfq.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
+        const totals = orderTotals(priced, defaultVatRate(currency, vatSetting));
+        const quoted = !!s.quotedAt && !s.declined;
+        return {
+          supplierId: s.supplierId, name: s.supplier.name, currency, quoted,
+          net: quoted ? Number(totals.net) : null, unpricedLines: totals.unpricedLines, validUntil: dayOf(s.validUntil),
+        };
+      });
+      const concerns = awardConcerns(quotes, asked.supplierId, today);
+      const reason = cleanText(input.reason);
+      if (concerns.length > 0 && !reason) {
+        throw Errors.validation(`Say why you are awarding to ${asked.supplier.name}: ${concerns.join('; ')}.`, { concerns });
+      }
+
+      // The supplier's quotation is what the order is placed against.
+      const notes = [
+        `As per your quotation${asked.quoteReference ? ` ${asked.quoteReference}` : ''} for ${rfq.number}.`,
+        rfq.notes,
+      ].filter(Boolean).join('\n');
+      const po = await PurchaseOrderService.create({
+        supplierId: asked.supplierId,
+        projectNumber: rfq.projectNumber,
+        penaltiesApply: rfq.penaltiesApply,
+        notes,
+        lines: rfq.lines.map((l) => {
+          const price = asked.prices.find((p) => p.rfqLineId === l.id)?.unitPrice;
+          return { materialId: l.materialId, orderedQty: l.quantity.toNumber(), ...(price ? { unitPrice: price.toNumber() } : {}) };
+        }),
+      }, actorId, { within: tx, fromRfq: { id: rfq.id, number: rfq.number } });
+
+      await tx.rfq.update({
+        where: { id: rfq.id },
+        data: { status: 'AWARDED', awardedAt: new Date(), awardedById: actorId, purchaseOrderId: po.id },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'RFQ_AWARD',
+          entityType: 'Rfq',
+          entityId: rfq.id,
+          before: { status: 'SENT' },
+          after: {
+            status: 'AWARDED', supplierId: asked.supplierId, purchaseOrderId: po.id, purchaseOrderNumber: po.number,
+            reason, concerns,
+          } as Prisma.InputJsonValue,
+        },
       });
     });
     return RfqService.getById(rfqId);
