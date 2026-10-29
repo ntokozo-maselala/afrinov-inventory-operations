@@ -142,6 +142,7 @@
 | 2026-10-22 | Repository `README.md`, `docs/README.md`, documentation inventory and reorganization report, project roadmaps, documentation guide, product roadmap, and migration README | Added repository-wide navigation and a complete document disposition inventory; grouped audit reports and specialist roadmaps; corrected moved references and migration-folder name | Engineering (repository maintenance) |
 
 | 2026-10-28 | `00-governance/change-log.md`, `09-frontend/page-inventory.md`, `11-testing/test-traceability.md` | Corrected: the Stores Stock table's threshold column is labelled **Required**; recorded its user-facing regression test | Engineering |
+| 2026-10-29 | `00-governance/decision-log.md`, `04-processes/purchase-order-lifecycle.md`, `08-api/authorization.md`, `08-api/resource-model.md`, `09-frontend/information-architecture.md`, `09-frontend/page-inventory.md`, `01-product/product-roadmap.md`, procurement and RFQ roadmaps, `task_context.md` | Added ADR-020: the store orders Stores stock from Store → Order stock (`order:stores_stock`), Procurement buys for projects; RFQs are project-only | Engineering (Stores ordering roadmap) |
 
 Add one row per meaningful revision (not typo fixes). For architecture-level
 changes, also add an ADR in `decision-log.md` and reference its ID here.

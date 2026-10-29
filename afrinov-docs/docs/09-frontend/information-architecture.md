@@ -14,6 +14,7 @@ Store
  |- Receive stock                 /stock/receive    (inventory:receive)
  |- Return stock                  /stock/return     (inventory:return)
  |- Count stock                   /stock/count      (inventory:count)
+ |- Order stock                   /stock/orders     (stores:order; unless VITE_PROCUREMENT_ENABLED=false)
  `- Tools                         /tools
 
 Reports
@@ -31,7 +32,8 @@ Operations
 
 Procurement                       (unless VITE_PROCUREMENT_ENABLED=false)
  |- Purchase orders               /purchase-orders      (orders:view)
- `- New purchase order            /purchase-orders/new  (procurement:manage)
+ |- New purchase order            /purchase-orders/new  (procurement:manage)
+ `- RFQ                           /rfqs                 (procurement:manage)
 
 Account
  `- Settings                      /settings  (General, Notifications, Inventory, Purchase orders*,

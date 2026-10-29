@@ -13,16 +13,18 @@
 | Count stock (`/stock/count`) | Inventory | Count a location; post differences | `POST /stock-counts` |
 | Tools (`/tools`) | Inventory | What is in store and out, with whom; check out and check in; overdue loans flagged (`04-processes/tool-loans.md`) | `GET /tools`, `POST /tools/check-out`, `/tools/check-in` |
 | Movements (`/movements`) | Inventory / Reporting | Ledger history in views: all movements, received, issued, returned, stock counts, transfers, write-offs and adjustments, tool check in/out, other changes. Date range, filters, paging; Excel and PDF download; drawer to reverse or return | `GET /inventory-transactions`, `/activity`; `POST …/reversal`, `…/returns` |
-| Materials (`/materials`, `/materials/:id`) | Inventory | Material master and per-item detail; edit Required Stock, unit cost and active status; start a purchase order for the item | `POST/PATCH /materials` |
+| Materials (`/materials`, `/materials/:id`) | Inventory | Material master and per-item detail; edit Required Stock, unit cost and active status; Order the item: a Stores item on Order stock's form (store controller), a Projects item on New purchase order (Procurement) | `POST/PATCH /materials` |
 | Locations (`/locations`) | Inventory | Location master; activate/deactivate; delete unused | `/locations` routes |
 | Projects (`/projects`) | Operations | Project master; archive | `/projects` routes |
 | Recipients (`/recipients`) | Operations | "Issued To" list | `/recipients` routes |
-| Suppliers (`/suppliers`, `/suppliers/:id`) | Procurement | Supplier master (the template's vendor list): list, add, edit, deactivate; a supplier's orders and a new order for it | `GET/POST /suppliers`, `PATCH /suppliers/:id` |
-| Purchase orders (`/purchase-orders`) | Procurement | Orders with status and project filters in the link (`?status=`, `?project=`); `?status=mine` lists the orders waiting for the signed-in approver | `GET /purchase-orders` |
-| New purchase order (`/purchase-orders/new`) | Procurement | The template's Inputs sheet: supplier, lines with prices, VAT, order and delivery details. Save draft, or Create & submit. Filled in from `?supplierId=&materialIds=` | `POST /purchase-orders`, `POST /:id/submit` |
+| Suppliers (`/suppliers`, `/suppliers/:id`) | Procurement | Supplier master (the template's vendor list): list, add, edit, deactivate; a supplier's orders and a new order for it, on the form the viewer orders from | `GET/POST /suppliers`, `PATCH /suppliers/:id` |
+| Purchase orders (`/purchase-orders`) | Procurement | Orders with kind, status and project filters in the link (`?kind=projects\|stores\|all`, `?status=`, `?project=`); buyers land on project orders; `?status=mine` lists the orders waiting for the signed-in approver | `GET /purchase-orders` |
+| New purchase order (`/purchase-orders/new`) | Procurement | A project order on the template's Inputs sheet: the project (required), supplier, that project's material with prices, VAT, order and delivery details. Save draft, or Create & submit. Filled in from `?supplierId=&materialIds=` | `POST /purchase-orders`, `POST /:id/submit` |
+| Order stock (`/stock/orders`) | Inventory | The store's orders (no project), with search and a status filter; New order for the store controller | `GET /purchase-orders?kind=stores` |
+| New stock order (`/stock/orders/new`) | Inventory | The same form for a Stores order: no project, Stores items only. Filled in from the re-order list's `?supplierId=&materialIds=` | `POST /purchase-orders`, `POST /:id/submit` |
 | Purchase order (`/purchase-orders/:id`) | Procurement | Lines with subtotal, VAT and net; totals; approval (who may approve); submit, approve, receive a delivery line by line, close, cancel; download the order document (PDF); history | `/purchase-orders/:id/*`, `POST /goods-receipts`, `…/post` |
 | Edit purchase order (`/purchase-orders/:id/edit`) | Procurement | Prices, delivery dates, VAT, details and remarks while editable | `PATCH /purchase-orders/:id` |
-| Stock status (`/reports/stock-status`) | Reporting | URGENT/WARNING/OK per item; re-order list download (Excel, PDF); start a purchase order from the list | `/reports/stock-status`, `/reports/reorder-list/export` |
+| Stock status (`/reports/stock-status`) | Reporting | URGENT/WARNING/OK per item; re-order list download (Excel, PDF); start a stock order from the list (store controller) | `/reports/stock-status`, `/reports/reorder-list/export` |
 | Stock used (`/reports/consumption`) | Reporting | Use by project, recipient and category over dates; issues to one recipient | `/reports/consumption`, `/export` |
 | Stock report (`/reports/stock-report`) | Reporting | The workbook's Summary/Stock Report layout, as stock stood at the end of a month, week or range of days | `/reports/month-end`, `/export` |
 | Settings (`/settings/*`) | Administration | General, Notifications, Inventory, Purchase orders, Appearance, Users (create, roles, approval limits, deactivate), Security, System (API health), Data, History (settings audit) | `/settings`, `/users`, `/health`, `/audit` |
@@ -47,7 +49,7 @@ The router in `afrinov-platform/apps/frontend/src/App.tsx` defines these active 
 
 - Public: `/login`.
 - Protected shell: `/`, `/stock`, `/stock/issue`, `/stock/return`, `/stock/receive`, `/stock/count`, `/materials`, `/materials/:id`, `/movements`, `/suppliers`, `/suppliers/:id`, `/reports/stock-status`, `/reports/consumption`, `/reports/stock-report`, `/locations`, `/projects`, `/recipients`, `/tools`, and `/settings`.
-- Conditional procurement routes when `PROCUREMENT_ENABLED`: `/purchase-orders`, `/purchase-orders/new`, `/purchase-orders/:id`, `/purchase-orders/:id/edit`, and `/settings/purchase-orders`.
+- Conditional procurement routes when `PROCUREMENT_ENABLED`: `/stock/orders`, `/stock/orders/new`, `/purchase-orders`, `/purchase-orders/new`, `/purchase-orders/:id`, `/purchase-orders/:id/edit`, `/rfqs` and its pages, and `/settings/purchase-orders`.
 - Settings child routes: `/settings/notifications`, `/settings/inventory`, `/settings/appearance`, `/settings/users`, `/settings/security`, `/settings/system`, `/settings/data`, and `/settings/history`; `/settings` renders the general section.
 - Fallback: all other protected paths render Not found.
 

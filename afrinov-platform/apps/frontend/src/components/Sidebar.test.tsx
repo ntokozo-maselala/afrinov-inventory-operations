@@ -353,4 +353,23 @@ describe('New purchase order in the menu', () => {
     expect(active('/purchase-orders/po-1/edit')).toEqual(['Purchase orders']);
     expect(active('/purchase-orders/new')).toEqual(['New purchase order']);
   });
+
+  // Stores ordering roadmap, Phase 4: each role sees only its own ordering.
+  it.each([
+    ['STORE_CONTROLLER', ['Order stock']],
+    ['PROCUREMENT', ['New purchase order', 'RFQ']],
+    ['APPROVER', []],
+    ['TECHNICIAN', []],
+    ['VIEWER', []],
+    ['ADMIN', ['Order stock', 'New purchase order', 'RFQ']],
+  ])('offers a %s only the ordering it does', (role, expected) => {
+    signedIn.roles = [role];
+    const ordering = ['Order stock', 'New purchase order', 'RFQ'];
+    expect(useNavGroups().flatMap((g) => g.items).map((i) => i.label).filter((l) => ordering.includes(l))).toEqual(expected);
+  });
+
+  it('lights Order stock on its new-order page, and nothing in Procurement', () => {
+    const items = useNavGroups().flatMap((g) => g.items);
+    expect(items.filter((i) => isNavItemActive(i, '/stock/orders/new')).map((i) => i.label)).toEqual(['Order stock']);
+  });
 });

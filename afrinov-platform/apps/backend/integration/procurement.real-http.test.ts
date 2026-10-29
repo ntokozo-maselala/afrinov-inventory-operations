@@ -536,8 +536,10 @@ describe('receiving stock over real HTTP', () => {
     let storeman: ReturnType<typeof client>;
     let buyer: ReturnType<typeof client>;
 
+    // Each call signs in a new user, so a role can be used in more than one test.
+    let users = 0;
     async function as(role: string) {
-      const email = `it-so-${role.toLowerCase()}-${run}@afrinov.local`;
+      const email = `it-so-${role.toLowerCase()}-${++users}-${run}@afrinov.local`;
       const password = `It-${run}-${role.toLowerCase()}`;
       expect((await api('POST', '/users', { email, name: `IT SO ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
       return client(server.port, await login(server.port, email, password));
@@ -618,6 +620,38 @@ describe('receiving stock over real HTTP', () => {
       const viewer = await as('APPROVER');
       expect((await viewer('PATCH', '/purchase-orders/00000000-0000-4000-8000-000000000000', { notes: 'x' })).status).toBe(403);
       expect((await storeman('PATCH', '/purchase-orders/00000000-0000-4000-8000-000000000000', { notes: 'x' })).status).toBe(404);
+    });
+
+    // Phase 4: every role end to end.
+    it('lets an approver approve both kinds, and raise neither', async () => {
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const approver = await as('APPROVER');
+        const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        const project = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 2, unitPrice: 40 }] });
+        expect((await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+        expect((await buyer<{ status: string }>('POST', `/purchase-orders/${project.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+        for (const id of [store.body.id, project.body.id]) {
+          const approved = await approver<{ status: string }>('POST', `/purchase-orders/${id}/approve`);
+          expect([id, approved.status, approved.body.status]).toEqual([id, 200, 'APPROVED']);
+        }
+        expect((await approver('POST', '/purchase-orders', storesOrder())).status).toBe(403);
+        expect((await approver('POST', '/purchase-orders', projectOrder())).status).toBe(403);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    it.each(['TECHNICIAN', 'VIEWER'])('lets a %s raise neither kind, nor open one', async (role) => {
+      const user = await as(role);
+      const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+      expect((await user('POST', '/purchase-orders', storesOrder())).status).toBe(403);
+      expect((await user('POST', '/purchase-orders', projectOrder())).status).toBe(403);
+      expect((await user('PATCH', `/purchase-orders/${store.body.id}`, { notes: 'x' })).status).toBe(403);
+      expect((await user('GET', `/purchase-orders/${store.body.id}`)).status).toBe(403);
+      expect((await user('GET', '/purchase-orders?kind=stores')).status).toBe(403);
     });
   });
 });

@@ -8,14 +8,14 @@ Four phases that split ordering the way Afrinov works. The **Procurement team** 
 
 Both kinds stay ordinary purchase orders underneath: the same AFRI numbering, approval by value, PDF and receiving. What changes is who may raise which kind, from which page, with which items. The server enforces the split, so it holds even if someone bypasses the screens.
 
-**Status:** Phases 1 to 3 built on `feature/stores-ordering`, in one pull request (#117), not yet merged.
+**Status:** All four phases built on `feature/stores-ordering`, in one pull request (#117), not yet merged. Recorded as ADR-020.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Permission and server rules | M | Built |
 | 2 | Order stock page under Stores | M | Built |
 | 3 | Procurement for projects only | M | Built |
-| 4 | Roles end to end and docs | S | Planned |
+| 4 | Roles end to end and docs | S | Built |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
@@ -41,14 +41,14 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 | Where Stores ordering lives | A new **Order stock** page under **Stores** in the menu | 29 Oct 2026 |
 | What a Stores order is | An ordinary purchase order without a project, holding Stores items only | Built in Phase 1 |
 | How the split is enforced | A new permission, **order Stores stock**, held by the store controller (and Admin). An order with a project needs the purchase order permissions; one without needs the new one | Built in Phase 1 |
-| Approval of Stores orders | By value, by an approver, as every order is today | Proposed |
-| What each side sees | Each can open the other's orders, read-only, so Procurement still sees what the store has on order | Proposed |
+| Approval of Stores orders | By value, by an approver, as every order is today | Built in Phase 1, tested in Phase 4 |
+| What each side sees | Each can open the other's orders, read-only, so Procurement still sees what the store has on order | Built in Phases 1 to 3 |
 | RFQs | Project-only; Stores stock is ordered directly at known prices. RFQ-0001 style numbers (no project) stop being issued | Built in Phase 1 |
 | Existing orders | Untouched. Orders without a project (3 in the dev database) are Stores orders, edited, submitted, cancelled and closed by the store controller from now; older project orders holding Stores items keep them. An RFQ sent before the rule is still awarded with its Stores items; a draft RFQ without a project can't be sent | Built in Phase 1 |
 
 ### Order of work
 
-Phases 1 to 3 share pull request #117, so the server rules, the store's page and Procurement's project-only forms arrive together. Phase 4 follows.
+All four phases share pull request #117, so the server rules, the store's page, Procurement's project-only forms and the docs arrive together.
 
 ## Phase 1: Permission and server rules
 
@@ -102,8 +102,8 @@ Size M. Frontend. Needs Phase 1.
 
 Size S. Tests and docs.
 
-- [ ] **4.1 Roles.** Over real HTTP and on screen: the storeman raises Stores orders and can't raise project orders or RFQs; Procurement the other way round; approvers approve both; everyone else as now.
-- [ ] **4.2 Docs.** `task_context.md`, the product roadmap, the procurement roadmaps and this one.
+- [x] **4.1 Roles.** Over real HTTP (`procurement.real-http.test.ts`, `rfqs.real-http.test.ts`): the storeman raises and changes Stores orders and can't raise project orders or RFQs; Procurement the other way round; an approver approves both kinds and raises neither; a technician or viewer can't raise or open either. On screen (`Sidebar.test.tsx`, `PoApproval.test.tsx`, `StoresOrders.test.tsx`, `PoFromNeed.test.tsx`): each role's menu offers only its own ordering, and an order's page offers its actions to its own team.
+- [x] **4.2 Docs.** ADR-020 in the decision log and the change log; `task_context.md`; the purchase order lifecycle (the two kinds); the API's role table and resource model; the menu and page inventory; the product roadmap; the RFQ and procurement roadmaps; and this one.
 
 **Done when:** each role sees and can do only its own ordering.
 
