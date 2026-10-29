@@ -108,14 +108,14 @@ describe('a new stock order (Stores → Order stock)', () => {
     expect(screen.getByLabelText(/^Project/)).toHaveValue('AFRI-1325');
   });
 
-  it('adds a new item only as a Stores item, which the drawer does not let be changed', async () => {
+  // The store re-orders what it always stocks: items come from the catalogue only.
+  it('offers no + New item, only the Stores items in the catalogue', async () => {
     stockOrder('');
-    fireEvent.click(await screen.findByRole('button', { name: 'New item' }));
-    const drawer = await screen.findByRole('dialog', { name: 'New item' });
-    expect(within(drawer).getByRole('radio', { name: /Stores/ })).toBeChecked();
-    expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeDisabled();
-    expect(within(drawer).queryByLabelText('Project')).not.toBeInTheDocument();
-    expect(within(drawer).getByText(/Set by the stock order/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add line' }));
+    const options = within(screen.getByLabelText('Line 1 material')).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toContain('DISC — Item DISC');
+    expect(options).not.toContain('+ New item…');
+    expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
   });
 
   it('is not for a buyer, who buys for projects', async () => {

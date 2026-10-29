@@ -22,7 +22,12 @@ const order = (id: string, number: string, status: string, supplier: string) => 
 beforeEach(() => {
   auth.roles = ['STORE_CONTROLLER'];
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders?kind=stores') return [order('po-1', 'AFRI-0201', 'DRAFT', 'Hydac'), order('po-2', 'AFRI-0202', 'APPROVED', 'Weldco')];
+    if (path === '/purchase-orders?kind=stores') {
+      return [
+        order('po-1', 'AFRI-0201', 'DRAFT', 'Hydac'), order('po-2', 'AFRI-0202', 'APPROVED', 'Weldco'),
+        order('po-3', 'AFRI-0203', 'PARTIALLY_RECEIVED', 'Weldco'), order('po-4', 'AFRI-0204', 'RECEIVED', 'Hydac'),
+      ];
+    }
     return [];
   });
 });
@@ -47,6 +52,30 @@ describe('Order stock', () => {
     fireEvent.change(screen.getByLabelText('Search stock orders'), { target: { value: 'hydac' } });
     expect(screen.getByRole('link', { name: 'AFRI-0201' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'AFRI-0202' })).not.toBeInTheDocument();
+  });
+
+  // What the store is still waiting for, and receiving it from here.
+  it('lists what is on order, and offers Receive on those orders only', async () => {
+    page();
+    await screen.findByRole('link', { name: 'AFRI-0201' });
+    fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'APPROVED,PARTIALLY_RECEIVED' } });
+    expect(screen.getByRole('link', { name: 'AFRI-0202' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'AFRI-0203' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'AFRI-0201' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'AFRI-0204' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Receive AFRI-0202' })).toHaveAttribute('href', '/purchase-orders/po-2?receive=1');
+    expect(screen.getByRole('link', { name: 'Receive AFRI-0203' })).toHaveAttribute('href', '/purchase-orders/po-3?receive=1');
+
+    fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: '' } });
+    expect(screen.queryByRole('link', { name: 'Receive AFRI-0201' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Receive AFRI-0204' })).not.toBeInTheDocument();
+  });
+
+  it('offers a buyer no Receive, as receiving is the store’s', async () => {
+    auth.roles = ['PROCUREMENT'];
+    page();
+    await screen.findByRole('link', { name: 'AFRI-0202' });
+    expect(screen.queryByRole('link', { name: /^Receive / })).not.toBeInTheDocument();
   });
 
   it('offers New order to the storeman', async () => {

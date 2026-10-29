@@ -7,8 +7,8 @@
 // and Required Stock) or Projects (bought for one project, never re-ordered).
 // Both are fixed once the item exists; an item moved in from the old Project
 // Material category without a project can be given one here. Added from an
-// order or RFQ line, both are fixed by it (`fixedBy`): a stock order takes a
-// Stores item, a project order or RFQ a Projects item for its own project.
+// order or RFQ line, both are fixed by it (`fixedBy`), so neither is shown:
+// the drawer's description says what the item will be.
 import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
@@ -43,7 +43,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
   projectNumber?: string;
   /**
    * What fixes the section, and a Projects item's project, for a new item,
-   * e.g. "a stock order": the section and project given can't be changed.
+   * e.g. "the purchase order for 1369": the section and project given are
+   * used as they are, and their fields are left off the form.
    */
   fixedBy?: string;
   onCancel: () => void; onSaved: (material: CreatedMaterial) => void; onError: (e: ApiError) => void;
@@ -115,7 +116,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
 
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
-      <fieldset>
+      {!fixedBy && <fieldset>
         <legend className="field-label mb-1">Section</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup">
           {([['STORES', 'Stores', 'Kept on the shelf and topped up'], ['PROJECTS', 'Projects', 'Bought for one project, not re-ordered']] as const).map(([value, label, help]) => (
@@ -126,8 +127,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
           ))}
         </div>
         {editing && <p className="text-xs text-surface-500 mt-1">Fixed once the item exists.</p>}
-        {!editing && fixedBy && <p className="text-xs text-surface-500 mt-1">Set by {fixedBy}.</p>}
-      </fieldset>
+      </fieldset>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="SKU / item code" htmlFor="m-sku" required help={fixed ?? (projects ? 'e.g. the project number first: 1369-PIPE-150NB' : undefined)}>
           <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={projects ? 'e.g. 1369-PIPE-150NB' : 'e.g. M16-WSHR'} autoComplete="off" required invalid={missing(sku)} disabled={editing} />
@@ -141,9 +141,11 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
       </Field>
       {projects ? (
         projectFixed ? (
-          <Field label="Project" htmlFor="m-project" help={editing ? 'Fixed once the item has its project.' : `Set by ${fixedBy}.`}>
-            <Input id="m-project" value={editing ? `${initial!.projectNumber}${initial!.project?.name ? ` · ${initial!.project.name}` : ''}` : projectNumber} disabled />
-          </Field>
+          !editing ? null : (
+            <Field label="Project" htmlFor="m-project" help="Fixed once the item has its project.">
+              <Input id="m-project" value={`${initial!.projectNumber}${initial!.project?.name ? ` · ${initial!.project.name}` : ''}`} disabled />
+            </Field>
+          )
         ) : (
           <Field label="Project" htmlFor="m-project" required help={editing ? 'This item has no project yet. Choose the one it was bought for.' : 'The project this material is bought for. Only open projects are listed.'} error={projectList.error ? 'Couldn’t load projects. Close and reopen to try again.' : null}>
             <Select id="m-project" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)} invalid={!!validation && !projectNumber}>
