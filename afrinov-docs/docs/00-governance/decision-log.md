@@ -387,3 +387,43 @@ permission to existing databases.
 (`requireForKind`, `requireForOrder`), `procurement.service.ts`,
 `rfq.service.ts`, `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
 `afrinov-docs/docs/13-project-management/roadmaps/stores-ordering-roadmap.md`.
+
+---
+
+### ADR-021 — Stores and Projects are kept apart, with no connections
+**Date:** 2026-10-29 · **Status:** Accepted · **Amends:** ADR-020
+
+**Context:** ADR-020 split who *raises* each kind of order, but the two sides
+still met: each could open the other's orders, Procurement's approvers
+approved Stores orders, and the store received deliveries against project
+orders. At Afrinov the two are different sides of the business: the store
+keeps stock for the workshop, and project material goes from the supplier
+straight to site.
+
+**Decision:** No connections between the two sides.
+- **Where:** a Stores order lives in Store → Order stock (`/stock/orders/:id`),
+  a project order in Procurement (`/purchase-orders/:id`); each opens only in
+  its own section.
+- **Who sees:** Stores orders only those with `order:stores_stock` (the store
+  controller and Admin); project orders and RFQs only those with
+  `view:purchase_order` (Procurement, approvers and Admin). The store
+  controller no longer holds `view:purchase_order`. Each side's orders are not
+  found (404) to the other, so neither can tell the other's exist.
+- **Who approves:** the storeman approves Stores orders, by value against his
+  own limit, including orders he raised (his limit is set in Settings → Users;
+  above it, Admin approves); approvers approve project orders, as before.
+- **Delivery:** a Stores order is received into stock by the store; a project
+  order is never received into stock: Procurement confirms its delivery on
+  the order, line by line, and no stock is added.
+
+**Consequences:** Each role sees and does only its own side. Admin sees both.
+Store controllers start with no approval limit, which means none, so a limit
+is set on each before release. Projects items bought from now hold no stock;
+existing Projects stock stays issuable to its project. Migration
+`20260101000031` removes the store controller's `view:purchase_order`.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts`
+(`kindsSeen`, `requireForOrder`, `requireViewOrder`, `confirm-delivery`),
+`po-approval.ts` (`approvePermissionFor`), `procurement.service.ts`
+(`confirmDelivery`, `awaitingApproval`), `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
+`afrinov-docs/docs/13-project-management/roadmaps/stores-procurement-separation-roadmap.md`.

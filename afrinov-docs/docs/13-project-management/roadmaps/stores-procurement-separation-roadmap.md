@@ -8,14 +8,14 @@ Four phases that take every connection out between the **Stores** side of the bu
 
 It builds on the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (merged as #117), which split who *raises* each kind but still let each side see the other's orders and sent Stores orders to Procurement's approvers.
 
-**Status:** Phase 1 is in PR #119 and Phase 2 in PR #120. Phase 3 is built on `feature/stores-receiving` (branched from #120), not yet committed. Phase 4 is next.
+**Status:** All four phases built: Phase 1 in PR #119, Phase 2 in #120, Phase 3 in #121, and Phase 4 on `feature/stores-roles-docs` (branched from #121), not yet committed. Recorded as ADR-021.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Separate homes for each kind of order | M | Built |
 | 2 | Access and approval on the server | M | Built |
 | 3 | Receiving, and finishing project orders | M | Built |
-| 4 | Roles end to end and docs | S | Planned |
+| 4 | Roles end to end and docs | S | Built |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days.
 
@@ -103,10 +103,16 @@ Tests: `procurement.real-http.test.ts` (a buyer confirms part, then the rest, an
 
 Size S. Tests and docs.
 
-- [ ] **4.1 Roles.** Over real HTTP and on screen: the storeman raises, approves and receives Stores orders and never sees a project order; Procurement and approvers never see a Stores order; Admin sees both.
-- [ ] **4.2 Docs.** ADR-021 records the separation and amends ADR-020 (each side no longer sees the other's orders; the storeman approves Stores orders). Also the purchase order lifecycle, the role table, the menu and page inventory, `task_context.md`, and the Stores Ordering Roadmap.
+- [x] **4.1 Roles.** Over real HTTP and on screen: the storeman raises, approves and receives Stores orders and never sees a project order or an RFQ; Procurement and approvers never see a Stores order; Admin sees both. To close the last gap, the store controller no longer holds `view:purchase_order` (migration `20260101000031`): viewing, listing and changing an order follow its kind, and each side's orders are *not found* to the other. On screen, the storeman's menu has no Procurement section.
+  Files: `shared/permissions.ts`, `procurement.routes.ts` (`kindsSeen`), `hooks/usePermissions.ts`; tests in `procurement.real-http.test.ts`, `rfqs.real-http.test.ts`, `permissions.test.ts`, `Sidebar.test.tsx`, `usePermissions.test.tsx`
+- [x] **4.2 Docs.** ADR-021 records the separation and amends ADR-020 (each side no longer sees the other's orders; the storeman approves Stores orders; Procurement confirms a project order's delivery). Also the change log, the purchase order lifecycle (the two kinds, side by side), the role table, the resource model, the menu and page inventory, `task_context.md`, the product roadmap and the Stores Ordering Roadmap.
 
 **Done when:** each role sees only its own side of the business.
+
+## Releasing
+
+- **Phase 2:** set an approval limit on every store controller (below).
+- **Phase 4:** apply migration `20260101000031` (`npx prisma migrate deploy`): it removes the store controller's `view:purchase_order`.
 
 ## Releasing Phase 2
 
