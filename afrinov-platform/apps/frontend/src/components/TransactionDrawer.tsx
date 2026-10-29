@@ -26,17 +26,16 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
-  const idem = useIdempotencyKey();
+  // One key per movement: the transaction id is part of the operation name, so
+  // a different movement gets its own key without an effect rotating anything.
+  const idem = useIdempotencyKey(`reversal-${transaction.id}`);
 
   // eslint-disable react-hooks/set-state-in-effect
   useEffect(() => {
     setReversing(false); // eslint-disable-line react-hooks/set-state-in-effect
     setReason('');  
     setValidation(null);  
-    // A different movement is a different operation: it must not inherit the
-    // previous one's idempotency key.
-    idem.rotate();
-  }, [transaction.id, idem]);
+  }, [transaction.id]);
   // eslint-enable react-hooks/set-state-in-effect
 
   const isTransfer = transaction.type === 'TRANSFER_IN' || transaction.type === 'TRANSFER_OUT';
@@ -74,14 +73,16 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     }
 
     setBusy(true);
+    const reversalBody = { reason: reason.trim() };
     try {
-      await api.post(`/inventory-transactions/${transaction.id}/reversal`, { reason: reason.trim() }, { idempotencyKey: idem.key() });
-      idem.rotate();
+      await api.post(`/inventory-transactions/${transaction.id}/reversal`, reversalBody, { idempotencyKey: idem.keyFor(reversalBody) });
+      idem.confirm();
       setReversing(false);
       setReason('');
       onReversed();
     } catch (err) {
       const e = err as ApiError;
+      idem.resolve(err);
       if (['CONFLICT', 'INVALID_STATE', 'INSUFFICIENT_BALANCE', 'VALIDATION_ERROR', 'NOT_FOUND'].includes(e.code)) {
         setValidation(e.message);
       } else if (e.code === 'FORBIDDEN') {
@@ -233,7 +234,9 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
   const locations = useApi<Array<{ id: string; name: string; active: boolean; parent?: { name: string } | null }>>(open ? '/locations' : null);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
-  const idem = useIdempotencyKey();
+  // Scoped to this issue, so another issue opening in the same drawer position
+  // gets its own key rather than inheriting this one's.
+  const idem = useIdempotencyKey(`issue-return-${transaction.id}`);
 
   async function submit() {
     setValidation(null);
@@ -241,19 +244,21 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
     if (!(qty > 0)) { setValidation('Enter how much is coming back.'); return; }
     if (qty > returnable) { setValidation(`At most ${returnable} can come back.`); return; }
     setBusy(true);
+    const returnBody = {
+      quantity: qty,
+      locationId: locationId !== transaction.locationId ? locationId : undefined,
+      reason: reason.trim() || undefined,
+    };
     try {
-      await api.post(`/inventory-transactions/${transaction.id}/returns`, {
-        quantity: qty,
-        locationId: locationId !== transaction.locationId ? locationId : undefined,
-        reason: reason.trim() || undefined,
-      }, { idempotencyKey: idem.key() });
-      idem.rotate();
+      await api.post(`/inventory-transactions/${transaction.id}/returns`, returnBody, { idempotencyKey: idem.keyFor(returnBody) });
+      idem.confirm();
       setOpen(false);
       setQuantity('');
       setReason('');
       onReturned();
     } catch (err) {
       const e = err as ApiError;
+      idem.resolve(err);
       if (['VALIDATION_ERROR', 'INVALID_STATE', 'NOT_FOUND'].includes(e.code)) setValidation(e.message);
       else if (e.code === 'FORBIDDEN') onError({ code: 'FORBIDDEN', message: 'You do not have permission to return stock.' });
       else onError({ code: 'NETWORK_ERROR', message: 'Unable to return the stock. Please try again.' });

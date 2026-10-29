@@ -142,6 +142,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   PAYLOAD_TOO_LARGE: 'Something about this request was not accepted. Please check your input and try again.',
   UNSUPPORTED_MEDIA_TYPE: 'Something about this request was not accepted. Please check your input and try again.',
   OUTCOME_UNKNOWN: 'We could not confirm whether that change was saved. Please check the records before trying again.',
+  IDEMPOTENCY_KEY_REUSED: 'This form was already submitted. Please review the details and submit again.',
   INTERNAL_ERROR: 'Something went wrong. Please try again.',
 };
 

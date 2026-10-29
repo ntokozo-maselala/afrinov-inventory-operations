@@ -14,8 +14,12 @@
    (e.g. via a client-supplied idempotency key on POST), so a network retry
    never double-posts a transaction. *Followed for inventory: every inventory
    mutation accepts an `Idempotency-Key` and replays the stored response on a
-   repeat (`src/shared/idempotency.ts`, TD-019 partly resolved). The remaining
-   write endpoints (procurement, master data) do not yet accept a key.
+   repeat (`src/shared/idempotency.ts`, TD-019 partly resolved). Concurrent
+   retries serialise on a transaction-scoped advisory lock, a present-but-
+   invalid key is refused rather than run unkeyed, a reused key answers a
+   distinct `IDEMPOTENCY_KEY_REUSED`, and stored keys are pruned after 24h. The
+   remaining write endpoints (procurement, master data) do not yet accept a
+   key.
    Purchase-order transitions are protected against double application by
    their status guards.*
 4. Responses never expose internal implementation details (raw stack

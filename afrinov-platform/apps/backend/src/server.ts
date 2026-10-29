@@ -17,6 +17,7 @@ import {
 } from './shared/config.js';
 import { prisma } from './shared/db.js';
 import { isActiveInDb } from './shared/authorization.js';
+import { pruneIdempotencyKeys } from './shared/idempotency.js';
 import { serviceName, serviceVersion } from './shared/version.js';
 
 declare module 'fastify' {
@@ -428,6 +429,21 @@ export async function start(): Promise<void> {
   } catch (err) {
     app.log.error({ err: (err as Error).message }, 'Database connection failed');
   }
+
+  // Sweep expired idempotency keys once at startup and then hourly, so the
+  // table does not grow without bound (a key is only useful for the retry
+  // window). Best-effort: a failure to prune must never stop the server.
+  const pruneKeys = async () => {
+    try {
+      const removed = await pruneIdempotencyKeys();
+      if (removed > 0) app.log.info({ removed }, 'Pruned expired idempotency keys');
+    } catch (err) {
+      app.log.warn({ err: (err as Error).message }, 'Idempotency key pruning failed');
+    }
+  };
+  void pruneKeys();
+  const pruneTimer = setInterval(() => void pruneKeys(), 60 * 60 * 1000);
+  pruneTimer.unref();
 
   // Graceful shutdown: stop accepting connections, drain in-flight requests,
   // close the database pool, then exit.

@@ -157,15 +157,26 @@ backend contract respectively.
   dropped *mutation* is reported as `OUTCOME_UNKNOWN` (not a retryable
   `TIMEOUT`), so the user is told the result is unconfirmed rather than
   invited to retry blindly. Writes also get a longer timeout budget than reads.
-- **Idempotency keys make an inventory retry safe.** Each mutation form mints
-  one key per logical submission (`useIdempotencyKey`,
-  `src/lib/idempotency.ts`) and reuses it across retries of that submission.
-  The backend (`src/shared/idempotency.ts`) runs the operation and records the
-  key in one transaction, so a retry replays the stored status and body and
-  posts nothing. A key reused with a different body — or on a different record
-  under the same route — is refused with `CONFLICT`, never replayed. The key is
-  rotated only after a confirmed success; an `OUTCOME_UNKNOWN` failure keeps
-  it, so the user's explicit retry reconciles instead of duplicating.
+- **Idempotency keys make an inventory retry safe.** Each mutation form —
+  including Count stock — mints one key per logical submission
+  (`useIdempotencyKey`, `src/lib/idempotency.ts`) and reuses it across retries
+  of that submission. The pending key is bound to the exact request payload and
+  held in `sessionStorage` per (operation, payload), so it survives navigating
+  away to check the record and coming back, and a *changed* request mints a new
+  key instead of colliding. The backend (`src/shared/idempotency.ts`) runs the
+  operation and records the key in one transaction, so a retry replays the
+  stored status and body and posts nothing. Concurrent retries with the same
+  key serialise on a transaction-scoped advisory lock, so the loser replays
+  rather than failing its own balance or state check. A key reused with a
+  different body — or on a different record under the same route — is refused
+  with `409 IDEMPOTENCY_KEY_REUSED` (distinct from a business `CONFLICT`), and
+  the client clears the key on that code so the next submission succeeds. A
+  *present but invalid* key (blank or over 200 characters) is refused
+  `400 VALIDATION_ERROR` rather than run unkeyed. The key is cleared only after
+  a confirmed success or a reuse refusal; an `OUTCOME_UNKNOWN` failure keeps it,
+  so the user's explicit retry reconciles instead of duplicating. Stored keys
+  are pruned after 24 hours by an hourly sweep, so the table does not grow
+  without bound.
 
 ## 7. Development versus production
 
@@ -211,7 +222,10 @@ backend contract respectively.
 | Protected data on a failed refresh | Refresh returns 403 | 403 | Hard error, not a stale snapshot | Contact admin | client `FORBIDDEN` | `useApiStale.test.tsx` |
 | Unconfirmed mutation | Timeout/network after a write | — | "We couldn't confirm that change" | Check the record, then retry | client `OUTCOME_UNKNOWN` | `client.test.ts`, `errorPresentation.test.ts` |
 | Retried inventory mutation | Same `Idempotency-Key` re-sent | 201 | Success replayed, not double-posted | — | stored response + `Idempotency-Replayed: true` | `idempotency.real-http.test.ts` |
-| Idempotency key reuse | Same key, different body or record | 409 | "This change needs your attention" | Start the operation again | `CONFLICT` | `idempotency.real-http.test.ts` |
+| Idempotency key reuse | Same key, different body or record | 409 | "Please submit this again" | Resubmit (key auto-cleared) | `IDEMPOTENCY_KEY_REUSED` | `idempotency.real-http.test.ts`, `errorPresentation.test.ts` |
+| Invalid idempotency key | Header present but blank or over-long | 400 | Validation message | Correct the request | `VALIDATION_ERROR` | `idempotency.real-http.test.ts`, `idempotency.test.ts` |
+| Concurrent keyed retry | Two same-key requests at once | 201 | Success replayed | — | advisory lock + `Idempotency-Replayed` | `idempotency.real-http.test.ts` |
+| Idempotency key retention | Keys older than 24h | — | — | — | hourly prune sweep | `idempotency.test.ts` |
 | Session expired by a late 401 | Old token rejected after re-login | 401 | Session kept | — | token-scoped event | `auth.test.tsx`, `client.test.ts` |
 | Notification storm | Many distinct failures in one outage | — | At most three toasts | Dismiss | dedupe + cap | `Toast.test.tsx` |
 | Settings tab switch | Move between settings tabs | — | Layout stays mounted, draft kept | — | stable boundary key | `App.test.tsx` |

@@ -39,7 +39,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const locations = useApi<Location[]>('/locations');
-  const idem = useIdempotencyKey();
+  const idem = useIdempotencyKey(`stock-action-${kind}`);
 
   function reset() { setQuantity(''); setNote(''); setValidation(null); }
 
@@ -58,21 +58,20 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
     setBusy(true);
     try {
       if (kind === 'transfer') {
-        await api.post('/inventory-transfers', {
-          materialId: row.materialId, fromLocationId: row.locationId, toLocationId, quantity: qty,
-        }, { idempotencyKey: idem.key() });
+        const transferBody = { materialId: row.materialId, fromLocationId: row.locationId, toLocationId, quantity: qty };
+        await api.post('/inventory-transfers', transferBody, { idempotencyKey: idem.keyFor(transferBody) });
         onSuccess(`Transferred ${qty} × ${row.materialSku}`);
       } else {
         // Adjustments accept a signed quantity: positive to add, negative to remove.
-        await api.post('/inventory-adjustments', {
-          materialId: row.materialId, locationId: row.locationId, quantity: qty, reasonCode, reasonNote: note || undefined,
-        }, { idempotencyKey: idem.key() });
+        const adjustBody = { materialId: row.materialId, locationId: row.locationId, quantity: qty, reasonCode, reasonNote: note || undefined };
+        await api.post('/inventory-adjustments', adjustBody, { idempotencyKey: idem.keyFor(adjustBody) });
         onSuccess(`Adjusted ${row.materialSku} by ${qty > 0 ? '+' : ''}${qty}`);
       }
-      idem.rotate();
+      idem.confirm();
       reset();
       onDone();
     } catch (err) {
+      idem.resolve(err);
       onError(err as ApiError);
     } finally {
       setBusy(false);

@@ -13,9 +13,10 @@ import { StockCountService } from './stock-count.service.js';
 import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+import { Errors } from '../../shared/errors.js';
 import {
   withIdempotency,
-  idempotencyKeyFrom,
+  readIdempotencyKey,
   sendIdempotent,
   type IdempotencyEndpoint,
 } from '../../shared/idempotency.js';
@@ -159,13 +160,19 @@ async function idempotentMutation(
   endpoint: IdempotencyEndpoint,
   run: (tx: Prisma.TransactionClient | undefined) => Promise<{ statusCode: number; body: unknown }>,
 ): Promise<FastifyReply> {
-  const key = idempotencyKeyFrom(req.headers as Record<string, unknown>);
-  if (!key) {
+  const read = readIdempotencyKey(req.headers as Record<string, unknown>);
+  if (!read.present) {
     const fresh = await run(undefined);
     return reply.code(fresh.statusCode).send(fresh.body);
   }
+  if (!read.valid) {
+    // The caller asked for retry safety but the key cannot be stored. Refusing
+    // is safer than silently running unkeyed: a retry of an unkeyed write could
+    // post the movement twice.
+    throw Errors.validation('Idempotency-Key must be 1-200 printable ASCII characters');
+  }
   const outcome = await withIdempotency(
-    { actorId: actorId(req), endpoint, key, scope: req.url, requestBody: req.body },
+    { actorId: actorId(req), endpoint, key: read.key, scope: req.url, requestBody: req.body },
     (tx) => run(tx),
   );
   return sendIdempotent(reply, outcome, outcome.replayed);

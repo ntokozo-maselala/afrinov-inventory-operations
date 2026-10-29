@@ -108,7 +108,8 @@ describe('idempotent inventory mutations over real HTTP', () => {
 
     const conflicting = await api<{ error: { code: string } }>('POST', '/inventory-issues', issueBody(6), { 'idempotency-key': key });
     expect(conflicting.status).toBe(409);
-    expect(conflicting.body.error.code).toBe('CONFLICT');
+    // A distinct code so the client can rotate its key rather than retry forever.
+    expect(conflicting.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
     // The conflicting retry posted nothing.
     expect(await ledgerAt()).toBe((Number(before) - 5).toString());
   });
@@ -137,7 +138,7 @@ describe('idempotent inventory mutations over real HTTP', () => {
     );
     // A different record under the same key is a conflict, not a replay.
     expect(second.status).toBe(409);
-    expect(second.body.error.code).toBe('CONFLICT');
+    expect(second.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
   });
 
   it('replays a rejected issue without re-checking the balance', async () => {
@@ -152,5 +153,38 @@ describe('idempotent inventory mutations over real HTTP', () => {
     const refusedAgain = await api('POST', '/inventory-issues', issueBody(100_000), { 'idempotency-key': key });
     expect(refusedAgain.status).toBe(422);
     expect(await ledgerAt()).toBe(before);
+  });
+
+  it('refuses a present but invalid key rather than running unkeyed', async () => {
+    const before = await ledgerAt();
+    const blank = await api<{ error: { code: string } }>('POST', '/inventory-issues', issueBody(1), { 'idempotency-key': '   ' });
+    expect(blank.status).toBe(400);
+    expect(blank.body.error.code).toBe('VALIDATION_ERROR');
+
+    const tooLong = await api<{ error: { code: string } }>('POST', '/inventory-issues', issueBody(1), { 'idempotency-key': 'a'.repeat(201) });
+    expect(tooLong.status).toBe(400);
+    expect(tooLong.body.error.code).toBe('VALIDATION_ERROR');
+
+    // Neither attempt posted anything.
+    expect(await ledgerAt()).toBe(before);
+  });
+
+  it('replays for a concurrent retry with the same key instead of failing it', async () => {
+    const key = `idem-issue-${run}-race`;
+    const before = await ledgerAt();
+    // Fire the same keyed request several times at once. Exactly one runs the
+    // operation; the rest must replay its response, not fail a balance check.
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () => api<IssueResult>('POST', '/inventory-issues', issueBody(3), { 'idempotency-key': key })),
+    );
+    for (const res of responses) {
+      expect(res.status).toBe(201);
+      expect(res.body.transactionIds).toHaveLength(1);
+    }
+    // All four agree on the same single movement id.
+    const ids = new Set(responses.map((r) => r.body.transactionIds[0]));
+    expect(ids.size).toBe(1);
+    // The ledger moved once, not four times.
+    expect(await ledgerAt()).toBe((Number(before) - 3).toString());
   });
 });

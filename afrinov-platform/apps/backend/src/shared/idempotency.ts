@@ -21,10 +21,14 @@ import { createHash } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { prisma } from './db.js';
-import { Errors } from './errors.js';
+import { ApiError } from './errors.js';
 
 /** The header a client sends to make a mutation retry-safe. */
 export const IDEMPOTENCY_HEADER = 'idempotency-key';
+
+/** How long a stored key is kept. A retry after a lost response happens within
+ * minutes; a day is far longer than any real retry and bounds the table. */
+export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /** Endpoint scope: one key is unique per route, not shared across the API. */
 export type IdempotencyEndpoint =
@@ -47,16 +51,29 @@ function hashRequest(scope: string, body: unknown): string {
   return createHash('sha256').update(`${scope}\n${JSON.stringify(body ?? null)}`).digest('hex');
 }
 
-/** Read the idempotency key from a request header, or null when absent. */
-export function idempotencyKeyFrom(headers: Record<string, unknown>): string | null {
+/** Read the idempotency key from a request header. */
+export type IdempotencyKeyRead =
+  | { present: false }
+  | { present: true; valid: false }
+  | { present: true; valid: true; key: string };
+
+/**
+ * Read the `Idempotency-Key` header, distinguishing three cases: absent (the
+ * caller did not ask for retry safety), present-but-invalid (the caller asked
+ * for it but the value cannot be stored), and valid. A present-but-invalid key
+ * must never be treated as absent: the caller expects retry safety, and
+ * silently running unkeyed would let a retry post a second movement.
+ */
+export function readIdempotencyKey(headers: Record<string, unknown>): IdempotencyKeyRead {
   const raw = headers[IDEMPOTENCY_HEADER];
+  if (raw === undefined) return { present: false };
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== 'string') return null;
+  if (typeof value !== 'string') return { present: true, valid: false };
   const key = value.trim();
-  // Bound the length so a hostile client cannot bloat the index; a UUID or any
-  // short opaque token fits comfortably.
-  if (!key || key.length > 200) return null;
-  return key;
+  // Visible ASCII only, 1–200 characters: a UUID or any short opaque token
+  // fits comfortably, while control characters and unbounded length do not.
+  if (!/^[\x21-\x7e]{1,200}$/.test(key)) return { present: true, valid: false };
+  return { present: true, valid: true, key };
 }
 
 /** What the callback returns: the status to send and the JSON body. */
@@ -71,11 +88,31 @@ export interface IdempotentOutcome extends IdempotentResult {
 }
 
 /**
+ * The error code sent when a key is reused with a different request. Distinct
+ * from a generic `CONFLICT` so the client can rotate its key and let the user
+ * submit again, instead of being stuck on a permanent 409.
+ */
+export const IDEMPOTENCY_REUSE_CODE = 'IDEMPOTENCY_KEY_REUSED';
+
+/** The transaction-scoped advisory lock key for one (actor, endpoint, key). */
+function lockKey(actorId: string, endpoint: string, key: string): string {
+  return `afrinov:idem:${actorId}|${endpoint}|${key}`;
+}
+
+/**
  * Run `operation` exactly once for a given (actor, endpoint, key).
  *
  * `operation` receives the transaction client and must do all of its writes —
  * including any balance recompute — through it, so the movement and the stored
  * key commit or roll back together.
+ *
+ * Concurrency: the lookup and the operation both run *inside* one transaction,
+ * after taking a transaction-scoped advisory lock on the key. Two simultaneous
+ * retries therefore serialise: the first runs the operation and stores the key;
+ * the second blocks on the lock, re-reads, sees the stored row and replays it
+ * without running the operation. This is what stops the loser of a race from
+ * failing its own balance or state check (a 422 or an already-reversed 409)
+ * before it could replay. The unique index remains as a last-resort safeguard.
  */
 export async function withIdempotency(
   args: { actorId: string; endpoint: IdempotencyEndpoint; key: string; scope: string; requestBody: unknown },
@@ -84,21 +121,30 @@ export async function withIdempotency(
   const { actorId, endpoint, key, scope, requestBody } = args;
   const requestHash = hashRequest(scope, requestBody);
 
-  const existing = await prisma.idempotencyKey.findUnique({
-    where: { actorId_endpoint_key: { actorId, endpoint, key } },
-    select: { requestHash: true, statusCode: true, response: true },
-  });
-  if (existing) {
-    if (existing.requestHash !== requestHash) {
-      throw Errors.conflict(
-        'This request reused an idempotency key with different details. Start the operation again.',
-      );
-    }
-    return { replayed: true, statusCode: existing.statusCode, body: existing.response };
-  }
-
   try {
-    const fresh = await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx) => {
+      // Serialise concurrent requests that carry the same key. The lock is
+      // released automatically when the transaction ends.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey(actorId, endpoint, key)}))`;
+
+      const existing = await tx.idempotencyKey.findUnique({
+        where: { actorId_endpoint_key: { actorId, endpoint, key } },
+        select: { requestHash: true, statusCode: true, response: true },
+      });
+      if (existing) {
+        if (existing.requestHash !== requestHash) {
+          // A distinct code (not a plain CONFLICT) so the client can tell a
+          // reused key from a real business conflict, rotate its key and let
+          // the user submit the new request instead of retrying the same 409.
+          throw new ApiError(
+            409,
+            IDEMPOTENCY_REUSE_CODE,
+            'This submission reused an earlier request\u2019s identifier with different details. Please submit it again.',
+          );
+        }
+        return { replayed: true, statusCode: existing.statusCode, body: existing.response };
+      }
+
       const result = await operation(tx);
       await tx.idempotencyKey.create({
         data: {
@@ -110,9 +156,8 @@ export async function withIdempotency(
           response: (result.body ?? null) as Prisma.InputJsonValue,
         },
       });
-      return result;
+      return { replayed: false, ...result };
     });
-    return { replayed: false, ...fresh };
   } catch (err) {
     // A concurrent retry inserted the same key first: this transaction rolled
     // back (so nothing was posted twice) and the winner's response is replayed.
@@ -127,6 +172,16 @@ export async function withIdempotency(
     }
     throw err;
   }
+}
+
+/**
+ * Delete stored keys older than the retention window, so the table does not
+ * grow without bound. Safe to call on a schedule; returns the number removed.
+ */
+export async function pruneIdempotencyKeys(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - IDEMPOTENCY_RETENTION_MS);
+  const { count } = await prisma.idempotencyKey.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  return count;
 }
 
 /**

@@ -51,7 +51,7 @@ export function ReturnStock() {
   // The return just booked, kept on the page (a toast fades) with a way to see it in the report.
   const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
-  const idem = useIdempotencyKey();
+  const idem = useIdempotencyKey('return-stock');
 
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
   const who = (recipients.data ?? []).find((r) => r.id === recipientId)?.name;
@@ -70,6 +70,10 @@ export function ReturnStock() {
   };
 
   function chooseRecipient(id: string) {
+    // A different recipient is a different return, so the draft is cleared and
+    // the pending submission key for the previous one is left in place (it may
+    // still need reconciling) while the next submit mints its own key from its
+    // own payload. Nothing to rotate here: keys are per payload.
     setRecipientId(id);
     setQty({});
     setInto({});
@@ -85,22 +89,24 @@ export function ReturnStock() {
 
     setBusy(true);
     try {
-      await api.post('/inventory-returns', {
+      const returnBody = {
         reason: note.trim() || undefined,
         lines: entered.map((l) => ({
           issueTransactionId: l.issueTransactionId,
           quantity: parseQty(qty[l.issueTransactionId])!,
           locationId: target(l) !== l.locationId ? target(l) : undefined,
         })),
-      }, { idempotencyKey: idem.key() });
+      };
+      await api.post('/inventory-returns', returnBody, { idempotencyKey: idem.keyFor(returnBody) });
       toast.success(`Returned ${entered.length} item${entered.length === 1 ? '' : 's'}${who ? ` from ${who}` : ''}`);
       setLast({ who: who ?? 'them', recipientId, count: entered.length });
       setQty({});
       setInto({});
       setNote('');
-      idem.rotate();
+      idem.confirm();
       lines.reload();
     } catch (err) {
+      idem.resolve(err);
       setError((err as ApiError).message);
     } finally {
       setBusy(false);
