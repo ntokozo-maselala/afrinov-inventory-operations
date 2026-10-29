@@ -12,8 +12,10 @@
 // Ordering is split by kind (Stores ordering roadmap). New purchase order is
 // Procurement's: for one project, holding that project's material, and + New
 // item adds a Projects item for it. Store → Order stock uses the same form in
-// its Stores form: no project, Stores items only, and + New item adds a Stores
-// item. An order's edit page follows its kind, as the server does.
+// its Stores form: no project, and Stores items from the catalogue only. The
+// store re-orders what it always stocks, so it has no + New item; a new
+// Stores item is added on Materials first. An order's edit page follows its
+// kind, as the server does.
 //
 // The re-order list, a supplier's page and an item's page link to the new
 // form with what to order: ?supplierId=…&materialIds=a,b. The supplier and
@@ -225,26 +227,27 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
     setLines((l) => l.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   }
   // + New item: material the client needs that isn't in the catalogue yet is
-  // added from its line, as a Projects item for the order's project when it has one.
-  const canAddItem = usePermissions().hasPermission('materials:create');
+  // added from its line, as a Projects item for the order's project. Not on a
+  // stock order: the store orders Stores items already in the catalogue.
+  const mayAddItems = usePermissions().hasPermission('materials:create');
+  const canAddItem = !stores && mayAddItems;
   // The drawer opening on screen, if any. The ref is what a save that finishes
   // later checks: unless the drawer is still that same opening (not closed,
   // nor closed and opened again), the item stays in the catalogue but goes on no line.
   const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
   const openFor = useRef<NewItemSession | null>(null);
   function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
-  // A project order's new item is a Projects item for its project, so it waits for one.
-  function startNewItem(key: number): boolean {
-    if (!stores && !orderProject) {
+  // The new item is a Projects item for the order's project, so it waits for one.
+  function startNewItem(key: number) {
+    if (!orderProject) {
       toast.error('Choose the project first', 'A new item on this order is added as a Projects item for its project.');
-      return false;
+      return;
     }
     openNewItem(key);
-    return true;
   }
   function newItemOnNewLine() {
+    if (!orderProject) { startNewItem(0); return; }
     const line = blankLine();
-    if (!stores && !orderProject) { startNewItem(line.key); return; }
     setLines((l) => [...l, line]);
     startNewItem(line.key);
   }
@@ -257,12 +260,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
       return;
     }
     closeNewItem();
-    // A stock order holds Stores items only, a project order its own project's material.
-    if (stores && sectionOf(saved.category) !== 'STORES') {
-      toast.error(`${saved.sku} added to the catalogue, but not to this order`, 'It is a Projects item, and a stock order holds Stores items only.');
-      return;
-    }
-    if (!stores && (sectionOf(saved.category) !== 'PROJECTS' || saved.projectNumber !== orderProject)) {
+    // A project order holds its own project's material only.
+    if (sectionOf(saved.category) !== 'PROJECTS' || saved.projectNumber !== orderProject) {
       toast.error(`${saved.sku} added to the catalogue, but not to this order`, sectionOf(saved.category) === 'PROJECTS'
         ? `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`
         : 'It is a Stores item, which the store orders from Store → Order stock.');
@@ -465,16 +464,14 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
             open
             onClose={closeNewItem}
             title="New item"
-            description={stores
-              ? `Stock that isn't in the catalogue yet. It is added as a Stores item, and goes on line ${lineNo}.`
-              : `Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${lineNo}.`}
+            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${lineNo}.`}
             width="md"
           >
             <MaterialForm
               key={from.session}
-              section={stores ? 'STORES' : 'PROJECTS'}
-              projectNumber={stores ? undefined : orderProject}
-              fixedBy={stores ? 'the stock order: it holds Stores items only' : `the purchase order for ${orderProject}`}
+              section="PROJECTS"
+              projectNumber={orderProject}
+              fixedBy={`the purchase order for ${orderProject}`}
               onCancel={closeNewItem}
               // The server answers with the whole item, its section and project included.
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
