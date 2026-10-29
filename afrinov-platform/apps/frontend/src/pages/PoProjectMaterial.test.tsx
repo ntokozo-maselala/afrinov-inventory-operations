@@ -108,13 +108,13 @@ describe('the new-order form with project material', () => {
     expect(await screen.findByText('Choose the project this order is for.')).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1369' } });
-    // The New item button opens the drawer on a new line, fixed to a Projects item for 1369.
+    // The New item button opens the drawer on a new line, for a Projects item
+    // for 1369: the order fixes both, so neither is asked.
     fireEvent.click(screen.getByRole('button', { name: 'New item' }));
     const drawer = await screen.findByRole('dialog', { name: 'New item' });
-    expect(within(drawer).getByRole('radio', { name: /Stores/ })).toBeDisabled();
-    expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeChecked();
-    expect(within(drawer).getByLabelText('Project')).toHaveValue('1369');
-    expect(within(drawer).getByLabelText('Project')).toBeDisabled();
+    expect(within(drawer).getByText(/added as a Projects item for 1369/)).toBeInTheDocument();
+    expect(within(drawer).queryByRole('radio')).not.toBeInTheDocument();
+    expect(within(drawer).queryByLabelText('Project')).not.toBeInTheDocument();
   });
 
   it('offers neither a closed project nor its material', async () => {

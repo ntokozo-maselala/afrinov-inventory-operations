@@ -64,9 +64,9 @@ describe('+ New item on an order line', () => {
     const drawer = await lineWithNewItem();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
     expect(within(drawer).getByText(/added as a Projects item for 1369, and goes on line 1/)).toBeInTheDocument();
-    // Fixed to the order's project: the drawer can't add it for another one.
-    expect(within(drawer).getByLabelText('Project')).toHaveValue('1369');
-    expect(within(drawer).getByLabelText('Project')).toBeDisabled();
+    // The order fixes the section and project, so the drawer doesn't ask for either.
+    expect(within(drawer).queryByRole('radio')).not.toBeInTheDocument();
+    expect(within(drawer).queryByLabelText('Project')).not.toBeInTheDocument();
 
     fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: '1369-FLANGE-150' } });
     fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flange 150NB' } });
