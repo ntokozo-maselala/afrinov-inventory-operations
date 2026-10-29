@@ -172,7 +172,7 @@ export function App() {
         <Route path="/projects/:projectNumber/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
         <Route path="/recipients" element={<RouteBoundary name="Recipients"><Recipients /></RouteBoundary>} />
         <Route path="/tools" element={<RouteBoundary name="Tools"><Tools /></RouteBoundary>} />
-        <Route path="/settings" element={<RouteBoundary name="Settings"><Settings /></RouteBoundary>}>
+        <Route path="/settings" element={<RouteBoundary name="Settings" resetKey="/settings"><Settings /></RouteBoundary>}>
           <Route index element={<RouteBoundary name="Settings: general"><SettingsGeneral /></RouteBoundary>} />
           <Route path="notifications" element={<RouteBoundary name="Settings: notifications"><SettingsNotifications /></RouteBoundary>} />
           <Route path="inventory" element={<RouteBoundary name="Settings: inventory"><SettingsInventory /></RouteBoundary>} />
@@ -198,11 +198,17 @@ export function App() {
  * route changes so a failure on one page does not strand the next. The
  * boundary keeps the shell (sidebar, header) usable: only the page content is
  * replaced by the fallback.
+ *
+ * `resetKey` overrides the default `location.pathname` key. A layout route that
+ * renders shared state across child routes (the Settings tabs) passes a stable
+ * key, so moving between its tabs does not remount the layout and discard its
+ * shared draft; leaf routes keep the pathname key so a failure on one page does
+ * not strand the next.
  */
-function RouteBoundary({ name, children }: { name: string; children: React.ReactNode }) {
+function RouteBoundary({ name, children, resetKey }: { name: string; children: React.ReactNode; resetKey?: string }) {
   const location = useLocation();
   return (
-    <ErrorBoundary name={name} key={location.pathname}>
+    <ErrorBoundary name={name} key={resetKey ?? location.pathname}>
       <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
     </ErrorBoundary>
   );

@@ -189,9 +189,12 @@ export function StockCount() {
     }
   }
 
-  const loadError = locations.error ?? materials.error;
-  const loadStale = locations.stale || materials.stale;
-  const loadFailed = !!loadError && !loadStale;
+  // Each required list is judged on its own: a stale result from one must not
+  // conceal a hard failure in another and leave the form with an empty list.
+  const sources = [locations, materials];
+  const hardError = sources.find((s) => s.error && !s.stale)?.error ?? null;
+  const loadFailed = hardError !== null;
+  const loadStale = !loadFailed && sources.some((s) => s.stale);
 
   // Reached by a typed or old link: say so rather than offer a form the server would refuse.
   const allowed = usePermissions().hasPermission('inventory:count');
@@ -205,8 +208,8 @@ export function StockCount() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Count stock' }]}
       />
 
-      {loadFailed && <ErrorState error={loadError} onRetry={() => { locations.reload(); materials.reload(); }} />}
-      {loadStale && <StaleDataNotice error={loadError} onRetry={() => { locations.reload(); materials.reload(); }} label="Some lists could not be refreshed" />}
+      {loadFailed && <ErrorState error={hardError} onRetry={() => { locations.reload(); materials.reload(); }} />}
+      {loadStale && <StaleDataNotice error={sources.find((s) => s.stale)?.error} onRetry={() => { locations.reload(); materials.reload(); }} label="Some lists could not be refreshed" />}
 
       {!loadFailed && (
         <div className="space-y-4">

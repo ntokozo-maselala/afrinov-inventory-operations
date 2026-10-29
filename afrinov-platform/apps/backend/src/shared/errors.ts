@@ -102,8 +102,34 @@ export function classifyPrismaError(err: unknown): ApiError | null {
     case 'P2019':
       return Errors.validation('One of the values provided is not valid.');
     default:
-      return new ApiError(500, 'INTERNAL_ERROR', 'Internal server error');
+      // A Prisma code we do not recognise is not a classified operational
+      // fault. Returning null lets the caller fall through to the generic
+      // internal-error path, where it is logged at error severity as an
+      // unexpected defect — transaction failures (P2028, P2034) and raw-query
+      // errors (P2010) must not be downgraded to database warnings.
+      return null;
   }
+}
+
+/**
+ * Add a requestId to an already-serialised error body that lacks one, leaving
+ * anything that is not a recognised envelope untouched. Used at the response
+ * boundary so a directly-sent route error still carries a reference the user
+ * can quote, without every call site having to pass the id.
+ */
+export function withRequestId(payload: string, requestId: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return payload;
+  }
+  const envelope = (parsed as { error?: unknown } | null)?.error;
+  if (typeof envelope !== 'object' || envelope === null) return payload;
+  if (typeof (envelope as { requestId?: unknown }).requestId === 'string') return payload;
+  return JSON.stringify({
+    error: { ...(envelope as Record<string, unknown>), requestId },
+  });
 }
 
 /**

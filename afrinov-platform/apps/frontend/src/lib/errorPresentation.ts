@@ -105,6 +105,40 @@ function titleFor(code: string): { title: string; message: string; tone: ErrorTo
         retryable: true,
         retryLabel: 'Try again',
       };
+    // A mutation whose outcome could not be confirmed: the request may have
+    // been committed and only the answer lost. Never invite a blind retry —
+    // the user is asked to check the records first.
+    case 'OUTCOME_UNKNOWN':
+      return {
+        title: "We couldn't confirm that change",
+        message: 'The connection was lost before we could confirm whether it was saved. Check the records before trying again, so the change is not made twice.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
+    // A field-level validation failure. Not a defect and not retryable
+    // unchanged: the user must correct the highlighted input first.
+    case 'VALIDATION_ERROR':
+      return {
+        title: 'A few details need attention',
+        message: 'Please review the highlighted fields and correct the information before continuing.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
+    // A business-rule refusal the server owns the wording for: insufficient
+    // stock, a duplicate, an invalid state transition. Retrying unchanged
+    // cannot succeed, so no retry is offered.
+    case 'CONFLICT':
+    case 'INVALID_STATE':
+    case 'INSUFFICIENT_BALANCE':
+      return {
+        title: 'This change needs your attention',
+        message: 'This change could not be made as asked. Review the details below and adjust before trying again.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
     // Malformed request the client produced.
     case 'BAD_REQUEST':
     case 'METHOD_NOT_ALLOWED':

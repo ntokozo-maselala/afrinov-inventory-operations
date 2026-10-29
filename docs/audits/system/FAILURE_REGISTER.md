@@ -61,3 +61,29 @@ F-11 was re-checked against the workflows and the container definition.
 | ID | Status now | Evidence |
 |---|---|---|
 | F-11 | **Resolved** | Every CI job pins Node 24 — `backend-ci.yml` (all three jobs), `frontend-ci.yml`, `security-ci.yml` — and `apps/backend/Dockerfile` builds and runs on `node:24-alpine`. The "backend on Node 20" claim was stale: the runtime mismatch (Vitest 5 on Node 20) no longer exists. The wider production-readiness items the row also mentioned (DB FK/ledger immutability/audit gaps, broad authenticated reads, untested paths, the hard-coded E2E credential) are tracked in their own findings and are not closed by this change. |
+
+## Re-verification — 2026-10-29 (fourth pass, Qodo review of the error-handling change)
+
+Qodo's review of PR #114 raised 13 findings against the new error-handling code
+(3 high, 10 medium). All 13 were checked against the code and confirmed real;
+all are now fixed and covered by tests. Where this register and the code
+disagree, the code wins.
+
+| ID | Severity | Defect and fix | Tests |
+|---|---|---|---|
+| Q-01 | High | A late 401 for a token replaced by a newer sign-in signed the new session out. The 401 handler now emits the rejected token and the auth provider ends the session only if it is still current. | `auth.test.tsx`, `client.test.ts` |
+| Q-02 | High | A 401 from `/auth/login` (bad credentials) or an untokened 401 raised the session-expired event. Neither emits it now. | `client.test.ts` |
+| Q-03 | High | Changing Settings tabs remounted the layout (boundary keyed on `pathname`) and dropped the unsaved draft. The layout route now passes a stable `resetKey`; leaf routes keep the pathname key. | `App.test.tsx` |
+| Q-04 | Medium | The Issue-stock form was hidden whenever the stock list had any error, including a stale-but-usable refresh. It now renders for a stale source and blocks only on a hard failure. | `useApiStale.test.tsx` (policy) |
+| Q-05 | Medium | `usePagedList` dropped the first page's `stale`, so a failed refresh became a hard error for paged consumers. It is forwarded now; report and activity pages show the stale notice. | `usePagedList.test.tsx` |
+| Q-06 | Medium | Errors raised by route handlers directly (bypassing the central handler) omitted `requestId` from the body. An `onSend` hook now injects it centrally, with `withRequestId` as the pure helper. | `errors.test.ts` |
+| Q-07 | Medium | Domain codes fell through to the "unexpected defect" default in `errorPresentation`, so a validation or conflict read as a system fault with a retry. Domain codes now map to warning tone and no retry. | `errorPresentation.test.ts` |
+| Q-08 | Medium | `networkError` did not know the HTTP method, so a timed-out mutation looked like a retryable read timeout. It now takes the method and returns `OUTCOME_UNKNOWN` for writes, and writes get a longer timeout. | `client.test.ts` |
+| Q-09 | Medium | An unmapped Prisma code fell through to a bare 500. `classifyPrismaError` now returns null for unmapped codes so the central handler logs them as defects. | `errors.test.ts` |
+| Q-10 | Medium | The message-safety heuristic rejected legitimate domain text shaped like a driver code (`P1001`, "Error Log Sheet"). It now matches only the real driver forms (`code: 'P2002'`, `prisma.…`). | `client.test.ts` |
+| Q-11 | Medium | On Receive/Return/Count, one stale option list masked a hard failure in another, leaving a form with an empty list. Each required list is now judged on its own. | `useApiStale.test.tsx` (policy) |
+| Q-12 | Medium | A 403 refresh still marked data stale, showing protected cached rows as "last data that loaded". `stale` is now cleared for `FORBIDDEN`/`UNAUTHENTICATED`. | `useApiStale.test.tsx` |
+| Q-13 | Medium | Error toasts do not auto-dismiss and were unbounded, so a long outage filled the screen. The stack is capped at three (newest kept) and dedupe entries are evicted. | `Toast.test.tsx` |
+
+Gates after the fixes: typecheck, lint and production build clean; backend 882
+tests, frontend 962 tests, all passing.

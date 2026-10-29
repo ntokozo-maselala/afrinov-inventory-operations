@@ -184,13 +184,119 @@ describe('api/client.ts — API client utilities', () => {
       await expect(api.get('/x')).rejects.toMatchObject({ code: 'TIMEOUT' });
     });
 
-    it('emits a session-expired event on a 401', async () => {
-      const { api, SESSION_EXPIRED_EVENT } = await withFetch(new Response(null, { status: 401 }));
+    it('emits a session-expired event carrying the rejected token on a 401', async () => {
+      const mod = await withFetch(new Response(null, { status: 401 }));
+      mod.setToken('tok-old');
       const seen = vi.fn();
-      window.addEventListener(SESSION_EXPIRED_EVENT, seen);
-      await api.get('/materials').catch(() => {});
-      window.removeEventListener(SESSION_EXPIRED_EVENT, seen);
+      window.addEventListener(mod.SESSION_EXPIRED_EVENT, seen);
+      await mod.api.get('/materials').catch(() => {});
+      window.removeEventListener(mod.SESSION_EXPIRED_EVENT, seen);
       expect(seen).toHaveBeenCalledTimes(1);
+      const [event] = seen.mock.calls[0] as [CustomEvent<{ token: string }>];
+      expect(event.detail).toEqual({ token: 'tok-old' });
+      mod.setToken(null);
+    });
+
+    it('does not announce an expired session when the request carried no token', async () => {
+      const mod = await withFetch(new Response(null, { status: 401 }));
+      mod.setToken(null);
+      const seen = vi.fn();
+      window.addEventListener(mod.SESSION_EXPIRED_EVENT, seen);
+      await mod.api.get('/materials').catch(() => {});
+      window.removeEventListener(mod.SESSION_EXPIRED_EVENT, seen);
+      expect(seen).not.toHaveBeenCalled();
+    });
+
+    it('does not announce an expired session for a rejected sign-in', async () => {
+      // A 401 from /auth/login is wrong credentials, not an ended session.
+      const mod = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'Invalid credentials' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      ));
+      mod.setToken('tok-current');
+      const seen = vi.fn();
+      window.addEventListener(mod.SESSION_EXPIRED_EVENT, seen);
+      await mod.api.post('/auth/login', { email: 'a@b.c', password: 'nope' }).catch(() => {});
+      window.removeEventListener(mod.SESSION_EXPIRED_EVENT, seen);
+      expect(seen).not.toHaveBeenCalled();
+      mod.setToken(null);
+    });
+
+    it('reports a timed-out mutation as an unconfirmed outcome, not a retryable timeout', async () => {
+      // A POST may have committed server-side before the client gave up;
+      // inviting a blind retry would risk posting the movement twice.
+      const { api } = await withFetch(async () => {
+        const err = new Error('The operation was aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      });
+      const err = await rejection(api.post('/inventory-issues', {}));
+      expect(err.code).toBe('OUTCOME_UNKNOWN');
+      expect(err.message).toMatch(/before trying again|check/i);
+    });
+
+    it('still reports a timed-out read as a retryable TIMEOUT', async () => {
+      const { api } = await withFetch(async () => {
+        const err = new Error('The operation was aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      });
+      await expect(api.get('/stock')).rejects.toMatchObject({ code: 'TIMEOUT' });
+    });
+
+    it('gives a write a longer timeout budget than a read', async () => {
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
+      vi.stubEnv('VITE_FRONTEND_ONLY', 'false');
+      vi.stubGlobal('fetch', fetchMock);
+      const { api } = await import('../api/client');
+      const timeoutOf = (init: RequestInit) => (init.signal as AbortSignal & { reason?: unknown });
+      await api.get('/materials');
+      await api.post('/materials', {});
+      // Both carry a signal; the mutation's is a distinct, longer-lived one.
+      expect(fetchMock.mock.calls.length).toBe(2);
+      expect(timeoutOf((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1])).toBeDefined();
+      expect(timeoutOf((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1])).toBeDefined();
+    });
+
+    it('keeps a domain message that names a SKU shaped like a driver code', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'INSUFFICIENT_BALANCE', message: 'Cannot issue 5 × P1001: only 2 available.' } }),
+        { status: 422, headers: { 'content-type': 'application/json' } },
+      ));
+      await expect(api.post('/inventory-issues', {})).rejects.toMatchObject({
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'Cannot issue 5 × P1001: only 2 available.',
+      });
+    });
+
+    it('keeps a domain message that contains the word "Error" in ordinary text', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'CONFLICT', message: 'Error Log Sheet already exists. Choose another name.' } }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ));
+      await expect(api.post('/materials', {})).rejects.toMatchObject({
+        code: 'CONFLICT',
+        message: 'Error Log Sheet already exists. Choose another name.',
+      });
+    });
+
+    it('still rejects a domain message that is really a driver error', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'CONFLICT', message: "Invalid `prisma.material.create()` invocation: code: 'P2002'" } }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ));
+      const err = await rejection(api.post('/materials', {}));
+      expect(err.message).not.toMatch(/prisma|P2002/);
+    });
+
+    it('reads the correlation id from the x-request-id header when the body has none', async () => {
+      const { api } = await withFetch(new Response('<html>502</html>', {
+        status: 502,
+        headers: { 'x-request-id': 'req-hdr-9' },
+      }));
+      await expect(api.get('/stock')).rejects.toMatchObject({
+        code: 'SERVICE_UNAVAILABLE', requestId: 'req-hdr-9',
+      });
     });
 
     it('attaches a request timeout signal', async () => {

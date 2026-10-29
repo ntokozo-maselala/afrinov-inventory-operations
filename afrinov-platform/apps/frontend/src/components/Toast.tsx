@@ -34,6 +34,12 @@ const DISMISS_MS: Record<ToastTone, number | null> = {
 // during one outage) collapse into a single toast instead of a stack of them.
 const DEDUPE_WINDOW_MS = 4000;
 
+// Error toasts do not auto-dismiss, so a long outage producing distinct
+// messages would otherwise fill the screen and stay until each is dismissed by
+// hand. Only the most recent are kept; the oldest is dropped as a new one
+// arrives, so the latest failure is always visible and the stack is bounded.
+const MAX_ERROR_TOASTS = 3;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const counter = useRef(0);
@@ -46,12 +52,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const show = useCallback((t: Omit<Toast, 'id'>) => {
     const key = `${t.tone}|${t.title}|${t.description ?? ''}`;
     const now = Date.now();
+    // Evict dedupe entries once their window has passed, so a long-lived
+    // provider does not accumulate a key per distinct message forever.
+    for (const [k, at] of recent.current) {
+      if (now - at >= DEDUPE_WINDOW_MS) recent.current.delete(k);
+    }
     const last = recent.current.get(key);
-    if (last !== undefined && now - last < DEDUPE_WINDOW_MS) return;
+    if (last !== undefined) return;
     recent.current.set(key, now);
 
     const id = ++counter.current;
-    setToasts((prev) => [...prev, { id, ...t }]);
+    setToasts((prev) => {
+      const next = [...prev, { id, ...t }];
+      if (t.tone !== 'error') return next;
+      // Keep only the most recent persistent errors: the newest failure is
+      // never lost, and the stack cannot grow without bound during an outage.
+      const errors = next.filter((x) => x.tone === 'error');
+      if (errors.length <= MAX_ERROR_TOASTS) return next;
+      const dropped = new Set(errors.slice(0, errors.length - MAX_ERROR_TOASTS).map((x) => x.id));
+      return next.filter((x) => !dropped.has(x.id));
+    });
     const ttl = DISMISS_MS[t.tone];
     if (ttl !== null) setTimeout(() => dismiss(id), ttl);
   }, [dismiss]);

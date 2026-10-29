@@ -35,5 +35,18 @@ export function usePagedList<T extends { cursor: string }>(path: string | null, 
     first.reload();
   }
 
-  return { rows, loading: first.loading, error: first.error, loaded: !!first.data, hasMore, loadMore, loadingMore, reload };
+  return {
+    rows,
+    loading: first.loading,
+    error: first.error,
+    // A failed refresh of the first page keeps its rows on screen; pass the
+    // state through so consumers show a stale warning instead of replacing
+    // loaded rows with a hard error.
+    stale: first.stale,
+    loaded: !!first.data,
+    hasMore,
+    loadMore,
+    loadingMore,
+    reload,
+  };
 }

@@ -135,7 +135,26 @@ backend contract respectively.
   is in flight; a second click cannot issue a second request.
 - **Stale data:** a failed refresh keeps the last good data visible with a
   `StaleDataNotice`. The figures are labelled as not freshly confirmed; they
-  are never presented as current.
+  are never presented as current. Only *availability* failures
+  (`SERVICE_UNAVAILABLE`, `NETWORK_ERROR`, `TIMEOUT`) mark data stale: a
+  refusal that says the user may no longer see the data (`FORBIDDEN`) or that
+  the session ended (`UNAUTHENTICATED`) clears it instead of showing a
+  protected snapshot. `useApi` exposes `stale`; `usePagedList` passes the
+  first page's `stale` through, and a stale source never masks a *hard*
+  failure in a different required list on the same page.
+- **Bounded notifications:** error toasts do not auto-dismiss, so at most
+  three are kept — the newest failure is always visible and the stack cannot
+  grow without bound during a prolonged outage. Identical messages in one
+  burst are deduped within a 4s window.
+- **Session expiry is scoped to the rejected token.** The 401 handler emits
+  the token the request carried; the auth provider ends the session only if
+  that token is still current, so a slow request made before a fresh sign-in
+  cannot sign the new session out. A 401 from `/auth/login` (bad credentials)
+  and an untokened 401 do not emit the event at all.
+- **Unknown mutation outcome is distinct from a read timeout.** A timed-out or
+  dropped *mutation* is reported as `OUTCOME_UNKNOWN` (not a retryable
+  `TIMEOUT`), so the user is told the result is unconfirmed rather than
+  invited to retry blindly. Writes also get a longer timeout budget than reads.
 
 ## 7. Development versus production
 
@@ -177,7 +196,12 @@ backend contract respectively.
 | Unexpected defect | Unhandled throw | 500 | "Something didn't go as expected" + reference | Retry; contact admin | `error` with stack + requestId | `errors.test.ts`, `server.test.ts` |
 | Render failure | Component throws | — | Boundary fallback | "Try again" | diagnostics `boundary:<name>` | `ErrorBoundary.test.tsx` |
 | Malformed error body | Non-JSON / no envelope | any | Status-derived copy | Depends | client fallback path | `client.test.ts` |
-| Stale refresh | Reload fails with data shown | any | "Could not refresh" notice | "Try again" | client error retained | `useApi` (`stale`) |
+| Stale refresh | Reload fails with data shown | any | "Could not refresh" notice | "Try again" | client error retained | `useApi` (`stale`), `useApiStale.test.tsx`, `usePagedList.test.tsx` |
+| Protected data on a failed refresh | Refresh returns 403 | 403 | Hard error, not a stale snapshot | Contact admin | client `FORBIDDEN` | `useApiStale.test.tsx` |
+| Unconfirmed mutation | Timeout/network after a write | — | "We couldn't confirm that change" | Check the record, then retry | client `OUTCOME_UNKNOWN` | `client.test.ts`, `errorPresentation.test.ts` |
+| Session expired by a late 401 | Old token rejected after re-login | 401 | Session kept | — | token-scoped event | `auth.test.tsx`, `client.test.ts` |
+| Notification storm | Many distinct failures in one outage | — | At most three toasts | Dismiss | dedupe + cap | `Toast.test.tsx` |
+| Settings tab switch | Move between settings tabs | — | Layout stays mounted, draft kept | — | stable boundary key | `App.test.tsx` |
 
 ## 10. Known limitations and outstanding risks
 
@@ -197,5 +221,5 @@ backend contract respectively.
   suite and the Playwright suite need a PostgreSQL 16 `_test` database and
   installed browsers (see `docs/audits/system/FAILURE_REGISTER.md` F-07).
   Both suites were executed against that live stack on 2026-10-29 and passed
-  (backend 124 passed / 3 conditional skips; Playwright 7/7), so the matrix
+  (backend 138 passed / 3 conditional skips; Playwright 7/7), so the matrix
   rows are covered end to end and not by unit tests alone.

@@ -9,6 +9,7 @@ import { Button } from '../Button';
 import { Badge } from '../Badge';
 import { DataTable, type DataTableColumn } from '../DataTable';
 import { EmptyState, ErrorState } from '../EmptyState';
+import { StaleDataNotice } from '../StaleDataNotice';
 import { Skeleton } from '../Skeleton';
 import { Drawer } from '../Modal';
 import { useToast } from '../Toast';
@@ -54,12 +55,13 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
   const [selected, setSelected] = useState<MovementRow | null>(null);
   const toast = useToast();
 
-  if (list.error) return <ErrorState error={list.error} onRetry={list.reload} />;
+  if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows: Row[] = list.rows.flatMap((s) => s.lines.map((l) => ({ s, l })));
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No stock issued" description="No stock was issued for these dates and filters." />;
   return (
     <div>
+      {list.stale && <StaleDataNotice error={list.error} onRetry={list.reload} />}
       <ReportBar view={view} onView={onView}>
         {list.loaded ? <>{countWords(list.rows.length, rows.length, list.hasMore, 'issue')}. Issues recorded before slips were kept show one item each.</> : ' '}
       </ReportBar>

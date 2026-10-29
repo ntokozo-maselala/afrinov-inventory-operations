@@ -104,9 +104,12 @@ export function ReturnStock() {
     }
   }
 
-  const loadError = recipients.error ?? locations.error;
-  const loadStale = recipients.stale || locations.stale;
-  const loadFailed = !!loadError && !loadStale;
+  // Each required list is judged on its own: a stale result from one must not
+  // conceal a hard failure in another and leave the form with an empty list.
+  const sources = [recipients, locations];
+  const hardError = sources.find((s) => s.error && !s.stale)?.error ?? null;
+  const loadFailed = hardError !== null;
+  const loadStale = !loadFailed && sources.some((s) => s.stale);
 
   // Reached by a typed or old link: say so rather than offer a form the server would refuse.
   const allowed = usePermissions().hasPermission('inventory:return');
@@ -120,8 +123,8 @@ export function ReturnStock() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Return stock' }]}
       />
 
-      {loadFailed && <ErrorState error={loadError} onRetry={() => { recipients.reload(); locations.reload(); }} />}
-      {loadStale && <StaleDataNotice error={loadError} onRetry={() => { recipients.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
+      {loadFailed && <ErrorState error={hardError} onRetry={() => { recipients.reload(); locations.reload(); }} />}
+      {loadStale && <StaleDataNotice error={sources.find((s) => s.stale)?.error} onRetry={() => { recipients.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
 
       {last && (
         <Alert tone="success" title={`Returned ${last.count} item${last.count === 1 ? '' : 's'} from ${last.who}`} className="mb-4 max-w-5xl">

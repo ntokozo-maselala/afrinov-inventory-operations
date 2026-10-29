@@ -19,7 +19,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, FRONTEND_ONLY, getToken, isApiError, setToken, SESSION_EXPIRED_EVENT } from './api/client';
+import { api, FRONTEND_ONLY, getToken, isApiError, setToken, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api/client';
 import { login as serviceLogin, type AuthUser } from './api/authService';
 
 export type { AuthUser } from './api/authService';
@@ -90,12 +90,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState<boolean>(false);
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
-  // A 401 from any request means the stored token is no longer accepted. The
-  // API client announces it once; here it is turned into a single, consistent
-  // transition to signed-out, so every screen does not invent its own handling.
+  // A 401 from any request means the token that request carried is no longer
+  // accepted. The API client announces it once, with the rejected token; here
+  // it is turned into a single, consistent transition to signed-out. The token
+  // is checked first so that a late 401 from a request made before a new
+  // sign-in cannot clear the session that sign-in just created, and a failed
+  // sign-in (which carries no token) cannot present itself as an expiry.
   useEffect(() => {
     if (FRONTEND_ONLY) return;
-    const onExpired = () => {
+    const onExpired = (event: Event) => {
+      const rejected = (event as CustomEvent<SessionExpiredDetail>).detail?.token;
+      if (!rejected || rejected !== getToken()) return;
       setToken(null);
       clearPersistedSession();
       setUser(null);

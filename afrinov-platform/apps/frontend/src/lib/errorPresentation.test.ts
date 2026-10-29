@@ -47,6 +47,31 @@ describe('errorPresentation', () => {
       expect(p.title).toMatch(/too many requests/i);
       expect(p.retryable).toBe(true);
     });
+
+    it('does not present a validation failure as an unexpected defect with a retry', () => {
+      const p = presentError({ code: 'VALIDATION_ERROR', message: 'Quantity must be above zero.' });
+      expect(p.title).toBe('A few details need attention');
+      expect(p.tone).toBe('warning');
+      expect(p.retryable).toBe(false);
+    });
+
+    it.each(['CONFLICT', 'INVALID_STATE', 'INSUFFICIENT_BALANCE'])(
+      'treats %s as a business-rule refusal, not a system defect',
+      (code) => {
+        const p = presentError({ code, message: 'Only 2 of SKU A-1 are available at D-1.' });
+        expect(p.tone).toBe('warning');
+        expect(p.retryable).toBe(false);
+        expect(p.title).not.toMatch(/didn't go as expected/i);
+        // The server's own constraint wording is still shown.
+        expect(p.message).toBe('Only 2 of SKU A-1 are available at D-1.');
+      },
+    );
+
+    it('never invites a blind retry of an unconfirmed mutation', () => {
+      const p = presentError({ code: 'OUTCOME_UNKNOWN', message: 'x' });
+      expect(p.retryable).toBe(false);
+      expect(p.message).toMatch(/check|confirm/i);
+    });
   });
 
   describe('domain wording', () => {

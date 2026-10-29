@@ -33,15 +33,26 @@ export const FRONTEND_ONLY: boolean = import.meta.env.VITE_FRONTEND_ONLY === 'tr
 // How long a request may run before it is abandoned. A hung backend (a request
 // that never resolves because a socket was blackholed) would otherwise leave
 // the UI spinning forever; the browser's own fetch has no default timeout.
-// 20s is comfortably longer than a slow report query and shorter than a user's
-// patience, and matches the server's own 30s request timeout with margin.
+// Reads are abandoned at 20s — comfortably longer than a slow report query.
+// Writes get a longer budget than the server's own 30s request timeout, so the
+// server's timeout is what fires first and returns a real answer: aborting a
+// mutation while the server may still commit it would invent an ambiguous
+// outcome the client cannot reconcile.
 const REQUEST_TIMEOUT_MS = 20_000;
+const MUTATION_TIMEOUT_MS = 35_000;
 
 const TOKEN_KEY = 'afrinov.token';
 
 /** Emitted when the server rejects a request as unauthenticated, so the app can
- * clear the session once, in one place, and send the user to sign in again. */
+ * clear the session once, in one place, and send the user to sign in again.
+ * The event carries the token that was rejected, so a late 401 from a request
+ * made before a new sign-in cannot sign the new session out. */
 export const SESSION_EXPIRED_EVENT = 'afrinov:session-expired';
+
+/** The token whose request was rejected as unauthenticated. */
+export interface SessionExpiredDetail {
+  token: string;
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -59,9 +70,27 @@ interface ApiShape {
   del: <T>(path: string) => Promise<T>;
 }
 
-function networkError(err: unknown): ApiError {
+/**
+ * Map a transport failure onto a stable code. A GET that is abandoned or
+ * cannot reach the server is safely retryable — it changed nothing. A
+ * mutation (POST/PATCH/PUT/DELETE) that times out or loses the connection is
+ * NOT: the server may have committed it and only the response was lost, so it
+ * gets OUTCOME_UNKNOWN, whose copy tells the user to check before repeating
+ * rather than inviting a duplicate stock movement.
+ */
+function networkError(err: unknown, method: string): ApiError {
   const e = err as { name?: string; message?: string } | null;
-  if (e?.name === 'AbortError' || e?.name === 'TimeoutError') {
+  const timedOut = e?.name === 'AbortError' || e?.name === 'TimeoutError';
+  const isMutation = method !== 'GET' && method !== 'HEAD';
+  if (isMutation) {
+    return {
+      code: 'OUTCOME_UNKNOWN',
+      message: timedOut
+        ? 'This is taking longer than expected. Check the records before trying again, in case the change was saved.'
+        : 'The connection was lost while saving. Check the records before trying again, in case the change was saved.',
+    };
+  }
+  if (timedOut) {
     return {
       code: 'TIMEOUT',
       message: 'The server took too long to respond. Please try again.',
@@ -102,6 +131,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   METHOD_NOT_ALLOWED: 'Something about this request was not accepted. Please check your input and try again.',
   PAYLOAD_TOO_LARGE: 'Something about this request was not accepted. Please check your input and try again.',
   UNSUPPORTED_MEDIA_TYPE: 'Something about this request was not accepted. Please check your input and try again.',
+  OUTCOME_UNKNOWN: 'We could not confirm whether that change was saved. Please check the records before trying again.',
   INTERNAL_ERROR: 'Something went wrong. Please try again.',
 };
 
@@ -116,12 +146,21 @@ const GENERIC_SAFE_MESSAGE = 'Something went wrong. Please try again.';
 export function isSafeServerMessage(message: string): boolean {
   const text = message.trim();
   if (!text || text.length > 400) return false;
-  // Stack frames, file paths, internal identifiers and driver noise.
-  if (/at\s+\S+\s+\(.*:\d+:\d+\)/.test(text)) return false;
-  if (/(^|\s)(\/[\w.-]+){2,}/.test(text)) return false;
-  if (/\b(Error|TypeError|SyntaxError|PrismaClient\w*Error)\b/.test(text)) return false;
-  if (/node_modules|\.ts:\d+|\.js:\d+/.test(text)) return false;
-  if (/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|P\d{4}\b/.test(text)) return false;
+  // Stack frames, file paths, internal identifiers and driver noise. Each
+  // pattern is anchored to its diagnostic form so that legitimate domain
+  // wording is not rejected: a SKU such as "P1001" or the word "Error" in a
+  // sentence must survive, because those messages name the actual constraint.
+  if (/\bat\s+[\w.$<>[\]]+\s+\(.*:\d+:\d+\)/.test(text)) return false; // "at fn (/x/y.ts:1:2)"
+  if (/\bnode_modules\b|\.(?:ts|js|mjs|cjs|tsx):\d+/.test(text)) return false;
+  if (/(^|\s)\/(?:app|usr|home|workspace|root|var|opt|srv|tmp)\//.test(text)) return false;
+  if (/\bPrismaClient\w*Error\b|\bInvalid\s+`prisma\.|code:\s*['"]P\d{4}['"]/.test(text)) return false;
+  if (/\b(?:TypeError|SyntaxError|ReferenceError|RangeError)\b/.test(text)) return false;
+  if (/\bError:\s|\bError\s+at\s/.test(text)) return false; // "Error: boom", "Error at ..."
+  if (/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EADDRINUSE|EACCES/.test(text)) return false;
+  // A Prisma code only in its driver form: the message opens with it, or names
+  // it as a code. A SKU that merely looks like one ("P1001") is left alone.
+  if (/^P\d{4}\b\s*[:)]/.test(text)) return false;
+  if (/\bcode[:\s]+['"]?P\d{4}\b/i.test(text)) return false;
   return true;
 }
 
@@ -156,7 +195,7 @@ function fallbackErrorForStatus(status: number): ApiError {
  * misconfigured server cannot inject a stack trace, a path or a driver string
  * into a screen that renders `err.message` directly.
  */
-function parseErrorBody(data: unknown, status: number): ApiError {
+function parseErrorBody(data: unknown, status: number, headerRequestId?: string | null): ApiError {
   const envelope = (data as { error?: unknown } | null)?.error;
   if (
     typeof envelope === 'object' &&
@@ -168,19 +207,30 @@ function parseErrorBody(data: unknown, status: number): ApiError {
     const serverMessage = DOMAIN_MESSAGE_CODES.has(e.code) && isSafeServerMessage(e.message)
       ? e.message
       : undefined;
+    const requestId = typeof e.requestId === 'string' ? e.requestId : headerRequestId ?? undefined;
     return {
       code: e.code,
       message: serverMessage ?? SAFE_MESSAGES[e.code] ?? GENERIC_SAFE_MESSAGE,
       ...(e.details && typeof e.details === 'object' ? { details: e.details as Record<string, unknown> } : {}),
-      ...(typeof e.requestId === 'string' ? { requestId: e.requestId } : {}),
+      ...(requestId ? { requestId } : {}),
       status,
     };
   }
-  return fallbackErrorForStatus(status);
+  const fallback = fallbackErrorForStatus(status);
+  // A response with no usable envelope (a proxy's HTML page, a bare status)
+  // still carries the correlation header; keep it so the user can quote it.
+  return headerRequestId ? { ...fallback, requestId: headerRequestId } : fallback;
+}
+
+/** The login endpoint is the one place a 401 is about the credentials the user
+ * just typed, not about a session that has ended. */
+function isLoginRequest(path: string): boolean {
+  return path.startsWith('/auth/login');
 }
 
 async function realRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
+  const isMutation = method !== 'GET' && method !== 'HEAD';
   let res: Response;
   try {
     res = await fetch(`/api/v1${path}`, {
@@ -192,10 +242,10 @@ async function realRequest<T>(method: string, path: string, body?: unknown): Pro
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(isMutation ? MUTATION_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    throw networkError(err);
+    throw networkError(err, method);
   }
   if (res.status === 204) return undefined as T;
   let data: unknown = null;
@@ -205,12 +255,16 @@ async function realRequest<T>(method: string, path: string, body?: unknown): Pro
     data = null;
   }
   if (!res.ok) {
-    const err = parseErrorBody(data, res.status);
-    // A 401 means the stored token is no longer accepted. Announce it once, in
-    // a single place, rather than letting each screen invent its own handling;
-    // the auth provider listens and clears the session.
-    if (res.status === 401 && !FRONTEND_ONLY && typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    const err = parseErrorBody(data, res.status, res.headers.get('x-request-id'));
+    // A 401 means the token sent with this request is no longer accepted.
+    // Announce it once, in a single place; the auth provider listens, and only
+    // clears the session if that same token is still the current one. Two
+    // cases must not fire it: a failed sign-in (the credentials were wrong,
+    // there is no session to end) and a request that carried no token.
+    if (res.status === 401 && token && !isLoginRequest(path) && !FRONTEND_ONLY && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent<SessionExpiredDetail>(SESSION_EXPIRED_EVENT, { detail: { token } }),
+      );
     }
     throw err;
   }

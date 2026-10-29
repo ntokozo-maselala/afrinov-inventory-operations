@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import type { StaticDocumentSpec } from '@fastify/swagger';
-import { ApiError, Errors, classifyPrismaError, toErrorEnvelope } from './shared/errors.js';
+import { ApiError, Errors, classifyPrismaError, toErrorEnvelope, withRequestId } from './shared/errors.js';
 import {
   loadConfig,
   ConfigError,
@@ -184,8 +184,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // reporting a problem ("it said something went wrong") can be matched to the
   // server log line for that exact request. The header is set on the reply
   // before the body is written, so it is present on success and error alike.
+  //
+  // Some route handlers send their error envelope directly (a validation or
+  // permission refusal) rather than throwing it to the central handler, so the
+  // body would otherwise carry no reference. Rather than depend on every call
+  // site remembering, the id is added here at the single response boundary:
+  // an error body without a requestId gets the current one.
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
+    if (reply.statusCode >= 400 && typeof payload === 'string') {
+      return withRequestId(payload, req.id);
+    }
     return payload;
   });
 

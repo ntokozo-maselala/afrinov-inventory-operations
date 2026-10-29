@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ApiError, Errors, classifyPrismaError, toErrorEnvelope } from './errors.js';
+import { ApiError, Errors, classifyPrismaError, toErrorEnvelope, withRequestId } from './errors.js';
 
 describe('shared/errors', () => {
   describe('Errors factory', () => {
@@ -117,6 +117,35 @@ describe('shared/errors', () => {
       expect(classifyPrismaError(new Error('boom'))).toBeNull();
       expect(classifyPrismaError({ code: 'NOT_A_CODE' })).toBeNull();
       expect(classifyPrismaError(null)).toBeNull();
+    });
+
+    it('returns null for an unmapped Prisma code so it is logged as a defect', () => {
+      // Transaction and raw-query failures (P2010, P2028, P2034) are not
+      // classified operational faults: returning null lets the central handler
+      // log them at error severity rather than as a database warning.
+      for (const code of ['P2010', 'P2028', 'P2034', 'P2099']) {
+        expect(classifyPrismaError({ code })).toBeNull();
+      }
+    });
+  });
+
+  describe('withRequestId', () => {
+    it('adds the id to an error envelope that lacks one', () => {
+      const body = JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'Invalid payload' } });
+      const out = JSON.parse(withRequestId(body, 'req-9'));
+      expect(out.error.requestId).toBe('req-9');
+      expect(out.error.code).toBe('VALIDATION_ERROR');
+      expect(out.error.message).toBe('Invalid payload');
+    });
+
+    it('leaves an envelope that already carries an id untouched', () => {
+      const body = JSON.stringify({ error: { code: 'FORBIDDEN', message: 'no', requestId: 'req-own' } });
+      expect(withRequestId(body, 'req-9')).toBe(body);
+    });
+
+    it('leaves a non-envelope or non-JSON body untouched', () => {
+      expect(withRequestId('<html>502</html>', 'req-9')).toBe('<html>502</html>');
+      expect(withRequestId(JSON.stringify({ ok: true }), 'req-9')).toBe(JSON.stringify({ ok: true }));
     });
   });
 

@@ -92,11 +92,18 @@ export function ReceiveStock() {
     label: `${m.name} (${m.sku})`,
     detail: stockText(m, heldAt.get(m.id)),
   })), [activeMaterials, heldAt]);
-  const loadError = suppliers.error ?? materials.error ?? locations.error;
-  // A refresh that failed while the option lists were already loaded is a
+    // A refresh that failed while the option lists were already loaded is a
   // stale warning, not a blocker: the form stays usable with the last data.
-  const loadStale = suppliers.stale || materials.stale || locations.stale;
-  const loadFailed = !!loadError && !loadStale;
+  //
+  // Each list is judged on its own. A stale result from one must not conceal a
+  // hard failure in another: if any required list has an error and no usable
+  // data of its own, that is a blocker, and the form must not render with an
+  // empty option list. Only when nothing is blocked does a stale source become
+  // a warning.
+  const sources = [suppliers, materials, locations];
+  const hardError = sources.find((s) => s.error && !s.stale)?.error ?? null;
+  const loadFailed = hardError !== null;
+  const loadStale = !loadFailed && sources.some((s) => s.stale);
   const loading = suppliers.loading || materials.loading || locations.loading;
 
   // An item's page links here with ?materialId=: once the catalogue, locations
@@ -180,8 +187,8 @@ export function ReceiveStock() {
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Receive stock' }]}
       />
 
-      {loadFailed && <ErrorState error={loadError} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} />}
-      {loadStale && <StaleDataNotice error={loadError} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
+      {loadFailed && <ErrorState error={hardError} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} />}
+      {loadStale && <StaleDataNotice error={sources.find((s) => s.stale)?.error} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
 
       {!loadFailed && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>

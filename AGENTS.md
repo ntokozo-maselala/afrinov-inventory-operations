@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 874, frontend 905)
+npm test               # both workspaces (backend 882, frontend 962)
 npm run build          # both workspaces
 ```
 
@@ -114,6 +114,15 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `err.message` cannot leak server text. Never render a raw exception message.
   See `afrinov-docs/docs/12-operations/error-handling.md` and
   `afrinov-docs/docs/08-api/error-model.md`.
+- **A failed refresh keeps data only for availability failures.** `useApi`
+  marks `stale` for `SERVICE_UNAVAILABLE`/`NETWORK_ERROR`/`TIMEOUT`; `FORBIDDEN`
+  and `UNAUTHENTICATED` clear it, so a permission loss is never shown as "here
+  is the old copy". `usePagedList` forwards `stale`, and one stale source must
+  not mask a hard failure in another required list on the same page.
+- **Never auto-retry a mutation.** A timed-out or dropped write is
+  `OUTCOME_UNKNOWN` (check the record, then retry), not a retryable read
+  timeout. Error toasts are capped at three so an outage cannot fill the
+  screen.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

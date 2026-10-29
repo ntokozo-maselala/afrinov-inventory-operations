@@ -65,7 +65,21 @@ export function useApi<T>(path: string | null): UseApiResult<T> {
   // A failed refresh keeps the previous data visible, so the failure is a stale
   // warning, not a blank page. Only a failure with no prior data for this path
   // is a hard error state.
-  const stale = !!error && data !== null && dataPath === path;
+  //
+  // Stale presentation is limited to transient availability failures. A refusal
+  // that says the user may no longer see this data (403, or a session that
+  // ended) must not be softened into "here is the old copy": the protected rows
+  // are suppressed and the refusal is shown.
+  const stale = !!error && data !== null && dataPath === path && isTransientFailure(error);
 
   return { data, dataPath, error, loading, stale, reload: () => setNonce((n) => n + 1) };
+}
+
+/** Failures where showing the last good data beside a warning is appropriate. */
+function isTransientFailure(error: ApiError): boolean {
+  return error.code === 'SERVICE_UNAVAILABLE'
+    || error.code === 'NETWORK_ERROR'
+    || error.code === 'TIMEOUT'
+    || error.code === 'TOO_MANY_REQUESTS'
+    || error.code === 'INTERNAL_ERROR';
 }
