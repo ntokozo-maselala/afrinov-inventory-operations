@@ -212,13 +212,15 @@ export function PurchaseOrderDetail() {
   useEffect(() => {
     if (params.has('receive')) setParams((p) => { p.delete('receive'); return p; }, { replace: true });
   }, [params, setParams]);
+  // An order at the other section's address moves to its own, taking a Receive
+  // delivery asked for (?receive=1, already tidied from this address) along.
+  // The request is kept, not used here, so it is still there as the move happens.
+  if (misplaced && fresh) return <Navigate to={`${orderPath(fresh)}${receiveRequested ? '?receive=1' : ''}`} replace />;
+
   if (receiveRequested && fresh) {
     setReceiveRequested(false);
     if (canReceive && isReceivable(fresh.status)) setReceiving(true);
   }
-
-  // A Receive delivery asked for on the way (?receive=1, already tidied from the address) goes along.
-  if (misplaced && fresh) return <Navigate to={`${orderPath(fresh)}${receiveRequested ? '?receive=1' : ''}`} replace />;
 
   return (
     <div>

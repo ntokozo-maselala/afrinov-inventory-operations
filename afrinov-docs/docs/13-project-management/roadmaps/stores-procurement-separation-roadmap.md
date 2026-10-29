@@ -49,7 +49,7 @@ Admin keeps access to both. The Director's access is decided after this roadmap.
 
 ### Order of work
 
-First open the pull request for `fix/stock-order-catalogue-only` (stock orders take catalogue items only, the simpler New item drawer, the On order view), so this work starts from main. Then one branch and pull request per phase, `feature/stores-procurement-separation`, in order. Phase 1 changes no rules, but it takes Stores orders out of Procurement's approval queue, while approvers still approve them until Phase 2 hands that to the storeman. So merge Phase 1 together with Phase 2, or just before it. Phases 2 and 3 change who may do what, so they should reach the business together.
+First open the pull request for `fix/stock-order-catalogue-only` (stock orders take catalogue items only, the simpler New item drawer, the On order view), so this work starts from main. Then one branch and pull request per phase, `feature/stores-procurement-separation`, in order. Phase 1 changes no rules, so it can merge on its own: until Phase 2 hands approval to the storeman, an approver's Waiting for my approval still holds Stores orders (each opening in Order stock), so it matches the Dashboard's count (Qodo, PR #119). Phases 2 and 3 change who may do what, so they should reach the business together.
 
 ## Phase 1: Separate homes for each kind of order
 
@@ -60,7 +60,7 @@ Size M. Frontend only. Changes where things are, not who may do what.
 - [x] **1.2 Every link opens an order in its own section.** The Order stock list and its Receive, Receive stock's Receive against, a supplier's orders, and the page shown after saving a new or edited order. The Dashboard's Waiting for your approval links to a list, not an order, so it moves with the approval queues in 2.3.
   Files: `pages/StoresOrders.tsx`, `pages/ReceiveStock.tsx`, `pages/Dashboard.tsx`, `pages/SupplierDetail.tsx`, `pages/PurchaseOrderForm.tsx`
 - [x] **1.3 Old links redirect.** `/purchase-orders/<a Stores order>` goes to `/stock/orders/…`, and a project order opened under `/stock/orders/…` goes to `/purchase-orders/…`. Bookmarks and emailed links keep working.
-- [x] **1.4 Procurement shows project orders only.** The Purchase orders list loses its kind filter (Project orders, Stores orders, All orders) and lists project orders; nothing from the store shows anywhere in Procurement.
+- [x] **1.4 Procurement shows project orders only.** The Purchase orders list loses its kind filter (Project orders, Stores orders, All orders) and lists project orders; nothing from the store shows anywhere in Procurement, except, until Phase 2, a Stores order waiting in its approver's Waiting for my approval.
   Files: `pages/PurchaseOrders.tsx`
 
 Tests: `lib/orderKind.test.ts` (each kind's address), `PoApproval.test.tsx` (a Stores order opened under Procurement moves to Order stock, and the other way round), `PoDetails.test.tsx` (Procurement lists project orders only), `StoresOrders.test.tsx` and `PoReceiveDelivery.test.tsx` (Order stock's links).
