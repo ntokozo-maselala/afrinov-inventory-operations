@@ -16,7 +16,7 @@ const { PurchaseOrderDetail } = await import('./PurchaseOrderDetail');
 const { ToastProvider } = await import('../components/Toast');
 
 const ORDER = {
-  id: 'po-1', number: 'AFRI-0412', status: 'PARTIALLY_RECEIVED', supplierId: 's-1', supplier: { name: 'Hydac' }, createdAt: '2026-10-01T08:00:00Z',
+  id: 'po-1', number: 'AFRI-0412', status: 'PARTIALLY_RECEIVED', supplierId: 's-1', supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-01T08:00:00Z',
   currency: 'ZAR', vatRate: '15', totals: { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0 },
   lines: [{ id: 'pol-1', materialId: 'm-1', orderedQty: '10', receivedQty: '6', unitPrice: '1', material: { sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each' } }],
 };

@@ -3,7 +3,8 @@
 // asks whether a delivery is against one of the supplier's open orders.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Fragment } from 'react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const { mockGet, mockPost, auth } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), auth: { roles: ['STORE_CONTROLLER'] as string[] } }));
 vi.mock('../api/client', () => ({
@@ -43,9 +44,18 @@ beforeEach(() => {
   mockPost.mockReset().mockImplementation(async (path: string) => (path === '/goods-receipts' ? { id: 'gr-9', number: 'GR-2026-0009' } : { number: 'GR-2026-0010' }));
 });
 
-const orderPage = (url = '/purchase-orders/po-1') => render(
+// A Stores order (no project), received by the store from Order stock. Its
+// old Procurement address is routed too, to check the move to Order stock;
+// each address gets its own page (a key), so nothing is carried over but the link.
+function Where() { return <p data-testid="at">{useLocation().pathname}</p>; }
+const orderPage = (url = '/stock/orders/po-1') => render(
   <MemoryRouter initialEntries={[url]}>
-    <ToastProvider><Routes><Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} /></Routes></ToastProvider>
+    <ToastProvider>
+      <Routes>
+        <Route path="/stock/orders/:id" element={<Fragment key="stores"><PurchaseOrderDetail /><Where /></Fragment>} />
+        <Route path="/purchase-orders/:id" element={<Fragment key="projects"><PurchaseOrderDetail /><Where /></Fragment>} />
+      </Routes>
+    </ToastProvider>
   </MemoryRouter>,
 );
 
@@ -87,13 +97,21 @@ describe('Receive delivery on the order page', () => {
   });
 
   it('opens straight away from a Receive stock link', async () => {
+    orderPage('/stock/orders/po-1?receive=1');
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Receive delivery');
+  });
+
+  // Qodo, PR #119: an old link to the order under Procurement moves it to
+  // Order stock, still opening Receive delivery.
+  it('opens Receive delivery from an old link, once moved to Order stock', async () => {
     orderPage('/purchase-orders/po-1?receive=1');
     expect(await screen.findByRole('dialog')).toHaveTextContent('Receive delivery');
+    expect(screen.getByTestId('at')).toHaveTextContent('/stock/orders/po-1');
   });
 
   it('is not offered to the buyer', async () => {
     auth.roles = ['PROCUREMENT'];
-    orderPage('/purchase-orders/po-1?receive=1');
+    orderPage('/stock/orders/po-1?receive=1');
     await screen.findByText('Cutting disc');
     expect(screen.queryByRole('button', { name: 'Receive delivery' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -108,7 +126,7 @@ describe('Receive stock with open orders', () => {
     await screen.findByRole('option', { name: 'Hydac' });
     fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-1' } });
     expect(await screen.findByText('Is this delivery against a purchase order?')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Receive against AFRI-0412' })).toHaveAttribute('href', '/purchase-orders/po-1?receive=1');
+    expect(screen.getByRole('link', { name: 'Receive against AFRI-0412' })).toHaveAttribute('href', '/stock/orders/po-1?receive=1');
     expect(screen.queryByRole('link', { name: /AFRI-0400/ })).not.toBeInTheDocument();
     expect(screen.getByText(/2 lines outstanding/)).toBeInTheDocument();
   });

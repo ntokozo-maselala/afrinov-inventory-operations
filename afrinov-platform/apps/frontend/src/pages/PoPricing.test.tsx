@@ -34,7 +34,7 @@ const UNPRICED = { ...PRICED, id: 'po-2', number: 'PO-2026-0002', lines: [PRICED
 
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders') return [PRICED, UNPRICED];
+    if (path === '/purchase-orders?kind=projects') return [PRICED, UNPRICED];
     if (path === '/purchase-orders/po-1') return PRICED;
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];

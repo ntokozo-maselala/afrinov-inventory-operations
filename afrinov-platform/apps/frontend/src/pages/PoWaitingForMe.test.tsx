@@ -15,7 +15,7 @@ vi.mock('../auth', () => ({ useAuth: () => ({ user: { name: 'Ona', roles: auth.r
 const { PurchaseOrders } = await import('./PurchaseOrders');
 
 const order = (id: string, number: string, status: string) => ({
-  id, number, status, supplier: { name: 'Hydac' }, createdAt: '2026-10-01T08:00:00Z', lines: [],
+  id, number, status, supplier: { name: 'Hydac' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-01T08:00:00Z', lines: [],
 });
 const MINE = [order('po-1', 'AFRI-0101', 'PENDING_APPROVAL')];
 const ALL = [...MINE, order('po-2', 'AFRI-0102', 'PENDING_APPROVAL'), order('po-3', 'AFRI-0103', 'APPROVED')];
@@ -36,6 +36,15 @@ describe('Waiting for my approval', () => {
     expect(screen.queryByText('AFRI-0102')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Filter by status')).toHaveValue('mine');
     expect(mockGet).toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
+  });
+
+  // Qodo, PR #119: until the storeman approves Stores orders, an approver's
+  // queue keeps them, so it matches the Dashboard's count; each opens in Order stock.
+  it("keeps a Stores order waiting for the approver, opening it in Order stock", async () => {
+    const stores = { ...order('po-9', 'AFRI-0109', 'PENDING_APPROVAL'), projectNumber: null };
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true' ? [...MINE, stores] : ALL));
+    list();
+    expect(await screen.findByRole('link', { name: 'AFRI-0109' })).toHaveAttribute('href', '/stock/orders/po-9');
   });
 
   it('can be left for all statuses, and back', async () => {

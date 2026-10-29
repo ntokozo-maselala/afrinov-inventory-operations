@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -23,7 +23,7 @@ import {
   EveryLineInto, OrderReceiptRow, checkReceiptLines, receiptLinesBody, receiptLinesFromOrder, type ReceiptLineDraft,
 } from '../components/OrderReceiptLines';
 import { StaleDataNotice } from '../components/StaleDataNotice';
-import { ORDER_PERMISSION, ORDER_SECTION, orderKindOf } from '../lib/orderKind';
+import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
 
 type POStatus =
   | 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
@@ -142,7 +142,11 @@ export function PurchaseOrderDetail() {
   // it), and posts a goods receipt, so needs the server's permission for that too.
   const canReceive = hasPermission('orders:receive') && hasPermission('inventory:receive');
   const [receiving, setReceiving] = useState(false);
-  const editOrder = () => navigate(`/purchase-orders/${id}/edit`);
+  const editOrder = () => navigate(`${po.data ? orderPath(po.data) : `/purchase-orders/${id}`}/edit`);
+  // An order opened at the other side's address moves to its own, so a
+  // Stores order never shows inside Procurement, nor a project order in Order stock.
+  const location = useLocation();
+  const misplaced = !!po.data && kindOfPath(location.pathname) !== orderKindOf(po.data);
 
   function reload() { po.reload(); history.reload(); approval.reload(); }
 
@@ -208,6 +212,11 @@ export function PurchaseOrderDetail() {
   useEffect(() => {
     if (params.has('receive')) setParams((p) => { p.delete('receive'); return p; }, { replace: true });
   }, [params, setParams]);
+  // An order at the other section's address moves to its own, taking a Receive
+  // delivery asked for (?receive=1, already tidied from this address) along.
+  // The request is kept, not used here, so it is still there as the move happens.
+  if (misplaced && fresh) return <Navigate to={`${orderPath(fresh)}${receiveRequested ? '?receive=1' : ''}`} replace />;
+
   if (receiveRequested && fresh) {
     setReceiveRequested(false);
     if (canReceive && isReceivable(fresh.status)) setReceiving(true);
@@ -317,7 +326,7 @@ export function PurchaseOrderDetail() {
       )}
 
       {!fresh && !po.loading && !po.error && (
-        <EmptyState title="Purchase order not found" description="It may have been deleted or the link is incorrect." action={<Link to="/purchase-orders" className="btn-primary btn-sm">Back to purchase orders</Link>} />
+        <EmptyState title="Purchase order not found" description="It may have been deleted or the link is incorrect." action={<Link to={ORDER_SECTION[kindOfPath(location.pathname)].to} className="btn-primary btn-sm">Back to {ORDER_SECTION[kindOfPath(location.pathname)].label}</Link>} />
       )}
 
       {po.loading && !fresh && <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>}

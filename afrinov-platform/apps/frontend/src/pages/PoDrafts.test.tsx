@@ -37,7 +37,7 @@ const ORDERS = [DRAFT, PENDING, APPROVED, RECEIVED];
 beforeEach(() => {
   auth.roles = ['PROCUREMENT'];
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders') return ORDERS;
+    if (path === '/purchase-orders?kind=projects') return ORDERS;
     const found = ORDERS.find((o) => path === `/purchase-orders/${o.id}`);
     if (found) return found;
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };

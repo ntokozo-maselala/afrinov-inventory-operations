@@ -4,7 +4,7 @@
 // permission table decides.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const { mockGet, mockPost, mockPatch, signedIn } = vi.hoisted(() => ({
   mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), signedIn: { roles: [] as string[] },
@@ -45,11 +45,17 @@ beforeEach(() => {
   mockPatch.mockReset().mockResolvedValue({});
 });
 
-const page = (roles: string[]) => {
+function Where() { return <p data-testid="at">{useLocation().pathname}</p>; }
+const page = (roles: string[], url = '/purchase-orders/po-1') => {
   signedIn.roles = roles;
   render(
-    <MemoryRouter initialEntries={['/purchase-orders/po-1']}>
-      <ToastProvider><Routes><Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} /></Routes></ToastProvider>
+    <MemoryRouter initialEntries={[url]}>
+      <ToastProvider>
+        <Routes>
+          <Route path="/purchase-orders/:id" element={<><PurchaseOrderDetail /><Where /></>} />
+          <Route path="/stock/orders/:id" element={<><PurchaseOrderDetail /><Where /></>} />
+        </Routes>
+      </ToastProvider>
     </MemoryRouter>,
   );
 };
@@ -144,7 +150,7 @@ describe('only the actions each role may take', () => {
   // Stores ordering roadmap: an order without a project is the store's.
   it('a store controller edits and cancels a Stores order, listed under Order stock', async () => {
     current.po = { ...order('APPROVED'), projectNumber: null } as unknown as typeof current.po;
-    page(['STORE_CONTROLLER']);
+    page(['STORE_CONTROLLER'], '/stock/orders/po-1');
     await screen.findByText('Hydraulic pump');
     expect(button('Edit')).toBeInTheDocument();
     expect(button('Cancel PO')).toBeInTheDocument();
@@ -153,8 +159,24 @@ describe('only the actions each role may take', () => {
 
   it('procurement opens a Stores order, and changes nothing on it', async () => {
     current.po = { ...order('DRAFT'), projectNumber: null } as unknown as typeof current.po;
-    page(['PROCUREMENT']);
+    page(['PROCUREMENT'], '/stock/orders/po-1');
     await screen.findByText('Hydraulic pump');
     for (const name of ['Edit', 'Cancel PO', 'Submit for approval']) expect(button(name)).not.toBeInTheDocument();
+  });
+
+  // Stores and Procurement Separation Roadmap: each order at its own section's address.
+  it('moves a Stores order opened under Procurement to Order stock', async () => {
+    current.po = { ...order('APPROVED'), projectNumber: null } as unknown as typeof current.po;
+    page(['STORE_CONTROLLER']);
+    await screen.findByText('Hydraulic pump');
+    await waitFor(() => expect(screen.getByTestId('at')).toHaveTextContent('/stock/orders/po-1'));
+  });
+
+  it('moves a project order opened under Order stock to Procurement', async () => {
+    current.po = order('APPROVED');
+    page(['PROCUREMENT'], '/stock/orders/po-1');
+    await screen.findByText('Hydraulic pump');
+    await waitFor(() => expect(screen.getByTestId('at')).toHaveTextContent('/purchase-orders/po-1'));
+    expect(screen.getByRole('link', { name: 'Purchase orders' })).toHaveAttribute('href', '/purchase-orders');
   });
 });

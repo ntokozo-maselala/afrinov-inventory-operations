@@ -19,6 +19,7 @@ import { NoAccess } from '../components/NoAccess';
 import { Icon } from '../components/Icon';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { usePermissions } from '../hooks/usePermissions';
+import { orderPath } from '../lib/orderKind';
 import { orderColumns, STATUS_OPTIONS, type PO } from './PurchaseOrders';
 
 /** Approved and not yet fully received: what the store is still waiting for. */
@@ -53,7 +54,7 @@ function StoresOrderList({ canOrder, canReceive }: { canOrder: boolean; canRecei
     ...(canReceive ? [{
       key: 'receive', header: <span className="sr-only">Receive</span>, width: '7rem', align: 'right' as const,
       render: (p: PO) => (RECEIVABLE.includes(p.status)
-        ? <Link to={`/purchase-orders/${p.id}?receive=1`} className="btn-secondary btn-sm" aria-label={`Receive ${p.number}`}>Receive</Link>
+        ? <Link to={`${orderPath(p)}?receive=1`} className="btn-secondary btn-sm" aria-label={`Receive ${p.number}`}>Receive</Link>
         : null),
     }] : []),
   ];

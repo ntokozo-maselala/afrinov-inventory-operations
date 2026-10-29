@@ -48,7 +48,7 @@ beforeEach(() => {
     if (path === '/rfqs/r-1') return current;
     if (path === '/purchase-orders/po-9') {
       return {
-        id: 'po-9', number: 'AFRI-0042', status: 'DRAFT', supplierId: 's-1', supplier: { name: 'EMV Africa' }, createdAt: '2026-10-29T09:00:00Z',
+        id: 'po-9', number: 'AFRI-0042', status: 'DRAFT', supplierId: 's-1', supplier: { name: 'EMV Africa' }, projectNumber: 'AFRI-1325', createdAt: '2026-10-29T09:00:00Z',
         currency: 'ZAR', vatRate: '15', totals: { subtotal: '600.00', vat: '90.00', net: '690.00', unpricedLines: 0 }, lines: [], rfq: { id: 'r-1', number: 'AFRI-02A-1325-02-02' },
       };
     }

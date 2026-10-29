@@ -37,7 +37,7 @@ const page = () => render(<MemoryRouter><StoresOrders /></MemoryRouter>);
 describe('Order stock', () => {
   it("lists the store's orders, asking the server for Stores orders only", async () => {
     page();
-    expect(await screen.findByRole('link', { name: 'AFRI-0201' })).toHaveAttribute('href', '/purchase-orders/po-1');
+    expect(await screen.findByRole('link', { name: 'AFRI-0201' })).toHaveAttribute('href', '/stock/orders/po-1');
     expect(screen.getByRole('link', { name: 'AFRI-0202' })).toBeInTheDocument();
     expect(mockGet.mock.calls.map((c) => c[0])).toContain('/purchase-orders?kind=stores');
   });
@@ -63,8 +63,8 @@ describe('Order stock', () => {
     expect(screen.getByRole('link', { name: 'AFRI-0203' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'AFRI-0201' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'AFRI-0204' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Receive AFRI-0202' })).toHaveAttribute('href', '/purchase-orders/po-2?receive=1');
-    expect(screen.getByRole('link', { name: 'Receive AFRI-0203' })).toHaveAttribute('href', '/purchase-orders/po-3?receive=1');
+    expect(screen.getByRole('link', { name: 'Receive AFRI-0202' })).toHaveAttribute('href', '/stock/orders/po-2?receive=1');
+    expect(screen.getByRole('link', { name: 'Receive AFRI-0203' })).toHaveAttribute('href', '/stock/orders/po-3?receive=1');
 
     fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: '' } });
     expect(screen.queryByRole('link', { name: 'Receive AFRI-0201' })).not.toBeInTheDocument();
