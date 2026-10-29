@@ -28,7 +28,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 | Menu | **Procurement:** Purchase orders, New purchase order, RFQ | **Stores:** **Order stock**, beside Stock, Issue, Receive, Return, Count and Tools |
 | Buys | Project items (Project Material), for one project | Stores items, for the shelf |
 | Project on the order | Required | None |
-| **+ New item** on a line | Adds a Projects item for the order's project | Adds a Stores item |
+| **+ New item** on a line | Adds a Projects item for the order's project | None: the store re-orders Stores items already in the catalogue (decided 29 Oct 2026); a new one is added on Materials |
 | RFQs | Yes, for a project only | No |
 | Approval | By value, as now | By value, as now |
 | Receiving | As now | As now |
@@ -75,7 +75,7 @@ Size M. Frontend. Needs Phase 1.
 
 - [x] **2.1 The page.** Store → **Order stock** (`/stock/orders`): the store's orders from `?kind=stores`, newest first, with search and a status filter, and **New order** for the storeman. Anyone who may see orders can open it; the menu entry shows to those who order Stores stock, when procurement is on.
   Files: `pages/StoresOrders.tsx`, `hooks/useNavGroups.tsx`, `hooks/usePermissions.ts` (`stores:order`), `App.tsx`
-- [x] **2.2 The order form.** `/stock/orders/new`: the purchase order form in its Stores form: supplier, delivery, lines of Stores items, **+ New item** adding Stores items, no Project field. Save draft or submit for approval. Its edit page follows the order's kind.
+- [x] **2.2 The order form.** `/stock/orders/new`: the purchase order form in its Stores form: supplier, delivery, lines of Stores items from the catalogue (no **+ New item**: the store re-orders what it stocks, decided 29 Oct 2026), no Project field. Save draft or submit for approval. Its edit page follows the order's kind.
   Files: `pages/PurchaseOrderForm.tsx`, `components/PurchaseOrderDetailsFields.tsx`, `lib/orderKind.ts`
 - [x] **2.3 Where re-ordering starts.** Stock status's re-order list (**Order these**, **New stock order**) and a Stores item's **Order** button open the Stores order form, filled in as before, for the storeman. A Projects item's **Order** stays with Procurement; a supplier's **New order** stays Procurement's until Phase 3.
   Files: `pages/StockStatus.tsx`, `pages/MaterialDetail.tsx`
