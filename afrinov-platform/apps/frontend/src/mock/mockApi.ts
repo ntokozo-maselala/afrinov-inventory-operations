@@ -24,6 +24,7 @@ import { buildReport } from './mockReport';
 import type { ReportQuery as MockReportQuery } from '../api/reportTypes';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
 import { priceLines } from '../lib/poMoney';
+import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import type {
@@ -384,6 +385,38 @@ const rfqLinesForLog = (lines: Array<{ materialId: string; quantity: string | nu
 
 const RFQ_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Frontend-only mode's quotation PDFs, as PUT and GET .../quote-file handle
+ * them on the server: a PDF only, up to 10 MB, while the RFQ is sent.
+ */
+export async function mockPutQuoteFile(rfqId: string, supplierId: string, fileName: string, data: Uint8Array): Promise<unknown> {
+  await new Promise((res) => setTimeout(res, 60));
+  const rfq = state.rfqs.find((r) => r.id === rfqId);
+  const asked = rfq?.suppliers.find((s) => s.supplierId === supplierId);
+  if (!rfq || !asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
+  if (rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so its quotes can no longer change`);
+  if (data.length === 0) throw err('VALIDATION_ERROR', 'The file is empty');
+  if (String.fromCharCode(...data.subarray(0, 5)) !== '%PDF-') throw err('VALIDATION_ERROR', 'Attach the quotation as a PDF');
+  if (data.length > 10 * 1024 * 1024) throw err('PAYLOAD_TOO_LARGE', 'The quotation is larger than 10 MB');
+  const now = new Date().toISOString();
+  // As the server: always a .pdf, so it opens as the PDF it was checked to be.
+  const base = fileName.split(/[\\/]/).pop()?.trim() ?? '';
+  const name = !base ? 'quotation.pdf' : /\.pdf$/i.test(base) ? base : `${base.replace(/\.[^.]*$/, '')}.pdf`;
+  const updated: MockRfq = {
+    ...rfq, updatedAt: now,
+    suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? { ...s, quoteFile: { fileName: name, size: data.length, uploadedAt: now, data } } : s)),
+    history: [...rfq.history, { id: nextId('audit'), action: 'RFQ_QUOTE_FILE', actorId: 'u-admin', before: null, after: { supplierId, fileName: name, size: data.length }, createdAt: now }],
+  };
+  state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? updated : r));
+  return rfqView(updated);
+}
+
+export function mockGetQuoteFile(rfqId: string, supplierId: string): { fileName: string; data: Uint8Array } {
+  const file = state.rfqs.find((r) => r.id === rfqId)?.suppliers.find((s) => s.supplierId === supplierId)?.quoteFile;
+  if (!file) throw err('NOT_FOUND', 'Quotation file not found');
+  return { fileName: file.fileName, data: file.data };
+}
+
 /** As the server: a YYYY-MM-DD day that exists (not 2026-02-30). */
 function isRealDay(day: string): boolean {
   if (!RFQ_DAY.test(day)) return false;
@@ -423,13 +456,22 @@ function rfqView(r: MockRfq) {
     createdBy: { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] },
     // As the server: who sent it, once sent (the mock's user does everything).
     sentBy: r.sentAt ? { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] } : null,
-    purchaseOrder: order ? { id: order.id, number: order.number, status: order.status } : null,
+    purchaseOrder: order ? { id: order.id, number: order.number, status: order.status, supplierId: order.supplierId } : null,
+    awardedBy: r.awardedAt ? { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] } : null,
     lines: r.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
     suppliers: r.suppliers.map((s) => {
       const supplier = findSupplier(s.supplierId);
-      const vatRate = (supplier?.currency ?? 'ZAR') === 'ZAR' ? vatSetting : 0;
+      // As the server: VAT at the currency the quote was given in, not the supplier's now.
+      const vatRate = (s.currency ?? supplier?.currency ?? 'ZAR') === 'ZAR' ? vatSetting : 0;
       const priced = r.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
-      return { ...s, supplier, vatRate, totals: s.quotedAt ? priceLines(priced, vatRate).totals : null };
+      // As the server: the file's name and size, never its contents.
+      const quoteFile = s.quoteFile ? { fileName: s.quoteFile.fileName, size: s.quoteFile.size, uploadedAt: s.quoteFile.uploadedAt } : null;
+      const money = priceLines(priced.map((pr, i) => ({ ...pr, rfqLineId: r.lines[i]!.id })), vatRate);
+      return {
+        ...s, supplier, vatRate, quoteFile,
+        totals: s.quotedAt ? money.totals : null,
+        lineSubtotals: s.quotedAt ? money.lines.filter((l) => l.subtotal !== null).map((l) => ({ rfqLineId: l.rfqLineId, subtotal: l.subtotal! })) : [],
+      };
     }),
   };
 }
@@ -492,6 +534,106 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     });
     state.rfqs.push(created);
     return rfqView(created);
+  }
+  // Quotes (Phase 4), as the server: only while the RFQ is sent, for a supplier it asked.
+  const quoteMatch = /^\/rfqs\/[^/]+\/suppliers\/([^/]+)\/(quote|decline|quote-file)$/.exec(p);
+  if (rfq && quoteMatch) {
+    const supplierId = decodeURIComponent(quoteMatch[1]!);
+    const what = quoteMatch[2]!;
+    const asked = rfq.suppliers.find((s) => s.supplierId === supplierId);
+    if (!asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
+    if (rfq.status !== 'SENT') {
+      throw err('INVALID_STATE', rfq.status === 'DRAFT'
+        ? `${rfq.number} hasn't been sent yet, so there are no quotes to record`
+        : `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so its quotes can no longer change`);
+    }
+    const now = new Date().toISOString();
+    const save = (next: MockRfq['suppliers'][number], action: string, after: Record<string, unknown>) => {
+      const updated: MockRfq = {
+        ...rfq, updatedAt: now,
+        suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? next : s)),
+        history: [...rfq.history, { id: nextId('audit'), action, actorId: 'u-admin', before: null, after: { supplierId, ...after }, createdAt: now }],
+      };
+      state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? updated : r));
+      return rfqView(updated);
+    };
+    if (method === 'PUT' && what === 'quote') {
+      const b = (body ?? {}) as { quotedAt?: string; quoteReference?: string | null; validUntil?: string | null; leadTime?: string | null; notes?: string | null; prices?: Array<{ rfqLineId: string; unitPrice: number }> };
+      // As the server's recordQuoteSchema: field types and lengths, and at most 200 prices.
+      const text = (v: unknown, max: number) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
+      if (!text(b.quoteReference, 100) || !text(b.leadTime, 100) || !text(b.notes, 2000)) throw err('VALIDATION_ERROR', 'Invalid quote');
+      const today = mockToday();
+      const quotedAt = b.quotedAt ?? today;
+      if (!isRealDay(quotedAt) || (b.validUntil && !isRealDay(b.validUntil))) throw err('VALIDATION_ERROR', 'Invalid quote');
+      if (quotedAt > today) throw err('VALIDATION_ERROR', `${quotedAt} is still to come: record the day the quote came in`);
+      if (b.validUntil && b.validUntil < quotedAt) throw err('VALIDATION_ERROR', `A quote received on ${quotedAt} can't be valid only until ${b.validUntil}: check the date`);
+      if (!Array.isArray(b.prices) || b.prices.length === 0) throw err('VALIDATION_ERROR', 'Price at least one line, or mark the supplier as declined');
+      if (b.prices.length > 200) throw err('VALIDATION_ERROR', 'Invalid quote');
+      for (const pr of b.prices) {
+        if (!rfq.lines.some((l) => l.id === pr.rfqLineId)) throw err('VALIDATION_ERROR', `Line ${pr.rfqLineId} is not on ${rfq.number}`);
+        const n = pr.unitPrice;
+        if (typeof n !== 'number' || !(n >= 0 && n <= 1e12) || !fourDecimals(n)) throw err('VALIDATION_ERROR', 'Invalid quote');
+      }
+      const prices = [...new Map(b.prices.map((pr) => [pr.rfqLineId, String(pr.unitPrice)])).entries()].map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice }));
+      return save({
+        ...asked, declined: false, currency: findSupplier(asked.supplierId)?.currency ?? 'ZAR', quotedAt: `${quotedAt}T00:00:00.000Z`, quoteReference: rfqText(b.quoteReference),
+        validUntil: b.validUntil ? `${b.validUntil}T00:00:00.000Z` : null, leadTime: rfqText(b.leadTime), notes: rfqText(b.notes), prices,
+      }, asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE', { quoteReference: rfqText(b.quoteReference), quotedAt, prices });
+    }
+    if (method === 'POST' && what === 'decline') {
+      const raw = (body as { notes?: unknown } | undefined)?.notes;
+      if (raw !== undefined && raw !== null && (typeof raw !== 'string' || raw.length > 2000)) throw err('VALIDATION_ERROR', 'Invalid decline');
+      const notes = rfqText(raw as string | null | undefined);
+      return save({ ...asked, declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, currency: null, notes, prices: [] }, 'RFQ_DECLINED', { notes });
+    }
+    if (method === 'DELETE' && what === 'quote-file') {
+      if (!asked.quoteFile) throw err('NOT_FOUND', 'Quotation file not found');
+      return save({ ...asked, quoteFile: null }, 'RFQ_QUOTE_FILE_REMOVED', {});
+    }
+  }
+  if (method === 'POST' && rfq && p === `/rfqs/${rfq.id}/award`) {
+    // As the server (Phase 5): a draft order at the supplier's quoted prices, and a reason when it isn't the clear choice.
+    const b = (body ?? {}) as { supplierId?: string; reason?: string | null };
+    if (typeof b.supplierId !== 'string' || !b.supplierId.trim()) throw err('VALIDATION_ERROR', 'Invalid award');
+    if (b.reason !== undefined && b.reason !== null && (typeof b.reason !== 'string' || b.reason.length > 500)) throw err('VALIDATION_ERROR', 'Invalid award');
+    if (rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`);
+    const asked = rfq.suppliers.find((s) => s.supplierId === b.supplierId);
+    if (!asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
+    const name = findSupplier(asked.supplierId)?.name ?? asked.supplierId;
+    if (!asked.quotedAt || asked.declined) throw err('VALIDATION_ERROR', `${name} hasn't quoted, so the RFQ can't be awarded to them`);
+    // As the server: the quote must have been given in the currency the supplier trades in now.
+    const tradesIn = findSupplier(asked.supplierId)?.currency ?? 'ZAR';
+    if (asked.currency && asked.currency !== tradesIn) {
+      throw err('VALIDATION_ERROR', `${name} quoted in ${asked.currency} but now trades in ${tradesIn}. Record their quote again in ${tradesIn} before awarding.`);
+    }
+    const view = rfqView(rfq) as unknown as Parameters<typeof awardConcerns>[0];
+    const concerns = awardConcerns(view, asked.supplierId, mockToday());
+    const reason = rfqText(b.reason);
+    if (concerns.length > 0 && !reason) throw err('VALIDATION_ERROR', `Say why you are awarding to ${name}: ${concerns.join('; ')}.`, { concerns });
+    const po = route('POST', '/purchase-orders', {
+      supplierId: asked.supplierId,
+      projectNumber: rfq.projectNumber,
+      penaltiesApply: rfq.penaltiesApply,
+      notes: [`As per your quotation${asked.quoteReference ? ` ${asked.quoteReference}` : ''} for ${rfq.number}.`, rfq.notes].filter(Boolean).join('\n'),
+      lines: rfq.lines.map((l) => {
+        const price = asked.prices.find((pr) => pr.rfqLineId === l.id)?.unitPrice;
+        return { materialId: l.materialId, orderedQty: Number(l.quantity), ...(price !== undefined ? { unitPrice: Number(price) } : {}) };
+      }),
+    }) as { id: string; number: string };
+    // As the server: the order's first Activity entry names the RFQ.
+    const created = state.purchaseOrders.find((x) => x.id === po.id);
+    const first = created?.history?.[0];
+    if (first) first.after = { ...(first.after ?? {}), rfqId: rfq.id, rfqNumber: rfq.number };
+    const now = new Date().toISOString();
+    const awarded: MockRfq = {
+      ...rfq, status: 'AWARDED', purchaseOrderId: po.id, awardedAt: now, updatedAt: now,
+      history: [...rfq.history, {
+        id: nextId('audit'), action: 'RFQ_AWARD', actorId: 'u-admin', before: { status: 'SENT' },
+        after: { status: 'AWARDED', supplierId: asked.supplierId, purchaseOrderId: po.id, purchaseOrderNumber: po.number, reason, concerns }, createdAt: now,
+      }],
+    };
+    state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? awarded : r));
+    return rfqView(awarded);
   }
   if (method === 'POST' && rfq && p === `/rfqs/${rfq.id}/send`) {
     if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be sent`);
@@ -625,6 +767,7 @@ export interface MockApi {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;
   patch: <T>(path: string, body?: unknown) => Promise<T>;
+  put: <T>(path: string, body?: unknown) => Promise<T>;
   del: <T>(path: string) => Promise<T>;
 }
 
@@ -645,6 +788,7 @@ export function createMockApi(): MockApi {
     get: <T>(path: string) => handle<T>(() => route('GET', path) as T),
     post: <T>(path: string, body?: unknown) => handle<T>(() => route('POST', path, body) as T),
     patch: <T>(path: string, body?: unknown) => handle<T>(() => route('PATCH', path, body) as T),
+    put: <T>(path: string, body?: unknown) => handle<T>(() => route('PUT', path, body) as T),
     del: <T>(path: string) => handle<T>(() => route('DELETE', path) as T),
   };
 }
@@ -986,8 +1130,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
+    // As the server: the request for quotation it was awarded from, if any.
+    const fromRfq = state.rfqs.find((r) => r.purchaseOrderId === po.id);
     return withPoTotals({
       ...po,
+      rfq: fromRfq ? { id: fromRfq.id, number: fromRfq.number } : null,
       project: projectRef(po.projectNumber),
       supplier: findSupplier(po.supplierId),
       lines: po.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),

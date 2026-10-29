@@ -51,6 +51,7 @@ model User {
   sentRfqs             Rfq[]             @relation("RFQ_SentBy")
   awardedRfqs          Rfq[]             @relation("RFQ_AwardedBy")
   cancelledRfqs        Rfq[]             @relation("RFQ_CancelledBy")
+  rfqQuoteFiles        RfqQuoteFile[]    @relation("RFQ_QuoteFileUploadedBy")
 
   @@map("users")
 }
@@ -472,16 +473,37 @@ model RfqSupplier {
   validUntil     DateTime? @map("valid_until") @db.Date
   leadTime       String?   @map("lead_time")
   notes          String?
+  // The currency the quote was given in: the supplier's when it was recorded,
+  // so an award never prices an order in a currency it wasn't quoted in.
+  currency       String?
   declined       Boolean   @default(false)
   createdAt      DateTime  @default(now()) @map("created_at")
 
-  rfq      Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  supplier Supplier        @relation(fields: [supplierId], references: [id])
-  prices   RfqQuotePrice[]
+  rfq       Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier  Supplier        @relation(fields: [supplierId], references: [id])
+  prices    RfqQuotePrice[]
+  quoteFile RfqQuoteFile?
 
   @@unique([rfqId, supplierId])
   @@index([supplierId])
   @@map("rfq_suppliers")
+}
+
+// The supplier's own quotation, as they sent it back (a PDF, as the RFQ sheet
+// asks). One per supplier asked; a new one replaces it. Kept in the database so
+// it is backed up with the quote it supports.
+model RfqQuoteFile {
+  rfqSupplierId String   @id @map("rfq_supplier_id")
+  fileName      String   @map("file_name")
+  size          Int
+  data          Bytes
+  uploadedAt    DateTime @default(now()) @map("uploaded_at")
+  uploadedById  String   @map("uploaded_by_id")
+
+  rfqSupplier RfqSupplier @relation(fields: [rfqSupplierId], references: [id], onDelete: Cascade)
+  uploadedBy  User        @relation("RFQ_QuoteFileUploadedBy", fields: [uploadedById], references: [id])
+
+  @@map("rfq_quote_files")
 }
 
 // One supplier's unit price for one line, excluding VAT, in the supplier's currency.

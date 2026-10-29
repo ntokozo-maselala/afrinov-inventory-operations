@@ -23,9 +23,13 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { downloadQuoteFile } from '../api/rfqQuoteFile';
+import { RfqQuoteDialog } from '../components/RfqQuoteDialog';
+import { RfqAwardDialog, RfqComparison } from '../components/RfqComparison';
+import { formatMoney } from '../lib/poMoney';
 
 interface HistoryEntry {
   id: string;
@@ -49,6 +53,18 @@ export function RfqDetail() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const reload = () => { rfq.reload(); history.reload(); };
   const r = rfq.data;
+
+  // Recording a supplier's answer, and opening their own quotation.
+  const [recording, setRecording] = useState<string | null>(null);
+  const [awarding, setAwarding] = useState<string | null>(null);
+  async function quoteFileFor(s: RfqSupplier) {
+    if (!r || !s.quoteFile) return;
+    try {
+      await downloadQuoteFile(r.id, s.supplierId, s.quoteFile.fileName);
+    } catch (err) {
+      toast.error('Could not open the quotation', (err as Error).message ?? String(err));
+    }
+  }
 
   // Each supplier's own copy, laid out like the RFQ sheet, to email to them.
   const [printing, setPrinting] = useState<string | null>(null);
@@ -117,6 +133,24 @@ export function RfqDetail() {
           {r.status === 'CANCELLED' && (
             <Alert tone="danger" title="Cancelled">{r.cancellationReason ?? 'No reason given.'}</Alert>
           )}
+          {r.status === 'AWARDED' && r.purchaseOrder && (
+            <Alert tone="success" title={`Awarded to ${awardedTo(r) ?? 'a supplier'}`}>
+              Raised as order <Link to={`/purchase-orders/${r.purchaseOrder.id}`} className="btn-link text-mono">{r.purchaseOrder.number}</Link>
+              {r.awardedAt ? ` on ${formatDateTime(r.awardedAt)}` : ''}{r.awardedBy ? ` by ${r.awardedBy.name}` : ''}. It goes for approval as any order does.
+            </Alert>
+          )}
+
+          {r.suppliers.some((s) => s.quotedAt && !s.declined) && (
+            <section>
+              <SectionHeader
+                title="Compare quotes"
+                description={r.status === 'SENT'
+                  ? 'Each supplier’s prices side by side, the lowest on each line marked. Award one to raise its purchase order.'
+                  : 'Each supplier’s prices side by side, as they stood when it was awarded.'}
+              />
+              <RfqComparison rfq={r} onAward={canManage && r.status === 'SENT' ? (s) => setAwarding(s.supplierId) : undefined} />
+            </section>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <aside className="lg:col-span-1 surface-card p-4 space-y-3">
@@ -149,7 +183,12 @@ export function RfqDetail() {
                 />
                 {r.suppliers.length === 0
                   ? <EmptyState title="No suppliers yet" description={canManage && r.status === 'DRAFT' ? 'Edit the RFQ to add the suppliers to ask.' : 'Nobody has been asked.'} />
-                  : <DataTable ariaLabel="Suppliers asked" rows={r.suppliers} rowKey={(s) => s.supplierId} columns={supplierColumns(r, downloadFor, printing)} />}
+                  : <DataTable ariaLabel="Suppliers asked" rows={r.suppliers} rowKey={(s) => s.supplierId} columns={supplierColumns(r, {
+                      onDownload: downloadFor,
+                      printing,
+                      onRecord: canManage && r.status === 'SENT' ? (s) => setRecording(s.supplierId) : undefined,
+                      onQuoteFile: (s) => void quoteFileFor(s),
+                    })} />}
               </section>
               <section>
                 <SectionHeader title="Activity" description="What has happened to this request for quotation." />
@@ -162,6 +201,32 @@ export function RfqDetail() {
 
       {r && dialog === 'send' && <SendDialog rfq={r} onClose={() => setDialog(null)} onSend={(closingDate) => act('{n} sent', () => api.post<Rfq>(`/rfqs/${r.id}/send`, { closingDate }))} />}
       {r && dialog === 'cancel' && <CancelDialog rfq={r} onClose={() => setDialog(null)} onCancel={(reason) => act('{n} cancelled', () => api.post<Rfq>(`/rfqs/${r.id}/cancel`, { reason }))} />}
+      {r && awarding && (() => {
+        const chosen = r.suppliers.find((s) => s.supplierId === awarding);
+        return chosen && (
+          <RfqAwardDialog
+            rfq={r} chosen={chosen}
+            onClose={() => setAwarding(null)}
+            onAwarded={(saved) => {
+              setAwarding(null);
+              toast.success(`${saved.number} awarded`, saved.purchaseOrder ? `Draft order ${saved.purchaseOrder.number} raised.` : undefined);
+              if (saved.purchaseOrder) navigate(`/purchase-orders/${saved.purchaseOrder.id}`);
+              else reload();
+            }}
+          />
+        );
+      })()}
+      {r && recording && (() => {
+        const asked = r.suppliers.find((s) => s.supplierId === recording);
+        return asked && (
+          <RfqQuoteDialog
+            rfq={r} asked={asked}
+            onClose={() => setRecording(null)}
+            onSaved={(_saved, message) => { setRecording(null); toast.success(message); reload(); }}
+            onChanged={reload}
+          />
+        );
+      })()}
       {r && dialog === 'sent-edit' && <SentEditDialog rfq={r} onClose={() => setDialog(null)} onSave={(body) => act('{n} saved', () => api.patch<Rfq>(`/rfqs/${r.id}`, body))} />}
     </div>
   );
@@ -174,7 +239,17 @@ const LINE_COLUMNS: DataTableColumn<RfqLine>[] = [
   { key: 'qty', header: 'Qty', align: 'right', width: '8rem', className: 'text-num', render: (l) => <span className="font-mono">{formatNumber(Number(l.quantity))}</span> },
 ];
 
-function supplierColumns(r: Rfq, onDownload: (s: RfqSupplier) => void, printing: string | null): DataTableColumn<RfqSupplier>[] {
+interface SupplierActions {
+  /** Their copy of the RFQ, to email to them. */
+  onDownload: (s: RfqSupplier) => void;
+  printing: string | null;
+  /** Record or edit their answer; only while the RFQ is sent, for those who may. */
+  onRecord?: (s: RfqSupplier) => void;
+  /** Their own quotation PDF, as attached. */
+  onQuoteFile: (s: RfqSupplier) => void;
+}
+
+function supplierColumns(r: Rfq, { onDownload, printing, onRecord, onQuoteFile }: SupplierActions): DataTableColumn<RfqSupplier>[] {
   return [
     {
       key: 'name', header: 'Supplier', render: (s) => (
@@ -193,15 +268,37 @@ function supplierColumns(r: Rfq, onDownload: (s: RfqSupplier) => void, printing:
       ),
     },
     {
-      key: 'quote', header: 'Quote', width: '9rem', render: (s) => {
+      key: 'quote', header: 'Quote', width: '13rem', render: (s) => {
         if (r.status === 'DRAFT') return <span className="text-meta">Not sent yet</span>;
-        if (s.declined) return <Badge tone="neutral">Declined</Badge>;
-        if (s.quotedAt) return <Badge tone="success">Quoted</Badge>;
-        return <Badge tone="info">Awaiting quote</Badge>;
+        const file = s.quoteFile && (
+          <button type="button" className="btn-link text-xs inline-flex items-center gap-1" onClick={() => onQuoteFile(s)} aria-label={`Their quotation ${s.quoteFile.fileName}`}>
+            <Icon.File size={12} /> {s.quoteFile.fileName}
+          </button>
+        );
+        if (s.declined) return <div><Badge tone="neutral">Declined</Badge>{s.notes && <div className="text-meta">{s.notes}</div>}{file}</div>;
+        if (s.quotedAt) {
+          return (
+            <div className="text-sm">
+              <Badge tone="success">Quoted</Badge>
+              {s.totals && <div className="font-mono mt-0.5">{formatMoney(s.totals.net, quoteCurrency(s))} <span className="text-meta">incl. VAT</span></div>}
+              {!!s.totals?.unpricedLines && <div className="text-meta">{s.totals.unpricedLines} line{s.totals.unpricedLines === 1 ? '' : 's'} not offered</div>}
+              <div className="text-meta">{[s.quoteReference && `Ref ${s.quoteReference}`, s.validUntil && `valid to ${formatDay(s.validUntil)}`, s.leadTime].filter(Boolean).join(' · ')}</div>
+              {file}
+            </div>
+          );
+        }
+        return <div><Badge tone="info">Awaiting quote</Badge>{file}</div>;
       },
     },
+    ...(onRecord ? [{
+      key: 'record', header: '', width: '8rem', render: (s: RfqSupplier) => (
+        <Button size="sm" variant="secondary" onClick={() => onRecord(s)} aria-label={`${s.quotedAt ? 'Edit quote' : 'Record quote'} for ${s.supplier?.name ?? s.supplierId}`}>
+          {s.quotedAt ? 'Edit quote' : s.declined ? 'Change' : 'Record quote'}
+        </Button>
+      ),
+    }] : []),
     {
-      key: 'pdf', header: 'Copy', width: '9rem', render: (s) => (
+      key: 'pdf', header: 'RFQ copy', width: '7rem', render: (s) => (
         <Button
           size="sm" variant="secondary" leadingIcon={<Icon.Download size={12} />}
           onClick={() => onDownload(s)} loading={printing === s.supplierId} disabled={printing !== null && printing !== s.supplierId}
@@ -234,6 +331,11 @@ function History({ entries, loading, suppliers }: { entries: HistoryEntry[]; loa
   );
 }
 
+/** The supplier an awarded RFQ's order went to. */
+function awardedTo(r: Rfq): string | null {
+  return r.suppliers.find((s) => s.supplierId === r.purchaseOrder?.supplierId)?.supplier?.name ?? null;
+}
+
 /** One Activity entry in plain words. */
 function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (id) => id): string {
   const after = (e.after ?? {}) as Record<string, unknown>;
@@ -244,6 +346,15 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
     return `Sent to ${n} supplier${n === 1 ? '' : 's'}, closing ${formatDay(String(after.closingDate ?? ''))}`;
   }
   if (e.action === 'RFQ_CANCEL') return `Cancelled: ${String(after.reason ?? '')}`;
+  if (e.action === 'RFQ_AWARD') {
+    return `Awarded to ${supplierName(String(after.supplierId ?? ''))}, raising order ${String(after.purchaseOrderNumber ?? '')}${after.reason ? `: ${String(after.reason)}` : ''}`;
+  }
+  const who = supplierName(String(after.supplierId ?? ''));
+  if (e.action === 'RFQ_QUOTE') return `Quote recorded from ${who}${after.quoteReference ? ` (ref ${String(after.quoteReference)})` : ''}`;
+  if (e.action === 'RFQ_QUOTE_CORRECTED') return `Quote from ${who} corrected`;
+  if (e.action === 'RFQ_DECLINED') return `${who} declined to quote${after.notes ? `: ${String(after.notes)}` : ''}`;
+  if (e.action === 'RFQ_QUOTE_FILE') return `${who}'s quotation attached (${String(after.fileName ?? 'PDF')})`;
+  if (e.action === 'RFQ_QUOTE_FILE_REMOVED') return `${who}'s quotation taken off`;
   if (e.action === 'UPDATE') {
     const parts: string[] = [];
     if ('number' in after) parts.push(`renumbered ${String(after.number)}`);

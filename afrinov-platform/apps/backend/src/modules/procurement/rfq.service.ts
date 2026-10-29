@@ -5,8 +5,10 @@
 //
 // State machine: DRAFT → SENT → AWARDED, or CANCELLED from DRAFT or SENT.
 // A draft is raised, edited and sent (Phases 1 and 2); once sent, only its
-// closing date moves and suppliers who were missed are added. Quotes and the
-// award follow in Phases 4 and 5.
+// closing date moves and suppliers who were missed are added, and each
+// supplier's quote is recorded, with their own PDF, or their decline (Phase 4).
+// Phase 5 compares the quotes and awards the RFQ to one supplier: a draft
+// purchase order at their prices, saved with the award or not at all.
 //
 // An RFQ is for a project or for Stores, as an order is, and holds a project's
 // material only for that project. Every change is written to the audit log
@@ -17,8 +19,8 @@ import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
-import { defaultVatRate, orderTotals } from './po-pricing.js';
-import { assertProjectOpen } from './procurement.service.js';
+import { defaultVatRate, lineMoney, orderTotals } from './po-pricing.js';
+import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
 
 export interface RfqLineInput { materialId: string; quantity: number }
 
@@ -67,15 +69,111 @@ export function addDays(day: string, days: number): string {
 const asDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
 const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
+/** Refuses a day that doesn't exist (2026-02-30), which would otherwise be saved as another one. */
+function checkDay(day: string): void {
+  const d = asDate(day);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== day) throw Errors.validation(`${day} is not a date`);
+}
+
 /** A closing date on or after the day it is sent; an RFQ can't close before it goes out. */
 function checkClosingDate(closing: string, issued: string): void {
-  // A day that doesn't exist (2026-02-30) would otherwise be saved as another one.
-  const d = asDate(closing);
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== closing) throw Errors.validation(`${closing} is not a date`);
+  checkDay(closing);
   if (closing < issued) throw Errors.validation(`The closing date can't be before ${issued}, the day it was sent`);
 }
 
 const SENT_FIELDS = ['projectNumber', 'description', 'notes', 'penaltiesApply', 'lines'] as const;
+
+/** One supplier's quote as the award weighs it. */
+export interface QuoteForAward {
+  supplierId: string;
+  name: string;
+  currency: string;
+  /** Recorded and not declined. */
+  quoted: boolean;
+  /** Net value including VAT, as the exact decimal it is kept as; null until quoted. */
+  net: string | null;
+  unpricedLines: number;
+  /** YYYY-MM-DD, or null when the quote gave none. */
+  validUntil: string | null;
+}
+
+/**
+ * What a buyer should say why about before awarding to `chosen`: lines it
+ * didn't price (the order has them without a price), a quote that has run
+ * out, and a cheaper complete quote in the same currency. Quotes in another
+ * currency aren't weighed against it. Empty: the clear choice, no reason
+ * needed.
+ */
+export function awardConcerns(quotes: QuoteForAward[], chosenId: string, today: string): string[] {
+  const chosen = quotes.find((q) => q.supplierId === chosenId);
+  if (!chosen?.quoted) return [];
+  const concerns: string[] = [];
+  if (chosen.unpricedLines > 0) {
+    concerns.push(`${chosen.name} didn't price ${chosen.unpricedLines === 1 ? '1 line' : `${chosen.unpricedLines} lines`}: the order has ${chosen.unpricedLines === 1 ? 'it' : 'them'} without a price`);
+  }
+  if (chosen.validUntil && chosen.validUntil < today) concerns.push(`${chosen.name}'s quote ran out on ${chosen.validUntil}`);
+  if (chosen.unpricedLines === 0 && chosen.net !== null) {
+    // Compared as decimals: large totals lose their cents as doubles, and two different ones could look equal.
+    const net = new Prisma.Decimal(chosen.net);
+    const cheaper = quotes
+      .filter((q) => q.supplierId !== chosenId && q.quoted && q.currency === chosen.currency && q.unpricedLines === 0 && q.net !== null && new Prisma.Decimal(q.net).lessThan(net))
+      .sort((a, b) => new Prisma.Decimal(a.net!).comparedTo(b.net!));
+    if (cheaper[0]) concerns.push(`${cheaper[0].name} quoted less for every line: ${cheaper[0].currency} ${new Prisma.Decimal(cheaper[0].net!).toFixed(2)} against ${net.toFixed(2)}`);
+  }
+  return concerns;
+}
+
+export interface RecordQuoteInput {
+  /** YYYY-MM-DD; today unless given. */
+  quotedAt?: string;
+  quoteReference?: string | null;
+  /** YYYY-MM-DD. */
+  validUntil?: string | null;
+  leadTime?: string | null;
+  notes?: string | null;
+  /** Excluding VAT, in the supplier's currency; lines the supplier doesn't offer are left out. */
+  prices: Array<{ rfqLineId: string; unitPrice: number }>;
+}
+
+/**
+ * The sent RFQ and the supplier asked, held for the change: quotes are
+ * recorded only while it is out with suppliers, so not on a draft, nor once
+ * it is awarded or cancelled.
+ */
+async function quotable(rfqId: string, supplierId: string, tx: Prisma.TransactionClient) {
+  await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${rfqId} FOR UPDATE`;
+  const rfq = await tx.rfq.findUnique({ where: { id: rfqId }, include: { lines: { select: { id: true } } } });
+  if (!rfq) throw Errors.notFound('Rfq');
+  if (rfq.status !== 'SENT') {
+    throw Errors.invalidState(rfq.status === 'DRAFT'
+      ? `${rfq.number} hasn't been sent yet, so there are no quotes to record`
+      : `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so its quotes can no longer change`, { status: rfq.status });
+  }
+  const asked = await tx.rfqSupplier.findUnique({ where: { rfqId_supplierId: { rfqId, supplierId } }, include: { prices: true } });
+  if (!asked) throw Errors.notFound('Supplier on this request for quotation');
+  return { rfq, asked };
+}
+
+/** A file name safe to keep and to send back in a download: no folders, no control characters. */
+function cleanFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? '';
+  const clean = [...base].filter((c) => c.charCodeAt(0) >= 0x20 && c !== '\u007f' && c !== '"').join('').trim().slice(0, 196);
+  // Always a .pdf, so a download opens as the PDF it was checked to be, never as a page a browser runs.
+  if (!clean) return 'quotation.pdf';
+  return /\.pdf$/i.test(clean) ? clean : `${clean.replace(/\.[^.]*$/, '')}.pdf`;
+}
+
+/** A recorded quote, or decline, as the audit log keeps it before it changes. */
+function quoteForLog(asked: {
+  supplierId: string; declined: boolean; quotedAt: Date | null; quoteReference: string | null; validUntil: Date | null;
+  leadTime: string | null; notes: string | null; prices: Array<{ rfqLineId: string; unitPrice: Prisma.Decimal }>;
+}) {
+  return {
+    supplierId: asked.supplierId, declined: asked.declined, quotedAt: dayOf(asked.quotedAt), quoteReference: asked.quoteReference,
+    validUntil: dayOf(asked.validUntil), leadTime: asked.leadTime, notes: asked.notes,
+    prices: asked.prices.map((p) => ({ rfqLineId: p.rfqLineId, unitPrice: p.unitPrice.toString() })),
+  };
+}
 
 /**
  * A sent RFQ has gone to its suppliers as it stands, so only its closing date
@@ -111,7 +209,7 @@ async function editSent(
     // since been deactivated stays on it, and doesn't stop anyone else being asked.
     const added = await checkSuppliers(next.filter((s) => !had.includes(s)), tx);
     if (added.length > 0) {
-      await tx.rfqSupplier.createMany({ data: added.map((supplierId) => ({ rfqId: rfq.id, supplierId })) });
+      await tx.rfqSupplier.createMany({ data: askedInOrder(added).map((row) => ({ rfqId: rfq.id, ...row })) });
       before.supplierIds = had;
       after.supplierIds = [...had, ...added];
     }
@@ -200,6 +298,15 @@ async function checkSuppliers(supplierIds: string[], tx: Prisma.TransactionClien
   return ids;
 }
 
+/**
+ * The suppliers to ask, each a millisecond after the one before: they are
+ * listed by when they were asked, and rows saved together would otherwise
+ * share a time and come back in any order.
+ */
+function askedInOrder(supplierIds: string[], from = Date.now()) {
+  return supplierIds.map((supplierId, i) => ({ supplierId, createdAt: new Date(from + i) }));
+}
+
 const lineRows = (lines: RfqLineInput[]) => lines.map((l, i) => ({ lineNo: i + 1, materialId: l.materialId, quantity: l.quantity }));
 
 /** Lines and suppliers as the audit log keeps them. */
@@ -214,9 +321,13 @@ const DETAIL = {
   sentBy: person,
   awardedBy: person,
   cancelledBy: person,
-  purchaseOrder: { select: { id: true, number: true, status: true } },
+  purchaseOrder: { select: { id: true, number: true, status: true, supplierId: true } },
   lines: { include: { material: true }, orderBy: { lineNo: 'asc' } },
-  suppliers: { include: { supplier: true, prices: true }, orderBy: { createdAt: 'asc' } },
+  suppliers: {
+    // The quotation file's details, never its contents: those are downloaded on their own.
+    include: { supplier: true, prices: true, quoteFile: { select: { fileName: true, size: true, uploadedAt: true } } },
+    orderBy: { createdAt: 'asc' },
+  },
 } satisfies Prisma.RfqInclude;
 
 type RfqDetail = Prisma.RfqGetPayload<{ include: typeof DETAIL }>;
@@ -236,9 +347,15 @@ function withQuotes(rfq: RfqDetail, vatSetting: number) {
     ...rfq,
     closed: isClosed(rfq),
     suppliers: rfq.suppliers.map((s) => {
-      const vatRate = defaultVatRate(s.supplier.currency ?? 'ZAR', vatSetting);
-      const priced = rfq.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
-      return { ...s, vatRate, totals: s.quotedAt ? orderTotals(priced, vatRate) : null };
+      const vatRate = defaultVatRate(s.currency ?? s.supplier.currency ?? 'ZAR', vatSetting);
+      const priced = rfq.lines.map((l) => ({ rfqLineId: l.id, orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
+      return {
+        ...s,
+        vatRate,
+        totals: s.quotedAt ? orderTotals(priced, vatRate) : null,
+        // Each priced line's subtotal, rounded as the order will round it, for the comparison.
+        lineSubtotals: s.quotedAt ? priced.flatMap((p) => { const m = lineMoney(p, vatRate); return m ? [{ rfqLineId: p.rfqLineId, subtotal: m.subtotal }] : []; }) : [],
+      };
     }),
   };
 }
@@ -289,7 +406,7 @@ export const RfqService = {
           penaltiesApply: input.penaltiesApply ?? false,
           createdById: actorId,
           lines: { create: lineRows(input.lines) },
-          suppliers: { create: supplierIds.map((supplierId) => ({ supplierId })) },
+          suppliers: { create: askedInOrder(supplierIds) },
         },
         include: { lines: { orderBy: { lineNo: 'asc' } } },
       });
@@ -378,7 +495,7 @@ export const RfqService = {
       const removed = had.filter((s) => !nextSuppliers.includes(s));
       const added = nextSuppliers.filter((s) => !had.includes(s));
       if (removed.length > 0) await tx.rfqSupplier.deleteMany({ where: { rfqId: rfq.id, supplierId: { in: removed } } });
-      if (added.length > 0) await tx.rfqSupplier.createMany({ data: added.map((supplierId) => ({ rfqId: rfq.id, supplierId })) });
+      if (added.length > 0) await tx.rfqSupplier.createMany({ data: askedInOrder(added).map((row) => ({ rfqId: rfq.id, ...row })) });
       if (removed.length > 0 || added.length > 0) {
         before.supplierIds = had;
         after.supplierIds = nextSuppliers;
@@ -476,6 +593,224 @@ export const RfqService = {
       });
     });
     return RfqService.getById(id);
+  },
+
+  /**
+   * Records a supplier's quote, or corrects one already recorded: a unit
+   * price per line they priced (a line they don't offer is left out), their
+   * reference, when it came in (today unless given), how long it holds and
+   * their lead time. A supplier who had declined has now quoted.
+   *
+   * @throws {ApiError} NOT_FOUND for the RFQ or a supplier it didn't ask;
+   * INVALID_STATE unless it is sent; VALIDATION_ERROR for no price, a line
+   * not on the RFQ, or a day that doesn't exist or is still to come.
+   */
+  async recordQuote(rfqId: string, supplierId: string, input: RecordQuoteInput, actorId: string) {
+    const today = todayInSouthAfrica();
+    const quotedAt = input.quotedAt ?? today;
+    checkDay(quotedAt);
+    if (quotedAt > today) throw Errors.validation(`${quotedAt} is still to come: record the day the quote came in`);
+    if (input.validUntil) {
+      checkDay(input.validUntil);
+      if (input.validUntil < quotedAt) throw Errors.validation(`A quote received on ${quotedAt} can't be valid only until ${input.validUntil}: check the date`);
+    }
+    if (input.prices.length === 0) throw Errors.validation('Price at least one line, or mark the supplier as declined');
+    await prisma.$transaction(async (tx) => {
+      const { rfq, asked } = await quotable(rfqId, supplierId, tx);
+      const lineIds = new Set(rfq.lines.map((l) => l.id));
+      const strange = input.prices.find((p) => !lineIds.has(p.rfqLineId));
+      if (strange) throw Errors.validation(`Line ${strange.rfqLineId} is not on ${rfq.number}`);
+      // One price per line: a line sent twice keeps the last.
+      const prices = [...new Map(input.prices.map((p) => [p.rfqLineId, p.unitPrice])).entries()];
+      await tx.rfqQuotePrice.deleteMany({ where: { rfqSupplierId: asked.id } });
+      await tx.rfqQuotePrice.createMany({ data: prices.map(([rfqLineId, unitPrice]) => ({ rfqSupplierId: asked.id, rfqLineId, unitPrice })) });
+      const quotedIn = (await tx.supplier.findUnique({ where: { id: supplierId }, select: { currency: true } }))?.currency ?? 'ZAR';
+      await tx.rfqSupplier.update({
+        where: { id: asked.id },
+        data: {
+          declined: false,
+          currency: quotedIn,
+          quotedAt: asDate(quotedAt),
+          quoteReference: cleanText(input.quoteReference),
+          validUntil: input.validUntil ? asDate(input.validUntil) : null,
+          leadTime: cleanText(input.leadTime),
+          notes: cleanText(input.notes),
+        },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE',
+          entityType: 'Rfq',
+          entityId: rfq.id,
+          // The whole quote it replaces, so the Activity can say what changed.
+          before: asked.quotedAt || asked.declined ? quoteForLog(asked) : Prisma.DbNull,
+          after: {
+            supplierId, declined: false, quoteReference: cleanText(input.quoteReference), quotedAt, validUntil: input.validUntil ?? null,
+            leadTime: cleanText(input.leadTime), notes: cleanText(input.notes),
+            prices: prices.map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice: String(unitPrice) })),
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+    return RfqService.getById(rfqId);
+  },
+
+  /**
+   * Records that a supplier won't quote. A quote recorded for them before is
+   * set aside: its prices go; a quotation file attached stays.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is sent.
+   */
+  async decline(rfqId: string, supplierId: string, input: { notes?: string | null }, actorId: string) {
+    await prisma.$transaction(async (tx) => {
+      const { rfq, asked } = await quotable(rfqId, supplierId, tx);
+      await tx.rfqQuotePrice.deleteMany({ where: { rfqSupplierId: asked.id } });
+      await tx.rfqSupplier.update({
+        where: { id: asked.id },
+        data: { declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, currency: null, notes: cleanText(input.notes) },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId, action: 'RFQ_DECLINED', entityType: 'Rfq', entityId: rfq.id,
+          // A quote it sets aside is kept here, as it was.
+          before: asked.quotedAt || asked.declined ? quoteForLog(asked) : Prisma.DbNull,
+          after: { supplierId, declined: true, notes: cleanText(input.notes) } as Prisma.InputJsonValue,
+        },
+      });
+    });
+    return RfqService.getById(rfqId);
+  },
+
+  /**
+   * Keeps the supplier's own quotation PDF with their quote, replacing one
+   * kept before. The RFQ sheet asks for quotes back as PDF.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is sent;
+   * VALIDATION_ERROR for an empty file or one that isn't a PDF.
+   */
+  async putQuoteFile(rfqId: string, supplierId: string, file: { fileName: string; data: Buffer }, actorId: string) {
+    if (file.data.length === 0) throw Errors.validation('The file is empty');
+    if (file.data.subarray(0, 5).toString('latin1') !== '%PDF-') throw Errors.validation('Attach the quotation as a PDF');
+    const fileName = cleanFileName(file.fileName);
+    await prisma.$transaction(async (tx) => {
+      const { rfq, asked } = await quotable(rfqId, supplierId, tx);
+      const data = { fileName, size: file.data.length, data: new Uint8Array(file.data), uploadedById: actorId, uploadedAt: new Date() };
+      await tx.rfqQuoteFile.upsert({ where: { rfqSupplierId: asked.id }, create: { rfqSupplierId: asked.id, ...data }, update: data });
+      await tx.auditLogEntry.create({
+        data: { actorId, action: 'RFQ_QUOTE_FILE', entityType: 'Rfq', entityId: rfq.id, after: { supplierId, fileName, size: file.data.length } },
+      });
+    });
+    return RfqService.getById(rfqId);
+  },
+
+  /** The supplier's quotation PDF as it was attached. @throws {ApiError} NOT_FOUND when there is none. */
+  async getQuoteFile(rfqId: string, supplierId: string) {
+    const asked = await prisma.rfqSupplier.findUnique({
+      where: { rfqId_supplierId: { rfqId, supplierId } },
+      select: { quoteFile: { select: { fileName: true, data: true } } },
+    });
+    if (!asked?.quoteFile) throw Errors.notFound('Quotation file');
+    return { fileName: asked.quoteFile.fileName, data: Buffer.from(asked.quoteFile.data) };
+  },
+
+  /** Takes the quotation PDF off, as when the wrong file was attached. */
+  async removeQuoteFile(rfqId: string, supplierId: string, actorId: string) {
+    await prisma.$transaction(async (tx) => {
+      const { rfq, asked } = await quotable(rfqId, supplierId, tx);
+      const removed = await tx.rfqQuoteFile.deleteMany({ where: { rfqSupplierId: asked.id } });
+      if (removed.count === 0) throw Errors.notFound('Quotation file');
+      await tx.auditLogEntry.create({
+        data: { actorId, action: 'RFQ_QUOTE_FILE_REMOVED', entityType: 'Rfq', entityId: rfq.id, after: { supplierId } },
+      });
+    });
+    return RfqService.getById(rfqId);
+  },
+
+  /**
+   * Awards the RFQ to one supplier who quoted: a draft purchase order for
+   * them, with the RFQ's project, penalties and lines at their quoted prices,
+   * saved together with the award or not at all. It then goes through
+   * approval as any order does. A reason is needed when the award isn't the
+   * clear choice (see awardConcerns), and is kept on the Activity.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is sent;
+   * VALIDATION_ERROR for a supplier who hasn't quoted, a missing reason, or
+   * what the order itself refuses (an inactive supplier or item, a closed project).
+   */
+  async award(rfqId: string, input: { supplierId: string; reason?: string | null }, actorId: string) {
+    const vatSetting = Number(await SettingsService.getValue<number>('purchaseOrders.vatRate')) || 0;
+    const today = todayInSouthAfrica();
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${rfqId} FOR UPDATE`;
+      const rfq = await tx.rfq.findUnique({
+        where: { id: rfqId },
+        include: { lines: { orderBy: { lineNo: 'asc' } }, suppliers: { include: { supplier: true, prices: true } } },
+      });
+      if (!rfq) throw Errors.notFound('Rfq');
+      if (rfq.status !== 'SENT') {
+        throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`, { status: rfq.status });
+      }
+      const asked = rfq.suppliers.find((s) => s.supplierId === input.supplierId);
+      if (!asked) throw Errors.notFound('Supplier on this request for quotation');
+      if (!asked.quotedAt || asked.declined) throw Errors.validation(`${asked.supplier.name} hasn't quoted, so the RFQ can't be awarded to them`);
+      // The order is priced in the supplier's currency now; their quote must have been given in it.
+      const supplierCurrency = asked.supplier.currency ?? 'ZAR';
+      if (asked.currency && asked.currency !== supplierCurrency) {
+        throw Errors.validation(`${asked.supplier.name} quoted in ${asked.currency} but now trades in ${supplierCurrency}. Record their quote again in ${supplierCurrency} before awarding.`);
+      }
+
+      const quotes: QuoteForAward[] = rfq.suppliers.map((s) => {
+        const currency = s.currency ?? s.supplier.currency ?? 'ZAR';
+        const priced = rfq.lines.map((l) => ({ orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
+        const totals = orderTotals(priced, defaultVatRate(currency, vatSetting));
+        const quoted = !!s.quotedAt && !s.declined;
+        return {
+          supplierId: s.supplierId, name: s.supplier.name, currency, quoted,
+          net: quoted ? totals.net : null, unpricedLines: totals.unpricedLines, validUntil: dayOf(s.validUntil),
+        };
+      });
+      const concerns = awardConcerns(quotes, asked.supplierId, today);
+      const reason = cleanText(input.reason);
+      if (concerns.length > 0 && !reason) {
+        throw Errors.validation(`Say why you are awarding to ${asked.supplier.name}: ${concerns.join('; ')}.`, { concerns });
+      }
+
+      // The supplier's quotation is what the order is placed against.
+      const notes = [
+        `As per your quotation${asked.quoteReference ? ` ${asked.quoteReference}` : ''} for ${rfq.number}.`,
+        rfq.notes,
+      ].filter(Boolean).join('\n');
+      const po = await PurchaseOrderService.create({
+        supplierId: asked.supplierId,
+        projectNumber: rfq.projectNumber,
+        penaltiesApply: rfq.penaltiesApply,
+        notes,
+        lines: rfq.lines.map((l) => {
+          const price = asked.prices.find((p) => p.rfqLineId === l.id)?.unitPrice;
+          return { materialId: l.materialId, orderedQty: l.quantity.toNumber(), ...(price ? { unitPrice: price.toNumber() } : {}) };
+        }),
+      }, actorId, { within: tx, fromRfq: { id: rfq.id, number: rfq.number } });
+
+      await tx.rfq.update({
+        where: { id: rfq.id },
+        data: { status: 'AWARDED', awardedAt: new Date(), awardedById: actorId, purchaseOrderId: po.id },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'RFQ_AWARD',
+          entityType: 'Rfq',
+          entityId: rfq.id,
+          before: { status: 'SENT' },
+          after: {
+            status: 'AWARDED', supplierId: asked.supplierId, purchaseOrderId: po.id, purchaseOrderNumber: po.number,
+            reason, concerns,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+    return RfqService.getById(rfqId);
   },
 
   /** The RFQ's Activity, newest first, each entry with the name of who did it. */
