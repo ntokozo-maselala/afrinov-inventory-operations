@@ -6,6 +6,7 @@ import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
 import type { MovementRow } from '../api/types';
 import { locationLabel } from '../lib/locations';
+import { useIdempotencyKey } from '../lib/idempotency';
 
 
 interface Props {
@@ -25,13 +26,17 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
+  const idem = useIdempotencyKey();
 
   // eslint-disable react-hooks/set-state-in-effect
   useEffect(() => {
     setReversing(false); // eslint-disable-line react-hooks/set-state-in-effect
     setReason('');  
     setValidation(null);  
-  }, [transaction.id]);
+    // A different movement is a different operation: it must not inherit the
+    // previous one's idempotency key.
+    idem.rotate();
+  }, [transaction.id, idem]);
   // eslint-enable react-hooks/set-state-in-effect
 
   const isTransfer = transaction.type === 'TRANSFER_IN' || transaction.type === 'TRANSFER_OUT';
@@ -70,7 +75,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
 
     setBusy(true);
     try {
-      await api.post(`/inventory-transactions/${transaction.id}/reversal`, { reason: reason.trim() });
+      await api.post(`/inventory-transactions/${transaction.id}/reversal`, { reason: reason.trim() }, { idempotencyKey: idem.key() });
+      idem.rotate();
       setReversing(false);
       setReason('');
       onReversed();
@@ -227,6 +233,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
   const locations = useApi<Array<{ id: string; name: string; active: boolean; parent?: { name: string } | null }>>(open ? '/locations' : null);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
+  const idem = useIdempotencyKey();
 
   async function submit() {
     setValidation(null);
@@ -239,7 +246,8 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
         quantity: qty,
         locationId: locationId !== transaction.locationId ? locationId : undefined,
         reason: reason.trim() || undefined,
-      });
+      }, { idempotencyKey: idem.key() });
+      idem.rotate();
       setOpen(false);
       setQuantity('');
       setReason('');

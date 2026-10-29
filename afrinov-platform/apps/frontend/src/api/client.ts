@@ -64,10 +64,20 @@ export function setToken(token: string | null): void {
 
 interface ApiShape {
   get: <T>(path: string) => Promise<T>;
-  post: <T>(path: string, body?: unknown) => Promise<T>;
-  patch: <T>(path: string, body?: unknown) => Promise<T>;
-  put: <T>(path: string, body?: unknown) => Promise<T>;
-  del: <T>(path: string) => Promise<T>;
+  post: <T>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
+  put: <T>(path: string, body?: unknown, options?: RequestOptions) => Promise<T>;
+  del: <T>(path: string, options?: RequestOptions) => Promise<T>;
+}
+
+/**
+ * Options for a mutating request. `idempotencyKey` makes the request retry-safe:
+ * the server runs it at most once per key, so a retry after a lost response
+ * replays the original answer instead of posting the movement twice. Only the
+ * inventory mutations use it (see `src/lib/idempotency.ts`).
+ */
+export interface RequestOptions {
+  idempotencyKey?: string;
 }
 
 /**
@@ -228,7 +238,7 @@ function isLoginRequest(path: string): boolean {
   return path.startsWith('/auth/login');
 }
 
-async function realRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function realRequest<T>(method: string, path: string, body?: unknown, options?: RequestOptions): Promise<T> {
   const token = getToken();
   const isMutation = method !== 'GET' && method !== 'HEAD';
   let res: Response;
@@ -240,6 +250,7 @@ async function realRequest<T>(method: string, path: string, body?: unknown): Pro
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options?.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(isMutation ? MUTATION_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
@@ -273,10 +284,10 @@ async function realRequest<T>(method: string, path: string, body?: unknown): Pro
 
 const realApi: ApiShape = {
   get: <T>(path: string) => realRequest<T>('GET', path),
-  post: <T>(path: string, body?: unknown) => realRequest<T>('POST', path, body),
-  patch: <T>(path: string, body?: unknown) => realRequest<T>('PATCH', path, body),
-  put: <T>(path: string, body?: unknown) => realRequest<T>('PUT', path, body),
-  del: <T>(path: string) => realRequest<T>('DELETE', path),
+  post: <T>(path: string, body?: unknown, options?: RequestOptions) => realRequest<T>('POST', path, body, options),
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) => realRequest<T>('PATCH', path, body, options),
+  put: <T>(path: string, body?: unknown, options?: RequestOptions) => realRequest<T>('PUT', path, body, options),
+  del: <T>(path: string, options?: RequestOptions) => realRequest<T>('DELETE', path, undefined, options),
 };
 
 let mockApi: ApiShape | null = null;
@@ -291,9 +302,10 @@ async function getMockApi(): Promise<ApiShape> {
 export const api: ApiShape = FRONTEND_ONLY
   ? new Proxy({} as ApiShape, {
       get(_t, prop: keyof ApiShape) {
-        return async (path: string, body?: unknown) => {
+        return async (path: string, body?: unknown, options?: RequestOptions) => {
           const m = await getMockApi();
-          return m[prop](path, body) as Promise<never>;
+          const call = m[prop] as (p: string, b?: unknown, o?: RequestOptions) => Promise<unknown>;
+          return call(path, body, options) as Promise<never>;
         };
       },
     })

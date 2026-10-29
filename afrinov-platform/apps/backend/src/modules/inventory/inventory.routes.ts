@@ -1,4 +1,5 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
 // Keep the pre-Zod-4 API contract: validate UUID shape without requiring RFC version bits.
@@ -12,6 +13,12 @@ import { StockCountService } from './stock-count.service.js';
 import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+import {
+  withIdempotency,
+  idempotencyKeyFrom,
+  sendIdempotent,
+  type IdempotencyEndpoint,
+} from '../../shared/idempotency.js';
 
 /**
  * The locations a report covers: with inside=true, the location and the ones
@@ -135,6 +142,35 @@ function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
 
+/**
+ * Run a mutating operation, making it retry-safe when the client sent an
+ * `Idempotency-Key` header. With a key, the operation and the stored key commit
+ * in one transaction, and a repeat replays the first response instead of
+ * posting the movement again (TD-019). Without a key, the behaviour is exactly
+ * as before: the operation opens and commits its own transaction.
+ *
+ * `run` receives the transaction to use (the idempotent one when a key was
+ * sent, otherwise undefined, so the service opens its own) and returns the
+ * status and body to send.
+ */
+async function idempotentMutation(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  endpoint: IdempotencyEndpoint,
+  run: (tx: Prisma.TransactionClient | undefined) => Promise<{ statusCode: number; body: unknown }>,
+): Promise<FastifyReply> {
+  const key = idempotencyKeyFrom(req.headers as Record<string, unknown>);
+  if (!key) {
+    const fresh = await run(undefined);
+    return reply.code(fresh.statusCode).send(fresh.body);
+  }
+  const outcome = await withIdempotency(
+    { actorId: actorId(req), endpoint, key, scope: req.url, requestBody: req.body },
+    (tx) => run(tx),
+  );
+  return sendIdempotent(reply, outcome, outcome.replayed);
+}
+
 export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
   app.get('/inventory-transactions', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as Record<string, string | undefined>;
@@ -180,8 +216,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid issue payload', details: parsed.error.flatten() },
       });
     }
-    const result = await InventoryService.issue({ ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /inventory-issues', async (tx) => ({
+      statusCode: 201,
+      body: await InventoryService.issue({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   app.post('/inventory-transfers', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -192,8 +230,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid transfer payload', details: parsed.error.flatten() },
       });
     }
-    const result = await InventoryService.transfer({ ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /inventory-transfers', async (tx) => ({
+      statusCode: 201,
+      body: await InventoryService.transfer({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   app.post('/inventory-adjustments', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -204,8 +244,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid adjustment payload', details: parsed.error.flatten() },
       });
     }
-    const result = await InventoryService.adjust({ ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /inventory-adjustments', async (tx) => ({
+      statusCode: 201,
+      body: await InventoryService.adjust({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   // A stock count by location; differences become COUNT_VARIANCE adjustments.
@@ -217,8 +259,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid stock count payload', details: parsed.error.flatten() },
       });
     }
-    const result = await StockCountService.post({ ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /stock-counts', async (tx) => ({
+      statusCode: 201,
+      body: await StockCountService.post({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   // The issued-stock report: issue slips with their lines, newest first.
@@ -257,8 +301,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid receipt payload', details: parsed.error.flatten() },
       });
     }
-    const result = await StockReceiptService.receive({ ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /stock-receipts', async (tx) => ({
+      statusCode: 201,
+      body: await StockReceiptService.receive({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   // Stock coming back from an issue. Same people as issuing.
@@ -271,8 +317,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const { id } = req.params as { id: string };
-    const result = await InventoryService.returnToStock({ issueTransactionId: id, ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /inventory-transactions/:id/returns', async (tx) => ({
+      statusCode: 201,
+      body: await InventoryService.returnToStock({ issueTransactionId: id, ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   // What a recipient can still bring back, for the Return stock page.
@@ -296,8 +344,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid return payload', details: parsed.error.flatten() },
       });
     }
-    const result = await InventoryService.returnMany({ ...parsed.data, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /inventory-returns', async (tx) => ({
+      statusCode: 201,
+      body: await InventoryService.returnMany({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
   });
 
   app.post('/inventory-transactions/:id/reversal', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -309,7 +359,9 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const { id } = req.params as { id: string };
-    const result = await InventoryService.reverse({ transactionId: id, reason: parsed.data.reason, actorId: actorId(req) });
-    return reply.code(201).send(result);
+    return idempotentMutation(req, reply, 'POST /inventory-transactions/:id/reversal', async (tx) => ({
+      statusCode: 201,
+      body: await InventoryService.reverse({ transactionId: id, reason: parsed.data.reason, actorId: actorId(req) }, tx),
+    }));
   });
 }

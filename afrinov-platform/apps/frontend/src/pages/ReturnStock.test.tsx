@@ -88,7 +88,7 @@ describe('ReturnStock page', () => {
         { issueTransactionId: 'a', quantity: 3, locationId: undefined },
         { issueTransactionId: 'b', quantity: 4, locationId: 'l-2' },
       ],
-    });
+    }, expect.any(Object));
     // A confirmation stays on the page, linking to today's returns from them in the Returned stock report.
     const link = await screen.findByRole('link', { name: 'See it in Returned stock' });
     expect(link.getAttribute('href')).toMatch(/^\/movements\?report=returned&recipientId=r-1&from=(\d{4}-\d\d-\d\d)&to=\1$/);

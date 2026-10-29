@@ -6,6 +6,7 @@ import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import type { CurrentStockRow } from '../api/types';
 import { locationLabel } from '../lib/locations';
+import { useIdempotencyKey } from '../lib/idempotency';
 
 // Issuing has its own page (IssueStock), so the row drawer only transfers and adjusts.
 export type StockActionKind = 'transfer' | 'adjust';
@@ -38,6 +39,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const locations = useApi<Location[]>('/locations');
+  const idem = useIdempotencyKey();
 
   function reset() { setQuantity(''); setNote(''); setValidation(null); }
 
@@ -58,15 +60,16 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
       if (kind === 'transfer') {
         await api.post('/inventory-transfers', {
           materialId: row.materialId, fromLocationId: row.locationId, toLocationId, quantity: qty,
-        });
+        }, { idempotencyKey: idem.key() });
         onSuccess(`Transferred ${qty} × ${row.materialSku}`);
       } else {
         // Adjustments accept a signed quantity: positive to add, negative to remove.
         await api.post('/inventory-adjustments', {
           materialId: row.materialId, locationId: row.locationId, quantity: qty, reasonCode, reasonNote: note || undefined,
-        });
+        }, { idempotencyKey: idem.key() });
         onSuccess(`Adjusted ${row.materialSku} by ${qty > 0 ? '+' : ''}${qty}`);
       }
+      idem.rotate();
       reset();
       onDone();
     } catch (err) {

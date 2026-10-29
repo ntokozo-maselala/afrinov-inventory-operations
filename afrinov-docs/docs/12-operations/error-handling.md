@@ -122,9 +122,11 @@ backend contract respectively.
 
 ## 6. Safe retry and mutation reconciliation
 
-- **Never auto-retry a mutation.** Stock issues, adjustments, receipts and
-  reversals are not idempotent; a retry after a network interruption could
-  double-post. Retries are always an explicit user action.
+- **Never auto-retry a mutation.** A retry is always an explicit user action.
+  Inventory mutations are made *retry-safe* by a server-side idempotency key
+  (below) rather than by automatic retrying: a repeated request with the same
+  key replays the first response, so even an explicit retry cannot double-post.
+  Purchase-order transitions remain protected by their own status guards.
 - **A failed read may be retried** freely (they are idempotent). Retry
   buttons are shown only for retryable classes.
 - **Unknown mutation outcome:** if a request fails after being sent (network
@@ -155,6 +157,15 @@ backend contract respectively.
   dropped *mutation* is reported as `OUTCOME_UNKNOWN` (not a retryable
   `TIMEOUT`), so the user is told the result is unconfirmed rather than
   invited to retry blindly. Writes also get a longer timeout budget than reads.
+- **Idempotency keys make an inventory retry safe.** Each mutation form mints
+  one key per logical submission (`useIdempotencyKey`,
+  `src/lib/idempotency.ts`) and reuses it across retries of that submission.
+  The backend (`src/shared/idempotency.ts`) runs the operation and records the
+  key in one transaction, so a retry replays the stored status and body and
+  posts nothing. A key reused with a different body — or on a different record
+  under the same route — is refused with `CONFLICT`, never replayed. The key is
+  rotated only after a confirmed success; an `OUTCOME_UNKNOWN` failure keeps
+  it, so the user's explicit retry reconciles instead of duplicating.
 
 ## 7. Development versus production
 
@@ -199,6 +210,8 @@ backend contract respectively.
 | Stale refresh | Reload fails with data shown | any | "Could not refresh" notice | "Try again" | client error retained | `useApi` (`stale`), `useApiStale.test.tsx`, `usePagedList.test.tsx` |
 | Protected data on a failed refresh | Refresh returns 403 | 403 | Hard error, not a stale snapshot | Contact admin | client `FORBIDDEN` | `useApiStale.test.tsx` |
 | Unconfirmed mutation | Timeout/network after a write | — | "We couldn't confirm that change" | Check the record, then retry | client `OUTCOME_UNKNOWN` | `client.test.ts`, `errorPresentation.test.ts` |
+| Retried inventory mutation | Same `Idempotency-Key` re-sent | 201 | Success replayed, not double-posted | — | stored response + `Idempotency-Replayed: true` | `idempotency.real-http.test.ts` |
+| Idempotency key reuse | Same key, different body or record | 409 | "This change needs your attention" | Start the operation again | `CONFLICT` | `idempotency.real-http.test.ts` |
 | Session expired by a late 401 | Old token rejected after re-login | 401 | Session kept | — | token-scoped event | `auth.test.tsx`, `client.test.ts` |
 | Notification storm | Many distinct failures in one outage | — | At most three toasts | Dismiss | dedupe + cap | `Toast.test.tsx` |
 | Settings tab switch | Move between settings tabs | — | Layout stays mounted, draft kept | — | stable boundary key | `App.test.tsx` |
@@ -212,11 +225,12 @@ backend contract respectively.
 - **No circuit breaker or offline queue.** The application is a single
   browser client against one API. The evidence for those patterns is absent;
   the simpler bounded retry plus explicit user retry is what is implemented.
-- **Mutation reconciliation is advisory.** The UI tells the user the outcome
-  is unconfirmed and points them at the record to check; it does not
-  automatically reconcile against the server. A server-side idempotency key
-  per mutation would let it do so and is the recommended next step for
-  inventory mutations.
+- **Mutation reconciliation is now keyed, not merely advisory.** The UI still
+  tells the user an interrupted write has an unconfirmed outcome and points
+  them at the record. Inventory mutations also carry a server-side idempotency
+  key, so a retry with the same key replays the first response rather than
+  posting again. Writes without a key (none of the shipped forms) keep the old
+  behaviour.
 - **Integration/E2E tests require infrastructure.** The backend integration
   suite and the Playwright suite need a PostgreSQL 16 `_test` database and
   installed browsers (see `docs/audits/system/FAILURE_REGISTER.md` F-07).

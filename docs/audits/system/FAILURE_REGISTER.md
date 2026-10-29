@@ -87,3 +87,14 @@ disagree, the code wins.
 
 Gates after the fixes: typecheck, lint and production build clean; backend 882
 tests, frontend 962 tests, all passing.
+
+## Re-verification — 2026-10-29 (fifth pass, idempotent inventory mutations)
+
+The remaining gap in the error-handling workstream was TD-019/ARCH-02: an
+interrupted inventory mutation could be double-posted by an explicit retry.
+Inventory mutations now carry a server-side idempotency key. Where this
+register and the code disagree, the code wins.
+
+| ID | Status now | Evidence |
+|---|---|---|
+| F-14 | **Resolved for inventory** | Every inventory mutation route (`/inventory-issues`, `/inventory-transfers`, `/inventory-adjustments`, `/stock-counts`, `/stock-receipts`, `/inventory-returns`, `/inventory-transactions/:id/returns`, `/inventory-transactions/:id/reversal`) accepts an optional `Idempotency-Key` and runs through `withIdempotency` (`src/shared/idempotency.ts`). The operation and the stored key commit in one transaction (the new `idempotency_keys` table, migration `20260101000030_idempotency_keys`), so a repeat with the same key replays the stored status and body (`Idempotency-Replayed: true`) and posts nothing; a key reused with a different body — or, via the request-scoped hash, a different record — is refused `409 CONFLICT`. A failed attempt stores no key, so a genuine retry still runs. The frontend mints one key per submission (`src/lib/idempotency.ts`) across all five mutation forms and rotates it only after a confirmed success. Covered by `integration/idempotency.real-http.test.ts` (5 tests) and `src/lib/idempotency.test.ts`; the remaining write endpoints (procurement, master data) are not yet keyed and stay tracked under TD-019. |

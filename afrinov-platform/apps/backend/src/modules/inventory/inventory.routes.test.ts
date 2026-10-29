@@ -158,7 +158,7 @@ describe('inventory routes', () => {
       const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-issues', headers: authed(), payload });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ transactionIds: ['tx-1'] });
-      expect(mockedIssue).toHaveBeenCalledWith({ ...payload, actorId: 'user-admin' });
+      expect(mockedIssue).toHaveBeenCalledWith({ ...payload, actorId: 'user-admin' }, undefined);
     });
   });
 
@@ -186,7 +186,7 @@ describe('inventory routes', () => {
       });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ transactionId: 'tx-r1', returnedQuantity: '3', returnableQuantity: '7' });
-      expect(mockedReturn).toHaveBeenCalledWith({ issueTransactionId: 'tx-1', quantity: 3, locationId: OTHER_UUID, reason: 'Job done', actorId: 'user-admin' });
+      expect(mockedReturn).toHaveBeenCalledWith({ issueTransactionId: 'tx-1', quantity: 3, locationId: OTHER_UUID, reason: 'Job done', actorId: 'user-admin' }, undefined);
     });
   });
 
@@ -215,7 +215,7 @@ describe('inventory routes', () => {
       const res = await app.inject({ method: 'POST', url: '/api/v1/inventory-returns', headers: authed(), payload: body });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ transactionIds: ['tx-r1', 'tx-r2'] });
-      expect(mockedReturnMany).toHaveBeenCalledWith({ ...body, reason: 'Job done', actorId: 'user-admin' });
+      expect(mockedReturnMany).toHaveBeenCalledWith({ ...body, reason: 'Job done', actorId: 'user-admin' }, undefined);
     });
   });
 
@@ -273,7 +273,7 @@ describe('inventory routes', () => {
       const res = await app.inject({ method: 'POST', url: '/api/v1/stock-receipts', headers: authed('user-store', ['receive:inventory']), payload: { ...receipt, receivedAt: '2026-10-01' } });
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ goodsReceiptId: 'gr-1', number: 'GR-2026-0001', transactionIds: ['t-1'] });
-      expect(mockedReceive).toHaveBeenCalledWith({ ...receipt, receivedAt: '2026-10-01', actorId: 'user-store' });
+      expect(mockedReceive).toHaveBeenCalledWith({ ...receipt, receivedAt: '2026-10-01', actorId: 'user-store' }, undefined);
     });
   });
 
@@ -311,6 +311,7 @@ describe('inventory routes', () => {
       expect(res.json()).toEqual({ outTransactionId: 'tx-out-1', inTransactionId: 'tx-in-1' });
       expect(mockedTransfer).toHaveBeenCalledWith(
         expect.objectContaining({ actorId: 'user-admin' }),
+        undefined,
       );
     });
   });
@@ -348,6 +349,7 @@ describe('inventory routes', () => {
       expect(res.json()).toEqual({ transactionId: 'tx-1' });
       expect(mockedAdjust).toHaveBeenCalledWith(
         expect.objectContaining({ actorId: 'user-admin' }),
+        undefined,
       );
     });
   });
@@ -489,7 +491,7 @@ describe('inventory routes', () => {
         payload: { reason: `  ${reason}  `, actorId: 'someone-else' },
       });
       expect(res.statusCode).toBe(201);
-      expect(mockedReverse).toHaveBeenCalledExactlyOnceWith({ transactionId: 'tx-1', reason, actorId: 'user-admin' });
+      expect(mockedReverse).toHaveBeenCalledExactlyOnceWith({ transactionId: 'tx-1', reason, actorId: 'user-admin' }, undefined);
     });
 
     it('does not accept the retired update permission as authorization to reverse', async () => {
@@ -584,7 +586,7 @@ describe('inventory routes', () => {
         transactionId: 'tx-1',
         reason: 'Wrong item',
         actorId: 'user-admin',
-      });
+      }, undefined);
     });
   });
 

@@ -12,8 +12,10 @@
    `POST /auth/login`.*
 3. Every mutating endpoint is idempotent-safe for retries where practical
    (e.g. via a client-supplied idempotency key on POST), so a network retry
-   never double-posts a transaction. ***Planned** — no endpoint accepts an
-   idempotency key, so a retried issue posts twice (TD-019).
+   never double-posts a transaction. *Followed for inventory: every inventory
+   mutation accepts an `Idempotency-Key` and replays the stored response on a
+   repeat (`src/shared/idempotency.ts`, TD-019 partly resolved). The remaining
+   write endpoints (procurement, master data) do not yet accept a key.
    Purchase-order transitions are protected against double application by
    their status guards.*
 4. Responses never expose internal implementation details (raw stack

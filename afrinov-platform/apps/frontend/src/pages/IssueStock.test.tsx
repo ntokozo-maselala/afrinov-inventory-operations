@@ -83,7 +83,7 @@ describe('IssueStock page', () => {
         { materialId: 'm-1', locationId: 'l-1', quantity: 3 },
         { materialId: 'm-2', locationId: 'l-1', quantity: 2 },
       ],
-    }));
+    }, expect.any(Object)));
 
     // The confirmation stays on the page, with the way to today's slip for them.
     const slip = await screen.findByRole('link', { name: 'See the issue slip in Movements' });
@@ -247,7 +247,7 @@ describe('IssueStock with project material', () => {
       recipientId: 'r-1',
       projectNumber: 'AFRI-1325',
       lines: [{ materialId: 'p-1', locationId: 'l-1', quantity: 2 }, { materialId: 'm-1', locationId: 'l-1', quantity: 1 }],
-    }));
+    }, expect.any(Object)));
   });
 
   it('frees the project again once its material is removed', async () => {

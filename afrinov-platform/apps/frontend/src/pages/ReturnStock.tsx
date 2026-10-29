@@ -17,6 +17,7 @@ import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
+import { useIdempotencyKey } from '../lib/idempotency';
 import type { ReturnableLine } from '../api/types';
 import { locationLabel } from '../lib/locations';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -50,6 +51,7 @@ export function ReturnStock() {
   // The return just booked, kept on the page (a toast fades) with a way to see it in the report.
   const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
   const toast = useToast();
+  const idem = useIdempotencyKey();
 
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
   const who = (recipients.data ?? []).find((r) => r.id === recipientId)?.name;
@@ -90,12 +92,13 @@ export function ReturnStock() {
           quantity: parseQty(qty[l.issueTransactionId])!,
           locationId: target(l) !== l.locationId ? target(l) : undefined,
         })),
-      });
+      }, { idempotencyKey: idem.key() });
       toast.success(`Returned ${entered.length} item${entered.length === 1 ? '' : 's'}${who ? ` from ${who}` : ''}`);
       setLast({ who: who ?? 'them', recipientId, count: entered.length });
       setQty({});
       setInto({});
       setNote('');
+      idem.rotate();
       lines.reload();
     } catch (err) {
       setError((err as ApiError).message);

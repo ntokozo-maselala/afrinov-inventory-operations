@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
@@ -444,12 +445,12 @@ export const InventoryService = {
    * and signed totals net to zero. Both legs of a transfer are reversed
    * together. A transaction can be reversed at most once (unique reverses_id).
    */
-  async reverse(input: ReverseInput): Promise<{ reversalIds: string[] }> {
+  async reverse(input: ReverseInput, within?: Prisma.TransactionClient): Promise<{ reversalIds: string[] }> {
     const reason = input.reason.trim();
     if (!reason) throw Errors.validation('A reason is required to reverse a movement');
 
     try {
-      return await prisma.$transaction(async (tx) => {
+      return await inTx(within, async (tx) => {
         const original = await tx.inventoryTransaction.findUnique({
           where: { id: input.transactionId },
           include: { reversedBy: { select: { id: true } } },
@@ -558,7 +559,7 @@ export const InventoryService = {
     }
   },
 
-  async issue(input: IssueInput): Promise<{ transactionIds: string[] }> {
+  async issue(input: IssueInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[] }> {
     if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, qty: toDecimal(l.quantity) }));
@@ -573,7 +574,7 @@ export const InventoryService = {
       else totals.set(key, { materialId: l.materialId, locationId: l.locationId, qty: l.qty });
     }
 
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       await lockInventoryBalances([...totals.values()], tx);
       await checkRecipientActive(input.recipientId, tx);
       if (input.projectNumber) await checkProjectTakesIssues(input.projectNumber, tx);
@@ -654,11 +655,11 @@ export const InventoryService = {
    * issue and keeps its recipient and project, so project consumption nets the
    * return out. At most the issued quantity, less what has already come back.
    */
-  async returnToStock(input: ReturnInput): Promise<{ transactionId: string; returnedQuantity: string; returnableQuantity: string }> {
+  async returnToStock(input: ReturnInput, within?: Prisma.TransactionClient): Promise<{ transactionId: string; returnedQuantity: string; returnableQuantity: string }> {
     const qty = toDecimal(input.quantity);
     if (!gtZero(qty)) throw Errors.validation('Return quantity must be positive');
 
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       const r = await bookReturn(tx, { ...input, qty, postedAt: new Date() });
       await dispatchDomainEvents([
         { type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: qty.toNumber() },
@@ -673,12 +674,12 @@ export const InventoryService = {
    * own issue: booked all-or-nothing, as an issue is. The same issue on two
    * lines is checked as one total, because each line counts the ones before it.
    */
-  async returnMany(input: ReturnManyInput): Promise<{ transactionIds: string[] }> {
+  async returnMany(input: ReturnManyInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[] }> {
     if (input.lines.length === 0) throw Errors.validation('Add at least one item that is coming back');
     const lines = input.lines.map((l) => ({ ...l, qty: toDecimal(l.quantity) }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Return quantity must be positive');
 
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       const postedAt = new Date();
       const transactionIds: string[] = [];
       const events: DomainEvent[] = [];
@@ -746,14 +747,14 @@ export const InventoryService = {
     });
   },
 
-  async transfer(input: TransferInput): Promise<{ outTransactionId: string; inTransactionId: string }> {
+  async transfer(input: TransferInput, within?: Prisma.TransactionClient): Promise<{ outTransactionId: string; inTransactionId: string }> {
     const qty = toDecimal(input.quantity);
     if (!gtZero(qty)) throw Errors.validation('Transfer quantity must be positive');
     if (input.fromLocationId === input.toLocationId) {
       throw Errors.validation('Source and destination locations must differ');
     }
 
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       await lockInventoryBalances([{ materialId: input.materialId, locationId: input.fromLocationId }, { materialId: input.materialId, locationId: input.toLocationId }], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.fromLocationId, tx);
@@ -810,11 +811,11 @@ export const InventoryService = {
     });
   },
 
-  async adjust(input: AdjustmentInput): Promise<{ transactionId: string }> {
+  async adjust(input: AdjustmentInput, within?: Prisma.TransactionClient): Promise<{ transactionId: string }> {
     const qty = toDecimal(input.quantity);
     if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
 
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       await lockInventoryBalances([{ materialId: input.materialId, locationId: input.locationId }], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);

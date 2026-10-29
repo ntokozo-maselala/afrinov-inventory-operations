@@ -18,7 +18,10 @@
 - The system must not lose data on a failed request — the client should be
   able to tell whether an operation succeeded, failed, or is unknown, and
   retries must not double-post a transaction (idempotency on write
-  endpoints). ***Planned:*** no idempotency keys exist (TD-019).
+  endpoints). *Met for inventory:* every inventory mutation accepts an
+  `Idempotency-Key` and replays the stored response on a repeat, so a retry
+  cannot double-post (TD-019 partly resolved). Procurement and master-data
+  writes do not yet accept a key.
 
 ## Security
 - All access requires authentication; no anonymous write access.

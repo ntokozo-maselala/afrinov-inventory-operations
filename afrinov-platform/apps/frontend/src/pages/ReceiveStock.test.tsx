@@ -91,7 +91,7 @@ describe('ReceiveStock page', () => {
         // The new line starts in the same location as the line above it.
         { materialId: 'm-2', locationId: 'l-1', quantity: 6 },
       ],
-    }));
+    }, expect.any(Object)));
     expect(await screen.findByText(/as GR-2026-0007/)).toBeInTheDocument();
   });
 

@@ -22,6 +22,15 @@
   every row. Cursor pagination is **Planned** (TD-019).
 - Request bodies are validated with Zod at the route; a failure returns
   `400 VALIDATION_ERROR` with the flattened Zod issues in `details`.
+- **Idempotency:** inventory mutations (`/inventory-issues`,
+  `/inventory-transfers`, `/inventory-adjustments`, `/stock-counts`,
+  `/stock-receipts`, `/inventory-returns`,
+  `/inventory-transactions/:id/returns`, `/inventory-transactions/:id/reversal`)
+  accept an optional `Idempotency-Key` header. A repeat with the same key and
+  the same request replays the stored status and body and carries
+  `Idempotency-Replayed: true`; the same key with a different body or record
+  answers `409 CONFLICT`. Keys are scoped per actor, route and record and are
+  stored with the movement in one transaction.
 - Dates: ISO 8601 strings; timestamps are returned in UTC
   (`toISOString()`). Some inputs are dates only (`YYYY-MM-DD`, e.g. report
   ranges) or a month (`YYYY-MM`, month-end).

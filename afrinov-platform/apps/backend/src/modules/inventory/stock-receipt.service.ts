@@ -4,6 +4,7 @@
 // works whether or not procurement is switched on. All-or-nothing.
 import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
@@ -113,7 +114,7 @@ export const StockReceiptService = {
   },
 
 
-  async receive(input: ReceiveStockInput): Promise<ReceiveStockResult> {
+  async receive(input: ReceiveStockInput, within?: Prisma.TransactionClient): Promise<ReceiveStockResult> {
     const deliveryRef = input.deliveryRef?.trim();
     if (!deliveryRef) throw Errors.validation('Enter the delivery note or invoice number');
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to receive');
@@ -121,7 +122,7 @@ export const StockReceiptService = {
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Received quantity must be positive');
     const receivedAt = parseReceivedAt(input.receivedAt);
 
-    return prisma.$transaction(async (tx) => {
+    return inTx(within, async (tx) => {
       // Serialise receipt numbering, as GoodsReceiptService.create does. The
       // number is locked before stock balances, as there, so a stock receipt
       // and a receipt against an order cannot deadlock.

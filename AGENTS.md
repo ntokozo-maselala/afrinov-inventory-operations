@@ -123,6 +123,15 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `OUTCOME_UNKNOWN` (check the record, then retry), not a retryable read
   timeout. Error toasts are capped at three so an outage cannot fill the
   screen.
+- **Inventory mutations are retry-safe through an idempotency key.** The
+  frontend mints one `Idempotency-Key` per logical submission
+  (`src/lib/idempotency.ts`) and reuses it across retries; the backend stores
+  it in `idempotency_keys` inside the same transaction as the movement
+  (`src/shared/idempotency.ts`), so a retry replays the first response instead
+  of posting twice. The key is scoped by actor, route *and* concrete path, so
+  the same key on a different record is a `CONFLICT`, not a replay. Wire new
+  mutation forms through `useIdempotencyKey` and rotate the key only after a
+  confirmed success — never after an `OUTCOME_UNKNOWN` failure.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See
