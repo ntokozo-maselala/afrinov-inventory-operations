@@ -431,11 +431,13 @@ export const OPERATIONS: Operation[] = [
   // Purchase orders and goods receipts (PROCUREMENT_ENABLED)
   {
     method: 'get', path: '/purchase-orders', tag: 'Purchase orders', summary: 'List purchase orders', procurement: true,
+    description: 'Stores orders (no project) are listed only to those with `order:stores_stock`; anyone else gets project orders. With awaitingMyApproval, the orders the user may approve now: Stores orders for the store, project orders for approvers.',
     permissions: [P.ViewPurchaseOrder],
     query: listPOQuerySchema, errors: [400],
   },
   {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
+    description: 'A Stores order (no project) is not found (404) to anyone without `order:stores_stock`; so are its history and approval.',
     procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
   },
   {
@@ -460,7 +462,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/purchase-orders/:id/approve', tag: 'Purchase orders', summary: 'Approve a submitted order',
     description: 'Every line needs a price (400), and the order total in rand including VAT must be within the approver\'s limit (403, naming who can approve it). Orders in other currencies need an approver without a limit.',
-    procurement: true, permissions: [P.ApprovePurchaseOrder], errors: [400, 403, 404, 409],
+    procurement: true, byOrderKind: P.ApprovePurchaseOrder, errors: [400, 403, 404, 409],
   },
   {
     method: 'get', path: '/purchase-orders/:id/approval', tag: 'Purchase orders', summary: 'Who may approve this order, and whether you can',

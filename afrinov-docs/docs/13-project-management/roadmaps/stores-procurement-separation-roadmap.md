@@ -8,12 +8,12 @@ Four phases that take every connection out between the **Stores** side of the bu
 
 It builds on the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (merged as #117), which split who *raises* each kind but still let each side see the other's orders and sent Stores orders to Procurement's approvers.
 
-**Status:** Phase 1 built on `feature/stores-procurement-separation` (branched from #118), not yet committed. Phase 2 is next; Phase 3 waits for one decision (how a project order is finished).
+**Status:** Phase 1 is in PR #119. Phase 2 is built on `feature/stores-approval` (branched from #119), not yet committed. Phase 3 waits for one decision (how a project order is finished).
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Separate homes for each kind of order | M | Built |
-| 2 | Access and approval on the server | M | Planned |
+| 2 | Access and approval on the server | M | Built |
 | 3 | Receiving, and finishing project orders | M | Waiting on a decision |
 | 4 | Roles end to end and docs | S | Planned |
 
@@ -43,13 +43,13 @@ Admin keeps access to both. The Director's access is decided after this roadmap.
 | Who sees Stores orders | Only those who order Stores stock: the storeman and Admin. Buyers and approvers don't | 29 Oct 2026 |
 | Who approves Stores orders | The storeman, on the order's page in Order stock | 29 Oct 2026 |
 | Project material at the workshop | It doesn't come there: it goes from the supplier straight to site, so the storeman doesn't receive it | 29 Oct 2026 |
-| Storeman's approval limit | By value as for approvers: his limit is set in Settings → Users, and blank means no limit. A limit can be added later without rebuilding | Proposed |
+| Storeman's approval limit | By value as for approvers: his limit is set in Settings → Users, and blank means no limit. A limit can be added later without rebuilding | Built in Phase 2 |
 | How a project order is finished | **Open.** 1) Procurement confirms delivery on the order, no stock added (recommended); 2) received into a site location; 3) nobody confirms, the buyer closes it | Open |
 | Orders from before | Untouched: Stores orders already approved by an approver stay approved; old links redirect to each order's own section | Proposed |
 
 ### Order of work
 
-First open the pull request for `fix/stock-order-catalogue-only` (stock orders take catalogue items only, the simpler New item drawer, the On order view), so this work starts from main. Then one branch and pull request per phase, `feature/stores-procurement-separation`, in order. Phase 1 changes no rules, so it can merge on its own: until Phase 2 hands approval to the storeman, an approver's Waiting for my approval still holds Stores orders (each opening in Order stock), so it matches the Dashboard's count (Qodo, PR #119). Phases 2 and 3 change who may do what, so they should reach the business together.
+First open the pull request for `fix/stock-order-catalogue-only` (stock orders take catalogue items only, the simpler New item drawer, the On order view), so this work starts from main. Then one branch and pull request per phase, `feature/stores-procurement-separation`, in order. Phase 1 changes no rules, so it can merge on its own: until Phase 2 hands approval to the storeman, an approver's Waiting for my approval still holds Stores orders (each opening in Order stock), so it matches the Dashboard's count (Qodo, PR #119). Phase 2 takes them out again. Merge #118, then #119, then Phase 2. Phases 2 and 3 change who may do what, so they should reach the business together.
 
 ## Phase 1: Separate homes for each kind of order
 
@@ -71,15 +71,17 @@ Tests: `lib/orderKind.test.ts` (each kind's address), `PoApproval.test.tsx` (a S
 
 Size M. Backend, mock and frontend. No migration: it reuses the `order:stores_stock` permission from the Stores Ordering Roadmap.
 
-- [ ] **2.1 Only the store sees Stores orders.** Opening a Stores order, its Activity and its approval panel need `order:stores_stock`; without it the answer is *not found*, so a buyer can't even tell one exists. The order list leaves Stores orders out for anyone without it.
+- [x] **2.1 Only the store sees Stores orders.** Opening a Stores order, its Activity and its approval panel need `order:stores_stock`; without it the answer is *not found*, so a buyer can't even tell one exists. The order list leaves Stores orders out for anyone without it, and changing one (edit, submit, cancel, close, approve) is *not found* to them too. Order stock opens only for those who order Stores stock.
   Files: `procurement/procurement.routes.ts`, `procurement.service.ts`
-- [ ] **2.2 The storeman approves Stores orders.** Approving a Stores order needs `order:stores_stock`, by value against the approving user's limit (Settings → Users; blank means no limit). Approvers no longer approve them, and approving a project order is as now.
+- [x] **2.2 The storeman approves Stores orders.** Approving a Stores order needs `order:stores_stock`, by value against the approving user's limit (Settings → Users; blank means no limit). Approvers no longer approve them, and approving a project order is as now.
   Files: `procurement.routes.ts`, `po-approval.ts` (who may approve each kind), `procurement.service.ts`
-- [ ] **2.3 Each side's approval queue.** "Waiting for my approval" lists what the signed-in user may approve, so the storeman's holds Stores orders and an approver's holds project orders. Order stock gets the same view; the Dashboard's Waiting for your approval opens each order in its own section.
+- [x] **2.3 Each side's approval queue.** "Waiting for my approval" lists what the signed-in user may approve, so the storeman's holds Stores orders and an approver's holds project orders. Order stock gets the same view (`/stock/orders?status=mine`), and Procurement's holds project orders only again. The Dashboard's Pending Approvals card counts what the user may approve and opens their own section's queue; someone who approves both (Admin) sees how many of each and opens the side with project orders waiting, else Order stock.
   Files: `pages/StoresOrders.tsx`, `pages/Dashboard.tsx`, `pages/PurchaseOrderDetail.tsx`
-- [ ] **2.4 Approval limits for the storeman.** Settings → Users lets an admin set an approval limit on a storeman, as on an approver.
+- [x] **2.4 Approval limits for the storeman.** Settings → Users lets an admin set an approval limit on a storeman, as on an approver; the list says "Approves stock orders …" for him.
   Files: `pages/SettingsSections.tsx`
-- [ ] **2.5 API docs and mock.** `openapi/document.ts` and `mock/mockApi.ts` follow.
+- [x] **2.5 API docs and mock.** `openapi/document.ts` names each kind's permission on approve and says a Stores order is *not found* without `order:stores_stock`. The mock signs in as Admin, who sees and approves both, so it needs no change.
+
+Tests: `procurement.real-http.test.ts` (a buyer gets *not found* for a Stores order and none in a list; the storeman and an approver each approve only their own kind; the storeman is held to his limit), `procurement.service.test.ts` (each kind's approvers), `StoresOrders.test.tsx`, `Dashboard.test.tsx`, `ApprovalLimits.test.tsx`, `PoWaitingForMe.test.tsx`.
 
 **Done when:** a buyer or approver gets *not found* for a Stores order and sees none in any list; the storeman approves a Stores order from Order stock within his limit.
 

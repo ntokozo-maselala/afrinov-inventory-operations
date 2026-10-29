@@ -171,10 +171,39 @@ describe('Dashboard: pending approvals card', () => {
   });
 
   it('is not shown to those who do not approve', async () => {
-    auth.roles = ['STORE_CONTROLLER'];
+    auth.roles = ['TECHNICIAN'];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await screen.findByText('Stock value by category');
     expect(screen.queryByText('Pending Approvals')).not.toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
+  });
+
+  // Stores and Procurement Separation Roadmap: the store approves its own stock orders, in Order stock.
+  it("opens the storeman's queue in Order stock", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(card).toHaveAttribute('href', '/stock/orders?status=mine');
+    expect(await within(card).findByText('1')).toBeInTheDocument();
+  });
+
+  it('counts both kinds for someone who approves both, and opens the side with project orders waiting', async () => {
+    auth.roles = ['ADMIN'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') {
+        return [{ ...order('po-1', 'AFRI-0101', '920.00'), projectNumber: 'AFRI-1402' }, { ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      }
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(card).toHaveAttribute('href', '/purchase-orders?status=mine');
+    expect(await within(card).findByText('waiting for your approval (1 purchase, 1 stock)')).toBeInTheDocument();
   });
 });

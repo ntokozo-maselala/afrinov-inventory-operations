@@ -335,6 +335,8 @@ function toDateOnly(iso: string): Date {
 export const ORDER_KINDS = ['stores', 'projects'] as const;
 export type OrderKind = (typeof ORDER_KINDS)[number];
 
+export const kindOfOrder = (po: { projectNumber: string | null }): OrderKind => (po.projectNumber ? 'projects' : 'stores');
+
 export const PurchaseOrderService = {
   async list(filter: { status?: PurchaseOrderStatus; projectNumber?: string; kind?: OrderKind } = {}) {
     const { kind, ...where } = filter;
@@ -352,14 +354,18 @@ export const PurchaseOrderService = {
    * as they have waited longest. Empty for anyone who may not approve.
    */
   async awaitingApproval(actorId: string, kind?: OrderKind) {
-    const me = (await listApprovers()).find((a) => a.id === actorId);
-    if (!me) return [];
-    const orders = await prisma.purchaseOrder.findMany({
-      where: { status: 'PENDING_APPROVAL', ...(kind ? { projectNumber: kind === 'stores' ? null : { not: null } } : {}) },
-      include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
-      orderBy: { createdAt: 'asc' },
-    });
-    return orders.filter((po) => !approvalBlock(po, me.approvalLimit)).map(withTotals);
+    // Each kind has its own approvers: the store approves Stores orders, approvers project orders.
+    const waiting = [];
+    for (const k of kind ? [kind] : ORDER_KINDS) {
+      const me = (await listApprovers(k)).find((a) => a.id === actorId);
+      if (!me) continue;
+      const orders = await prisma.purchaseOrder.findMany({
+        where: { status: 'PENDING_APPROVAL', projectNumber: k === 'stores' ? null : { not: null } },
+        include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
+      });
+      waiting.push(...orders.filter((po) => !approvalBlock(po, me.approvalLimit)));
+    }
+    return waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(withTotals);
   },
 
   async getById(id: string) {
@@ -668,7 +674,7 @@ export const PurchaseOrderService = {
   async approval(id: string, actorId: string) {
     const po = await prisma.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
     if (!po) throw Errors.notFound('PurchaseOrder');
-    const approvers = await listApprovers();
+    const approvers = await listApprovers(kindOfOrder(po));
     const me = approvers.find((a) => a.id === actorId);
     const block = me ? approvalBlock(po, me.approvalLimit) : null;
     return {
@@ -694,7 +700,7 @@ export const PurchaseOrderService = {
       const block = approvalBlock(po, actor?.approvalLimit ?? null);
       if (block?.code === 'UNPRICED') throw Errors.validation(block.message);
       if (block) {
-        const names = approversFor(po, await listApprovers()).map((a) => a.name);
+        const names = approversFor(po, await listApprovers(kindOfOrder(po))).map((a) => a.name);
         throw Errors.forbidden(`${block.message} ${whoToAsk(names)}`);
       }
       const now = new Date();

@@ -37,6 +37,8 @@ describe('approval limits', () => {
     expect(screen.getByText(/Approves orders up to R\s500\s000,00/)).toBeInTheDocument();
     expect(screen.getByText('Approves orders of any value')).toBeInTheDocument();
     expect(screen.getAllByText(/Approves orders/)).toHaveLength(2);
+    // The store controller approves the store's stock orders (Stores and Procurement Separation Roadmap).
+    expect(within(row('Store Controller')).getByText('Approves stock orders of any value')).toBeInTheDocument();
   });
 
   it('sets a limit on an approver; blank means no limit', async () => {

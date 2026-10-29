@@ -22,7 +22,7 @@ const ALL = [...MINE, order('po-2', 'AFRI-0102', 'PENDING_APPROVAL'), order('po-
 
 beforeEach(() => {
   auth.roles = ['APPROVER'];
-  mockGet.mockReset().mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true' ? MINE : ALL));
+  mockGet.mockReset().mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true&kind=projects' ? MINE : ALL));
 });
 
 const list = (url = '/purchase-orders') => render(
@@ -35,16 +35,16 @@ describe('Waiting for my approval', () => {
     expect(await screen.findByText('AFRI-0101')).toBeInTheDocument();
     expect(screen.queryByText('AFRI-0102')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Filter by status')).toHaveValue('mine');
-    expect(mockGet).toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
+    // Procurement's queue: project orders only; the store approves its own in Order stock.
+    expect(mockGet).toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true&kind=projects');
   });
 
-  // Qodo, PR #119: until the storeman approves Stores orders, an approver's
-  // queue keeps them, so it matches the Dashboard's count; each opens in Order stock.
-  it("keeps a Stores order waiting for the approver, opening it in Order stock", async () => {
+  it('never shows a Stores order, even were the server to send one', async () => {
     const stores = { ...order('po-9', 'AFRI-0109', 'PENDING_APPROVAL'), projectNumber: null };
-    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true' ? [...MINE, stores] : ALL));
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true&kind=projects' ? [...MINE, stores] : ALL));
     list();
-    expect(await screen.findByRole('link', { name: 'AFRI-0109' })).toHaveAttribute('href', '/stock/orders/po-9');
+    expect(await screen.findByText('AFRI-0101')).toBeInTheDocument();
+    expect(screen.queryByText('AFRI-0109')).not.toBeInTheDocument();
   });
 
   it('can be left for all statuses, and back', async () => {
@@ -57,7 +57,7 @@ describe('Waiting for my approval', () => {
   });
 
   it('says when nothing is waiting', async () => {
-    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true' ? [] : ALL));
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?awaitingMyApproval=true&kind=projects' ? [] : ALL));
     list();
     expect(await screen.findByText('Nothing is waiting for your approval')).toBeInTheDocument();
   });

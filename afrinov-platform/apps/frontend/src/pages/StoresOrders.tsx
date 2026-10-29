@@ -6,8 +6,13 @@
 // "On order" lists what the store is still waiting for, and each such order
 // has Receive, which opens its Receive delivery as Receive stock's "Receive
 // against" does. Counter deliveries without an order stay on Receive stock.
+//
+// Stores orders are the store's alone (Stores and Procurement Separation
+// Roadmap, Phase 2): only those who order Stores stock open this page, and the
+// storeman approves them here ("Waiting for my approval", ?status=mine), by
+// value against his limit.
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -20,28 +25,35 @@ import { Icon } from '../components/Icon';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { usePermissions } from '../hooks/usePermissions';
 import { orderPath } from '../lib/orderKind';
-import { orderColumns, STATUS_OPTIONS, type PO } from './PurchaseOrders';
+import { MINE, orderColumns, STATUS_OPTIONS, type PO } from './PurchaseOrders';
 
 /** Approved and not yet fully received: what the store is still waiting for. */
 const ON_ORDER = 'APPROVED,PARTIALLY_RECEIVED';
 const RECEIVABLE = ON_ORDER.split(',');
-const STORES_STATUS_OPTIONS = [STATUS_OPTIONS[0]!, { value: ON_ORDER, label: 'On order (awaiting delivery)' }, ...STATUS_OPTIONS.slice(1)];
+const STORES_STATUS_OPTIONS = [
+  STATUS_OPTIONS[0]!, { value: MINE, label: 'Waiting for my approval' }, { value: ON_ORDER, label: 'On order (awaiting delivery)' }, ...STATUS_OPTIONS.slice(1),
+];
 
 export function StoresOrders() {
   const { hasPermission } = usePermissions();
-  if (!hasPermission('orders:view')) {
+  if (!hasPermission('stores:order')) {
     return <NoAccess title="Order stock" action="see the store's orders" section={{ label: 'Stock', to: '/stock' }} />;
   }
   // Receiving posts a goods receipt, so it needs the server's permission for that too, as on the order's page.
   const canReceive = hasPermission('orders:receive') && hasPermission('inventory:receive');
-  return <StoresOrderList canOrder={hasPermission('stores:order')} canReceive={canReceive} />;
+  return <StoresOrderList canReceive={canReceive} />;
 }
 
-function StoresOrderList({ canOrder, canReceive }: { canOrder: boolean; canReceive: boolean }) {
-  const orders = useApi<PO[]>('/purchase-orders?kind=stores');
+function StoresOrderList({ canReceive }: { canReceive: boolean }) {
+  // The status lives in the link (?status=), so the Dashboard can open "Waiting for my approval".
+  const [params, setParams] = useSearchParams();
+  const status = params.get('status') ?? '';
+  const setStatus = (v: string) => setParams((p) => { if (v) p.set('status', v); else p.delete('status'); return p; }, { replace: true });
+  const mine = status === MINE;
+  // "Waiting for my approval" depends on the storeman's limit, so the server picks those.
+  const orders = useApi<PO[]>(mine ? '/purchase-orders?awaitingMyApproval=true&kind=stores' : '/purchase-orders?kind=stores');
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
-  const statuses = status ? status.split(',') : [];
+  const statuses = status && !mine ? status.split(',') : [];
   const needle = q.trim().toLowerCase();
   const filtered = (orders.data ?? []).filter((p) => {
     if (statuses.length > 0 && !statuses.includes(p.status)) return false;
@@ -63,8 +75,8 @@ function StoresOrderList({ canOrder, canReceive }: { canOrder: boolean; canRecei
     <div>
       <PageHeader
         title="Order stock"
-        description="Stock ordered for the store: Stores items, without a project. Each order goes for approval by value and is received on Receive stock."
-        actions={canOrder ? newOrder : undefined}
+        description="Stock ordered for the store: Stores items, without a project. The store approves each order by value, and receives it here or on Receive stock."
+        actions={newOrder}
       />
 
       <Toolbar
@@ -98,11 +110,13 @@ function StoresOrderList({ canOrder, canReceive }: { canOrder: boolean; canRecei
               title={status === ON_ORDER && !q ? 'Nothing is on order' : 'No orders match your filters'}
               description={status === ON_ORDER && !q ? 'Approved orders show here until everything on them has arrived.' : 'Try another status, or clear the filters.'}
             />
+          ) : mine && !q ? (
+            <EmptyState title="Nothing is waiting for your approval" description="Stock orders within your limit appear here once they are submitted and priced." />
           ) : (
             <EmptyState
               title="No stock orders yet"
               description="Order Stores items that are running low. Stock status's re-order list fills one in for you."
-              action={canOrder ? newOrder : undefined}
+              action={newOrder}
             />
           )}
         />

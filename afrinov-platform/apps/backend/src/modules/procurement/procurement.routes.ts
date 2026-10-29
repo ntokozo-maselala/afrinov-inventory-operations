@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
-import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService } from './procurement.service.js';
+import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService, kindOfOrder } from './procurement.service.js';
+import { Errors } from '../../shared/errors.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
 import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
 import { PermissionCode, type PermissionCodeValue } from '../../shared/permissions.js';
@@ -159,13 +160,24 @@ async function requireForKind(req: FastifyRequest, projectNumber: string | null 
  * As requireForKind, for an existing order. Someone who may change neither
  * kind is refused before the order is looked up, so they can't learn which
  * orders exist; for an order that doesn't exist, the service answers 404.
+ * A Stores order is the store's alone (Stores and Procurement Separation
+ * Roadmap): to anyone else it is not found, so they can't tell it exists.
  */
 async function requireForOrder(req: FastifyRequest, id: string, forProject: PermissionCodeValue): Promise<void> {
   if (!(await userHasPermission(req, forProject)) && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) {
     await requirePermission(req, forProject);
   }
   const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
-  if (po) await requireForKind(req, po.projectNumber, forProject);
+  if (!po) return;
+  if (kindOfOrder(po) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) throw Errors.notFound('PurchaseOrder');
+  await requireForKind(req, po.projectNumber, forProject);
+}
+
+/** Viewing an order: as before, but a Stores order is not found to anyone outside the store. */
+async function requireViewOrder(req: FastifyRequest, id: string): Promise<void> {
+  await requirePermission(req, PermissionCode.ViewPurchaseOrder);
+  const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
+  if (po && kindOfOrder(po) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) throw Errors.notFound('PurchaseOrder');
 }
 
 // Suppliers are shared with inventory (stock items, reports), so they are
@@ -220,12 +232,16 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid purchase order filter', details: parsed.error.flatten() },
       });
     }
-    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req), parsed.data.kind);
-    return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber, kind: parsed.data.kind });
+    // Stores orders are listed only to the store; anyone else gets project orders.
+    const seesStores = await userHasPermission(req, PermissionCode.OrderStoresStock);
+    if (!seesStores && parsed.data.kind === 'stores') return [];
+    const kind = seesStores ? parsed.data.kind : 'projects';
+    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req), kind);
+    return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber, kind });
   });
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ViewPurchaseOrder);
     const id = (req.params as { id: string }).id;
+    await requireViewOrder(req, id);
     return PurchaseOrderService.getById(id);
   });
 
@@ -255,8 +271,8 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/purchase-orders/:id/history', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ViewPurchaseOrder);
     const id = (req.params as { id: string }).id;
+    await requireViewOrder(req, id);
     return PurchaseOrderService.history(id);
   });
 
@@ -268,13 +284,15 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
 
   // Who may approve this order (by limit), and whether the asking user can.
   app.get('/purchase-orders/:id/approval', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ViewPurchaseOrder);
-    return PurchaseOrderService.approval((req.params as { id: string }).id, actorId(req));
+    const id = (req.params as { id: string }).id;
+    await requireViewOrder(req, id);
+    return PurchaseOrderService.approval(id, actorId(req));
   });
 
   app.post('/purchase-orders/:id/approve', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ApprovePurchaseOrder);
     const id = (req.params as { id: string }).id;
+    // A Stores order is approved by the store, a project order by approvers.
+    await requireForOrder(req, id, PermissionCode.ApprovePurchaseOrder);
     return PurchaseOrderService.approve(id, actorId(req));
   });
 
