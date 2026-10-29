@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { orderPath } from '../lib/orderKind';
+import { orderKindOf, orderPath } from '../lib/orderKind';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Toolbar } from '../components/Toolbar';
@@ -86,7 +86,7 @@ export function PurchaseOrders() {
   const filtered = (pos.data ?? []).filter((p) => {
     if (statuses.length > 0 && !statuses.includes(p.status)) return false;
     // As the server answers, but held here too so a Stores order never shows in Procurement.
-    if (!p.projectNumber) return false;
+    if (orderKindOf(p) === 'stores') return false;
     if (project && p.projectNumber !== project) return false;
     if (needle) {
       const hay = `${p.number} ${p.supplier?.name ?? ''} ${p.projectNumber ?? ''}`.toLowerCase();

@@ -7,8 +7,12 @@ import type { Permission } from '../hooks/usePermissions';
 
 export type OrderKind = 'stores' | 'projects';
 
+/**
+ * A Stores order has no project (null, or left out); any project number makes
+ * it a project order. The same rule as the server's, which filters on null.
+ */
 export function orderKindOf(order: { projectNumber?: string | null }): OrderKind {
-  return order.projectNumber ? 'projects' : 'stores';
+  return order.projectNumber == null ? 'stores' : 'projects';
 }
 
 /** The permission that raises, edits, submits, cancels and closes an order of this kind. */

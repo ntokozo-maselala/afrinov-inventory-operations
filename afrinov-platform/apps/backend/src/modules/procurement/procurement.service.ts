@@ -335,7 +335,8 @@ function toDateOnly(iso: string): Date {
 export const ORDER_KINDS = ['stores', 'projects'] as const;
 export type OrderKind = (typeof ORDER_KINDS)[number];
 
-export const kindOfOrder = (po: { projectNumber: string | null }): OrderKind => (po.projectNumber ? 'projects' : 'stores');
+/** A Stores order has no project (null), as the order lists filter; any project number makes it a project order. */
+export const kindOfOrder = (po: { projectNumber?: string | null }): OrderKind => (po.projectNumber == null ? 'stores' : 'projects');
 
 export const PurchaseOrderService = {
   async list(filter: { status?: PurchaseOrderStatus; projectNumber?: string; kind?: OrderKind } = {}) {
@@ -532,7 +533,7 @@ export const PurchaseOrderService = {
       if (nextProject !== undefined && nextProject !== po.projectNumber) {
         // A Stores order and a project order are raised by different teams,
         // so neither becomes the other; a project order can change project.
-        if (!nextProject !== !po.projectNumber) {
+        if ((nextProject === null) !== (kindOfOrder(po) === 'stores')) {
           throw Errors.validation(po.projectNumber
             ? 'A project order stays on a project. Stores stock is ordered from Stores → Order stock.'
             : 'A Stores order has no project. Raise a purchase order for the project instead.');

@@ -170,7 +170,7 @@ async function requireForOrder(req: FastifyRequest, id: string, forProject: Perm
   const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
   if (!po) return;
   if (kindOfOrder(po) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) throw Errors.notFound('PurchaseOrder');
-  await requireForKind(req, po.projectNumber, forProject);
+  await requirePermission(req, kindOfOrder(po) === 'projects' ? forProject : PermissionCode.OrderStoresStock);
 }
 
 /** Viewing an order: as before, but a Stores order is not found to anyone outside the store. */

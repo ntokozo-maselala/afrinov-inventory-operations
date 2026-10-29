@@ -8,6 +8,7 @@ import { StockStatusBadge } from '../components/StockStatusBadge';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { formatNumber, formatDateTime } from '../lib/format';
+import { orderKindOf } from '../lib/orderKind';
 import { formatCurrency } from '../lib/currency';
 import { categoryLabel } from '../lib/categories';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
@@ -46,13 +47,13 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
 function approvalCard(mine: Waiting[], pending: Waiting[] | null, sides: { projects: boolean; stores: boolean }) {
   // Only the kinds this person approves count as "more": a storeman isn't
   // told about project orders waiting for an approver (Qodo, PR #120).
-  const theirs = pending?.filter((o) => (o.projectNumber ? sides.projects : sides.stores)) ?? null;
+  const theirs = pending?.filter((o) => (orderKindOf(o) === 'projects' ? sides.projects : sides.stores)) ?? null;
   const others = theirs ? Math.max(0, theirs.length - mine.length) : 0;
   const more = others === 1 ? '1 more needs prices or a higher limit' : `${formatNumber(others)} more need prices or a higher limit`;
   // Each side approves in its own section (Stores and Procurement Separation
   // Roadmap): stock orders in Order stock, project orders in Procurement.
   // Someone who approves both opens the side that has orders waiting.
-  const projectsWaiting = mine.filter((o) => o.projectNumber).length;
+  const projectsWaiting = mine.filter((o) => orderKindOf(o) === 'projects').length;
   const storesWaiting = mine.length - projectsWaiting;
   const toProjects = sides.projects && (!sides.stores || projectsWaiting > 0 || storesWaiting === 0);
   const both = projectsWaiting > 0 && storesWaiting > 0

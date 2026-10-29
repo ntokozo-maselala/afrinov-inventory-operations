@@ -212,6 +212,31 @@ describe('Dashboard: pending approvals card', () => {
     expect(within(card).queryByText(/more need prices/)).not.toBeInTheDocument();
   });
 
+  // Qodo, PR #120: the Dashboard tells the kinds apart as the server does, by a null project.
+  it('counts an order with an empty project number as a project order, as the server does', async () => {
+    auth.roles = ['ADMIN'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-8', 'AFRI-0108', '500.00'), projectNumber: '' }];
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await approvalCard()).toHaveAttribute('href', '/purchase-orders?status=mine');
+  });
+
+  it("doesn't count an order with an empty project number among the storeman's", async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [];
+      if (path === '/purchase-orders?status=PENDING_APPROVAL') return [{ ...order('po-8', 'AFRI-0108', '500.00'), projectNumber: '' }];
+      if (path === '/reports/stock-value') return VALUE;
+      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = await approvalCard();
+    expect(await within(card).findByText('nothing waiting for you')).toBeInTheDocument();
+  });
+
   it('counts both kinds for someone who approves both, and opens the side with project orders waiting', async () => {
     auth.roles = ['ADMIN'];
     mockGet.mockImplementation(async (path: string) => {
