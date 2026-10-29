@@ -633,6 +633,12 @@ describe('receiving stock over real HTTP', () => {
         const project = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 2, unitPrice: 40 }] });
         expect((await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
         expect((await buyer<{ status: string }>('POST', `/purchase-orders/${project.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+        // "Waiting for my approval" takes the kind filter too (Qodo, PR #117).
+        const waiting = async (kind: string) => (await approver<Array<{ id: string }>>('GET', `/purchase-orders?awaitingMyApproval=true&kind=${kind}`)).body.map((o) => o.id);
+        expect(await waiting('stores')).toContain(store.body.id);
+        expect(await waiting('stores')).not.toContain(project.body.id);
+        expect(await waiting('projects')).toContain(project.body.id);
+        expect(await waiting('projects')).not.toContain(store.body.id);
         for (const id of [store.body.id, project.body.id]) {
           const approved = await approver<{ status: string }>('POST', `/purchase-orders/${id}/approve`);
           expect([id, approved.status, approved.body.status]).toEqual([id, 200, 'APPROVED']);

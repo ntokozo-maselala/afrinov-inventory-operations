@@ -98,13 +98,23 @@ describe('the new-order form with project material', () => {
     await waitFor(() => expect(optionsOf('Project')).toContain('1369 — Plant upgrade'));
     expect(optionsOf('Project')).not.toContain('No project');
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
-    expect(optionsOf('Line 1 material')).not.toContain('+ New item…');
+    // Offered, but a Projects item needs the order's project first.
+    expect(optionsOf('Line 1 material')).toContain('+ New item…');
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
+    expect(await screen.findByText('Choose the project first')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('Choose the project this order is for.')).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1369' } });
-    expect(optionsOf('Line 1 material')).toContain('+ New item…');
+    // The New item button opens the drawer on a new line, fixed to a Projects item for 1369.
+    fireEvent.click(screen.getByRole('button', { name: 'New item' }));
+    const drawer = await screen.findByRole('dialog', { name: 'New item' });
+    expect(within(drawer).getByRole('radio', { name: /Stores/ })).toBeDisabled();
+    expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeChecked();
+    expect(within(drawer).getByLabelText('Project')).toHaveValue('1369');
+    expect(within(drawer).getByLabelText('Project')).toBeDisabled();
   });
 
   it('offers neither a closed project nor its material', async () => {

@@ -562,6 +562,17 @@ describe('requests for quotation over real HTTP', () => {
       const refused = await api<ApiErrorBody>('POST', `/rfqs/${draft.body.id}/send`, {});
       expect(refused.status).toBe(400);
       expect(refused.body.error.message).toMatch(/is for one project/);
+
+      // Nor is one already sent awarded: its order would be a Stores order,
+      // the store's to change, not the buyer's (Qodo, PR #117).
+      const old = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] });
+      const oldSent = (await api<Awarded>('POST', `/rfqs/${old.body.id}/send`, {})).body;
+      await api('PUT', `/rfqs/${oldSent.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: oldSent.lines[0]!.id, unitPrice: 5 }] });
+      await prisma.rfq.update({ where: { id: oldSent.id }, data: { projectNumber: null } });
+      const noProject = await award(oldSent.id, { supplierId: supplierA });
+      expect(noProject.status).toBe(400);
+      expect(noProject.body.error.message).toMatch(/has no project, so it can't be awarded/);
+      expect(await prisma.purchaseOrder.count({ where: { rfq: { id: oldSent.id } } })).toBe(0);
     });
 
     it('raises one order when two buyers award at once', async () => {

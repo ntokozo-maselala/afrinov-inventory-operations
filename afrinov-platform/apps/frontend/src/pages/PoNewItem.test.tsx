@@ -64,7 +64,9 @@ describe('+ New item on an order line', () => {
     const drawer = await lineWithNewItem();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
     expect(within(drawer).getByText(/added as a Projects item for 1369, and goes on line 1/)).toBeInTheDocument();
-    await waitFor(() => expect(within(drawer).getByRole('combobox', { name: /^Project/ })).toHaveValue('1369'));
+    // Fixed to the order's project: the drawer can't add it for another one.
+    expect(within(drawer).getByLabelText('Project')).toHaveValue('1369');
+    expect(within(drawer).getByLabelText('Project')).toBeDisabled();
 
     fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: '1369-FLANGE-150' } });
     fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flange 150NB' } });

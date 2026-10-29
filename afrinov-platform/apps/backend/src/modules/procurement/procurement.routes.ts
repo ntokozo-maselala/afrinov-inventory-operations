@@ -217,10 +217,10 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     const parsed = listPOQuerySchema.safeParse(req.query ?? {});
     if (!parsed.success) {
       return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Unknown purchase order status', details: parsed.error.flatten() },
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid purchase order filter', details: parsed.error.flatten() },
       });
     }
-    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req));
+    if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req), parsed.data.kind);
     return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber, kind: parsed.data.kind });
   });
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {

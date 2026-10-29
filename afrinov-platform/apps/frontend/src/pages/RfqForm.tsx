@@ -137,16 +137,30 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
     materialsReq.reload();
     if (openFor.current?.session !== from.session) { toast.success(`${saved.sku} added to the catalogue`); return; }
     closeNewItem();
-    if (project && sectionOf(saved.category) === 'PROJECTS' && saved.projectNumber !== project) {
-      toast.error(`${saved.sku} added to the catalogue, but not to this RFQ`, `It is for project ${saved.projectNumber}, and this RFQ is for ${project}.`);
+    if (sectionOf(saved.category) !== 'PROJECTS' || saved.projectNumber !== project) {
+      toast.error(`${saved.sku} added to the catalogue, but not to this RFQ`, sectionOf(saved.category) === 'PROJECTS'
+        ? `It is for project ${saved.projectNumber}, and this RFQ is for ${project}.`
+        : 'It is a Stores item, which the store orders from Store → Order stock.');
       return;
     }
     updateLine(from.key, { materialId: saved.id });
     toast.success(`${saved.sku} added to the catalogue and to the RFQ`);
   }
 
+  // A new item is a Projects item for the RFQ's project, so it waits for one.
+  function startNewItem(key: number) {
+    if (!project) { toast.error('Choose the project first', 'A new item on this RFQ is added as a Projects item for its project.'); return; }
+    openNewItem(key);
+  }
+  function newItemOnNewLine() {
+    if (!project) { startNewItem(0); return; }
+    const line = blankLine();
+    setLines((l) => [...l, line]);
+    startNewItem(line.key);
+  }
+
   function chooseMaterial(key: number, materialId: string) {
-    if (materialId === NEW_ITEM) { openNewItem(key); return; }
+    if (materialId === NEW_ITEM) { startNewItem(key); return; }
     updateLine(key, { materialId });
   }
 
@@ -221,7 +235,10 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
         <fieldset>
           <div className="flex items-center justify-between mb-2">
             <legend className="text-eyebrow">Lines</legend>
-            <Button size="sm" variant="secondary" type="button" onClick={() => setLines((l) => [...l, blankLine()])} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
+            <div className="flex gap-2">
+              {canAddItem && <Button size="sm" variant="ghost" type="button" onClick={newItemOnNewLine} leadingIcon={<Icon.Plus size={12} />}>New item</Button>}
+              <Button size="sm" variant="secondary" type="button" onClick={() => setLines((l) => [...l, blankLine()])} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
+            </div>
           </div>
           <div className={`hidden md:grid ${LINE_GRID} text-meta mb-1`}>
             <span>Item</span><span>Description</span><span>Units</span><span>Quantity</span><span />
@@ -235,8 +252,8 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
                   <div className="col-span-12 md:col-span-1">
                     <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} item`}>
                       <option value="">Item…</option>
-                      {/* A Projects item is added for the RFQ's project, so it waits for one. */}
-                      {canAddItem && project && <option value={NEW_ITEM}>+ New item…</option>}
+                      {/* Not in the catalogue yet: added from the line, once the RFQ has its project. */}
+                      {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                       {/* An inactive item isn't quoted for; one a draft already holds stays listed so it can be changed. */}
                       {lineMaterials.filter((m) => m.active || m.id === l.materialId).map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}{m.active ? '' : ' (inactive)'}</option>)}
                     </Select>
@@ -306,6 +323,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
               key={from.session}
               section="PROJECTS"
               projectNumber={project}
+              fixedBy={`the RFQ for ${project}`}
               onCancel={closeNewItem}
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
               onError={(err) => toast.error('Could not add item', err.message)}

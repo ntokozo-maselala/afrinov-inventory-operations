@@ -108,6 +108,16 @@ describe('a new stock order (Stores → Order stock)', () => {
     expect(screen.getByLabelText(/^Project/)).toHaveValue('AFRI-1325');
   });
 
+  it('adds a new item only as a Stores item, which the drawer does not let be changed', async () => {
+    stockOrder('');
+    fireEvent.click(await screen.findByRole('button', { name: 'New item' }));
+    const drawer = await screen.findByRole('dialog', { name: 'New item' });
+    expect(within(drawer).getByRole('radio', { name: /Stores/ })).toBeChecked();
+    expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeDisabled();
+    expect(within(drawer).queryByLabelText('Project')).not.toBeInTheDocument();
+    expect(within(drawer).getByText(/Set by the stock order/)).toBeInTheDocument();
+  });
+
   it('is not for a buyer, who buys for projects', async () => {
     auth.roles = ['PROCUREMENT'];
     stockOrder('materialIds=m-1');

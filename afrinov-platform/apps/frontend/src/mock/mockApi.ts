@@ -609,6 +609,9 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     if (typeof b.supplierId !== 'string' || !b.supplierId.trim()) throw err('VALIDATION_ERROR', 'Invalid award');
     if (b.reason !== undefined && b.reason !== null && (typeof b.reason !== 'string' || b.reason.length > 500)) throw err('VALIDATION_ERROR', 'Invalid award');
     if (rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`);
+    if (!rfq.projectNumber) {
+      throw err('VALIDATION_ERROR', `${rfq.number} has no project, so it can't be awarded: an order from it would be a Stores order. Cancel it, and the store orders that stock from Store → Order stock.`);
+    }
     const asked = rfq.suppliers.find((s) => s.supplierId === b.supplierId);
     if (!asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
     const name = findSupplier(asked.supplierId)?.name ?? asked.supplierId;
@@ -1112,6 +1115,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     // As the server: ?awaitingMyApproval=true is the pending orders the signed-in
     // user may approve now, oldest first.
     const awaiting = qs.awaitingMyApproval === 'true';
+    // As the server: only stores or projects.
+    if (qs.kind && qs.kind !== 'stores' && qs.kind !== 'projects') throw err('VALIDATION_ERROR', 'Invalid purchase order filter');
     const list = [...state.purchaseOrders]
       .filter((po) => !qs.projectNumber || po.projectNumber === qs.projectNumber)
       // As the server: ?kind=stores is the orders without a project, ?kind=projects those with one.

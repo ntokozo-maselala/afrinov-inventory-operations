@@ -88,6 +88,8 @@ describe('mock: project material is ordered only for its own project (Phase 6)',
     expect(await kind('stores')).toContain(stores.id);
     expect(await kind('stores')).not.toContain(project.id);
     expect(await kind('projects')).toContain(project.id);
+    // As the server: an unknown kind is refused, not read as projects (Qodo, PR #117).
+    expect(await messageOf(api.get('/purchase-orders?kind=shelf'))).toMatch(/Invalid purchase order filter/);
   });
 
   it('refuses an order for a completed project, and submitting a draft whose project has closed since', async () => {

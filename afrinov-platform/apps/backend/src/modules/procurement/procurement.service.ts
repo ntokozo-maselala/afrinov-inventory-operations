@@ -351,11 +351,11 @@ export const PurchaseOrderService = {
    * Approve: every line priced and the total within their limit. Oldest first,
    * as they have waited longest. Empty for anyone who may not approve.
    */
-  async awaitingApproval(actorId: string) {
+  async awaitingApproval(actorId: string, kind?: OrderKind) {
     const me = (await listApprovers()).find((a) => a.id === actorId);
     if (!me) return [];
     const orders = await prisma.purchaseOrder.findMany({
-      where: { status: 'PENDING_APPROVAL' },
+      where: { status: 'PENDING_APPROVAL', ...(kind ? { projectNumber: kind === 'stores' ? null : { not: null } } : {}) },
       include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
       orderBy: { createdAt: 'asc' },
     });

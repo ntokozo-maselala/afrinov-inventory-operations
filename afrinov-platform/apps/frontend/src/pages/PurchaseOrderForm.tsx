@@ -233,6 +233,21 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
   const openFor = useRef<NewItemSession | null>(null);
   function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
+  // A project order's new item is a Projects item for its project, so it waits for one.
+  function startNewItem(key: number): boolean {
+    if (!stores && !orderProject) {
+      toast.error('Choose the project first', 'A new item on this order is added as a Projects item for its project.');
+      return false;
+    }
+    openNewItem(key);
+    return true;
+  }
+  function newItemOnNewLine() {
+    const line = blankLine();
+    if (!stores && !orderProject) { startNewItem(line.key); return; }
+    setLines((l) => [...l, line]);
+    startNewItem(line.key);
+  }
   function closeNewItem() { openFor.current = null; setNewItemFor(null); }
   function itemAdded(saved: Material, from: NewItemSession) {
     setAdded((a) => [...a, saved]);
@@ -242,9 +257,15 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
       return;
     }
     closeNewItem();
-    // Project material goes only on an order for its own project.
-    if (orderProject && sectionOf(saved.category) === 'PROJECTS' && saved.projectNumber !== orderProject) {
-      toast.error(`${saved.sku} added to the catalogue, but not to this order`, `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`);
+    // A stock order holds Stores items only, a project order its own project's material.
+    if (stores && sectionOf(saved.category) !== 'STORES') {
+      toast.error(`${saved.sku} added to the catalogue, but not to this order`, 'It is a Projects item, and a stock order holds Stores items only.');
+      return;
+    }
+    if (!stores && (sectionOf(saved.category) !== 'PROJECTS' || saved.projectNumber !== orderProject)) {
+      toast.error(`${saved.sku} added to the catalogue, but not to this order`, sectionOf(saved.category) === 'PROJECTS'
+        ? `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`
+        : 'It is a Stores item, which the store orders from Store → Order stock.');
       return;
     }
     chooseMaterial(from.key, saved.id, saved);
@@ -252,7 +273,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   }
 
   function chooseMaterial(key: number, materialId: string, item?: Material) {
-    if (materialId === NEW_ITEM) { openNewItem(key); return; }
+    if (materialId === NEW_ITEM) { startNewItem(key); return; }
     // Starts from the item's unit cost; the buyer types the quoted price over it.
     const cost = (item ?? materials.find((m) => m.id === materialId))?.unitCost;
     setLines((l) => l.map((row) => {
@@ -357,7 +378,10 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
         <fieldset>
           <div className="flex items-center justify-between mb-2">
             <legend className="text-eyebrow">Lines</legend>
-            <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
+            <div className="flex gap-2">
+              {canAddItem && <Button size="sm" variant="ghost" type="button" onClick={newItemOnNewLine} leadingIcon={<Icon.Plus size={12} />}>New item</Button>}
+              <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
+            </div>
           </div>
           {lines.length === 0 && <p className="text-meta italic">No lines yet.</p>}
           {filledFromLink && (
@@ -372,8 +396,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
-                    {/* A Projects item is added for the order's project, so it waits for one. */}
-                    {canAddItem && (stores || orderProject) && <option value={NEW_ITEM}>+ New item…</option>}
+                    {/* Not in the catalogue yet: added from the line (a project order's waits for its project). */}
+                    {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                     {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
                 </div>
@@ -441,15 +465,16 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
             open
             onClose={closeNewItem}
             title="New item"
-            description={orderProject
-              ? `Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${lineNo}.`
-              : `Material that isn't in the catalogue yet. It is added to the catalogue and goes on line ${lineNo}.`}
+            description={stores
+              ? `Stock that isn't in the catalogue yet. It is added as a Stores item, and goes on line ${lineNo}.`
+              : `Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${lineNo}.`}
             width="md"
           >
             <MaterialForm
               key={from.session}
-              section={orderProject ? 'PROJECTS' : 'STORES'}
-              projectNumber={orderProject || undefined}
+              section={stores ? 'STORES' : 'PROJECTS'}
+              projectNumber={stores ? undefined : orderProject}
+              fixedBy={stores ? 'the stock order: it holds Stores items only' : `the purchase order for ${orderProject}`}
               onCancel={closeNewItem}
               // The server answers with the whole item, its section and project included.
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}

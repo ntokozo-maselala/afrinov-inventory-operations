@@ -742,8 +742,9 @@ export const RfqService = {
    * clear choice (see awardConcerns), and is kept on the Activity.
    *
    * @throws {ApiError} NOT_FOUND; INVALID_STATE unless it is sent;
-   * VALIDATION_ERROR for a supplier who hasn't quoted, a missing reason, or
-   * what the order itself refuses (an inactive supplier or item, a closed project).
+   * VALIDATION_ERROR for an RFQ without a project, a supplier who hasn't
+   * quoted, a missing reason, or what the order itself refuses (an inactive
+   * supplier or item, a closed project).
    */
   async award(rfqId: string, input: { supplierId: string; reason?: string | null }, actorId: string) {
     const vatSetting = Number(await SettingsService.getValue<number>('purchaseOrders.vatRate')) || 0;
@@ -757,6 +758,11 @@ export const RfqService = {
       if (!rfq) throw Errors.notFound('Rfq');
       if (rfq.status !== 'SENT') {
         throw Errors.invalidState(`Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be awarded`, { status: rfq.status });
+      }
+      // One sent before RFQs were project-only would raise a Stores order,
+      // which is the store's to raise and change, not the buyer's (ADR-020).
+      if (!rfq.projectNumber) {
+        throw Errors.validation(`${rfq.number} has no project, so it can't be awarded: an order from it would be a Stores order. Cancel it, and the store orders that stock from Store → Order stock.`);
       }
       const asked = rfq.suppliers.find((s) => s.supplierId === input.supplierId);
       if (!asked) throw Errors.notFound('Supplier on this request for quotation');
