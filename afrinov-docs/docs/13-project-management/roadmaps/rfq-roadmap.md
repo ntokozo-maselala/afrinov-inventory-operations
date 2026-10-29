@@ -23,7 +23,7 @@ Sizes used below: **S** is about a day, **M** is 2 to 4 days, **L** is a week or
 
 ### Before release, on every database
 
-1. Apply migrations `20260101000025` (RFQ tables), `20260101000026` (RFQ settings), `20260101000028` (quotation files) and `20260101000029` (quote currency).
+1. Apply the migrations in order. The RFQ ones are `20260101000025` (RFQ tables), `20260101000026` (RFQ settings), `20260101000028` (quotation files) and `20260101000029` (quote currency). Between them runs `20260101000027_inventory_balance_foreign_keys` from the dependency upgrades: it refuses to run while any stock balance points at an item or location that no longer exists, and the deploy then stops until those rows are fixed. Run its orphan check first, as `docs/engineering/DATABASE_ASSURANCE.md` (DATA-03) describes, and follow the recovery there if it refuses.
 2. Under **Settings → Purchase orders → Printed on the request for quotation**, set **Quotes returned to**, so each RFQ tells suppliers where to send their quotation. It is left off the PDF until set. Check the **RFQ instructions** wording too.
 3. Tell buyers the date from which RFQs are raised in the app, and stop saving new RFQ sheets from the workbook.
 
@@ -142,9 +142,9 @@ Size S. Tests and docs.
 
 **Built** on `feature/rfq-rollout`, all but the cut-over date. 5 real-HTTP tests and 3 page tests.
 
-- [x] **6.1 Check roles end to end.** Over real HTTP, signed in as a user of each role: Procurement raises, sends, records, awards and cancels; Approver and Store controller open RFQs, their Activity and quotations but get 403 on every change; Technician and Viewer get 403 on RFQs altogether. On screen, Approver and Store controller see no New RFQ, Send, Edit or Cancel, and New RFQ shows them "no access". Only buyers and Admin see Requests for quotation in the menu (sidebar test, Phase 2).
+- [x] **6.1 Check roles end to end.** Over real HTTP, signed in as a user of each role: Procurement raises, sends, records, awards and cancels; Approver and Store controller open RFQs, their Activity and quotations but get 403 on every change (raise, edit, send, record, decline, attach or take off a quotation, award, cancel); Technician and Viewer get 403 on RFQs altogether. On screen, Approver and Store controller see no New RFQ, Send, Edit or Cancel, and New RFQ shows them "no access". Only buyers and Admin see Requests for quotation in the menu (sidebar test, Phase 2).
   Files: `backend/integration/rfqs.real-http.test.ts`, `pages/Rfqs.test.tsx`
-- [x] **6.2 Real-HTTP journey.** A buyer raises an RFQ, sends it, records two quotes and awards one; the order is submitted for approval like any other, the RFQ's Activity reads raised, sent, quoted, quoted, awarded, and the order's starts from the RFQ, all under the buyer's name. Two awards at once raising one order is tested in Phase 5.
+- [x] **6.2 Real-HTTP journey.** With approval switched on, a buyer raises an RFQ, sends it, records two quotes and awards one; the order is submitted and waits for approval like any other, the RFQ's Activity reads raised, sent, quoted, quoted, awarded, and the order's starts from the RFQ, all under the buyer's name. Two awards at once raising one order is tested in Phase 5.
 - [x] **6.3 Docs.** The product roadmap's Milestone 3, `workbook-replacement-roadmap.md`, `task_context.md` (the RFQ state machine), `docs/README.md` (this roadmap among the specialist plans), and this roadmap's status and release steps.
 - [ ] **6.4 Cut over.** The business sets the date from which RFQs are raised in the app only, and tells buyers (see Before release).
 
