@@ -26,7 +26,7 @@ redirects to Purchase orders.
 | Lines | That project's material | Stores items from the catalogue |
 | Raise, edit, submit, cancel, close | `create`/`submit`/`cancel`/`close:purchase_order` | `order:stores_stock` |
 | Approved by | Approvers, by value | The storeman, by value, against his own limit |
-| Delivery | Straight to site: Procurement **confirms delivery** on the order (`POST /:id/confirm-delivery`); no stock is added | Into stock: Receive delivery on the order, or Receive stock |
+| Delivery | Straight to site: Procurement **confirms delivery** on the order (`POST /:id/confirm-delivery`); no stock is added | Into stock: on Receive stock, against the order |
 | RFQ first | Possible | No: Stores stock is ordered at known prices |
 
 The numbering, the order document and the statuses are the same for both.
@@ -131,16 +131,27 @@ supplier acceptance blocks. An order not yet approved is marked "Draft, not
 for issue" on every page; a cancelled one "Cancelled".
 
 ## Receiving
-- On the order's page, **Receive** books what arrived, line by line and to a
-  location, as a goods receipt that is posted at once (`POST /goods-receipts`
-  then `POST /goods-receipts/:id/post`). Each receipt credits the order's
-  lines, so a part delivery leaves the rest showing as owed.
+Every delivery to the store is booked on **Receive stock** (`/stock/receive`),
+the one place to receive (Stores and Procurement Separation Roadmap).
+- Choosing a supplier with open Stores orders (`APPROVED` or
+  `PARTIALLY_RECEIVED`) asks which order the delivery is against, or *Not
+  against an order*; the question is shown to those who may receive orders.
+  The order's page (**Receive delivery**) and Order stock (**Receive**) open
+  Receive stock with the order chosen (`?order=<id>`); older `?receive=1`
+  links on the order go there too.
+- Against an order, its outstanding lines are filled in, each going where
+  that item is kept now. What arrived is booked line by line, with the
+  delivery note and date, as a goods receipt recorded and posted in one step
+  (`POST /goods-receipts` with `post: true` and an `Idempotency-Key`, so a
+  retry cannot book it twice). Each receipt credits the order's lines, so a
+  part delivery leaves the rest showing as owed.
+- **Closing:** when a delivery completes the order (`RECEIVED`), the
+  confirmation offers **Close AFRI-…**. When nothing more is coming, ticking
+  *close short* with a reason closes the order with the delivery (short, if part-received)
+  (`POST /:id/close` with the reason), as Close PO does.
+- A delivery not against an order is booked as a counter receipt
+  (`goods-receiving.md`).
 - `POST /:id/receive` books everything still outstanding to one location.
-- On Receive stock, choosing a supplier with open orders (`APPROVED` or
-  `PARTIALLY_RECEIVED`) asks whether the delivery is against one of them and
-  links to *Receive against AFRI-…* on that order (`?receive=1`), shown to
-  those who may receive orders. A delivery not against an order is booked as
-  a counter receipt (`goods-receiving.md`).
 
 ## Business rules
 - Materials and quantities are fixed once the order is raised. Prices, line

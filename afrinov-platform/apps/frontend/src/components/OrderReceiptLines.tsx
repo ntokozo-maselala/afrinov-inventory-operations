@@ -1,6 +1,6 @@
 // What arrived against a purchase order: one row per order line still
 // outstanding, filled in with what is owed, each with where it goes, for
-// Receive delivery on the order's page. Each line is sent with the order line
+// a delivery against an order on Receive stock. Each line is sent with the order line
 // it credits; typing lines by hand used to book the stock without crediting
 // the order.
 import { Button } from './Button';

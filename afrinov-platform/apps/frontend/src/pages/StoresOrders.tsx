@@ -4,8 +4,8 @@
 // project orders stay under Procurement → Purchase orders.
 //
 // "On order" lists what the store is still waiting for, and each such order
-// has Receive, which opens its Receive delivery as Receive stock's "Receive
-// against" does. Counter deliveries without an order stay on Receive stock.
+// has Receive, which opens Receive stock with that order chosen: every
+// delivery to the store is booked there.
 //
 // Stores orders are the store's alone (Stores and Procurement Separation
 // Roadmap, Phase 2): only those who order Stores stock open this page, and the
@@ -24,7 +24,7 @@ import { NoAccess } from '../components/NoAccess';
 import { Icon } from '../components/Icon';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { usePermissions } from '../hooks/usePermissions';
-import { orderPath } from '../lib/orderKind';
+import { receivePath } from '../lib/orderKind';
 import { MINE, orderColumns, STATUS_OPTIONS, type PO } from './PurchaseOrders';
 
 /** Approved and not yet fully received: what the store is still waiting for. */
@@ -66,7 +66,7 @@ function StoresOrderList({ canReceive }: { canReceive: boolean }) {
     ...(canReceive ? [{
       key: 'receive', header: <span className="sr-only">Receive</span>, width: '7rem', align: 'right' as const,
       render: (p: PO) => (RECEIVABLE.includes(p.status)
-        ? <Link to={`${orderPath(p)}?receive=1`} className="btn-secondary btn-sm" aria-label={`Receive ${p.number}`}>Receive</Link>
+        ? <Link to={receivePath(p.id)} className="btn-secondary btn-sm" aria-label={`Receive ${p.number}`}>Receive</Link>
         : null),
     }] : []),
   ];

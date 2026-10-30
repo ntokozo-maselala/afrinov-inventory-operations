@@ -109,6 +109,14 @@ Size S. Tests and docs.
 
 **Done when:** each role sees only its own side of the business.
 
+## Follow-up: Receive stock, the one place to receive
+
+Added 30 Oct 2026. The order's Receive delivery and Receive stock did the same job in two places.
+
+- [x] **Receive stock books every delivery to the store.** A supplier with open Stores orders is asked which order the delivery is against, or *Not against an order*. Against an order, its outstanding lines are filled in (each going where that item is kept now) and the receipt credits the order (`POST /goods-receipts`, posted at once, with the delivery date and an `Idempotency-Key`, now honoured by that endpoint). The order's **Receive delivery**, Order stock's **Receive** and older `?receive=1` links open Receive stock with the order chosen (`?order=<id>`); the order page's dialog is gone.
+- [x] **Closing.** A delivery that completes the order offers **Close AFRI-…** on the confirmation. When nothing more is coming, *close short* with a reason closes the order with the delivery: short if part-received, and also if that delivery completed it. The delivery date is a day in South Africa (today is booked as now); a later day is refused. Orders still close only when someone says so.
+  Files: `ReceiveStock.tsx`, `PurchaseOrderDetail.tsx`, `StoresOrders.tsx`, `lib/orderKind.ts` (`receivePath`), `goods-receipt.service.ts`, `procurement.routes.ts`, `shared/idempotency.ts` (`idempotentMutation`, moved from `inventory.routes.ts`); tests in `PoReceiveDelivery.test.tsx`, `StoresOrders.test.tsx`, `procurement.real-http.test.ts`
+
 ## Releasing
 
 - **Phase 2:** set an approval limit on every store controller (below).

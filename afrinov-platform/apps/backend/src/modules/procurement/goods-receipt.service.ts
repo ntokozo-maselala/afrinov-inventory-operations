@@ -4,10 +4,40 @@ import { Errors } from '../../shared/errors.js';
 import { PROJECT_DELIVERY_REFUSED, RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+/** Slack for a client clock a little ahead of the server's. */
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * The date on the delivery note; now when left out. A day from the date field
+ * (YYYY-MM-DD) is a day in South Africa: today is booked as now, keeping the
+ * time of day, so the day's receipts stay in the order they came; a later day
+ * is refused; an earlier one is that day, at UTC midnight as the delivery-date
+ * filters count days. A full timestamp may not be ahead of now (Qodo, PR #123).
+ */
+export function parseReceivedAt(value: string | undefined, now = new Date()): Date {
+  if (!value) return now;
+  const future = () => Errors.validation('The delivery date cannot be in the future');
+  if (DATE_ONLY.test(value)) {
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const d = new Date(`${value}T00:00:00.000Z`);
+    // 2026-02-31 parses as 3 March: refused, not moved.
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) throw Errors.validation('Invalid delivery date');
+    if (value > today) throw future();
+    return value === today ? now : d;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw Errors.validation('Invalid delivery date');
+  if (d.getTime() > now.getTime() + CLOCK_SKEW_MS) throw future();
+  return d;
+}
+
 export interface CreateGoodsReceiptInput {
   purchaseOrderId?: string;
   supplierId: string;
   deliveryRef?: string;
+  /** The delivery date; now when left out. */
+  receivedAt?: string;
   lines: Array<{
     materialId: string;
     locationId: string;
@@ -65,8 +95,8 @@ export const GoodsReceiptService = {
     });
   },
 
-  async getById(id: string) {
-    const gr = await prisma.goodsReceipt.findUnique({
+  async getById(id: string, db: Prisma.TransactionClient = prisma) {
+    const gr = await db.goodsReceipt.findUnique({
       where: { id },
       include: { supplier: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } }, lines: { include: { material: true, location: true } } },
     });
@@ -77,9 +107,11 @@ export const GoodsReceiptService = {
   /**
    * Records a delivery. With `post`, it is also posted into stock in the same
    * transaction: if posting fails, nothing is recorded, so a failed attempt
-   * leaves no unposted receipt behind.
+   * leaves no unposted receipt behind. Given a transaction (an idempotent
+   * request's), it writes in that one, so the receipt and the stored key
+   * commit together.
    */
-  async create(input: CreateGoodsReceiptInput, actorId: string, opts: { post?: boolean } = {}) {
+  async create(input: CreateGoodsReceiptInput, actorId: string, opts: { post?: boolean } = {}, outer?: Prisma.TransactionClient) {
     if (input.lines.length === 0) throw Errors.validation('Goods receipt must have at least one line');
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
@@ -100,7 +132,7 @@ export const GoodsReceiptService = {
       throw Errors.validation('These lines belong to a purchase order: choose the order the delivery is for.');
     }
 
-    return prisma.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
       // Serialize GR-number generation so two concurrent creates cannot
       // collide on the same sequential number. The lock is taken first and
       // held through posting, as Receive stock does: receipts then post one
@@ -115,6 +147,7 @@ export const GoodsReceiptService = {
           purchaseOrderId: input.purchaseOrderId ?? null,
           supplierId: input.supplierId,
           deliveryRef: input.deliveryRef ?? null,
+          receivedAt: parseReceivedAt(input.receivedAt),
           receivedById: actorId,
           status: 'SUBMITTED',
           lines: {
@@ -130,13 +163,14 @@ export const GoodsReceiptService = {
       });
       if (opts.post) await InventoryService.postGoodsReceipt({ goodsReceiptId: gr.id, actorId }, tx);
       return gr;
-    });
+    };
+    return outer ? write(outer) : prisma.$transaction(write);
   },
 
   /** Records a delivery and posts it into stock, as one step. */
-  async receive(input: CreateGoodsReceiptInput, actorId: string) {
-    const gr = await this.create(input, actorId, { post: true });
-    return this.getById(gr.id);
+  async receive(input: CreateGoodsReceiptInput, actorId: string, tx?: Prisma.TransactionClient) {
+    const gr = await this.create(input, actorId, { post: true }, tx);
+    return this.getById(gr.id, tx);
   },
 
   async post(id: string, actorId: string) {

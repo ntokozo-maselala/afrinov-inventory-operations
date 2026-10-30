@@ -108,6 +108,58 @@ describe('receiving stock over real HTTP', () => {
     await server?.close();
   });
 
+  // Receive stock is the one place a delivery to the store is booked: against
+  // an order it sends the delivery date and an Idempotency-Key.
+  describe('a delivery against an order, as Receive stock books it', () => {
+    // Its own location, so the stock counted by the tests below is untouched.
+    let into: string;
+    beforeAll(async () => {
+      const location = await api<{ id: string }>('POST', '/locations', { name: `IT receive stock ${run}`, type: 'STOREROOM' });
+      expect(location.status).toBe(201);
+      into = location.body.id;
+    });
+    const body = (order: PurchaseOrder, extra: Record<string, unknown> = {}) => ({
+      purchaseOrderId: order.id, supplierId, deliveryRef: `RS-${run}`, post: true,
+      lines: [{ materialId: order.lines[0]!.materialId, locationId: into, quantity: 2, purchaseOrderLineId: order.lines[0]!.id }],
+      ...extra,
+    });
+
+    it('keeps the delivery date given', async () => {
+      const order = await approvedOrder(5);
+      const res = await api<{ receivedAt: string; status: string }>('POST', '/goods-receipts', body(order, { receivedAt: '2026-10-20' }));
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('POSTED');
+      expect(res.body.receivedAt.slice(0, 10)).toBe('2026-10-20');
+    });
+
+    it('refuses a delivery date still to come, booking nothing', async () => {
+      const order = await approvedOrder(5);
+      const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await api<{ error: { message: string } }>('POST', '/goods-receipts', body(order, { receivedAt: future }));
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/cannot be in the future/);
+      expect((await getOrder(order.id)).lines[0]!.receivedQty).toMatch(/^0(\.0+)?$/);
+    });
+
+    it('replays a retried delivery instead of booking it twice', async () => {
+      const order = await approvedOrder(5);
+      const key = `rs-${run}-${order.id}`;
+      const first = await api<{ id: string; number: string }>('POST', '/goods-receipts', body(order), { 'idempotency-key': key });
+      expect(first.status).toBe(201);
+      const retry = await api<{ id: string; number: string }>('POST', '/goods-receipts', body(order), { 'idempotency-key': key });
+      expect(retry.status).toBe(201);
+      expect(retry.headers.get('idempotency-replayed')).toBe('true');
+      expect(retry.body.number).toBe(first.body.number);
+      const after = await getOrder(order.id);
+      expect(Number(after.lines[0]!.receivedQty)).toBe(2);
+      expect(after.status).toBe('PARTIALLY_RECEIVED');
+      // The same key for another delivery is refused, not replayed.
+      const other = await api<{ error: { code: string } }>('POST', '/goods-receipts', { ...body(order), deliveryRef: `RS2-${run}` }, { 'idempotency-key': key });
+      expect(other.status).toBe(409);
+      expect(other.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    });
+  });
+
   describe('goods receipts', () => {
     let order: PurchaseOrder;
 

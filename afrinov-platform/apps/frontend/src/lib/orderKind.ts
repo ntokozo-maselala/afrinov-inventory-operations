@@ -30,6 +30,11 @@ export function orderPath(order: { id: string; projectNumber?: string | null }):
   return `${ORDER_SECTION[orderKindOf(order)].to}/${order.id}`;
 }
 
+/** Where a delivery against a Stores order is booked: Receive stock, with the order chosen. */
+export function receivePath(orderId: string): string {
+  return `/stock/receive?order=${encodeURIComponent(orderId)}`;
+}
+
 /** The kind of order a page address is for: under Order stock or under Procurement. */
 export function kindOfPath(pathname: string): OrderKind {
   return pathname.startsWith(`${ORDER_SECTION.stores.to}/`) ? 'stores' : 'projects';

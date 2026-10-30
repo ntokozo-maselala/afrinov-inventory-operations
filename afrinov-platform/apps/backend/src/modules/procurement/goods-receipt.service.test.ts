@@ -121,6 +121,41 @@ beforeEach(() => {
   db.locations.set('loc-1', { id: 'loc-1', name: 'Main Storeroom' });
 });
 
+// Qodo, PR #123: the delivery date is a day in South Africa.
+describe('parseReceivedAt', () => {
+  // 23:30 on 30 Oct in UTC is already 31 Oct in South Africa (UTC+2).
+  const now = new Date('2026-10-30T23:30:00.000Z');
+
+  it('books today in South Africa as now, keeping the time of day', async () => {
+    const { parseReceivedAt } = await import('./goods-receipt.service.js');
+    expect(parseReceivedAt('2026-10-31', now)).toEqual(now);
+    expect(parseReceivedAt(undefined, now)).toEqual(now);
+  });
+
+  it('keeps an earlier day as that day', async () => {
+    const { parseReceivedAt } = await import('./goods-receipt.service.js');
+    expect(parseReceivedAt('2026-10-30', now).toISOString()).toBe('2026-10-30T00:00:00.000Z');
+  });
+
+  it('refuses a later day, even within 24 hours', async () => {
+    const { parseReceivedAt } = await import('./goods-receipt.service.js');
+    expect(() => parseReceivedAt('2026-11-01', now)).toThrow(/cannot be in the future/);
+    expect(() => parseReceivedAt('2026-10-31', new Date('2026-10-30T12:00:00.000Z'))).toThrow(/cannot be in the future/);
+  });
+
+  it('refuses a timestamp ahead of now, beyond a few minutes of clock difference', async () => {
+    const { parseReceivedAt } = await import('./goods-receipt.service.js');
+    expect(parseReceivedAt('2026-10-30T23:33:00.000Z', now).toISOString()).toBe('2026-10-30T23:33:00.000Z');
+    expect(() => parseReceivedAt('2026-10-31T01:00:00.000Z', now)).toThrow(/cannot be in the future/);
+  });
+
+  it('refuses a date that is not one', async () => {
+    const { parseReceivedAt } = await import('./goods-receipt.service.js');
+    expect(() => parseReceivedAt('2026-02-31', now)).toThrow(/Invalid delivery date/);
+    expect(() => parseReceivedAt('soon', now)).toThrow(/Invalid delivery date/);
+  });
+});
+
 describe('GoodsReceiptService', () => {
   describe('create', () => {
     it('creates a goods receipt linked to a supplier with a generated number', async () => {

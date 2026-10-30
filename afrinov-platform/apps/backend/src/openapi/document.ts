@@ -506,8 +506,10 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED), or with post: true record and post it in one step',
-    description: 'Stock does not change until the receipt is posted.',
-    procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404],
+    description: 'Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
+      + 'refused with 400 if still to come). Retry-safe with an Idempotency-Key header, as Receive stock sends: a '
+      + 'repeat replays the first receipt, and the same key with other details is refused with 409.',
+    procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404, 409],
   },
   {
     method: 'post', path: '/goods-receipts/:id/post', tag: 'Goods receipts', summary: 'Post a receipt into stock',
