@@ -225,6 +225,18 @@ describe('a Projects item has its project’s status, not a stock status', () =>
     expect(within(table).queryByText('Reorder')).not.toBeInTheDocument();
     expect(within(table).queryByText('Item status')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
+    // The status card doesn't say none is held while some is shown (Qodo, PR #126).
+    const card = screen.getByRole('heading', { name: 'Project status' }).closest('section')!;
+    expect(within(card).queryByText(/isn.t held in the store/)).not.toBeInTheDocument();
+    expect(within(card).getByText(/What is shown as left in the store was received before/)).toBeInTheDocument();
+  });
+
+  it('says an item with no project can be issued once it has one', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [{ ...left, materialId: 'm-OLD-PLATE' }] : base(path)));
+    detail('m-OLD-PLATE');
+    expect(await screen.findByText(/It can be issued once it is given a project/)).toBeInTheDocument();
+    expect(screen.queryByText(/It is issued to its project/)).not.toBeInTheDocument();
   });
 
   it('sends a closed project’s leftovers to be moved to Stores', async () => {

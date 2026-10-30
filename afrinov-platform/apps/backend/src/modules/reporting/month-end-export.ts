@@ -74,12 +74,14 @@ export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
   const ot = ov.addRow(['Total', r.total.items, r.total.itemsInStock, r.total.value, r.total.urgent, r.total.warning, r.total.usedValue]);
   ot.font = { bold: true };
   ot.getCell(4).numFmt = MONEY;
-  // Projects material per project: what each job holds at the end of the period.
-  if (r.projects.length > 0) {
+  // Project material still in the store at the end of the period, received
+  // before it went straight to site: as the report page lists it (Qodo, PR #126).
+  const held = r.projects.filter((p) => p.itemsInStock > 0);
+  if (held.length > 0) {
     ov.addRow([]);
-    const ph = ov.addRow(['Project material by project', 'Items', 'In stock', `Stock value (${r.currency})`]);
+    const ph = ov.addRow(['Project material still in the store', 'Items', 'In stock', `Stock value (${r.currency})`]);
     headerRow(ph);
-    for (const p of r.projects) {
+    for (const p of held) {
       const closed = p.status === 'COMPLETED' ? ' (completed)' : p.status === 'CANCELLED' ? ' (cancelled)' : '';
       const label = p.projectNumber ? `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}${closed}` : 'No project yet';
       ov.addRow([label, p.items, p.itemsInStock, p.value]).getCell(4).numFmt = MONEY;

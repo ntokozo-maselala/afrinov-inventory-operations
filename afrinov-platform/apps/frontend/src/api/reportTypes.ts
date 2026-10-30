@@ -195,5 +195,13 @@ export interface ConsumptionReport {
   total: { value: number; items: number; unpriced: number };
 }
 
+/**
+ * The projects with material still in the store at the end of the period,
+ * received before it went straight to site: as the report page lists them.
+ */
+export function heldProjects(r: MonthEndReport): NonNullable<MonthEndReport['projects']> {
+  return (r.projects ?? []).filter((p) => p.itemsInStock > 0);
+}
+
 export const NO_PROJECT = '__none__';
 export const NO_RECIPIENT = '__none__';

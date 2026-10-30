@@ -172,7 +172,10 @@ export function MaterialDetail() {
                     ? 'It has no project yet, so it isn’t ordered or issued until it is given one.'
                     : projectClosed(material.data)
                       ? 'The project is closed, so nothing more is ordered for it.'
-                      : 'Ordered for its project. Project material goes from the supplier straight to site, so it isn’t held in the store.'}
+                      // Some may still be in the store from before (Qodo, PR #126).
+                      : total > 0
+                        ? 'Ordered for its project, and delivered straight to site. What is shown as left in the store was received before.'
+                        : 'Ordered for its project. Project material goes from the supplier straight to site, so it isn’t held in the store.'}
                 </p>
               </section>
             ) : (
@@ -206,9 +209,11 @@ export function MaterialDetail() {
                 <section>
                   <SectionHeader
                     title="Left in the store"
-                    description={projectClosed(material.data)
-                      ? 'Received before project material went straight to site. The project is closed: move it to Stores.'
-                      : 'Received before project material went straight to site. It is issued to its project.'}
+                    description={!material.data.projectNumber
+                      ? 'Received before project material went straight to site. It can be issued once it is given a project.'
+                      : projectClosed(material.data)
+                        ? 'Received before project material went straight to site. The project is closed: move it to Stores.'
+                        : 'Received before project material went straight to site. It is issued to its project.'}
                     actions={projectClosed(material.data) && material.data.projectNumber
                       ? <Link to={leftoversLink(material.data.projectNumber)} className="btn-link text-sm">Move to Stores</Link>
                       : undefined}

@@ -108,7 +108,7 @@ export function Dashboard() {
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
   // The projects whose material is still in the store, received before it went straight to site.
-  const heldFor = (value?.projects ?? []).filter((p) => p.itemsInStock > 0).length;
+  const heldFor = (value?.projects ?? []).filter((p) => p.projectNumber && p.itemsInStock > 0).length;
   const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
   // The room each location stands in, for the chart's By room view.
   const { data: locationList, error: locationsError, reload: reloadLocations } = useApi<Array<{ id: string; parent?: { id: string; name: string } | null }>>('/locations');

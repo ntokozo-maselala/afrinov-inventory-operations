@@ -104,7 +104,7 @@ export function Stock() {
         }
       />
 
-      <ProjectStockNotice className="mb-4" />
+      <ProjectStockNotice rows={stock.data ?? []} className="mb-4" />
 
       <FilterBar
         onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', room: '' }); } : undefined}

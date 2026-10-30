@@ -5,6 +5,8 @@ import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { Alert } from './Alert';
 import type { StockValue } from '../pages/Dashboard';
+import type { CurrentStockRow } from '../api/types';
+import { sectionOf } from '../lib/categories';
 
 export interface ProjectLeftoverCount { projectNumber: string; name: string | null; status: string; items: number }
 
@@ -45,32 +47,69 @@ export function LeftoversNotice({ projectNumber, className }: { projectNumber?: 
 export const projectMaterialsLink = (projectNumber: string | null) =>
   `/materials?section=PROJECTS&project=${projectNumber ? encodeURIComponent(projectNumber) : 'none'}`;
 
+interface HeldForProject { projectNumber: string | null; name: string | null; status: string | null; items: number }
+
+const itemsText = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
+
 /**
  * Project material still in the store, received before project material went
  * straight to site (Stores and Procurement Separation Roadmap). Stock shows
  * Stores only, so it is listed here by project: a closed project's as
- * leftovers to move to Stores, an open project's as still to be issued to it.
+ * leftovers to move to Stores, an open project's as still to be issued to it,
+ * and any with no project yet as needing one first. Built from the Stock
+ * page's own rows (inactive items included), so it shows whenever the table
+ * can, and the page's load error covers both (Qodo, PR #126).
  */
-export function ProjectStockNotice({ className }: { className?: string }) {
-  const value = useApi<StockValue>('/reports/stock-value');
-  const open = (value.data?.projects ?? [])
-    .filter((p) => p.itemsInStock > 0 && !isClosedStatus(p.status))
-    .sort((a, b) => (a.projectNumber ?? '￿').localeCompare(b.projectNumber ?? '￿'));
+export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[]; className?: string }) {
+  const byProject = new Map<string, HeldForProject & { ids: Set<string> }>();
+  for (const r of rows) {
+    if (sectionOf(r.category) !== 'PROJECTS' || Number(r.quantity) <= 0) continue;
+    const key = r.projectNumber ?? '';
+    const held = byProject.get(key) ?? { projectNumber: r.projectNumber ?? null, name: r.project?.name ?? null, status: r.project?.status ?? null, items: 0, ids: new Set<string>() };
+    held.ids.add(r.materialId);
+    held.items = held.ids.size;
+    byProject.set(key, held);
+  }
+  const projects = [...byProject.values()].filter((p) => p.projectNumber).sort((a, b) => a.projectNumber!.localeCompare(b.projectNumber!));
+  const closed = projects.filter((p) => isClosedStatus(p.status));
+  const open = projects.filter((p) => !isClosedStatus(p.status));
+  const unassigned = byProject.get('');
+  const name = (p: HeldForProject) => `Project ${p.projectNumber}${p.name ? ` · ${p.name}` : ''}`;
   return (
     <>
-      <LeftoversNotice className={className} />
-      {open.length > 0 && (
-        <Alert tone="info" title="Project material still in the store" className={className}>
-          <p>Received before project material went straight to site. It is issued to its project on Issue stock.</p>
-          <ul className="mt-1 space-y-0.5">
-            {open.map((p) => (
-              <li key={p.projectNumber ?? 'none'}>
-                <Link to={projectMaterialsLink(p.projectNumber)} className="btn-link">
-                  {p.projectNumber ? `Project ${p.projectNumber}${p.name ? ` · ${p.name}` : ''}` : 'No project yet'}: {p.itemsInStock} item{p.itemsInStock === 1 ? '' : 's'}
-                </Link>
+      {closed.length > 0 && (
+        <Alert tone="warning" title="Leftovers to move to Stores" className={className}>
+          <ul className="space-y-0.5">
+            {closed.map((p) => (
+              <li key={p.projectNumber}>
+                {name(p)} is {p.status === 'COMPLETED' ? 'completed' : 'cancelled'}:{' '}
+                <Link to={leftoversLink(p.projectNumber!)} className="btn-link">{itemsText(p.items)} to move to Stores</Link>
               </li>
             ))}
           </ul>
+        </Alert>
+      )}
+      {(open.length > 0 || unassigned) && (
+        <Alert tone="info" title="Project material still in the store" className={className}>
+          <p>Received before project material went straight to site.</p>
+          {open.length > 0 && (
+            <>
+              <p className="mt-1">Issued to its project on Issue stock:</p>
+              <ul className="space-y-0.5">
+                {open.map((p) => (
+                  <li key={p.projectNumber}>
+                    <Link to={projectMaterialsLink(p.projectNumber)} className="btn-link">{name(p)}: {itemsText(p.items)}</Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {unassigned && (
+            <p className="mt-1">
+              {itemsText(unassigned.items)} with no project yet, which can&rsquo;t be issued until each is given one:{' '}
+              <Link to={projectMaterialsLink(null)} className="btn-link">Give them their projects</Link>
+            </p>
+          )}
         </Alert>
       )}
     </>

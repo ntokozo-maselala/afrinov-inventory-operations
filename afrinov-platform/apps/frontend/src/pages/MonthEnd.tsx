@@ -13,6 +13,7 @@ import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { downloadMonthEnd, downloadMonthEndPdf } from '../api/exportMonthEnd';
+import { heldProjects as projectsHeld } from '../api/reportTypes';
 import type { MonthEndReport } from '../api/reportTypes';
 import { categoryLabel } from '../lib/categories';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -60,7 +61,7 @@ export function MonthEnd() {
   }
 
   const r = report.data;
-  const heldProjects = (r?.projects ?? []).filter((p) => p.itemsInStock > 0);
+  const heldProjects = r ? projectsHeld(r) : [];
   return (
     <div>
       <PageHeader

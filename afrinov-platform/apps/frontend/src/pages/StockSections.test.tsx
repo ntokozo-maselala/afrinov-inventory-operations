@@ -70,11 +70,24 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
     await screen.findByText('DISC');
     // A closed project's: leftovers to move to Stores.
     expect(await screen.findByRole('link', { name: '1 item to move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
-    // An open project's, and one with no project yet: to its project's items on Materials.
+    // An open project's: to its items on Materials, to be issued to it.
     expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1402');
-    expect(screen.getByRole('link', { name: 'No project yet: 1 item' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=none');
-    // Not a project with nothing in the store.
-    expect(screen.queryByText(/Bridge/)).not.toBeInTheDocument();
+    // One with no project yet can't be issued until it has one (Qodo, PR #126).
+    expect(screen.getByText(/1 item with no project yet, which can.t be issued until each is given one/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Give them their projects' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=none');
+  });
+
+  // Qodo, PR #126: from the page's own rows, so a deactivated item still in the
+  // store isn't lost, and nothing depends on another report loading.
+  it('lists project material from the stock rows themselves, not another report', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/locations') return [];
+      if (path === '/reports/stock-value') throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
+      return ROWS;
+    });
+    stockPage();
+    expect(await screen.findByRole('link', { name: '1 item to move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
+    expect(mockGet).not.toHaveBeenCalledWith('/reports/stock-value');
   });
 
   it('opens an older Projects link on the store\u2019s stock', async () => {

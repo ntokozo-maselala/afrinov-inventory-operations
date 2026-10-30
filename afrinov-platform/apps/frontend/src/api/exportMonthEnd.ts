@@ -3,7 +3,7 @@
 // here, in the stock workbook's layout, from the mock stock report.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
-import type { MonthEndReport } from './reportTypes';
+import { heldProjects, type MonthEndReport } from './reportTypes';
 import { downloadPdf, type PdfTable } from '../lib/pdf';
 import { formatDate, formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
@@ -82,10 +82,10 @@ async function buildInBrowser(r: MonthEndReport): Promise<ArrayBuffer> {
   ov.getRow(4).font = { bold: true };
   for (const c of r.categories) ov.addRow([SHEET[c.category]?.label ?? c.category, c.items.length, c.itemsInStock, c.value, c.urgent, c.warning, c.usedValue]);
   ov.addRow(['Total', r.total.items, r.total.itemsInStock, r.total.value, r.total.urgent, r.total.warning, r.total.usedValue]).font = { bold: true };
-  if ((r.projects ?? []).length > 0) {
+  if (heldProjects(r).length > 0) {
     ov.addRow([]);
-    ov.addRow(['Project material by project', 'Items', 'In stock', `Stock value (${r.currency})`]).font = { bold: true };
-    for (const p of r.projects!) ov.addRow([projectLabel(p), p.items, p.itemsInStock, p.value]);
+    ov.addRow(['Project material still in the store', 'Items', 'In stock', `Stock value (${r.currency})`]).font = { bold: true };
+    for (const p of heldProjects(r)) ov.addRow([projectLabel(p), p.items, p.itemsInStock, p.value]);
   }
 
   for (const c of r.categories) {
@@ -134,14 +134,14 @@ export async function downloadMonthEndPdf(range: { from: string; to: string }): 
     totals: [['Total', formatNumber(r.total.items), formatNumber(r.total.itemsInStock), money(r.total.value), formatNumber(r.total.urgent), formatNumber(r.total.warning), money(r.total.usedValue)]],
     empty: 'No items in stock or used in this period.',
   }];
-  if ((r.projects ?? []).length > 0) {
+  if (heldProjects(r).length > 0) {
     sections.push({
-      heading: 'Project material by project',
+      heading: 'Project material still in the store',
       columns: [
         { header: 'Project', wrap: true }, { header: 'Items', align: 'right' }, { header: 'In stock', align: 'right' },
         { header: `Stock value (${r.currency})`, align: 'right' },
       ],
-      rows: r.projects!.map((p) => [projectLabel(p), formatNumber(p.items), formatNumber(p.itemsInStock), money(p.value)]),
+      rows: heldProjects(r).map((p) => [projectLabel(p), formatNumber(p.items), formatNumber(p.itemsInStock), money(p.value)]),
       empty: 'No project material.',
     });
   }
