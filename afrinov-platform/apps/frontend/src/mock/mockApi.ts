@@ -2577,7 +2577,7 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
   const rfq = state.rfqs.find((r) => (r.status === 'DRAFT' || r.status === 'SENT') && r.lines.some((l) => ids.has(l.materialId)));
   if (rfq) {
     const sku = findMaterial(rfq.lines.find((l) => ids.has(l.materialId))!.materialId)?.sku;
-    throw err('VALIDATION_ERROR', `${sku} is on ${rfq.number}, which is still open, so it stays project material. Move it once that request is awarded or cancelled.`);
+    throw err('VALIDATION_ERROR', `${sku} is on ${rfq.number}, which is still open, so it stays project material. Move it once that request is cancelled, or the order it is awarded as is finished.`);
   }
   for (const item of items) {
     const m = findMaterial(item.materialId);

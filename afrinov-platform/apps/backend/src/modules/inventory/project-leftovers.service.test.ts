@@ -33,6 +33,8 @@ const client = {
     },
   },
   auditLogEntry: { create: async ({ data }: { data: Record<string, unknown> }) => { db.audit.push(data); return data; } },
+  // The row locks the service takes: nothing to hold in memory.
+  $executeRaw: async () => 0,
   purchaseOrderLine: {
     findFirst: async ({ where }: { where: { materialId: { in: string[] } } }) => {
       const l = firstOpen(db.openOrderLines, where.materialId.in);

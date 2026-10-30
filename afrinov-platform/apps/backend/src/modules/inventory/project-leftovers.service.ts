@@ -104,7 +104,11 @@ export const ProjectLeftoversService = {
       // Project material on an open project order or RFQ stays project material
       // until that is finished: as a Stores item it would reach a project order,
       // and be confirmed delivered to site, as Stores stock (Qodo, PR #129).
+      // The items are locked first, so an order or RFQ being written for them at
+      // the same moment (which holds them too) either commits before these
+      // checks, and is found, or reads them after the move, and is refused.
       const ids = items.map((i) => i.materialId);
+      await tx.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR UPDATE`;
       const onOrder = await tx.purchaseOrderLine.findFirst({
         where: { materialId: { in: ids }, purchaseOrder: { projectNumber: { not: null }, status: { in: OPEN_ORDER_STATUSES } } },
         select: { material: { select: { sku: true } }, purchaseOrder: { select: { number: true } } },
@@ -117,7 +121,7 @@ export const ProjectLeftoversService = {
         select: { material: { select: { sku: true } }, rfq: { select: { number: true } } },
       });
       if (onRfq) {
-        throw Errors.validation(`${onRfq.material.sku} is on ${onRfq.rfq.number}, which is still open, so it stays project material. Move it once that request is awarded or cancelled.`);
+        throw Errors.validation(`${onRfq.material.sku} is on ${onRfq.rfq.number}, which is still open, so it stays project material. Move it once that request is cancelled, or the order it is awarded as is finished.`);
       }
       for (const item of items) {
         const before = await tx.material.findUnique({ where: { id: item.materialId } });

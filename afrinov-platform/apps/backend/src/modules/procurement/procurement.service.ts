@@ -487,6 +487,15 @@ export const PurchaseOrderService = {
     }
 
     const write = async (tx: Prisma.TransactionClient) => {
+      // The items are held, and their sections read again, in the transaction
+      // that writes the order: an item moved to Stores at the same moment then
+      // either waits for this order (and is refused, being on it) or is seen as
+      // moved here (Qodo, PR #129).
+      const ids = [...new Set(input.lines.map((l) => l.materialId))];
+      await tx.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
+      const held = await lineMaterialsOf(ids, tx);
+      if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), held);
+      refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), held);
       // Serialize PO-number generation so two concurrent creates cannot
       // collide on the same sequential number. The advisory lock is scoped
       // to this transaction and auto-released on commit/rollback.

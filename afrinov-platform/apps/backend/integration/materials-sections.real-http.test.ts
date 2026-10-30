@@ -117,6 +117,26 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect((await issue()).status).toBe(201);
   });
 
+  // Qodo, PR #129: raising a project order for an item and moving it to Stores
+  // at the same moment never leaves it both on an open order and in Stores.
+  it('never leaves an item on an open project order once it is moved to Stores, however the two overlap', async () => {
+    const supplier = await api<{ id: string }>('POST', '/suppliers', { name: `IT sections race supplier ${run}` });
+    const items = await Promise.all(Array.from({ length: 8 }, (_, i) => prisma.material.create({
+      data: { sku: `IT-SEC-RACE-${run}-${i}`, name: `Race plate ${i}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' },
+    })));
+    await Promise.all(items.flatMap((m) => [
+      api('POST', '/purchase-orders', { supplierId: supplier.body.id, projectNumber, lines: [{ materialId: m.id, orderedQty: 1 }] }),
+      api('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: m.id, category: 'CONSUMABLES' }] }),
+    ]));
+    for (const m of items) {
+      const now = await prisma.material.findUniqueOrThrow({ where: { id: m.id } });
+      const onOrder = await prisma.purchaseOrderLine.count({ where: { materialId: m.id, purchaseOrder: { status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'] } } } });
+      // One or the other won: on the order and still project material, or moved and on no order.
+      expect(onOrder > 0 ? now.category : 'moved').toBe(onOrder > 0 ? 'PROJECT_MATERIAL' : 'moved');
+      expect(onOrder + (now.category === 'CONSUMABLES' ? 1 : 0)).toBe(1);
+    }
+  });
+
   it('issues project material only to its own project, and nothing to a completed project (Phase 5)', async () => {
     const other = `IT-SEC2-${run}`;
     expect((await api('POST', '/projects', { projectNumber: other, name: `Other project ${run}` })).status).toBe(201);
