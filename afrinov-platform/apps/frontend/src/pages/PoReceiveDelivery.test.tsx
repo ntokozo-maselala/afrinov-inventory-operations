@@ -33,7 +33,7 @@ const ORDER = {
     { id: 'pol-2', materialId: 'm-2', orderedQty: '5', receivedQty: '0', unitPrice: '1', material: { sku: 'BOLT-M16', name: 'Hex bolt', unitOfMeasure: 'each' } },
   ],
 };
-const today = new Date().toISOString().slice(0, 10);
+const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
 const withKey = expect.objectContaining({ idempotencyKey: expect.any(String) });
 
 beforeEach(() => {
@@ -202,6 +202,34 @@ describe('Receive stock against an order', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders/po-1/close', { reason: 'Discontinued' }));
     expect(await screen.findByText('AFRI-0412 is closed.')).toBeInTheDocument();
+  });
+
+  // Qodo, PR #123: also when the same delivery completed the order.
+  it('closes the order as asked when the delivery completes it', async () => {
+    after.status = 'RECEIVED';
+    receiveStock();
+    await chooseHydacOrder();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Nothing more is coming/ }));
+    fireEvent.change(screen.getByLabelText(/Why nothing more is coming/), { target: { value: 'All here' } });
+    await fillAndReceive();
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders/po-1/close', { reason: 'All here' }));
+    expect(await screen.findByText('AFRI-0412 is closed.')).toBeInTheDocument();
+  });
+
+  // Qodo, PR #123: a failed load of the orders keeps the link, with a retry.
+  it('keeps the order a link names when the orders fail to load, and offers a retry', async () => {
+    let fail = true;
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?kind=stores' && fail) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
+      return base(path);
+    });
+    receiveStock('/stock/receive?order=po-1');
+    expect(await screen.findByText('The store\u2019s open orders could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText(/That order has nothing left to receive/)).not.toBeInTheDocument();
+    fail = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('What arrived against AFRI-0412')).toBeInTheDocument();
   });
 
   it('says the delivery was booked when the order then fails to close', async () => {

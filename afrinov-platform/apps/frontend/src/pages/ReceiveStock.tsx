@@ -37,6 +37,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
+import { todayInSouthAfrica } from '../lib/rfq';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Supplier { id: string; name: string; active: boolean }
@@ -54,7 +55,8 @@ const NO_ORDER = 'none';
 
 let nextKey = 1;
 const emptyLine = (locationId = ''): Line => ({ key: nextKey++, materialId: '', locationId, quantity: '' });
-const today = () => new Date().toISOString().slice(0, 10);
+/** Today in South Africa, as the server reads the delivery date. */
+const today = () => todayInSouthAfrica();
 
 function stockText(m: Material, rows: CurrentStockRow[] | undefined): string {
   if (!rows || rows.length === 0) return 'None in stock';
@@ -159,8 +161,10 @@ export function ReceiveStock() {
 
   // The order's page and Order stock link here with ?order=: once the orders,
   // locations and stock have loaded, its supplier and the order are chosen.
+  // The link waits for the orders to load: a failure says so, with a retry,
+  // rather than that the order has nothing left to receive (Qodo, PR #123).
   const [orderPreset, setOrderPreset] = useState(() => params.get('order'));
-  if (orderPreset && (orders.data || orders.error) && locations.data && (stock.data || stock.error)) {
+  if (orderPreset && orders.data && locations.data && (stock.data || stock.error)) {
     setOrderPreset(null);
     const order = (orders.data ?? []).find((o) => o.id === orderPreset && receivable(o));
     if (order) {
@@ -269,8 +273,9 @@ export function ReceiveStock() {
     let status: string | null = null;
     try {
       status = (await api.get<{ status: string }>(`/purchase-orders/${order.id}`)).status;
-      // Nothing more is coming: the rest is closed short, with the reason, as Close PO does.
-      if (shortReason && status === 'PARTIALLY_RECEIVED') {
+      // Nothing more is coming: the order is closed, short with the reason, as Close PO
+      // does; also when this delivery completed it, as asked (Qodo, PR #123).
+      if (shortReason && (status === 'PARTIALLY_RECEIVED' || status === 'RECEIVED')) {
         status = (await api.post<{ status: string }>(`/purchase-orders/${order.id}/close`, { reason: shortReason })).status;
       }
     } catch (err) {
@@ -312,6 +317,13 @@ export function ReceiveStock() {
 
       {loadFailed && <ErrorState error={hardError} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} />}
       {loadStale && <StaleDataNotice error={sources.find((s) => s.stale)?.error} onRetry={() => { suppliers.reload(); materials.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
+      {orders.error && (
+        // Without the store's orders the form can't ask which one a delivery is against.
+        <Alert tone="warning" title={orders.data ? 'The store\u2019s open orders could not be refreshed' : 'The store\u2019s open orders could not be loaded'} className="max-w-4xl mb-4">
+          <p>{orders.data ? 'The orders shown may be out of date.' : 'A delivery against an order can\u2019t be booked until they load.'}</p>
+          <Button size="sm" variant="secondary" className="mt-2" onClick={() => orders.reload()}>Try again</Button>
+        </Alert>
+      )}
 
       {booked && (
         <Alert tone="success" title={`Received on ${booked.receipt} against ${booked.order.number}`} className="max-w-4xl mb-4">

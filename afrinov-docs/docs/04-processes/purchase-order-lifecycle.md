@@ -147,7 +147,7 @@ the one place to receive (Stores and Procurement Separation Roadmap).
   part delivery leaves the rest showing as owed.
 - **Closing:** when a delivery completes the order (`RECEIVED`), the
   confirmation offers **Close AFRI-…**. When nothing more is coming, ticking
-  *close short* with a reason closes a part-received order with the delivery
+  *close short* with a reason closes the order with the delivery (short, if part-received)
   (`POST /:id/close` with the reason), as Close PO does.
 - A delivery not against an order is booked as a counter receipt
   (`goods-receiving.md`).

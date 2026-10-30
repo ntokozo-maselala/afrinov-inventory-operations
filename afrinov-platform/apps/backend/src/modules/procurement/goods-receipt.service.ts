@@ -4,13 +4,31 @@ import { Errors } from '../../shared/errors.js';
 import { PROJECT_DELIVERY_REFUSED, RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 
-/** The date on the delivery note; now when left out. Cannot be in the future. */
-export function parseReceivedAt(value: string | undefined): Date {
-  if (!value) return new Date();
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+/** Slack for a client clock a little ahead of the server's. */
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * The date on the delivery note; now when left out. A day from the date field
+ * (YYYY-MM-DD) is a day in South Africa: today is booked as now, keeping the
+ * time of day, so the day's receipts stay in the order they came; a later day
+ * is refused; an earlier one is that day, at UTC midnight as the delivery-date
+ * filters count days. A full timestamp may not be ahead of now (Qodo, PR #123).
+ */
+export function parseReceivedAt(value: string | undefined, now = new Date()): Date {
+  if (!value) return now;
+  const future = () => Errors.validation('The delivery date cannot be in the future');
+  if (DATE_ONLY.test(value)) {
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const d = new Date(`${value}T00:00:00.000Z`);
+    // 2026-02-31 parses as 3 March: refused, not moved.
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) throw Errors.validation('Invalid delivery date');
+    if (value > today) throw future();
+    return value === today ? now : d;
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) throw Errors.validation('Invalid delivery date');
-  // Allow today in any timezone, refuse anything later.
-  if (d.getTime() > Date.now() + 24 * 60 * 60 * 1000) throw Errors.validation('The delivery date cannot be in the future');
+  if (d.getTime() > now.getTime() + CLOCK_SKEW_MS) throw future();
   return d;
 }
 
