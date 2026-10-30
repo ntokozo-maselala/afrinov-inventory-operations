@@ -1564,6 +1564,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const deliveryRef = b.deliveryRef?.trim();
     if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');
     const receivedAt = mockReceivedAt(b.receivedAt);
+    // As the server: a Projects item with no project isn't received, as it couldn't be issued.
+    for (const l of b.lines ?? []) {
+      const m = findMaterial(l.materialId);
+      if (m && m.category === 'PROJECT_MATERIAL' && !m.projectNumber) {
+        throw err('VALIDATION_ERROR', `${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
+      }
+    }
     const lines = b.lines ?? [];
     if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
     if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');

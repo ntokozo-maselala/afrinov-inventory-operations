@@ -4,7 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGet, granted } = vi.hoisted(() => ({ mockGet: vi.fn(), granted: new Set<string>() }));
+const { mockGet, granted, features } = vi.hoisted(() => ({ mockGet: vi.fn(), granted: new Set<string>(), features: { procurement: true } }));
+vi.mock('../config/features', () => ({ get PROCUREMENT_ENABLED() { return features.procurement; } }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
@@ -55,6 +56,13 @@ describe('links to stock used and deliveries', () => {
     granted.add('orders:view');
     page(<Projects />);
     expect(await screen.findByRole('link', { name: 'Orders for AFRI-1325' })).toHaveAttribute('href', '/purchase-orders?project=AFRI-1325');
+    cleanup();
+    // With procurement off there are no order pages, so no link to them (Qodo, PR #131).
+    features.procurement = false;
+    page(<Projects />);
+    await screen.findByText('Project AFRI-1325');
+    expect(screen.queryByRole('link', { name: 'Orders for AFRI-1325' })).not.toBeInTheDocument();
+    features.procurement = true;
     granted.clear();
   });
 

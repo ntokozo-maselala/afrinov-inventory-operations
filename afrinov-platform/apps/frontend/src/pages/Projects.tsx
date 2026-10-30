@@ -20,6 +20,7 @@ import { today } from '../lib/dates';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface UserOpt { id: string; name: string }
 
@@ -210,8 +211,9 @@ export function Projects() {
   // Adding, editing and archiving need manage:projects on the server.
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('projects:manage');
-  // A project's orders are Procurement's: shown to those who see project orders.
-  const canSeeOrders = hasPermission('orders:view');
+  // A project's orders are Procurement's: shown to those who see project orders,
+  // while procurement is on (off, the order pages aren't there: Qodo, PR #131).
+  const canSeeOrders = PROCUREMENT_ENABLED && hasPermission('orders:view');
 
   const filtered = useMemo(() => {
     if (!projects.data) return [];
