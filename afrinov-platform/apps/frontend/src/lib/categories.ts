@@ -32,10 +32,13 @@ export function sectionOf(category: string): MaterialSection {
  * The project a Projects item was tagged with, while it is open: suggested as
  * an order's or RFQ's project when none is chosen yet, never fixed by it (the
  * order says which project its material is for: Project on the Order Roadmap).
- * Blank for a Stores item, an untagged one, or one whose project has closed.
+ * Blank for a Stores item, an untagged one, or one whose project has closed or
+ * been deactivated.
  */
-export function suggestedProject(m: { category: string; projectNumber?: string | null; project?: { status?: string | null } | null }): string {
+export function suggestedProject(m: { category: string; projectNumber?: string | null; project?: { status?: string | null; active?: boolean } | null }): string {
   if (m.category !== PROJECTS_CATEGORY || !m.projectNumber) return '';
+  // Nor a deactivated project, which the server refuses an order for (Qodo, PR #130).
+  if (m.project?.active === false) return '';
   return m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED' ? '' : m.projectNumber;
 }
 

@@ -2,7 +2,7 @@
 // Stores and Projects tabs, the item form asking the section first, and an
 // item's page saying where it belongs.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet, mockPost, mockPatch } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn() }));
@@ -105,7 +105,7 @@ const form = (props: Record<string, unknown> = {}) => render(<MaterialForm onCan
 const fill = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe('the item form asks for the section first', () => {
-  it('a Projects item takes an open project and no reorder level', async () => {
+  it('a Projects item takes an open project, if one is given, and no reorder level', async () => {
     form();
     fireEvent.click(screen.getByRole('radio', { name: /Projects/ }));
     expect(screen.queryByLabelText('Reorder level')).not.toBeInTheDocument();
@@ -113,14 +113,33 @@ describe('the item form asks for the section first', () => {
     expect(screen.queryByRole('option', { name: /1200/ })).not.toBeInTheDocument();
     fill(/^SKU/, '1369-FLANGE');
     fill(/^Item name/, 'Flange');
-    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
-    expect(await screen.findByText('Choose the project this material is for.')).toBeInTheDocument();
     fill(/^Project(?!s)/, '1369');
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     const body = mockPost.mock.calls[0]![1] as Record<string, unknown>;
     expect(body).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: '1369' });
     expect(body).not.toHaveProperty('requiredStock');
+  });
+
+  // Project on the Order Roadmap, Phase 2: the order says which project it is for (Qodo, PR #130).
+  it('adds a Projects item with no project, and saves an edit to one without asking for a project', async () => {
+    form();
+    fireEvent.click(screen.getByRole('radio', { name: /Projects/ }));
+    await screen.findByRole('option', { name: 'No project' });
+    fill(/^SKU/, 'PLATE-10MM');
+    fill(/^Item name/, 'Plate');
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(mockPost.mock.calls[0]![1]).not.toHaveProperty('projectNumber');
+    cleanup();
+
+    // Editing one with no project sends no project, and saves.
+    form({ initial: ITEMS.find((m) => m.sku === 'OLD-PLATE') });
+    fill(/^Item name/, 'Old plate, 10mm');
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
+    expect(mockPatch.mock.calls[0]![1]).toMatchObject({ name: 'Old plate, 10mm' });
+    expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('projectNumber');
   });
 
   it('a Stores item has a category (not Project Material) and a reorder level', async () => {

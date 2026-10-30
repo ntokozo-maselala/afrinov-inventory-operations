@@ -280,7 +280,7 @@ const PROJECT_DELIVERY_REFUSED = "Project material goes from the supplier straig
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
   const p = state.projects.find((x) => x.projectNumber === projectNumber);
-  return { projectNumber, name: p?.name ?? null, status: p?.status ?? null };
+  return { projectNumber, name: p?.name ?? null, status: p?.status ?? null, active: p?.active ?? true };
 }
 
 // AFRI-0001, AFRI-0002, …: one past the highest AFRI number, never below the

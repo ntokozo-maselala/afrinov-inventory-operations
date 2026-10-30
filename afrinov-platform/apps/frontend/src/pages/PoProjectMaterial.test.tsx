@@ -79,6 +79,19 @@ describe('the new-order form with project material', () => {
     })));
   });
 
+  // Qodo, PR #130: the server refuses an order for a deactivated project.
+  it("doesn't suggest a deactivated project", async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path === '/materials'
+      ? [...MATERIALS, { ...pipe('p-1500', '1500'), project: { projectNumber: '1500', name: 'Job 1500', status: 'ACTIVE', active: false } }]
+      : base(path)));
+    form();
+    await waitFor(() => expect(optionsOf('Project')).toContain('1402 — Boiler'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'p-1500' } });
+    expect(screen.getByLabelText('Project')).toHaveValue('');
+  });
+
   it("doesn't suggest a closed project, or replace the project already chosen", async () => {
     form();
     await waitFor(() => expect(optionsOf('Project')).toContain('1402 — Boiler'));
