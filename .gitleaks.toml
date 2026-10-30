@@ -3,9 +3,9 @@
 # The repository is public, so any credential in the tree or in history is
 # disclosed. The gate must therefore fail on a real secret but stay quiet on the
 # known, intentional test placeholders below. Every value listed here is already
-# published in this repository by design, is explicitly rejected by production
-# configuration (see INSECURE_SECRETS in apps/backend/src/shared/config.ts), and
-# grants no access to anything.
+# published in this repository by design and grants no access to anything; the
+# JWT/secret values are additionally rejected by production configuration (see
+# INSECURE_SECRETS in apps/backend/src/shared/config.ts).
 #
 # The allowlist matches on VALUE ONLY, never on a path. Gitleaks combines an
 # allowlist's `paths` and `regexes` criteria with OR (and ignores
@@ -32,4 +32,7 @@ regexes = [
   '''test-secret-do-not-use-in-prod''',
   '''insecure-dev-secret-change-me''',
   '''change-me-in-production''',
+  # A frontend unit-test fixture: a password and a deliberately mismatched
+  # confirmation in passwordPolicy.test.ts. Published by design, not a credential.
+  '''a-long-passw0rd''',
 ]
