@@ -141,12 +141,12 @@ describe('changing a material', () => {
   });
 });
 
-describe('material with no project yet', () => {
-  it('is refused for issuing and ordering; with a project, or in Stores, it is not', () => {
-    expect(() => refuseUnassigned({ sku: 'OLD-PLATE', category: 'PROJECT_MATERIAL', projectNumber: null }, 'ordered'))
-      .toThrow("OLD-PLATE has no project yet, so it can't be ordered. Give it its project on Materials first.");
-    expect(() => refuseUnassigned({ sku: 'PIPE', category: 'PROJECT_MATERIAL', projectNumber: '1369' }, 'issued')).not.toThrow();
-    expect(() => refuseUnassigned({ sku: 'DISC', category: 'CONSUMABLES', projectNumber: null }, 'issued')).not.toThrow();
+describe('material with no project', () => {
+  it('is refused for issuing, and pointed to Stores; with a project, or in Stores, it is not', () => {
+    expect(() => refuseUnassigned({ sku: 'OLD-PLATE', category: 'PROJECT_MATERIAL', projectNumber: null }))
+      .toThrow("OLD-PLATE has no project, so it isn't issued. Move it to Stores from Project leftovers.");
+    expect(() => refuseUnassigned({ sku: 'PIPE', category: 'PROJECT_MATERIAL', projectNumber: '1369' })).not.toThrow();
+    expect(() => refuseUnassigned({ sku: 'DISC', category: 'CONSUMABLES', projectNumber: null })).not.toThrow();
   });
 });
 

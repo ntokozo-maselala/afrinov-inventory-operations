@@ -23,7 +23,7 @@ import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
-import { leftoversLink } from '../components/LeftoversNotice';
+import { NO_PROJECT_LEFTOVERS, leftoversLink } from '../components/LeftoversNotice';
 import { PROJECT_STATUS_TONE, projectStatusLabel, type ProjectStatus } from '../lib/projectStatus';
 
 
@@ -210,13 +210,15 @@ export function MaterialDetail() {
                   <SectionHeader
                     title="Left in the store"
                     description={!material.data.projectNumber
-                      ? 'Received before project material went straight to site. It can be issued once it is given a project.'
+                      ? 'Received before project material went straight to site. It has no project, so it isn\u2019t issued: move it to Stores.'
                       : projectClosed(material.data)
                         ? 'Received before project material went straight to site. The project is closed: move it to Stores.'
                         : 'Received before project material went straight to site. It is issued to its project.'}
-                    actions={projectClosed(material.data) && material.data.projectNumber
-                      ? <Link to={leftoversLink(material.data.projectNumber)} className="btn-link text-sm">Move to Stores</Link>
-                      : undefined}
+                    actions={!material.data.projectNumber
+                      ? <Link to={NO_PROJECT_LEFTOVERS} className="btn-link text-sm">Move to Stores</Link>
+                      : projectClosed(material.data)
+                        ? <Link to={leftoversLink(material.data.projectNumber)} className="btn-link text-sm">Move to Stores</Link>
+                        : undefined}
                   />
                   <DataTable
                     ariaLabel="Left in the store"

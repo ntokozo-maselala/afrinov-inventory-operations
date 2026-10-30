@@ -466,27 +466,24 @@ describe('PurchaseOrderService lifecycle', () => {
   });
 });
 
-describe('PurchaseOrderService and project material with no project (materials sections Phase 3)', () => {
-  it('refuses to order it until it has its project', async () => {
+// Project on the Order Roadmap, Phase 1: the order says which project its
+// material is for, so an item's own project (or none) doesn't matter.
+describe('PurchaseOrderService and project material with no project', () => {
+  it('orders it for any project', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-old', { id: 'mat-old', sku: 'OLD-PLATE', name: 'Plate', active: true, category: 'PROJECT_MATERIAL', projectNumber: null });
+    db.projects.set('1369', { projectNumber: '1369', active: true });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber: '1369', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1');
+    expect(po).toMatchObject({ status: 'DRAFT', projectNumber: '1369' });
+    expect(await PurchaseOrderService.submit(po.id, 'user-1')).not.toMatchObject({ status: 'DRAFT' });
+  });
+
+  it("keeps it off a Stores order, which holds Stores items only", async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     db.materials.set('mat-old', { id: 'mat-old', sku: 'OLD-PLATE', name: 'Plate', active: true, category: 'PROJECT_MATERIAL', projectNumber: null });
     await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1'))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE has no project yet, so it can't be ordered/) });
-    db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: '1369' });
-    db.projects.set('1369', { projectNumber: '1369', active: true });
-    expect(await PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber: '1369', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
-  });
-
-  it('refuses to submit a draft holding such an item, raised before the rule', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    db.materials.set('mat-old', { id: 'mat-old', sku: 'OLD-PLATE', name: 'Plate', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1369' });
-    db.projects.set('1369', { projectNumber: '1369', active: true });
-    const draft = await PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber: '1369', lines: [{ materialId: 'mat-old', orderedQty: 2 }] }, 'user-1');
-    // As a draft from before Phase 3 would be: its item has no project.
-    db.materials.set('mat-old', { ...db.materials.get('mat-old')!, projectNumber: null });
-    await expect(PurchaseOrderService.submit(draft.id, 'user-1'))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE has no project yet/) });
-    expect(db.pos.get(draft.id)!.status).toBe('DRAFT');
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/OLD-PLATE is project material, so it isn't bought on a Stores order/) });
+    expect(db.pos.size).toBe(0);
   });
 });
 
@@ -521,10 +518,14 @@ describe('PurchaseOrderService and project material (materials sections Phase 6)
     expect(awarded).toMatchObject({ projectNumber: '1369' });
   });
 
-  it('refuses it on an order for another project, for none, or with another project\'s material', async () => {
-    await expect(order('1402', 'pipe-1369')).rejects.toMatchObject({ message: "1369-PIPE is material for project 1369, so it can't be ordered for project 1402." });
-    await expect(order(undefined, 'pipe-1369')).rejects.toMatchObject({ message: '1369-PIPE is material for project 1369: order it for that project.' });
-    await expect(order('1369', 'pipe-1369', 'pipe-1402')).rejects.toMatchObject({ message: expect.stringMatching(/One order can't hold material for two projects \(1369 and 1402\)/) });
+  // Project on the Order Roadmap, Phase 1: the item's project no longer limits the order.
+  it('orders an item tagged with another project, or items of two projects, for the order\'s project', async () => {
+    expect(await order('1402', 'pipe-1369')).toMatchObject({ status: 'DRAFT', projectNumber: '1402' });
+    expect(await order('1369', 'pipe-1369', 'pipe-1402')).toMatchObject({ status: 'DRAFT', projectNumber: '1369' });
+  });
+
+  it('keeps it off an order with no project, a Stores order', async () => {
+    await expect(order(undefined, 'pipe-1369')).rejects.toMatchObject({ message: expect.stringMatching(/1369-PIPE is project material, so it isn't bought on a Stores order/) });
     expect(db.pos.size).toBe(0);
   });
 
@@ -533,11 +534,10 @@ describe('PurchaseOrderService and project material (materials sections Phase 6)
     await expect(order('1200', 'pipe-1200')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Project 1200 is completed, so nothing more is ordered for it.' });
   });
 
-  it('refuses moving an order with project material to another project', async () => {
+  it('moves an order with project material to another project', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await order('1369', 'pipe-1369');
-    await expect(PurchaseOrderService.update({ id: po.id, projectNumber: '1402' }, 'user-1'))
-      .rejects.toMatchObject({ message: expect.stringMatching(/can't be ordered for project 1402/) });
+    expect(await PurchaseOrderService.update({ id: po.id, projectNumber: '1402' }, 'user-1')).toMatchObject({ projectNumber: '1402' });
   });
 
   it('keeps a project order on a project and a Stores order off one, as each team raises its own', async () => {
@@ -569,7 +569,7 @@ describe('PurchaseOrderService and project material (materials sections Phase 6)
     const old = await order(undefined, 'mat-1');
     const line = [...db.lines.values()].find((l) => l.purchaseOrderId === old.id)!;
     line.materialId = 'pipe-1402';
-    await expect(PurchaseOrderService.submit(old.id, 'user-1')).rejects.toMatchObject({ message: expect.stringMatching(/1402-PIPE is material for project 1402: order it for that project/) });
+    await expect(PurchaseOrderService.submit(old.id, 'user-1')).rejects.toMatchObject({ message: expect.stringMatching(/1402-PIPE is project material, so it isn't bought on a Stores order/) });
     expect(db.pos.get(old.id)!.status).toBe('DRAFT');
   });
 });

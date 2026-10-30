@@ -17,7 +17,7 @@ import { Prisma, type RfqStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
+import { refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
 import { defaultVatRate, lineMoney, orderTotals } from './po-pricing.js';
 import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
@@ -286,8 +286,8 @@ async function checkLines(lines: RfqLineInput[], projectNumber: string | null, t
   if (missing) throw Errors.validation(`Material ${missing} does not exist`);
   const inactive = materials.find((m) => !m.active);
   if (inactive) throw Errors.validation(`${inactive.sku} is inactive, so it can't be quoted for`);
-  for (const m of materials) refuseUnassigned(m, 'ordered');
-  checkProjectMaterial(projectNumber, materials, 'ordered');
+  // The RFQ says which project it is for, not the catalogue item (Project on
+  // the Order Roadmap, Phase 1).
   refuseStoresOnProjectOrder(projectNumber, materials);
 }
 

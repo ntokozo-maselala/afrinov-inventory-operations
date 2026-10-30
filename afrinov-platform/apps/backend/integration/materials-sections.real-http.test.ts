@@ -65,7 +65,9 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect((await api('GET', '/materials?section=OTHER')).status).toBe(400);
   });
 
-  it('keeps project material with no project from being issued until it is given one (Phase 3)', async () => {
+  // Project on the Order Roadmap, Phase 1: no one gives items a project any
+  // more, so leftovers with none are moved to Stores, then issued as Stores stock.
+  it('keeps project material with no project from being issued, and moves it to Stores', async () => {
     // As the workbook import and the migration leave it: Project Material with no project.
     const old = await prisma.material.create({ data: { sku: `IT-SEC-OLD-${run}`, name: 'Old plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' } });
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections rack ${run}`, type: 'RACK' });
@@ -75,11 +77,64 @@ describe('Stores and Projects materials over real HTTP', () => {
 
     const refused = await issue();
     expect(refused.status).toBe(400);
-    expect(refused.body.error?.message).toMatch(/has no project yet, so it can't be issued/);
+    expect(refused.body.error?.message).toMatch(/has no project, so it isn't issued. Move it to Stores from Project leftovers/);
 
-    const assigned = await api<MaterialRow>('PATCH', `/materials/${old.id}`, { projectNumber });
-    expect(assigned.body).toMatchObject({ projectNumber, section: 'PROJECTS' });
+    const listed = await api<{ project: null; items: Array<{ materialId: string; onHand: string }> }>('GET', '/materials/no-project/leftovers');
+    expect(listed.status).toBe(200);
+    expect(listed.body.project).toBeNull();
+    expect(listed.body.items.find((i) => i.materialId === old.id)).toMatchObject({ onHand: '5' });
+
+    // Only an item that really has no project moves from here.
+    const tagged = await create({ sku: `IT-SEC-TAG-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
+    const wrong = await api<{ error: { message: string } }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: tagged.body.id, category: 'CONSUMABLES' }] });
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error.message).toMatch(/is not a Projects item with no project/);
+
+    // Not while it is on an open project order: as a Stores item it would be
+    // confirmed delivered to site as Stores stock (Qodo, PR #129).
+    const supplier = await api<{ id: string }>('POST', '/suppliers', { name: `IT sections move supplier ${run}` });
+    const draft = await api<{ id: string; number: string }>('POST', '/purchase-orders', { supplierId: supplier.body.id, projectNumber, lines: [{ materialId: old.id, orderedQty: 1 }] });
+    expect([200, 201]).toContain(draft.status);
+    const onOrder = await api<{ error: { message: string } }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: old.id, category: 'CONSUMABLES' }] });
+    expect(onOrder.status).toBe(400);
+    expect(onOrder.body.error.message).toMatch(new RegExp(`is on ${draft.body.number}, which is still open, so it stays project material`));
+    expect((await api('POST', `/purchase-orders/${draft.body.id}/cancel`, { reason: 'Moving the stock to Stores' })).status).toBe(200);
+    // Nor while it is on an open request for quotation, whose award would be a project order.
+    const rfq = await api<{ id: string; number: string }>('POST', '/rfqs', { projectNumber, lines: [{ materialId: old.id, quantity: 1 }] });
+    expect(rfq.status).toBe(201);
+    const onRfq = await api<{ error: { message: string } }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: old.id, category: 'CONSUMABLES' }] });
+    expect(onRfq.status).toBe(400);
+    expect(onRfq.body.error.message).toMatch(new RegExp(`is on ${rfq.body.number}, which is still open`));
+    expect((await api('POST', `/rfqs/${rfq.body.id}/cancel`, { reason: 'Moving the stock to Stores' })).status).toBe(200);
+
+    const moved = await api<{ moved: number }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: old.id, category: 'CONSUMABLES' }] });
+    expect(moved.status).toBe(200);
+    expect(moved.body.moved).toBe(1);
+    const after = await prisma.material.findUniqueOrThrow({ where: { id: old.id } });
+    expect(after).toMatchObject({ category: 'CONSUMABLES', projectNumber: null });
+    expect((await api<{ items: Array<{ materialId: string }> }>('GET', '/materials/no-project/leftovers')).body.items.map((i) => i.materialId)).not.toContain(old.id);
+    // Now Stores stock, it is issued to any project.
     expect((await issue()).status).toBe(201);
+  });
+
+  // Qodo, PR #129: raising a project order for an item and moving it to Stores
+  // at the same moment never leaves it both on an open order and in Stores.
+  it('never leaves an item on an open project order once it is moved to Stores, however the two overlap', async () => {
+    const supplier = await api<{ id: string }>('POST', '/suppliers', { name: `IT sections race supplier ${run}` });
+    const items = await Promise.all(Array.from({ length: 8 }, (_, i) => prisma.material.create({
+      data: { sku: `IT-SEC-RACE-${run}-${i}`, name: `Race plate ${i}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' },
+    })));
+    await Promise.all(items.flatMap((m) => [
+      api('POST', '/purchase-orders', { supplierId: supplier.body.id, projectNumber, lines: [{ materialId: m.id, orderedQty: 1 }] }),
+      api('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: m.id, category: 'CONSUMABLES' }] }),
+    ]));
+    for (const m of items) {
+      const now = await prisma.material.findUniqueOrThrow({ where: { id: m.id } });
+      const onOrder = await prisma.purchaseOrderLine.count({ where: { materialId: m.id, purchaseOrder: { status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'] } } } });
+      // One or the other won: on the order and still project material, or moved and on no order.
+      expect(onOrder > 0 ? now.category : 'moved').toBe(onOrder > 0 ? 'PROJECT_MATERIAL' : 'moved');
+      expect(onOrder + (now.category === 'CONSUMABLES' ? 1 : 0)).toBe(1);
+    }
   });
 
   it('issues project material only to its own project, and nothing to a completed project (Phase 5)', async () => {
@@ -108,7 +163,8 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(closed.body.error?.message).toMatch(/is completed, so no more stock is issued to it/);
   });
 
-  it('orders project material only for its own project, and nothing for a completed project (Phase 6)', async () => {
+  // Project on the Order Roadmap, Phase 1: the order's project applies, whatever the item is tagged with.
+  it('orders project material for any project on a project order, never on a Stores order, and nothing for a completed project', async () => {
     const other = `IT-SEC3-${run}`;
     expect((await api('POST', '/projects', { projectNumber: other, name: `Third project ${run}` })).status).toBe(201);
     const pipe = await create({ sku: `IT-SEC-ORD-${run}`, category: 'PROJECT_MATERIAL', projectNumber });
@@ -118,11 +174,15 @@ describe('Stores and Projects materials over real HTTP', () => {
       supplierId: supplier.body.id, projectNumber: to, lines: [{ materialId, orderedQty: 2 }],
     });
 
-    const wrong = await order(pipe.body.id, other);
-    expect(wrong.status).toBe(400);
-    expect(wrong.body.error?.message).toMatch(/is material for project .*, so it can't be ordered for project/);
-    expect((await order(pipe.body.id)).status).toBe(400);
+    expect([200, 201]).toContain((await order(pipe.body.id, other)).status);
     expect([200, 201]).toContain((await order(pipe.body.id, projectNumber)).status);
+    // An item with no project goes on a project order too.
+    const plain = await prisma.material.create({ data: { sku: `IT-SEC-PLAIN-${run}`, name: 'Plain plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' } });
+    expect([200, 201]).toContain((await order(plain.id, other)).status);
+    // An order with no project is a Stores order: Stores items only.
+    const stores = await order(pipe.body.id);
+    expect(stores.status).toBe(400);
+    expect(stores.body.error?.message).toMatch(/is project material, so it isn't bought on a Stores order/);
 
     // A project order holds project material only (Stores ordering roadmap).
     const onProject = await order(disc.body.id, other);

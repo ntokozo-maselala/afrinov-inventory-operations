@@ -391,7 +391,16 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/projects/:projectNumber/leftovers/move', tag: 'Projects', summary: 'Move the leftovers of a closed project to Stores',
-    description: 'All or none. Each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no project and no Required Stock.',
+    description: 'All or none. Each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no project and no Required Stock. Refused (400) for an item still on an open project order or request for quotation: it stays project material until that is finished.',
+    permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/materials/no-project/leftovers', tag: 'Projects', summary: 'List Projects items with no project still in stock',
+    description: 'They are not issued, so they move to Stores. Returns { project: null, items }.',
+  },
+  {
+    method: 'post', path: '/materials/no-project/leftovers/move', tag: 'Projects', summary: 'Move Projects items with no project to Stores',
+    description: 'All or none, as for a closed project\'s leftovers: each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no Required Stock. Refused (400) for an item still on an open project order or request for quotation: it stays project material until that is finished.',
     permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
 
@@ -443,7 +452,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/purchase-orders', tag: 'Purchase orders', summary: 'Create a draft purchase order',
-    description: 'With a project, a project order holding that project\'s material only; without one, a Stores order of Stores items.',
+    description: 'With a project, a project order of Projects items, any of them: the order says which project they are for, whatever project an item was tagged with. Without one, a Stores order of Stores items only.',
     procurement: true, byOrderKind: P.CreatePurchaseOrder, body: createPOSchema, success: 201, errors: [404],
   },
   {
@@ -530,7 +539,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/rfqs', tag: 'Requests for quotation', summary: 'Raise a draft request for quotation',
-    description: "For one project and its material only: Stores stock is ordered without an RFQ. Numbered AFRI-02A-<project>-02-<nn> (other project numbers RFQ-<project>-<nn>). The description defaults to the project's name.",
+    description: "For one project and Projects items only, any of them (the RFQ says which project they are for): Stores stock is ordered without an RFQ. Numbered AFRI-02A-<project>-02-<nn> (other project numbers RFQ-<project>-<nn>). The description defaults to the project's name.",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
   },
   {

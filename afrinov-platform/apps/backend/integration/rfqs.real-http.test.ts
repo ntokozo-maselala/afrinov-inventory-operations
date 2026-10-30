@@ -125,10 +125,10 @@ describe('requests for quotation over real HTTP', () => {
     expect(together.map((r) => r.body.number).sort()).toEqual([1, 2, 3, 4].map((n) => `RFQ-IT-${run}-0${n}`));
   });
 
-  it("refuses another project's material, an inactive supplier and an unknown project", async () => {
+  it("takes an item tagged with another project, and refuses an inactive supplier and an unknown project", async () => {
+    // Project on the Order Roadmap, Phase 1: the RFQ says which project its material is for.
     const forOther = await raise({ projectNumber: otherProject, lines: [{ materialId: projectItem, quantity: 1 }] });
-    expect(forOther.status).toBe(400);
-    expect(forOther.body.error.message).toMatch(/material for project/);
+    expect(forOther.status).toBe(201);
 
     const closed = await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [inactiveSupplier] });
     expect(closed.status).toBe(400);
@@ -163,8 +163,8 @@ describe('requests for quotation over real HTTP', () => {
     expect(named.body.description).toBe(`Door rails ${run}`);
     const moved = await api<Rfq>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: otherProject, lines: [{ materialId: otherItem, quantity: 1 }] });
     expect(moved.body.description).toBe(`Other job ${run}`);
-    // Its material stays with its project.
-    expect((await api('PATCH', `/rfqs/${named.body.id}`, { projectNumber })).status).toBe(400);
+    // Its material goes with it to another project (Project on the Order Roadmap, Phase 1).
+    expect((await api('PATCH', `/rfqs/${named.body.id}`, { projectNumber })).status).toBe(200);
     // And it stays on a project.
     const off = await api<ApiErrorBody>('PATCH', `/rfqs/${named.body.id}`, { projectNumber: null });
     expect(off.status).toBe(400);

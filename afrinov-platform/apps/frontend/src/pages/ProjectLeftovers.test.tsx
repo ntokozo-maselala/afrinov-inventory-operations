@@ -93,6 +93,34 @@ describe('ProjectLeftovers page', () => {
   });
 });
 
+// Project on the Order Roadmap, Phase 1 (Qodo, PR #129): Projects items with
+// no project aren't issued, so they move to Stores from here.
+describe('ProjectLeftovers for items with no project', () => {
+  const renderUnassigned = () => render(
+    <MemoryRouter initialEntries={['/materials/no-project/leftovers']}>
+      <ToastProvider><Routes><Route path="/materials/no-project/leftovers" element={<ProjectLeftovers />} /></Routes></ToastProvider>
+    </MemoryRouter>,
+  );
+
+  it('lists them and moves them to Stores, with no project to close first', async () => {
+    mockGet.mockResolvedValue({ project: null, items: [{ ...ITEMS[0]!, sku: 'OLD-PLATE', name: 'Plate' }] });
+    renderUnassigned();
+    await screen.findByText('Plate');
+    expect(screen.getByRole('heading', { name: 'Projects items with no project' })).toBeInTheDocument();
+    expect(mockGet.mock.calls[0]![0]).toBe('/materials/no-project/leftovers');
+    expect(screen.queryByText(/is still open/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Stores category for OLD-PLATE'), { target: { value: 'CONSUMABLES' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/materials/no-project/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }));
+  });
+
+  it('says when none is in stock', async () => {
+    mockGet.mockResolvedValue({ project: null, items: [] });
+    renderUnassigned();
+    expect(await screen.findByText('No Projects item with no project is in stock, so there is nothing to move.')).toBeInTheDocument();
+  });
+});
+
 describe('LeftoversNotice', () => {
   beforeEach(() => {
     mockGet.mockReset().mockResolvedValue({

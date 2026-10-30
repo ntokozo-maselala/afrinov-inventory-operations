@@ -98,6 +98,23 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
     return MaterialService.update({ id, ...parsed.data }, actorId);
   });
 
+  // Projects items with no project still in stock: they aren't issued, so they
+  // move to Stores (Project on the Order Roadmap, Phase 1). Their own route, so
+  // no project number can be mistaken for them.
+  app.get('/materials/no-project/leftovers', { preHandler: [app.authenticate] }, async () => ProjectLeftoversService.listUnassigned());
+
+  app.post('/materials/no-project/leftovers/move', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.EditMaterial);
+    const parsed = moveLeftoversSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid move payload', details: parsed.error.flatten() },
+      });
+    }
+    const actorId = (req as unknown as { user: { id: string } }).user.id;
+    return ProjectLeftoversService.moveToStores(null, parsed.data.items, actorId);
+  });
+
   // A project's material still in stock: once it is closed, its leftovers to move to Stores.
   app.get('/projects/:projectNumber/leftovers', { preHandler: [app.authenticate] }, async (req) => {
     const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);

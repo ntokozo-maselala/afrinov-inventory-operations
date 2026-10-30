@@ -72,9 +72,9 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
     expect(await screen.findByRole('link', { name: '1 item to move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
     // An open project's: to its items on Materials, to be issued to it.
     expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1402');
-    // One with no project yet can't be issued until it has one (Qodo, PR #126).
-    expect(screen.getByText(/1 item with no project yet, which can.t be issued until each is given one/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Give them their projects' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=none');
+    // One with no project isn't issued: it moves to Stores (Project on the Order Roadmap; Qodo, PR #129).
+    expect(screen.getByText(/1 item with no project, which aren.t issued/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Move them to Stores' })).toHaveAttribute('href', '/materials/no-project/leftovers');
   });
 
   // Qodo, PR #126: from the page's own rows, so a deactivated item still in the

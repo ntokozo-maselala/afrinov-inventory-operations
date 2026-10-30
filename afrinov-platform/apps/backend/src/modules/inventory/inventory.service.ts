@@ -585,10 +585,10 @@ export const InventoryService = {
         if (materials.has(t.materialId)) continue;
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
-        refuseUnassigned(material, 'issued');
+        refuseUnassigned(material);
         materials.set(t.materialId, material);
       }
-      checkProjectMaterial(input.projectNumber, [...materials.values()], 'issued');
+      checkProjectMaterial(input.projectNumber, [...materials.values()]);
 
       for (const t of totals.values()) {
         const material = materials.get(t.materialId)!;
