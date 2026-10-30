@@ -107,6 +107,8 @@ export function Dashboard() {
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
+  // The projects whose material is still in the store, received before it went straight to site.
+  const heldFor = (value?.projects ?? []).filter((p) => p.projectNumber && p.itemsInStock > 0).length;
   const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
   // The room each location stands in, for the chart's By room view.
   const { data: locationList, error: locationsError, reload: reloadLocations } = useApi<Array<{ id: string; parent?: { id: string; name: string } | null }>>('/locations');
@@ -296,11 +298,12 @@ export function Dashboard() {
               <div className="dashboard-chart-empty">No priced stock is available for category comparison.</div>
             )}
             {value?.total.unpriced ? <p className="dashboard-panel-footnote">Unpriced stock is excluded from the valuation total.</p> : null}
-            {value?.sections && value.sections.PROJECTS.items > 0 && (
+            {/* Project material goes straight to site; only what was received before still sits in the store. */}
+            {value?.sections && value.sections.PROJECTS.itemsInStock > 0 && (
               <p className="dashboard-panel-footnote">
-                Projects material: {formatCurrency(value.sections.PROJECTS.value, value.currency)} across{' '}
-                {(value.projects ?? []).filter((p) => p.projectNumber).length} project{(value.projects ?? []).filter((p) => p.projectNumber).length === 1 ? '' : 's'}; it is never re-ordered, so the counts above are Stores only.{' '}
-                <Link to="/stock?section=PROJECTS" className="btn-link">By project</Link>
+                Project material still in the store from before it went straight to site: {formatCurrency(value.sections.PROJECTS.value, value.currency)} across{' '}
+                {heldFor} project{heldFor === 1 ? '' : 's'}; it is never re-ordered, so the counts above are Stores only.{' '}
+                <Link to="/stock" className="btn-link">By project</Link>
               </p>
             )}
           </section>

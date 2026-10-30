@@ -188,6 +188,64 @@ describe('an item’s page says where it belongs', () => {
     detail('m-DISC');
     expect(await screen.findByText('DISC · Stores · Consumables')).toBeInTheDocument();
     expect(screen.getByText('Reorder at')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Stock summary' })).toBeInTheDocument();
+  });
+});
+
+// Project material goes from the supplier straight to site: it has no stock
+// status, only its project's, and shows stock only while some is left from before.
+describe('a Projects item has its project’s status, not a stock status', () => {
+  const withStock = (sku: string, status: string, rows: unknown[]) => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === `/materials/m-${sku}`) return { ...ITEMS.find((m) => m.sku === sku), project: { projectNumber: sku.slice(0, 4), name: 'Plant upgrade', status } };
+      if (path.startsWith('/reports/current-stock')) return rows;
+      return base(path);
+    });
+  };
+  const left = { materialId: 'm-1369-PIPE', locationId: 'l-1', locationName: 'Main store', locationType: 'STOREROOM', quantity: '3', requiredStock: '0', stockStatus: 'NOT_SET', percentOfRequired: null };
+
+  it('shows its project’s status, and no stock summary, stock table or View in stock', async () => {
+    withStock('1369-PIPE', 'ACTIVE', []);
+    detail('m-1369-PIPE');
+    const card = (await screen.findByRole('heading', { name: 'Project status' })).closest('section')!;
+    expect(within(card).getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText(/goes from the supplier straight to site/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Stock summary' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Stock by location')).not.toBeInTheDocument();
+    expect(screen.queryByText('Left in the store')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'View in stock' })).not.toBeInTheDocument();
+  });
+
+  it('shows what is left in the store from before, with no reorder level or stock status', async () => {
+    withStock('1369-PIPE', 'ACTIVE', [left]);
+    detail('m-1369-PIPE');
+    const table = await screen.findByRole('table', { name: 'Left in the store' });
+    expect(within(table).getByText('Main store')).toBeInTheDocument();
+    expect(within(table).queryByText('Reorder')).not.toBeInTheDocument();
+    expect(within(table).queryByText('Item status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
+    // The status card doesn't say none is held while some is shown (Qodo, PR #126).
+    const card = screen.getByRole('heading', { name: 'Project status' }).closest('section')!;
+    expect(within(card).queryByText(/isn.t held in the store/)).not.toBeInTheDocument();
+    expect(within(card).getByText(/What is shown as left in the store was received before/)).toBeInTheDocument();
+  });
+
+  it('says an item with no project can be issued once it has one', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [{ ...left, materialId: 'm-OLD-PLATE' }] : base(path)));
+    detail('m-OLD-PLATE');
+    expect(await screen.findByText(/It can be issued once it is given a project/)).toBeInTheDocument();
+    expect(screen.queryByText(/It is issued to its project/)).not.toBeInTheDocument();
+  });
+
+  it('sends a closed project’s leftovers to be moved to Stores', async () => {
+    withStock('1369-PIPE', 'COMPLETED', [left]);
+    detail('m-1369-PIPE');
+    const card = (await screen.findByRole('heading', { name: 'Project status' })).closest('section')!;
+    expect(within(card).getByText('Completed')).toBeInTheDocument();
+    expect(within(card).getByText('The project is closed, so nothing more is ordered for it.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
   });
 });
 

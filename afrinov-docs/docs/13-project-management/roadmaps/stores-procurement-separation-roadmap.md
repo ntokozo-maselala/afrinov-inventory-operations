@@ -124,6 +124,15 @@ Added 30 Oct 2026 (ADR-022). Receive stock still took counter receipts with no o
 - [x] **Only approved Stores orders are received.** With procurement on, Receive stock lists the store's Approved and Partly received orders (with supplier and what each owes) and nothing else: no supplier to pick, no free lines, no New item or New supplier. When none is waiting it says so and links to Order stock. The server refuses a receipt with no order (`POST /stock-receipts`; `POST /goods-receipts` without `purchaseOrderId`; posting one saved with no order earlier), and so does the mock. A Stores item's Receive opens the orders still owed that item, choosing it when only one is; a Projects item has no Receive (Qodo, PR #125). The page is for those who receive orders (`receive:purchase_order`), so the menu item, Stock status's and an item page's Receive show only to the store controller and Admin. With procurement off, counter receipts are unchanged.
   Files: `ReceiveStock.tsx` (`ReceiveAgainstOrder`, `CounterReceipt`), `lib/orderKind.ts` (`canReceiveStock`), `useNavGroups.tsx`, `StockStatus.tsx`, `MaterialDetail.tsx`, `inventory.routes.ts`, `procurement.routes.ts`, `server.ts`, `mock/mockApi.ts`; tests in `PoReceiveDelivery.test.tsx`, `ReceiveStock.test.tsx`, `Sidebar.test.tsx`, `mockReceiveOrdersOnly.test.ts`, `inventory.routes.test.ts`, `procurement.real-http.test.ts`
 
+## Follow-up: Stock is the store's, Stores only
+
+Added 30 Oct 2026. Project material goes from the supplier straight to site, so it is never stock on hand.
+
+- [x] **Stock shows Stores only.** The Stores/Projects tabs and the Project filter are gone. Project material still in the store from before is listed above the table by project: a closed project's as leftovers to move to Stores, an open project's (or one with no project yet) linking to its items on Materials. An older `?section=PROJECTS` link opens the same page. The Dashboard's note on project material counts only what is still in the store.
+- [x] **A Projects item has its project's status, not a stock status.** Its page has no stock summary, status badge, % of required, stock by location or View in stock; instead, its project's status (Planning, Active, On hold, Completed, Cancelled) with what that means, and **Left in the store** only while some is left (Move to Stores once the project is closed). Materials keeps its Projects tab: it is the catalogue Procurement orders from.
+- [x] **The stock report** lists only projects with material still in the store at the end of the period, as "Project material still in the store".
+  Files: `Stock.tsx`, `MaterialDetail.tsx`, `MonthEnd.tsx`, `Dashboard.tsx`, `components/LeftoversNotice.tsx` (`ProjectStockNotice`), `lib/projectStatus.ts`, `Projects.tsx`; tests in `StockSections.test.tsx`, `MaterialsSections.test.tsx`
+
 ## Releasing
 
 - **Phase 2:** set an approval limit on every store controller (below).

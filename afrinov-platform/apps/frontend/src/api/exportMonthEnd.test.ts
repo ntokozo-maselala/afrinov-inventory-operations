@@ -133,6 +133,23 @@ describe('downloadMonthEnd in frontend-only mode', () => {
     expect(wb.getWorksheet('Tools Used')!.getCell('B6').value).toBe('Nothing was used in this period.');
   });
 
+  // Qodo, PR #126: the download lists what the report page lists.
+  it('lists only projects with material still in the store, under the page’s heading', async () => {
+    mocks.get.mockResolvedValue({
+      ...report,
+      projects: [
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 1, itemsInStock: 1, value: 300 },
+        { projectNumber: '1500', name: 'Bridge', status: 'ACTIVE', items: 4, itemsInStock: 0, value: 0 },
+      ],
+    });
+    await downloadMonthEnd(SEPT);
+    const labels: unknown[] = [];
+    (await readWorkbook(mocks.download.mock.calls[0]![0])).getWorksheet('Overview')!.eachRow((row) => labels.push(row.getCell(1).value));
+    expect(labels).toContain('Project material still in the store');
+    expect(labels.some((l) => String(l).startsWith('1369'))).toBe(true);
+    expect(labels.some((l) => String(l).startsWith('1500'))).toBe(false);
+  });
+
   it('propagates report failures without starting a download', async () => {
     const error = new Error('That period has not started yet');
     mocks.get.mockRejectedValue(error);

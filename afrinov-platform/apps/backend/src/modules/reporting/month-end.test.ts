@@ -196,7 +196,9 @@ describe('month-end workbook edge cases', () => {
     const overview = wb.getWorksheet('Overview')!;
     const labels: unknown[] = [];
     overview.eachRow((row) => labels.push(row.getCell(1).value));
-    expect(labels).toEqual(expect.arrayContaining(['Project material by project', '1369 · Plant upgrade (completed)', 'No project yet']));
+    expect(labels).toEqual(expect.arrayContaining(['Project material still in the store', '1369 · Plant upgrade (completed)']));
+    // Only projects with some left in the store, as the report page lists them (Qodo, PR #126).
+    expect(labels).not.toContain('No project yet');
   });
 
   it('preserves numeric formatting, frozen headers and urgency colors after serialization', async () => {
