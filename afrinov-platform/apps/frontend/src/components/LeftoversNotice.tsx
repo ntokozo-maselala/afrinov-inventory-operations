@@ -40,3 +40,39 @@ export function LeftoversNotice({ projectNumber, className }: { projectNumber?: 
     </Alert>
   );
 }
+
+/** A project's items on Materials, where each item's page shows what is left of it. */
+export const projectMaterialsLink = (projectNumber: string | null) =>
+  `/materials?section=PROJECTS&project=${projectNumber ? encodeURIComponent(projectNumber) : 'none'}`;
+
+/**
+ * Project material still in the store, received before project material went
+ * straight to site (Stores and Procurement Separation Roadmap). Stock shows
+ * Stores only, so it is listed here by project: a closed project's as
+ * leftovers to move to Stores, an open project's as still to be issued to it.
+ */
+export function ProjectStockNotice({ className }: { className?: string }) {
+  const value = useApi<StockValue>('/reports/stock-value');
+  const open = (value.data?.projects ?? [])
+    .filter((p) => p.itemsInStock > 0 && !isClosedStatus(p.status))
+    .sort((a, b) => (a.projectNumber ?? '￿').localeCompare(b.projectNumber ?? '￿'));
+  return (
+    <>
+      <LeftoversNotice className={className} />
+      {open.length > 0 && (
+        <Alert tone="info" title="Project material still in the store" className={className}>
+          <p>Received before project material went straight to site. It is issued to its project on Issue stock.</p>
+          <ul className="mt-1 space-y-0.5">
+            {open.map((p) => (
+              <li key={p.projectNumber ?? 'none'}>
+                <Link to={projectMaterialsLink(p.projectNumber)} className="btn-link">
+                  {p.projectNumber ? `Project ${p.projectNumber}${p.name ? ` · ${p.name}` : ''}` : 'No project yet'}: {p.itemsInStock} item{p.itemsInStock === 1 ? '' : 's'}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+    </>
+  );
+}

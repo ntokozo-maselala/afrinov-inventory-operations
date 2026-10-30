@@ -19,6 +19,7 @@ import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
 
 interface UserOpt { id: string; name: string }
 
@@ -39,26 +40,14 @@ interface Project {
   updatedAt: string;
 }
 
-const STATUS_OPTIONS = [
-  { value: 'PLANNING', label: 'Planning' },
-  { value: 'ACTIVE', label: 'Active' },
-  { value: 'ON_HOLD', label: 'On hold' },
-  { value: 'COMPLETED', label: 'Completed' },
-  { value: 'CANCELLED', label: 'Cancelled' },
-];
+const STATUS_OPTIONS = PROJECT_STATUS_OPTIONS;
 
 const FILTER_OPTIONS = [
   { value: '', label: 'All statuses' },
   ...STATUS_OPTIONS,
 ];
 
-const STATUS_TONE: Record<Project['status'], 'neutral' | 'success' | 'warning' | 'brand' | 'danger'> = {
-  PLANNING: 'neutral',
-  ACTIVE: 'success',
-  ON_HOLD: 'warning',
-  COMPLETED: 'brand',
-  CANCELLED: 'danger',
-};
+const STATUS_TONE = PROJECT_STATUS_TONE;
 
 interface ProjectFormProps {
   initial?: Partial<Project>;

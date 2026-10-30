@@ -60,6 +60,7 @@ export function MonthEnd() {
   }
 
   const r = report.data;
+  const heldProjects = (r?.projects ?? []).filter((p) => p.itemsInStock > 0);
   return (
     <div>
       <PageHeader
@@ -132,10 +133,11 @@ export function MonthEnd() {
           </table>
         </section>
       )}
-      {r && (r.projects ?? []).length > 0 && (
+      {/* Project material goes straight to site: only projects with some still in the store, received before, are listed. */}
+      {r && heldProjects.length > 0 && (
         <section aria-labelledby="month-end-projects" className="surface-card overflow-x-auto mt-4">
-          <h2 id="month-end-projects" className="text-h3 text-surface-900 px-4 pt-3">Project material by project</h2>
-          <p className="text-meta px-4">At the end of the period. {leftoverNote(r.projects!)}</p>
+          <h2 id="month-end-projects" className="text-h3 text-surface-900 px-4 pt-3">Project material still in the store</h2>
+          <p className="text-meta px-4">At the end of the period: received before project material went straight to site. {leftoverNote(heldProjects)}</p>
           <table className="table">
             <thead>
               <tr>
@@ -146,7 +148,7 @@ export function MonthEnd() {
               </tr>
             </thead>
             <tbody>
-              {r.projects!.map((p) => (
+              {heldProjects.map((p) => (
                 <tr key={p.projectNumber ?? 'none'}>
                   <td className="font-medium">
                     {p.projectNumber ? `${p.projectNumber}${p.name ? ` · ${p.name}` : ''}` : 'No project yet'}

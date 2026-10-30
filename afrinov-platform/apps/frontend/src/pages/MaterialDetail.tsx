@@ -23,6 +23,8 @@ import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { leftoversLink } from '../components/LeftoversNotice';
+import { PROJECT_STATUS_TONE, projectStatusLabel, type ProjectStatus } from '../lib/projectStatus';
 
 
 /** Project material of a completed or cancelled project: nothing more is ordered for it; its leftovers go to Stores. */
@@ -109,7 +111,7 @@ export function MaterialDetail() {
         actions={material.data && (
           <>
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
-            <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>
+            {storesItem && <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>}
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
             {active && canOrder && !needsProject(material.data) && !projectClosed(material.data) && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
@@ -156,6 +158,24 @@ export function MaterialDetail() {
                 {material.data.description && (<><dt className="text-surface-500">Description</dt><dd className="col-span-2">{material.data.description}</dd></>)}
               </dl>
             </section>
+            {!storesItem ? (
+              // Project material goes from the supplier straight to site: it has no
+              // stock status. What it has is its project's (Stores and Procurement
+              // Separation Roadmap).
+              <section className="surface-card p-4 space-y-2">
+                <h2 className="text-h3 text-surface-900">Project status</h2>
+                {material.data.project?.status && (
+                  <Badge tone={PROJECT_STATUS_TONE[material.data.project.status as ProjectStatus] ?? 'neutral'}>{projectStatusLabel(material.data.project.status)}</Badge>
+                )}
+                <p className="text-meta">
+                  {!material.data.projectNumber
+                    ? 'It has no project yet, so it isn’t ordered or issued until it is given one.'
+                    : projectClosed(material.data)
+                      ? 'The project is closed, so nothing more is ordered for it.'
+                      : 'Ordered for its project. Project material goes from the supplier straight to site, so it isn’t held in the store.'}
+                </p>
+              </section>
+            ) : (
             <section className="surface-card p-4">
               <h2 className="text-h3 text-surface-900 mb-3">Stock summary</h2>
               <div className="grid grid-cols-2 gap-3">
@@ -176,9 +196,35 @@ export function MaterialDetail() {
                 </div>
               </div>
             </section>
+            )}
           </aside>
 
           <div className="lg:col-span-2 space-y-6">
+            {!storesItem ? (
+              // Received before project material went straight to site: shown only while some is left.
+              total > 0 && (
+                <section>
+                  <SectionHeader
+                    title="Left in the store"
+                    description={projectClosed(material.data)
+                      ? 'Received before project material went straight to site. The project is closed: move it to Stores.'
+                      : 'Received before project material went straight to site. It is issued to its project.'}
+                    actions={projectClosed(material.data) && material.data.projectNumber
+                      ? <Link to={leftoversLink(material.data.projectNumber)} className="btn-link text-sm">Move to Stores</Link>
+                      : undefined}
+                  />
+                  <DataTable
+                    ariaLabel="Left in the store"
+                    rowKey={(r) => r.locationId}
+                    rows={(stock.data ?? []).filter((r) => Number(r.quantity) > 0)}
+                    columns={[
+                      { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                      { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
+                    ]}
+                  />
+                </section>
+              )
+            ) : (
             <section>
               <SectionHeader title="Stock by location" description="Current balance for this material at each location." />
               <DataTable
@@ -202,6 +248,7 @@ export function MaterialDetail() {
                 )}
               />
             </section>
+            )}
 
             <section>
               <SectionHeader

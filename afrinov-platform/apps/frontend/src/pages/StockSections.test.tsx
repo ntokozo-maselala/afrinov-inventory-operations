@@ -1,6 +1,8 @@
 // Stores and Projects stock and reports, apart (materials sections roadmap,
-// Phase 4): the Stock page's two views, the stock report's projects table, and
-// the mock API's stock status and stock value.
+// Phase 4). Project material goes from the supplier straight to site (Stores
+// and Procurement Separation Roadmap), so the Stock page shows Stores stock only
+// and lists project material still in the store by project; the stock report
+// lists only projects with some left; the mock API's stock status and value.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -33,51 +35,52 @@ const ROWS = [
 const stockPage = (url = '/stock') => render(<MemoryRouter initialEntries={[url]}><ToastProvider><Stock /></ToastProvider></MemoryRouter>);
 const skus = () => within(screen.getByRole('table')).getAllByRole('link').map((a) => a.textContent);
 
-describe('Stock: Stores and Projects views', () => {
-  beforeEach(() => { mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations' ? [] : ROWS)); });
+const STOCK_VALUE = {
+  currency: 'ZAR', categories: [], total: { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
+  status: { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 },
+  projects: [
+    { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 1, itemsInStock: 1, value: 300, unpriced: 0 },
+    { projectNumber: '1402', name: 'Silo', status: 'ACTIVE', items: 2, itemsInStock: 1, value: 50, unpriced: 0 },
+    { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 1, value: 0, unpriced: 2 },
+    { projectNumber: '1500', name: 'Bridge', status: 'ACTIVE', items: 4, itemsInStock: 0, value: 0, unpriced: 0 },
+  ],
+};
 
-  it('opens on Stores, with its Required threshold and status', async () => {
+describe('Stock: the store\u2019s stock, Stores only', () => {
+  beforeEach(() => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/locations') return [];
+      if (path === '/reports/stock-value') return STOCK_VALUE;
+      return ROWS;
+    });
+  });
+
+  it('lists Stores stock only, with its Required threshold and status, and no Stores/Projects tabs', async () => {
     stockPage();
     await screen.findByText('DISC');
     expect(skus()).toEqual(['DISC']);
-    expect(screen.getByRole('tab', { name: /Stores/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
     expect(within(screen.getByRole('table')).getByText('Required')).toBeInTheDocument();
+    expect(screen.getByText('1 of 1 lines')).toBeInTheDocument();
   });
 
-  it('shows Projects stock project by project, completed projects included, without a Required threshold column', async () => {
+  it('lists project material still in the store by project, apart from the stock', async () => {
     stockPage();
     await screen.findByText('DISC');
-    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
-    expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
-    const table = screen.getByRole('table');
-    expect(within(table).queryByText('Required')).not.toBeInTheDocument();
-    expect(within(within(table).getByText('1369-PIPE').closest('tr')!).getByText('Completed')).toBeInTheDocument();
-    expect(within(within(table).getByText('OLD-PLATE').closest('tr')!).getByText('No project yet')).toBeInTheDocument();
+    // A closed project's: leftovers to move to Stores.
+    expect(await screen.findByRole('link', { name: '1 item to move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
+    // An open project's, and one with no project yet: to its project's items on Materials.
+    expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1402');
+    expect(screen.getByRole('link', { name: 'No project yet: 1 item' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=none');
+    // Not a project with nothing in the store.
+    expect(screen.queryByText(/Bridge/)).not.toBeInTheDocument();
   });
 
-  it('leaves no Stores-only filter on, unseen, after switching to Projects', async () => {
-    stockPage();
-    await screen.findByText('DISC');
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'out' } });
-    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
-    expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
-    fireEvent.click(screen.getByRole('tab', { name: /Stores/ }));
-    expect(screen.getByLabelText('Status')).toHaveValue('');
-  });
-
-  it('ignores a stock-status filter in a Projects link', async () => {
-    stockPage('/stock?section=PROJECTS&status=out');
-    await screen.findByText('1369-PIPE');
-    expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
-  });
-
-  it('keeps a linked project with no stock shown in the Project field, so it can be cleared', async () => {
-    stockPage('/stock?section=PROJECTS&project=1500');
-    await screen.findByText('No stock matches your filters');
-    expect(screen.getByLabelText('Project')).toHaveValue('1500');
-    fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
-    expect(await screen.findByText('1369-PIPE')).toBeInTheDocument();
-    expect(screen.getByLabelText('Project')).toHaveValue('');
+  it('opens an older Projects link on the store\u2019s stock', async () => {
+    stockPage('/stock?section=PROJECTS&project=1369');
+    await screen.findByText('Item DISC');
+    expect(screen.queryByText('1369-PIPE')).not.toBeInTheDocument();
   });
 
   it('keeps the address in step with the filters, so cleared ones do not come back', async () => {
@@ -89,29 +92,11 @@ describe('Stock: Stores and Projects views', () => {
     expect(where()).toContain('category=CONSUMABLES');
     fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
     expect(where()).toBe('');
-    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'URGENT' } });
-    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
-    expect(where()).toBe('?section=PROJECTS');
-  });
-
-  it('keeps the filters when the tab already open is clicked', async () => {
-    stockPage('/stock?section=PROJECTS&project=1369');
-    await screen.findByText('1369-PIPE');
-    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
-    expect(skus()).toEqual(['1369-PIPE']);
-    expect(screen.getByLabelText('Project')).toHaveValue('1369');
-  });
-
-  it('opens on one project from the link', async () => {
-    stockPage('/stock?section=PROJECTS&project=1369');
-    await screen.findByText('1369-PIPE');
-    expect(skus()).toEqual(['1369-PIPE']);
-    expect(screen.getByLabelText('Project')).toHaveValue('1369');
   });
 });
 
-describe('Month-end report: project material by project', () => {
-  it('lists each project with its leftovers, completed ones marked', async () => {
+describe('Stock report: project material still in the store', () => {
+  it('lists only projects with some left, completed ones marked', async () => {
     mockGet.mockReset().mockResolvedValue({
       month: '2026-09', from: '2026-09-01', to: '2026-09-30', generatedAt: '2026-10-01T00:00:00Z', currency: 'ZAR',
       bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, categories: [],
@@ -123,12 +108,25 @@ describe('Month-end report: project material by project', () => {
       total: { items: 0, itemsInStock: 0, value: 0, urgent: 0, warning: 0, usedValue: 0 },
     });
     render(<MemoryRouter initialEntries={['/reports/stock-report?month=2026-09']}><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
-    const section = (await screen.findByRole('heading', { name: 'Project material by project' })).closest('section')!;
+    const section = (await screen.findByRole('heading', { name: 'Project material still in the store' })).closest('section')!;
     expect(within(section).getByText('1369 · Plant upgrade')).toBeInTheDocument();
     expect(within(section).getByText('(completed)')).toBeInTheDocument();
     // Every project shows its status, not only closed ones.
     expect(within(section).getByText('(on hold)')).toBeInTheDocument();
-    expect(within(section).getByText('No project yet')).toBeInTheDocument();
+    // Projects material with nothing in the store isn't listed.
+    expect(within(section).queryByText('No project yet')).not.toBeInTheDocument();
+  });
+
+  it('has no projects table when no project material is left in the store', async () => {
+    mockGet.mockReset().mockResolvedValue({
+      month: '2026-11', from: '2026-11-01', to: '2026-11-30', generatedAt: '2026-12-01T00:00:00Z', currency: 'ZAR',
+      bands: { urgentBelowPercent: 20, warningBelowPercent: 40 }, categories: [],
+      projects: [{ projectNumber: '1500', name: 'Bridge', status: 'ACTIVE', items: 4, itemsInStock: 0, value: 0 }],
+      total: { items: 0, itemsInStock: 0, value: 0, urgent: 0, warning: 0, usedValue: 0 },
+    });
+    render(<MemoryRouter initialEntries={['/reports/stock-report?month=2026-11']}><ToastProvider><MonthEnd /></ToastProvider></MemoryRouter>);
+    await screen.findByText(/2026/);
+    expect(screen.queryByRole('heading', { name: 'Project material still in the store' })).not.toBeInTheDocument();
   });
 });
 
