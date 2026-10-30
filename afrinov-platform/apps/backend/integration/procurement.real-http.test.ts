@@ -725,6 +725,32 @@ describe('receiving stock over real HTTP', () => {
       // With no filter either.
       const all = (await storeman<Array<{ entityId: string }>>('GET', '/audit?limit=500')).body.map((e) => e.entityId);
       expect(all).not.toContain(project.body.id);
+      // Entries come back as they did: newest first, within the limit asked for.
+      const page = (await api<Array<{ createdAt: string; entityType: string }>>('GET', '/audit?limit=3')).body;
+      expect(page.length).toBeLessThanOrEqual(3);
+      expect([...page].sort((x, y) => y.createdAt.localeCompare(x.createdAt))).toEqual(page);
+    });
+
+    // Qodo, PR #122: a role with the audit log but neither kind of order sees no order's Activity.
+    it("shows no order's Activity to someone who reads the audit log but sees neither kind", async () => {
+      const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+      const project = await buyer<{ id: string }>('POST', '/purchase-orders', projectOrder());
+      // Roles are a fixed list, so VIEWER (neither order permission) is given the audit log
+      // for this test only; integration files run one at a time, and it is taken back after.
+      const viewer = await prisma.role.findUniqueOrThrow({ where: { name: 'VIEWER' } });
+      const viewAudit = await prisma.permission.findUniqueOrThrow({ where: { code: 'view:audit_log' } });
+      const grant = { roleId_permissionId: { roleId: viewer.id, permissionId: viewAudit.id } };
+      await prisma.rolePermission.upsert({ where: grant, update: {}, create: { roleId: viewer.id, permissionId: viewAudit.id } });
+      try {
+        const reader = await as('VIEWER');
+        const seen = (await reader<Array<{ entityType: string; entityId: string }>>('GET', '/audit?limit=500')).body;
+        expect(seen.length).toBeGreaterThan(0);
+        expect(seen.some((e) => e.entityType === 'PurchaseOrder')).toBe(false);
+        expect(seen.map((e) => e.entityId)).not.toContain(store.body.id);
+        expect(seen.map((e) => e.entityId)).not.toContain(project.body.id);
+      } finally {
+        await prisma.rolePermission.delete({ where: grant });
+      }
     });
 
     it("holds the storeman to his approval limit, as an approver is held to theirs", async () => {

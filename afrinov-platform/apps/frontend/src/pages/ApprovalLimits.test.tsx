@@ -42,6 +42,14 @@ describe('approval limits', () => {
     expect(within(row('Store Controller')).getByText('Approves no stock orders until a limit is set')).toBeInTheDocument();
   });
 
+  it("tells a user with both roles that stock orders wait for a limit, as the server does", async () => {
+    const { approvalLine } = await import('./SettingsSections');
+    expect(approvalLine(['APPROVER', 'STORE_CONTROLLER'], null)).toBe('Approves project orders of any value; no stock orders until a limit is set');
+    expect(approvalLine(['APPROVER', 'STORE_CONTROLLER'], '5000')).toMatch(/^Approves orders up to R\s5\s000,00$/);
+    expect(approvalLine(['ADMIN', 'STORE_CONTROLLER'], null)).toBe('Approves orders of any value');
+    expect(approvalLine(['STORE_CONTROLLER'], null)).toBe('Approves no stock orders until a limit is set');
+  });
+
   it('sets a limit on an approver; blank means no limit', async () => {
     page();
     await screen.findByText('Ona Moloane');

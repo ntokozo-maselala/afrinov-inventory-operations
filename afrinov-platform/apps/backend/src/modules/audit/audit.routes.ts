@@ -3,6 +3,7 @@
 //
 // Both need the view:audit_log permission: Admin and Store Controller.
 import type { FastifyInstance } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../shared/db.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
@@ -26,27 +27,33 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid query', details: parsed.error.flatten() } });
     }
-    const where: { entityType?: string; entityId?: string; NOT?: object[] } = {};
-    if (parsed.data.entityType) where.entityType = parsed.data.entityType;
-    if (parsed.data.entityId) where.entityId = parsed.data.entityId;
+    const conditions: Prisma.Sql[] = [];
+    if (parsed.data.entityType) conditions.push(Prisma.sql`a.entity_type = ${parsed.data.entityType}`);
+    if (parsed.data.entityId) conditions.push(Prisma.sql`a.entity_id = ${parsed.data.entityId}`);
     // The Activity of orders and RFQs follows who may see them (Stores and
     // Procurement Separation Roadmap): Stores orders' to the store, project
-    // orders' and RFQs' to Procurement and approvers. Admin sees both.
-    const hidden: object[] = [];
+    // orders' and RFQs' to Procurement and approvers; Admin sees both, and
+    // someone who sees neither kind sees no order's. Each entry is checked
+    // against its order in this same query, so the answer is one consistent
+    // read and the work follows the page asked for (Qodo, PR #122).
     const seesStores = await userHasPermission(req, PermissionCode.OrderStoresStock);
     const seesProjects = await userHasPermission(req, PermissionCode.ViewPurchaseOrder);
-    if (!seesProjects) hidden.push({ entityType: 'Rfq' });
-    if (!seesStores || !seesProjects) {
-      const unseen = await prisma.purchaseOrder.findMany({ where: { projectNumber: seesProjects ? null : { not: null } }, select: { id: true } });
-      if (unseen.length > 0) hidden.push({ entityType: 'PurchaseOrder', entityId: { in: unseen.map((po) => po.id) } });
+    if (!seesProjects) conditions.push(Prisma.sql`a.entity_type <> 'Rfq'`);
+    if (!seesStores && !seesProjects) {
+      conditions.push(Prisma.sql`a.entity_type <> 'PurchaseOrder'`);
+    } else if (!seesStores || !seesProjects) {
+      // The kind this person can't see: Stores orders have no project.
+      const unseen = seesProjects ? Prisma.sql`po.project_number IS NULL` : Prisma.sql`po.project_number IS NOT NULL`;
+      conditions.push(Prisma.sql`NOT (a.entity_type = 'PurchaseOrder' AND EXISTS (SELECT 1 FROM purchase_orders po WHERE po.id = a.entity_id AND ${unseen}))`);
     }
-    if (hidden.length > 0) where.NOT = hidden;
-    const rows = await prisma.auditLogEntry.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: parsed.data.limit,
-    });
-    return rows;
+    const where = conditions.length > 0 ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
+    return prisma.$queryRaw<Array<{ id: string; actorId: string | null; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: Date }>>`
+      SELECT a.id, a.actor_id AS "actorId", a.action, a.entity_type AS "entityType", a.entity_id AS "entityId",
+             a."before", a."after", a.created_at AS "createdAt"
+      FROM audit_log_entries a
+      ${where}
+      ORDER BY a.created_at DESC
+      LIMIT ${parsed.data.limit}`;
   });
 
   // The shop's other activity for the Movements page: described, filtered and paged.
