@@ -54,6 +54,16 @@ export function approvalBlock(po: OrderForApproval, limit: Num | null | undefine
   return { code: 'OVER_LIMIT', message: `This order is ${rand(totals.net)} including VAT; your approval limit is ${rand(limit!)}.` };
 }
 
+/**
+ * Segregation of duties (ADR-021, PRA-06): whoever raised an order cannot also
+ * approve it, for either kind and for administrators too, so every order
+ * commits company money on two people's say-so. Returns the reason, or null
+ * when this user may approve.
+ */
+export function selfApprovalBlock(po: { createdById: string }, actorId: string): string | null {
+  return po.createdById === actorId ? 'You raised this order, so someone else must approve it.' : null;
+}
+
 /** The permission that approves an order of this kind. */
 export function approvePermissionFor(kind: OrderKind) {
   return kind === 'stores' ? PermissionCode.OrderStoresStock : PermissionCode.ApprovePurchaseOrder;
@@ -78,11 +88,11 @@ export async function listApprovers(kind: OrderKind = 'projects'): Promise<Appro
     });
 }
 
-/** The approvers whose limit covers this order. */
-export function approversFor(po: OrderForApproval, approvers: Approver[]): Approver[] {
+/** The approvers whose limit covers this order, leaving out whoever raised it. */
+export function approversFor(po: OrderForApproval & { createdById?: string }, approvers: Approver[]): Approver[] {
   const totals = orderTotals(po.lines, po.vatRate ?? 0);
   if (totals.unpricedLines > 0) return [];
-  return approvers.filter((a) => withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
+  return approvers.filter((a) => a.id !== po.createdById && withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
 }
 
 /** "Ask Simbongile Bantubani to approve it." or a fallback when nobody can. */

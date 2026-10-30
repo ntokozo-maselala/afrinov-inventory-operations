@@ -32,6 +32,8 @@ describe('receiving stock over real HTTP', () => {
   const run = runId();
   let server: TestServer;
   let api: ReturnType<typeof client>;
+  /** A second administrator: whoever raised an order cannot approve it (ADR-021). */
+  let peer: ReturnType<typeof client>;
   let materialId: string;
   let locationId: string;
   let supplierId: string;
@@ -61,7 +63,7 @@ describe('receiving stock over real HTTP', () => {
     expect(submitted.status).toBe(200);
     // Submission auto-approves when the approval setting is off.
     if (submitted.body.status === 'PENDING_APPROVAL') {
-      const approved = await api<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/approve`);
+      const approved = await peer<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/approve`);
       expect(approved.status).toBe(200);
     }
     const order = await getOrder(created.body.id);
@@ -85,6 +87,11 @@ describe('receiving stock over real HTTP', () => {
     const password = requireAdminPassword();
     server = await startServer({ procurementEnabled: true });
     api = client(server.port, await login(server.port, ADMIN_EMAIL, password));
+
+    const peerEmail = `it-po-peer-${run}@afrinov.local`;
+    const peerPassword = `It-${run}-peer-admin`;
+    expect((await api('POST', '/users', { email: peerEmail, name: `IT Peer ${run}`, password: peerPassword, roleNames: ['ADMIN'] })).status).toBe(201);
+    peer = client(server.port, await login(server.port, peerEmail, peerPassword));
 
     const material = await api<{ id: string }>('POST', '/materials', {
       sku: `IT-PO-${run}`,
@@ -443,7 +450,7 @@ describe('receiving stock over real HTTP', () => {
       });
       expect(created.status).toBe(201);
       const submitted = await api<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/submit`);
-      if (submitted.body.status === 'PENDING_APPROVAL') await api('POST', `/purchase-orders/${created.body.id}/approve`);
+      if (submitted.body.status === 'PENDING_APPROVAL') await peer('POST', `/purchase-orders/${created.body.id}/approve`);
       const order = (await api<PurchaseOrder>('GET', `/purchase-orders/${created.body.id}`)).body;
       expect(order.status).toBe('APPROVED');
 
@@ -646,31 +653,39 @@ describe('receiving stock over real HTTP', () => {
 
     // Phase 4: every role end to end.
     // Stores and Procurement Separation Roadmap, Phase 2: each kind has its own approvers.
-    it('lets the storeman approve Stores orders and an approver project orders, each only their own', async () => {
+    it('lets a storeman approve Stores orders and an approver project orders, each only their own kind, never their own order', async () => {
       const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
       const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
       expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
       try {
         const approver = await as('APPROVER');
+        // A second storeman approves what the first one raised (ADR-021).
+        const otherStoreman = await as('STORE_CONTROLLER');
         const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
         const project = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 2, unitPrice: 40 }] });
         expect((await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
         expect((await buyer<{ status: string }>('POST', `/purchase-orders/${project.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
 
-        // Each one's "Waiting for my approval" holds only their own kind.
+        // Each one's "Waiting for my approval" holds only their own kind, and
+        // never an order they raised.
         const waiting = async (who: typeof api) => (await who<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id);
-        expect(await waiting(storeman)).toContain(store.body.id);
-        expect(await waiting(storeman)).not.toContain(project.body.id);
+        expect(await waiting(otherStoreman)).toContain(store.body.id);
+        expect(await waiting(otherStoreman)).not.toContain(project.body.id);
+        expect(await waiting(storeman)).not.toContain(store.body.id);
         expect(await waiting(approver)).toContain(project.body.id);
         expect(await waiting(approver)).not.toContain(store.body.id);
-        const panel = await storeman<{ canApprove: boolean }>('GET', `/purchase-orders/${store.body.id}/approval`);
+        const panel = await otherStoreman<{ canApprove: boolean }>('GET', `/purchase-orders/${store.body.id}/approval`);
         expect(panel.body.canApprove).toBe(true);
+        const ownPanel = await storeman<{ canApprove: boolean; reason: string }>('GET', `/purchase-orders/${store.body.id}/approval`);
+        expect(ownPanel.body).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must approve it.' });
 
         // Neither approves the other's: the approver doesn't even find a Stores order.
         expect((await approver('POST', `/purchase-orders/${store.body.id}/approve`)).status).toBe(404);
         expect((await storeman('POST', `/purchase-orders/${project.body.id}/approve`)).status).toBe(403);
+        // Nor their own.
+        expect((await storeman('POST', `/purchase-orders/${store.body.id}/approve`)).status).toBe(403);
 
-        const storeApproved = await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/approve`);
+        const storeApproved = await otherStoreman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/approve`);
         expect([storeApproved.status, storeApproved.body.status]).toEqual([200, 'APPROVED']);
         const projectApproved = await approver<{ status: string }>('POST', `/purchase-orders/${project.body.id}/approve`);
         expect([projectApproved.status, projectApproved.body.status]).toEqual([200, 'APPROVED']);
@@ -696,9 +711,10 @@ describe('receiving stock over real HTTP', () => {
         const limited = client(server.port, await login(server.port, email, password));
 
         // 3 x 12.50 = 37.50, R 43.13 with VAT: within it. 30 x 12.50 = R 431.25: over it.
-        const small = await limited<{ id: string }>('POST', '/purchase-orders', storesOrder());
-        const big = await limited<{ id: string }>('POST', '/purchase-orders', { supplierId, lines: [{ materialId, orderedQty: 30, unitPrice: 12.5 }] });
-        for (const id of [small.body.id, big.body.id]) await limited('POST', `/purchase-orders/${id}/submit`);
+        // Raised by the other storeman, as nobody approves their own order.
+        const small = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        const big = await storeman<{ id: string }>('POST', '/purchase-orders', { supplierId, lines: [{ materialId, orderedQty: 30, unitPrice: 12.5 }] });
+        for (const id of [small.body.id, big.body.id]) await storeman('POST', `/purchase-orders/${id}/submit`);
         expect((await limited<{ status: string }>('POST', `/purchase-orders/${small.body.id}/approve`)).body.status).toBe('APPROVED');
         const refused = await limited<{ error: { message: string } }>('POST', `/purchase-orders/${big.body.id}/approve`);
         expect(refused.status).toBe(403);

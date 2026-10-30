@@ -437,7 +437,7 @@ describe('PurchaseOrderService lifecycle', () => {
     expect(hist.every((h) => h.actorName === 'Thandi Buyer')).toBe(true);
   });
 
-  it('with requireApprovalBeforeProcessing off, submit auto-approves', async () => {
+  it('with requireApprovalBeforeProcessing off, submit auto-approves within the submitter’s own authority', async () => {
     // The setting lives in the SettingsService catalog; ensureSeeded seeds
     // a default row of `true`. We override it for this test by replacing
     // the value on the underlying prisma.setting.update path.
@@ -445,13 +445,29 @@ describe('PurchaseOrderService lifecycle', () => {
     await SettingsService.ensureSeeded();
     await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1');
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
-    const submitted = await PurchaseOrderService.submit(po.id, 'user-1');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'u-ona');
+    const submitted = await PurchaseOrderService.submit(po.id, 'u-ona');
     expect(submitted?.status).toBe('APPROVED');
-    expect(submitted?.approvedById).toBe('user-1');
+    expect(submitted?.approvedById).toBe('u-ona');
     // Approved on submission, it keeps its small print as well.
     expect(submitted?.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za' });
     // Cleanup so other tests are unaffected
+    await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', true, 'user-1');
+  });
+
+  it.each([
+    { who: 'a submitter who cannot approve', creator: 'user-1', price: 10, reason: 'not_an_approver' },
+    { who: 'an order over the submitter’s limit', creator: 'u-ona', price: 500000, reason: 'over_limit_or_unpriced' },
+  ])('with approval off, still sends $who for approval', async ({ creator, price, reason }) => {
+    const { SettingsService } = await import('../settings/settings.service.js');
+    await SettingsService.ensureSeeded();
+    await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1');
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: price }] }, creator);
+    const submitted = await PurchaseOrderService.submit(po.id, creator);
+    expect(submitted?.status).toBe('PENDING_APPROVAL');
+    expect(submitted?.approvedById ?? null).toBeNull();
+    expect(db.audit.filter((a) => a.entityId === po.id && a.action === 'PO_SUBMIT').at(-1)?.after).toMatchObject({ autoApproveSkipped: reason });
     await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', true, 'user-1');
   });
 
@@ -858,6 +874,20 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     });
     expect(db.pos.get(id)!.status).toBe('PENDING_APPROVAL');
     expect(await PurchaseOrderService.approve(id, 'u-sb')).toMatchObject({ status: 'APPROVED' });
+  });
+
+  it('never lets whoever raised an order approve it, whatever their limit (ADR-021)', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }] }, 'u-sb');
+    await PurchaseOrderService.submit(po.id, 'u-sb');
+    await expect(PurchaseOrderService.approve(po.id, 'u-sb')).rejects.toMatchObject({
+      statusCode: 403, message: 'You raised this order, so someone else must approve it. Ask Ona Moloane to approve it.',
+    });
+    expect(db.pos.get(po.id)!.status).toBe('PENDING_APPROVAL');
+    expect(await PurchaseOrderService.approval(po.id, 'u-sb')).toMatchObject({
+      canApprove: false, reason: 'You raised this order, so someone else must approve it.', approvers: [{ name: 'Ona Moloane' }],
+    });
+    expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
   });
 
   it('refuses an order with unpriced lines, for everyone', async () => {
