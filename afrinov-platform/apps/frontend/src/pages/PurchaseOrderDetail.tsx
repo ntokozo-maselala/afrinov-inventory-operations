@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader, SectionHeader } from '../components/PageHeader';
@@ -19,11 +19,8 @@ import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
 import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
 import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
-import {
-  EveryLineInto, OrderReceiptRow, checkReceiptLines, receiptLinesBody, receiptLinesFromOrder, type ReceiptLineDraft,
-} from '../components/OrderReceiptLines';
 import { StaleDataNotice } from '../components/StaleDataNotice';
-import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
+import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath, receivePath } from '../lib/orderKind';
 import { fourDecimals, todayInSouthAfrica } from '../lib/rfq';
 
 type POStatus =
@@ -93,8 +90,6 @@ interface HistoryEntry {
   createdAt: string;
 }
 
-interface LocationOpt { id: string; name: string; parent?: { name: string } | null }
-
 interface ReasonDraft { reason: string }
 
 type ActionDraft =
@@ -141,12 +136,12 @@ export function PurchaseOrderDetail() {
   const canManage = kind !== null && hasPermission(ORDER_PERMISSION[kind]);
   // Receive delivery is for those who receive orders (not the buyer who raised
   // it), and posts a goods receipt, so needs the server's permission for that too.
+  // It is booked on Receive stock, the one place deliveries to the store are booked.
   // Only a Stores order is received into stock: project material goes from the
   // supplier straight to site, so Procurement confirms its delivery instead
   // (Stores and Procurement Separation Roadmap, Phase 3).
   const canReceive = kind === 'stores' && hasPermission('orders:receive') && hasPermission('inventory:receive');
   const canConfirm = kind === 'projects' && canManage;
-  const [receiving, setReceiving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const editOrder = () => navigate(`${po.data ? orderPath(po.data) : `/purchase-orders/${id}`}/edit`);
   // An order opened at the other side's address moves to its own, so a
@@ -208,27 +203,17 @@ export function PurchaseOrderDetail() {
   }, [fresh, approval.data, canReceive, canConfirm, canManage]);
 
   function openPrimary(kind: PrimaryKind) {
-    if (kind === 'receive') setReceiving(true);
+    if (kind === 'receive') navigate(receivePath(id!));
     else if (kind === 'confirm') setConfirming(true);
     else setDraft({ kind });
   }
 
-  // Receive stock links here with ?receive=1 for a delivery against this order:
-  // the dialog opens once the order has loaded, and the link is tidied away.
-  const [params, setParams] = useSearchParams();
-  const [receiveRequested, setReceiveRequested] = useState(() => params.has('receive'));
-  useEffect(() => {
-    if (params.has('receive')) setParams((p) => { p.delete('receive'); return p; }, { replace: true });
-  }, [params, setParams]);
-  // An order at the other section's address moves to its own, taking a Receive
-  // delivery asked for (?receive=1, already tidied from this address) along.
-  // The request is kept, not used here, so it is still there as the move happens.
-  if (misplaced && fresh) return <Navigate to={`${orderPath(fresh)}${receiveRequested ? '?receive=1' : ''}`} replace />;
-
-  if (receiveRequested && fresh) {
-    setReceiveRequested(false);
-    if (canReceive && isReceivable(fresh.status)) setReceiving(true);
-  }
+  // Older links asked for a delivery here with ?receive=1: it is booked on
+  // Receive stock now, so they go there, or just to the order if it can't be.
+  const [params] = useSearchParams();
+  if (params.has('receive') && fresh) return <Navigate to={canReceive && isReceivable(fresh.status) ? receivePath(fresh.id) : orderPath(fresh)} replace />;
+  // An order at the other section's address moves to its own.
+  if (misplaced && fresh) return <Navigate to={orderPath(fresh)} replace />;
 
   return (
     <div>
@@ -338,14 +323,6 @@ export function PurchaseOrderDetail() {
       )}
 
       {po.loading && !fresh && <div className="surface-card p-6 h-72"><Skeleton h={240} /></div>}
-
-      {receiving && fresh && (
-        <ReceiveDeliveryDialog
-          po={fresh}
-          onClose={() => setReceiving(false)}
-          onReceived={(number) => { setReceiving(false); reload(); toast.success(`Received on ${number}`, `${fresh.number} is credited with what arrived.`); }}
-        />
-      )}
 
       {confirming && fresh && (
         <ConfirmDeliveryDialog
@@ -546,72 +523,6 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
       <Field label="Reason" htmlFor="po-cancel-reason" required help="A reason is required for the audit trail.">
         <Textarea id="po-cancel-reason" rows={3} value={d.reason} onChange={(e) => upd({ reason: e.target.value })} placeholder="e.g. Supplier out of stock" />
       </Field>
-    </Modal>
-  );
-}
-
-// ── Receive delivery ─────────────────────────────────────────────────────
-// What arrived on one delivery, line by line, posted as a goods receipt
-// against this order. A partial delivery needs no other page.
-function ReceiveDeliveryDialog({ po, onClose, onReceived }: { po: PO; onClose: () => void; onReceived: (receiptNumber: string) => void }) {
-  const locations = useApi<LocationOpt[]>('/locations');
-  const [lines, setLines] = useState<ReceiptLineDraft[]>(() => receiptLinesFromOrder(po));
-  const [deliveryRef, setDeliveryRef] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const update = (i: number, patch: Partial<ReceiptLineDraft>) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-
-  async function receive() {
-    setProblem(null);
-    const checked = checkReceiptLines(lines, true);
-    if ('problem' in checked) { setProblem(checked.problem); return; }
-    setBusy(true);
-    try {
-      // Recorded and posted in one step: a failure leaves no unposted receipt.
-      const created = await api.post<{ id: string; number: string }>('/goods-receipts', {
-        supplierId: po.supplierId,
-        purchaseOrderId: po.id,
-        deliveryRef: deliveryRef.trim() || undefined,
-        lines: receiptLinesBody(checked.lines),
-        post: true,
-      });
-      onReceived(created.number);
-    } catch (err) {
-      setProblem((err as ApiError).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open onClose={() => { if (!busy) onClose(); }} size="lg" title="Receive delivery"
-      description={`What arrived from ${po.supplier.name} against ${po.number}. Lines left at 0 stay outstanding.`}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="primary" onClick={() => void receive()} loading={busy}>Receive</Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <Field label="Delivery note / invoice no." htmlFor="po-rcv-ref" help="e.g. the Tax Invoice number">
-          <Input id="po-rcv-ref" value={deliveryRef} onChange={(e) => setDeliveryRef(e.target.value)} maxLength={120} />
-        </Field>
-        <div>
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <span className="field-label">What arrived</span>
-            <EveryLineInto locations={locations.data ?? []} onChoose={(locationId) => setLines((ls) => ls.map((l) => ({ ...l, locationId })))} />
-          </div>
-          {locations.error && <p className="text-meta text-danger-700">Couldn&rsquo;t load locations. Close and reopen to try again.</p>}
-          {lines.length === 0 && <p className="text-meta italic">Nothing is outstanding on this order.</p>}
-          <div className="space-y-2">
-            {lines.map((l, i) => <OrderReceiptRow key={l.purchaseOrderLineId} line={l} index={i} locations={locations.data ?? []} onChange={(patch) => update(i, patch)} />)}
-          </div>
-        </div>
-        {problem && <Alert tone="danger" title="Cannot receive">{problem}</Alert>}
-        <p className="text-meta">A delivery with no order is booked on <Link to="/stock/receive" className="btn-link">Receive stock</Link>.</p>
-      </div>
     </Modal>
   );
 }
@@ -845,7 +756,7 @@ function OrderTotals({ po, totals, onAddPrices }: { po: PO; totals: PoTotals; on
 
 function RelatedReceipts({ receipts }: { receipts: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }> }) {
   if (receipts.length === 0) {
-    return <EmptyState title="No receipts yet" description="Deliveries booked with Receive delivery appear here." />;
+    return <EmptyState title="No receipts yet" description="Deliveries booked against this order on Receive stock appear here." />;
   }
   return (
     <DataTable

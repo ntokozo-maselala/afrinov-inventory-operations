@@ -9,7 +9,7 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
-import { generateGRNumber } from '../procurement/goods-receipt.service.js';
+import { generateGRNumber, parseReceivedAt } from '../procurement/goods-receipt.service.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 
 type Decimal = Prisma.Decimal;
@@ -27,15 +27,6 @@ export interface ReceiveStockResult {
   goodsReceiptId: string;
   number: string;
   transactionIds: string[];
-}
-
-function parseReceivedAt(value: string | undefined): Date {
-  if (!value) return new Date();
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) throw Errors.validation('Invalid delivery date');
-  // Allow today in any timezone, refuse anything later.
-  if (d.getTime() > Date.now() + 24 * 60 * 60 * 1000) throw Errors.validation('The delivery date cannot be in the future');
-  return d;
 }
 
 export interface ReceiptListFilter {

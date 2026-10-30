@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { idempotentMutation } from '../../shared/idempotency.js';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
 import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService, kindOfOrder } from './procurement.service.js';
@@ -137,6 +138,8 @@ export const createGRSchema = z.object({
   purchaseOrderId: z.uuid().optional(),
   supplierId: supplierIdSchema,
   deliveryRef: z.string().optional(),
+  // The date on the delivery note, as Receive stock sends it; now when left out.
+  receivedAt: z.string().max(40).optional(),
   lines: z
     .array(
       z.object({
@@ -403,10 +406,14 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     // Against an order: a Stores order is the store's (not found to anyone
     // else); a project order is refused by the service, as it goes to site.
     if (input.purchaseOrderId) await requireForOrder(req, input.purchaseOrderId, PermissionCode.ReceiveInventory);
-    const created = post
-      ? await GoodsReceiptService.receive(input, actorId(req))
-      : await GoodsReceiptService.create(input, actorId(req));
-    return reply.code(201).send(created);
+    // Retry-safe with an Idempotency-Key, as Receive stock sends one: a
+    // retried delivery replays the first receipt instead of booking it twice.
+    return idempotentMutation(req, reply, 'POST /goods-receipts', async (tx) => ({
+      statusCode: 201,
+      body: post
+        ? await GoodsReceiptService.receive(input, actorId(req), tx)
+        : await GoodsReceiptService.create(input, actorId(req), {}, tx),
+    }));
   });
 
   app.post('/goods-receipts/:id/post', { preHandler: [app.authenticate] }, async (req, reply) => {

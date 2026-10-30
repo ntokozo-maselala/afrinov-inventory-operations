@@ -154,7 +154,7 @@ export function App() {
             <Route path="/rfqs/new" element={<RouteBoundary name="New request for quotation"><NewRfq /></RouteBoundary>} />
             <Route path="/rfqs/:id" element={<RouteBoundary name="Request for quotation"><RfqDetail /></RouteBoundary>} />
             <Route path="/rfqs/:id/edit" element={<RouteBoundary name="Edit request for quotation"><EditRfq /></RouteBoundary>} />
-            {/* Goods receipts had its own page; deliveries are booked on Receive stock and an order's Receive delivery. */}
+            {/* Goods receipts had its own page; deliveries, against an order or not, are booked on Receive stock. */}
             <Route path="/goods-receipts/*" element={<Navigate to="/purchase-orders" replace />} />
           </>
         ) : (

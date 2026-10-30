@@ -1260,7 +1260,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/confirm-delivery'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.projectNumber == null) throw err('VALIDATION_ERROR', 'A Stores order is received into stock: use Receive delivery on the order, or Receive stock.');
+    if (po.projectNumber == null) throw err('VALIDATION_ERROR', 'A Stores order is received into stock: book its delivery on Receive stock.');
     if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', 'Only an approved or partly delivered purchase order can have its delivery confirmed');
     const b = (body ?? {}) as { lines?: Array<{ lineId: string; quantity: number }>; deliveryRef?: string; deliveredOn?: string };
     if (!b.lines?.length) throw err('VALIDATION_ERROR', 'Confirm what arrived on at least one line.');
@@ -1445,6 +1445,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       supplierId: string;
       purchaseOrderId?: string;
       deliveryRef?: string;
+      receivedAt?: string;
       lines: Array<{ materialId: string; locationId: string; quantity: number; purchaseOrderLineId?: string }>;
       post?: boolean;
     };
@@ -1480,7 +1481,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       supplierId: b.supplierId,
       deliveryRef: b.deliveryRef,
       status: 'SUBMITTED',
-      receivedAt: new Date().toISOString(),
+      receivedAt: b.receivedAt ? new Date(b.receivedAt).toISOString() : new Date().toISOString(),
       lines: b.lines.map((l) => ({
         id: nextId('grl'),
         materialId: l.materialId,

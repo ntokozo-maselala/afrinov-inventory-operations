@@ -853,7 +853,7 @@ export const PurchaseOrderService = {
         include: { lines: { include: { material: { select: { sku: true } } } } },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      if (kindOfOrder(po) === 'stores') throw Errors.validation('A Stores order is received into stock: use Receive delivery on the order, or Receive stock.');
+      if (kindOfOrder(po) === 'stores') throw Errors.validation('A Stores order is received into stock: book its delivery on Receive stock.');
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState('Only an approved or partly delivered purchase order can have its delivery confirmed', { status: po.status });
       }
