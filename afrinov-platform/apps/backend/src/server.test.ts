@@ -102,6 +102,22 @@ describe('HTTP server', () => {
     await app.close();
   });
 
+  it('gives every request a UUID that does not repeat across server instances (PRA-08)', async () => {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const first = await buildServer({ skipConfigValidation: true });
+    const second = await buildServer({ skipConfigValidation: true });
+    const a = (await first.inject({ method: 'GET', url: '/health' })).headers['x-request-id'];
+    const b = (await second.inject({ method: 'GET', url: '/health' })).headers['x-request-id'];
+    expect(a).toMatch(uuid);
+    expect(b).toMatch(uuid);
+    expect(a).not.toBe(b);
+    // An inbound id is not adopted: a client cannot plant a misleading reference.
+    const planted = await first.inject({ method: 'GET', url: '/health', headers: { 'x-request-id': 'req-1' } });
+    expect(planted.headers['x-request-id']).not.toBe('req-1');
+    await first.close();
+    await second.close();
+  });
+
   it('answers a malformed JSON body with 400, not a 500', async () => {
     const app = await buildServer({ skipConfigValidation: true });
     const res = await app.inject({

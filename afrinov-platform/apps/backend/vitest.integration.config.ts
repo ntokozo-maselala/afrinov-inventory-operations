@@ -15,6 +15,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['integration/**/*.test.ts'],
+    globalSetup: ['integration/global-setup.ts'],
     isolate: false,
     // Vitest 5 removed `singleFork`; this runs the files sequentially in one
     // worker so the shared real-database state is deterministic.

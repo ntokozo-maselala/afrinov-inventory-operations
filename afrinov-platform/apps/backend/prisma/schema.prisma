@@ -33,6 +33,15 @@ model User {
   // Largest purchase order total (rand, including VAT) this user may approve.
   // Null: no limit. Only matters to users whose role may approve orders.
   approvalLimit Decimal?     @map("approval_limit") @db.Decimal(18, 2)
+  // Set by an administrator's reset (and on the bootstrap admin): the user may
+  // only change their password until they do.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  // Tokens issued before this instant are refused, so a password change or
+  // reset ends every existing session.
+  passwordChangedAt DateTime? @map("password_changed_at")
+  // Consecutive failed sign-ins, and the time sign-in reopens after too many.
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 

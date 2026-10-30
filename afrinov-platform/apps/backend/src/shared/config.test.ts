@@ -8,7 +8,7 @@
 //   - PORT must be a valid port number.
 //   - Defaults are applied for optional fields (HOST, LOG_LEVEL, NODE_ENV).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { loadConfig, ConfigError } from './config.js';
+import { loadConfig, ConfigError, resolveTrustProxy } from './config.js';
 
 const savedEnv = { ...process.env };
 
@@ -184,5 +184,34 @@ describe('loadConfig', () => {
     const before = { ...process.env };
     loadConfig();
     expect(process.env).toEqual(before);
+  });
+});
+
+describe('CORS_ALLOW_ANY in production (SEC-04)', () => {
+  it('refuses to start in production with the wildcard escape hatch on', () => {
+    setEnv({ NODE_ENV: 'production', CORS_ALLOW_ANY: 'true' });
+    expect(() => loadConfig()).toThrow(/CORS_ALLOW_ANY=true is not permitted in production/);
+  });
+
+  it('still allows it outside production', () => {
+    setEnv({ NODE_ENV: 'development', CORS_ALLOW_ANY: 'true' });
+    expect(() => loadConfig()).not.toThrow();
+  });
+});
+
+describe('resolveTrustProxy', () => {
+  it('trusts no proxy unless told to', () => {
+    expect(resolveTrustProxy(undefined)).toBe(false);
+    expect(resolveTrustProxy('')).toBe(false);
+    expect(resolveTrustProxy('false')).toBe(false);
+  });
+
+  it('accepts true, a hop count, or a list of addresses', () => {
+    expect(resolveTrustProxy('true')).toBe(true);
+    const oneHop = resolveTrustProxy('1') as (address: string, hop: number) => boolean;
+    expect(typeof oneHop).toBe('function');
+    expect(oneHop('10.0.0.1', 0)).toBe(true);
+    expect(oneHop('10.0.0.2', 1)).toBe(false);
+    expect(resolveTrustProxy('10.0.0.1, 10.1.0.0/16')).toEqual(['10.0.0.1', '10.1.0.0/16']);
   });
 });

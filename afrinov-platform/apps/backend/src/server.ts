@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply, type RouteOptions } from 'fastify';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
@@ -13,10 +13,11 @@ import {
   isKnownInsecureSecret,
   isProcurementEnabled,
   isApiDocsEnabled,
+  resolveTrustProxy,
   type AppConfig,
 } from './shared/config.js';
 import { prisma } from './shared/db.js';
-import { isActiveInDb } from './shared/authorization.js';
+import { loadAccountState } from './shared/authorization.js';
 import { pruneIdempotencyKeys } from './shared/idempotency.js';
 import { serviceName, serviceVersion } from './shared/version.js';
 
@@ -28,10 +29,18 @@ declare module 'fastify' {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; email: string; name: string; roles: string[] };
-    user: { sub: string; email: string; name: string; roles: string[] };
+    // `iat` (issued at, whole seconds) is set by the signer; it is compared
+    // with the password change time to end older sessions.
+    payload: { sub: string; email: string; name: string; roles: string[]; iat?: number };
+    user: { sub: string; email: string; name: string; roles: string[]; iat?: number };
   }
 }
+
+/** The only routes an account under a forced password change may call. */
+const PASSWORD_CHANGE_ROUTES = new Set(['/api/v1/auth/me', '/api/v1/auth/password']);
+
+/** Answered for anything else while a password change is required. */
+export const PASSWORD_CHANGE_REQUIRED_CODE = 'PASSWORD_CHANGE_REQUIRED';
 
 export interface BuildServerOptions {
   skipConfigValidation?: boolean;
@@ -62,21 +71,20 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     bodyLimit: 1_000_000,
     requestTimeout: 30_000,
     pluginTimeout: config.nodeEnv === 'test' ? 60_000 : 10_000,
+    // Per-request correlation ID. Fastify's default is a per-process counter
+    // (req-1, req-2, …) that restarts with every deploy and repeats across
+    // instances, so the reference a user quotes could match several log lines
+    // (PRA-08). A random UUID is unique everywhere. Inbound IDs are not
+    // accepted: a client could otherwise plant misleading references.
+    //
+    // HTTP request/response logging (timestamp, requestId, method, url,
+    // statusCode, responseTime) is Fastify's built-in pino request logger,
+    // enabled by the `logger` option above.
+    genReqId: () => randomUUID(),
+    trustProxy: resolveTrustProxy(process.env.TRUST_PROXY),
   });
 
   if (opts.onRoute) app.addHook('onRoute', opts.onRoute);
-
-  // Per-request correlation ID so logs can be traced through async boundaries.
-  //
-  // HTTP request/response logging (timestamp, requestId, method, url,
-  // statusCode, responseTime) is provided by Fastify's built-in pino request
-  // logger, which is enabled above via the `logger` option. It emits an
-  // "incoming request" line on arrival and a "request completed" line on
-  // completion, carrying the request id for correlation. No additional
-  // per-request hook is required, and none is added so logs are not duplicated.
-  app.addHook('onRequest', async (req) => {
-    req.id = req.id || crypto.randomUUID();
-  });
 
   // CORS is allow-list based in every environment. `CORS_ORIGIN` (comma
   // separated) is the explicit list; development with no list falls back to the
@@ -153,7 +161,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // it must not be reported as an authentication failure, or a database
     // outage is silently disguised as a wave of invalid tokens (and the
     // incident is invisible in the logs).
-    let payload: { sub: string; email: string; name: string; roles: string[] };
+    let payload: { sub: string; email: string; name: string; roles: string[]; iat?: number };
     try {
       await req.jwtVerify();
       payload = req.user as typeof payload;
@@ -170,14 +178,28 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // request, so the authorization layer reuses this result instead of
     // repeating the identical primary-key query. A lookup error propagates to
     // the error handler (500) — access is never granted on an unknown state.
-    const active = await isActiveInDb(payload.sub, req);
-    if (!active) {
+    const account = await loadAccountState(payload.sub, req);
+    if (!account?.active) {
       return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Account unavailable'), req.id));
+    }
+    // A password change or reset ends every session that existed before it:
+    // a token issued earlier (whole seconds, as JWT `iat` is) is refused.
+    if (account.passwordChangedAt
+      && (payload.iat ?? 0) < Math.floor(account.passwordChangedAt.getTime() / 1000)) {
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Your password was changed. Please sign in again.'), req.id));
+    }
+    // After an administrator's reset (or on the bootstrap admin) the user may
+    // only set their own password until they have done so.
+    if (account.mustChangePassword && !PASSWORD_CHANGE_ROUTES.has(req.routeOptions.url ?? '')) {
+      return reply.code(403).send(toErrorEnvelope(
+        new ApiError(403, PASSWORD_CHANGE_REQUIRED_CODE, 'Please choose a new password before continuing.'),
+        req.id,
+      ));
     }
     (req as unknown as { user: typeof payload & { id: string; active: boolean } }).user = {
       ...payload,
       id: payload.sub,
-      active,
+      active: account.active,
     };
   });
 
