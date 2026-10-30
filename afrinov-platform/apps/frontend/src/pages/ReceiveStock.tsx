@@ -80,6 +80,8 @@ const receivable = (o: OpenOrder) => orderKindOf(o) === 'stores' && ['APPROVED',
 const owedLines = (o: OpenOrder) => o.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty)).length;
 
 const breadcrumb = [{ label: 'Stock', to: '/stock' }, { label: 'Receive stock' }];
+/** The pending choice from an item's link, until the orders have loaded. */
+const ITEM_LINK = 'item';
 
 export function ReceiveStock() {
   const { hasPermission } = usePermissions();
@@ -98,10 +100,20 @@ function ReceiveAgainstOrder() {
   const orders = useApi<OpenOrder[]>('/purchase-orders?kind=stores');
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
+  const [params] = useSearchParams();
   const openOrders = useMemo(
     () => (orders.data ?? []).filter(receivable).sort((a, b) => a.number.localeCompare(b.number)),
     [orders.data],
   );
+  // An item's page links here with ?materialId=: the list shows the orders
+  // still owed that item, until "Show all orders" (Qodo, PR #125).
+  const [itemId, setItemId] = useState(() => params.get('materialId'));
+  const listed = useMemo(
+    () => (itemId ? openOrders.filter((o) => o.lines.some((l) => l.materialId === itemId && Number(l.receivedQty) < Number(l.orderedQty))) : openOrders),
+    [openOrders, itemId],
+  );
+  const itemLine = itemId ? (orders.data ?? []).flatMap((o) => o.lines).find((l) => l.materialId === itemId) : undefined;
+  const itemLabel = itemLine ? `${itemLine.material.sku} — ${itemLine.material.name}` : 'this item';
   const [orderId, setOrderId] = useState('');
   const chosenOrder = openOrders.find((o) => o.id === orderId);
   const [deliveryRef, setDeliveryRef] = useState('');
@@ -136,14 +148,18 @@ function ReceiveAgainstOrder() {
   // The order's page and Order stock link here with ?order=: once the orders,
   // locations and stock have loaded, the order is chosen. The link waits for
   // the orders to load: a failure says so, with a retry, rather than that the
-  // order has nothing left to receive.
-  const [params] = useSearchParams();
-  const [orderPreset, setOrderPreset] = useState(() => params.get('order'));
+  // order has nothing left to receive. An item's link chooses the order when
+  // only one is owed that item.
+  const [orderPreset, setOrderPreset] = useState(() => params.get('order') ?? (itemId ? ITEM_LINK : null));
   if (orderPreset && orders.data && locations.data && (stock.data || stock.error)) {
     setOrderPreset(null);
-    const order = openOrders.find((o) => o.id === orderPreset);
-    if (order) chooseOrder(order.id, order);
-    else setError('That order has nothing left to receive: it may be fully received, closed, not yet approved, or not one of the store’s orders.');
+    if (orderPreset === ITEM_LINK) {
+      if (listed.length === 1) chooseOrder(listed[0]!.id, listed[0]);
+    } else {
+      const order = openOrders.find((o) => o.id === orderPreset);
+      if (order) chooseOrder(order.id, order);
+      else setError('That order has nothing left to receive: it may be fully received, closed, not yet approved, or not one of the store’s orders.');
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -211,6 +227,10 @@ function ReceiveAgainstOrder() {
 
   const loading = orders.loading || locations.loading;
   const nothingToReceive = !!orders.data && openOrders.length === 0;
+  // Without the orders, or the locations, there is nothing the form could book (Qodo, PR #125).
+  const blocked = (!!locations.error && !locations.data) || (!!orders.error && !orders.data);
+  // The chosen order stays in the list, so the select still shows it.
+  const choices = chosenOrder && !listed.includes(chosenOrder) ? [chosenOrder, ...listed] : listed;
 
   return (
     <div>
@@ -253,7 +273,13 @@ function ReceiveAgainstOrder() {
         </Alert>
       )}
 
-      {!(locations.error && !locations.data) && !nothingToReceive && (
+      {itemId && !nothingToReceive && !!orders.data && (
+        <Alert tone="info" title={listed.length === 0 ? `No approved order is waiting for ${itemLabel}` : `Showing the orders still owed ${itemLabel}`} className="max-w-4xl mb-4">
+          <Button size="sm" variant="secondary" onClick={() => setItemId(null)}>Show all orders</Button>
+        </Alert>
+      )}
+
+      {!blocked && !nothingToReceive && (choices.length > 0 || !orders.data) && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field
@@ -262,7 +288,7 @@ function ReceiveAgainstOrder() {
             >
               <Select id="rcv-order" value={orderId} onChange={(e) => chooseOrder(e.target.value)} disabled={loading || !orders.data} invalid={!!error && !orderId}>
                 <option value="">{loading ? 'Loading…' : '— choose —'}</option>
-                {openOrders.map((o) => {
+                {choices.map((o) => {
                   const owed = owedLines(o);
                   return (
                     <option key={o.id} value={o.id}>

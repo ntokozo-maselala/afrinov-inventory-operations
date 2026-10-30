@@ -40,9 +40,13 @@ Which way depends on whether procurement is switched on
    `post: true` and an `Idempotency-Key`). The order's page and Order stock
    open Receive stock with the order chosen (`?order=<id>`). Or "receive
    everything outstanding" with `POST /purchase-orders/:id/receive`.
-   A receipt with no order is refused, by `POST /stock-receipts` and by
-   `POST /goods-receipts` without `purchaseOrderId` (400). When no order is
-   waiting, the page says so and links to Order stock.
+   A receipt with no order is refused, by `POST /stock-receipts`, by
+   `POST /goods-receipts` without `purchaseOrderId`, and by posting one saved
+   with no order before this rule (`POST /goods-receipts/:id/post`), all 400.
+   When no order is waiting, the page says so and links to Order stock. A
+   Stores item's **Receive** opens it on the orders still owed that item
+   (`?materialId=`), choosing the order when only one is; a Projects item has
+   no Receive.
 2. Posting inserts RECEIPT transactions, increments each order line's
    received quantity (never above the ordered quantity), marks the receipt
    `POSTED`, and moves the order to PARTIALLY_RECEIVED or RECEIVED — all in

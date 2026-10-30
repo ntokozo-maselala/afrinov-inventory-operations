@@ -137,6 +137,23 @@ describe('receiving stock over real HTTP', () => {
       expect(Number(ledger)).toBe(0);
     });
 
+    // Qodo, PR #125: one saved with no order before receipts needed one isn't posted either.
+    it('refuses to post a receipt saved with no order', async () => {
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
+      const saved = await prisma.goodsReceipt.create({
+        data: {
+          number: `GR-IT-NOPO-${run}`, supplierId, receivedById: admin.id, status: 'SUBMITTED',
+          lines: { create: [{ materialId, locationId: into, quantity: 1 }] },
+        },
+      });
+      const res = await api<{ error: { message: string } }>('POST', `/goods-receipts/${saved.id}/post`);
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/booked against an approved Stores order/);
+      expect((await prisma.goodsReceipt.findUniqueOrThrow({ where: { id: saved.id } })).status).toBe('SUBMITTED');
+      const { ledger } = await ledgerAndBalance(materialId, into);
+      expect(Number(ledger)).toBe(0);
+    });
+
     it('keeps the delivery date given', async () => {
       const order = await approvedOrder(5);
       const res = await api<{ receivedAt: string; status: string }>('POST', '/goods-receipts', body(order, { receivedAt: '2026-10-20' }));

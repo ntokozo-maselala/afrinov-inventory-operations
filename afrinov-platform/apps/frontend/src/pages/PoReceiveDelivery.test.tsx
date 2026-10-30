@@ -247,6 +247,50 @@ describe('Receive stock against an approved order', () => {
     expect(await screen.findByText('What arrived against AFRI-0412')).toBeInTheDocument();
   });
 
+  // Qodo, PR #125: with nothing to choose from, no form is offered.
+  it('offers no form when the orders fail to load', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?kind=stores') throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
+      if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }];
+      return [];
+    });
+    receiveStock();
+    expect(await screen.findByText('The store’s open orders could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Receive stock' })).not.toBeInTheDocument();
+  });
+
+  // Qodo, PR #125: an item's Receive starts on the orders still owed that item.
+  describe('from an item', () => {
+    const owedOnlyBolts = { ...ORDER, id: 'po-4', number: 'AFRI-0401', lines: [{ ...ORDER.lines[0]!, receivedQty: '10' }, ORDER.lines[1]!] };
+    beforeEach(() => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?kind=stores' ? [ORDER, owedOnlyBolts] : base(path)));
+    });
+
+    it('chooses the only order still owed the item', async () => {
+      receiveStock('/stock/receive?materialId=m-1');
+      expect(await screen.findByText('What arrived against AFRI-0412')).toBeInTheDocument();
+      expect(screen.getByText('Showing the orders still owed DISC-115 — Cutting disc')).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /AFRI-0401/ })).not.toBeInTheDocument();
+    });
+
+    it('lists every order still owed the item, for the storeman to choose', async () => {
+      receiveStock('/stock/receive?materialId=m-2');
+      expect(await screen.findByRole('option', { name: /AFRI-0412/ })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /AFRI-0401/ })).toBeInTheDocument();
+      expect(screen.getByLabelText(/^Order/)).toHaveValue('');
+    });
+
+    it('says when no order is owed the item, and shows them all on request', async () => {
+      receiveStock('/stock/receive?materialId=m-9');
+      expect(await screen.findByText('No approved order is waiting for this item')).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^Order/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Show all orders' }));
+      expect(await screen.findByRole('option', { name: /AFRI-0412/ })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /AFRI-0401/ })).toBeInTheDocument();
+    });
+  });
+
   it('says the delivery was booked when the order then fails to close', async () => {
     mockPost.mockImplementation(async (path: string) => {
       if (path === '/goods-receipts') return { id: 'gr-9', number: 'GR-2026-0009' };
