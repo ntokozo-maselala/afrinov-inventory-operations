@@ -1,6 +1,9 @@
 // The mock confirms a project order's delivery and refuses to receive one into
 // stock, as the server does (Stores and Procurement Separation Roadmap, Phase 3).
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
+vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
 import { createMockApi, resetMockState } from './mockApi';
 
 const api = createMockApi();

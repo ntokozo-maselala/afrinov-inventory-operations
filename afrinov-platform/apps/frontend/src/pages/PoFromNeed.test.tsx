@@ -256,7 +256,9 @@ describe('ordering from a supplier or an item', () => {
         <ToastProvider><Routes><Route path="/materials/:id" element={<MaterialDetail />} /></Routes></ToastProvider>
       </MemoryRouter>,
     );
-    await screen.findByRole('link', { name: 'Receive' });
+    await screen.findByRole('heading', { name: /Item DISC/ });
+    // Nor Receive: with procurement on, a delivery is against one of the store's orders, which the buyer doesn't receive.
+    expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Order' })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('link', { name: /New order/ })).not.toBeInTheDocument());
   });

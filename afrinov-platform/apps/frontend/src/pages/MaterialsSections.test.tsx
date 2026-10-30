@@ -169,6 +169,13 @@ describe('an item’s page says where it belongs', () => {
     expect(await screen.findByRole('link', { name: '1369 · Plant upgrade' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1369');
     expect(screen.getByText('1369-PIPE · Project 1369 · Plant upgrade')).toBeInTheDocument();
     expect(screen.queryByText('Reorder at')).not.toBeInTheDocument();
+    // Project material goes to site, never into the store (Qodo, PR #125).
+    expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
+  });
+
+  it('a Stores item offers Receive', async () => {
+    detail('m-DISC');
+    expect(await screen.findByRole('link', { name: 'Receive' })).toHaveAttribute('href', '/stock/receive?materialId=m-DISC');
   });
 
   it('a Projects item without a project says so', async () => {

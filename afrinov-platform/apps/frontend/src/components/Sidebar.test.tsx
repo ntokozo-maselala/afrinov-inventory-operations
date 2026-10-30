@@ -69,13 +69,20 @@ describe('useNavGroups', () => {
 
   it.each([
     ['TECHNICIAN', ['Stock', 'Issue stock', 'Return stock', 'Tools']],
-    ['PROCUREMENT', ['Stock', 'Receive stock', 'Tools']],
+    // With procurement on, a delivery is against one of the store's orders, which Procurement doesn't receive.
+    ['PROCUREMENT', ['Stock', 'Tools']],
     ['VIEWER', ['Stock', 'Tools']],
     // The storeman orders stock for the shelf (Stores ordering roadmap); Procurement doesn't.
     ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Order stock', 'Tools']],
   ])('shows a %s only the Store actions the server lets them do', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Store')).toEqual(expected);
+  });
+
+  it('offers Procurement Receive stock for counter receipts while procurement is off', () => {
+    features.procurement = false;
+    signedIn.roles = ['PROCUREMENT'];
+    expect(useLabelsIn('Store')).toEqual(['Stock', 'Receive stock', 'Tools']);
   });
 
   it('includes the Procurement group when procurement is enabled', () => {

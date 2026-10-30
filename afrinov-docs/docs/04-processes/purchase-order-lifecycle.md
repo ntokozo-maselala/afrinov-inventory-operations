@@ -132,13 +132,13 @@ for issue" on every page; a cancelled one "Cancelled".
 
 ## Receiving
 Every delivery to the store is booked on **Receive stock** (`/stock/receive`),
-the one place to receive (Stores and Procurement Separation Roadmap).
-- Choosing a supplier with open Stores orders (`APPROVED` or
-  `PARTIALLY_RECEIVED`) asks which order the delivery is against, or *Not
-  against an order*; the question is shown to those who may receive orders.
-  The order's page (**Receive delivery**) and Order stock (**Receive**) open
-  Receive stock with the order chosen (`?order=<id>`); older `?receive=1`
-  links on the order go there too.
+the one place to receive, and only against an approved Stores order
+(ADR-022).
+- The page lists the store's orders that are `APPROVED` or
+  `PARTIALLY_RECEIVED`, with supplier and what each still owes; it is open to
+  those who receive orders (the store controller and Admin). The order's page
+  (**Receive delivery**) and Order stock (**Receive**) open it with the order
+  chosen (`?order=<id>`); older `?receive=1` links on the order go there too.
 - Against an order, its outstanding lines are filled in, each going where
   that item is kept now. What arrived is booked line by line, with the
   delivery note and date, as a goods receipt recorded and posted in one step
@@ -149,8 +149,8 @@ the one place to receive (Stores and Procurement Separation Roadmap).
   confirmation offers **Close AFRI-…**. When nothing more is coming, ticking
   *close short* with a reason closes the order with the delivery (short, if part-received)
   (`POST /:id/close` with the reason), as Close PO does.
-- A delivery not against an order is booked as a counter receipt
-  (`goods-receiving.md`).
+- There is no receipt without an order: the server refuses one
+  (`goods-receiving.md`). Counter receipts are only for procurement off.
 - `POST /:id/receive` books everything still outstanding to one location.
 
 ## Business rules

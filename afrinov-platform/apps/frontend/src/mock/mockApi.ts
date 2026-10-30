@@ -27,6 +27,7 @@ import { priceLines } from '../lib/poMoney';
 import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
+import { PROCUREMENT_ENABLED } from '../config/features';
 import type {
   MockMaterial,
   MockLocation,
@@ -44,6 +45,9 @@ import type {
 } from './types';
 import type { ApiError } from '../api/client';
 import type { ReturnableLine } from '../api/types';
+
+/** As the server: with procurement on, a delivery is always against an approved Stores order. */
+const COUNTER_RECEIPTS_OFF = 'Deliveries to the store are booked against an approved Stores order: choose the order on Receive stock.';
 
 interface Balance {
   materialId: string;
@@ -1467,6 +1471,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       post?: boolean;
     };
     if (!b.supplierId || !b.lines?.length) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
+    if (PROCUREMENT_ENABLED && !b.purchaseOrderId) throw err('VALIDATION_ERROR', COUNTER_RECEIPTS_OFF);
     const receivedAt = mockReceivedAt(b.receivedAt);
     if (!state.suppliers.find((s) => s.id === b.supplierId)) throw err('NOT_FOUND', 'Supplier not found');
     if (b.purchaseOrderId) {
@@ -1519,6 +1524,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/goods-receipts/'.length, -'/post'.length);
     const gr = state.goodsReceipts.find((g) => g.id === id);
     if (!gr) throw err('NOT_FOUND', 'Goods receipt not found');
+    if (PROCUREMENT_ENABLED && !gr.purchaseOrderId) throw err('VALIDATION_ERROR', COUNTER_RECEIPTS_OFF);
     if (gr.status === 'POSTED') throw err('INVALID_STATE', 'Already posted');
     if (gr.status === 'DRAFT') throw err('INVALID_STATE', 'Must be submitted first');
     handleReceiptPost(gr);
@@ -1547,6 +1553,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Mirrors StockReceiptService.receive: a posted goods receipt with no
   // purchase order, all-or-nothing.
   if (method === 'POST' && p === '/stock-receipts') {
+    if (PROCUREMENT_ENABLED) throw err('VALIDATION_ERROR', COUNTER_RECEIPTS_OFF);
     const b = (body as { supplierId?: string; deliveryRef?: string; receivedAt?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }) ?? {};
     const deliveryRef = b.deliveryRef?.trim();
     if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');

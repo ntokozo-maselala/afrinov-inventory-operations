@@ -20,6 +20,7 @@ column says how the platform implements each rule today.
 | BR-010 (proposed) | Every inventory transaction must be attributable to an authenticated user | Not enforced today — recommended new rule | Every ledger row has the signed-in user as actor |
 | BR-011 (proposed) | Once posted, an inventory transaction is immutable; corrections are new adjustment transactions | Not enforced today — recommended new rule (see ADR-002) | Immutable via the API; corrections are reversals linked to the original (ADR-005) or adjustments |
 | (new, no ID) | Every issue names who received the stock | ADR-008 | Required active recipient on every issue |
+| (new, no ID) | With procurement on, stock is received into the store only against an approved Stores order | ADR-022 | `POST /stock-receipts`, and `POST /goods-receipts` without an order, refused (400); the order must be APPROVED or PARTIALLY_RECEIVED |
 | (new, no ID) | Returned stock cannot exceed what is still out on the issue | Platform rule (no workbook source) | Return quantity ≤ issued − already returned |
 
 *Unverified:* the "Source" column describes the July workbook, which is not

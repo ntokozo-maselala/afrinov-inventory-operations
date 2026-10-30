@@ -4,6 +4,7 @@
 // Order stock. The server holds each kind to its own permission; these keep
 // the screens in step with it.
 import type { Permission } from '../hooks/usePermissions';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 export type OrderKind = 'stores' | 'projects';
 
@@ -33,6 +34,15 @@ export function orderPath(order: { id: string; projectNumber?: string | null }):
 /** Where a delivery against a Stores order is booked: Receive stock, with the order chosen. */
 export function receivePath(orderId: string): string {
   return `/stock/receive?order=${encodeURIComponent(orderId)}`;
+}
+
+/**
+ * Whether Receive stock books anything for this user. With procurement on,
+ * every delivery is against one of the store's approved orders, so it takes
+ * receiving orders as well as receiving stock.
+ */
+export function canReceiveStock(hasPermission: (code: Permission) => boolean): boolean {
+  return hasPermission('inventory:receive') && (!PROCUREMENT_ENABLED || hasPermission('orders:receive'));
 }
 
 /** The kind of order a page address is for: under Order stock or under Procurement. */

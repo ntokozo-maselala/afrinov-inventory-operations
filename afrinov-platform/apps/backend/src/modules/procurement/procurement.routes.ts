@@ -6,6 +6,7 @@ import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService, k
 import { Errors } from '../../shared/errors.js';
 import { fourDecimals } from './rfq.routes.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
+import { COUNTER_RECEIPTS_OFF } from '../inventory/inventory.routes.js';
 import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
 import { PermissionCode, type PermissionCodeValue } from '../../shared/permissions.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
@@ -403,9 +404,12 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const { post, ...input } = parsed.data;
-    // Against an order: a Stores order is the store's (not found to anyone
-    // else); a project order is refused by the service, as it goes to site.
-    if (input.purchaseOrderId) await requireForOrder(req, input.purchaseOrderId, PermissionCode.ReceiveInventory);
+    // Every delivery to the store is against an approved Stores order: one
+    // with no order is refused, as a counter receipt is while procurement is on.
+    if (!input.purchaseOrderId) throw Errors.validation(COUNTER_RECEIPTS_OFF);
+    // A Stores order is the store's (not found to anyone else); a project
+    // order is refused by the service, as it goes to site.
+    await requireForOrder(req, input.purchaseOrderId, PermissionCode.ReceiveInventory);
     // Retry-safe with an Idempotency-Key, as Receive stock sends one: a
     // retried delivery replays the first receipt instead of booking it twice.
     return idempotentMutation(req, reply, 'POST /goods-receipts', async (tx) => ({
@@ -422,6 +426,9 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     // As when it was recorded (Qodo, PR #121): a Stores order's receipt is the
     // store's; a project order's is refused while posting, as it goes to site.
     const saved = await prisma.goodsReceipt.findUnique({ where: { id }, select: { purchaseOrderId: true } });
+    // One saved with no order, before receipts needed one, isn't posted
+    // into stock either (Qodo, PR #125).
+    if (saved && !saved.purchaseOrderId) throw Errors.validation(COUNTER_RECEIPTS_OFF);
     if (saved?.purchaseOrderId) await requireForOrder(req, saved.purchaseOrderId, PermissionCode.ReceiveInventory);
     const posted = await GoodsReceiptService.post(id, actorId(req));
     return reply.send(posted);

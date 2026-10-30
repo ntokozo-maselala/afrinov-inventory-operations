@@ -11,7 +11,10 @@
 //   - goods-receipt posting rejects receiving more than the ordered quantity.
 //
 // The mock is reset between tests via `resetMockState()`.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
+vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
 import { createMockApi, resetMockState } from './mockApi';
 import { isApiError } from '../api/client';
 import type { ApiError } from '../api/client';
