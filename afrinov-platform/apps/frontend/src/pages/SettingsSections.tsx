@@ -22,6 +22,8 @@ import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { PASSWORD_MIN_LENGTH } from '../lib/passwordPolicy';
+import { presentError } from '../lib/errorPresentation';
 
 // Hide "Purchase orders" as a landing page while procurement is off, unless it
 // is the value already saved (so the select still shows what is stored).
@@ -404,7 +406,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
     if (!email.trim()) errs.email = 'Email is required.';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = 'Enter a valid email address.';
     if (!isEdit) {
-      if (password.length < 8) errs.password = 'Password must be at least 8 characters.';
+      if (password.length < PASSWORD_MIN_LENGTH) errs.password = `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
       if (password !== confirm) errs.confirm = 'Passwords do not match.';
     }
     if (roles.length === 0) errs.roles = 'Select at least one role.';
@@ -464,7 +466,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       </div>
       {!isEdit && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Password" htmlFor="usr-pw" required help="At least 8 characters." error={fieldErrors.password}>
+          <Field label="Password" htmlFor="usr-pw" required help={`At least ${PASSWORD_MIN_LENGTH} characters.`} error={fieldErrors.password}>
             <Input id="usr-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} invalid={!!fieldErrors.password} autoComplete="new-password" />
           </Field>
           <Field label="Confirm password" htmlFor="usr-pw2" required error={fieldErrors.confirm}>
@@ -506,11 +508,71 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
   );
 }
 
+interface ResetPasswordFormProps {
+  user: AdminUser;
+  onCancel: () => void;
+  onSaved: (msg: string) => void;
+}
+
+/**
+ * An administrator sets a temporary password. The user is signed out
+ * everywhere and must choose their own password at their next sign-in, which
+ * also lifts a sign-in lockout.
+ */
+function ResetPasswordForm({ user, onCancel, onSaved }: ResetPasswordFormProps) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [failure, setFailure] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setFailure(null);
+    const errs: Record<string, string> = {};
+    if (password.length < PASSWORD_MIN_LENGTH) errs.password = `Use at least ${PASSWORD_MIN_LENGTH} characters.`;
+    if (password !== confirm) errs.confirm = 'Passwords do not match.';
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setBusy(true);
+    try {
+      await api.post(`/users/${user.id}/password-reset`, { temporaryPassword: password });
+      onSaved(`Password reset for ${user.name}. Give them the temporary password; they will choose their own at sign-in.`);
+    } catch (err) {
+      setFailure(presentError(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4" noValidate>
+      <Alert tone="info" title="What happens">
+        {user.name} is signed out on every device and must choose a new password the next time they sign in.
+        Pass the temporary password on in person or by phone, not by email.
+      </Alert>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Temporary password" htmlFor="rst-pw" required help={`At least ${PASSWORD_MIN_LENGTH} characters.`} error={fieldErrors.password}>
+          <Input id="rst-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} invalid={!!fieldErrors.password} autoComplete="new-password" />
+        </Field>
+        <Field label="Confirm" htmlFor="rst-pw2" required error={fieldErrors.confirm}>
+          <Input id="rst-pw2" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} invalid={!!fieldErrors.confirm} autoComplete="new-password" />
+        </Field>
+      </div>
+      {failure && <Alert tone="danger" title="Password not reset">{failure}</Alert>}
+      <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
+        <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
+        <Button variant="primary" type="submit" loading={busy}>Reset password</Button>
+      </div>
+    </form>
+  );
+}
+
 export function SettingsUsers() {
   const usersApi = useApi<AdminUser[]>('/users');
   const users = usersApi.data ?? [];
   const reload = usersApi.reload;
-  const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | null>(null);
+  const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | { mode: 'reset'; user: AdminUser } | null>(null);
   const [pendingToggle, setPendingToggle] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
@@ -570,6 +632,7 @@ export function SettingsUsers() {
               </div>
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => setDrawer({ mode: 'edit', user: u })}>Edit</Button>
+                <Button size="sm" variant="ghost" onClick={() => setDrawer({ mode: 'reset', user: u })}>Reset password</Button>
                 <Button size="sm" variant="ghost" onClick={() => setPendingToggle(u)}>
                   {u.active ? 'Deactivate' : 'Activate'}
                 </Button>
@@ -579,7 +642,23 @@ export function SettingsUsers() {
         </ul>
       )}
 
-      {drawer && (
+      {drawer?.mode === 'reset' && (
+        <Drawer
+          open
+          onClose={() => setDrawer(null)}
+          title={`Reset password for ${drawer.user.name}`}
+          description="Set a temporary password the user must change at their next sign-in."
+          width="md"
+        >
+          <ResetPasswordForm
+            user={drawer.user}
+            onCancel={() => setDrawer(null)}
+            onSaved={(msg) => { setDrawer(null); toast.success(msg); }}
+          />
+        </Drawer>
+      )}
+
+      {drawer && drawer.mode !== 'reset' && (
         <Drawer
           open
           onClose={() => setDrawer(null)}
@@ -628,11 +707,12 @@ export function SettingsSecurity() {
         onChange={(v) => setDraft('security.sessionTimeoutMinutes', v)}
         error={errors['security.sessionTimeoutMinutes'] ?? null}
       />
-      <Alert tone="info" title="Notes">
-        The current authentication module supports email + password and a 12-hour JWT lifetime. Adjusting
-        the session timeout below is the only setting the existing backend can enforce; more granular controls
-        (account lockout, password complexity) are not yet wired and would require backend changes.
-        Accounts are created by an administrator under Settings → Users.
+      <Alert tone="info" title="How sign-in is protected">
+        A browser left untouched for the time above is signed out. Passwords need at least {PASSWORD_MIN_LENGTH} characters.
+        Five wrong passwords in a row pause sign-in for that account for 15 minutes; an administrator&rsquo;s password
+        reset lifts the pause. A reset signs the user out everywhere and makes them choose a new password. Every
+        sign-in attempt is recorded. A session lasts at most 12 hours. Accounts are created by an administrator
+        under Settings → Users.
       </Alert>
       <SaveBar items={items} onSave={async () => {
         try {

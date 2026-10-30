@@ -1,6 +1,10 @@
-// Demo business data seed.
+// Bootstrap and demo business data seed.
 //
-// Seeds the catalog the application expects for a populated demo
+// Every run writes the bootstrap (permissions, roles, the first admin, the
+// settings catalog). Only `--demo` (or SEED_DEMO_DATA=true), in development or
+// test, adds the demo data below; production refuses it (see seed-mode.ts).
+//
+// The demo data is the catalog the application expects for a populated demo
 // environment: materials, suppliers, projects, racks, purchase orders,
 // goods receipts, and the matching inventory transactions with
 // derived inventory balances. Mirrors the frontend `mock/seed.ts`
@@ -24,6 +28,7 @@ import { randomBytes } from 'node:crypto';
 import { ALL_PERMISSION_CODES, RolePermissions } from '../shared/permissions.js';
 import { recomputeBalancesFor } from '../modules/inventory/balances.js';
 import { prisma } from '../shared/db.js';
+import { demoDataRequested } from './seed-mode.js';
 
 type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER';
 
@@ -151,15 +156,19 @@ async function ensureAdminUser(): Promise<string> {
   // in dev/test a strong random password is generated so no secret is committed
   // and the seed still runs out of the box. Operators MUST rotate the password
   // after first login.
-  const isProd = process.env.NODE_ENV === 'production';
+  //
+  // The password is only needed when the account is created, so once the
+  // admin exists SEED_ADMIN_PASSWORD can (and should) be removed from the
+  // runtime environment.
+  const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
+  if (existing) return existing.id;
+
+  const isProd = (process.env.NODE_ENV ?? 'production') === 'production';
   const configuredAdminPassword = process.env.SEED_ADMIN_PASSWORD;
   const adminPassword = configuredAdminPassword?.trim() ? configuredAdminPassword : undefined;
   if (isProd && !adminPassword) {
     throw new Error('SEED_ADMIN_PASSWORD must be set when seeding in production');
   }
-
-  const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
-  if (existing) return existing.id;
   const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
   if (!adminRole) throw new Error('ADMIN role missing — seed ordering bug');
 
@@ -170,13 +179,16 @@ async function ensureAdminUser(): Promise<string> {
       email: adminEmail,
       name: 'System Administrator',
       passwordHash: hash,
+      // The bootstrap password passed through deployment configuration, so
+      // the first sign-in must replace it before anything else (PRA-05).
+      mustChangePassword: true,
       roles: { create: [{ roleId: adminRole.id }] },
     },
   });
   if (!adminPassword) {
     console.log(`Created admin user ${adminEmail}. No SEED_ADMIN_PASSWORD was set, so a random bootstrap password was generated (not logged). Set SEED_ADMIN_PASSWORD to use a known credential.`);
   } else {
-    console.log(`Created admin user ${adminEmail} (CHANGE PASSWORD ON FIRST LOGIN).`);
+    console.log(`Created admin user ${adminEmail}. The password must be changed at first sign-in.`);
   }
   return created.id;
 }
@@ -514,9 +526,22 @@ async function ensureTransactions(
 }
 
 async function main(): Promise<void> {
+  // Decided before anything is written, so a refused demo run changes nothing.
+  const withDemo = demoDataRequested(process.argv.slice(2), process.env);
+
+  // Bootstrap: what the application needs to work, in every environment.
   await ensurePermissions();
   await ensureRoles();
   const adminId = await ensureAdminUser();
+  const { SettingsService } = await import('../modules/settings/settings.service.js');
+  await SettingsService.ensureSeeded();
+
+  if (!withDemo) {
+    console.log('Bootstrap seed complete (no demo data; pass --demo in development or test to load it).');
+    return;
+  }
+
+  // Demo business data: development and test databases only (PRA-01).
   const locations = await ensureLocations();
   const suppliers = await ensureSuppliers();
   const materials = await ensureMaterials();
@@ -527,11 +552,7 @@ async function main(): Promise<void> {
   await ensureGoodsReceipt(suppliers, materials, locations, adminId);
   await ensureTransactions(materials, locations, recipients, adminId);
 
-  // 5. Settings catalog (idempotent — safe to re-run).
-  const { SettingsService } = await import('../modules/settings/settings.service.js');
-  await SettingsService.ensureSeeded();
-
-  console.log('Seed complete.');
+  console.log('Seed complete, with demo data.');
 }
 
 main()

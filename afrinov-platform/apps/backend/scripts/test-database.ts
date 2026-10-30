@@ -20,7 +20,7 @@ if (action === 'seed' && !process.env.SEED_ADMIN_PASSWORD?.trim()) {
 
 const args = action === 'migrate'
   ? ['prisma', 'migrate', 'deploy', '--schema', 'prisma/schema.prisma']
-  : ['tsx', 'src/db/seed.ts'];
+  : ['tsx', 'src/db/seed.ts', '--demo'];
 const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const result = spawnSync(command, args, {
   cwd: backendDirectory,

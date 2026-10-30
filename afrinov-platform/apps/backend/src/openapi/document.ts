@@ -15,8 +15,8 @@ import { PermissionCode, type PermissionCodeValue } from '../shared/permissions.
 import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
-import { loginSchema } from '../modules/identity/auth.routes.js';
-import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
+import { changePasswordSchema, loginSchema } from '../modules/identity/auth.routes.js';
+import { createUserSchema, resetPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema } from '../modules/inventory/tool.routes.js';
 import {
@@ -148,10 +148,18 @@ export const OPERATIONS: Operation[] = [
   // Auth
   {
     method: 'post', path: '/auth/login', tag: 'Auth', summary: 'Log in and receive a bearer token', public: true,
-    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute).',
+    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute). '
+      + 'Five wrong passwords in a row lock the account for 15 minutes (429 ACCOUNT_LOCKED). Every attempt is audited. '
+      + 'When `user.mustChangePassword` is true, every other route answers 403 PASSWORD_CHANGE_REQUIRED until `POST /auth/password` succeeds.',
     body: loginSchema, errors: [401, 429],
   },
-  { method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user' },
+  { method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user, and whether they must change their password' },
+  {
+    method: 'post', path: '/auth/password', tag: 'Auth', summary: 'Change your own password',
+    description: 'At least 12 characters. Ends every other session: tokens issued before the change are refused. '
+      + 'Returns a fresh token for the caller. A wrong current password is a 400 VALIDATION_ERROR.',
+    body: changePasswordSchema,
+  },
 
   // Users
   { method: 'get', path: '/users', tag: 'Users', summary: 'List users', permissions: [P.ManageUsers] },
@@ -166,7 +174,13 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate, change roles or set an approval limit',
-    permissions: [P.ManageUsers], body: updateUserSchema, errors: [404],
+    description: 'The last active administrator cannot remove their own administrator role or deactivate themselves (409).',
+    permissions: [P.ManageUsers], body: updateUserSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/users/:id/password-reset', tag: 'Users', summary: 'Set a temporary password the user must change',
+    description: 'Ends the user’s sessions and lifts a sign-in lockout. The user must choose a new password at their next sign-in.',
+    permissions: [P.ManageUsers], body: resetPasswordSchema, errors: [404],
   },
 
   // Materials

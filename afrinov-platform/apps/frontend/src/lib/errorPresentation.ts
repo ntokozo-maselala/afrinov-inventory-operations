@@ -87,6 +87,25 @@ function titleFor(code: string): { title: string; message: string; tone: ErrorTo
         retryable: false,
         retryLabel: 'Back',
       };
+    // After an administrator's reset: nothing else works until the user has
+    // chosen their own password. The app takes them to that screen.
+    case 'PASSWORD_CHANGE_REQUIRED':
+      return {
+        title: 'Please choose a new password',
+        message: 'Your password was reset. Choose a new one to continue.',
+        tone: 'info',
+        retryable: false,
+        retryLabel: 'Change password',
+      };
+    // Too many wrong passwords in a row for this account.
+    case 'ACCOUNT_LOCKED':
+      return {
+        title: 'Sign-in is paused for this account',
+        message: 'Too many failed sign-in attempts. Please try again in 15 minutes, or ask an administrator to reset your password.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
     // Missing resource.
     case 'NOT_FOUND':
       return {

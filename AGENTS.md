@@ -132,6 +132,25 @@ Use these forms; the older spellings still work but are deprecated or removed.
   the same key on a different record is a `CONFLICT`, not a replay. Wire new
   mutation forms through `useIdempotencyKey` and rotate the key only after a
   confirmed success — never after an `OUTCOME_UNKNOWN` failure.
+- **The seed never loads demo data into production (ADR-023).** `npm run
+  db:seed` writes only the bootstrap; `npm run db:seed:demo` (development and
+  test only) adds the demo dataset. CI proves both on every backend PR.
+  Local dev and the integration suites seed with `db:seed:demo`.
+- **Every route authenticates unless it is on the public list.**
+  `src/route-guard.test.ts` fails for any `/api/v1` route without
+  `app.authenticate`; adding a genuinely public route means adding it to
+  `PUBLIC_ROUTES` there, in review.
+- **Password lifecycle (ADR-024).** After an administrator's reset (and for the
+  bootstrap admin) the API answers 403 `PASSWORD_CHANGE_REQUIRED` for every
+  route except those in `PASSWORD_CHANGE_ROUTES` (`src/server.ts`). A password
+  change or reset ends earlier sessions (`users.password_changed_at` against
+  the token's `iat`). Sign-in attempts are audited as `Authentication`
+  entries; they are deliberately not in the Movements activity feed.
+- **Nobody approves a project order they raised (ADR-022).** Tests that take
+  a project order to APPROVED need a second user to approve it. Stores orders
+  are exempt: the store controller approves his own within his limit (ADR-021).
+- **CHECK constraints live only in migrations** (`20260101000033_check_constraints`):
+  Prisma's schema cannot express them and the drift check ignores them.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

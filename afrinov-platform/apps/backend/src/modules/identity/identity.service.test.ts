@@ -39,6 +39,7 @@ function makePrisma(): unknown {
         return null;
       },
       findMany: async () => [...db.users.values()],
+      count: async ({ where }: { where: { id: { not: string } } }) => countOtherActiveAdmins(where.id.not),
       create: async ({ data, include }: { data: Omit<User, 'id' | 'createdAt'> & { roles?: { create: Array<{ roleId: string }> } }; include?: unknown }) => {
         const u: User = { id: nextId(), email: data.email, name: data.name, passwordHash: data.passwordHash, active: data.active ?? true, createdAt: new Date() };
         db.users.set(u.id, u);
@@ -85,7 +86,14 @@ function makePrisma(): unknown {
       },
     },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
+    $executeRaw: async () => 0,
   };
+}
+
+/** Stands in for `user.count({ where: { id: { not }, active: true, roles: { some: ADMIN } } })`. */
+function countOtherActiveAdmins(excludeId: string): number {
+  return [...db.users.values()].filter((u) => u.id !== excludeId && u.active
+    && [...db.userRoles.values()].some((ur) => ur.userId === u.id && db.roles.get(ur.roleId)?.name === 'ADMIN')).length;
 }
 
 beforeEach(() => {
@@ -143,5 +151,55 @@ describe('UserService', () => {
   it('update on missing id throws NOT_FOUND', async () => {
     const { UserService } = await import('./identity.service.js');
     await expect(UserService.update({ id: 'missing', name: 'X' }, 'a')).rejects.toThrow(/not found/i);
+  });
+
+  describe('the last active administrator (ARCH-01)', () => {
+    it('cannot be demoted or deactivated, and nothing is written', async () => {
+      const { UserService } = await import('./identity.service.js');
+      const admin = await UserService.create({ email: 'a@b.c', name: 'Only Admin', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'actor-1');
+      db.audit.length = 0;
+      await expect(UserService.update({ id: admin.id, roleNames: ['VIEWER'] }, admin.id)).rejects.toMatchObject({ statusCode: 409 });
+      await expect(UserService.update({ id: admin.id, active: false }, admin.id)).rejects.toMatchObject({ statusCode: 409 });
+      expect(db.users.get(admin.id)!.active).toBe(true);
+      expect(db.audit).toHaveLength(0);
+    });
+
+    it('can step down once another administrator is active', async () => {
+      const { UserService } = await import('./identity.service.js');
+      const first = await UserService.create({ email: 'a@b.c', name: 'First', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'actor-1');
+      await UserService.create({ email: 'd@e.f', name: 'Second', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'actor-1');
+      const updated = await UserService.update({ id: first.id, roleNames: ['VIEWER'] }, first.id);
+      expect(updated.roles.map((r) => r.role.name)).toEqual(['VIEWER']);
+    });
+
+    it('leaves other users’ changes alone', async () => {
+      const { UserService } = await import('./identity.service.js');
+      await UserService.create({ email: 'a@b.c', name: 'Only Admin', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'actor-1');
+      const viewer = await UserService.create({ email: 'v@b.c', name: 'Viewer', password: 'ChangeMe!2026', roleNames: ['VIEWER'] }, 'actor-1');
+      await expect(UserService.update({ id: viewer.id, active: false }, 'actor-1')).resolves.toMatchObject({ active: false });
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('sets a temporary password the user must change, ends their sessions and lifts a lockout', async () => {
+      const { UserService } = await import('./identity.service.js');
+      const u = await UserService.create({ email: 'a@b.c', name: 'Alice', password: 'ChangeMe!2026', roleNames: ['VIEWER'] }, 'actor-1');
+      Object.assign(db.users.get(u.id)!, { failedLoginCount: 4, lockedUntil: new Date(Date.now() + 60_000) });
+      const before = Date.now();
+      await UserService.resetPassword(u.id, 'temporary-pass-123', 'actor-2');
+      const stored = db.users.get(u.id)! as unknown as Record<string, unknown>;
+      const bcrypt = (await import('bcryptjs')).default;
+      expect(await bcrypt.compare('temporary-pass-123', stored['passwordHash'] as string)).toBe(true);
+      expect(stored).toMatchObject({ mustChangePassword: true, failedLoginCount: 0, lockedUntil: null });
+      expect((stored['passwordChangedAt'] as Date).getTime()).toBeGreaterThanOrEqual(before);
+      const audit = db.audit.at(-1)!;
+      expect(audit).toMatchObject({ action: 'PASSWORD_RESET', entityType: 'User', entityId: u.id, actorId: 'actor-2' });
+      expect(JSON.stringify(audit)).not.toContain('temporary-pass-123');
+    });
+
+    it('throws NOT_FOUND for an unknown user', async () => {
+      const { UserService } = await import('./identity.service.js');
+      await expect(UserService.resetPassword('missing', 'temporary-pass-123', 'a')).rejects.toThrow(/not found/i);
+    });
   });
 });

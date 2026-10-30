@@ -23,7 +23,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
-import { approvalBlock, approversFor, approvesStores, listApprovers, whoToAsk } from './po-approval.js';
+import { approvalBlock, approversFor, approvesStores, listApprovers, selfApprovalBlock, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
 
@@ -387,7 +387,8 @@ export const PurchaseOrderService = {
         where: { status: 'PENDING_APPROVAL', projectNumber: k === 'stores' ? null : { not: null } },
         include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
       });
-      waiting.push(...orders.filter((po) => !approvalBlock(po, me.approvalLimit)));
+      // Not project orders they raised themselves: someone else approves those (ADR-022).
+      waiting.push(...orders.filter((po) => !selfApprovalBlock(po, actorId) && !approvalBlock(po, me.approvalLimit)));
     }
     return waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(withTotals);
   },
@@ -537,6 +538,10 @@ export const PurchaseOrderService = {
   async update(input: UpdatePOInput, actorId: string) {
     const allowEditAfterApproval = await SettingsService.getValue<boolean>('purchaseOrders.allowEditAfterApproval');
     return prisma.$transaction(async (tx) => {
+      // Serialised with approve(): otherwise an approval could check the old
+      // total while this edit commits a higher one, leaving an order approved
+      // at an amount nobody signed off (PRA-07).
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${input.id} FOR UPDATE`;
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (!isEditable(po.status, allowEditAfterApproval)) {
@@ -636,6 +641,7 @@ export const PurchaseOrderService = {
   async submit(id: string, actorId: string) {
     const requireApproval = await SettingsService.getValue<boolean>('purchaseOrders.requireApprovalBeforeProcessing');
     return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (po.lines.length === 0) throw Errors.validation('Cannot submit an empty purchase order');
@@ -650,7 +656,19 @@ export const PurchaseOrderService = {
       checkProjectMaterial(po.projectNumber, lineMaterials, 'ordered');
       if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
       const now = new Date();
-      if (requireApproval) {
+      // With approval switched off, submitting approves the order only within
+      // the submitter's own authority: they must be someone who approves this
+      // kind of order, and its total must be within their limit. Anything else
+      // goes for approval as usual, so switching approval off cannot let a
+      // buyer commit an order nobody with authority has seen (PRA-06).
+      let autoApproveBlock: string | null = null;
+      if (!requireApproval) {
+        const me = (await listApprovers(kindOfOrder(po))).find((a) => a.id === actorId);
+        autoApproveBlock = !me
+          ? 'not_an_approver'
+          : approvalBlock(po, me.approvalLimit) ? 'over_limit_or_unpriced' : null;
+      }
+      if (requireApproval || autoApproveBlock) {
         const target: PurchaseOrderStatus = 'PENDING_APPROVAL';
         const result = await tx.purchaseOrder.updateMany({
           where: { id, status: { in: allowed } },
@@ -666,7 +684,7 @@ export const PurchaseOrderService = {
             entityType: 'PurchaseOrder',
             entityId: id,
             before: { status: po.status },
-            after: { status: target },
+            after: { status: target, ...(autoApproveBlock ? { autoApproveSkipped: autoApproveBlock } : {}) },
           },
         });
       } else {
@@ -700,12 +718,12 @@ export const PurchaseOrderService = {
     if (!po) throw Errors.notFound('PurchaseOrder');
     const approvers = await listApprovers(kindOfOrder(po));
     const me = approvers.find((a) => a.id === actorId);
-    const block = me ? approvalBlock(po, me.approvalLimit) : null;
+    const reason = me ? selfApprovalBlock(po, actorId) ?? approvalBlock(po, me.approvalLimit)?.message ?? null : null;
     return {
       ...orderTotals(po.lines, po.vatRate ?? 0),
       currency: po.currency,
-      canApprove: !!me && po.status === 'PENDING_APPROVAL' && !block,
-      reason: me ? block?.message ?? null : null,
+      canApprove: !!me && po.status === 'PENDING_APPROVAL' && !reason,
+      reason,
       myLimit: me?.approvalLimit ?? null,
       approvers: approversFor(po, approvers),
     };
@@ -713,11 +731,19 @@ export const PurchaseOrderService = {
 
   async approve(id: string, actorId: string) {
     return prisma.$transaction(async (tx) => {
+      // Locked before the lines are read, as update() locks it, so a price
+      // change cannot land between the limit check and the approval (PRA-07).
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot approve a PO in status ${po.status}`, { status: po.status });
+      }
+      const selfBlock = selfApprovalBlock(po, actorId);
+      if (selfBlock) {
+        const names = approversFor(po, await listApprovers(kindOfOrder(po))).map((a) => a.name);
+        throw Errors.forbidden(`${selfBlock} ${whoToAsk(names)}`);
       }
       // The approver's limit must cover the order total (rand, including VAT).
       const actor = await tx.user.findUnique({ where: { id: actorId }, select: { approvalLimit: true, roles: { select: { role: { select: { name: true } } } } } });

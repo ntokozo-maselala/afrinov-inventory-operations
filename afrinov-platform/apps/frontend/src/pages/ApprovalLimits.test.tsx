@@ -68,8 +68,8 @@ describe('approval limits', () => {
     expect(screen.queryByLabelText('Approval limit (R, including VAT)')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'New Approver' } });
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'new@afrinov.local' } });
-    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'secret123' } });
-    fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'secret-passphrase-123' } });
+    fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: 'secret-passphrase-123' } });
     const drawer = screen.getByRole('dialog');
     fireEvent.click(within(drawer).getByRole('checkbox', { name: /^Approver/ }));
     fireEvent.change(screen.getByLabelText('Approval limit (R, including VAT)'), { target: { value: '250000' } });

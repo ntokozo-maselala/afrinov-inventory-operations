@@ -22,10 +22,10 @@ returns) is next.
 | Path | What it is |
 | --- | --- |
 | `afrinov-platform/` | npm workspaces monorepo; install dependencies and run scripts here |
-| `afrinov-platform/apps/backend/` | REST API: Fastify 5, Prisma 5, PostgreSQL 16, Zod, Vitest |
-| `afrinov-platform/apps/frontend/` | React 18 + Vite + Tailwind 3 SPA, Vitest and Playwright |
+| `afrinov-platform/apps/backend/` | REST API: Fastify 5, Prisma 7, PostgreSQL 16, Zod 4, Vitest |
+| `afrinov-platform/apps/frontend/` | React 19 + Vite 8 + Tailwind 4 SPA, Vitest and Playwright |
 | `afrinov-docs/docs/` | Original specification: product, domain, processes, architecture, API, security, testing, operations |
-| `.github/workflows/` | CI: `backend-ci.yml`, `frontend-ci.yml` |
+| `.github/workflows/` | CI: `backend-ci.yml`, `frontend-ci.yml`, `security-ci.yml`, `codeql.yml` |
 | `workbook-replacement-roadmap.md` | The plan, phase by phase, with what is done |
 | `decision-log.md` | Architecture decisions, ADR-001 onwards |
 | `gap-analysis.md`, `sap-lessons-for-afrinov.md` | Early analysis of the workbook and of SAP |
@@ -45,7 +45,7 @@ npm run dev:frontend   # app on http://localhost:5173
 `npm run dev:frontend-only`, run in `apps/frontend/`, starts the frontend on
 mock data with no backend.
 
-Use Node 22 or later (24 recommended); the test tools need 22+.
+Use Node 24, as CI and the backend Docker image do.
 
 ## Checking a change
 
@@ -66,6 +66,14 @@ database; CI runs them on every backend pull request.
   users; manage them on the Recipients page.
 - **Accounts are created by an administrator.** There is no self-registration
   (ADR-006).
+- **Passwords:** at least 12 characters. Users change their own from the
+  header; an administrator resets one under Settings → Users, and the user must
+  then choose a new one before anything else. Five wrong passwords lock an
+  account for 15 minutes. Every sign-in attempt is audited (ADR-024).
+- **Nobody approves a project order they raised** (ADR-022); the store
+  controller approves his own Stores orders within his limit (ADR-021).
+- **The seed writes only the bootstrap**; demo data comes from
+  `npm run db:seed:demo`, never in production (ADR-023).
 - **Roles:** `ADMIN`, `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`,
   `TECHNICIAN`, `VIEWER`. Server permissions are in
   `apps/backend/src/shared/permissions.ts`. In the UI, `useHasRole()` lets
@@ -97,10 +105,7 @@ database; CI runs them on every backend pull request.
 
 ## Known follow-ups
 
-- The `inventory_balances` foreign keys declared in `schema.prisma` were never
-  created by a migration.
-- The backend still runs on Node 20 in CI and in its Docker image; Node 20 no
-  longer receives security updates.
-- The GitHub Actions `checkout@v4` and `setup-node@v4` need updating.
-- `npm audit` reports vulnerabilities that should be reviewed; do not use
-  `npm audit fix --force`, which upgrades across major versions.
+The production readiness assessment (2026-10-30) and its remediation plan are
+in `docs/audits/production-readiness/`. What remains open before go-live is
+listed in its remediation plan; most of it is hosting, backups and a restore
+drill, which need decisions outside the repository.

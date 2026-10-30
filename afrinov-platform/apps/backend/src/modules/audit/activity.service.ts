@@ -137,6 +137,8 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
       const roles = Array.isArray(a['roles']) ? (a['roles'] as string[]).map((r) => r.toLowerCase().replace(/_/g, ' ')).join(', ') : '';
       if (e.action === 'CREATE') return { summary: `Added user ${label}${str(a['email']) ? ` (${a['email']})` : ''}${roles ? ` as ${roles}` : ''}`, link: null };
       if (e.action === 'UPDATE') return { summary: editSentence('user', label, e.before, e.after), link: null };
+      if (e.action === 'PASSWORD_CHANGE') return { summary: `${label} changed their password`, link: null };
+      if (e.action === 'PASSWORD_RESET') return { summary: `Reset the password of ${label}`, link: null };
       break;
     }
     case 'WorkbookImport':

@@ -4,7 +4,7 @@
 
 | Environment | Purpose | Data | Evidence |
 |---|---|---|---|
-| local | Developer machines: Docker Postgres, `npm run dev:backend` and `dev:frontend` | Demo seed (`npm run db:seed`) | `apps/backend/README.md`, `src/db/seed.ts` |
+| local | Developer machines: Docker Postgres, `npm run dev:backend` and `dev:frontend` | Demo seed (`npm run db:seed:demo`); production gets the bootstrap only (`npm run db:seed`, ADR-023) | `apps/backend/README.md`, `src/db/seed.ts` |
 | frontend-only | UI review without backend or database | In-memory mock data, reset on reload | `apps/frontend/FRONTEND_ONLY.md` |
 | CI | Throwaway Postgres per integration run | Seed data | `.github/workflows/backend-ci.yml` |
 | staging | Migration rehearsal, UAT, pre-release validation | Sanitised copy of migrated data | **Planned** — not defined in the repository |

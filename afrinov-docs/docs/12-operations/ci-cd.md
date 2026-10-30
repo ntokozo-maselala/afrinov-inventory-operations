@@ -6,7 +6,7 @@
 | Workflow | Runs on | Steps |
 |---|---|---|
 | `backend-ci.yml` → job **checks** | Pull requests touching `apps/backend`, the workspace manifests or the workflow; pushes to `main` | Node 24; `npm ci` at the workspace root; `prisma generate`; `npm run typecheck`, `lint`, `test`, `build` |
-| `backend-ci.yml` → job **integration** | Same triggers | Node 24; `postgres:16-alpine` service; random `JWT_SECRET` and `SEED_ADMIN_PASSWORD` generated and masked; `prisma generate`; `prisma migrate deploy`; `npm run db:seed`; `npm run test:integration` |
+| `backend-ci.yml` → job **integration** | Same triggers | Node 24; `postgres:16-alpine` service; random `JWT_SECRET` and `SEED_ADMIN_PASSWORD` generated and masked; `prisma generate`; `prisma migrate deploy`; production-mode `npm run db:seed` then `npm run db:check-bootstrap` (no business data); `npm run db:seed:demo` must fail in production; demo seed with `NODE_ENV=test`; `npm run test:integration` |
 | `frontend-ci.yml` → job **checks** | Pull requests touching `apps/frontend`, the workspace manifests or the workflow; pushes to `main` | Node 24; `npm ci`; `typecheck`, `lint`, `test`, production `build` (fails if a demo flag is set) |
 | `security-ci.yml` | Push/PR | Node 24; dependency and static-analysis checks |
 

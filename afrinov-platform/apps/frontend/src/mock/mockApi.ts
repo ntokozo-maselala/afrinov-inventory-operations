@@ -853,6 +853,12 @@ function route(method: string, path: string, body?: unknown): unknown {
     // service (rare). It still returns the dev user for consistency.
     return { token: 'mock-token', user: devUser() };
   }
+  if (method === 'POST' && p === '/auth/password') {
+    const b = body as { currentPassword?: string; newPassword?: string } | undefined;
+    if (!b?.currentPassword) throw err('VALIDATION_ERROR', 'Your current password is not correct.');
+    if (!b.newPassword || b.newPassword.length < 12) throw err('VALIDATION_ERROR', 'Use at least 12 characters');
+    return { token: 'mock-token', user: { ...devUser(), mustChangePassword: false } };
+  }
 
   // Materials
   /** As MaterialService: only a tool has a serial number, and no two items share one. */
@@ -1821,6 +1827,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/users/'.length);
     const b = body as { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null };
     return mockUsersApi.update(id, b);
+  }
+  if (method === 'POST' && /^\/users\/[^/]+\/password-reset$/.test(p)) {
+    const id = p.split('/')[2]!;
+    if (!mockUsersApi.list().some((x) => x.id === id)) throw err('NOT_FOUND', 'User not found');
+    const b = body as { temporaryPassword?: string } | undefined;
+    if (!b?.temporaryPassword || b.temporaryPassword.length < 12) throw err('VALIDATION_ERROR', 'Use at least 12 characters');
+    return { id, mustChangePassword: true };
   }
 
   // ── Settings ───────────────────────────────────────────────────────────

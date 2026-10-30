@@ -157,7 +157,29 @@ jobs:
       - name: Apply migrations
         run: npx prisma migrate deploy
 
-      - name: Seed database
-        run: npm run db:seed
+      # The production bootstrap must write no business data (PRA-01): a
+      # demo supplier or stock movement in the system of record could never be
+      # removed from the ledger.
+      - name: Bootstrap seed as production writes no business data
+        env:
+          NODE_ENV: production
+        run: |
+          npm run db:seed
+          npm run db:check-bootstrap
+
+      - name: Demo seed is refused in production
+        env:
+          NODE_ENV: production
+        run: |
+          if npm run db:seed:demo; then
+            echo "The demo seed ran with NODE_ENV=production" >&2
+            exit 1
+          fi
+
+      # The integration suites run against the demo dataset.
+      - name: Seed demo data
+        env:
+          NODE_ENV: test
+        run: npm run db:seed:demo
 
       - run: npm run test:integration

@@ -54,6 +54,18 @@ export function approvalBlock(po: OrderForApproval, limit: Num | null | undefine
   return { code: 'OVER_LIMIT', message: `This order is ${rand(totals.net)} including VAT; your approval limit is ${rand(limit!)}.` };
 }
 
+/**
+ * Segregation of duties on project orders (ADR-022, PRA-06): whoever raised a
+ * project order cannot also approve it, administrators included, so project
+ * spend is committed on two people's say-so. Stores orders are exempt: the
+ * store controller approves his own within the limit an admin set (ADR-021).
+ * Returns the reason, or null when this user may approve.
+ */
+export function selfApprovalBlock(po: { createdById: string; projectNumber?: string | null }, actorId: string): string | null {
+  if (!po.projectNumber) return null;
+  return po.createdById === actorId ? 'You raised this order, so someone else must approve it.' : null;
+}
+
 /** The permission that approves an order of this kind. */
 export function approvePermissionFor(kind: OrderKind) {
   return kind === 'stores' ? PermissionCode.OrderStoresStock : PermissionCode.ApprovePurchaseOrder;
@@ -90,11 +102,12 @@ export async function listApprovers(kind: OrderKind = 'projects'): Promise<Appro
     });
 }
 
-/** The approvers whose limit covers this order. */
-export function approversFor(po: OrderForApproval, approvers: Approver[]): Approver[] {
+/** The approvers whose limit covers this order, leaving out whoever raised a project order. */
+export function approversFor(po: OrderForApproval & { createdById?: string; projectNumber?: string | null }, approvers: Approver[]): Approver[] {
   const totals = orderTotals(po.lines, po.vatRate ?? 0);
   if (totals.unpricedLines > 0) return [];
-  return approvers.filter((a) => withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
+  return approvers.filter((a) => !(po.createdById && selfApprovalBlock({ createdById: po.createdById, projectNumber: po.projectNumber }, a.id))
+    && withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
 }
 
 /** "Ask Simbongile Bantubani to approve it." or a fallback when nobody can. */

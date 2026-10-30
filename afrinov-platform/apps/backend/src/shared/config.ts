@@ -69,6 +69,13 @@ export function loadConfig(): AppConfig {
     throw new ConfigError('JWT_SECRET must be at least 32 bytes in production.');
   }
 
+  // Reflecting any origin with credentials hands every website a credentialed
+  // channel to the API. Acceptable on a throwaway demo box, never in production
+  // (SEC-04).
+  if (nodeEnv === 'production' && process.env.CORS_ALLOW_ANY === 'true') {
+    throw new ConfigError('CORS_ALLOW_ANY=true is not permitted in production. List the allowed origins in CORS_ORIGIN.');
+  }
+
   const port = Number(process.env.PORT ?? 4000);
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     throw new ConfigError(`PORT must be a valid port number (got "${process.env.PORT}").`);
@@ -146,6 +153,34 @@ export function resolveCorsOrigin(
   if (configured && configured.length > 0) return configured;
   if (nodeEnv === 'development') return DEV_ALLOWED_ORIGINS;
   return false;
+}
+
+export type TrustProxySetting = boolean | string[] | ((address: string, hop: number) => boolean);
+
+/**
+ * Which proxies may tell the API the client's address (`X-Forwarded-For`),
+ * from `TRUST_PROXY`. Behind a load balancer the socket address is the
+ * balancer's, so without this every user shares one IP: one login rate-limit
+ * budget for the whole office, and no client address in the sign-in audit
+ * (SEC-05, PRA-09).
+ *
+ * - unset or `false`: trust nobody (the socket address is the client). Right
+ *   when the API is reached directly.
+ * - a number: trust that many proxy hops in front of the API (usually `1`).
+ * - a comma-separated list of addresses or CIDR ranges: trust only those.
+ * - `true`: trust any forwarder. Only safe when nothing can reach the API
+ *   except through the proxy; otherwise a client can forge its address.
+ */
+export function resolveTrustProxy(raw: string | undefined): TrustProxySetting {
+  const value = raw?.trim() ?? '';
+  if (value === '' || value.toLowerCase() === 'false') return false;
+  if (value.toLowerCase() === 'true') return true;
+  // Hop count, in Fastify's function form: trust the nearest `hops` addresses.
+  if (/^\d+$/.test(value)) {
+    const hops = Number(value);
+    return (_address: string, hop: number) => hop < hops;
+  }
+  return value.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
 export class ConfigError extends Error {

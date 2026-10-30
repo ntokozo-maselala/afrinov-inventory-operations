@@ -211,3 +211,56 @@ describe('auth.tsx — session expiry handling', () => {
     spy.mockRestore();
   });
 });
+describe('auth.tsx — password changes and inactivity', () => {
+  beforeEach(() => {
+    sessionStorageStub.clear();
+    localStorage.clear();
+  });
+
+  async function renderProbe() {
+    const { render, screen, act } = await import('@testing-library/react');
+    const { AuthProvider, useAuth } = await import('./auth');
+    function Probe() {
+      const { user, sessionExpired, expireSession, completePasswordChange } = useAuth();
+      return (
+        <div>
+          <span data-testid="state">{user ? 'signed-in' : 'signed-out'}</span>
+          <span data-testid="must-change">{user?.mustChangePassword ? 'yes' : 'no'}</span>
+          <span data-testid="expired">{sessionExpired ? 'yes' : 'no'}</span>
+          <button onClick={expireSession}>idle</button>
+          <button onClick={() => completePasswordChange()}>changed</button>
+        </div>
+      );
+    }
+    render(<AuthProvider><Probe /></AuthProvider>);
+    return { screen, act };
+  }
+
+  it('marks the user when the server says the password must be changed, and clears it once changed', async () => {
+    const { PASSWORD_CHANGE_REQUIRED_EVENT, setToken } = await import('./api/client');
+    setToken('a-token');
+    writePersistedSession(makeUser());
+    const { screen, act } = await renderProbe();
+    expect(screen.getByTestId('must-change').textContent).toBe('no');
+
+    await act(async () => { window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT)); });
+    expect(screen.getByTestId('must-change').textContent).toBe('yes');
+    expect(readPersistedSession()?.user.mustChangePassword).toBe(true);
+
+    await act(async () => { screen.getByText('changed').click(); });
+    expect(screen.getByTestId('must-change').textContent).toBe('no');
+    expect(screen.getByTestId('state').textContent).toBe('signed-in');
+    setToken(null);
+  });
+
+  it('ends an idle session as expired, so the sign-in page can say why', async () => {
+    const { setToken } = await import('./api/client');
+    setToken('a-token');
+    writePersistedSession(makeUser());
+    const { screen, act } = await renderProbe();
+    await act(async () => { screen.getByText('idle').click(); });
+    expect(screen.getByTestId('state').textContent).toBe('signed-out');
+    expect(screen.getByTestId('expired').textContent).toBe('yes');
+    expect(localStorage.getItem('afrinov.token')).toBeNull();
+  });
+});

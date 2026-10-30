@@ -54,6 +54,11 @@ export interface SessionExpiredDetail {
   token: string;
 }
 
+/** Emitted when the server refuses a request until the user changes their
+ * password (after an administrator's reset), so the app can take them to the
+ * change-password screen from wherever they are. */
+export const PASSWORD_CHANGE_REQUIRED_EVENT = 'afrinov:password-change-required';
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -143,6 +148,8 @@ const SAFE_MESSAGES: Record<string, string> = {
   UNSUPPORTED_MEDIA_TYPE: 'Something about this request was not accepted. Please check your input and try again.',
   OUTCOME_UNKNOWN: 'We could not confirm whether that change was saved. Please check the records before trying again.',
   IDEMPOTENCY_KEY_REUSED: 'This form was already submitted. Please review the details and submit again.',
+  PASSWORD_CHANGE_REQUIRED: 'Please choose a new password before continuing.',
+  ACCOUNT_LOCKED: 'Too many failed sign-in attempts. Please try again in 15 minutes, or ask an administrator to reset your password.',
   INTERNAL_ERROR: 'Something went wrong. Please try again.',
 };
 
@@ -277,6 +284,9 @@ async function realRequest<T>(method: string, path: string, body?: unknown, opti
       window.dispatchEvent(
         new CustomEvent<SessionExpiredDetail>(SESSION_EXPIRED_EVENT, { detail: { token } }),
       );
+    }
+    if (res.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED' && !FRONTEND_ONLY && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT));
     }
     throw err;
   }

@@ -14,6 +14,7 @@
     "test": "npm run test --workspaces --if-present",
     "db:migrate": "npm run db:migrate --workspace=@afrinov/backend",
     "db:seed": "npm run db:seed --workspace=@afrinov/backend",
+    "db:seed:demo": "npm run db:seed:demo --workspace=@afrinov/backend",
     "db:rotate-admin": "npm run db:rotate-admin --workspace=@afrinov/backend",
     "dev:backend": "npm run dev --workspace=@afrinov/backend",
     "dev:frontend": "npm run dev --workspace=@afrinov/frontend"

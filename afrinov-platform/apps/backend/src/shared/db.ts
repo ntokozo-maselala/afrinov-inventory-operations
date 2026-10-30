@@ -14,6 +14,19 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const IDLE_TIMEOUT_MS = 10_000;
 const MAX_POOL_SIZE = 10;
 
+/**
+ * The longest one SQL statement may run before PostgreSQL cancels it (PRA-18).
+ * The HTTP layer gives up on a request after 30 s, but without this the query
+ * behind it would keep running and keep one of the ten pool connections busy,
+ * so a few runaway reports could starve every other request. Matches the
+ * request timeout by default; `DB_STATEMENT_TIMEOUT_MS` overrides it (0 turns
+ * it off, e.g. for a one-off import run by hand).
+ */
+export function statementTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.DB_STATEMENT_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 0 && env.DB_STATEMENT_TIMEOUT_MS?.trim() ? raw : 30_000;
+}
+
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
   if (!url) {
@@ -46,6 +59,7 @@ function createClient(): PrismaClient {
       connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
       idleTimeoutMillis: IDLE_TIMEOUT_MS,
       max: MAX_POOL_SIZE,
+      statement_timeout: statementTimeoutMs(),
     },
     { schema: schemaFromUrl(connectionString) },
   );

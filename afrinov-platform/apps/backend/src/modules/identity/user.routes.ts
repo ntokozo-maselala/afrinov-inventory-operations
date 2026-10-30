@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { UserService } from './identity.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+import { newPasswordSchema } from './password-policy.js';
 
 export const createUserSchema = z.object({
   email: z.email(),
   name: z.string().min(1),
-  password: z.string().min(8).regex(/[^\0]/),
+  password: newPasswordSchema,
   roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1),
 });
 
@@ -17,6 +18,11 @@ export const updateUserSchema = z.object({
   roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1).optional(),
   // Largest purchase order (rand, incl. VAT) the user may approve; null: no limit.
   approvalLimit: z.number().nonnegative().max(1e12).nullable().optional(),
+});
+
+export const resetPasswordSchema = z.object({
+  // A temporary password the user must replace at their next sign-in.
+  temporaryPassword: newPasswordSchema,
 });
 
 function actorId(req: unknown): string {
@@ -67,5 +73,17 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     }
     const updated = await UserService.update({ id, ...parsed.data }, actorId(req));
     return updated;
+  });
+
+  app.post('/users/:id/password-reset', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageUsers);
+    const id = (req.params as { id: string }).id;
+    const parsed = resetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'The temporary password does not meet the rules', details: parsed.error.flatten() },
+      });
+    }
+    return UserService.resetPassword(id, parsed.data.temporaryPassword, actorId(req));
   });
 }

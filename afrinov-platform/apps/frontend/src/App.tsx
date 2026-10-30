@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GlobalPreferencesApplier } from './components/GlobalPreferencesApplier';
+import { IdleSignOut } from './components/IdleSignOut';
 import { PROCUREMENT_ENABLED } from './config/features';
 import { applyTheme, getAppearance } from './hooks/useAppearance';
 
@@ -56,6 +57,7 @@ const SettingsSystem = importPage(() => import('./pages/SettingsSections').then(
 const SettingsData = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsData })));
 const SettingsHistory = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsHistory })));
 const NotFound = importPage(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })));
+const ChangePassword = lazy(() => import('./pages/ChangePassword').then(m => ({ default: m.ChangePassword })));
 
 function PageSkeleton() {
   return (
@@ -101,8 +103,22 @@ function Protected() {
     // holds the flag, so no effect has to win a race to carry it across.
     return <Navigate to="/login" state={{ from: location, sessionExpired }} replace />;
   }
+  // After an administrator's reset the server refuses everything but the
+  // password change, so nothing else is shown (and no screen fires requests
+  // that would only be refused) until it is done.
+  if (user.mustChangePassword) {
+    return (
+      <ErrorBoundary name="Change password">
+        <IdleSignOut />
+        <Suspense fallback={<PageSkeleton />}>
+          <ChangePassword forced />
+        </Suspense>
+      </ErrorBoundary>
+    );
+  }
   return (
     <ToastProvider>
+      <IdleSignOut />
       <GlobalPreferencesApplier onReady={() => setThemeReady(true)} />
       {themeReady ? <AppShell><Outlet /></AppShell> : <AuthLoading />}
     </ToastProvider>
@@ -194,6 +210,7 @@ export function App() {
           <Route path="data" element={<RouteBoundary name="Settings: data"><SettingsData /></RouteBoundary>} />
           <Route path="history" element={<RouteBoundary name="Settings: history"><SettingsHistory /></RouteBoundary>} />
         </Route>
+        <Route path="/account/password" element={<RouteBoundary name="Change password"><ChangePassword /></RouteBoundary>} />
         <Route path="*" element={<RouteBoundary name="Page"><NotFound /></RouteBoundary>} />
       </Route>
       </Routes>

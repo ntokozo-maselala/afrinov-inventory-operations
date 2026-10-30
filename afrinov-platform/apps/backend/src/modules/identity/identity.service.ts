@@ -1,7 +1,43 @@
 import bcrypt from 'bcryptjs';
+import { createHash, randomBytes } from 'node:crypto';
 import { Prisma, type Role } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import { Errors } from '../../shared/errors.js';
+import { ApiError, Errors } from '../../shared/errors.js';
+
+/** Consecutive wrong passwords before sign-in closes for the account. */
+export const MAX_FAILED_LOGINS = 5;
+/** How long sign-in stays closed after that. */
+export const LOCKOUT_MS = 15 * 60 * 1000;
+
+/** Answered while an account is locked; distinct so the sign-in page can say so. */
+export const ACCOUNT_LOCKED_CODE = 'ACCOUNT_LOCKED';
+
+/**
+ * Compared against when the email is unknown, so an unknown account costs the
+ * same bcrypt work as a known one and response time does not reveal which
+ * emails have accounts (PRA-16). The hash of a random value nobody knows, made
+ * once on first use at the same cost as real hashes.
+ */
+let dummyHash: Promise<string> | undefined;
+function getDummyHash(): Promise<string> {
+  dummyHash ??= bcrypt.hash(randomBytes(32).toString('hex'), 12);
+  return dummyHash;
+}
+
+/** Where a sign-in came from, recorded with every attempt. */
+export interface LoginContext {
+  ip?: string;
+  userAgent?: string;
+}
+
+/** An unknown email is recorded by fingerprint, never as typed: it may be a password. */
+function emailFingerprint(email: string): string {
+  return createHash('sha256').update(email).digest('hex').slice(0, 16);
+}
+
+function contextJson(ctx: LoginContext, extra: Record<string, unknown> = {}): Prisma.InputJsonValue {
+  return { ip: ctx.ip ?? null, userAgent: ctx.userAgent?.slice(0, 200) ?? null, ...extra } as Prisma.InputJsonValue;
+}
 
 export const AuthService = {
   async hashPassword(plain: string): Promise<string> {
@@ -15,21 +51,126 @@ export const AuthService = {
     return bcrypt.compare(plain, hash);
   },
 
-  async login(email: string, password: string) {
+  /**
+   * Check a sign-in and record it (PRA-09). Every attempt leaves an
+   * `Authentication` audit entry, so a misuse investigation can see who tried
+   * what and from where. After MAX_FAILED_LOGINS wrong passwords in a row the
+   * account refuses sign-in for LOCKOUT_MS, whichever IP the attempts come from.
+   *
+   * @throws {ApiError} UNAUTHENTICATED for any wrong email, wrong password or
+   *   inactive account (one message, so none of them reveals the others), and
+   *   ACCOUNT_LOCKED (429) while the account is locked.
+   */
+  async login(email: string, password: string, ctx: LoginContext = {}) {
+    const normalised = email.toLowerCase();
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: normalised },
       include: { roles: { include: { role: true } } },
     });
-    if (!user || !user.active) throw Errors.unauthenticated('Invalid credentials');
+
+    if (!user) {
+      await this.verifyPassword(password, await getDummyHash());
+      await prisma.auditLogEntry.create({
+        data: {
+          actorId: null, action: 'LOGIN_FAILED', entityType: 'Authentication', entityId: emailFingerprint(normalised),
+          after: contextJson(ctx, { reason: 'unknown_account' }),
+        },
+      });
+      throw Errors.unauthenticated('Invalid credentials');
+    }
+
+    const now = new Date();
+    if (user.lockedUntil && user.lockedUntil > now) {
+      await prisma.auditLogEntry.create({
+        data: {
+          actorId: user.id, action: 'LOGIN_LOCKED', entityType: 'Authentication', entityId: user.id,
+          after: contextJson(ctx, { lockedUntil: user.lockedUntil.toISOString() }),
+        },
+      });
+      throw new ApiError(429, ACCOUNT_LOCKED_CODE, 'Too many failed sign-in attempts. Please try again in 15 minutes, or ask an administrator to reset your password.');
+    }
+
     const ok = await this.verifyPassword(password, user.passwordHash);
-    if (!ok) throw Errors.unauthenticated('Invalid credentials');
+    if (!ok || !user.active) {
+      await prisma.$transaction(async (tx) => {
+        let lockedUntil: Date | null = null;
+        // Only a wrong password counts towards the lockout; an inactive
+        // account with the right password is refused but not locked.
+        if (!ok) {
+          const counted = await tx.user.update({
+            where: { id: user.id },
+            data: { failedLoginCount: { increment: 1 } },
+            select: { failedLoginCount: true },
+          });
+          if (counted.failedLoginCount >= MAX_FAILED_LOGINS) {
+            lockedUntil = new Date(now.getTime() + LOCKOUT_MS);
+            await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil } });
+          }
+        }
+        await tx.auditLogEntry.create({
+          data: {
+            actorId: user.id, action: 'LOGIN_FAILED', entityType: 'Authentication', entityId: user.id,
+            after: contextJson(ctx, {
+              reason: ok ? 'inactive_account' : 'wrong_password',
+              ...(lockedUntil ? { lockedUntil: lockedUntil.toISOString() } : {}),
+            }),
+          },
+        });
+      });
+      throw Errors.unauthenticated('Invalid credentials');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (user.failedLoginCount > 0 || user.lockedUntil) {
+        await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+      }
+      await tx.auditLogEntry.create({
+        data: { actorId: user.id, action: 'LOGIN_SUCCEEDED', entityType: 'Authentication', entityId: user.id, after: contextJson(ctx) },
+      });
+    });
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       active: user.active,
       roles: user.roles.map((r) => r.role.name),
+      mustChangePassword: user.mustChangePassword ?? false,
     };
+  },
+
+  /**
+   * A signed-in user replaces their own password. Ends every other session
+   * (tokens issued before now are refused) and clears a forced change.
+   *
+   * @throws {ApiError} VALIDATION_ERROR when the current password is wrong, or
+   *   the new one repeats the current one or the email.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active) throw Errors.unauthenticated('Account unavailable');
+    // A 400, not a 401: the session is fine, only the typed password is wrong,
+    // and clients treat a 401 as "signed out".
+    if (!(await this.verifyPassword(currentPassword, user.passwordHash))) {
+      throw Errors.validation('Your current password is not correct.');
+    }
+    if (await this.verifyPassword(newPassword, user.passwordHash)) {
+      throw Errors.validation('Choose a new password that is different from your current one.');
+    }
+    if (newPassword.trim().toLowerCase() === user.email.toLowerCase()) {
+      throw Errors.validation('Your password cannot be your email address.');
+    }
+    const passwordHash = await this.hashPassword(newPassword);
+    const changedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, passwordChangedAt: changedAt, mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+      });
+      await tx.auditLogEntry.create({
+        data: { actorId: userId, action: 'PASSWORD_CHANGE', entityType: 'User', entityId: userId, after: { name: user.name } },
+      });
+    });
+    return { changedAt };
   },
 };
 
@@ -121,10 +262,27 @@ export const UserService = {
       if (nextRoles.length !== input.roleNames.length) throw Errors.validation('One or more roles not found');
     }
 
+    const wasActiveAdmin = before.active && before.roles.some((r) => r.role.name === 'ADMIN');
+    const staysActiveAdmin = (input.active ?? before.active)
+      && (nextRoles ? nextRoles.some((r) => r.name === 'ADMIN') : wasActiveAdmin);
+
     // The role/permission change and its audit record share one transaction, so
     // an administrative change can never commit without the history entry that
     // explains it (AUD-01).
     const updated = await prisma.$transaction(async (tx) => {
+      // The last active administrator cannot remove their own access: nobody
+      // could then manage users, and recovery would need the database itself
+      // (ARCH-01). Serialised so two administrators demoting each other at the
+      // same moment cannot both pass the count.
+      if (wasActiveAdmin && !staysActiveAdmin) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:active-admins'))`;
+        const otherAdmins = await tx.user.count({
+          where: { id: { not: input.id }, active: true, roles: { some: { role: { name: 'ADMIN' } } } },
+        });
+        if (otherAdmins === 0) {
+          throw Errors.conflict('This is the only active administrator. Make another user an administrator first.');
+        }
+      }
       await tx.user.update({ where: { id: input.id }, data });
       if (nextRoles !== undefined) {
         await tx.userRole.deleteMany({ where: { userId: input.id } });
@@ -162,5 +320,26 @@ export const UserService = {
     });
     if (!updated) throw Errors.notFound('User');
     return updated;
+  },
+
+  /**
+   * An administrator sets a temporary password. The user must replace it at
+   * their next sign-in, every session they had ends, and a lockout is lifted.
+   * The password itself is never recorded.
+   */
+  async resetPassword(id: string, temporaryPassword: string, actorId: string) {
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) throw Errors.notFound('User');
+    const passwordHash = await AuthService.hashPassword(temporaryPassword);
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id },
+        data: { passwordHash, passwordChangedAt: new Date(), mustChangePassword: true, failedLoginCount: 0, lockedUntil: null },
+      });
+      await tx.auditLogEntry.create({
+        data: { actorId, action: 'PASSWORD_RESET', entityType: 'User', entityId: id, after: { name: user.name } },
+      });
+    });
+    return { id, mustChangePassword: true };
   },
 };
