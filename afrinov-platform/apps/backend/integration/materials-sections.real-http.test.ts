@@ -90,6 +90,23 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(wrong.status).toBe(400);
     expect(wrong.body.error.message).toMatch(/is not a Projects item with no project/);
 
+    // Not while it is on an open project order: as a Stores item it would be
+    // confirmed delivered to site as Stores stock (Qodo, PR #129).
+    const supplier = await api<{ id: string }>('POST', '/suppliers', { name: `IT sections move supplier ${run}` });
+    const draft = await api<{ id: string; number: string }>('POST', '/purchase-orders', { supplierId: supplier.body.id, projectNumber, lines: [{ materialId: old.id, orderedQty: 1 }] });
+    expect([200, 201]).toContain(draft.status);
+    const onOrder = await api<{ error: { message: string } }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: old.id, category: 'CONSUMABLES' }] });
+    expect(onOrder.status).toBe(400);
+    expect(onOrder.body.error.message).toMatch(new RegExp(`is on ${draft.body.number}, which is still open, so it stays project material`));
+    expect((await api('POST', `/purchase-orders/${draft.body.id}/cancel`, { reason: 'Moving the stock to Stores' })).status).toBe(200);
+    // Nor while it is on an open request for quotation, whose award would be a project order.
+    const rfq = await api<{ id: string; number: string }>('POST', '/rfqs', { projectNumber, lines: [{ materialId: old.id, quantity: 1 }] });
+    expect(rfq.status).toBe(201);
+    const onRfq = await api<{ error: { message: string } }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: old.id, category: 'CONSUMABLES' }] });
+    expect(onRfq.status).toBe(400);
+    expect(onRfq.body.error.message).toMatch(new RegExp(`is on ${rfq.body.number}, which is still open`));
+    expect((await api('POST', `/rfqs/${rfq.body.id}/cancel`, { reason: 'Moving the stock to Stores' })).status).toBe(200);
+
     const moved = await api<{ moved: number }>('POST', '/materials/no-project/leftovers/move', { items: [{ materialId: old.id, category: 'CONSUMABLES' }] });
     expect(moved.status).toBe(200);
     expect(moved.body.moved).toBe(1);

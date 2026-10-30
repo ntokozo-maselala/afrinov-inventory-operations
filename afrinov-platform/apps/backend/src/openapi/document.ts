@@ -391,7 +391,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/projects/:projectNumber/leftovers/move', tag: 'Projects', summary: 'Move the leftovers of a closed project to Stores',
-    description: 'All or none. Each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no project and no Required Stock.',
+    description: 'All or none. Each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no project and no Required Stock. Refused (400) for an item still on an open project order or request for quotation: it stays project material until that is finished.',
     permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
   {
@@ -400,7 +400,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/materials/no-project/leftovers/move', tag: 'Projects', summary: 'Move Projects items with no project to Stores',
-    description: 'All or none, as for a closed project\'s leftovers: each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no Required Stock.',
+    description: 'All or none, as for a closed project\'s leftovers: each item becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no Required Stock. Refused (400) for an item still on an open project order or request for quotation: it stays project material until that is finished.',
     permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
 

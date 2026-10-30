@@ -7,7 +7,7 @@
 // Projects items with no project still in stock move the same way (Project on
 // the Order Roadmap, Phase 1): no one gives items a project any more, so they
 // aren't issued, and Stores is where they go.
-import { Prisma, type MaterialCategory } from '@prisma/client';
+import { Prisma, type MaterialCategory, type PurchaseOrderStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { PROJECTS_CATEGORY } from './material-section.js';
@@ -41,6 +41,9 @@ export interface UnassignedLeftovers {
 }
 
 const isClosed = (status: string) => status === 'COMPLETED' || status === 'CANCELLED';
+
+/** An order not yet finished: its lines may still be bought, received or confirmed. */
+const OPEN_ORDER_STATUSES: PurchaseOrderStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'];
 
 async function findProject(projectNumber: string, db: Prisma.TransactionClient | typeof prisma) {
   const project = await db.project.findUnique({ where: { projectNumber }, select: { projectNumber: true, name: true, status: true } });
@@ -97,6 +100,24 @@ export const ProjectLeftoversService = {
         if (!isClosed(project.status)) {
           throw Errors.validation(`Project ${projectNumber} is still open, so its material stays with it. Leftovers move to Stores once it is completed or cancelled.`);
         }
+      }
+      // Project material on an open project order or RFQ stays project material
+      // until that is finished: as a Stores item it would reach a project order,
+      // and be confirmed delivered to site, as Stores stock (Qodo, PR #129).
+      const ids = items.map((i) => i.materialId);
+      const onOrder = await tx.purchaseOrderLine.findFirst({
+        where: { materialId: { in: ids }, purchaseOrder: { projectNumber: { not: null }, status: { in: OPEN_ORDER_STATUSES } } },
+        select: { material: { select: { sku: true } }, purchaseOrder: { select: { number: true } } },
+      });
+      if (onOrder) {
+        throw Errors.validation(`${onOrder.material.sku} is on ${onOrder.purchaseOrder.number}, which is still open, so it stays project material. Move it once that order is finished or cancelled.`);
+      }
+      const onRfq = await tx.rfqLine.findFirst({
+        where: { materialId: { in: ids }, rfq: { status: { in: ['DRAFT', 'SENT'] } } },
+        select: { material: { select: { sku: true } }, rfq: { select: { number: true } } },
+      });
+      if (onRfq) {
+        throw Errors.validation(`${onRfq.material.sku} is on ${onRfq.rfq.number}, which is still open, so it stays project material. Move it once that request is awarded or cancelled.`);
       }
       for (const item of items) {
         const before = await tx.material.findUnique({ where: { id: item.materialId } });

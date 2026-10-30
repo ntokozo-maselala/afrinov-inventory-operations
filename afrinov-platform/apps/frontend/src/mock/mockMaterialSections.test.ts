@@ -85,8 +85,18 @@ describe('mock: project material is ordered for the order’s project', () => {
     expect((await api.get<{ project: null }>('/materials/no-project/leftovers')).project).toBeNull();
     await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
     expect(await messageOf(api.post('/materials/no-project/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] }))).toMatch(/is not a Projects item with no project/);
+    // Qodo, PR #129: an item listed twice is refused, as the server refuses it.
+    expect(await messageOf(api.post('/materials/no-project/leftovers/move', { items: [{ materialId: 'mat-10', category: 'CONSUMABLES' }, { materialId: 'mat-10', category: 'FASTENERS_SLUGS_INSULATION' }] })))
+      .toMatch(/listed twice/);
+    // Not while it is on an open project order.
+    const order = await api.post<{ id: string; number: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-10', orderedQty: 1 }] });
+    expect(await messageOf(api.post('/materials/no-project/leftovers/move', { items: [{ materialId: 'mat-10', category: 'CONSUMABLES' }] })))
+      .toMatch(new RegExp(`is on ${order.number}, which is still open`));
+    await api.post(`/purchase-orders/${order.id}/cancel`, { reason: 'Moving it to Stores' });
     expect(await api.post<{ moved: number }>('/materials/no-project/leftovers/move', { items: [{ materialId: 'mat-10', category: 'CONSUMABLES' }] })).toEqual({ moved: 1 });
     expect((await api.get<Material>('/materials/mat-10')).category).toBe('CONSUMABLES');
+    // In the Activity, as the server records it.
+    expect((await api.get<Array<{ action: string; entityId: string }>>('/audit?entityType=Material')).find((a) => a.entityId === 'mat-10')).toMatchObject({ action: 'MOVE_TO_STORES' });
   });
 
   it('keeps Stores items off a project order, and neither kind of order becomes the other (Stores ordering)', async () => {

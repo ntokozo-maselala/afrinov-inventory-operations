@@ -1,6 +1,10 @@
 // Move a closed project's leftovers to Stores (materials sections roadmap,
 // Phase 7). Each item still in stock is given a Stores category and becomes a
 // Stores item, keeping its SKU, stock, locations, cost and history.
+//
+// Without a project number (/materials/no-project/leftovers), the same for
+// Projects items with no project still in stock: they aren't issued, so they
+// move to Stores (Project on the Order Roadmap, Phase 1; Qodo, PR #129).
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -17,14 +21,16 @@ import { STORES_CATEGORIES } from '../lib/categories';
 import { formatCurrency } from '../lib/currency';
 
 interface LeftoverItem { materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string }
-interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean }; items: LeftoverItem[] }
+interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean } | null; items: LeftoverItem[] }
 
 /** Leftovers move to a Stores category other than Tools: a tool is lent one by one, not issued. */
 const CATEGORY_OPTIONS = STORES_CATEGORIES.filter((c) => c.value !== 'TOOLS');
 
 export function ProjectLeftovers() {
   const { projectNumber = '' } = useParams<{ projectNumber: string }>();
-  const leftovers = useApi<Leftovers>(`/projects/${encodeURIComponent(projectNumber)}/leftovers`);
+  const unassigned = !projectNumber;
+  const path = unassigned ? '/materials/no-project/leftovers' : `/projects/${encodeURIComponent(projectNumber)}/leftovers`;
+  const leftovers = useApi<Leftovers>(path);
   const canMove = usePermissions().hasPermission('materials:manage');
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -40,7 +46,7 @@ export function ProjectLeftovers() {
     setError(null);
     setBusy(true);
     try {
-      const { moved: count } = await api.post<{ moved: number }>(`/projects/${encodeURIComponent(projectNumber)}/leftovers/move`, {
+      const { moved: count } = await api.post<{ moved: number }>(`${path}/move`, {
         items: chosen.map((i) => ({ materialId: i.materialId, category: categories[i.materialId] })),
       });
       toast.success(`Moved ${count} item${count === 1 ? '' : 's'} to Stores`);
@@ -54,17 +60,23 @@ export function ProjectLeftovers() {
     }
   }
 
-  const title = `Project ${projectNumber} leftovers`;
-  const breadcrumb = [{ label: 'Projects', to: '/projects' }, { label: projectNumber }, { label: 'Leftovers' }];
+  const title = unassigned ? 'Projects items with no project' : `Project ${projectNumber} leftovers`;
+  const breadcrumb = unassigned
+    ? [{ label: 'Materials', to: '/materials?section=PROJECTS' }, { label: 'No project' }]
+    : [{ label: 'Projects', to: '/projects' }, { label: projectNumber }, { label: 'Leftovers' }];
   if (leftovers.error) return <><PageHeader title={title} breadcrumb={breadcrumb} /><ErrorState error={leftovers.error} onRetry={leftovers.reload} /></>;
   if (!data) return <><PageHeader title={title} breadcrumb={breadcrumb} /><div className="surface-card p-6"><Skeleton h={160} /></div></>;
 
   const { project, items } = data;
+  // Items with no project always move; a project's, once it is closed.
+  const movable = !project || project.closed;
   return (
     <div>
       <PageHeader
         title={title}
-        description={`${project.name ? `${project.name}. ` : ''}What is left in stock when a project is completed or cancelled moves to Stores: each item becomes a Stores item in the category you choose, keeping its code, stock, locations, cost and history.`}
+        description={project
+          ? `${project.name ? `${project.name}. ` : ''}What is left in stock when a project is completed or cancelled moves to Stores: each item becomes a Stores item in the category you choose, keeping its code, stock, locations, cost and history.`
+          : 'Projects items with no project still in stock aren\u2019t issued, so they move to Stores: each item becomes a Stores item in the category you choose, keeping its code, stock, locations, cost and history.'}
         breadcrumb={breadcrumb}
       />
 
@@ -74,7 +86,7 @@ export function ProjectLeftovers() {
         </Alert>
       )}
 
-      {!project.closed && (
+      {project && !project.closed && (
         <Alert tone="info" title={`Project ${projectNumber} is still open`} className="mb-4 max-w-4xl">
           Its material stays with it. Once the project is completed or cancelled, what is left moves to Stores from here.
         </Alert>
@@ -82,7 +94,7 @@ export function ProjectLeftovers() {
 
       {items.length === 0 ? (
         <div className="surface-card max-w-4xl">
-          <EmptyState title="Nothing left in stock" description={`Project ${projectNumber} has no material in stock, so there is nothing to move.`} />
+          <EmptyState title="Nothing left in stock" description={project ? `Project ${projectNumber} has no material in stock, so there is nothing to move.` : 'No Projects item with no project is in stock, so there is nothing to move.'} />
         </div>
       ) : (
         <div className="surface-card max-w-5xl overflow-x-auto">
@@ -93,7 +105,7 @@ export function ProjectLeftovers() {
                 <th scope="col" className="text-right">On hand</th>
                 <th scope="col">Where</th>
                 <th scope="col" className="text-right">Value</th>
-                {project.closed && canMove && <th scope="col">Stores category</th>}
+                {movable && canMove && <th scope="col">Stores category</th>}
               </tr>
             </thead>
             <tbody>
@@ -103,7 +115,7 @@ export function ProjectLeftovers() {
                   <td className="text-right font-mono">{i.onHand} {i.unitOfMeasure}</td>
                   <td className="text-meta">{i.locations}</td>
                   <td className="text-right font-mono">{i.value === null ? <span className="text-surface-300">No unit cost</span> : formatCurrency(i.value, 'ZAR')}</td>
-                  {project.closed && canMove && (
+                  {movable && canMove && (
                     <td>
                       <Select
                         aria-label={`Stores category for ${i.sku}`}
@@ -122,14 +134,14 @@ export function ProjectLeftovers() {
               <tr>
                 <th scope="row" colSpan={3}>{items.length} item{items.length === 1 ? '' : 's'}</th>
                 <td className="text-right font-mono">{formatCurrency(totalValue, 'ZAR')}</td>
-                {project.closed && canMove && <td />}
+                {movable && canMove && <td />}
               </tr>
             </tfoot>
           </table>
         </div>
       )}
 
-      {project.closed && canMove && items.length > 0 && (
+      {movable && canMove && items.length > 0 && (
         <div className="max-w-5xl mt-4 space-y-3">
           {error && <Alert tone="danger" title="Cannot move">{error}</Alert>}
           <div className="flex items-center justify-end gap-3">
@@ -140,7 +152,7 @@ export function ProjectLeftovers() {
           </div>
         </div>
       )}
-      {project.closed && !canMove && items.length > 0 && (
+      {movable && !canMove && items.length > 0 && (
         <p className="text-meta mt-3">A store controller moves these to Stores.</p>
       )}
     </div>

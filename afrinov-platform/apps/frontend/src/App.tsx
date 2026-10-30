@@ -178,6 +178,7 @@ export function App() {
         <Route path="/locations" element={<RouteBoundary name="Locations"><Locations /></RouteBoundary>} />
         <Route path="/projects" element={<RouteBoundary name="Projects"><Projects /></RouteBoundary>} />
         <Route path="/projects/:projectNumber/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
+        <Route path="/materials/no-project/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
         <Route path="/recipients" element={<RouteBoundary name="Recipients"><Recipients /></RouteBoundary>} />
         <Route path="/tools" element={<RouteBoundary name="Tools"><Tools /></RouteBoundary>} />
         <Route path="/settings" element={<RouteBoundary name="Settings" resetKey="/settings"><Settings /></RouteBoundary>}>

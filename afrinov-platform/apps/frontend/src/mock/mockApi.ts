@@ -2565,6 +2565,20 @@ function mockLeftoverItems(projectNumber: string | null) {
 /** Moves a closed project's leftovers, or items with no project (null), to Stores, all or none. */
 function mockMoveLeftovers(projectNumber: string | null, items: Array<{ materialId: string; category: string }>) {
   if (items.length === 0) throw err('VALIDATION_ERROR', 'Choose at least one item to move to Stores');
+  if (new Set(items.map((i) => i.materialId)).size !== items.length) throw err('VALIDATION_ERROR', 'An item is listed twice');
+  // As the server: project material on an open project order or RFQ stays project material.
+  const ids = new Set(items.map((i) => i.materialId));
+  const order = state.purchaseOrders.find((po) => po.projectNumber && ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'].includes(po.status)
+    && po.lines.some((l) => ids.has(l.materialId)));
+  if (order) {
+    const sku = findMaterial(order.lines.find((l) => ids.has(l.materialId))!.materialId)?.sku;
+    throw err('VALIDATION_ERROR', `${sku} is on ${order.number}, which is still open, so it stays project material. Move it once that order is finished or cancelled.`);
+  }
+  const rfq = state.rfqs.find((r) => (r.status === 'DRAFT' || r.status === 'SENT') && r.lines.some((l) => ids.has(l.materialId)));
+  if (rfq) {
+    const sku = findMaterial(rfq.lines.find((l) => ids.has(l.materialId))!.materialId)?.sku;
+    throw err('VALIDATION_ERROR', `${sku} is on ${rfq.number}, which is still open, so it stays project material. Move it once that request is awarded or cancelled.`);
+  }
   for (const item of items) {
     const m = findMaterial(item.materialId);
     if (!m) throw err('NOT_FOUND', 'Material not found');
@@ -2575,7 +2589,16 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
     }
     if (!['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
   }
-  for (const item of items) Object.assign(findMaterial(item.materialId)!, { category: item.category, projectNumber: null, requiredStock: '0' });
+  const at = new Date().toISOString();
+  for (const item of items) {
+    const m = findMaterial(item.materialId)!;
+    // As the server, each move is in the Activity.
+    MOCK_AUDIT.unshift({
+      id: nextId('audit'), action: 'MOVE_TO_STORES', entityType: 'Material', entityId: m.id,
+      before: { category: m.category, projectNumber }, after: { category: item.category, projectNumber: null }, createdAt: at, actorId: 'user-1',
+    });
+    Object.assign(m, { category: item.category, projectNumber: null, requiredStock: '0' });
+  }
   return { moved: items.length };
 }
 

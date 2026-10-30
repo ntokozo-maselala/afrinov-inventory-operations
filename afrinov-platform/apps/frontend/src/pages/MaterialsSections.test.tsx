@@ -231,11 +231,12 @@ describe('a Projects item has its project’s status, not a stock status', () =>
     expect(within(card).getByText(/What is shown as left in the store was received before/)).toBeInTheDocument();
   });
 
-  it('says an item with no project can be issued once it has one', async () => {
+  it('sends what is left of an item with no project to be moved to Stores, not issued', async () => {
     const base = mockGet.getMockImplementation()!;
     mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [{ ...left, materialId: 'm-OLD-PLATE' }] : base(path)));
     detail('m-OLD-PLATE');
-    expect(await screen.findByText(/It can be issued once it is given a project/)).toBeInTheDocument();
+    expect(await screen.findByText(/It has no project, so it isn.t issued: move it to Stores/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Move to Stores' })).toHaveAttribute('href', '/materials/no-project/leftovers');
     expect(screen.queryByText(/It is issued to its project/)).not.toBeInTheDocument();
   });
 

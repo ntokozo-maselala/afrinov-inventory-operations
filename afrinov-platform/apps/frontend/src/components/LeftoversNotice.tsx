@@ -23,6 +23,9 @@ export function useLeftovers(): ProjectLeftoverCount[] {
 
 export const leftoversLink = (projectNumber: string) => `/projects/${encodeURIComponent(projectNumber)}/leftovers`;
 
+/** Projects items with no project still in stock, to move to Stores (Project on the Order Roadmap). */
+export const NO_PROJECT_LEFTOVERS = '/materials/no-project/leftovers';
+
 /** "N items to move to Stores" for each closed project holding stock, or only `projectNumber`'s. */
 export function LeftoversNotice({ projectNumber, className }: { projectNumber?: string; className?: string }) {
   const leftovers = useLeftovers().filter((p) => !projectNumber || p.projectNumber === projectNumber);
@@ -106,8 +109,8 @@ export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[
           )}
           {unassigned && (
             <p className="mt-1">
-              {itemsText(unassigned.items)} with no project yet, which can&rsquo;t be issued until each is given one:{' '}
-              <Link to={projectMaterialsLink(null)} className="btn-link">Give them their projects</Link>
+              {itemsText(unassigned.items)} with no project, which aren&rsquo;t issued:{' '}
+              <Link to={NO_PROJECT_LEFTOVERS} className="btn-link">Move them to Stores</Link>
             </p>
           )}
         </Alert>
