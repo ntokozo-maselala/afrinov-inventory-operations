@@ -529,7 +529,7 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.adjust({ materialId: 'prj-1', locationId: 'loc-1', quantity: 4, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
       const before = trxRows.length;
       await expect(InventoryService.issue({ recipientId: 'user-3', actorId: 'u', lines: [{ materialId: 'prj-1', locationId: 'loc-1', quantity: 1 }] }))
-        .rejects.toThrow(/PRJ-1 has no project yet, so it can't be issued/);
+        .rejects.toThrow(/PRJ-1 has no project, so it isn't issued. Move it to Stores/);
       expect(trxRows).toHaveLength(before);
     });
 

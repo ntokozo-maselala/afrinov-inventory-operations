@@ -218,12 +218,12 @@ function poDetails(b: PoDetailsBody): Partial<MockPurchaseOrder> {
   return out as Partial<MockPurchaseOrder>;
 }
 
-// As the server (material-section.ts): project material with no project yet
-// is not issued or ordered until it has one.
-function refuseUnassigned(materialId: string, use: 'issued' | 'ordered') {
+// As the server (material-section.ts): a Projects item with no project isn't
+// issued; its leftovers move to Stores (Project on the Order Roadmap).
+function refuseUnassigned(materialId: string) {
   const m = state.materials.find((x) => x.id === materialId);
   if (m && m.category === 'PROJECT_MATERIAL' && !m.projectNumber) {
-    throw err('VALIDATION_ERROR', `${m.sku} has no project yet, so it can't be ${use}. Give it its project on Materials first.`);
+    throw err('VALIDATION_ERROR', `${m.sku} has no project, so it isn't issued. Move it to Stores from Project leftovers.`);
   }
 }
 
@@ -236,25 +236,21 @@ function assertProjectOpen(projectNumber: string) {
   }
 }
 
-// As the server (checkProjectMaterial): project material goes only to its own
-// project, so one issue or order can't hold two projects' material.
-const PROJECT_USE = {
-  issued: { verb: 'issue', Verb: 'Issue', past: 'issued', to: 'to' },
-  ordered: { verb: 'order', Verb: 'Order', past: 'ordered', to: 'for' },
-} as const;
-function checkProjectMaterial(projectNumber: string | null | undefined, materialIds: string[], use: 'issued' | 'ordered') {
-  const u = PROJECT_USE[use];
+// As the server (checkProjectMaterial): a project's leftovers go only to that
+// project, so one issue can't hold two projects' material. Orders and RFQs take
+// their project from the order (Project on the Order Roadmap).
+function checkProjectMaterial(projectNumber: string | null | undefined, materialIds: string[]) {
   const own = [...new Set(materialIds)].map(findMaterial)
     .filter((m): m is NonNullable<typeof m> => !!m && m.category === 'PROJECT_MATERIAL' && !!m.projectNumber);
   const projects = [...new Set(own.map((m) => m.projectNumber))];
   if (projects.length > 1) {
-    throw err('VALIDATION_ERROR', `One ${u.verb} can't hold material for two projects (${projects.join(' and ')}). ${u.Verb} each project's material separately.`);
+    throw err('VALIDATION_ERROR', `One issue can't hold material for two projects (${projects.join(' and ')}). Issue each project's material separately.`);
   }
   const wrong = own.find((m) => m.projectNumber !== (projectNumber || null));
   if (wrong) {
     throw err('VALIDATION_ERROR', projectNumber
-      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be ${u.past} ${u.to} project ${projectNumber}.`
-      : `${wrong.sku} is material for project ${wrong.projectNumber}: ${u.verb} it ${u.to} that project.`);
+      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be issued to project ${projectNumber}.`
+      : `${wrong.sku} is material for project ${wrong.projectNumber}: issue it to that project.`);
   }
 }
 
@@ -265,6 +261,16 @@ function refuseStoresOnProjectOrder(projectNumber: string | null | undefined, ma
   const stores = [...new Set(materialIds)].map(findMaterial).find((m) => !!m && m.category !== 'PROJECT_MATERIAL');
   if (stores) {
     throw err('VALIDATION_ERROR', `${stores.sku} is a Stores item, so it isn't bought for project ${projectNumber}. The store orders Stores stock from Stores → Order stock.`);
+  }
+}
+
+// As the server: a Stores order holds Stores items only; project material is
+// bought by Procurement on a project order.
+function refuseProjectMaterialOnStoresOrder(projectNumber: string | null | undefined, materialIds: string[]) {
+  if (projectNumber) return;
+  const project = [...new Set(materialIds)].map(findMaterial).find((m) => !!m && m.category === 'PROJECT_MATERIAL');
+  if (project) {
+    throw err('VALIDATION_ERROR', `${project.sku} is project material, so it isn't bought on a Stores order. Procurement orders it on a purchase order for its project.`);
   }
 }
 
@@ -391,9 +397,7 @@ function checkRfqLines(lines: RfqBody['lines'], projectNumber: string | null): N
     if (!m) throw err('VALIDATION_ERROR', `Material ${l.materialId} does not exist`);
     if (!m.active) throw err('VALIDATION_ERROR', `${m.sku} is inactive, so it can't be quoted for`);
     if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', 'Invalid request for quotation');
-    refuseUnassigned(l.materialId, 'ordered');
   }
-  checkProjectMaterial(projectNumber, lines.map((l) => l.materialId), 'ordered');
   refuseStoresOnProjectOrder(projectNumber, lines.map((l) => l.materialId));
   return lines;
 }
@@ -888,6 +892,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (qs.projectNumber) list = list.filter((m) => m.projectNumber === qs.projectNumber);
     return list.map(withSection);
   }
+  // As the server: Projects items with no project still in stock, and moving them to Stores.
+  if (p === '/materials/no-project/leftovers' && method === 'GET') return { project: null, items: mockLeftoverItems(null) };
+  if (p === '/materials/no-project/leftovers/move' && method === 'POST') {
+    return mockMoveLeftovers(null, (body as { items?: Array<{ materialId: string; category: string }> })?.items ?? []);
+  }
   if (method === 'GET' && p.startsWith('/materials/')) {
     const id = p.slice('/materials/'.length);
     const m = findMaterial(id);
@@ -1191,9 +1200,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!supplier.active) throw err('VALIDATION_ERROR', `${supplier.name} is inactive. Reactivate the supplier to order from them.`);
     checkPoDetails(b);
     if (b.projectNumber) assertProjectOpen(b.projectNumber);
-    for (const l of b.lines) refuseUnassigned(l.materialId, 'ordered');
-    checkProjectMaterial(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId), 'ordered');
     refuseStoresOnProjectOrder(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId));
+    refuseProjectMaterialOnStoresOrder(b.projectNumber?.trim() || null, b.lines.map((l) => l.materialId));
     // Filled as the server fills them: terms from the supplier, delivery from Settings, the buyer as contact.
     const details = poDetails(b);
     if (b.paymentTerms === undefined) details.paymentTerms = supplier.paymentTerms ?? null;
@@ -1237,8 +1245,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (po.status !== 'DRAFT') throw err('INVALID_STATE', `Cannot submit from ${po.status}`);
-    for (const l of po.lines) refuseUnassigned(l.materialId, 'ordered');
-    checkProjectMaterial(po.projectNumber, po.lines.map((l) => l.materialId), 'ordered');
+    refuseProjectMaterialOnStoresOrder(po.projectNumber, po.lines.map((l) => l.materialId));
     if (po.projectNumber) assertProjectOpen(po.projectNumber);
     const before = { status: po.status };
     po.history = po.history ?? [];
@@ -1412,7 +1419,6 @@ function route(method: string, path: string, body?: unknown): unknown {
           : 'A Stores order has no project. Raise a purchase order for the project instead.');
       }
       if (nextProject) assertProjectOpen(nextProject);
-      checkProjectMaterial(nextProject, po.lines.map((l) => l.materialId), 'ordered');
     }
     if (b.notes !== undefined) po.notes = b.notes ?? undefined;
     if (b.expectedDeliveryDate !== undefined) po.expectedDeliveryDate = b.expectedDeliveryDate ?? null;
@@ -1588,7 +1594,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   if (method === 'POST' && p === '/inventory-issues') {
-    for (const l of (body as IssueBody)?.lines ?? []) refuseUnassigned(l.materialId, 'issued');
+    for (const l of (body as IssueBody)?.lines ?? []) refuseUnassigned(l.materialId);
     return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'GET' && p === '/tools') return listTools();
@@ -1668,21 +1674,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const project = state.projects.find((x) => x.projectNumber === projectNumber);
     if (!project) throw err('NOT_FOUND', 'Project not found');
     const closed = project.status === 'COMPLETED' || project.status === 'CANCELLED';
-    if (method === 'GET' && !leftoversPath[2]) return mockLeftovers(project, closed);
+    if (method === 'GET' && !leftoversPath[2]) {
+      return { project: { projectNumber: project.projectNumber, name: project.name ?? null, status: project.status, closed }, items: mockLeftoverItems(projectNumber) };
+    }
     if (method === 'POST' && leftoversPath[2]) {
       const items = (body as { items?: Array<{ materialId: string; category: string }> })?.items ?? [];
-      if (items.length === 0) throw err('VALIDATION_ERROR', 'Choose at least one item to move to Stores');
-      if (!closed) throw err('VALIDATION_ERROR', `Project ${projectNumber} is still open, so its material stays with it. Leftovers move to Stores once it is completed or cancelled.`);
-      for (const item of items) {
-        const m = findMaterial(item.materialId);
-        if (!m) throw err('NOT_FOUND', 'Material not found');
-        if (m.category !== 'PROJECT_MATERIAL' || m.projectNumber !== projectNumber) {
-          throw err('VALIDATION_ERROR', `${m.sku} is not material of project ${projectNumber}, so it isn't moved from it.`);
-        }
-        if (!['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
-      }
-      for (const item of items) Object.assign(findMaterial(item.materialId)!, { category: item.category, projectNumber: null, requiredStock: '0' });
-      return { moved: items.length };
+      if (items.length > 0 && !closed) throw err('VALIDATION_ERROR', `Project ${projectNumber} is still open, so its material stays with it. Leftovers move to Stores once it is completed or cancelled.`);
+      return mockMoveLeftovers(projectNumber, items);
     }
   }
   if (method === 'GET' && p === '/projects') {
@@ -2178,7 +2176,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
       throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
     }
   }
-  checkProjectMaterial(b.projectNumber, lines.map((l) => l.materialId), 'issued');
+  checkProjectMaterial(b.projectNumber, lines.map((l) => l.materialId));
   const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
   for (const l of lines) {
     const key = `${l.materialId}|${l.locationId}`;
@@ -2546,10 +2544,11 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
   return { countId, counted: lines.length, adjusted, lines: results };
 }
 
-function mockLeftovers(project: MockProject, closed: boolean) {
+/** Projects material still in stock for a project, or with no project (null), by SKU. */
+function mockLeftoverItems(projectNumber: string | null) {
   const balances = computeBalances().filter((b) => b.quantity > 0);
-  const items = state.materials
-    .filter((m) => m.category === 'PROJECT_MATERIAL' && m.projectNumber === project.projectNumber)
+  return state.materials
+    .filter((m) => m.category === 'PROJECT_MATERIAL' && (m.projectNumber ?? null) === projectNumber)
     .sort((a, b) => a.sku.localeCompare(b.sku))
     .flatMap((m) => {
       const held = balances.filter((b) => b.materialId === m.id);
@@ -2561,7 +2560,23 @@ function mockLeftovers(project: MockProject, closed: boolean) {
         locations: held.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity})`).join(', '),
       }];
     });
-  return { project: { projectNumber: project.projectNumber, name: project.name ?? null, status: project.status, closed }, items };
+}
+
+/** Moves a closed project's leftovers, or items with no project (null), to Stores, all or none. */
+function mockMoveLeftovers(projectNumber: string | null, items: Array<{ materialId: string; category: string }>) {
+  if (items.length === 0) throw err('VALIDATION_ERROR', 'Choose at least one item to move to Stores');
+  for (const item of items) {
+    const m = findMaterial(item.materialId);
+    if (!m) throw err('NOT_FOUND', 'Material not found');
+    if (m.category !== 'PROJECT_MATERIAL' || (m.projectNumber ?? null) !== projectNumber) {
+      throw err('VALIDATION_ERROR', projectNumber === null
+        ? `${m.sku} is not a Projects item with no project, so it isn't moved from here.`
+        : `${m.sku} is not material of project ${projectNumber}, so it isn't moved from it.`);
+    }
+    if (!['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
+  }
+  for (const item of items) Object.assign(findMaterial(item.materialId)!, { category: item.category, projectNumber: null, requiredStock: '0' });
+  return { moved: items.length };
 }
 
 function getBalance(materialId: string, locationId: string): number {

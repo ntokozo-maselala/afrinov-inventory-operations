@@ -25,7 +25,7 @@ import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './s
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { approvalBlock, approversFor, approvesStores, listApprovers, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
-import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
+import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -449,14 +449,14 @@ export const PurchaseOrderService = {
     const currency = supplier.currency ?? 'ZAR';
     const vatRate = input.vatRate ?? defaultVatRate(currency, await SettingsService.getValue<number>('purchaseOrders.vatRate', opts.within));
     if (input.projectNumber) await assertProjectOpen(input.projectNumber, db);
-    // Project material with no project yet is not ordered until it has one,
-    // and is ordered only for its own project.
+    // The order says which project its material is for, not the catalogue
+    // item: any Projects item goes on any project order (Project on the Order
+    // Roadmap, Phase 1).
     const lineMaterials = await lineMaterialsOf(input.lines.map((l) => l.materialId), db);
-    for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
-    checkProjectMaterial(cleanText(input.projectNumber), lineMaterials, 'ordered');
     // A project order holds its project's material only. An RFQ sent before
     // that rule may still hold Stores items, and its award keeps them.
     if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), lineMaterials);
+    refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), lineMaterials);
 
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods
@@ -562,7 +562,6 @@ export const PurchaseOrderService = {
             : 'A Stores order has no project. Raise a purchase order for the project instead.');
         }
         if (nextProject) await assertProjectOpen(nextProject, tx);
-        checkProjectMaterial(nextProject, await lineMaterialsOf(po.lines.map((l) => l.materialId), tx), 'ordered');
       }
       Object.assign(data, detailsData(input));
       const priceChanges: Array<{ lineId: string; before: string | null; after: string | null }> = [];
@@ -643,11 +642,9 @@ export const PurchaseOrderService = {
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot submit a PO in status ${po.status}`, { status: po.status });
       }
-      // A draft is checked again as it goes out: its project material may have
-      // had no project when it was raised, and its project may have closed since.
-      const lineMaterials = await lineMaterialsOf(po.lines.map((l) => l.materialId), tx);
-      for (const m of lineMaterials) refuseUnassigned(m, 'ordered');
-      checkProjectMaterial(po.projectNumber, lineMaterials, 'ordered');
+      // A draft is checked again as it goes out: its project may have closed
+      // since, and a Stores draft from before may hold project material.
+      refuseProjectMaterialOnStoresOrder(po.projectNumber, await lineMaterialsOf(po.lines.map((l) => l.materialId), tx));
       if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
       const now = new Date();
       if (requireApproval) {

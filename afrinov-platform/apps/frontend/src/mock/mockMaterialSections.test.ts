@@ -61,20 +61,32 @@ describe('mock: project material goes only to its own project (Phase 5)', () => 
   });
 });
 
-describe('mock: project material is ordered only for its own project (Phase 6)', () => {
+// Project on the Order Roadmap, Phase 1: the order says which project its
+// material is for, as the server does.
+describe('mock: project material is ordered for the order’s project', () => {
   const messageOf = (p: Promise<unknown>) => p.then(() => undefined, (e: { message?: string }) => e.message);
   const order = (projectNumber: string | undefined, ...materialIds: string[]) =>
     api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber, lines: materialIds.map((materialId) => ({ materialId, orderedQty: 1 })) });
 
-  it('refuses it for another project, for none, or with another project\'s material', async () => {
+  it('takes any Projects item on a project order, and none on a Stores order', async () => {
     await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
     const other = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402' });
-    expect(await messageOf(order('AFRI-1402', 'mat-9'))).toMatch(/is material for project AFRI-1325, so it can't be ordered for project AFRI-1402/);
-    expect(await messageOf(order(undefined, 'mat-9'))).toMatch(/is material for project AFRI-1325: order it for that project/);
-    expect(await messageOf(order('AFRI-1325', 'mat-9', other.id))).toMatch(/One order can't hold material for two projects/);
-    expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-10'))).toMatch(/has no project yet/);
-    await api.patch('/materials/mat-10', { projectNumber: 'AFRI-1325' });
+    expect(await messageOf(order('AFRI-1402', 'mat-9'))).toBeUndefined();
+    expect(await messageOf(order('AFRI-1325', 'mat-9', other.id))).toBeUndefined();
+    // mat-10 has no project.
     expect(await messageOf(order('AFRI-1325', 'mat-9', 'mat-10'))).toBeUndefined();
+    expect(await messageOf(order(undefined, 'mat-9'))).toMatch(/is project material, so it isn't bought on a Stores order/);
+  });
+
+  it('moves a Projects item with no project to Stores instead of issuing it', async () => {
+    // mat-10 is a Projects item with no project.
+    expect(await messageOf(api.post('/inventory-issues', { recipientId: 'rcp-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-10', locationId: 'loc-1', quantity: 1 }] })))
+      .toMatch(/has no project, so it isn't issued. Move it to Stores from Project leftovers/);
+    expect((await api.get<{ project: null }>('/materials/no-project/leftovers')).project).toBeNull();
+    await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
+    expect(await messageOf(api.post('/materials/no-project/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] }))).toMatch(/is not a Projects item with no project/);
+    expect(await api.post<{ moved: number }>('/materials/no-project/leftovers/move', { items: [{ materialId: 'mat-10', category: 'CONSUMABLES' }] })).toEqual({ moved: 1 });
+    expect((await api.get<Material>('/materials/mat-10')).category).toBe('CONSUMABLES');
   });
 
   it('keeps Stores items off a project order, and neither kind of order becomes the other (Stores ordering)', async () => {

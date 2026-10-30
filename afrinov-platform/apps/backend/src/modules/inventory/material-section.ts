@@ -85,32 +85,29 @@ export async function checkMaterialChange(
   return next;
 }
 
-const PROJECT_USE = {
-  issued: { verb: 'issue', Verb: 'Issue', past: 'issued', to: 'to' },
-  ordered: { verb: 'order', Verb: 'Order', past: 'ordered', to: 'for' },
-} as const;
 
 /**
- * Project material goes only to its own project (Phases 5 and 6): an issue or
- * an order holding a Projects item is for that item's project, so one can't
- * hold two projects' material. Stores items can go to any project, or none.
+ * A project's leftovers go only to that project (Phases 5 and 6): an issue
+ * holding a Projects item still in the store is for that item's project, so
+ * one can't hold two projects' material. Stores items can go to any project,
+ * or none. Orders and RFQs take their project from the order instead (Project
+ * on the Order Roadmap): project material isn't stock, so only leftovers
+ * received before carry a project of their own.
  */
 export function checkProjectMaterial(
   projectNumber: string | null | undefined,
   materials: Array<{ sku: string; category: string; projectNumber: string | null }>,
-  use: 'issued' | 'ordered',
 ): void {
-  const u = PROJECT_USE[use];
   const own = materials.filter((m) => sectionOf(m.category) === 'PROJECTS' && m.projectNumber);
   const projects = [...new Set(own.map((m) => m.projectNumber))];
   if (projects.length > 1) {
-    throw Errors.validation(`One ${u.verb} can't hold material for two projects (${projects.join(' and ')}). ${u.Verb} each project's material separately.`);
+    throw Errors.validation(`One issue can't hold material for two projects (${projects.join(' and ')}). Issue each project's material separately.`);
   }
   const wrong = own.find((m) => m.projectNumber !== (projectNumber || null));
   if (wrong) {
     throw Errors.validation(projectNumber
-      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be ${u.past} ${u.to} project ${projectNumber}.`
-      : `${wrong.sku} is material for project ${wrong.projectNumber}: ${u.verb} it ${u.to} that project.`);
+      ? `${wrong.sku} is material for project ${wrong.projectNumber}, so it can't be issued to project ${projectNumber}.`
+      : `${wrong.sku} is material for project ${wrong.projectNumber}: issue it to that project.`);
   }
 }
 
@@ -131,11 +128,29 @@ export function refuseStoresOnProjectOrder(
 }
 
 /**
- * Refuses a Projects material that has no project yet: until it is given one,
- * it keeps its stock and history but is not issued or ordered.
+ * A Stores order is the store's, so it holds Stores items only: project
+ * material is bought by Procurement on a project order. Until the project
+ * moved to the order (Project on the Order Roadmap), the item's own project
+ * kept it off a Stores order; this says so outright.
  */
-export function refuseUnassigned(m: { sku: string; category: string; projectNumber: string | null }, use: 'issued' | 'ordered'): void {
+export function refuseProjectMaterialOnStoresOrder(
+  projectNumber: string | null | undefined,
+  materials: Array<{ sku: string; category: string }>,
+): void {
+  if (projectNumber) return;
+  const project = materials.find((m) => sectionOf(m.category) === 'PROJECTS');
+  if (project) {
+    throw Errors.validation(`${project.sku} is project material, so it isn't bought on a Stores order. Procurement orders it on a purchase order for its project.`);
+  }
+}
+
+/**
+ * Refuses to issue a Projects item still in the store with no project: no one
+ * gives items a project any more (Project on the Order Roadmap), so its
+ * leftovers move to Stores, as a closed project's do.
+ */
+export function refuseUnassigned(m: { sku: string; category: string; projectNumber: string | null }): void {
   if (sectionOf(m.category) === 'PROJECTS' && !m.projectNumber) {
-    throw Errors.validation(`${m.sku} has no project yet, so it can't be ${use}. Give it its project on Materials first.`);
+    throw Errors.validation(`${m.sku} has no project, so it isn't issued. Move it to Stores from Project leftovers.`);
   }
 }
