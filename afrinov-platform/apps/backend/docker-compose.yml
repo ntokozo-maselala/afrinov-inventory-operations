@@ -8,8 +8,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-afrinov}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${POSTGRES_TEST_PASSWORD:?set POSTGRES_PASSWORD or POSTGRES_TEST_PASSWORD in the environment}}
       POSTGRES_DB: ${POSTGRES_DB:-afrinov}
+    # Loopback only (SEC-03): tools on this machine reach it at localhost:5432,
+    # but it is never published to the network. The backend container reaches
+    # it as db:5432 on the Compose network, which needs no published port.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - afrinov_pg:/var/lib/postgresql/data
     healthcheck:
@@ -63,20 +66,25 @@ services:
       PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-true}
       # API docs at /api/docs. Off in production unless this is "true".
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
-      # Password for the admin account the seed creates on first start. The
-      # current production seed checks this before looking up the existing
-      # admin, so keep it injected on every Compose startup.
+      # Password for the admin account the seed creates on first start; it
+      # must be changed at the first sign-in. Only needed until that account
+      # exists: remove it from the environment afterwards.
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      # Number of reverse-proxy hops in front of the API (e.g. 1), or their
+      # addresses. Unset when the API is reached directly. See resolveTrustProxy.
+      TRUST_PROXY: ${TRUST_PROXY:-}
       PORT: 4000
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "4000:4000"
-    # Seed is idempotent. Run the compiled seed (node dist/db/seed.js) rather
-    # than `npm run db:seed`, which needs tsx — a dev dependency that is
-    # pruned from the production image. The current seed requires
-    # SEED_ADMIN_PASSWORD on every production invocation (see above).
+    # The seed writes only the bootstrap (roles, permissions, first admin,
+    # settings) and is idempotent; it never loads demo data in production.
+    # Run the compiled seed (node dist/db/seed.js) rather than
+    # `npm run db:seed`, which needs tsx — a dev dependency that is pruned from
+    # the production image. For a real deployment, run migrations as their own
+    # step before starting the new version (see the deployment checklist).
     command: sh -c "npx prisma migrate deploy && node dist/db/seed.js && node dist/index.js"
 
 volumes:

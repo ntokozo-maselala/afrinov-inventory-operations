@@ -179,7 +179,7 @@ Remove-Item Env:VITE_FRONTEND_ONLY   # PowerShell
 cd apps/backend
 docker compose up -d db
 npm run db:migrate
-npm run db:seed
+npm run db:seed:demo
 npm run dev
 
 # 4. in a separate terminal, start the frontend normally

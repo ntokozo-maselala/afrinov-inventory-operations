@@ -387,3 +387,95 @@ permission to existing databases.
 (`requireForKind`, `requireForOrder`), `procurement.service.ts`,
 `rfq.service.ts`, `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
 `afrinov-docs/docs/13-project-management/roadmaps/stores-ordering-roadmap.md`.
+
+### ADR-021 — Whoever raises a purchase order cannot approve it
+**Date:** 2026-10-30 · **Status:** Proposed — implemented, pending business confirmation
+
+**Context:** Approval checked the approver's permission and limit only. The
+person who raised an order could approve it, so one person could commit
+company money with no second pair of eyes (PRA-06 in
+`docs/audits/production-readiness/`). For Stores orders this was the normal
+path: the permission that raises them also approves them. With
+`purchaseOrders.requireApprovalBeforeProcessing` off, submitting approved any
+order, of any value, as the submitter.
+
+**Decision:** The approver must be a different person from the order's
+creator, for both kinds of order and for administrators. With approval
+switched off, submitting approves an order only when the submitter could
+have approved it anyway (they hold the approve permission for its kind and
+it is within their limit); otherwise it goes for approval as usual. An
+approval and an edit of the same order take a row lock, so an approval can
+never be checked against one total and land on another (PRA-07).
+
+**Consequences:** Every order needs two people. A site with a single store
+controller has its Stores orders approved by an administrator or a second
+store controller. "Waiting for my approval" no longer lists a user's own
+orders, and the approval panel says why the creator cannot approve. Reverse
+this ADR only by an explicit business decision; the check is one function
+(`selfApprovalBlock`).
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`
+(`selfApprovalBlock`), `procurement.service.ts` (`approve`, `approval`,
+`awaitingApproval`, `submit`, `update`),
+`integration/production-controls.real-http.test.ts`.
+
+### ADR-022 — The seed writes only the bootstrap; demo data never reaches production
+**Date:** 2026-10-30 · **Status:** Accepted
+
+**Context:** The container's start command runs the seed on every start, and
+the seed loaded demo suppliers, materials, projects, purchase orders and stock
+movements unconditionally (PRA-01). In the system of record that is fictitious
+stock that ADR-002 and ADR-005 then forbid deleting, and every restart
+rewrote the demo materials.
+
+**Decision:** `npm run db:seed` (and `node dist/db/seed.js`) writes only the
+bootstrap: permissions, roles, the first administrator (with a forced password
+change) and the settings catalog. Demo data needs `--demo` (or
+`SEED_DEMO_DATA=true`, `npm run db:seed:demo`) and is refused unless
+`NODE_ENV` is `development` or `test`; an unset `NODE_ENV` counts as
+production, as in `loadConfig()`. `SEED_ADMIN_PASSWORD` is needed only to
+create the admin.
+
+**Consequences:** A new production database starts empty apart from the
+bootstrap, ready for the opening-balance import. Developers and the
+integration suites load demo data explicitly. CI proves both rules on every
+backend pull request (`npm run db:check-bootstrap` after a production-mode
+seed; the demo seed must fail in production).
+
+**Evidence:** `afrinov-platform/apps/backend/src/db/seed.ts`, `seed-mode.ts`,
+`scripts/check-bootstrap-only.ts`, `.github/workflows/backend-ci.yml`.
+
+### ADR-023 — Password lifecycle and sign-in controls
+**Date:** 2026-10-30 · **Status:** Accepted
+
+**Context:** No one could change or reset a password in the product, the
+bootstrap admin's seeded password could not be replaced at first sign-in,
+sign-ins were not recorded, and nothing slowed down guessing one account's
+password from many addresses (PRA-05, PRA-09).
+
+**Decision:** Passwords need at least 12 characters (length, not character
+classes, per NIST SP 800-63B). A user changes their own with their current
+password (`POST /auth/password`). An administrator sets a temporary password
+(`POST /users/:id/password-reset`) that the user must replace before anything
+else works; the bootstrap admin starts the same way. A change or reset ends
+every earlier session: tokens issued before `users.password_changed_at` are
+refused. Five wrong passwords in a row lock the account for 15 minutes
+(429 `ACCOUNT_LOCKED`); an administrator's reset lifts it. Every attempt is
+written to the audit log as an `Authentication` entry with IP and user agent;
+an unknown email is recorded only as a fingerprint. Unknown emails cost the
+same bcrypt work as known ones. The browser signs out after
+`security.sessionTimeoutMinutes` without activity.
+
+**Consequences:** A locked-out or forgetful user goes to an administrator,
+who resets the password; there is no email self-service (no mail is sent by
+the system). Password changes need no restart and take effect on the next
+request. The 12-hour token lifetime is unchanged and remains the upper bound
+of a session.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/identity/`
+(`identity.service.ts`, `auth.routes.ts`, `user.routes.ts`,
+`password-policy.ts`), `src/server.ts` (`authenticate`), migration
+`20260101000031_password_lifecycle`,
+`afrinov-platform/apps/frontend/src/pages/ChangePassword.tsx`,
+`src/components/IdleSignOut.tsx`,
+`integration/password-lifecycle.real-http.test.ts`.

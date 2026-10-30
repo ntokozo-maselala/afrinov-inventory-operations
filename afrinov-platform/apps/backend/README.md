@@ -44,16 +44,22 @@ variable for one command with `$env:NAME = "value"; <command>`.
    ```sh
    npm run db:generate
    npm run db:migrate
-   SEED_ADMIN_PASSWORD=choose-a-password npm run db:seed
+   SEED_ADMIN_PASSWORD=choose-a-password npm run db:seed:demo
    ```
 
    The seed creates the admin account `admin@afrinov.local` with that
-   password. An unset, empty, or whitespace-only `SEED_ADMIN_PASSWORD` makes
-   the seed generate a random password and not print it, so you will not be
-   able to log in. Production seeding rejects those values. The seed does not
-   change an existing admin password. In production, the current seed code
-   requires `SEED_ADMIN_PASSWORD` on every invocation, even after the admin
-   exists, so keep it injected for container restarts.
+   password, which must be changed at the first sign-in (at least 12
+   characters). An unset, empty, or whitespace-only `SEED_ADMIN_PASSWORD`
+   makes the seed generate a random password and not print it, so you will
+   not be able to log in. Production seeding rejects those values. The seed
+   does not change an existing admin password, and needs
+   `SEED_ADMIN_PASSWORD` only while the admin does not exist yet.
+
+   `npm run db:seed` writes only the bootstrap (permissions, roles, the admin
+   and the settings catalog). `npm run db:seed:demo` adds the demo suppliers,
+   materials, projects, orders and stock movements, and refuses unless
+   `NODE_ENV` is `development` or `test` (ADR-022): demo data never goes into
+   a production database.
 
 To rotate the existing bootstrap admin password, set a new `SEED_ADMIN_PASSWORD`
 and run `npm run db:rotate-admin`. This updates `admin@afrinov.local` and records
@@ -74,7 +80,8 @@ the existing account may have been created with an empty bootstrap password.
 ## Running it with Docker
 
 `docker-compose.yml` runs PostgreSQL and the API together. On start the API
-container applies migrations, runs the seed, then starts the server. From
+container applies migrations, runs the bootstrap seed (no demo data), then
+starts the server. PostgreSQL is published on `127.0.0.1:5432` only. From
 `apps/backend`:
 
 ```sh
@@ -87,9 +94,11 @@ docker compose up --build
 
 The container runs with `NODE_ENV=production`, so the stricter production
 rules apply: `JWT_SECRET` must be a real random value, `SEED_ADMIN_PASSWORD`
-must remain injected on every start because the seed runs each time, CORS is
-disabled unless `CORS_ORIGIN` is set, and the API docs are off unless
-`API_DOCS_ENABLED=true`.
+is required until the admin account exists (remove it afterwards), CORS is
+disabled unless `CORS_ORIGIN` is set (`CORS_ALLOW_ANY=true` is refused), and
+the API docs are off unless `API_DOCS_ENABLED=true`. After the first start,
+`npm run db:check-bootstrap` confirms the database holds no business data
+before the opening-balance import.
 
 ## Dropping the Rack table
 
@@ -138,12 +147,15 @@ any Rack row remains. On each database:
 | `HOST` | No | `0.0.0.0` | Interface to bind |
 | `LOG_LEVEL` | No | `info` | Pino log level |
 | `CORS_ORIGIN` | In production | Local Vite origins in development | Comma-separated list of allowed browser origins |
-| `CORS_ALLOW_ANY` | No | — | `true` allows any origin. Throwaway demos only |
+| `CORS_ALLOW_ANY` | No | — | `true` allows any origin. Throwaway demos only; refused in production |
 | `RATE_LIMIT_AUTH` | No | `5` | Login requests per minute per IP |
 | `RATE_LIMIT_GLOBAL` | No | `1000` | All other requests per minute per IP |
+| `TRUST_PROXY` | Behind a proxy | Trust none | Which proxies may report the client address: a hop count (usually `1`), a comma-separated list of addresses or CIDR ranges, or `true`. Without it, behind a load balancer every user shares one rate-limit budget and the sign-in audit records the proxy's address |
+| `DB_STATEMENT_TIMEOUT_MS` | No | `30000` | Longest one SQL statement may run before PostgreSQL cancels it. `0` switches it off (e.g. for a large one-off import) |
 | `PROCUREMENT_ENABLED` | No | `true` | `false` turns off purchase orders and goods receipts. Keep in step with the frontend's `VITE_PROCUREMENT_ENABLED` |
 | `API_DOCS_ENABLED` | No | On, except in production | `true` or `false` to serve the API docs at `/api/docs` |
-| `SEED_ADMIN_PASSWORD` | Required on every production seed invocation | Random in development | Password used when creating or explicitly rotating the bootstrap account; production seed currently checks it even when the account exists |
+| `SEED_ADMIN_PASSWORD` | Until the admin exists, in production | Random in development | Password for the bootstrap account when it is created (it must be changed at first sign-in), or for an explicit rotation |
+| `SEED_DEMO_DATA` | No | — | `true` makes the seed load demo data, like `--demo`. Refused in production |
 | `SEED_ADMIN_EMAIL` | No | `admin@afrinov.local` | Account used by the integration tests and diagnostic scripts |
 | `REPORT_CURRENCY` | No | `ZAR` | Currency code returned with the inventory report (`/reports/inventory`) only; the other reports use the `general.defaultCurrency` setting |
 
@@ -162,7 +174,9 @@ Run from `apps/backend`.
 | `npm test` | Run the unit tests |
 | `npm run test:integration` | Run the integration tests against a real database |
 | `npm run db:migrate` | Apply pending Prisma migrations |
-| `npm run db:seed` | Load roles, permissions, the admin account and demo data |
+| `npm run db:seed` | Write the bootstrap: permissions, roles, the admin account and the settings catalog. No business data |
+| `npm run db:seed:demo` | The bootstrap plus demo suppliers, materials, projects, orders and stock movements. Development and test only |
+| `npm run db:check-bootstrap` | Read-only: fails if the database holds any business data or has no administrator. Run on a new production database before the opening-balance import |
 | `npm run import:workbook -- --file <workbook.xlsm>` | Dry run of the stock workbook import: checks the four Main and four Summary sheets against the mapping file and writes a problem report to `import-reports/` (git-ignored). The first run creates `import-reports/mapping.xlsx` (new SKUs, units, locations) and `import-reports/master-data.xlsx` (projects, recipients, suppliers) for the storeman and buyer to review; later runs read them. Never touches the database |
 | `npm run import:workbook -- --file <workbook.xlsm> --apply --database <name> --date <YYYY-MM-DD> --actor <email>` | The real import, once per database: creates the projects, recipients and suppliers (skipping any that exist), the items and locations and posts one dated opening-balance receipt per item and location, all or nothing. Refuses while the dry run has blocking problems, when `--database` does not match `DATABASE_URL`, or when opening balances were imported before |
 | `npm run import:suppliers -- --file <Item Description workbook.xlsm>` | Dry run of the vendor list import: reads the "Suppliers" sheet of the AFRI-0000_x purchase order template, compares it with the suppliers in `DATABASE_URL` (by name, ignoring case) and writes a report to `import-reports/` of new suppliers, existing ones whose empty fields would be filled, and rows to review (duplicate names, vendor codes already taken, invalid emails, unknown currencies). Never touches the database |

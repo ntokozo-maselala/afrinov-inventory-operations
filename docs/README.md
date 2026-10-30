@@ -47,6 +47,12 @@ audits, project entry points, and code-adjacent guides.
   original document's disposition; the
   [reorganization report](audits/documentation-reorganization-report.md)
   records changes and validation.
+- The [production readiness assessment](audits/production-readiness/PRODUCTION_READINESS_REPORT.md)
+  (2026-10-30) gives the go-live verdict, risk register and maturity scores,
+  with its [checklist](audits/production-readiness/PRODUCTION_READINESS_CHECKLIST.md),
+  [remediation plan](audits/production-readiness/PRODUCTION_REMEDIATION_PLAN.md),
+  [deployment checklist](audits/production-readiness/PRODUCTION_DEPLOYMENT_CHECKLIST.md)
+  and [operational runbook](audits/production-readiness/OPERATIONAL_RUNBOOK.md).
 - Earlier reports retained for historical context are in
   [`docs/archive/`](archive/README.md). Archived reports describe their
   original point in time and are not current technical references.
