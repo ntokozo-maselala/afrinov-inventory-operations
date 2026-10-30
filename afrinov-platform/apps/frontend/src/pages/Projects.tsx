@@ -20,6 +20,7 @@ import { today } from '../lib/dates';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
+import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface UserOpt { id: string; name: string }
 
@@ -208,7 +209,11 @@ export function Projects() {
   const [archiving, setArchiving] = useState(false);
   const toast = useToast();
   // Adding, editing and archiving need manage:projects on the server.
-  const canManage = usePermissions().hasPermission('projects:manage');
+  const { hasPermission } = usePermissions();
+  const canManage = hasPermission('projects:manage');
+  // A project's orders are Procurement's: shown to those who see project orders,
+  // while procurement is on (off, the order pages aren't there: Qodo, PR #131).
+  const canSeeOrders = PROCUREMENT_ENABLED && hasPermission('orders:view');
 
   const filtered = useMemo(() => {
     if (!projects.data) return [];
@@ -280,6 +285,7 @@ export function Projects() {
           rows={filtered}
           columns={columns({
             canManage,
+            canSeeOrders,
             onEdit: (p) => setDrawer({ mode: 'edit', project: p }),
             onArchive: (p) => setArchive(p),
           })}
@@ -335,11 +341,11 @@ function stockUsedLink(p: Project): string {
 }
 
 /**
- * Return project columns with stock usage and materials links.
+ * Return project columns with stock usage and, for those who see project orders, an orders link.
  * When `canManage` is true, add buttons that call `onEdit` or `onArchive` with the row;
  * archiving is disabled for inactive projects.
  */
-function columns({ canManage, onEdit, onArchive }: { canManage: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
+function columns({ canManage, canSeeOrders, onEdit, onArchive }: { canManage: boolean; canSeeOrders: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
   return [
     { key: 'num', header: 'Number', render: (p) => <span className="font-mono">{p.projectNumber}</span>, width: '10rem' },
     { key: 'name', header: 'Name', render: (p) => <span className="font-medium">{p.name ?? <span className="text-surface-300">—</span>}</span> },
@@ -349,7 +355,11 @@ function columns({ canManage, onEdit, onArchive }: { canManage: boolean; onEdit:
     { key: 'status', header: 'Status', render: (p) => <Badge tone={STATUS_TONE[p.status]} dot>{p.status}</Badge>, width: '10rem' },
     { key: 'start', header: 'Start', render: (p) => p.startDate ? <span className="text-meta">{formatDate(p.startDate)}</span> : <span className="text-surface-300">—</span>, width: '10rem' },
     { key: 'used', header: 'Stock used', render: (p) => <Link to={stockUsedLink(p)} className="btn-link text-sm">View</Link>, width: '7rem' },
-    { key: 'materials', header: 'Materials', render: (p) => <Link to={`/materials?section=PROJECTS&project=${encodeURIComponent(p.projectNumber)}`} className="btn-link text-sm" aria-label={`Materials for ${p.projectNumber}`}>View</Link>, width: '7rem' },
+    // A project's material is what its orders buy: items have no project of their own (Project on the Order Roadmap, Phase 3).
+    ...(canSeeOrders ? [{
+      key: 'orders', header: 'Orders', width: '7rem',
+      render: (p: Project) => <Link to={`/purchase-orders?project=${encodeURIComponent(p.projectNumber)}`} className="btn-link text-sm" aria-label={`Orders for ${p.projectNumber}`}>View</Link>,
+    }] : []),
     ...(canManage ? [{
       key: 'actions', header: '', align: 'right' as const, width: '12rem',
       render: (p: Project) => (

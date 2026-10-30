@@ -11,6 +11,7 @@ import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { generateGRNumber, parseReceivedAt } from '../procurement/goods-receipt.service.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
+import { sectionOf } from './material-section.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -129,6 +130,12 @@ export const StockReceiptService = {
           const m = await tx.material.findUnique({ where: { id: l.materialId } });
           if (!m) throw Errors.notFound('Material');
           if (!m.active) throw Errors.validation(`Material ${m.sku} is inactive`);
+          // A Projects item with no project isn't issued (refuseUnassigned), so
+          // it isn't received into the store either: as /stock-items requires
+          // (Project on the Order Roadmap; Qodo, PR #131).
+          if (sectionOf(m.category) === 'PROJECTS' && !m.projectNumber) {
+            throw Errors.validation(`${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
+          }
           checked.add(`m:${l.materialId}`);
         }
         if (!checked.has(`l:${l.locationId}`)) {

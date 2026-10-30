@@ -19,8 +19,9 @@ describe('mock Stores and Projects materials', () => {
     expect(stores.every((m) => m.section === 'STORES' && m.category !== 'PROJECT_MATERIAL')).toBe(true);
   });
 
-  it('refuses a Projects material without a project or with Required Stock, and a project on Stores material', async () => {
-    expect(await codeOf(api.post('/materials', { sku: 'X1', name: 'X', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm' }))).toBe('VALIDATION_ERROR');
+  // Project on the Order Roadmap, Phase 2: a Projects item needs no project of its own.
+  it('adds a Projects material with no project, and refuses one with Required Stock, and a project on Stores material', async () => {
+    expect(await api.post<Material>('/materials', { sku: 'X1', name: 'X', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm' })).toMatchObject({ projectNumber: null });
     expect(await codeOf(api.post('/materials', { sku: 'X2', name: 'X', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1325', requiredStock: 5 }))).toBe('VALIDATION_ERROR');
     expect(await codeOf(api.post('/materials', { sku: 'X3', name: 'X', category: 'CONSUMABLES', unitOfMeasure: 'm', projectNumber: 'AFRI-1325' }))).toBe('VALIDATION_ERROR');
   });

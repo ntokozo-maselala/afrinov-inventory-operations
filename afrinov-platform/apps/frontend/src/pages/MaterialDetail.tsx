@@ -24,7 +24,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { NO_PROJECT_LEFTOVERS, leftoversLink } from '../components/LeftoversNotice';
-import { PROJECT_STATUS_TONE, projectStatusLabel, type ProjectStatus } from '../lib/projectStatus';
+import { projectStatusLabel } from '../lib/projectStatus';
 
 
 /** Project material of a completed or cancelled project: nothing more is ordered for it; its leftovers go to Stores. */
@@ -32,11 +32,15 @@ function projectClosed(m: Material): boolean {
   return m.category === 'PROJECT_MATERIAL' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED');
 }
 
-/** "Stores · Consumables", "Project 1369 · Plant upgrade" or "Projects · no project yet". */
+/** "Stores · Consumables", or "Projects": a Projects item has no project of its own (Project on the Order Roadmap). */
 function placeOf(m: Material): string {
-  if (sectionOf(m.category) === 'STORES') return `Stores · ${categoryLabel(m.category)}`;
-  if (!m.projectNumber) return 'Projects · no project yet';
-  return `Project ${m.projectNumber}${m.project?.name ? ` · ${m.project.name}` : ''}`;
+  return sectionOf(m.category) === 'STORES' ? `Stores · ${categoryLabel(m.category)}` : 'Projects';
+}
+
+/** "project 1369 · Plant upgrade (Active)": the project an older item's leftovers belong to. */
+function leftoversProject(m: Material): string {
+  const status = m.project?.status ? ` (${projectStatusLabel(m.project.status)})` : '';
+  return `project ${m.projectNumber}${m.project?.name ? ` · ${m.project.name}` : ''}${status}`;
 }
 
 /**
@@ -113,7 +117,8 @@ export function MaterialDetail() {
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
             {storesItem && <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>}
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
-            {active && canOrder && !needsProject(material.data) && !projectClosed(material.data) && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
+            {/* Any active item: a Projects item's project is chosen on the order (Project on the Order Roadmap, Phase 2). */}
+            {active && canOrder && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
             {active && total > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
@@ -135,13 +140,7 @@ export function MaterialDetail() {
               <dl className="text-sm grid grid-cols-1 sm:grid-cols-3 gap-y-2">
                 <dt className="text-surface-500">SKU</dt><dd className="col-span-2 text-mono">{material.data.sku}</dd>
                 {sectionOf(material.data.category) === 'PROJECTS' ? (
-                  <><dt className="text-surface-500">Section</dt><dd className="col-span-2">Projects</dd>
-                  <dt className="text-surface-500">Project</dt>
-                  <dd className="col-span-2">
-                    {material.data.projectNumber
-                      ? <Link to={`/materials?section=PROJECTS&project=${encodeURIComponent(material.data.projectNumber)}`} className="btn-link">{material.data.projectNumber}{material.data.project?.name ? ` · ${material.data.project.name}` : ''}</Link>
-                      : <span className="text-warning-700">No project yet{canManage && <> · <button type="button" className="btn-link" onClick={() => setEditing(true)}>Choose one</button></>}</span>}
-                  </dd></>
+                  <><dt className="text-surface-500">Section</dt><dd className="col-span-2">Projects</dd></>
                 ) : (
                   <><dt className="text-surface-500">Section</dt><dd className="col-span-2">Stores</dd>
                   <dt className="text-surface-500">Category</dt><dd className="col-span-2">{categoryLabel(material.data.category)}</dd></>
@@ -160,22 +159,13 @@ export function MaterialDetail() {
             </section>
             {!storesItem ? (
               // Project material goes from the supplier straight to site: it has no
-              // stock status. What it has is its project's (Stores and Procurement
-              // Separation Roadmap).
+              // stock status, and no project of its own: the order it is bought on
+              // says which (Project on the Order Roadmap, Phase 3).
               <section className="surface-card p-4 space-y-2">
-                <h2 className="text-h3 text-surface-900">Project status</h2>
-                {material.data.project?.status && (
-                  <Badge tone={PROJECT_STATUS_TONE[material.data.project.status as ProjectStatus] ?? 'neutral'}>{projectStatusLabel(material.data.project.status)}</Badge>
-                )}
+                <h2 className="text-h3 text-surface-900">Ordering</h2>
                 <p className="text-meta">
-                  {!material.data.projectNumber
-                    ? 'It has no project yet, so it isn’t ordered or issued until it is given one.'
-                    : projectClosed(material.data)
-                      ? 'The project is closed, so nothing more is ordered for it.'
-                      // Some may still be in the store from before (Qodo, PR #126).
-                      : total > 0
-                        ? 'Ordered for its project, and delivered straight to site. What is shown as left in the store was received before.'
-                        : 'Ordered for its project. Project material goes from the supplier straight to site, so it isn’t held in the store.'}
+                  Bought for a project on its purchase order, which says which project it is for. Project material goes from the supplier straight to site, so it isn&rsquo;t held in the store.
+                  {total > 0 && ' What is shown as left in the store was received before.'}
                 </p>
               </section>
             ) : (
@@ -209,11 +199,12 @@ export function MaterialDetail() {
                 <section>
                   <SectionHeader
                     title="Left in the store"
+                    // Leftovers keep the project they were received for, named here.
                     description={!material.data.projectNumber
                       ? 'Received before project material went straight to site. It has no project, so it isn\u2019t issued: move it to Stores.'
                       : projectClosed(material.data)
-                        ? 'Received before project material went straight to site. The project is closed: move it to Stores.'
-                        : 'Received before project material went straight to site. It is issued to its project.'}
+                        ? `Received before project material went straight to site, for ${leftoversProject(material.data)}. The project is closed: move it to Stores.`
+                        : `Received before project material went straight to site, for ${leftoversProject(material.data)}. It is issued to that project.`}
                     actions={!material.data.projectNumber
                       ? <Link to={NO_PROJECT_LEFTOVERS} className="btn-link text-sm">Move to Stores</Link>
                       : projectClosed(material.data)

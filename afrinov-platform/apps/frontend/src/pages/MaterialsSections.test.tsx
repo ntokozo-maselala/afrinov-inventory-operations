@@ -1,6 +1,8 @@
 // The Materials screens in two sections (materials sections roadmap, Phase 2):
 // Stores and Projects tabs, the item form asking the section first, and an
-// item's page saying where it belongs.
+// item's page saying where it belongs. A Projects item has no project of its
+// own: the order it is bought on says which (Project on the Order Roadmap,
+// Phase 3), so nothing asks for, filters by or warns about one.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -62,42 +64,32 @@ describe('Materials: Stores and Projects tabs', () => {
     expect(screen.queryByRole('option', { name: 'Project Material' })).not.toBeInTheDocument();
   });
 
-  it('shows Projects items grouped by project, with those without a project last', async () => {
+  it('shows Projects items with no Project column or filter, and no "needs a project" step', async () => {
     list();
     await screen.findByText('DISC');
+    expect(screen.queryByText(/need a project|needs a project/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
-    expect(skus()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
-    expect(screen.getByRole('link', { name: '1369 · Plant upgrade' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1369');
-    expect(within(within(screen.getByRole('table')).getByText('OLD-PLATE').closest('tr')!).getByText('No project yet')).toBeInTheDocument();
+    expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
+    expect(within(screen.getByRole('table')).queryByText('Project')).not.toBeInTheDocument();
+    expect(screen.queryByText('No project yet')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Needs a project/ })).not.toBeInTheDocument();
     expect(screen.queryByText('Reorder')).not.toBeInTheDocument();
   });
 
-  it('opens on one project from the link, and on the items with no project', async () => {
-    const { unmount } = list('/materials?section=PROJECTS&project=1402');
-    await screen.findByText('1402-BOLT');
-    expect(skus()).toEqual(['1402-BOLT']);
-    unmount();
-    list('/materials?section=PROJECTS&project=none');
-    // OLD-PLATE also appears in the "Needs a project" panel, so wait for the
-    // table row specifically rather than any matching text on the page.
-    await within(await screen.findByRole('table')).findByText('OLD-PLATE');
-    expect(skus()).toEqual(['OLD-PLATE']);
-  });
-
-  it('keeps the project filter when the Projects tab, already open, is clicked', async () => {
+  it('opens an older link to one project on the whole Projects tab', async () => {
     list('/materials?section=PROJECTS&project=1402');
     await screen.findByText('1402-BOLT');
-    fireEvent.click(screen.getByRole('tab', { name: /Projects/ }));
-    expect(skus()).toEqual(['1402-BOLT']);
+    expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
   });
 
-  it('adds an item from the Projects tab as Projects material on that project', async () => {
-    list('/materials?section=PROJECTS&project=1369');
+  it('adds an item from the Projects tab as Projects material, with no project to choose', async () => {
+    list('/materials?section=PROJECTS');
     await screen.findByText('1369-PIPE');
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     const drawer = screen.getByRole('dialog');
     expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeChecked();
-    expect(await within(drawer).findByLabelText(/^Project(?!s)/)).toHaveValue('1369');
+    expect(within(drawer).queryByLabelText(/^Project(?!s)/)).not.toBeInTheDocument();
   });
 });
 
@@ -105,22 +97,20 @@ const form = (props: Record<string, unknown> = {}) => render(<MaterialForm onCan
 const fill = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe('the item form asks for the section first', () => {
-  it('a Projects item takes an open project and no reorder level', async () => {
+  it('a Projects item has no Project field and no reorder level, and is added with no project', async () => {
     form();
     fireEvent.click(screen.getByRole('radio', { name: /Projects/ }));
     expect(screen.queryByLabelText('Reorder level')).not.toBeInTheDocument();
-    await screen.findByRole('option', { name: '1369 · Plant upgrade' });
-    expect(screen.queryByRole('option', { name: /1200/ })).not.toBeInTheDocument();
-    fill(/^SKU/, '1369-FLANGE');
-    fill(/^Item name/, 'Flange');
-    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
-    expect(await screen.findByText('Choose the project this material is for.')).toBeInTheDocument();
-    fill(/^Project(?!s)/, '1369');
+    expect(screen.queryByLabelText(/^Project(?!s)/)).not.toBeInTheDocument();
+    fill(/^SKU/, 'PLATE-10MM');
+    fill(/^Item name/, 'Plate');
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     const body = mockPost.mock.calls[0]![1] as Record<string, unknown>;
-    expect(body).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: '1369' });
+    expect(body).toMatchObject({ category: 'PROJECT_MATERIAL' });
+    expect(body).not.toHaveProperty('projectNumber');
     expect(body).not.toHaveProperty('requiredStock');
+    expect(mockGet).not.toHaveBeenCalledWith(expect.stringMatching(/^\/projects/));
   });
 
   it('a Stores item has a category (not Project Material) and a reorder level', async () => {
@@ -136,24 +126,20 @@ describe('the item form asks for the section first', () => {
     expect(body).not.toHaveProperty('projectNumber');
   });
 
-  it('on edit, gives an item with no project its project; one with a project keeps it', async () => {
-    const { unmount } = form({ initial: projectItem('OLD-PLATE', null) });
-    expect(screen.getByRole('radio', { name: /Projects/ })).toBeDisabled();
-    await screen.findByRole('option', { name: '1402 · Silo' });
-    fill(/^Project(?!s)/, '1402');
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
-    expect(mockPatch.mock.calls[0]![1]).toMatchObject({ projectNumber: '1402' });
-    expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('requiredStock');
-    unmount();
-
-    mockPatch.mockClear();
-    form({ initial: projectItem('1369-PIPE', '1369') });
-    expect(screen.getByLabelText(/^Project(?!s)/)).toHaveValue('1369 · Plant upgrade');
-    expect(screen.getByLabelText(/^Project(?!s)/)).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
-    expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('projectNumber');
+  it('on edit, neither asks for a project nor changes the one an older item was tagged with', async () => {
+    for (const initial of [projectItem('OLD-PLATE', null), projectItem('1369-PIPE', '1369')]) {
+      mockPatch.mockClear();
+      const { unmount } = form({ initial });
+      expect(screen.getByRole('radio', { name: /Projects/ })).toBeDisabled();
+      expect(screen.queryByLabelText(/^Project(?!s)/)).not.toBeInTheDocument();
+      fill(/^Item name/, 'Renamed');
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(mockPatch).toHaveBeenCalled());
+      expect(mockPatch.mock.calls[0]![1]).toMatchObject({ name: 'Renamed' });
+      expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('projectNumber');
+      expect(mockPatch.mock.calls[0]![1]).not.toHaveProperty('requiredStock');
+      unmount();
+    }
   });
 });
 
@@ -164,10 +150,10 @@ const detail = (id: string) => render(
 );
 
 describe('an item’s page says where it belongs', () => {
-  it('a Projects item links to its project’s materials, with no reorder level', async () => {
+  it('a Projects item says only that it is Projects material, with no project or reorder level', async () => {
     detail('m-1369-PIPE');
-    expect(await screen.findByRole('link', { name: '1369 · Plant upgrade' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1369');
-    expect(screen.getByText('1369-PIPE · Project 1369 · Plant upgrade')).toBeInTheDocument();
+    expect(await screen.findByText('1369-PIPE · Projects')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '1369 · Plant upgrade' })).not.toBeInTheDocument();
     expect(screen.queryByText('Reorder at')).not.toBeInTheDocument();
     // Project material goes to site, never into the store (Qodo, PR #125).
     expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
@@ -178,10 +164,11 @@ describe('an item’s page says where it belongs', () => {
     expect(await screen.findByRole('link', { name: 'Receive' })).toHaveAttribute('href', '/stock/receive?materialId=m-DISC');
   });
 
-  it('a Projects item without a project says so', async () => {
+  it('a Projects item with no project is not flagged for one', async () => {
     detail('m-OLD-PLATE');
-    expect(await screen.findByText(/No project yet/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Choose one' })).toBeInTheDocument();
+    await screen.findByText('OLD-PLATE · Projects');
+    expect(screen.queryByText(/No project yet/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Choose one' })).not.toBeInTheDocument();
   });
 
   it('a Stores item shows its section, category and reorder level', async () => {
@@ -193,8 +180,9 @@ describe('an item’s page says where it belongs', () => {
 });
 
 // Project material goes from the supplier straight to site: it has no stock
-// status, only its project's, and shows stock only while some is left from before.
-describe('a Projects item has its project’s status, not a stock status', () => {
+// status, and shows stock only while some is left from before, naming the
+// project those leftovers were received for.
+describe('a Projects item has no stock status, and names the project only for its leftovers', () => {
   const withStock = (sku: string, status: string, rows: unknown[]) => {
     const base = mockGet.getMockImplementation()!;
     mockGet.mockImplementation(async (path: string) => {
@@ -205,30 +193,29 @@ describe('a Projects item has its project’s status, not a stock status', () =>
   };
   const left = { materialId: 'm-1369-PIPE', locationId: 'l-1', locationName: 'Main store', locationType: 'STOREROOM', quantity: '3', requiredStock: '0', stockStatus: 'NOT_SET', percentOfRequired: null };
 
-  it('shows its project’s status, and no stock summary, stock table or View in stock', async () => {
+  it('says how it is ordered, with no stock summary, stock table or View in stock', async () => {
     withStock('1369-PIPE', 'ACTIVE', []);
     detail('m-1369-PIPE');
-    const card = (await screen.findByRole('heading', { name: 'Project status' })).closest('section')!;
-    expect(within(card).getByText('Active')).toBeInTheDocument();
-    expect(screen.getByText(/goes from the supplier straight to site/)).toBeInTheDocument();
+    const card = (await screen.findByRole('heading', { name: 'Ordering' })).closest('section')!;
+    expect(within(card).getByText(/its purchase order, which says which project it is for/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Project status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Stock summary' })).not.toBeInTheDocument();
     expect(screen.queryByText('Stock by location')).not.toBeInTheDocument();
     expect(screen.queryByText('Left in the store')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'View in stock' })).not.toBeInTheDocument();
   });
 
-  it('shows what is left in the store from before, with no reorder level or stock status', async () => {
+  it('shows what is left in the store from before, for the project it was received for', async () => {
     withStock('1369-PIPE', 'ACTIVE', [left]);
     detail('m-1369-PIPE');
     const table = await screen.findByRole('table', { name: 'Left in the store' });
     expect(within(table).getByText('Main store')).toBeInTheDocument();
     expect(within(table).queryByText('Reorder')).not.toBeInTheDocument();
     expect(within(table).queryByText('Item status')).not.toBeInTheDocument();
+    expect(screen.getByText(/for project 1369 · Plant upgrade \(Active\). It is issued to that project/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
-    // The status card doesn't say none is held while some is shown (Qodo, PR #126).
-    const card = screen.getByRole('heading', { name: 'Project status' }).closest('section')!;
-    expect(within(card).queryByText(/isn.t held in the store/)).not.toBeInTheDocument();
-    expect(within(card).getByText(/What is shown as left in the store was received before/)).toBeInTheDocument();
+    // The card doesn't say none is held while some is shown (Qodo, PR #126).
+    expect(within(screen.getByRole('heading', { name: 'Ordering' }).closest('section')!).getByText(/What is shown as left in the store was received before/)).toBeInTheDocument();
   });
 
   it('sends what is left of an item with no project to be moved to Stores, not issued', async () => {
@@ -243,51 +230,17 @@ describe('a Projects item has its project’s status, not a stock status', () =>
   it('sends a closed project’s leftovers to be moved to Stores', async () => {
     withStock('1369-PIPE', 'COMPLETED', [left]);
     detail('m-1369-PIPE');
-    const card = (await screen.findByRole('heading', { name: 'Project status' })).closest('section')!;
-    expect(within(card).getByText('Completed')).toBeInTheDocument();
-    expect(within(card).getByText('The project is closed, so nothing more is ordered for it.')).toBeInTheDocument();
+    expect(await screen.findByText(/for project 1369 · Plant upgrade \(Completed\). The project is closed: move it to Stores/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
   });
 });
 
-describe('Needs a project (Phase 3)', () => {
-  it('tells the Stores tab how many Projects items need a project, linking to them', async () => {
-    list();
-    const notice = await screen.findByText('1 Projects item needs a project');
-    expect(within(notice.closest('[role="status"]')!).getByRole('link', { name: 'Give them their projects' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=none');
-  });
-
-  it('gives the ticked items the chosen project, and reloads', async () => {
-    list('/materials?section=PROJECTS');
-    const panel = (await screen.findByRole('heading', { name: /Needs a project/ })).closest('section')!;
-    const give = within(panel).getByRole('button', { name: 'Tick the items first' });
-    expect(give).toBeDisabled();
-    fireEvent.click(within(panel).getByLabelText('Give OLD-PLATE a project'));
-    await within(panel).findByRole('option', { name: '1369 · Plant upgrade' });
-    expect(within(panel).queryByRole('option', { name: /1200/ })).not.toBeInTheDocument();
-    fireEvent.change(within(panel).getByLabelText('Project'), { target: { value: '1369' } });
-    const loads = mockGet.mock.calls.filter(([p]) => p === '/materials').length;
-    fireEvent.click(within(panel).getByRole('button', { name: 'Give 1 item this project' }));
-    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-OLD-PLATE', { projectNumber: '1369' }));
-    expect(await screen.findByText('1 item given project 1369')).toBeInTheDocument();
-    await waitFor(() => expect(mockGet.mock.calls.filter(([p]) => p === '/materials').length).toBeGreaterThan(loads));
-  });
-
-  it('says which items kept no project when the server refuses', async () => {
-    mockPatch.mockRejectedValue({ code: 'VALIDATION_ERROR', message: 'Project 1369 is closed, so no new material can be added to it' });
-    list('/materials?section=PROJECTS');
-    const panel = (await screen.findByRole('heading', { name: /Needs a project/ })).closest('section')!;
-    fireEvent.click(within(panel).getByLabelText('Tick all'));
-    await within(panel).findByRole('option', { name: '1369 · Plant upgrade' });
-    fireEvent.change(within(panel).getByLabelText('Project'), { target: { value: '1369' } });
-    fireEvent.click(within(panel).getByRole('button', { name: 'Give 1 item this project' }));
-    expect(await within(panel).findByText(/OLD-PLATE: Project 1369 is closed/)).toBeInTheDocument();
-  });
-
-  it('a Projects item with no project offers no Order or Issue on its page', async () => {
+// Project on the Order Roadmap, Phase 2: ordered for a project chosen on the order, but not issued.
+describe('a Projects item with no project', () => {
+  it('offers Order, but no Issue, on its page', async () => {
     detail('m-OLD-PLATE');
-    await screen.findByText(/No project yet/);
-    expect(screen.queryByRole('link', { name: 'Order' })).not.toBeInTheDocument();
+    await screen.findByText('OLD-PLATE · Projects');
+    expect(screen.getByRole('link', { name: 'Order' })).toHaveAttribute('href', '/purchase-orders/new?materialIds=m-OLD-PLATE');
     expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
   });
 });

@@ -10,13 +10,13 @@ After this roadmap a Projects item is a plain catalogue entry ("10mm Plate"), an
 
 It amends the [Materials Sections Roadmap](materials-sections-roadmap.md), Phases 5 and 6, which put the project on the item.
 
-**Status:** Proposed, not started.
+**Status:** Phase 1 merged as #129; Phase 2 in #130; Phase 3 on `feature/project-on-the-order-3`, built on #130. Phase 4 not started.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | The server takes the project from the order | M | Proposed |
-| 2 | Ordering screens: any Projects item on any project order | M | Proposed |
-| 3 | Catalogue screens: no project on the item | M | Proposed |
+| 1 | The server takes the project from the order | M | Built (#129) |
+| 2 | Ordering screens: any Projects item on any project order | M | Built |
+| 3 | Catalogue screens: no project on the item | M | Built |
 | 4 | Docs and ADR | S | Proposed |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days.
@@ -56,13 +56,15 @@ Sizes: **S** is about a day, **M** is 2 to 4 days.
 
 Size M. Backend and mock.
 
-- [ ] **1.1 Ordering ignores the item's project.** Creating, editing and submitting a purchase order no longer call `refuseUnassigned` or `checkProjectMaterial` for ordering (`procurement.service.ts`). A project order still needs its own project, and still refuses Stores items (`refuseStoresOnProjectOrder`).
-- [ ] **1.2 RFQs ignore the item's project.** `rfq.service.ts` drops `refuseUnassigned`; an RFQ's project stays on the RFQ and passes to the order it is awarded as.
-- [ ] **1.3 Issuing leftovers is unchanged.** `inventory.service.ts` keeps `checkProjectMaterial` and `refuseUnassigned` for issues: an item tagged with a project is issued to that project only, and one with no project isn't issued. `refuseUnassigned`'s message stops saying "Give it its project on Materials first" and says to move it to Stores.
-- [ ] **1.4 Moving leftovers with no project to Stores.** Project leftovers lists and moves a "no project" group too (`project-leftovers.service.ts`, `GET/POST /projects/none/leftovers` or a separate route), as it does a closed project's: each item gets a Stores category and becomes a Stores item, keeping its SKU, stock, locations, cost and history.
-- [ ] **1.5 Mock and API docs.** `mock/mockApi.ts` mirrors 1.1 to 1.4; `openapi/document.ts` drops "the item must belong to the order's project" from purchase orders and RFQs, and documents the "no project" leftovers.
+- [x] **1.1 Ordering ignores the item's project.** Creating, editing and submitting a purchase order no longer call `refuseUnassigned` or `checkProjectMaterial` for ordering (`procurement.service.ts`). A project order still needs its own project, and still refuses Stores items (`refuseStoresOnProjectOrder`).
+- [x] **1.2 RFQs ignore the item's project.** `rfq.service.ts` drops `refuseUnassigned`; an RFQ's project stays on the RFQ and passes to the order it is awarded as.
+- [x] **1.3 Issuing leftovers is unchanged.** `inventory.service.ts` keeps `checkProjectMaterial` and `refuseUnassigned` for issues: an item tagged with a project is issued to that project only, and one with no project isn't issued. `refuseUnassigned`'s message stops saying "Give it its project on Materials first" and says to move it to Stores.
+- [x] **1.4 Moving leftovers with no project to Stores.** Project leftovers lists and moves a "no project" group too (`project-leftovers.service.ts`, `GET/POST /projects/none/leftovers` or a separate route), as it does a closed project's: each item gets a Stores category and becomes a Stores item, keeping its SKU, stock, locations, cost and history.
+- [x] **1.5 Mock and API docs.** `mock/mockApi.ts` mirrors 1.1 to 1.4; `openapi/document.ts` drops "the item must belong to the order's project" from purchase orders and RFQs, and documents the "no project" leftovers.
 
 **Tests:** a project order (and an RFQ) taking an item with no project and an item tagged with another project, over real HTTP; a project order still refusing a Stores item; an issue still refusing another project's leftovers and an item with no project; moving an item with no project and stock to Stores.
+
+- [x] **1.6 Added during review (#129).** A Stores order holds Stores items only, checked on create and submit: the item-project check used to keep project material off it. Moving to Stores is refused while an item is on an open project order or RFQ, and is locked against raising an order for it at the same moment. The screen part of 3.5 came forward: Project leftovers has a "no project" view (`/materials/no-project/leftovers`), and the Stock notice and an item's **Left in the store** link to it.
 
 **Done when:** the server accepts any Projects item on any project order or RFQ.
 
@@ -70,10 +72,12 @@ Size M. Backend and mock.
 
 Size M. Frontend.
 
-- [ ] **2.1 New and edit purchase order.** The line picker offers every active Projects item once a project is chosen, not only that project's (`PurchaseOrderForm.tsx`). The New item drawer creates a Projects item with no project.
-- [ ] **2.2 New RFQ.** The same for RFQ lines (`RfqForm.tsx`).
-- [ ] **2.3 Order from an item's page.** **Order** shows for any active Projects item, whatever project it is tagged with, closed or not: the project is chosen on the order (`MaterialDetail.tsx`).
-- [ ] **2.4 Documents.** The purchase order and RFQ PDFs already take the project from the order; checked, not changed (`poDocument.ts`, `rfqDocument.ts`).
+- [x] **2.1 New and edit purchase order.** The line picker offers every active Projects item once a project is chosen, not only that project's (`PurchaseOrderForm.tsx`). The New item drawer creates a Projects item with no project.
+- [x] **2.2 New RFQ.** The same for RFQ lines (`RfqForm.tsx`).
+- [x] **2.3 Order from an item's page.** **Order** shows for any active Projects item, whatever project it is tagged with, closed or not: the project is chosen on the order (`MaterialDetail.tsx`).
+- [x] **2.4 Documents.** The purchase order and RFQ PDFs already take the project from the order; checked, not changed (`poDocument.ts`, `rfqDocument.ts`).
+
+- [x] **2.5 Added in Phase 2.** Adding a Projects item no longer needs a project (`projectForNewMaterial`); one created with opening stock (`POST /stock-items`) still does, as stock with no project can't be issued. Choosing an item tagged with an open project suggests the order's or RFQ's project while none is chosen, without fixing it; the edit page's project lock is gone too.
 
 **Done when:** Procurement can order or request quotes for any Projects item for any open project.
 
@@ -81,12 +85,14 @@ Size M. Frontend.
 
 Size M. Frontend.
 
-- [ ] **3.1 The item form.** A new Projects item has no Project field (`MaterialForm.tsx`). Editing an existing item leaves its project as it is and doesn't offer to change it.
-- [ ] **3.2 Materials.** The "Needs a project" panel (`NeedsProjectPanel.tsx`) and the Stores tab's "N Projects items need a project" banner go. The Projects tab lists items without a Project column or Project filter; its leftovers notice stays.
-- [ ] **3.3 A Projects item's page.** Its Identity card drops Project and "No project yet". Its **Left in the store** section, shown only while leftovers exist, names the project they belong to when the item has one.
-- [ ] **3.4 Projects page.** Each project's **Materials** link becomes **Orders**, opening Procurement's purchase orders for that project (`/purchase-orders?project=`), for those who see project orders.
-- [ ] **3.5 Leftovers with no project.** Wherever they are flagged, they lead to Project leftovers to be moved to Stores, not to "Give them their projects": the Stock page's project notice (`ProjectStockNotice`), the item's **Left in the store** (Move to Stores), and the Project leftovers page itself, which shows the "no project" group like a closed project's.
-- [ ] **3.6 Older links.** `/materials?section=PROJECTS&project=…` opens the Projects tab without a filter.
+- [x] **3.1 The item form.** A new Projects item has no Project field (`MaterialForm.tsx`). Editing an existing item leaves its project as it is and doesn't offer to change it.
+- [x] **3.2 Materials.** The "Needs a project" panel (`NeedsProjectPanel.tsx`) and the Stores tab's "N Projects items need a project" banner go. The Projects tab lists items without a Project column or Project filter; its leftovers notice stays.
+- [x] **3.3 A Projects item's page.** Its Identity card drops Project and "No project yet". Its **Left in the store** section, shown only while leftovers exist, names the project they belong to when the item has one.
+- [x] **3.4 Projects page.** Each project's **Materials** link becomes **Orders**, opening Procurement's purchase orders for that project (`/purchase-orders?project=`), for those who see project orders.
+- [x] **3.5 Leftovers with no project.** Wherever they are flagged, they lead to Project leftovers to be moved to Stores, not to "Give them their projects": the Stock page's project notice (`ProjectStockNotice`), the item's **Left in the store** (Move to Stores), and the Project leftovers page itself, which shows the "no project" group like a closed project's.
+- [x] **3.6 Older links.** `/materials?section=PROJECTS&project=…` opens the Projects tab without a filter.
+
+- [x] **3.7 How it turned out.** A Projects item's page shows an **Ordering** card (bought for a project on its purchase order, which says which) in place of the Project status card from the Stores and Procurement Separation follow-up; **Left in the store** names the project and its status the leftovers were received for. An open project's leftovers on the Stock notice link to that project's leftovers page. `NeedsProjectPanel.tsx` is removed; its server call (setting an item's project) stays in the API.
 
 **Done when:** nothing asks for, or warns about, a project on a catalogue item.
 
