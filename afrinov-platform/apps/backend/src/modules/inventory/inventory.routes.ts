@@ -13,6 +13,7 @@ import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { idempotentMutation } from '../../shared/idempotency.js';
+import { Errors } from '../../shared/errors.js';
 
 /**
  * The locations a report covers: with inside=true, the location and the ones
@@ -136,7 +137,15 @@ function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
 
-export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
+/**
+ * With procurement on, every delivery to the store is booked against an
+ * approved Stores order (`POST /goods-receipts`), so a receipt with no order
+ * is refused. Counter receipts are how stock arrives when procurement is off.
+ */
+export const COUNTER_RECEIPTS_OFF =
+  'Deliveries to the store are booked against an approved Stores order: choose the order on Receive stock.';
+
+export async function inventoryRoutes(app: FastifyInstance, opts: { procurementEnabled?: boolean } = {}): Promise<void> {
   app.get('/inventory-transactions', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as Record<string, string | undefined>;
     return InventoryService.queryHistory({
@@ -257,9 +266,10 @@ export async function inventoryRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Counter receipts work whether or not procurement is switched on.
+  // Counter receipts, with no order: only while procurement is switched off.
   app.post('/stock-receipts', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ReceiveInventory);
+    if (opts.procurementEnabled) throw Errors.validation(COUNTER_RECEIPTS_OFF);
     const parsed = stockReceiptSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({

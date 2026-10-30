@@ -124,6 +124,19 @@ describe('receiving stock over real HTTP', () => {
       ...extra,
     });
 
+    // Every delivery to the store is against an approved Stores order.
+    it('refuses a delivery with no order, by either way in', async () => {
+      const line = { materialId, locationId: into, quantity: 1 };
+      const counter = await api<{ error: { message: string } }>('POST', '/stock-receipts', { supplierId, deliveryRef: `NO-PO-${run}`, lines: [line] });
+      expect(counter.status).toBe(400);
+      expect(counter.body.error.message).toMatch(/booked against an approved Stores order/);
+      const receipt = await api<{ error: { message: string } }>('POST', '/goods-receipts', { supplierId, deliveryRef: `NO-PO-${run}`, lines: [line], post: true });
+      expect(receipt.status).toBe(400);
+      expect(receipt.body.error.message).toMatch(/booked against an approved Stores order/);
+      const { ledger } = await ledgerAndBalance(materialId, into);
+      expect(Number(ledger)).toBe(0);
+    });
+
     it('keeps the delivery date given', async () => {
       const order = await approvedOrder(5);
       const res = await api<{ receivedAt: string; status: string }>('POST', '/goods-receipts', body(order, { receivedAt: '2026-10-20' }));
@@ -544,25 +557,24 @@ describe('receiving stock over real HTTP', () => {
     // Receive stock once locked the item's balance before the receipt number,
     // and a receipt against an order the other way round, so the two could
     // deadlock (Postgres aborted one: "deadlock detected"). Every receiving
-    // path now locks the number first. Twelve of each, as fewer rarely overlap.
-    it('posts receipts against orders and stock receipts for one item at once, none failing', async () => {
+    // path now locks the number first. With procurement on, a delivery is
+    // always against an order, so the two ways in are a receipt against an
+    // order and receiving a whole order. Twelve of each, as fewer rarely overlap.
+    it('posts receipts against orders and whole-order receipts for one item at once, none failing', async () => {
       const each = 12;
-      const orders = await Promise.all(Array.from({ length: each }, () => approvedOrder(1)));
+      const orders = await Promise.all(Array.from({ length: each * 2 }, () => approvedOrder(1)));
       const { ledger: before } = await ledgerAndBalance(materialId, locationId);
 
       const results = await Promise.all([
-        ...orders.map((order) => api('POST', '/goods-receipts', {
+        ...orders.slice(0, each).map((order) => api('POST', '/goods-receipts', {
           purchaseOrderId: order.id, supplierId,
           lines: [{ materialId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }],
           post: true,
         })),
-        ...Array.from({ length: each }, (_, i) => api('POST', '/stock-receipts', {
-          supplierId, deliveryRef: `INV-MIX-${run}-${i}`,
-          lines: [{ materialId, locationId, quantity: 1 }],
-        })),
+        ...orders.slice(each).map((order) => api('POST', `/purchase-orders/${order.id}/receive`, { locationId })),
       ]);
 
-      expect(results.map((r) => r.status)).toEqual(Array(each * 2).fill(201));
+      expect(results.map((r) => r.status)).toEqual([...Array(each).fill(201), ...Array(each).fill(200)]);
       await expectStock(String(Number(before) + each * 2));
     });
   });

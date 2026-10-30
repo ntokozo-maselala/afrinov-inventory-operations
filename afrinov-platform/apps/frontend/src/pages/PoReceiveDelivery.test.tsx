@@ -1,9 +1,9 @@
 // One place to receive (Stores and Procurement Separation Roadmap): every
-// delivery to the store is booked on Receive stock. Against one of the
-// supplier's open Stores orders, the order's outstanding lines are filled in
-// and the receipt credits the order; the order is closed from the
-// confirmation, or closed short with the delivery. The order's page and its
-// old links send a delivery there.
+// delivery to the store is booked on Receive stock, and with procurement on
+// only against an approved Stores order. The order's outstanding lines are
+// filled in and the receipt credits the order; the order is closed from the
+// confirmation, or with the delivery when nothing more is coming. The order's
+// page and its old links send a delivery there.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Fragment } from 'react';
@@ -41,7 +41,12 @@ beforeEach(() => {
   after.status = 'PARTIALLY_RECEIVED';
   let booked = false;
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders?kind=stores') return [ORDER, { ...ORDER, id: 'po-2', number: 'AFRI-0400', status: 'CLOSED' }];
+    if (path === '/purchase-orders?kind=stores') return [
+      ORDER,
+      { ...ORDER, id: 'po-2', number: 'AFRI-0400', status: 'CLOSED' },
+      { ...ORDER, id: 'po-3', number: 'AFRI-0420', status: 'PENDING_APPROVAL' },
+      { ...ORDER, id: 'po-4', number: 'AFRI-0401', status: 'PARTIALLY_RECEIVED', supplierId: 's-2', supplier: { name: 'Other' }, expectedDeliveryDate: null },
+    ];
     if (path === '/purchase-orders/po-1') return booked ? { ...ORDER, status: after.status } : ORDER;
     if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
     if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydac', active: true }, { id: 's-2', name: 'Other', active: true }];
@@ -99,7 +104,7 @@ describe('Receive delivery on the order page', () => {
   });
 });
 
-describe('Receive stock against an order', () => {
+describe('Receive stock against an approved order', () => {
   const receiveStock = (url = '/stock/receive') => render(
     <MemoryRouter initialEntries={[url]}>
       <ToastProvider>
@@ -110,11 +115,9 @@ describe('Receive stock against an order', () => {
       </ToastProvider>
     </MemoryRouter>,
   );
-  async function chooseHydacOrder() {
-    await screen.findByRole('option', { name: 'Hydac' });
-    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-1' } });
-    fireEvent.change(await screen.findByLabelText(/Against order/), { target: { value: 'po-1' } });
-    await screen.findByText('What arrived against AFRI-0412');
+  async function chooseOrder(id = 'po-1') {
+    fireEvent.change(await screen.findByLabelText(/^Order/), { target: { value: id } });
+    await screen.findByText(/^What arrived against/);
   }
   async function fillAndReceive(ref = 'INV-77') {
     await screen.findAllByRole('option', { name: 'Yard' });
@@ -123,33 +126,46 @@ describe('Receive stock against an order', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
   }
 
-  it('offers the supplier’s open orders, with what each still owes', async () => {
+  it('offers only the store\u2019s approved orders still to come, with supplier and what each owes', async () => {
     receiveStock();
-    await screen.findByRole('option', { name: 'Hydac' });
-    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-1' } });
-    expect(await screen.findByRole('option', { name: /AFRI-0412: 2 lines outstanding, expected/ })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /AFRI-0412 · Hydac · 2 lines outstanding, expected/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'AFRI-0401 · Other · 2 lines outstanding' })).toBeInTheDocument();
+    // Not closed, not waiting for approval.
     expect(screen.queryByRole('option', { name: /AFRI-0400/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /Not against an order/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /AFRI-0420/ })).not.toBeInTheDocument();
+    // No receipt without an order: no supplier to pick, no free lines, no new items.
+    expect(screen.queryByLabelText(/^Supplier/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add another item' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
   });
 
-  it('asks which order the delivery is against before booking it', async () => {
+  it('asks for the order before booking anything', async () => {
     receiveStock();
-    await screen.findByRole('option', { name: 'Hydac' });
-    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-1' } });
-    await screen.findByLabelText(/Against order/);
+    await screen.findByRole('option', { name: /AFRI-0412/ });
     fireEvent.change(screen.getByLabelText(/Delivery note/), { target: { value: 'INV-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
-    expect(await screen.findByText(/This supplier has open orders/)).toBeInTheDocument();
+    expect(await screen.findByText('Choose the order this delivery is against.')).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('says when no approved order is waiting, and points to Order stock', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?kind=stores') return [{ ...ORDER, status: 'RECEIVED' }];
+      if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }];
+      return [];
+    });
+    receiveStock();
+    expect(await screen.findByText('No approved orders are waiting for delivery')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to Order stock' })).toHaveAttribute('href', '/stock/orders');
+    expect(screen.queryByRole('button', { name: 'Receive stock' })).not.toBeInTheDocument();
   });
 
   it('books what arrived, line by line, as a goods receipt against the order', async () => {
     receiveStock();
-    await chooseHydacOrder();
+    await chooseOrder();
+    expect(screen.getByText('Supplier: Hydac')).toBeInTheDocument();
     expect(screen.getByText('6 each outstanding')).toBeInTheDocument();
     expect(screen.getByLabelText('Line 1 quantity')).toHaveValue(6);
-    // An order's lines are the order's: no free lines or new items here.
-    expect(screen.queryByRole('button', { name: 'Add another item' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '2' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'None came' })[1]!);
     await fillAndReceive();
@@ -164,11 +180,12 @@ describe('Receive stock against an order', () => {
     expect(screen.queryByRole('button', { name: 'Close AFRI-0412' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open AFRI-0412' })).toHaveAttribute('href', '/stock/orders/po-1');
     expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockPost).not.toHaveBeenCalledWith('/stock-receipts', expect.anything(), expect.anything());
   });
 
   it('refuses more than is outstanding, or a line with nowhere to go', async () => {
     receiveStock();
-    await chooseHydacOrder();
+    await chooseOrder();
     fireEvent.change(screen.getByLabelText(/Delivery note/), { target: { value: 'INV-2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
     expect(await screen.findByText('Choose where each line is going.')).toBeInTheDocument();
@@ -182,7 +199,7 @@ describe('Receive stock against an order', () => {
   it('closes a completed order from the confirmation', async () => {
     after.status = 'RECEIVED';
     receiveStock();
-    await chooseHydacOrder();
+    await chooseOrder();
     await fillAndReceive();
     expect(await screen.findByText(/Everything on AFRI-0412 has arrived/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close AFRI-0412' }));
@@ -192,7 +209,7 @@ describe('Receive stock against an order', () => {
 
   it('closes the order short with the delivery when nothing more is coming, with a reason', async () => {
     receiveStock();
-    await chooseHydacOrder();
+    await chooseOrder();
     fireEvent.click(screen.getAllByRole('button', { name: 'None came' })[1]!);
     fireEvent.click(screen.getByRole('checkbox', { name: /Nothing more is coming/ }));
     await fillAndReceive();
@@ -204,11 +221,10 @@ describe('Receive stock against an order', () => {
     expect(await screen.findByText('AFRI-0412 is closed.')).toBeInTheDocument();
   });
 
-  // Qodo, PR #123: also when the same delivery completed the order.
   it('closes the order as asked when the delivery completes it', async () => {
     after.status = 'RECEIVED';
     receiveStock();
-    await chooseHydacOrder();
+    await chooseOrder();
     fireEvent.click(screen.getByRole('checkbox', { name: /Nothing more is coming/ }));
     fireEvent.change(screen.getByLabelText(/Why nothing more is coming/), { target: { value: 'All here' } });
     await fillAndReceive();
@@ -216,7 +232,6 @@ describe('Receive stock against an order', () => {
     expect(await screen.findByText('AFRI-0412 is closed.')).toBeInTheDocument();
   });
 
-  // Qodo, PR #123: a failed load of the orders keeps the link, with a retry.
   it('keeps the order a link names when the orders fail to load, and offers a retry', async () => {
     let fail = true;
     const base = mockGet.getMockImplementation()!;
@@ -240,12 +255,11 @@ describe('Receive stock against an order', () => {
     mockGet.mockImplementation(async (path: string) => {
       if (path === '/purchase-orders?kind=stores') return [ORDER];
       if (path === '/purchase-orders/po-1') return { ...ORDER, status: 'PARTIALLY_RECEIVED' };
-      if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydac', active: true }];
       if (path.startsWith('/locations')) return [{ id: 'loc-2', name: 'Yard', active: true }];
       return [];
     });
     receiveStock();
-    await chooseHydacOrder();
+    await chooseOrder();
     fireEvent.click(screen.getByRole('checkbox', { name: /Nothing more is coming/ }));
     fireEvent.change(screen.getByLabelText(/Why nothing more is coming/), { target: { value: 'Discontinued' } });
     await fillAndReceive();
@@ -257,38 +271,18 @@ describe('Receive stock against an order', () => {
   it('starts on the order a link names', async () => {
     receiveStock('/stock/receive?order=po-1');
     expect(await screen.findByText('What arrived against AFRI-0412')).toBeInTheDocument();
-    expect(screen.getByLabelText(/Supplier/)).toHaveValue('s-1');
-    expect(screen.getByLabelText(/Against order/)).toHaveValue('po-1');
+    expect(screen.getByLabelText(/^Order/)).toHaveValue('po-1');
   });
 
   it('says so when a link names an order with nothing left to receive', async () => {
-    receiveStock('/stock/receive?order=po-2');
+    receiveStock('/stock/receive?order=po-3');
     expect(await screen.findByText(/That order has nothing left to receive/)).toBeInTheDocument();
   });
 
-  it('books a counter receipt when the delivery isn’t against an order', async () => {
-    receiveStock();
-    await screen.findByRole('option', { name: 'Hydac' });
-    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-1' } });
-    fireEvent.change(await screen.findByLabelText(/Against order/), { target: { value: 'none' } });
-    expect(screen.getByRole('button', { name: 'Add another item' })).toBeInTheDocument();
-    expect(screen.queryByText(/What arrived against/)).not.toBeInTheDocument();
-  });
-
-  it('does not ask about a supplier with no open orders', async () => {
-    receiveStock();
-    await screen.findByRole('option', { name: 'Other' });
-    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-2' } });
-    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/purchase-orders?kind=stores'));
-    expect(screen.queryByLabelText(/Against order/)).not.toBeInTheDocument();
-  });
-
-  it('does not ask the buyer, who receives no orders', async () => {
+  it('is not open to the buyer, who receives no orders', async () => {
     auth.roles = ['PROCUREMENT'];
     receiveStock();
-    await screen.findByRole('option', { name: 'Hydac' });
-    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: 's-1' } });
-    expect(screen.queryByLabelText(/Against order/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Your role cannot receive the store.s orders/)).toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?kind=stores');
   });
 });

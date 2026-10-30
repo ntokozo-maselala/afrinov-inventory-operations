@@ -14,6 +14,7 @@ import { Icon } from '../components/Icon';
 import { MaterialForm } from '../components/MaterialForm';
 import { useToast } from '../components/Toast';
 import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
+import { canReceiveStock } from '../lib/orderKind';
 import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
@@ -52,7 +53,7 @@ export function MaterialDetail() {
   const canManage = useCanManageMaterials();
   // The same permissions as the Receive, Issue and Check out buttons elsewhere.
   const { hasPermission } = usePermissions();
-  const canReceive = hasPermission('inventory:receive');
+  const canReceive = canReceiveStock(hasPermission);
   const canIssue = hasPermission('inventory:issue');
   const canLend = hasPermission('tools:lend');
   // A Stores item is ordered by the store from Order stock, a Projects item by

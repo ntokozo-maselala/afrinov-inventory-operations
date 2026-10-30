@@ -317,7 +317,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     await materialRoutes(instance);
     await locationRoutes(instance);
     await stockItemRoutes(instance);
-    await inventoryRoutes(instance);
+    await inventoryRoutes(instance, { procurementEnabled });
     await toolRoutes(instance);
     await supplierRoutes(instance);
     if (procurementEnabled) {

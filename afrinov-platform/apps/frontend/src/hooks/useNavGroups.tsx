@@ -48,7 +48,8 @@ export function useNavGroups(): NavGroup[] {
         // `end`: Stock is not also lit on /stock/issue and the other action pages below it.
         { to: '/stock', label: 'Stock', end: true, icon: <Icon.Box /> },
         { to: '/stock/issue', label: 'Issue stock', icon: <Icon.ArrowRight />, permissions: ['inventory:issue'] },
-        { to: '/stock/receive', label: 'Receive stock', icon: <Icon.ArrowDown />, permissions: ['inventory:receive'] },
+        // With procurement on, a delivery is always against one of the store's orders.
+        { to: '/stock/receive', label: 'Receive stock', icon: <Icon.ArrowDown />, permissions: PROCUREMENT_ENABLED ? ['inventory:receive', 'orders:receive'] : ['inventory:receive'] },
         { to: '/stock/return', label: 'Return stock', icon: <Icon.Arrows />, permissions: ['inventory:return'] },
         { to: '/stock/count', label: 'Count stock', icon: <Icon.Check />, permissions: ['inventory:count'] },
         // The storeman orders stock for the shelf; Procurement buys for projects.

@@ -8,6 +8,8 @@ vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
+// Counter receipts: how stock arrives while procurement is off. With it on, see PoReceiveDelivery.test.tsx.
+vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
 vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => perms.canManageMaterials, usePermissions: () => ({ hasPermission: (p: string) => p !== 'suppliers:manage' || perms.canAddSupplier }) }));
 
 const { ReceiveStock } = await import('./ReceiveStock');

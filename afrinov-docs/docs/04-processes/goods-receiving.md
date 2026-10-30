@@ -4,23 +4,26 @@
 
 ## Inputs
 Delivery from a supplier with a delivery note or invoice reference
-(mirrors the workbook's `Delivery/Invoice No.` field); optionally an
-approved Purchase Order.
+(mirrors the workbook's `Delivery/Invoice No.` field). With procurement on,
+an approved Stores purchase order (ADR-022).
 
 ## Actors
-Store Controller, or Procurement (both hold `receive:inventory`).
+With procurement on, the Store Controller (and Admin): the server needs
+`receive:inventory` and the order to be the store's (`order:stores_stock`);
+the page also asks for `receive:purchase_order`. With procurement off, anyone with
+`receive:inventory` (Store Controller, Procurement).
 *Unverified:* who receives on shift in practice.
 
-## Two ways to receive
-**1. At the counter, without a purchase order** — the everyday case, always
-available.
-1. Receive stock page (`/stock/receive`): choose the supplier, enter the
-   delivery note or invoice number (required), the delivery date (defaults
-   to today; may not be in the future) and one to 50 lines of item,
-   location and quantity. A supplier or item not yet in the app can be
-   added from the form. If the supplier has open purchase orders, the page
-   asks whether the delivery is against one and links to receiving it on
-   that order (way 2).
+## How a delivery is received
+Which way depends on whether procurement is switched on
+(`PROCUREMENT_ENABLED`); Receive stock (`/stock/receive`) is the page for both.
+
+**1. Procurement off: at the counter, without a purchase order.**
+1. Receive stock: choose the supplier, enter the delivery note or invoice
+   number (required), the delivery date (a day in South Africa, defaults to
+   today; may not be in the future) and one to 50 lines of item, location
+   and quantity. A supplier or item not yet in the app can be added from
+   the form.
 2. `POST /api/v1/stock-receipts` → `StockReceiptService.receive`, in one
    transaction: checks supplier, items and locations are active; numbers
    the receipt `GR-YYYY-NNNN`; creates a `goods_receipts` row already
@@ -28,15 +31,18 @@ available.
    (`reference_type = 'GoodsReceipt'`); recomputes balances; writes a
    `RECEIVE_STOCK` audit entry.
 
-**2. Against a purchase order** — unless procurement is switched off
-(`PROCUREMENT_ENABLED=false`).
-1. The order's page (`/purchase-orders/:id`): **Receive** records what
-   arrived, line by line and to a location. It creates a goods receipt in
-   `SUBMITTED` (`POST /goods-receipts`; the order must be APPROVED or
-   PARTIALLY_RECEIVED) and posts it at once
-   (`POST /goods-receipts/:id/post`). Or "receive everything outstanding"
-   with `POST /purchase-orders/:id/receive`. There is no separate Goods
-   receipts page.
+**2. Procurement on: only against an approved Stores order** (ADR-022).
+1. Receive stock lists the store's orders that are APPROVED or
+   PARTIALLY_RECEIVED; there is no supplier to pick, no free lines and no new
+   item. Choosing one fills in its outstanding lines; what arrived is booked
+   line by line and to a location, with the delivery note and date, as a goods
+   receipt recorded and posted in one step (`POST /goods-receipts` with
+   `post: true` and an `Idempotency-Key`). The order's page and Order stock
+   open Receive stock with the order chosen (`?order=<id>`). Or "receive
+   everything outstanding" with `POST /purchase-orders/:id/receive`.
+   A receipt with no order is refused, by `POST /stock-receipts` and by
+   `POST /goods-receipts` without `purchaseOrderId` (400). When no order is
+   waiting, the page says so and links to Order stock.
 2. Posting inserts RECEIPT transactions, increments each order line's
    received quantity (never above the ordered quantity), marks the receipt
    `POSTED`, and moves the order to PARTIALLY_RECEIVED or RECEIVED — all in
@@ -63,7 +69,7 @@ GoodsReceipt (+ lines), InventoryTransaction(s), updated InventoryBalance,
 updated PurchaseOrder (if linked), audit entry (counter receipts only).
 
 ## Evidence
-- `afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx`, `PurchaseOrderDetail.tsx`
+- `afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx` (`ReceiveAgainstOrder`, `CounterReceipt`)
 - `afrinov-platform/apps/backend/src/modules/inventory/inventory.routes.ts` (`/stock-receipts`)
 - `afrinov-platform/apps/backend/src/modules/inventory/stock-receipt.service.ts`
 - `afrinov-platform/apps/backend/src/modules/procurement/goods-receipt.service.ts` — create, post

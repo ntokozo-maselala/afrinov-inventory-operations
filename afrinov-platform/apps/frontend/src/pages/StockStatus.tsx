@@ -12,6 +12,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
+import { canReceiveStock } from '../lib/orderKind';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { PageHeader } from '../components/PageHeader';
@@ -21,7 +22,6 @@ import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Alert } from '../components/Alert';
 import { Icon } from '../components/Icon';
-import { RoleGuard } from '../components/RoleGuard';
 import { StockStatusBadge } from '../components/StockStatusBadge';
 import { formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
@@ -91,6 +91,7 @@ export function StockStatus() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   // The re-order list is Stores stock, ordered by the store (Stores ordering roadmap).
+  const canReceive = canReceiveStock(hasPermission);
   const canOrder = PROCUREMENT_ENABLED && hasPermission('stores:order');
   // Kept for this tab, so the items left after one order are still ticked on return.
   const [tickedIds, setTickedIds] = useState<string[]>(() => (canOrder ? readTicked() : []));
@@ -159,11 +160,11 @@ export function StockStatus() {
               disabled={!items.data || toReorder === 0}
             />
             {/* When the order arrives, it is booked on Receive stock. */}
-            <RoleGuard permission="inventory:receive">
+            {canReceive && (
               <Link to="/stock/receive" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.ArrowDown size={14} /> Receive stock
               </Link>
-            </RoleGuard>
+            )}
             {canOrder && (
               <Link to="/stock/orders/new" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
                 <Icon.Cart size={14} /> New stock order

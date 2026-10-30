@@ -117,6 +117,13 @@ Added 30 Oct 2026. The order's Receive delivery and Receive stock did the same j
 - [x] **Closing.** A delivery that completes the order offers **Close AFRI-…** on the confirmation. When nothing more is coming, *close short* with a reason closes the order with the delivery: short if part-received, and also if that delivery completed it. The delivery date is a day in South Africa (today is booked as now); a later day is refused. Orders still close only when someone says so.
   Files: `ReceiveStock.tsx`, `PurchaseOrderDetail.tsx`, `StoresOrders.tsx`, `lib/orderKind.ts` (`receivePath`), `goods-receipt.service.ts`, `procurement.routes.ts`, `shared/idempotency.ts` (`idempotentMutation`, moved from `inventory.routes.ts`); tests in `PoReceiveDelivery.test.tsx`, `StoresOrders.test.tsx`, `procurement.real-http.test.ts`
 
+## Follow-up: Receive approved orders only
+
+Added 30 Oct 2026 (ADR-022). Receive stock still took counter receipts with no order.
+
+- [x] **Only approved Stores orders are received.** With procurement on, Receive stock lists the store's Approved and Partly received orders (with supplier and what each owes) and nothing else: no supplier to pick, no free lines, no New item or New supplier. When none is waiting it says so and links to Order stock. The server refuses a receipt with no order (`POST /stock-receipts`; `POST /goods-receipts` without `purchaseOrderId`), and so does the mock. The page is for those who receive orders (`receive:purchase_order`), so the menu item, Stock status's and an item page's Receive show only to the store controller and Admin. With procurement off, counter receipts are unchanged.
+  Files: `ReceiveStock.tsx` (`ReceiveAgainstOrder`, `CounterReceipt`), `lib/orderKind.ts` (`canReceiveStock`), `useNavGroups.tsx`, `StockStatus.tsx`, `MaterialDetail.tsx`, `inventory.routes.ts`, `procurement.routes.ts`, `server.ts`, `mock/mockApi.ts`; tests in `PoReceiveDelivery.test.tsx`, `ReceiveStock.test.tsx`, `Sidebar.test.tsx`, `mockReceiveOrdersOnly.test.ts`, `inventory.routes.test.ts`, `procurement.real-http.test.ts`
+
 ## Releasing
 
 - **Phase 2:** set an approval limit on every store controller (below).

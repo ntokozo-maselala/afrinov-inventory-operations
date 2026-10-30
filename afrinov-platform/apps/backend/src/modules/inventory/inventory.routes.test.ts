@@ -79,7 +79,8 @@ describe('inventory routes', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    app = await buildServer({ skipConfigValidation: true });
+    // Counter receipts are taken only while procurement is off.
+    app = await buildServer({ skipConfigValidation: true, procurementEnabled: false });
     mockedIssue.mockResolvedValue({ transactionIds: ['tx-1'] });
     mockedTransfer.mockResolvedValue({ outTransactionId: 'tx-out-1', inTransactionId: 'tx-in-1' });
     mockedAdjust.mockResolvedValue({ transactionId: 'tx-1' });
@@ -274,6 +275,18 @@ describe('inventory routes', () => {
       expect(res.statusCode).toBe(201);
       expect(res.json()).toEqual({ goodsReceiptId: 'gr-1', number: 'GR-2026-0001', transactionIds: ['t-1'] });
       expect(mockedReceive).toHaveBeenCalledWith({ ...receipt, receivedAt: '2026-10-01', actorId: 'user-store' }, undefined);
+    });
+
+    it('refuses a receipt with no order while procurement is on', async () => {
+      const withOrders = await buildServer({ skipConfigValidation: true, procurementEnabled: true });
+      try {
+        const res = await withOrders.inject({ method: 'POST', url: '/api/v1/stock-receipts', headers: authed('user-store', ['receive:inventory']), payload: receipt });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error.message).toMatch(/booked against an approved Stores order/);
+        expect(mockedReceive).not.toHaveBeenCalled();
+      } finally {
+        await withOrders.close();
+      }
     });
   });
 

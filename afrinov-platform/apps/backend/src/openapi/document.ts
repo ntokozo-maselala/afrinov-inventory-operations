@@ -306,7 +306,8 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/stock-receipts', tag: 'Stock movements', summary: 'Receive stock from a supplier',
     description: 'The supplier, delivery/invoice number, delivery date (defaults to now) and up to 50 lines, booked '
-      + 'all-or-nothing as a goods receipt with no purchase order. Works with procurement switched off. '
+      + 'all-or-nothing as a goods receipt with no purchase order. Only while procurement is switched off: with it on, '
+      + 'every delivery is booked against an approved Stores order (POST /goods-receipts) and this is refused with 400. '
       + 'Refused with 404 for an unknown supplier, material or location, and 400 for an inactive one.',
     permissions: [P.ReceiveInventory], body: stockReceiptSchema, success: 201, errors: [404],
   },
@@ -506,7 +507,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED), or with post: true record and post it in one step',
-    description: 'Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
+    description: 'Against an approved Stores order (purchaseOrderId is required: a receipt with no order is refused with 400). '
+      + 'Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
       + 'refused with 400 if still to come). Retry-safe with an Idempotency-Key header, as Receive stock sends: a '
       + 'repeat replays the first receipt, and the same key with other details is refused with 409.',
     procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404, 409],

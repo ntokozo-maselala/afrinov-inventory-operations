@@ -429,3 +429,30 @@ existing Projects stock stays issuable to its project. Migration
 `po-approval.ts` (`approvePermissionFor`), `procurement.service.ts`
 (`confirmDelivery`, `awaitingApproval`), `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
 `afrinov-docs/docs/13-project-management/roadmaps/stores-procurement-separation-roadmap.md`.
+
+### ADR-022 — The store receives only against approved Stores orders
+**Date:** 2026-10-30 · **Status:** Accepted · **Amends:** ADR-021
+
+**Context:** Receive stock booked a delivery against one of the store's
+orders, or, if not against one, as a counter receipt of any items. With
+ordering in place, a counter receipt let stock into the store that no one had
+ordered or approved.
+
+**Decision:** While procurement is switched on, stock is received into the
+store only against an approved Stores order (APPROVED or PARTIALLY_RECEIVED).
+Receive stock lists those orders and nothing else: no supplier to pick, no free
+lines, no new item. The server refuses a receipt with no order
+(`POST /stock-receipts`, and `POST /goods-receipts` without `purchaseOrderId`).
+Receiving a Stores order already needs `order:stores_stock`, so Procurement
+no longer receives; the page and its links show to those who receive orders
+(`receive:purchase_order`). With procurement off there are no orders, and
+counter receipts stay the way stock arrives.
+
+**Consequences:** An unplanned delivery (a cash purchase, extra stock) needs a
+Stores order raised and approved before it is received. Adjustments, returns,
+stock counts and opening balances are not receiving and are unchanged.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/inventory.routes.ts`
+(`COUNTER_RECEIPTS_OFF`), `procurement.routes.ts` (`POST /goods-receipts`),
+`afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx`,
+`afrinov-platform/apps/frontend/src/lib/orderKind.ts` (`canReceiveStock`).

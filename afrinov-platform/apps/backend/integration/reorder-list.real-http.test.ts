@@ -18,7 +18,8 @@ describe('stock status and re-order list over real HTTP', () => {
   let token: string;
 
   beforeAll(async () => {
-    server = await startServer();
+    // Stock is brought in with counter receipts, which need procurement off.
+    server = await startServer({ procurementEnabled: false });
     token = await login(server.port, ADMIN_EMAIL, requireAdminPassword());
     api = client(server.port, token);
     const m = await api<{ id: string }>('POST', '/materials', { sku, name: `Re-order disc ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: 100, unitCost: 42.05 });
