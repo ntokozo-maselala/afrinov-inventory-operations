@@ -1,7 +1,7 @@
 // The links from the setup pages (projects, recipients, suppliers) to what
 // happened with them: stock used and deliveries.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet, granted } = vi.hoisted(() => ({ mockGet: vi.fn(), granted: new Set<string>() }));
@@ -43,6 +43,19 @@ describe('links to stock used and deliveries', () => {
     await screen.findByText('Sabelo');
     expect(screen.getByRole('link', { name: 'This month' })).toHaveAttribute('href', '/reports/consumption?recipientId=r-1');
     expect(screen.queryByRole('link', { name: 'Return stock' })).not.toBeInTheDocument();
+  });
+
+  // Project on the Order Roadmap, Phase 3: a project's material is what its orders buy.
+  it("opens a project's orders, for those who see project orders, and no Materials link", async () => {
+    page(<Projects />);
+    await screen.findByText('Project AFRI-1325');
+    expect(screen.queryByRole('link', { name: 'Orders for AFRI-1325' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Materials for AFRI-1325' })).not.toBeInTheDocument();
+    cleanup();
+    granted.add('orders:view');
+    page(<Projects />);
+    expect(await screen.findByRole('link', { name: 'Orders for AFRI-1325' })).toHaveAttribute('href', '/purchase-orders?project=AFRI-1325');
+    granted.clear();
   });
 
   it('opens Return stock for a recipient, for those who can take returns', async () => {
