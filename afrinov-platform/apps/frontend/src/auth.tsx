@@ -19,7 +19,16 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, FRONTEND_ONLY, getToken, isApiError, setToken, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api/client';
+import {
+  api,
+  FRONTEND_ONLY,
+  getToken,
+  isApiError,
+  setToken,
+  PASSWORD_CHANGE_REQUIRED_EVENT,
+  SESSION_EXPIRED_EVENT,
+  type SessionExpiredDetail,
+} from './api/client';
 import { login as serviceLogin, type AuthUser } from './api/authService';
 
 export type { AuthUser } from './api/authService';
@@ -72,6 +81,10 @@ export interface AuthContextValue {
   sessionExpired: boolean;
   login: (email: string, password: string) => Promise<{ user: AuthUser; landingPath: string }>;
   logout: () => void;
+  /** End the session as expired (the sign-in page says so), e.g. after inactivity. */
+  expireSession: () => void;
+  /** Record that the user has chosen a new password; the server sent `user`. */
+  completePasswordChange: (user?: AuthUser | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -108,6 +121,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  // The server refused a request until the password is changed (an
+  // administrator reset it while this session was open). Mark the user, and
+  // the route guard takes them to the change-password screen.
+  useEffect(() => {
+    if (FRONTEND_ONLY) return;
+    const onChangeRequired = () => {
+      setUser((u) => {
+        if (!u || u.mustChangePassword) return u;
+        const next = { ...u, mustChangePassword: true };
+        writePersistedSession(next);
+        return next;
+      });
+    };
+    window.addEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, onChangeRequired);
+    return () => window.removeEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, onChangeRequired);
   }, []);
 
   // On mount, revalidate the session against the backend when a JWT is
@@ -173,9 +203,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setSessionExpired(false);
   }, []);
 
+  const expireSession = useCallback(() => {
+    setToken(null);
+    clearPersistedSession();
+    setUser(null);
+    setSessionExpired(true);
+  }, []);
+
+  const completePasswordChange = useCallback((fresh?: AuthUser | null) => {
+    setUser((u) => {
+      if (!u) return u;
+      const next = { ...u, ...(fresh ?? {}), mustChangePassword: false };
+      writePersistedSession(next);
+      return next;
+    });
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, sessionExpired, login, logout }),
-    [user, loading, sessionExpired, login, logout],
+    () => ({ user, loading, sessionExpired, login, logout, expireSession, completePasswordChange }),
+    [user, loading, sessionExpired, login, logout, expireSession, completePasswordChange],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

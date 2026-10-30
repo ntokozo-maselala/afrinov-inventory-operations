@@ -18,6 +18,8 @@ export interface AuthUser {
   email: string;
   name: string;
   roles: string[];
+  /** Set after an administrator's reset: the user must choose a new password first. */
+  mustChangePassword?: boolean;
 }
 
 export interface LoginResult {
@@ -111,9 +113,29 @@ export async function login(email: string, password: string): Promise<LoginResul
     if (isApiError(err)) {
       if (err.code === 'UNAUTHENTICATED') throw unauthenticated();
       if (err.code === 'VALIDATION_ERROR') throw validation(err.message);
+      // The client already holds fixed copy for these; say what happened
+      // rather than "unable to sign in right now".
+      if (err.code === 'ACCOUNT_LOCKED' || err.code === 'TOO_MANY_REQUESTS') {
+        throw { code: err.code, message: err.code === 'TOO_MANY_REQUESTS' ? 'Too many sign-in attempts from this network. Please wait a minute and try again.' : err.message } as ApiError;
+      }
     }
     throw { code: 'INTERNAL_ERROR', message: 'Unable to sign in right now. Please try again.' } as ApiError;
   }
+}
+
+/**
+ * Replace the signed-in user's password. The server ends every other session
+ * and returns a fresh token for this one, which is stored so the user stays
+ * signed in. In frontend-only mode there is no server: the change is accepted.
+ *
+ * @throws {ApiError} VALIDATION_ERROR when the current password is wrong or
+ *   the new one breaks the rules (the server's wording is kept).
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<AuthUser | null> {
+  if (FRONTEND_ONLY || DEMO_AUTH_ENABLED) return null;
+  const res = await api.post<{ token: string; user: AuthUser }>('/auth/password', { currentPassword, newPassword });
+  if (res.token) setToken(res.token);
+  return res.user;
 }
 
 /**

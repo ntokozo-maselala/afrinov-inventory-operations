@@ -230,6 +230,26 @@ describe('api/client.ts — API client utilities', () => {
       mod.setToken(null);
     });
 
+    it('announces a required password change, and keeps the session', async () => {
+      const mod = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'PASSWORD_CHANGE_REQUIRED', message: 'Please choose a new password before continuing.' } }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ));
+      mod.setToken('tok-current');
+      const changeRequired = vi.fn();
+      const expired = vi.fn();
+      window.addEventListener(mod.PASSWORD_CHANGE_REQUIRED_EVENT, changeRequired);
+      window.addEventListener(mod.SESSION_EXPIRED_EVENT, expired);
+      const err = await rejection(mod.api.get('/materials'));
+      window.removeEventListener(mod.PASSWORD_CHANGE_REQUIRED_EVENT, changeRequired);
+      window.removeEventListener(mod.SESSION_EXPIRED_EVENT, expired);
+      expect(err.code).toBe('PASSWORD_CHANGE_REQUIRED');
+      expect(changeRequired).toHaveBeenCalledTimes(1);
+      expect(expired).not.toHaveBeenCalled();
+      expect(mod.getToken()).toBe('tok-current');
+      mod.setToken(null);
+    });
+
     it('reports a timed-out mutation as an unconfirmed outcome, not a retryable timeout', async () => {
       // A POST may have committed server-side before the client gave up;
       // inviting a blind retry would risk posting the movement twice.

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAppShell } from '../hooks/useAppShell';
 import { Icon } from './Icon';
 import { Button } from './Button';
@@ -41,12 +42,16 @@ export function AppHeader({ user, onLogout }: AppHeaderProps) {
         <div className="flex-1" />
 
         <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-2 text-sm text-surface-700 dark:text-surface-700">
+          <Link
+            to="/account/password"
+            title="Change your password"
+            className="hidden md:flex items-center gap-2 text-sm text-surface-700 dark:text-surface-700 rounded-md px-1 hover:bg-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-100"
+          >
             <span className="h-8 w-8 rounded-full bg-surface-100 text-surface-700 flex items-center justify-center text-xs font-semibold dark:bg-surface-100 dark:text-surface-700">
               {user?.name?.split(' ').map((p: string) => p[0]).slice(0, 2).join('').toUpperCase() ?? '?'}
             </span>
             <span className="font-medium truncate max-w-[160px]">{user?.name}</span>
-          </div>
+          </Link>
           <Button variant="ghost" size="sm" onClick={onLogout} className="hidden sm:inline-flex">
             <Icon.Logout size={14} /> Sign out
           </Button>
