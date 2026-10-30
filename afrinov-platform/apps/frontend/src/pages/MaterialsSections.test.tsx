@@ -284,10 +284,11 @@ describe('Needs a project (Phase 3)', () => {
     expect(await within(panel).findByText(/OLD-PLATE: Project 1369 is closed/)).toBeInTheDocument();
   });
 
-  it('a Projects item with no project offers no Order or Issue on its page', async () => {
+  // Project on the Order Roadmap, Phase 2: it is ordered for a project chosen on the order, but not issued.
+  it('a Projects item with no project offers Order, but no Issue, on its page', async () => {
     detail('m-OLD-PLATE');
     await screen.findByText(/No project yet/);
-    expect(screen.queryByRole('link', { name: 'Order' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Order' })).toHaveAttribute('href', '/purchase-orders/new?materialIds=m-OLD-PLATE');
     expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
   });
 });

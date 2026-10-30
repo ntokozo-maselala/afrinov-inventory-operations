@@ -82,8 +82,9 @@ describe('creating Stores and Projects material', () => {
     expect(await storesItem('CON-1', { requiredStock: 20 })).toMatchObject({ section: 'STORES', projectNumber: null, requiredStock: 20 });
   });
 
-  it('refuses a Projects material without a project', async () => {
-    await expect(projectItem('1369-PIPE')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/needs the project/) });
+  // Project on the Order Roadmap, Phase 2: the order says which project it is for.
+  it('adds a Projects material with no project', async () => {
+    expect(await projectItem('PLATE-10MM')).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: null });
   });
 
   it('refuses Required Stock on a Projects material', async () => {

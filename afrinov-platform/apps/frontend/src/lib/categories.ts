@@ -28,7 +28,18 @@ export function sectionOf(category: string): MaterialSection {
   return category === PROJECTS_CATEGORY ? 'PROJECTS' : 'STORES';
 }
 
-/** Projects material with no project yet: kept, but not issued or ordered until it has one. */
+/**
+ * The project a Projects item was tagged with, while it is open: suggested as
+ * an order's or RFQ's project when none is chosen yet, never fixed by it (the
+ * order says which project its material is for: Project on the Order Roadmap).
+ * Blank for a Stores item, an untagged one, or one whose project has closed.
+ */
+export function suggestedProject(m: { category: string; projectNumber?: string | null; project?: { status?: string | null } | null }): string {
+  if (m.category !== PROJECTS_CATEGORY || !m.projectNumber) return '';
+  return m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED' ? '' : m.projectNumber;
+}
+
+/** Projects material with no project yet: its leftovers aren't issued, but moved to Stores. */
 export function needsProject(m: { category: string; projectNumber?: string | null }): boolean {
   return m.category === PROJECTS_CATEGORY && !m.projectNumber;
 }
