@@ -31,7 +31,7 @@ Operations
  `- Suppliers                     /suppliers
 
 Procurement                       (unless VITE_PROCUREMENT_ENABLED=false)
- |- Purchase orders               /purchase-orders      (orders:view)
+ |- Purchase orders               /purchase-orders      (orders:view; project orders only, ADR-021)
  |- New purchase order            /purchase-orders/new  (procurement:manage)
  `- RFQ                           /rfqs                 (procurement:manage)
 

@@ -58,7 +58,7 @@ variable for one command with `$env:NAME = "value"; <command>`.
    `npm run db:seed` writes only the bootstrap (permissions, roles, the admin
    and the settings catalog). `npm run db:seed:demo` adds the demo suppliers,
    materials, projects, orders and stock movements, and refuses unless
-   `NODE_ENV` is `development` or `test` (ADR-022): demo data never goes into
+   `NODE_ENV` is `development` or `test` (ADR-023): demo data never goes into
    a production database.
 
 To rotate the existing bootstrap admin password, set a new `SEED_ADMIN_PASSWORD`

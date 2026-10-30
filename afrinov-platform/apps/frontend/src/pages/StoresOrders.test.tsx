@@ -64,8 +64,8 @@ describe('Order stock', () => {
     expect(screen.getByRole('link', { name: 'AFRI-0203' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'AFRI-0201' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'AFRI-0204' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Receive AFRI-0202' })).toHaveAttribute('href', '/stock/orders/po-2?receive=1');
-    expect(screen.getByRole('link', { name: 'Receive AFRI-0203' })).toHaveAttribute('href', '/stock/orders/po-3?receive=1');
+    expect(screen.getByRole('link', { name: 'Receive AFRI-0202' })).toHaveAttribute('href', '/stock/receive?order=po-2');
+    expect(screen.getByRole('link', { name: 'Receive AFRI-0203' })).toHaveAttribute('href', '/stock/receive?order=po-3');
 
     fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: '' } });
     expect(screen.queryByRole('link', { name: 'Receive AFRI-0201' })).not.toBeInTheDocument();

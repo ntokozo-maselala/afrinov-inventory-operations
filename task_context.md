@@ -69,10 +69,11 @@ database; CI runs them on every backend pull request.
 - **Passwords:** at least 12 characters. Users change their own from the
   header; an administrator resets one under Settings → Users, and the user must
   then choose a new one before anything else. Five wrong passwords lock an
-  account for 15 minutes. Every sign-in attempt is audited (ADR-023).
-- **Nobody approves their own purchase order** (ADR-021).
+  account for 15 minutes. Every sign-in attempt is audited (ADR-024).
+- **Nobody approves a project order they raised** (ADR-022); the store
+  controller approves his own Stores orders within his limit (ADR-021).
 - **The seed writes only the bootstrap**; demo data comes from
-  `npm run db:seed:demo`, never in production (ADR-022).
+  `npm run db:seed:demo`, never in production (ADR-023).
 - **Roles:** `ADMIN`, `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`,
   `TECHNICIAN`, `VIEWER`. Server permissions are in
   `apps/backend/src/shared/permissions.ts`. In the UI, `useHasRole()` lets
@@ -81,13 +82,15 @@ database; CI runs them on every backend pull request.
   PARTIALLY_RECEIVED → RECEIVED → CLOSED, or CANCELLED (ADR-007). Procurement
   is on by default; `PROCUREMENT_ENABLED=false` (backend) and
   `VITE_PROCUREMENT_ENABLED=false` (frontend) switch it off (ADR-019).
-- **Ordering is split by kind** (ADR-020). An order with a project is
-  Procurement's (New purchase order, the purchase order permissions) and
-  holds that project's material only. An order without a project is a Stores
-  order, raised by the store controller from Store → Order stock with
-  `order:stores_stock`, and holds Stores items only. The server enforces it
-  (`requireForKind` in `procurement.routes.ts`); the screens follow
-  `lib/orderKind.ts`. Approval and receiving are the same for both.
+- **Stores and Projects are kept apart** (ADR-020, ADR-021). An order with a
+  project is Procurement's: raised on New purchase order, seen with
+  `view:purchase_order`, approved by approvers, and its delivery to site
+  confirmed on the order (no stock added). An order without a project is a
+  Stores order: raised, seen, approved (within the storeman's limit) and
+  received into stock by the store controller with `order:stores_stock`, in
+  Store → Order stock. Each side's orders are not found to the other. The
+  server enforces it (`kindsSeen`, `requireForOrder` in
+  `procurement.routes.ts`); the screens follow `lib/orderKind.ts`.
 - **Requests for quotation** go DRAFT → SENT → AWARDED, or CANCELLED from
   DRAFT or SENT (`rfq.service.ts`). Quotes are recorded while SENT; the
   award raises a draft purchase order in the same transaction. They are for

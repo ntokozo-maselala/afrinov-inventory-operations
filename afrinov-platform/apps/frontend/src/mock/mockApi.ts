@@ -123,6 +123,23 @@ function computeBalances(): Balance[] {
   return Array.from(map.values()).filter((b) => b.quantity !== 0);
 }
 
+/** Mirrors parseReceivedAt: the delivery date, refused if invalid or still to come (Qodo, PR #123). */
+function mockReceivedAt(value: string | undefined, now = new Date()): string {
+  if (!value) return now.toISOString();
+  const future = () => err('VALIDATION_ERROR', 'The delivery date cannot be in the future');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const d = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) throw err('VALIDATION_ERROR', 'Invalid delivery date');
+    if (value > today) throw future();
+    return value === today ? now.toISOString() : d.toISOString();
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw err('VALIDATION_ERROR', 'Invalid delivery date');
+  if (d.getTime() > now.getTime() + 5 * 60 * 1000) throw future();
+  return d.toISOString();
+}
+
 function err(code: string, message: string, details?: Record<string, unknown>): ApiError {
   return { code, message, details };
 }
@@ -1266,7 +1283,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const id = p.slice('/purchase-orders/'.length, -'/confirm-delivery'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.projectNumber == null) throw err('VALIDATION_ERROR', 'A Stores order is received into stock: use Receive delivery on the order, or Receive stock.');
+    if (po.projectNumber == null) throw err('VALIDATION_ERROR', 'A Stores order is received into stock: book its delivery on Receive stock.');
     if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', 'Only an approved or partly delivered purchase order can have its delivery confirmed');
     const b = (body ?? {}) as { lines?: Array<{ lineId: string; quantity: number }>; deliveryRef?: string; deliveredOn?: string };
     if (!b.lines?.length) throw err('VALIDATION_ERROR', 'Confirm what arrived on at least one line.');
@@ -1451,10 +1468,12 @@ function route(method: string, path: string, body?: unknown): unknown {
       supplierId: string;
       purchaseOrderId?: string;
       deliveryRef?: string;
+      receivedAt?: string;
       lines: Array<{ materialId: string; locationId: string; quantity: number; purchaseOrderLineId?: string }>;
       post?: boolean;
     };
     if (!b.supplierId || !b.lines?.length) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
+    const receivedAt = mockReceivedAt(b.receivedAt);
     if (!state.suppliers.find((s) => s.id === b.supplierId)) throw err('NOT_FOUND', 'Supplier not found');
     if (b.purchaseOrderId) {
       const po = state.purchaseOrders.find((p) => p.id === b.purchaseOrderId);
@@ -1486,7 +1505,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       supplierId: b.supplierId,
       deliveryRef: b.deliveryRef,
       status: 'SUBMITTED',
-      receivedAt: new Date().toISOString(),
+      receivedAt,
       lines: b.lines.map((l) => ({
         id: nextId('grl'),
         materialId: l.materialId,
@@ -1537,6 +1556,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = (body as { supplierId?: string; deliveryRef?: string; receivedAt?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }) ?? {};
     const deliveryRef = b.deliveryRef?.trim();
     if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');
+    const receivedAt = mockReceivedAt(b.receivedAt);
     const lines = b.lines ?? [];
     if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
     if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');
@@ -1553,7 +1573,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       supplierId: supplier.id,
       deliveryRef,
       status: 'POSTED',
-      receivedAt: b.receivedAt ? new Date(b.receivedAt).toISOString() : new Date().toISOString(),
+      receivedAt,
       lines: lines.map((l) => ({ id: nextId('grl'), materialId: l.materialId, locationId: l.locationId, quantity: String(l.quantity) })),
     };
     state.goodsReceipts.push(gr);

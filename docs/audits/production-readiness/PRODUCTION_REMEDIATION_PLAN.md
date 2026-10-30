@@ -11,12 +11,12 @@ the status table below.
 
 | Task | Status | What was done / what remains | Evidence |
 |---|---|---|---|
-| P0-1 Seed split | **Done** | Bootstrap-only `db:seed`; `db:seed:demo` refused in production; `SEED_ADMIN_PASSWORD` needed only to create the admin; CI proves both (ADR-022) | `src/db/seed.ts`, `seed-mode.ts` (+ tests), `scripts/check-bootstrap-only.ts`, `backend-ci.yml` |
+| P0-1 Seed split | **Done** | Bootstrap-only `db:seed`; `db:seed:demo` refused in production; `SEED_ADMIN_PASSWORD` needed only to create the admin; CI proves both (ADR-023) | `src/db/seed.ts`, `seed-mode.ts` (+ tests), `scripts/check-bootstrap-only.ts`, `backend-ci.yml` |
 | P0-2 Environments, backups, restore drill | **Open** | Needs a hosting decision, RPO/RTO and a drill. Nothing in the repository can close it | — |
 | P0-3 Deployment pipeline, rollback | **Open** | Needs a registry and target. Compose comments now point to separate migration steps | — |
 | P0-4 Close SEC-07 | **Open** | Operational: rotate or remove the account and record it. Cannot be done from code | `SECURITY_CONTROLS.md` SEC-07 |
-| P0-5 Password lifecycle | **Done** | Change, admin reset, forced change (also for the bootstrap admin), session cut-off, 12-character minimum, audit (ADR-023) | Migration `20260101000031`; `modules/identity/*`; `server.ts`; `pages/ChangePassword.tsx`; `integration/password-lifecycle.real-http.test.ts` |
-| P0-6 Segregation of duties | **Done — policy confirmation pending** | Creator cannot approve; auto-approve bounded by the submitter's authority; own orders left out of "Waiting for my approval" (ADR-021, *Proposed*) | `po-approval.ts`, `procurement.service.ts`, `integration/production-controls.real-http.test.ts` |
+| P0-5 Password lifecycle | **Done** | Change, admin reset, forced change (also for the bootstrap admin), session cut-off, 12-character minimum, audit (ADR-024) | Migration `20260101000032`; `modules/identity/*`; `server.ts`; `pages/ChangePassword.tsx`; `integration/password-lifecycle.real-http.test.ts` |
+| P0-6 Segregation of duties | **Done** | The creator of a project order cannot approve it; Stores orders keep ADR-021 (the store controller approves his own within his limit); auto-approve bounded by the submitter's authority; own project orders left out of "Waiting for my approval" (ADR-022) | `po-approval.ts`, `procurement.service.ts`, `integration/production-controls.real-http.test.ts` |
 | P1-1 PO row lock | **Done** | `FOR UPDATE` in `update`, `approve`, `submit`; concurrent test repeats 10 times | `integration/production-controls.real-http.test.ts` |
 | P1-2 Observability | **Partly done** | UUID request IDs (inbound IDs not adopted). Central logs, uptime check and alerts need hosting | `server.ts` `genReqId`; `server.test.ts` |
 | P1-3 Login hardening | **Done (code)** | Audit of every attempt; 5-failure / 15-minute lockout; `TRUST_PROXY`. Shared limiter store only needed with more than one replica | `identity.service.ts`, `config.ts` |
@@ -24,24 +24,24 @@ the status table below.
 | P1-5 Database roles | **Partly done** | Compose publishes PostgreSQL on loopback only. Separate runtime role needs the hosting database | `docker-compose.yml` |
 | P1-6 Last-admin guard | **Done** | 409 inside the transaction, serialised | `identity.service.ts` (+ tests) |
 | P1-7 CI E2E smoke | **Open** | Not started | — |
-| P2-1 CHECK constraints | **Done** | 10 constraints with violation preflight | Migration `20260101000032`; integration test |
+| P2-1 CHECK constraints | **Done** | 10 constraints with violation preflight | Migration `20260101000033`; integration test |
 | P2-3 Statement timeout | **Partly done** | `statement_timeout` 30 s, configurable. Pagination and baseline open | `shared/db.ts` (+ tests) |
 | P2-4 Constant-time login | **Done** | Dummy bcrypt comparison for unknown emails | `identity.service.ts` |
 | P2-6 Route-guard test | **Done** | Fails for any unauthenticated route not on the public list | `src/route-guard.test.ts` |
 | P2-8 Refuse `CORS_ALLOW_ANY` in production | **Done** | `loadConfig` throws | `config.ts` (+ tests) |
-| P2-9 Docs refresh | **Done** | `task_context.md`, AGENTS.md, backend README, `.env.example`, ops docs, ADR-021 to ADR-023 | — |
+| P2-9 Docs refresh | **Done** | `task_context.md`, AGENTS.md, backend README, `.env.example`, ops docs, ADR-022 to ADR-024 | — |
 | P2-2, P2-5, P2-7, P2-10, P3-* | **Open** | Not started | — |
 
-### Decisions to confirm
+### Decisions taken
 
-- **ADR-021 (segregation of duties)** is implemented with the rule proposed in
-  this plan. With one store controller, Stores orders now need an
-  administrator or a second store controller to approve them. Confirm the
-  rule with the business, or say which exceptions you want.
+- **ADR-022 (segregation of duties)** applies to project orders. Stores orders
+  follow ADR-021 (merged in #122): the store controller approves his own,
+  within the limit an admin set. Decided by the repository owner on
+  2026-10-30 when this branch was merged with main.
 
 ### Upgrade notes for existing databases
 
-- Migrations `20260101000031` (additive columns) and `20260101000032` (CHECK
+- Migrations `20260101000032` (additive columns) and `20260101000033` (CHECK
   constraints, with preflight) must be applied. The second refuses to run if
   existing rows break a rule, and lists the counts.
 - Existing accounts are unaffected until an administrator resets a password.
@@ -183,7 +183,7 @@ Stores-only launch with `PROCUREMENT_ENABLED=false`.
 - **Owner:** Business owner (policy) + Backend · **Size:** S–M ·
   **Authorisation:** policy decision, then code
 - **Work:**
-  1. Agree the rule with the business and record it as ADR-021. Suggested
+  1. Agree the rule with the business and record it as ADR-022. Suggested
      rule: the approver must differ from the creator, for both order kinds;
      ADMIN is not exempt.
   2. Enforce it in `approve()` inside the transaction.

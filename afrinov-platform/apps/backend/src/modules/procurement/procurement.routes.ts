@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { idempotentMutation } from '../../shared/idempotency.js';
 import { z } from 'zod';
 import { supplierIdSchema } from '../../shared/ids.js';
 import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService, kindOfOrder } from './procurement.service.js';
@@ -137,6 +138,8 @@ export const createGRSchema = z.object({
   purchaseOrderId: z.uuid().optional(),
   supplierId: supplierIdSchema,
   deliveryRef: z.string().optional(),
+  // The date on the delivery note, as Receive stock sends it; now when left out.
+  receivedAt: z.string().max(40).optional(),
   lines: z
     .array(
       z.object({
@@ -165,11 +168,28 @@ async function requireForKind(req: FastifyRequest, projectNumber: string | null 
 }
 
 /**
+ * Which kinds of order this user sees (Stores and Procurement Separation
+ * Roadmap): Stores orders with order:stores_stock, project orders with
+ * view:purchase_order. Each side's orders are not found to the other.
+ */
+async function kindsSeen(req: FastifyRequest): Promise<{ stores: boolean; projects: boolean }> {
+  return {
+    stores: await userHasPermission(req, PermissionCode.OrderStoresStock),
+    projects: await userHasPermission(req, PermissionCode.ViewPurchaseOrder),
+  };
+}
+
+/** Refuses an order the user can't see: not found, so they can't tell it exists. */
+async function requireSeesOrder(req: FastifyRequest, po: { projectNumber: string | null }): Promise<void> {
+  const seen = await kindsSeen(req);
+  if (!seen[kindOfOrder(po)]) throw Errors.notFound('PurchaseOrder');
+}
+
+/**
  * As requireForKind, for an existing order. Someone who may change neither
  * kind is refused before the order is looked up, so they can't learn which
  * orders exist; for an order that doesn't exist, the service answers 404.
- * A Stores order is the store's alone (Stores and Procurement Separation
- * Roadmap): to anyone else it is not found, so they can't tell it exists.
+ * An order of the other side's is not found.
  */
 async function requireForOrder(req: FastifyRequest, id: string, forProject: PermissionCodeValue): Promise<void> {
   if (!(await userHasPermission(req, forProject)) && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) {
@@ -177,15 +197,16 @@ async function requireForOrder(req: FastifyRequest, id: string, forProject: Perm
   }
   const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
   if (!po) return;
-  if (kindOfOrder(po) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) throw Errors.notFound('PurchaseOrder');
+  await requireSeesOrder(req, po);
   await requirePermission(req, kindOfOrder(po) === 'projects' ? forProject : PermissionCode.OrderStoresStock);
 }
 
-/** Viewing an order: as before, but a Stores order is not found to anyone outside the store. */
+/** Viewing an order: the store sees Stores orders, Procurement and approvers project orders. */
 async function requireViewOrder(req: FastifyRequest, id: string): Promise<void> {
-  await requirePermission(req, PermissionCode.ViewPurchaseOrder);
+  const seen = await kindsSeen(req);
+  if (!seen.stores && !seen.projects) await requirePermission(req, PermissionCode.ViewPurchaseOrder);
   const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
-  if (po && kindOfOrder(po) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) throw Errors.notFound('PurchaseOrder');
+  if (po) await requireSeesOrder(req, po);
 }
 
 // Suppliers are shared with inventory (stock items, reports), so they are
@@ -231,19 +252,19 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.get('/purchase-orders', { preHandler: [app.authenticate] }, async (req, reply) => {
     // The list exposes PO numbers, statuses, and line quantities — the same
     // data the detail endpoint guards. Requiring the permission here closes
-    // the enumeration gap (K6); VIEWER/APPROVER cannot list POs, matching
-    // their inability to open a PO detail.
-    await requirePermission(req, PermissionCode.ViewPurchaseOrder);
+    // the enumeration gap (K6): only those who see one kind or the other list.
+    const seen = await kindsSeen(req);
+    if (!seen.stores && !seen.projects) await requirePermission(req, PermissionCode.ViewPurchaseOrder);
     const parsed = listPOQuerySchema.safeParse(req.query ?? {});
     if (!parsed.success) {
       return reply.code(400).send({
         error: { code: 'VALIDATION_ERROR', message: 'Invalid purchase order filter', details: parsed.error.flatten() },
       });
     }
-    // Stores orders are listed only to the store; anyone else gets project orders.
-    const seesStores = await userHasPermission(req, PermissionCode.OrderStoresStock);
-    if (!seesStores && parsed.data.kind === 'stores') return [];
-    const kind = seesStores ? parsed.data.kind : 'projects';
+    // Each side lists only its own: Stores orders to the store, project orders to Procurement and approvers.
+    const asked = parsed.data.kind;
+    if (asked && !seen[asked]) return [];
+    const kind = seen.stores && seen.projects ? asked : seen.stores ? 'stores' : 'projects';
     if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req), kind);
     return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber, kind });
   });
@@ -362,16 +383,14 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.get('/goods-receipts', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewGoodsReceipt);
     const receipts = await GoodsReceiptService.list();
-    if (await userHasPermission(req, PermissionCode.OrderStoresStock)) return receipts;
-    return receipts.filter((gr) => !gr.purchaseOrder || kindOfOrder(gr.purchaseOrder) === 'projects');
+    const seen = await kindsSeen(req);
+    return receipts.filter((gr) => !gr.purchaseOrder || seen[kindOfOrder(gr.purchaseOrder)]);
   });
   app.get('/goods-receipts/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewGoodsReceipt);
     const id = (req.params as { id: string }).id;
     const gr = await GoodsReceiptService.getById(id);
-    if (gr.purchaseOrder && kindOfOrder(gr.purchaseOrder) === 'stores' && !(await userHasPermission(req, PermissionCode.OrderStoresStock))) {
-      throw Errors.notFound('GoodsReceipt');
-    }
+    if (gr.purchaseOrder && !(await kindsSeen(req))[kindOfOrder(gr.purchaseOrder)]) throw Errors.notFound('GoodsReceipt');
     return gr;
   });
 
@@ -387,10 +406,14 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     // Against an order: a Stores order is the store's (not found to anyone
     // else); a project order is refused by the service, as it goes to site.
     if (input.purchaseOrderId) await requireForOrder(req, input.purchaseOrderId, PermissionCode.ReceiveInventory);
-    const created = post
-      ? await GoodsReceiptService.receive(input, actorId(req))
-      : await GoodsReceiptService.create(input, actorId(req));
-    return reply.code(201).send(created);
+    // Retry-safe with an Idempotency-Key, as Receive stock sends one: a
+    // retried delivery replays the first receipt instead of booking it twice.
+    return idempotentMutation(req, reply, 'POST /goods-receipts', async (tx) => ({
+      statusCode: 201,
+      body: post
+        ? await GoodsReceiptService.receive(input, actorId(req), tx)
+        : await GoodsReceiptService.create(input, actorId(req), {}, tx),
+    }));
   });
 
   app.post('/goods-receipts/:id/post', { preHandler: [app.authenticate] }, async (req, reply) => {

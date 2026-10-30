@@ -37,9 +37,9 @@ Responsible areas are roles; assign named people before go-live.
 | B-5 | Every change has an audit record in the same transaction | PASS | AUD-01 fixed; `identity-audit-atomicity.real-http.test.ts` | Backend | — |
 | B-6 | VAT and order totals are correct and consistent | PASS | `po-pricing.ts` Decimal, half-up per line; unit-tested | Backend | — |
 | B-7 | Approval limits are enforced | PASS *(remediated)* | `approve()`; auto-approve now bounded by the submitter's limit | Backend / Business | — |
-| B-8 | Segregation of duties on approval | PASS *(remediated)* | Creator refused (ADR-021); integration test | Business + Backend | Confirm the ADR-021 policy |
+| B-8 | Segregation of duties on approval | PASS *(remediated)* | Project-order creator refused (ADR-022); Stores orders per ADR-021; integration test | Business + Backend | — |
 | B-9 | PO state changes are race-safe | PASS *(remediated)* | Row lock in update, approve and submit; concurrent integration test | Backend | — |
-| B-10 | Production database starts free of demo data | PASS *(remediated)* | Bootstrap-only seed; `db:check-bootstrap` in CI (ADR-022) | Backend / Ops | Run `db:check-bootstrap` on the real production DB |
+| B-10 | Production database starts free of demo data | PASS *(remediated)* | Bootstrap-only seed; `db:check-bootstrap` in CI (ADR-023) | Backend / Ops | Run `db:check-bootstrap` on the real production DB |
 | B-11 | Opening balances import once only | PASS | `opening-balance.service.ts` refuses a second import | Backend | — |
 | B-12 | Direct-to-site, in-transit and document management workflows | N/A (not built) | Roadmap scope | Product | Confirm they are out of scope for go-live |
 
@@ -53,7 +53,7 @@ Responsible areas are roles; assign named people before go-live.
 | SEC-4 | Every mutation needs a permission, checked on the server | PASS | Per-route scan: all POST/PUT/PATCH/DELETE call `requirePermission` / `requireForKind` | Backend | — |
 | SEC-5 | Reads are permission-scoped | PARTIAL | Several reads need authentication only | Backend | PRA-19 |
 | SEC-6 | Deactivation and role changes take effect immediately | PASS | DB lookup per request in `authorization.ts` | Backend | — |
-| SEC-7 | Password change and reset | PASS *(remediated)* | Change, admin reset, forced change, session cut-off (ADR-023) | Backend / Frontend | — |
+| SEC-7 | Password change and reset | PASS *(remediated)* | Change, admin reset, forced change, session cut-off (ADR-024) | Backend / Frontend | — |
 | SEC-8 | Login success and failure audited; lockout | PASS *(remediated)* | `Authentication` audit entries; 5 failures lock 15 min | Backend | — |
 | SEC-9 | Brute-force rate limit correct behind a proxy | NOT VERIFIED | `TRUST_PROXY` setting added; topology unknown | Platform | Set it for the real proxy chain |
 | SEC-10 | Session idle timeout enforced | PASS *(remediated)* | `IdleSignOut` reads the setting | Frontend | — |
@@ -73,7 +73,7 @@ Responsible areas are roles; assign named people before go-live.
 | D-1 | Migrations apply from empty | PASS | V8: 32 migrations; 34 after remediation | Backend | — |
 | D-2 | Schema matches migrations | PASS | V9 empty diff; CI `migration-drift` | Backend | — |
 | D-3 | Foreign keys complete | PASS | DATA-03 fixed | Backend | — |
-| D-4 | Business invariants backed by constraints | PASS *(remediated)* | 10 CHECK constraints (migration `20260101000032`); integration test | Backend | — |
+| D-4 | Business invariants backed by constraints | PASS *(remediated)* | 10 CHECK constraints (migration `20260101000033`); integration test | Backend | — |
 | D-5 | Migrations tested on a production-like copy | NOT VERIFIED | No staging | Ops | PRA-03 |
 | D-6 | Rollback strategy for schema changes | FAIL | Forward-only; no expand–contract procedure | Backend / Ops | PRA-03 |
 | D-7 | Backups automated | **FAIL** | None | Ops | PRA-02 |

@@ -18,10 +18,10 @@
 // failure rolls back both the movement and the key: a genuine retry after a
 // failed attempt is not mistaken for a duplicate.
 import { createHash } from 'node:crypto';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { prisma } from './db.js';
-import { ApiError } from './errors.js';
+import { ApiError, Errors } from './errors.js';
 
 /** The header a client sends to make a mutation retry-safe. */
 export const IDEMPOTENCY_HEADER = 'idempotency-key';
@@ -37,6 +37,7 @@ export type IdempotencyEndpoint =
   | 'POST /inventory-adjustments'
   | 'POST /stock-counts'
   | 'POST /stock-receipts'
+  | 'POST /goods-receipts'
   | 'POST /inventory-returns'
   | 'POST /inventory-transactions/:id/returns'
   | 'POST /inventory-transactions/:id/reversal';
@@ -192,4 +193,40 @@ export async function pruneIdempotencyKeys(now: Date = new Date()): Promise<numb
 export function sendIdempotent(reply: FastifyReply, result: IdempotentResult, replayed: boolean): FastifyReply {
   if (replayed) reply.header('Idempotency-Replayed', 'true');
   return reply.code(result.statusCode).send(result.body);
+}
+
+/**
+ * Run a mutating operation, making it retry-safe when the client sent an
+ * `Idempotency-Key` header. With a key, the operation and the stored key commit
+ * in one transaction, and a repeat replays the first response instead of
+ * posting the movement again (TD-019). Without a key, the behaviour is exactly
+ * as before: the operation opens and commits its own transaction.
+ *
+ * `run` receives the transaction to use (the idempotent one when a key was
+ * sent, otherwise undefined, so the service opens its own) and returns the
+ * status and body to send.
+ */
+export async function idempotentMutation(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  endpoint: IdempotencyEndpoint,
+  run: (tx: Prisma.TransactionClient | undefined) => Promise<{ statusCode: number; body: unknown }>,
+): Promise<FastifyReply> {
+  const read = readIdempotencyKey(req.headers as Record<string, unknown>);
+  if (!read.present) {
+    const fresh = await run(undefined);
+    return reply.code(fresh.statusCode).send(fresh.body);
+  }
+  if (!read.valid) {
+    // The caller asked for retry safety but the key cannot be stored. Refusing
+    // is safer than silently running unkeyed: a retry of an unkeyed write could
+    // post the movement twice.
+    throw Errors.validation('Idempotency-Key must be 1-200 printable ASCII characters');
+  }
+  const actorId = (req as unknown as { user: { id: string } }).user.id;
+  const outcome = await withIdempotency(
+    { actorId, endpoint, key: read.key, scope: req.url, requestBody: req.body },
+    (tx) => run(tx),
+  );
+  return sendIdempotent(reply, outcome, outcome.replayed);
 }

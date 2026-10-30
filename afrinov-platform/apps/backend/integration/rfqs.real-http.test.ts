@@ -633,7 +633,7 @@ describe('requests for quotation over real HTTP', () => {
       }
     });
 
-    it.each(['APPROVER', 'STORE_CONTROLLER'])('lets a %s open RFQs and their quotations, and change nothing', async (role) => {
+    it.each(['APPROVER'])('lets a %s open RFQs and their quotations, and change nothing', async (role) => {
       const user = await as(role);
       const draft = (await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] })).body;
       const rfq = (await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }], supplierIds: [supplierA] })).body;
@@ -656,7 +656,8 @@ describe('requests for quotation over real HTTP', () => {
       }
     });
 
-    it.each(['TECHNICIAN', 'VIEWER'])('keeps RFQs from a %s altogether', async (role) => {
+    // RFQs are Procurement's: the store orders its own stock without one (Stores and Procurement Separation Roadmap, Phase 4).
+    it.each(['TECHNICIAN', 'VIEWER', 'STORE_CONTROLLER'])('keeps RFQs from a %s altogether', async (role) => {
       const user = await as(role);
       const rfq = (await raise({ projectNumber, lines: [{ materialId: projectItem, quantity: 1 }] })).body;
       expect((await user('GET', '/rfqs')).status).toBe(403);

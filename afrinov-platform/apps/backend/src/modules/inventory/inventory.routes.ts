@@ -1,5 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { Prisma } from '@prisma/client';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 // Keep the pre-Zod-4 API contract: validate UUID shape without requiring RFC version bits.
@@ -13,13 +12,7 @@ import { StockCountService } from './stock-count.service.js';
 import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
-import { Errors } from '../../shared/errors.js';
-import {
-  withIdempotency,
-  readIdempotencyKey,
-  sendIdempotent,
-  type IdempotencyEndpoint,
-} from '../../shared/idempotency.js';
+import { idempotentMutation } from '../../shared/idempotency.js';
 
 /**
  * The locations a report covers: with inside=true, the location and the ones
@@ -141,41 +134,6 @@ export const reversalSchema = z.object({
 
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
-}
-
-/**
- * Run a mutating operation, making it retry-safe when the client sent an
- * `Idempotency-Key` header. With a key, the operation and the stored key commit
- * in one transaction, and a repeat replays the first response instead of
- * posting the movement again (TD-019). Without a key, the behaviour is exactly
- * as before: the operation opens and commits its own transaction.
- *
- * `run` receives the transaction to use (the idempotent one when a key was
- * sent, otherwise undefined, so the service opens its own) and returns the
- * status and body to send.
- */
-async function idempotentMutation(
-  req: FastifyRequest,
-  reply: FastifyReply,
-  endpoint: IdempotencyEndpoint,
-  run: (tx: Prisma.TransactionClient | undefined) => Promise<{ statusCode: number; body: unknown }>,
-): Promise<FastifyReply> {
-  const read = readIdempotencyKey(req.headers as Record<string, unknown>);
-  if (!read.present) {
-    const fresh = await run(undefined);
-    return reply.code(fresh.statusCode).send(fresh.body);
-  }
-  if (!read.valid) {
-    // The caller asked for retry safety but the key cannot be stored. Refusing
-    // is safer than silently running unkeyed: a retry of an unkeyed write could
-    // post the movement twice.
-    throw Errors.validation('Idempotency-Key must be 1-200 printable ASCII characters');
-  }
-  const outcome = await withIdempotency(
-    { actorId: actorId(req), endpoint, key: read.key, scope: req.url, requestBody: req.body },
-    (tx) => run(tx),
-  );
-  return sendIdempotent(reply, outcome, outcome.replayed);
 }
 
 export async function inventoryRoutes(app: FastifyInstance): Promise<void> {

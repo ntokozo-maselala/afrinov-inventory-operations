@@ -63,7 +63,9 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.CheckInTool,
     PermissionCode.ManageProjects,
     PermissionCode.ManageRecipients,
-    PermissionCode.ViewPurchaseOrder,
+    // No view:purchase_order: project orders and RFQs are Procurement's, and the
+    // store sees only its own Stores orders, through order:stores_stock
+    // (Stores and Procurement Separation Roadmap, Phase 4).
     PermissionCode.ReceivePurchaseOrder,
     // The storeman orders stock for the stores; Procurement buys for projects.
     PermissionCode.OrderStoresStock,

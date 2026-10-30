@@ -11,7 +11,7 @@
 -- left half-constrained. As with 20260101000027, Prisma then records the
 -- migration as failed: repair the named rows (through the application, by
 -- reversal or adjustment, never by editing the ledger), clear it with
--- `npx prisma migrate resolve --rolled-back 20260101000032_check_constraints`,
+-- `npx prisma migrate resolve --rolled-back 20260101000033_check_constraints`,
 -- and deploy again.
 DO $$
 DECLARE
@@ -41,7 +41,7 @@ BEGIN
 
   IF bad_balances + bad_po_lines + bad_orders + bad_receipt_lines + bad_rfq + bad_users > 0 THEN
     RAISE EXCEPTION
-      'Rows violate the new constraints: % negative balance(s), % purchase order line(s), % purchase order(s), % goods receipt line(s), % RFQ row(s), % user(s). Repair them, run prisma migrate resolve --rolled-back 20260101000032_check_constraints, then deploy again.',
+      'Rows violate the new constraints: % negative balance(s), % purchase order line(s), % purchase order(s), % goods receipt line(s), % RFQ row(s), % user(s). Repair them, run prisma migrate resolve --rolled-back 20260101000033_check_constraints, then deploy again.',
       bad_balances, bad_po_lines, bad_orders, bad_receipt_lines, bad_rfq, bad_users;
   END IF;
 

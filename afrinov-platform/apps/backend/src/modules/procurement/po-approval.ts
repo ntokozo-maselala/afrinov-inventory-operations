@@ -55,18 +55,31 @@ export function approvalBlock(po: OrderForApproval, limit: Num | null | undefine
 }
 
 /**
- * Segregation of duties (ADR-021, PRA-06): whoever raised an order cannot also
- * approve it, for either kind and for administrators too, so every order
- * commits company money on two people's say-so. Returns the reason, or null
- * when this user may approve.
+ * Segregation of duties on project orders (ADR-022, PRA-06): whoever raised a
+ * project order cannot also approve it, administrators included, so project
+ * spend is committed on two people's say-so. Stores orders are exempt: the
+ * store controller approves his own within the limit an admin set (ADR-021).
+ * Returns the reason, or null when this user may approve.
  */
-export function selfApprovalBlock(po: { createdById: string }, actorId: string): string | null {
+export function selfApprovalBlock(po: { createdById: string; projectNumber?: string | null }, actorId: string): string | null {
+  if (!po.projectNumber) return null;
   return po.createdById === actorId ? 'You raised this order, so someone else must approve it.' : null;
 }
 
 /** The permission that approves an order of this kind. */
 export function approvePermissionFor(kind: OrderKind) {
   return kind === 'stores' ? PermissionCode.OrderStoresStock : PermissionCode.ApprovePurchaseOrder;
+}
+
+/**
+ * Whether this user may approve Stores orders. A store controller approves
+ * the store's orders, his own included, only once an admin has set his
+ * approval limit (Stores and Procurement Separation Roadmap: a blank limit
+ * would otherwise mean any value, unchecked). Admin approves without one.
+ */
+export function approvesStores(u: { approvalLimit: unknown; roles?: Array<{ role: { name: string } }> }): boolean {
+  const roles = (u.roles ?? []).map((r) => r.role.name);
+  return u.approvalLimit !== null || !roles.includes('STORE_CONTROLLER') || roles.includes('ADMIN');
 }
 
 /** Active users who may approve orders of this kind, with their limits, most senior first. */
@@ -76,9 +89,10 @@ export async function listApprovers(kind: OrderKind = 'projects'): Promise<Appro
       active: true,
       roles: { some: { role: { permissions: { some: { permission: { code: approvePermissionFor(kind) } } } } } },
     },
-    select: { id: true, name: true, approvalLimit: true },
+    select: { id: true, name: true, approvalLimit: true, roles: { select: { role: { select: { name: true } } } } },
   });
   return users
+    .filter((u) => kind !== 'stores' || approvesStores(u))
     .map((u) => ({ id: u.id, name: u.name, approvalLimit: u.approvalLimit?.toString() ?? null }))
     .sort((a, b) => {
       if (a.approvalLimit === b.approvalLimit) return a.name.localeCompare(b.name);
@@ -88,11 +102,12 @@ export async function listApprovers(kind: OrderKind = 'projects'): Promise<Appro
     });
 }
 
-/** The approvers whose limit covers this order, leaving out whoever raised it. */
-export function approversFor(po: OrderForApproval & { createdById?: string }, approvers: Approver[]): Approver[] {
+/** The approvers whose limit covers this order, leaving out whoever raised a project order. */
+export function approversFor(po: OrderForApproval & { createdById?: string; projectNumber?: string | null }, approvers: Approver[]): Approver[] {
   const totals = orderTotals(po.lines, po.vatRate ?? 0);
   if (totals.unpricedLines > 0) return [];
-  return approvers.filter((a) => a.id !== po.createdById && withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
+  return approvers.filter((a) => !(po.createdById && selfApprovalBlock({ createdById: po.createdById, projectNumber: po.projectNumber }, a.id))
+    && withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
 }
 
 /** "Ask Simbongile Bantubani to approve it." or a fallback when nobody can. */

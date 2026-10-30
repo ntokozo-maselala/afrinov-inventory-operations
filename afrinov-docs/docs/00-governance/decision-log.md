@@ -388,38 +388,83 @@ permission to existing databases.
 `rfq.service.ts`, `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
 `afrinov-docs/docs/13-project-management/roadmaps/stores-ordering-roadmap.md`.
 
-### ADR-021 — Whoever raises a purchase order cannot approve it
-**Date:** 2026-10-30 · **Status:** Proposed — implemented, pending business confirmation
+---
 
-**Context:** Approval checked the approver's permission and limit only. The
-person who raised an order could approve it, so one person could commit
-company money with no second pair of eyes (PRA-06 in
-`docs/audits/production-readiness/`). For Stores orders this was the normal
-path: the permission that raises them also approves them. With
+### ADR-021 — Stores and Projects are kept apart, with no connections
+**Date:** 2026-10-29 · **Status:** Accepted · **Amends:** ADR-020
+
+**Context:** ADR-020 split who *raises* each kind of order, but the two sides
+still met: each could open the other's orders, Procurement's approvers
+approved Stores orders, and the store received deliveries against project
+orders. At Afrinov the two are different sides of the business: the store
+keeps stock for the workshop, and project material goes from the supplier
+straight to site.
+
+**Decision:** No connections between the two sides.
+- **Where:** a Stores order lives in Store → Order stock (`/stock/orders/:id`),
+  a project order in Procurement (`/purchase-orders/:id`); each opens only in
+  its own section.
+- **Who sees:** Stores orders only those with `order:stores_stock` (the store
+  controller and Admin); project orders and RFQs only those with
+  `view:purchase_order` (Procurement, approvers and Admin). The store
+  controller no longer holds `view:purchase_order`. Each side's orders are not
+  found (404) to the other, so neither can tell the other's exist.
+- **Who approves:** the storeman approves Stores orders, by value against his
+  own limit, including orders he raised. His limit is set in Settings → Users,
+  and until it is, he approves none (a blank limit would otherwise mean any
+  value, unchecked); above it, Admin approves. Approvers approve project
+  orders, as before.
+- **Delivery:** a Stores order is received into stock by the store; a project
+  order is never received into stock: Procurement confirms its delivery on
+  the order, line by line, and no stock is added.
+
+**Consequences:** Each role sees and does only its own side. Admin sees both.
+A store controller approves nothing until an admin sets his limit, so a
+limit is set on each at release. Projects items bought from now hold no stock;
+existing Projects stock stays issuable to its project. Migration
+`20260101000031` removes the store controller's `view:purchase_order`.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/procurement.routes.ts`
+(`kindsSeen`, `requireForOrder`, `requireViewOrder`, `confirm-delivery`),
+`po-approval.ts` (`approvePermissionFor`), `procurement.service.ts`
+(`confirmDelivery`, `awaitingApproval`), `afrinov-platform/apps/frontend/src/lib/orderKind.ts`,
+`afrinov-docs/docs/13-project-management/roadmaps/stores-procurement-separation-roadmap.md`.
+
+---
+
+### ADR-022 — Whoever raises a project order cannot approve it
+**Date:** 2026-10-30 · **Status:** Accepted · **Builds on:** ADR-021
+
+**Context:** Approval checked the approver's permission and limit only, so
+the person who raised a project order could approve it and commit project
+spend with no second pair of eyes (PRA-06 in
+`docs/audits/production-readiness/`). With
 `purchaseOrders.requireApprovalBeforeProcessing` off, submitting approved any
-order, of any value, as the submitter.
+order, of any value, as the submitter. An edit and an approval of the same
+order could also interleave (PRA-07).
 
-**Decision:** The approver must be a different person from the order's
-creator, for both kinds of order and for administrators. With approval
-switched off, submitting approves an order only when the submitter could
-have approved it anyway (they hold the approve permission for its kind and
-it is within their limit); otherwise it goes for approval as usual. An
-approval and an edit of the same order take a row lock, so an approval can
-never be checked against one total and land on another (PRA-07).
+**Decision:** The approver of a project order must be a different person from
+its creator, administrators included. Stores orders keep ADR-021: the store
+controller approves his own within the limit an admin set. With approval
+switched off, submitting approves an order only when the submitter could have
+approved it anyway (they hold the approve permission for its kind and it is
+within their limit); otherwise it goes for approval as usual. An approval and
+an edit of the same order take a row lock, so an approval can never be checked
+against one total and land on another.
 
-**Consequences:** Every order needs two people. A site with a single store
-controller has its Stores orders approved by an administrator or a second
-store controller. "Waiting for my approval" no longer lists a user's own
-orders, and the approval panel says why the creator cannot approve. Reverse
-this ADR only by an explicit business decision; the check is one function
-(`selfApprovalBlock`).
+**Consequences:** Every project order needs two people. "Waiting for my
+approval" no longer lists a user's own project orders, and the approval panel
+says why the creator cannot approve. Extending the rule to Stores orders is a
+business decision; the check is one function (`selfApprovalBlock`).
 
 **Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`
 (`selfApprovalBlock`), `procurement.service.ts` (`approve`, `approval`,
 `awaitingApproval`, `submit`, `update`),
 `integration/production-controls.real-http.test.ts`.
 
-### ADR-022 — The seed writes only the bootstrap; demo data never reaches production
+---
+
+### ADR-023 — The seed writes only the bootstrap; demo data never reaches production
 **Date:** 2026-10-30 · **Status:** Accepted
 
 **Context:** The container's start command runs the seed on every start, and
@@ -445,7 +490,9 @@ seed; the demo seed must fail in production).
 **Evidence:** `afrinov-platform/apps/backend/src/db/seed.ts`, `seed-mode.ts`,
 `scripts/check-bootstrap-only.ts`, `.github/workflows/backend-ci.yml`.
 
-### ADR-023 — Password lifecycle and sign-in controls
+---
+
+### ADR-024 — Password lifecycle and sign-in controls
 **Date:** 2026-10-30 · **Status:** Accepted
 
 **Context:** No one could change or reset a password in the product, the
@@ -475,7 +522,7 @@ of a session.
 **Evidence:** `afrinov-platform/apps/backend/src/modules/identity/`
 (`identity.service.ts`, `auth.routes.ts`, `user.routes.ts`,
 `password-policy.ts`), `src/server.ts` (`authenticate`), migration
-`20260101000031_password_lifecycle`,
+`20260101000032_password_lifecycle`,
 `afrinov-platform/apps/frontend/src/pages/ChangePassword.tsx`,
 `src/components/IdleSignOut.tsx`,
 `integration/password-lifecycle.real-http.test.ts`.

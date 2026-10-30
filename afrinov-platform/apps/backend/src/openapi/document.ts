@@ -446,14 +446,13 @@ export const OPERATIONS: Operation[] = [
   // Purchase orders and goods receipts (PROCUREMENT_ENABLED)
   {
     method: 'get', path: '/purchase-orders', tag: 'Purchase orders', summary: 'List purchase orders', procurement: true,
-    description: 'Stores orders (no project) are listed only to those with `order:stores_stock`; anyone else gets project orders. With awaitingMyApproval, the orders the user may approve now: Stores orders for the store, project orders for approvers.',
-    permissions: [P.ViewPurchaseOrder],
-    query: listPOQuerySchema, errors: [400],
+    description: 'Each side lists only its own: Stores orders (no project) to those with `order:stores_stock`, project orders to those with `view:purchase_order`; one of the two is required (403 otherwise). With awaitingMyApproval, the orders the user may approve now: Stores orders for the store, project orders for approvers.',
+    query: listPOQuerySchema, errors: [400, 403],
   },
   {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
-    description: 'A Stores order (no project) is not found (404) to anyone without `order:stores_stock`; so are its history and approval.',
-    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
+    description: 'A Stores order (no project) needs `order:stores_stock`, a project order `view:purchase_order`; to anyone without it the order is not found (404), and so are its history and approval.',
+    procurement: true, errors: [403, 404],
   },
   {
     method: 'post', path: '/purchase-orders', tag: 'Purchase orders', summary: 'Create a draft purchase order',
@@ -467,7 +466,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/purchase-orders/:id/history', tag: 'Purchase orders', summary: 'Status change history',
-    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
+    description: 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404).',
+    procurement: true, errors: [403, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/submit', tag: 'Purchase orders', summary: 'Submit a draft',
@@ -481,7 +481,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/purchase-orders/:id/approval', tag: 'Purchase orders', summary: 'Who may approve this order, and whether you can',
-    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [404],
+    description: 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404). A Stores order is approved by the store, a store controller only once his approval limit is set.',
+    procurement: true, errors: [403, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',
@@ -519,8 +520,10 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED), or with post: true record and post it in one step',
-    description: 'Stock does not change until the receipt is posted.',
-    procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404],
+    description: 'Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
+      + 'refused with 400 if still to come). Retry-safe with an Idempotency-Key header, as Receive stock sends: a '
+      + 'repeat replays the first receipt, and the same key with other details is refused with 409.',
+    procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404, 409],
   },
   {
     method: 'post', path: '/goods-receipts/:id/post', tag: 'Goods receipts', summary: 'Post a receipt into stock',

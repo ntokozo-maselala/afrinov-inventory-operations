@@ -8,14 +8,14 @@ Four phases that take every connection out between the **Stores** side of the bu
 
 It builds on the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (merged as #117), which split who *raises* each kind but still let each side see the other's orders and sent Stores orders to Procurement's approvers.
 
-**Status:** Phase 1 is in PR #119 and Phase 2 in PR #120. Phase 3 is built on `feature/stores-receiving` (branched from #120), not yet committed. Phase 4 is next.
+**Status:** All four phases built: Phase 1 in PR #119, Phase 2 in #120, Phase 3 in #121, and Phase 4 on `feature/stores-roles-docs` (branched from #121), not yet committed. Recorded as ADR-021.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Separate homes for each kind of order | M | Built |
 | 2 | Access and approval on the server | M | Built |
 | 3 | Receiving, and finishing project orders | M | Built |
-| 4 | Roles end to end and docs | S | Planned |
+| 4 | Roles end to end and docs | S | Built |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days.
 
@@ -43,7 +43,7 @@ Admin keeps access to both. The Director's access is decided after this roadmap.
 | Who sees Stores orders | Only those who order Stores stock: the storeman and Admin. Buyers and approvers don't | 29 Oct 2026 |
 | Who approves Stores orders | The storeman, on the order's page in Order stock | 29 Oct 2026 |
 | Project material at the workshop | It doesn't come there: it goes from the supplier straight to site, so the storeman doesn't receive it | 29 Oct 2026 |
-| Storeman's approval limit | He may approve Stores orders he raised himself, by value against his own limit. **Each storeman is given a limit** (for example R 50 000) in Settings → Users before Phase 2 is released; above it, Admin approves. Blank means no limit, which is how every storeman starts (Qodo, PR #120) | 29 Oct 2026 |
+| Storeman's approval limit | He may approve Stores orders he raised himself, by value against his own limit. **Each storeman is given a limit** (for example R 50 000) in Settings → Users; above it, Admin approves. Until his limit is set he approves no Stores orders: a blank limit would otherwise mean any value, unchecked (Qodo, PRs #120 and #122) | 29 Oct 2026 |
 | How a project order is finished | Procurement **confirms delivery** on the order, line by line, from the supplier's delivery note or the site's confirmation; no stock is added. (Not chosen: receiving it into a site location; the buyer closing it with no confirmation) | 29 Oct 2026 |
 | Orders from before | Untouched: Stores orders already approved by an approver stay approved; old links redirect to each order's own section | Proposed |
 
@@ -103,14 +103,28 @@ Tests: `procurement.real-http.test.ts` (a buyer confirms part, then the rest, an
 
 Size S. Tests and docs.
 
-- [ ] **4.1 Roles.** Over real HTTP and on screen: the storeman raises, approves and receives Stores orders and never sees a project order; Procurement and approvers never see a Stores order; Admin sees both.
-- [ ] **4.2 Docs.** ADR-021 records the separation and amends ADR-020 (each side no longer sees the other's orders; the storeman approves Stores orders). Also the purchase order lifecycle, the role table, the menu and page inventory, `task_context.md`, and the Stores Ordering Roadmap.
+- [x] **4.1 Roles.** Over real HTTP and on screen: the storeman raises, approves and receives Stores orders and never sees a project order or an RFQ; Procurement and approvers never see a Stores order; Admin sees both. To close the last gap, the store controller no longer holds `view:purchase_order` (migration `20260101000031`): viewing, listing and changing an order follow its kind, and each side's orders are *not found* to the other. On screen, the storeman's menu has no Procurement section.
+  Files: `shared/permissions.ts`, `procurement.routes.ts` (`kindsSeen`), `hooks/usePermissions.ts`; tests in `procurement.real-http.test.ts`, `rfqs.real-http.test.ts`, `permissions.test.ts`, `Sidebar.test.tsx`, `usePermissions.test.tsx`
+- [x] **4.2 Docs.** ADR-021 records the separation and amends ADR-020 (each side no longer sees the other's orders; the storeman approves Stores orders; Procurement confirms a project order's delivery). Also the change log, the purchase order lifecycle (the two kinds, side by side), the role table, the resource model, the menu and page inventory, `task_context.md`, the product roadmap and the Stores Ordering Roadmap.
 
 **Done when:** each role sees only its own side of the business.
 
+## Follow-up: Receive stock, the one place to receive
+
+Added 30 Oct 2026. The order's Receive delivery and Receive stock did the same job in two places.
+
+- [x] **Receive stock books every delivery to the store.** A supplier with open Stores orders is asked which order the delivery is against, or *Not against an order*. Against an order, its outstanding lines are filled in (each going where that item is kept now) and the receipt credits the order (`POST /goods-receipts`, posted at once, with the delivery date and an `Idempotency-Key`, now honoured by that endpoint). The order's **Receive delivery**, Order stock's **Receive** and older `?receive=1` links open Receive stock with the order chosen (`?order=<id>`); the order page's dialog is gone.
+- [x] **Closing.** A delivery that completes the order offers **Close AFRI-…** on the confirmation. When nothing more is coming, *close short* with a reason closes the order with the delivery: short if part-received, and also if that delivery completed it. The delivery date is a day in South Africa (today is booked as now); a later day is refused. Orders still close only when someone says so.
+  Files: `ReceiveStock.tsx`, `PurchaseOrderDetail.tsx`, `StoresOrders.tsx`, `lib/orderKind.ts` (`receivePath`), `goods-receipt.service.ts`, `procurement.routes.ts`, `shared/idempotency.ts` (`idempotentMutation`, moved from `inventory.routes.ts`); tests in `PoReceiveDelivery.test.tsx`, `StoresOrders.test.tsx`, `procurement.real-http.test.ts`
+
+## Releasing
+
+- **Phase 2:** set an approval limit on every store controller (below).
+- **Phase 4:** apply migration `20260101000031` (`npx prisma migrate deploy`): it removes the store controller's `view:purchase_order`.
+
 ## Releasing Phase 2
 
-Set an approval limit on every store controller in **Settings → Users** before Phase 2 is deployed. Until then a storeman's limit is blank, which means he may approve any Stores order, including his own.
+Set an approval limit on every store controller in **Settings → Users** when Phase 2 is deployed. Until his limit is set, a store controller approves no Stores orders (from Phase 4, which closes the gap Qodo found on #122: before it, a blank limit meant any value), and Admin approves them meanwhile.
 
 ## Before each pull request
 

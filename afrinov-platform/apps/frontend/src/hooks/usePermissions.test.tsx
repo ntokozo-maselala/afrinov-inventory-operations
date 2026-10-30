@@ -180,7 +180,7 @@ describe('usePermissions — the role check sheet', () => {
     STORE_CONTROLLER: [
       'materials:manage', 'materials:create', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
       'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage',
-      'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:view', 'orders:receive', 'receipts:view',
+      'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:receive', 'receipts:view',
       // Stores orders: those without a project (Stores ordering roadmap).
       'stores:order',
     ],

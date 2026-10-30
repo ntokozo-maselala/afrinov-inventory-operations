@@ -626,8 +626,8 @@ on that branch:
 | `npm run test:integration` | 20 files / 181 tests pass, none skipped |
 
 **Resolved:** PRA-01, PRA-05, PRA-07, PRA-09, PRA-11, PRA-13 (ARCH-01),
-PRA-14, PRA-16, PRA-19, SEC-04. **Implemented, policy confirmation pending:**
-PRA-06 (ADR-021). **Partly resolved:** PRA-08 (unique request IDs; no central
+PRA-14, PRA-16, PRA-19, SEC-04, and PRA-06 (ADR-022: no self-approval of
+project orders; Stores orders follow ADR-021). **Partly resolved:** PRA-08 (unique request IDs; no central
 logging or alerting yet), PRA-10 (no SPA CSP yet), PRA-12 (Compose on
 loopback; no separate DB role yet), PRA-18 (statement timeout; no pagination
 or baseline yet), SEC-05 (`TRUST_PROXY` setting).
@@ -640,7 +640,7 @@ blockers cannot be closed from the repository:
    rehearsed rollback.
 3. PRA-04: SEC-07 credential rotation not evidenced.
 
-Once these three are closed with evidence, and ADR-021 is confirmed, the
+Once these three are closed with evidence, the
 system can be re-assessed for a **conditionally production ready** verdict.
 The condition would be the P1 operational items: central logs and alerts, a
 SPA CSP, a separate DB role, and E2E smoke tests in CI.

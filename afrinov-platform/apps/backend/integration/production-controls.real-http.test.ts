@@ -1,5 +1,5 @@
 // Real-HTTP + real-database tests for the controls added by the production
-// readiness remediation: segregation of duties on approval (ADR-021, PRA-06),
+// readiness remediation: segregation of duties on approval (ADR-022, PRA-06),
 // the order-row lock that keeps an edit and an approval from interleaving
 // (PRA-07), and the database CHECK constraints behind the ledger and order
 // invariants (PRA-14).

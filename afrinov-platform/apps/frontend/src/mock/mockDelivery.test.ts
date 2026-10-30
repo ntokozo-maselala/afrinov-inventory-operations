@@ -18,6 +18,25 @@ async function approvedProjectOrder(): Promise<Order> {
   return api.get<Order>(`/purchase-orders/${po.id}`);
 }
 
+describe('mock: the delivery date of a receipt', () => {
+  const receipt = (receivedAt: string) => ({ supplierId: 'sup-1', deliveryRef: 'INV-1', receivedAt, lines: [{ materialId: 'mat-1', locationId: 'loc-1', quantity: 1 }] });
+  const tomorrow = new Date(Date.now() + 36 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+
+  // Qodo, PR #123: as the server checks it.
+  it('refuses a day still to come, or a date that is not one, by either way in', async () => {
+    for (const path of ['/goods-receipts', '/stock-receipts']) {
+      expect(await messageOf(api.post(path, receipt(tomorrow)))).toMatch(/cannot be in the future/);
+      expect(await messageOf(api.post(path, receipt('2026-02-31')))).toMatch(/Invalid delivery date/);
+    }
+  });
+
+  it('keeps an earlier day', async () => {
+    const saved = await api.post<{ number: string }>('/stock-receipts', receipt('2026-10-01'));
+    const rows = await api.get<Array<{ number: string; receivedAt: string }>>('/stock-receipts');
+    expect(rows.find((r) => r.number === saved.number)?.receivedAt.slice(0, 10)).toBe('2026-10-01');
+  });
+});
+
 describe('mock: delivery of a project order', () => {
   it('confirms what arrived, line by line, then in full', async () => {
     const po = await approvedProjectOrder();

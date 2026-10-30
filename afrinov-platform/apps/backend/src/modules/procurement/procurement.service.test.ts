@@ -49,7 +49,7 @@ const db = {
   audit: [] as AuditRow[],
   settings: new Map<string, SettingRow>(),
   projects: new Map<string, { projectNumber: string; active: boolean; status?: string }>(),
-  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean; canApproveStores?: boolean }>(),
+  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean; canApproveStores?: boolean; roles?: Array<{ role: { name: string } }> }>(),
 };
 let poCounter = 0;
 let lineCounter = 0;
@@ -876,9 +876,11 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect(await PurchaseOrderService.approve(id, 'u-sb')).toMatchObject({ status: 'APPROVED' });
   });
 
-  it('never lets whoever raised an order approve it, whatever their limit (ADR-021)', async () => {
+  it('never lets whoever raised a project order approve it, whatever their limit (ADR-022)', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }] }, 'u-sb');
+    db.projects.set('1369', { projectNumber: '1369', active: true, status: 'ACTIVE' });
+    db.materials.set('pipe-1369', { id: 'pipe-1369', sku: '1369-PIPE', name: 'Pipe', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1369' });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', projectNumber: '1369', vatRate: 15, lines: [{ materialId: 'pipe-1369', orderedQty: 1, unitPrice: 100 }] }, 'u-sb');
     await PurchaseOrderService.submit(po.id, 'u-sb');
     await expect(PurchaseOrderService.approve(po.id, 'u-sb')).rejects.toMatchObject({
       statusCode: 403, message: 'You raised this order, so someone else must approve it. Ask Ona Moloane to approve it.',
@@ -887,6 +889,15 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect(await PurchaseOrderService.approval(po.id, 'u-sb')).toMatchObject({
       canApprove: false, reason: 'You raised this order, so someone else must approve it.', approvers: [{ name: 'Ona Moloane' }],
     });
+    expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
+  });
+
+  it('lets the store approve a Stores order it raised, within its limit (ADR-021)', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }] }, 'u-ona');
+    await PurchaseOrderService.submit(po.id, 'u-ona');
+    expect(await PurchaseOrderService.approval(po.id, 'u-ona')).toMatchObject({ canApprove: true, reason: null });
+    expect((await PurchaseOrderService.awaitingApproval('u-ona', 'stores')).map((p) => p.id)).toContain(po.id);
     expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
   });
 
@@ -947,6 +958,19 @@ describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)',
     expect(panel.approvers.map((a) => a.id)).toContain('u-store');
     expect(panel.approvers.map((a) => a.id)).not.toContain('u-proc');
     expect(await PurchaseOrderService.approval(stores, 'u-proc')).toMatchObject({ canApprove: false });
+  });
+
+  // Qodo, PR #122: a blank limit would mean any value, unchecked.
+  it('lets a store controller approve Stores orders only once his limit is set', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const storeman = { role: { name: 'STORE_CONTROLLER' } };
+    db.users.set('u-new', { id: 'u-new', name: 'New storeman', approvalLimit: null, canApprove: false, canApproveStores: true, roles: [storeman] });
+    const stores = await submitted(1000);
+    expect(await PurchaseOrderService.awaitingApproval('u-new')).toEqual([]);
+    expect(await PurchaseOrderService.approval(stores, 'u-new')).toMatchObject({ canApprove: false });
+    await expect(PurchaseOrderService.approve(stores, 'u-new')).rejects.toMatchObject({ code: 'FORBIDDEN', message: expect.stringMatching(/approval limit isn't set yet/) });
+    db.users.set('u-new', { ...db.users.get('u-new')!, approvalLimit: new Prisma.Decimal(5000) });
+    expect(await PurchaseOrderService.approve(stores, 'u-new')).toMatchObject({ status: 'APPROVED' });
   });
 
   it('sends an approved order back for approval when an edit takes it past the approver\'s limit', async () => {

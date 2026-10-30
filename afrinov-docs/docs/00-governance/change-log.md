@@ -143,6 +143,7 @@
 
 | 2026-10-28 | `00-governance/change-log.md`, `09-frontend/page-inventory.md`, `11-testing/test-traceability.md` | Corrected: the Stores Stock table's threshold column is labelled **Required**; recorded its user-facing regression test | Engineering |
 | 2026-10-29 | `00-governance/decision-log.md`, `04-processes/purchase-order-lifecycle.md`, `08-api/authorization.md`, `08-api/resource-model.md`, `09-frontend/information-architecture.md`, `09-frontend/page-inventory.md`, `01-product/product-roadmap.md`, procurement and RFQ roadmaps, `task_context.md` | Added ADR-020: the store orders Stores stock from Store → Order stock (`order:stores_stock`), Procurement buys for projects; RFQs are project-only | Engineering (Stores ordering roadmap) |
+| 2026-10-29 | `00-governance/decision-log.md`, `04-processes/purchase-order-lifecycle.md`, `08-api/authorization.md`, `08-api/resource-model.md`, `09-frontend/information-architecture.md`, `09-frontend/page-inventory.md`, `01-product/product-roadmap.md`, Stores ordering and separation roadmaps, `task_context.md` | Added ADR-021 (amends ADR-020): Stores and Projects kept apart; each side sees only its own orders, the storeman approves Stores orders, Procurement confirms a project order's delivery and no stock is added | Engineering (Stores and Procurement Separation Roadmap) |
 
 Add one row per meaningful revision (not typo fixes). For architecture-level
 changes, also add an ADR in `decision-log.md` and reference its ID here.

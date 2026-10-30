@@ -23,7 +23,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
-import { approvalBlock, approversFor, listApprovers, selfApprovalBlock, whoToAsk } from './po-approval.js';
+import { approvalBlock, approversFor, approvesStores, listApprovers, selfApprovalBlock, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { checkProjectMaterial, refuseStoresOnProjectOrder, refuseUnassigned } from '../inventory/material-section.js';
 
@@ -387,7 +387,7 @@ export const PurchaseOrderService = {
         where: { status: 'PENDING_APPROVAL', projectNumber: k === 'stores' ? null : { not: null } },
         include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
       });
-      // Not the orders they raised themselves: someone else approves those (ADR-021).
+      // Not project orders they raised themselves: someone else approves those (ADR-022).
       waiting.push(...orders.filter((po) => !selfApprovalBlock(po, actorId) && !approvalBlock(po, me.approvalLimit)));
     }
     return waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(withTotals);
@@ -746,7 +746,11 @@ export const PurchaseOrderService = {
         throw Errors.forbidden(`${selfBlock} ${whoToAsk(names)}`);
       }
       // The approver's limit must cover the order total (rand, including VAT).
-      const actor = await tx.user.findUnique({ where: { id: actorId }, select: { approvalLimit: true } });
+      const actor = await tx.user.findUnique({ where: { id: actorId }, select: { approvalLimit: true, roles: { select: { role: { select: { name: true } } } } } });
+      // A store controller approves Stores orders only once his limit is set (Qodo, PR #122).
+      if (kindOfOrder(po) === 'stores' && actor && !approvesStores(actor)) {
+        throw Errors.forbidden("Your approval limit isn't set yet, so you can't approve stock orders. Ask an admin to set it under Settings → Users.");
+      }
       const block = approvalBlock(po, actor?.approvalLimit ?? null);
       if (block?.code === 'UNPRICED') throw Errors.validation(block.message);
       if (block) {
@@ -875,14 +879,15 @@ export const PurchaseOrderService = {
         include: { lines: { include: { material: { select: { sku: true } } } } },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      if (kindOfOrder(po) === 'stores') throw Errors.validation('A Stores order is received into stock: use Receive delivery on the order, or Receive stock.');
+      if (kindOfOrder(po) === 'stores') throw Errors.validation('A Stores order is received into stock: book its delivery on Receive stock.');
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState('Only an approved or partly delivered purchase order can have its delivery confirmed', { status: po.status });
       }
       if (input.lines.length === 0) throw Errors.validation('Confirm what arrived on at least one line.');
       // Calendar days in South Africa, as the buyer picks them: the server's clock runs in UTC.
-      if (input.deliveredOn && input.deliveredOn > todayInSouthAfrica()) throw Errors.validation('The delivery date is still to come.');
-      const deliveredOn = input.deliveredOn ? toDateOnly(input.deliveredOn) : null;
+      const today = todayInSouthAfrica();
+      const day = input.deliveredOn ?? today;
+      if (day > today) throw Errors.validation('The delivery date is still to come.');
 
       const credited = new Map<string, Prisma.Decimal>();
       for (const l of input.lines) {
@@ -901,7 +906,8 @@ export const PurchaseOrderService = {
       const receivedAfter = (line: (typeof po.lines)[number]) => toDecimal(line.receivedQty).plus(credited.get(line.id) ?? 0);
       const allIn = po.lines.every((line) => receivedAfter(line).gte(toDecimal(line.orderedQty)));
       const status: PurchaseOrderStatus = allIn ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
-      const at = deliveredOn ?? new Date();
+      // Delivered today: now. On an earlier day: that day, with no time of day made up.
+      const at = day === today ? new Date() : toDateOnly(day);
 
       const claimed = await tx.purchaseOrder.updateMany({
         where: { id: po.id, status: po.status },
@@ -922,7 +928,7 @@ export const PurchaseOrderService = {
           before: { status: po.status },
           after: {
             status,
-            deliveredOn: at.toISOString().slice(0, 10),
+            deliveredOn: day,
             deliveryRef: cleanText(input.deliveryRef),
             lines: [...credited].map(([lineId, quantity]) => ({ lineId, quantity: quantity.toString() })),
           },
