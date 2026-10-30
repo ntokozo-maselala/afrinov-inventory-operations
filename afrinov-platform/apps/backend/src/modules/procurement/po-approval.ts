@@ -59,6 +59,17 @@ export function approvePermissionFor(kind: OrderKind) {
   return kind === 'stores' ? PermissionCode.OrderStoresStock : PermissionCode.ApprovePurchaseOrder;
 }
 
+/**
+ * Whether this user may approve Stores orders. A store controller approves
+ * the store's orders, his own included, only once an admin has set his
+ * approval limit (Stores and Procurement Separation Roadmap: a blank limit
+ * would otherwise mean any value, unchecked). Admin approves without one.
+ */
+export function approvesStores(u: { approvalLimit: unknown; roles?: Array<{ role: { name: string } }> }): boolean {
+  const roles = (u.roles ?? []).map((r) => r.role.name);
+  return u.approvalLimit !== null || !roles.includes('STORE_CONTROLLER') || roles.includes('ADMIN');
+}
+
 /** Active users who may approve orders of this kind, with their limits, most senior first. */
 export async function listApprovers(kind: OrderKind = 'projects'): Promise<Approver[]> {
   const users = await prisma.user.findMany({
@@ -66,9 +77,10 @@ export async function listApprovers(kind: OrderKind = 'projects'): Promise<Appro
       active: true,
       roles: { some: { role: { permissions: { some: { permission: { code: approvePermissionFor(kind) } } } } } },
     },
-    select: { id: true, name: true, approvalLimit: true },
+    select: { id: true, name: true, approvalLimit: true, roles: { select: { role: { select: { name: true } } } } },
   });
   return users
+    .filter((u) => kind !== 'stores' || approvesStores(u))
     .map((u) => ({ id: u.id, name: u.name, approvalLimit: u.approvalLimit?.toString() ?? null }))
     .sort((a, b) => {
       if (a.approvalLimit === b.approvalLimit) return a.name.localeCompare(b.name);

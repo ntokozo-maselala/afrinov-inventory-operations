@@ -67,7 +67,7 @@ export const PERMISSION_ROLES = {
   'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order (project orders)
   'stores:order': ['STORE_CONTROLLER'], // order:stores_stock (Stores orders: those without a project)
   'orders:approve': ['APPROVER'], // approve:purchase_order (within the user's approval limit)
-  'orders:view': ['STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER'], // view:purchase_order
+  'orders:view': ['PROCUREMENT', 'APPROVER'], // view:purchase_order (project orders; the store sees its own through stores:order)
   'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order
   'receipts:view': ['STORE_CONTROLLER', 'PROCUREMENT'], // view:goods_receipt
   'users:manage': [], // manage:users (ADMIN only)

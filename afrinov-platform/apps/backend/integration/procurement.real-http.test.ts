@@ -561,6 +561,11 @@ describe('receiving stock over real HTTP', () => {
       beamId = beam.body.id;
       storeman = await as('STORE_CONTROLLER');
       buyer = await as('PROCUREMENT');
+      // A store controller approves the store's orders once an admin has set his limit.
+      await prisma.user.updateMany({
+        where: { email: { endsWith: `-${run}@afrinov.local` }, roles: { some: { role: { name: 'STORE_CONTROLLER' } } } },
+        data: { approvalLimit: 1000000 },
+      });
     });
 
     const storesOrder = () => ({ supplierId, lines: [{ materialId, orderedQty: 3, unitPrice: 12.5 }] });
@@ -575,15 +580,23 @@ describe('receiving stock over real HTTP', () => {
       expect((await storeman('POST', `/purchase-orders/${created.body.id}/cancel`, { reason: 'Ordered twice' })).status).toBe(200);
 
       expect((await storeman('POST', '/purchase-orders', projectOrder())).status).toBe(403);
+      // A project order is Procurement's: to the store it is not found (Stores
+      // and Procurement Separation Roadmap, Phase 4), whichever way it is asked for.
       const theirs = await buyer<{ id: string }>('POST', '/purchase-orders', projectOrder());
       for (const [method, path, body] of [
+        ['GET', `/purchase-orders/${theirs.body.id}`, undefined],
+        ['GET', `/purchase-orders/${theirs.body.id}/history`, undefined],
         ['PATCH', `/purchase-orders/${theirs.body.id}`, { notes: 'Not mine' }],
         ['POST', `/purchase-orders/${theirs.body.id}/submit`, undefined],
         ['POST', `/purchase-orders/${theirs.body.id}/cancel`, { reason: 'Not mine' }],
         ['POST', `/purchase-orders/${theirs.body.id}/close`, {}],
       ] as const) {
-        expect([method, path, (await storeman(method, path, body)).status]).toEqual([method, path, 403]);
+        expect([method, path, (await storeman(method, path, body)).status]).toEqual([method, path, 404]);
       }
+      const listed = (await storeman<Array<{ id: string; projectNumber: string | null }>>('GET', '/purchase-orders')).body;
+      expect(listed.map((o) => o.id)).not.toContain(theirs.body.id);
+      expect(listed.every((o) => o.projectNumber === null)).toBe(true);
+      expect((await storeman<unknown[]>('GET', '/purchase-orders?kind=projects')).body).toEqual([]);
       // A Stores order is the store's alone (Stores and Procurement Separation
       // Roadmap, Phase 2): to a buyer it is not found, in any way of opening it.
       for (const path of [`/purchase-orders/${created.body.id}`, `/purchase-orders/${created.body.id}/history`, `/purchase-orders/${created.body.id}/approval`]) {
@@ -668,7 +681,7 @@ describe('receiving stock over real HTTP', () => {
 
         // Neither approves the other's: the approver doesn't even find a Stores order.
         expect((await approver('POST', `/purchase-orders/${store.body.id}/approve`)).status).toBe(404);
-        expect((await storeman('POST', `/purchase-orders/${project.body.id}/approve`)).status).toBe(403);
+        expect((await storeman('POST', `/purchase-orders/${project.body.id}/approve`)).status).toBe(404);
 
         const storeApproved = await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/approve`);
         expect([storeApproved.status, storeApproved.body.status]).toEqual([200, 'APPROVED']);
@@ -679,6 +692,64 @@ describe('receiving stock over real HTTP', () => {
         expect((await approver('POST', '/purchase-orders', projectOrder())).status).toBe(403);
       } finally {
         await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    // Qodo, PR #122: a blank limit would mean any value, unchecked.
+    it("won't let a store controller approve until an admin sets his limit", async () => {
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const fresh = await as('STORE_CONTROLLER');
+        const order = await fresh<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        await fresh('POST', `/purchase-orders/${order.body.id}/submit`);
+        expect((await fresh<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id)).not.toContain(order.body.id);
+        expect((await fresh<{ canApprove: boolean }>('GET', `/purchase-orders/${order.body.id}/approval`)).body.canApprove).toBe(false);
+        const refused = await fresh<{ error: { message: string } }>('POST', `/purchase-orders/${order.body.id}/approve`);
+        expect(refused.status).toBe(403);
+        expect(refused.body.error.message).toMatch(/approval limit isn't set yet/);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    it("keeps project orders' Activity out of the store's audit log, and the store's out of Procurement's", async () => {
+      const project = await buyer<{ id: string }>('POST', '/purchase-orders', projectOrder());
+      const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+      const entries = async (who: typeof api, id: string) => (await who<Array<{ entityId: string }>>('GET', `/audit?entityType=PurchaseOrder&entityId=${id}`)).body;
+      expect(await entries(storeman, project.body.id)).toEqual([]);
+      expect(await entries(storeman, store.body.id)).not.toEqual([]);
+      // Admin sees both.
+      expect(await entries(api, project.body.id)).not.toEqual([]);
+      // With no filter either.
+      const all = (await storeman<Array<{ entityId: string }>>('GET', '/audit?limit=500')).body.map((e) => e.entityId);
+      expect(all).not.toContain(project.body.id);
+      // Entries come back as they did: newest first, within the limit asked for.
+      const page = (await api<Array<{ createdAt: string; entityType: string }>>('GET', '/audit?limit=3')).body;
+      expect(page.length).toBeLessThanOrEqual(3);
+      expect([...page].sort((x, y) => y.createdAt.localeCompare(x.createdAt))).toEqual(page);
+    });
+
+    // Qodo, PR #122: a role with the audit log but neither kind of order sees no order's Activity.
+    it("shows no order's Activity to someone who reads the audit log but sees neither kind", async () => {
+      const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+      const project = await buyer<{ id: string }>('POST', '/purchase-orders', projectOrder());
+      // Roles are a fixed list, so VIEWER (neither order permission) is given the audit log
+      // for this test only; integration files run one at a time, and it is taken back after.
+      const viewer = await prisma.role.findUniqueOrThrow({ where: { name: 'VIEWER' } });
+      const viewAudit = await prisma.permission.findUniqueOrThrow({ where: { code: 'view:audit_log' } });
+      const grant = { roleId_permissionId: { roleId: viewer.id, permissionId: viewAudit.id } };
+      await prisma.rolePermission.upsert({ where: grant, update: {}, create: { roleId: viewer.id, permissionId: viewAudit.id } });
+      try {
+        const reader = await as('VIEWER');
+        const seen = (await reader<Array<{ entityType: string; entityId: string }>>('GET', '/audit?limit=500')).body;
+        expect(seen.length).toBeGreaterThan(0);
+        expect(seen.some((e) => e.entityType === 'PurchaseOrder')).toBe(false);
+        expect(seen.map((e) => e.entityId)).not.toContain(store.body.id);
+        expect(seen.map((e) => e.entityId)).not.toContain(project.body.id);
+      } finally {
+        await prisma.rolePermission.delete({ where: grant });
       }
     });
 
@@ -779,19 +850,21 @@ describe('receiving stock over real HTTP', () => {
         expect((await confirm(buyer, store.id, { lines: [{ lineId: store.lines[0]!.id, quantity: 1 }] })).status).toBe(404);
       });
 
-      it("keeps the storeman from receiving a project order into stock, or confirming its delivery", async () => {
+      it("receives no project order into stock, by either way in, and the storeman doesn't even find one", async () => {
         const order = await approvedProjectOrder();
         const line = order.lines[0]!;
-        const received = await storeman<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
+        const receiptBody = { purchaseOrderId: order.id, supplierId, post: true, lines: [{ materialId: beamId, locationId, quantity: 1, purchaseOrderLineId: line.id }] };
+        // Admin sees both sides, and is told why.
+        const received = await api<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
         expect(received.status).toBe(400);
         expect(received.body.error.message).toMatch(/goes from the supplier straight to site/);
-        const receipt = await storeman<{ error: { message: string } }>('POST', '/goods-receipts', {
-          purchaseOrderId: order.id, supplierId, post: true,
-          lines: [{ materialId: beamId, locationId, quantity: 1, purchaseOrderLineId: line.id }],
-        });
+        const receipt = await api<{ error: { message: string } }>('POST', '/goods-receipts', receiptBody);
         expect(receipt.status).toBe(400);
         expect(receipt.body.error.message).toMatch(/goes from the supplier straight to site/);
-        expect((await confirm(storeman, order.id, { lines: [{ lineId: line.id, quantity: 1 }] })).status).toBe(403);
+        // To the store a project order is not found, whatever is tried.
+        expect((await storeman('POST', `/purchase-orders/${order.id}/receive`, { locationId })).status).toBe(404);
+        expect((await storeman('POST', '/goods-receipts', receiptBody)).status).toBe(404);
+        expect((await confirm(storeman, order.id, { lines: [{ lineId: line.id, quantity: 1 }] })).status).toBe(404);
         expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('APPROVED');
       });
 
@@ -806,10 +879,14 @@ describe('receiving stock over real HTTP', () => {
         expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.3 }] })).body.status).toBe('RECEIVED');
       });
 
-      it('takes today in South Africa as the delivery day', async () => {
+      it('takes today in South Africa as the delivery day, given or left out', async () => {
         const order = await approvedProjectOrder();
         const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
         expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }], deliveredOn: today })).status).toBe(200);
+        // Left out, it is recorded as today in South Africa, not in UTC (Qodo, PR #122).
+        expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }] })).status).toBe(200);
+        const history = (await api<Array<{ action: string; after: { deliveredOn?: string } }>>('GET', `/purchase-orders/${order.id}/history`)).body;
+        expect(history.filter((e) => e.action === 'PO_DELIVERY_CONFIRMED').map((e) => e.after.deliveredOn)).toEqual([today, today]);
       });
 
       it("won't post a receipt saved against a project order before Phase 3", async () => {

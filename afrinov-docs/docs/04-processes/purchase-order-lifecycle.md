@@ -16,18 +16,23 @@ order (`/stock/orders/new`), the order (`/purchase-orders/:id`) and Edit
 deliveries are received from the order's page, and `/goods-receipts/*`
 redirects to Purchase orders.
 
-## Two kinds of order (ADR-020)
+## Two kinds of order (ADR-020, ADR-021)
 | | Project order | Stores order |
 |---|---|---|
-| Raised by | Procurement, on New purchase order | The store controller, on Store → Order stock |
+| Lives in | Procurement (`/purchase-orders/:id`) | Store → Order stock (`/stock/orders/:id`) |
+| Raised by | Procurement, on New purchase order | The store controller, on Order stock |
+| Seen by | Procurement, approvers and Admin (`view:purchase_order`) | The store controller and Admin (`order:stores_stock`) |
 | Project | Required | None |
-| Lines | That project's material | Stores items |
+| Lines | That project's material | Stores items from the catalogue |
 | Raise, edit, submit, cancel, close | `create`/`submit`/`cancel`/`close:purchase_order` | `order:stores_stock` |
+| Approved by | Approvers, by value | The storeman, by value, against his own limit |
+| Delivery | Straight to site: Procurement **confirms delivery** on the order (`POST /:id/confirm-delivery`); no stock is added | Into stock: Receive delivery on the order, or Receive stock |
 | RFQ first | Possible | No: Stores stock is ordered at known prices |
 
-Approval by value, receiving, the order document and the numbering are the
-same for both. An order can't change kind. Orders raised before the split
-keep what they hold; those without a project are Stores orders.
+The numbering, the order document and the statuses are the same for both.
+An order can't change kind, and each side's orders are not found (404) to
+the other. Orders raised before the split keep what they hold; those without
+a project are Stores orders.
 
 ## States
 `DRAFT → PENDING_APPROVAL → APPROVED → PARTIALLY_RECEIVED → RECEIVED → CLOSED`,

@@ -42,7 +42,7 @@ Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 | What a Stores order is | An ordinary purchase order without a project, holding Stores items only | Built in Phase 1 |
 | How the split is enforced | A new permission, **order Stores stock**, held by the store controller (and Admin). An order with a project needs the purchase order permissions; one without needs the new one | Built in Phase 1 |
 | Approval of Stores orders | By value, by an approver, as every order is today | Built in Phase 1, tested in Phase 4 |
-| What each side sees | Each can open the other's orders, read-only, so Procurement still sees what the store has on order | Built in Phases 1 to 3 |
+| What each side sees | Each can open the other's orders, read-only, so Procurement still sees what the store has on order | Built in Phases 1 to 3; superseded by the [Stores and Procurement Separation Roadmap](stores-procurement-separation-roadmap.md) (ADR-021): each side sees only its own |
 | RFQs | Project-only; Stores stock is ordered directly at known prices. RFQ-0001 style numbers (no project) stop being issued | Built in Phase 1 |
 | Existing orders | Untouched. Orders without a project (3 in the dev database) are Stores orders, edited, submitted, cancelled and closed by the store controller from now; older project orders holding Stores items keep them. An RFQ sent before the rule is still awarded with its Stores items; a draft RFQ without a project can't be sent | Built in Phase 1 |
 

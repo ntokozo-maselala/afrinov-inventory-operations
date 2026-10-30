@@ -38,7 +38,16 @@ describe('approval limits', () => {
     expect(screen.getByText('Approves orders of any value')).toBeInTheDocument();
     expect(screen.getAllByText(/Approves orders/)).toHaveLength(2);
     // The store controller approves the store's stock orders (Stores and Procurement Separation Roadmap).
-    expect(within(row('Store Controller')).getByText('Approves stock orders of any value')).toBeInTheDocument();
+    // With no limit set, he approves nothing until an admin sets one (Qodo, PR #122).
+    expect(within(row('Store Controller')).getByText('Approves no stock orders until a limit is set')).toBeInTheDocument();
+  });
+
+  it("tells a user with both roles that stock orders wait for a limit, as the server does", async () => {
+    const { approvalLine } = await import('./SettingsSections');
+    expect(approvalLine(['APPROVER', 'STORE_CONTROLLER'], null)).toBe('Approves project orders of any value; no stock orders until a limit is set');
+    expect(approvalLine(['APPROVER', 'STORE_CONTROLLER'], '5000')).toMatch(/^Approves orders up to R\s5\s000,00$/);
+    expect(approvalLine(['ADMIN', 'STORE_CONTROLLER'], null)).toBe('Approves orders of any value');
+    expect(approvalLine(['STORE_CONTROLLER'], null)).toBe('Approves no stock orders until a limit is set');
   });
 
   it('sets a limit on an approver; blank means no limit', async () => {
