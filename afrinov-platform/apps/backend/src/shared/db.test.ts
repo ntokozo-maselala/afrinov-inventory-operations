@@ -6,7 +6,7 @@
 //   - A non-public `?schema=` must be forwarded to the adapter, because pg
 //     ignores Prisma's schema parameter and would otherwise query `public`.
 import { describe, it, expect } from 'vitest';
-import { schemaFromUrl } from './db.js';
+import { schemaFromUrl, statementTimeoutMs } from './db.js';
 
 describe('schemaFromUrl', () => {
   it('extracts a non-public schema from the URL', () => {
@@ -23,5 +23,22 @@ describe('schemaFromUrl', () => {
 
   it('returns undefined for an unparseable URL instead of throwing', () => {
     expect(schemaFromUrl('not a url')).toBeUndefined();
+  });
+});
+
+describe('statementTimeoutMs (PRA-18)', () => {
+  it('matches the 30 s request timeout by default', () => {
+    expect(statementTimeoutMs({})).toBe(30_000);
+    expect(statementTimeoutMs({ DB_STATEMENT_TIMEOUT_MS: '' })).toBe(30_000);
+  });
+
+  it('takes an override, including 0 to switch it off', () => {
+    expect(statementTimeoutMs({ DB_STATEMENT_TIMEOUT_MS: '15000' })).toBe(15_000);
+    expect(statementTimeoutMs({ DB_STATEMENT_TIMEOUT_MS: '0' })).toBe(0);
+  });
+
+  it('ignores a value that is not a non-negative number', () => {
+    expect(statementTimeoutMs({ DB_STATEMENT_TIMEOUT_MS: 'soon' })).toBe(30_000);
+    expect(statementTimeoutMs({ DB_STATEMENT_TIMEOUT_MS: '-5' })).toBe(30_000);
   });
 });
