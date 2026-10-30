@@ -231,6 +231,7 @@ function ReceiveAgainstOrder() {
   const blocked = (!!locations.error && !locations.data) || (!!orders.error && !orders.data);
   // The chosen order stays in the list, so the select still shows it.
   const choices = chosenOrder && !listed.includes(chosenOrder) ? [chosenOrder, ...listed] : listed;
+  const showForm = !blocked && !nothingToReceive && (choices.length > 0 || !orders.data);
 
   return (
     <div>
@@ -266,6 +267,9 @@ function ReceiveAgainstOrder() {
         </Alert>
       )}
 
+      {/* Without the form, a link to an order that can't be received still says why (Qodo, PR #125). */}
+      {error && !showForm && <Alert tone="danger" title="Cannot receive" className="max-w-4xl mb-4">{error}</Alert>}
+
       {nothingToReceive && (
         <Alert tone="info" title={'No approved orders are waiting for delivery'} className="max-w-4xl mb-4">
           {'Stock comes into the store against an approved Stores order. '}
@@ -279,7 +283,7 @@ function ReceiveAgainstOrder() {
         </Alert>
       )}
 
-      {!blocked && !nothingToReceive && (choices.length > 0 || !orders.data) && (
+      {showForm && (
         <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-4xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field

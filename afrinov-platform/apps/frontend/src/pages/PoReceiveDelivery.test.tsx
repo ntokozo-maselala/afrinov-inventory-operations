@@ -318,6 +318,18 @@ describe('Receive stock against an approved order', () => {
     expect(screen.getByLabelText(/^Order/)).toHaveValue('po-1');
   });
 
+  // Qodo, PR #125: also when no other order is waiting, so there is no form.
+  it('says why a linked order can’t be received when no order is waiting at all', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders?kind=stores') return [{ ...ORDER, status: 'CLOSED' }];
+      if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }];
+      return [];
+    });
+    receiveStock('/stock/receive?order=po-1');
+    expect(await screen.findByText(/That order has nothing left to receive/)).toBeInTheDocument();
+    expect(screen.getByText('No approved orders are waiting for delivery')).toBeInTheDocument();
+  });
+
   it('says so when a link names an order with nothing left to receive', async () => {
     receiveStock('/stock/receive?order=po-3');
     expect(await screen.findByText(/That order has nothing left to receive/)).toBeInTheDocument();
