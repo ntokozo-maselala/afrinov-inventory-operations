@@ -113,7 +113,8 @@ export function MaterialDetail() {
             {material.data.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>}
             {storesItem && <Link to={`/stock?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">View in stock</Link>}
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
-            {active && canOrder && !needsProject(material.data) && !projectClosed(material.data) && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
+            {/* Any active item: a Projects item's project is chosen on the order (Project on the Order Roadmap, Phase 2). */}
+            {active && canOrder && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
             {active && total > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active

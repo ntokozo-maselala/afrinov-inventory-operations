@@ -182,7 +182,7 @@ export const OPERATIONS: Operation[] = [
   { method: 'get', path: '/materials/:id', tag: 'Materials', summary: 'Get a material', errors: [404] },
   {
     method: 'post', path: '/materials', tag: 'Materials', summary: 'Create a material',
-    description: 'Answers 200, not 201.', permissions: [P.CreateMaterial], body: createMaterialSchema, errors: [409],
+    description: 'Answers 200, not 201. A Projects material needs no project of its own (the order it is bought on says which); any project given must be open. A Stores material has no project.', permissions: [P.CreateMaterial], body: createMaterialSchema, errors: [409],
   },
   {
     method: 'patch', path: '/materials/:id', tag: 'Materials', summary: 'Update a material',

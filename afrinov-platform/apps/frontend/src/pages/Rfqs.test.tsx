@@ -145,6 +145,26 @@ describe('New request for quotation', () => {
     expect(mockPost).not.toHaveBeenCalled();
   });
 
+  // Project on the Order Roadmap, Phase 2: the RFQ says which project its material is for.
+  it('offers any Projects item, and lets an item tagged with a project suggest it without fixing it', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path === '/materials' ? [
+      ...(await base(path)) as unknown[],
+      { id: 'm-plain', sku: 'PLATE-10MM', name: 'Plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', active: true, projectNumber: null, project: null },
+      { id: 'm-other', sku: '1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: '0', active: true, projectNumber: '1402', project: { projectNumber: '1402', status: 'COMPLETED' } },
+    ] : base(path)));
+    appAt('/rfqs/new');
+    const select = await screen.findByLabelText('Line 1 item');
+    await within(select).findByRole('option', { name: /PLATE-10MM/ });
+    expect(within(select).getByRole('option', { name: /1402-PIPE/ })).toBeInTheDocument();
+    // A closed project's tag suggests nothing; an open one's suggests the RFQ's project.
+    fireEvent.change(select, { target: { value: 'm-other' } });
+    expect(screen.getByLabelText('Project')).toHaveValue('');
+    fireEvent.change(select, { target: { value: 'm-1' } });
+    expect(screen.getByLabelText('Project')).toHaveValue('AFRI-1325');
+    expect(screen.getByLabelText('Project')).toBeEnabled();
+  });
+
   it("doesn't offer inactive items, which the server would refuse", async () => {
     appAt('/rfqs/new');
     const select = await screen.findByLabelText('Line 1 item');

@@ -26,7 +26,7 @@ import { MaterialForm } from '../components/MaterialForm';
 import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material, Supplier } from '../api/types';
-import { needsProject, sectionOf } from '../lib/categories';
+import { sectionOf, suggestedProject } from '../lib/categories';
 import type { Rfq } from '../lib/rfq';
 
 const RFQS = { label: 'Requests for quotation', to: '/rfqs' };
@@ -96,13 +96,13 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   // Items added from a line, until the catalogue is loaded again.
   const [added, setAdded] = useState<Material[]>([]);
   const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
-  // An RFQ is for one project's material (Stores ordering roadmap): Stores
-  // stock is ordered by the store at known prices. As for orders, project
-  // material with no project yet, or for a closed project, is not asked for.
-  // What a draft already holds stays listed, so it can be changed.
+  // An RFQ is for one project and Projects items only (Stores ordering
+  // roadmap): Stores stock is ordered by the store at known prices. Any
+  // Projects item, whatever project it was tagged with: the RFQ says which
+  // project it is for (Project on the Order Roadmap, Phase 2). What a draft
+  // already holds stays listed, so it can be changed.
   const held = new Set(rfq?.lines.map((l) => l.materialId) ?? []);
-  const materials = catalogue.filter((m) => held.has(m.id) || (sectionOf(m.category) === 'PROJECTS' && !needsProject(m)
-    && m.project?.status !== 'COMPLETED' && m.project?.status !== 'CANCELLED'));
+  const materials = catalogue.filter((m) => held.has(m.id) || sectionOf(m.category) === 'PROJECTS');
   const suppliers = suppliersReq.data ?? [];
 
   const [projectChoice, setProjectChoice] = useState(rfq?.projectNumber ?? '');
@@ -116,10 +116,9 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
 
-  // Project material fixes the RFQ's project while a line holds some.
-  const lockedBy = lines.map((l) => catalogue.find((m) => m.id === l.materialId)).find((m) => m && sectionOf(m.category) === 'PROJECTS');
-  const project = lockedBy?.projectNumber ?? projectChoice;
-  const lineMaterials = materials.filter((m) => held.has(m.id) || !project || m.projectNumber === project);
+  // The RFQ's project is the buyer's choice; no line fixes it.
+  const project = projectChoice;
+  const lineMaterials = materials;
   const projects = (projectsReq.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED');
   const projectOptions = project && !projects.some((p) => p.projectNumber === project) ? [...projects, { projectNumber: project, name: null }] : projects;
 
@@ -137,23 +136,19 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
     materialsReq.reload();
     if (openFor.current?.session !== from.session) { toast.success(`${saved.sku} added to the catalogue`); return; }
     closeNewItem();
-    if (sectionOf(saved.category) !== 'PROJECTS' || saved.projectNumber !== project) {
-      toast.error(`${saved.sku} added to the catalogue, but not to this RFQ`, sectionOf(saved.category) === 'PROJECTS'
-        ? `It is for project ${saved.projectNumber}, and this RFQ is for ${project}.`
-        : 'It is a Stores item, which the store orders from Store → Order stock.');
+    if (sectionOf(saved.category) !== 'PROJECTS') {
+      toast.error(`${saved.sku} added to the catalogue, but not to this RFQ`, 'It is a Stores item, which the store orders from Store → Order stock.');
       return;
     }
     updateLine(from.key, { materialId: saved.id });
     toast.success(`${saved.sku} added to the catalogue and to the RFQ`);
   }
 
-  // A new item is a Projects item for the RFQ's project, so it waits for one.
+  // A new item is a Projects item with no project of its own: the RFQ says which project it is for.
   function startNewItem(key: number) {
-    if (!project) { toast.error('Choose the project first', 'A new item on this RFQ is added as a Projects item for its project.'); return; }
     openNewItem(key);
   }
   function newItemOnNewLine() {
-    if (!project) { startNewItem(0); return; }
     const line = blankLine();
     setLines((l) => [...l, line]);
     startNewItem(line.key);
@@ -161,6 +156,10 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
 
   function chooseMaterial(key: number, materialId: string) {
     if (materialId === NEW_ITEM) { startNewItem(key); return; }
+    // The first item tagged with an open project suggests the RFQ's project, until one is chosen.
+    const chosen = catalogue.find((m) => m.id === materialId);
+    const hint = chosen ? suggestedProject(chosen) : '';
+    if (hint && !projectChoice) setProjectChoice(hint);
     updateLine(key, { materialId });
   }
 
@@ -215,9 +214,9 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field
               label="Project" htmlFor="rfq-project" required
-              help={lockedBy ? `Set by ${lockedBy.sku}: project material is asked for only for its own project.` : 'An RFQ is for one project. Stores stock is ordered from Store → Order stock.'}
+              help="An RFQ is for one project. Stores stock is ordered from Store → Order stock."
             >
-              <Select id="rfq-project" value={project} onChange={(e) => setProjectChoice(e.target.value)} disabled={!!lockedBy}>
+              <Select id="rfq-project" value={project} onChange={(e) => setProjectChoice(e.target.value)}>
                 <option value="" disabled>Choose the project…</option>
                 {projectOptions.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` — ${p.name}` : ''}</option>)}
               </Select>
@@ -316,14 +315,13 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
             open
             onClose={closeNewItem}
             title="New item"
-            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${project}, and goes on line ${lineNo}.`}
+            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item, and goes on line ${lineNo}; this RFQ says which project it is for.`}
             width="md"
           >
             <MaterialForm
               key={from.session}
               section="PROJECTS"
-              projectNumber={project}
-              fixedBy={`the RFQ for ${project}`}
+              fixedBy="the RFQ"
               onCancel={closeNewItem}
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
               onError={(err) => toast.error('Could not add item', err.message)}

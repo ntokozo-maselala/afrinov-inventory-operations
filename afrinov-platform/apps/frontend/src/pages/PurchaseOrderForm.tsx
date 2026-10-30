@@ -41,7 +41,7 @@ import { MaterialForm } from '../components/MaterialForm';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
-import { needsProject, sectionOf } from '../lib/categories';
+import { sectionOf, suggestedProject } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
 import {
@@ -140,12 +140,10 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   // Items added from an order line, until the catalogue is loaded again.
   const [added, setAdded] = useState<Material[]>([]);
   const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
-  // Project material with no project yet isn't ordered until it has one, and a
-  // completed or cancelled project's isn't ordered at all: its leftovers go to Stores.
-  const materials = catalogue.filter((m) => !needsProject(m)
-    && !(sectionOf(m.category) === 'PROJECTS' && (m.project?.status === 'COMPLETED' || m.project?.status === 'CANCELLED'))
-    // A Stores order holds Stores items only, a project order Projects items only.
-    && sectionOf(m.category) === (stores ? 'STORES' : 'PROJECTS'));
+  // A Stores order holds Stores items only, a project order Projects items only:
+  // any of them, whatever project an item was tagged with, as the order says
+  // which project it is for (Project on the Order Roadmap, Phase 2).
+  const materials = catalogue.filter((m) => sectionOf(m.category) === (stores ? 'STORES' : 'PROJECTS'));
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
   const [expected, setExpected] = useState('');
@@ -161,12 +159,9 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const currency = supplier?.currency ?? 'ZAR';
   const vatRate = vatOverride ?? String(currency === 'ZAR' ? settingRate : 0);
   const preview = priceLines(lines.filter((l) => l.materialId && Number(l.orderedQty) > 0), Number(vatRate) || 0);
-  // Project material is ordered only for its own project: a line holding some
-  // sets the order's project, which can't change while it is there, and other
-  // projects' material is not offered.
-  const lockedBy = lines.map((l) => materials.find((m) => m.id === l.materialId)).find((m) => m && sectionOf(m.category) === 'PROJECTS');
-  const orderProject = stores ? '' : lockedBy?.projectNumber ?? details.projectNumber;
-  const lineMaterials = materials.filter((m) => sectionOf(m.category) === 'STORES' || !orderProject || m.projectNumber === orderProject);
+  // The order's project is the buyer's choice; no line fixes it.
+  const orderProject = stores ? '' : details.projectNumber;
+  const lineMaterials = materials;
   // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
   const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: Number(l.orderedQty) > 0 ? l.orderedQty : 0 })), Number(vatRate) || 0).lines;
 
@@ -220,6 +215,9 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
         return { ...blankLine(), materialId: m.id, orderedQty: qty > 0 ? String(qty) : '', unitPrice: priceFrom(m.unitCost) };
       });
     if (presetLines.length > 0) { setLines(presetLines); setFilledFromLink(true); }
+    // Ordered from an item's page: its tagged project is suggested, not fixed.
+    const hint = stores ? '' : presetLines.map((l) => suggestedProject(materials.find((m) => m.id === l.materialId)!)).find(Boolean);
+    if (hint && !details.projectNumber) setDetails((d) => ({ ...d, projectNumber: hint }));
   }
 
   function addLine() { setLines((l) => [...l, blankLine()]); }
@@ -237,16 +235,11 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const [newItemFor, setNewItemFor] = useState<NewItemSession | null>(null);
   const openFor = useRef<NewItemSession | null>(null);
   function openNewItem(key: number) { const s = { key, session: nextSession++ }; openFor.current = s; setNewItemFor(s); }
-  // The new item is a Projects item for the order's project, so it waits for one.
+  // The new item is a Projects item with no project of its own: the order says which project it is for.
   function startNewItem(key: number) {
-    if (!orderProject) {
-      toast.error('Choose the project first', 'A new item on this order is added as a Projects item for its project.');
-      return;
-    }
     openNewItem(key);
   }
   function newItemOnNewLine() {
-    if (!orderProject) { startNewItem(0); return; }
     const line = blankLine();
     setLines((l) => [...l, line]);
     startNewItem(line.key);
@@ -260,11 +253,9 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
       return;
     }
     closeNewItem();
-    // A project order holds its own project's material only.
-    if (sectionOf(saved.category) !== 'PROJECTS' || saved.projectNumber !== orderProject) {
-      toast.error(`${saved.sku} added to the catalogue, but not to this order`, sectionOf(saved.category) === 'PROJECTS'
-        ? `It is for project ${saved.projectNumber}, and this order is for ${orderProject}.`
-        : 'It is a Stores item, which the store orders from Store → Order stock.');
+    // A project order holds Projects items only.
+    if (sectionOf(saved.category) !== 'PROJECTS') {
+      toast.error(`${saved.sku} added to the catalogue, but not to this order`, 'It is a Stores item, which the store orders from Store → Order stock.');
       return;
     }
     chooseMaterial(from.key, saved.id, saved);
@@ -274,7 +265,11 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   function chooseMaterial(key: number, materialId: string, item?: Material) {
     if (materialId === NEW_ITEM) { startNewItem(key); return; }
     // Starts from the item's unit cost; the buyer types the quoted price over it.
-    const cost = (item ?? materials.find((m) => m.id === materialId))?.unitCost;
+    const chosen = item ?? materials.find((m) => m.id === materialId);
+    const cost = chosen?.unitCost;
+    // The first item tagged with an open project suggests the order's project, until one is chosen.
+    const hint = !stores && chosen ? suggestedProject(chosen) : '';
+    if (hint && !details.projectNumber) setDetails((d) => ({ ...d, projectNumber: hint }));
     setLines((l) => l.map((row) => {
       if (row.key !== key) return row;
       // A price filled from the item the line held follows the new item; one the buyer typed stays.
@@ -366,10 +361,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
 
         <PurchaseOrderDetailsFields
           value={{ ...details, projectNumber: orderProject }}
-          // While project material fixes the project, the buyer's own choice is kept for when it goes.
-          onChange={(next) => setDetails(lockedBy ? { ...next, projectNumber: details.projectNumber } : next)}
+          onChange={setDetails}
           idPrefix="po-new"
-          projectSetBy={lockedBy?.sku}
           hideProject={stores}
           requireProject={!stores}
         />
@@ -464,14 +457,13 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
             open
             onClose={closeNewItem}
             title="New item"
-            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item for ${orderProject}, and goes on line ${lineNo}.`}
+            description={`Material the client needs that isn't in the catalogue yet. It is added as a Projects item, and goes on line ${lineNo}; this order says which project it is for.`}
             width="md"
           >
             <MaterialForm
               key={from.session}
               section="PROJECTS"
-              projectNumber={orderProject}
-              fixedBy={`the purchase order for ${orderProject}`}
+              fixedBy="the purchase order"
               onCancel={closeNewItem}
               // The server answers with the whole item, its section and project included.
               onSaved={(saved) => itemAdded(saved as unknown as Material, from)}
@@ -650,7 +642,6 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
           idPrefix="po-edit"
           hideProject={stores}
           requireProject={!stores}
-          projectSetBy={po.lines.find((l) => l.material.category && sectionOf(l.material.category) === 'PROJECTS' && l.material.projectNumber)?.material.sku}
         />
         <Field label="Remarks" htmlFor="po-edit-notes">
           <Textarea id="po-edit-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />

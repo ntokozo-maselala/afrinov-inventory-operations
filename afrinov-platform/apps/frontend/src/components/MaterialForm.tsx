@@ -7,8 +7,10 @@
 // and Required Stock) or Projects (bought for one project, never re-ordered).
 // Both are fixed once the item exists; an item moved in from the old Project
 // Material category without a project can be given one here. Added from an
-// order or RFQ line, both are fixed by it (`fixedBy`), so neither is shown:
-// the drawer's description says what the item will be.
+// order or RFQ line, the section is fixed by it (`fixedBy`) and not shown: the
+// drawer's description says what the item will be. Such a Projects item gets
+// no project of its own: the order says which project it is for (Project on
+// the Order Roadmap, Phase 2).
 import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
@@ -65,8 +67,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
   const bands = useStatusBands();
   const projects = section === 'PROJECTS';
   // A Projects item's project is fixed once it has one; one without can be given it here.
-  // A new item for an order line takes the order's project.
-  const projectFixed = editing ? !!initial?.projectNumber : !!fixedBy && !!startProject;
+  // A new item for an order or RFQ line takes the project it is given, or none.
+  const projectFixed = editing ? !!initial?.projectNumber : !!fixedBy;
   const sectionFixed = editing || !!fixedBy;
   const projectList = useApi<ProjectOpt[]>(projects && !projectFixed ? '/projects?active=true' : null);
   const openProjects = (projectList.data ?? []).filter(isOpen);
@@ -82,7 +84,6 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
     e.preventDefault();
     setValidation(null);
     if (!sku.trim() || !name.trim() || !unitOfMeasure.trim()) { setValidation('SKU, name and unit of measure are required.'); return; }
-    if (projects && !projectNumber) { setValidation('Choose the project this material is for.'); return; }
     const reorder = projects ? 0 : Number(requiredStock);
     if (!projects && (requiredStock.trim() === '' || !Number.isFinite(reorder) || reorder < 0)) { setValidation('Reorder level must be 0 or positive.'); return; }
     const cost = unitCost.trim() === '' ? undefined : Number(unitCost);
@@ -97,13 +98,14 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
           name: name.trim(), unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost ?? null, description: description.trim() || null,
           ...(projects ? {} : { requiredStock: reorder }),
-          ...(projects && !projectFixed ? { projectNumber } : {}),
+          // A project is given only if chosen: none is needed (Qodo, PR #130).
+          ...(projects && !projectFixed && projectNumber ? { projectNumber } : {}),
           ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : {}),
         })
         : await api.post<CreatedMaterial>('/materials', {
           sku: sku.trim(), name: name.trim(), category: itemCategory, unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost, description: description.trim() || undefined,
-          ...(projects ? { projectNumber } : { requiredStock: reorder }),
+          ...(projects ? (projectNumber ? { projectNumber } : {}) : { requiredStock: reorder }),
           serialNumber: itemCategory === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
         });
       onSaved(saved);
@@ -147,9 +149,10 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
             </Field>
           )
         ) : (
-          <Field label="Project" htmlFor="m-project" required help={editing ? 'This item has no project yet. Choose the one it was bought for.' : 'The project this material is bought for. Only open projects are listed.'} error={projectList.error ? 'Couldn’t load projects. Close and reopen to try again.' : null}>
-            <Select id="m-project" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)} invalid={!!validation && !projectNumber}>
-              <option value="">{projectList.loading ? 'Loading…' : '— choose a project —'}</option>
+          // Optional: the order an item is bought on says which project it is for (Project on the Order Roadmap).
+          <Field label="Project" htmlFor="m-project" help="Optional. The order it is bought on says which project it is for. Only open projects are listed." error={projectList.error ? 'Couldn’t load projects. Close and reopen to try again.' : null}>
+            <Select id="m-project" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)}>
+              <option value="">{projectList.loading ? 'Loading…' : 'No project'}</option>
               {openProjects.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` · ${p.name}` : ''}</option>)}
             </Select>
           </Field>
