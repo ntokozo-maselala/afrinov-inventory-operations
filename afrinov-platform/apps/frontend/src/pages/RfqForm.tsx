@@ -148,11 +148,6 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   function startNewItem(key: number) {
     openNewItem(key);
   }
-  function newItemOnNewLine() {
-    const line = blankLine();
-    setLines((l) => [...l, line]);
-    startNewItem(line.key);
-  }
 
   function chooseMaterial(key: number, materialId: string) {
     if (materialId === NEW_ITEM) { startNewItem(key); return; }
@@ -235,7 +230,6 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
           <div className="flex items-center justify-between mb-2">
             <legend className="text-eyebrow">Lines</legend>
             <div className="flex gap-2">
-              {canAddItem && <Button size="sm" variant="ghost" type="button" onClick={newItemOnNewLine} leadingIcon={<Icon.Plus size={12} />}>New item</Button>}
               <Button size="sm" variant="secondary" type="button" onClick={() => setLines((l) => [...l, blankLine()])} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
             </div>
           </div>

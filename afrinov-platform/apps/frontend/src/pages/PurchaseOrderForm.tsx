@@ -239,11 +239,6 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   function startNewItem(key: number) {
     openNewItem(key);
   }
-  function newItemOnNewLine() {
-    const line = blankLine();
-    setLines((l) => [...l, line]);
-    startNewItem(line.key);
-  }
   function closeNewItem() { openFor.current = null; setNewItemFor(null); }
   function itemAdded(saved: Material, from: NewItemSession) {
     setAdded((a) => [...a, saved]);
@@ -371,7 +366,6 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
           <div className="flex items-center justify-between mb-2">
             <legend className="text-eyebrow">Lines</legend>
             <div className="flex gap-2">
-              {canAddItem && <Button size="sm" variant="ghost" type="button" onClick={newItemOnNewLine} leadingIcon={<Icon.Plus size={12} />}>New item</Button>}
               <Button size="sm" variant="secondary" type="button" onClick={addLine} leadingIcon={<Icon.Plus size={12} />}>Add line</Button>
             </div>
           </div>
@@ -388,7 +382,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 <div className="col-span-12 md:col-span-1">
                   <Select value={l.materialId} onChange={(e) => chooseMaterial(l.key, e.target.value)} aria-label={`Line ${i + 1} material`}>
                     <option value="">Material…</option>
-                    {/* Not in the catalogue yet: added from the line (a project order's waits for its project). */}
+                    {/* Not in the catalogue yet: added from the line, the one place to add it (a Projects item with no project of its own). */}
                     {canAddItem && <option value={NEW_ITEM}>+ New item…</option>}
                     {lineMaterials.map((m) => <option key={m.id} value={m.id}>{m.sku} — {m.name}</option>)}
                   </Select>
