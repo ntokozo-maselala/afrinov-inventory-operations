@@ -269,6 +269,26 @@ describe('StockStatus on order', () => {
     expect(screen.getByLabelText('Show')).toHaveValue('overdue');
   });
 
+  // Qodo, PR #134: the order is left out for someone who can't open Stores orders, and one
+  // order can have two lines of the item due the same day.
+  it('shows an order it may not name, and two lines of one order due the same day', async () => {
+    const lines = [order('0011', '5', '2026-11-30'), order('0011', '7', '2026-11-30'), { purchaseOrderId: null, number: null, outstanding: '3', dueDate: '2026-11-20' }];
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : [{ ...ON_ORDER[0]!, onOrder: '15', orders: lines }]));
+    renderAt();
+    await screen.findByText('Grinding disc');
+    const cell = cellOf('Grinding disc', 'On order');
+    expect(within(cell).getAllByText(/AFRI-0011/)).toHaveLength(2);
+    expect(within(cell).getByText(/An order/)).toHaveTextContent('An order · 3 · due');
+  });
+
+  // Qodo, PR #134: the download holds what is still to order.
+  it("doesn't offer the download when every short item is all on order", async () => {
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? {} : [ON_ORDER[1]!, ON_ORDER[2]!]));
+    renderAt();
+    await screen.findByLabelText('Show');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Download re-order list' })).toBeDisabled());
+  });
+
   it('has no On order column or views with procurement off', async () => {
     features.procurement = false;
     renderAt('/reports/stock-status?view=overdue');

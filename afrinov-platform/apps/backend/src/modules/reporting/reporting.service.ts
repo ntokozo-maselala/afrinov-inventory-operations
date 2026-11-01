@@ -96,8 +96,12 @@ async function lastSuppliers(materialIds: string[]): Promise<Map<string, { id: s
   return out;
 }
 
-/** One Stores order line still to come in: what is left to receive, and when it is due. */
-export interface OnOrderLine { purchaseOrderId: string; number: string; outstanding: string; dueDate: string | null }
+/**
+ * One Stores order line still to come in: what is left to receive, and when it
+ * is due. The order's id and number are null for someone who can't open Stores
+ * orders (Qodo, PR #134).
+ */
+export interface OnOrderLine { purchaseOrderId: string | null; number: string | null; outstanding: string; dueDate: string | null }
 
 // Order statuses with stock still to come: approved (with the supplier) or partly received.
 const OPEN_ORDER_STATUSES = ['APPROVED', 'PARTIALLY_RECEIVED'] as const;
@@ -129,7 +133,7 @@ async function onOrderByMaterial(materialIds: string[]): Promise<Map<string, OnO
     }]);
   }
   // Soonest due first; an order with no date last.
-  for (const list of out.values()) list.sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number));
+  for (const list of out.values()) list.sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || (a.number ?? '').localeCompare(b.number ?? ''));
   return out;
 }
 
@@ -252,7 +256,11 @@ export const ReportingService = {
    * Required Stock, URGENT / WARNING / OK by the setting bands, or NOT_SET.
    * Most urgent first, then lowest percentage.
    */
-  async stockStatus(filter: { status?: StockStatus[]; category?: string; section?: MaterialSection | 'ALL' } = {}): Promise<StockStatusRow[]> {
+  /**
+   * `orders` counts what is on approved Stores orders: only when procurement is
+   * on, as with it off those orders can't be received or cancelled (Qodo, PR #134).
+   */
+  async stockStatus(filter: { status?: StockStatus[]; category?: string; section?: MaterialSection | 'ALL'; orders?: boolean } = {}): Promise<StockStatusRow[]> {
     // Re-ordering is for Stores: Projects material is bought per job, so it is
     // left out unless asked for (materials sections roadmap, Phase 4).
     const section = filter.section ?? 'STORES';
@@ -272,7 +280,7 @@ export const ReportingService = {
       getStatusBands(),
       lastSuppliers(ids),
       onLoanByMaterial(prisma, ids),
-      onOrderByMaterial(ids),
+      filter.orders ? onOrderByMaterial(ids) : Promise.resolve(new Map<string, OnOrderLine[]>()),
     ]);
     const byMaterial = new Map<string, typeof balances>();
     for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
@@ -378,9 +386,9 @@ export const ReportingService = {
   },
 
   /** Items that need re-ordering (URGENT or WARNING); empty when stock alerts are off. */
-  async lowStock(): Promise<StockStatusRow[]> {
+  async lowStock(opts: { orders?: boolean } = {}): Promise<StockStatusRow[]> {
     if (!(await SettingsService.getValue<boolean>('inventory.enableStockAlerts'))) return [];
-    return this.stockStatus({ status: ['URGENT', 'WARNING'] });
+    return this.stockStatus({ status: ['URGENT', 'WARNING'], orders: opts.orders });
   },
 
   async projectConsumption(projectNumber: string) {

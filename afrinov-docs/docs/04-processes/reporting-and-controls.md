@@ -24,7 +24,9 @@ the ledger, balances and material master — nothing is stored.
   The status itself is what is owned now. The Stock status page lists what
   still needs re-ordering after what is on order, what is short but on order,
   everything with an order still to come (pending orders, in transit), and
-  what is on an overdue order (`GET /reports/stock-status`, `GET /reports/low-stock`;
+  what is on an overdue order. The re-order list download holds only what is
+  still to order. Orders are counted only with procurement on, and the order
+  numbers are shown only to those who can open Stores orders (`GET /reports/stock-status`, `GET /reports/low-stock`;
   Excel re-order list `GET /reports/reorder-list/export`). Replaces the
   workbook's URGENCY column; an item without Required Stock is NOT_SET,
   not URGENT. Off when `inventory.enableStockAlerts` is false.

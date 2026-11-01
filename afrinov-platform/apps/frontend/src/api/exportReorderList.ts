@@ -40,11 +40,15 @@ export async function downloadReorderList(category?: string): Promise<void> {
   triggerDownload(blob, filenameFromDisposition(res.headers.get('content-disposition'), fallbackName(category)));
 }
 
+/** What to order: an item whose shortfall is all on order is left out, as on the page and the server's file (Qodo, PR #134). */
+const toOrder = (rows: StockStatusItem[]) => rows.filter((r) => Number(r.reorderQuantity) > 0);
+
 async function buildInBrowser(category?: string): Promise<ArrayBuffer> {
-  const [rows, settings] = await Promise.all([
+  const [graded, settings] = await Promise.all([
     api.get<StockStatusItem[]>(`/reports/stock-status?status=URGENT,WARNING${categoryQuery(category)}`),
     api.get<Array<{ key: string; value: unknown }>>('/settings'),
   ]);
+  const rows = toOrder(graded);
   const setting = (key: string, fallback: unknown) => settings.find((s) => s.key === key)?.value ?? fallback;
   const urgent = setting('inventory.urgentBelowPercent', 20);
   const warning = setting('inventory.warningBelowPercent', 40);
@@ -94,7 +98,7 @@ async function buildInBrowser(category?: string): Promise<ArrayBuffer> {
     total += subtotal;
   }
   if (rows.length === 0) {
-    ws.addRow([`Nothing ${category ? `in ${categoryLabel(category)} ` : ''}needs re-ordering: every item with a Required Stock is at or above the warning level.`]);
+    ws.addRow([`Nothing ${category ? `in ${categoryLabel(category)} ` : ''}needs re-ordering: every item with a Required Stock is at or above the warning level, or enough is on order.`]);
   } else {
     ws.addRow([null, `Total re-order value (${rows.length} items)`, null, null, null, null, null, null, null, null, Math.round(total * 100) / 100]).font = { bold: true };
     if (unpriced > 0) ws.addRow([null, `${unpriced} item${unpriced === 1 ? ' has' : 's have'} no unit price and ${unpriced === 1 ? 'is' : 'are'} not in the total.`]);
@@ -108,10 +112,11 @@ async function buildInBrowser(category?: string): Promise<ArrayBuffer> {
  * where the stock is kept is left out to fit the page.
  */
 export async function downloadReorderListPdf(category?: string): Promise<void> {
-  const [rows, values] = await Promise.all([
+  const [graded, values] = await Promise.all([
     api.get<StockStatusItem[]>(`/reports/stock-status?status=URGENT,WARNING${categoryQuery(category)}`),
     api.get<Record<string, unknown>>('/settings/values?keys=inventory.urgentBelowPercent,inventory.warningBelowPercent,general.defaultCurrency'),
   ]);
+  const rows = toOrder(graded);
   const urgent = Number(values['inventory.urgentBelowPercent'] ?? 20);
   const warning = Number(values['inventory.warningBelowPercent'] ?? 40);
   const currency = String(values['general.defaultCurrency'] ?? 'ZAR');
@@ -132,7 +137,7 @@ export async function downloadReorderListPdf(category?: string): Promise<void> {
       return [categoryLabel(c), String(group.filter((r) => r.status === 'URGENT').length), String(group.filter((r) => r.status === 'WARNING').length), money(subtotal(c))];
     }),
     totals: [[`Total (${rows.length} items)`, String(rows.filter((r) => r.status === 'URGENT').length), String(rows.filter((r) => r.status === 'WARNING').length), money(total)]],
-    empty: `Nothing ${category ? `in ${categoryLabel(category)} ` : ''}needs re-ordering: every item with a Required Stock is at or above the warning level.`,
+    empty: `Nothing ${category ? `in ${categoryLabel(category)} ` : ''}needs re-ordering: every item with a Required Stock is at or above the warning level, or enough is on order.`,
   };
   const detail: PdfTable[] = categories.map((c) => {
     const group = rows.filter((r) => r.category === c);

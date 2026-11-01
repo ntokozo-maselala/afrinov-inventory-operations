@@ -117,8 +117,8 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
 
   if (rows.length === 0) {
     ws.addRow([meta.category
-      ? `Nothing in ${CATEGORY_LABEL[meta.category] ?? meta.category} needs re-ordering: every item with a Required Stock is at or above the warning level.`
-      : 'Nothing needs re-ordering: every item with a Required Stock is at or above the warning level.']);
+      ? `Nothing in ${CATEGORY_LABEL[meta.category] ?? meta.category} needs re-ordering: every item with a Required Stock is at or above the warning level, or enough is on order.`
+      : 'Nothing needs re-ordering: every item with a Required Stock is at or above the warning level, or enough is on order.']);
   } else {
     const total = ws.addRow({ name: `Total re-order value (${rows.length} items)`, value: Math.round(grandTotal * 100) / 100 });
     total.font = { bold: true, size: 12 };

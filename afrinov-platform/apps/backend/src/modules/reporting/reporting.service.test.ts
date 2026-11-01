@@ -328,7 +328,9 @@ describe('ReportingService', () => {
         { materialId: 'm-3', orderedQty: 40, receivedQty: 0, deliveryDate: null, order: order('9', 'APPROVED', { expectedDeliveryDate: null }) },
       ];
       const { ReportingService } = await import('./reporting.service.js');
-      const rows = await ReportingService.stockStatus();
+      // Not counted unless asked for: with procurement off, those orders can't be received.
+      expect((await ReportingService.stockStatus()).find((r) => r.sku === 'SKU-002')).toMatchObject({ onOrder: '0', orders: [], reorderQuantity: '40' });
+      const rows = await ReportingService.stockStatus({ orders: true });
       const cable = rows.find((r) => r.sku === 'SKU-002')!;
       expect([cable.status, cable.onHand, cable.onOrder, cable.reorderQuantity]).toEqual(['WARNING', '10', '25', '15']);
       expect(cable.orders).toEqual([

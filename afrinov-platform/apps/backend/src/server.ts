@@ -326,7 +326,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     }
     await projectRoutes(instance);
     await recipientRoutes(instance);
-    await reportingRoutes(instance);
+    await reportingRoutes(instance, { procurementEnabled });
     await settingsRoutes(instance);
     await auditRoutes(instance);
     await healthRoutes(instance);

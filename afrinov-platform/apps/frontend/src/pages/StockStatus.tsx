@@ -64,8 +64,8 @@ export interface StockStatusItem {
   project?: { name: string | null; status: string } | null;
 }
 
-/** One Stores order line still to come in. */
-export interface OnOrderLine { purchaseOrderId: string; number: string; outstanding: string; dueDate: string | null }
+/** One Stores order line still to come in; the order is null for someone who can't open Stores orders. */
+export interface OnOrderLine { purchaseOrderId: string | null; number: string | null; outstanding: string; dueDate: string | null }
 
 /** Its orders due before today, still to come. */
 const overdueOrders = (r: StockStatusItem, today: string) => (r.orders ?? []).filter((o) => o.dueDate !== null && o.dueDate < today);
@@ -147,8 +147,8 @@ export function StockStatus() {
     return c;
   }, [items.data]);
 
-  // What the download would hold: the items to re-order, in the chosen category if one is.
-  const toReorder = (items.data ?? []).filter((r) => needsAttention(r.status) && (!category || r.category === category)).length;
+  // What the download would hold: the items still to order after what is on order, in the chosen category if one is.
+  const toReorder = (items.data ?? []).filter((r) => needsAttention(r.status) && num(r.reorderQuantity) > 0 && (!category || r.category === category)).length;
 
   const filtered = useMemo(() => {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -312,11 +312,13 @@ function onOrderColumn(canOpen: boolean, today: string): DataTableColumn<StockSt
       return (
         <div>
           <span className="font-mono">{formatNumber(num(r.onOrder))}</span>
-          {orders.map((o) => {
+          {orders.map((o, i) => {
             const late = o.dueDate !== null && o.dueDate < today;
             return (
-              <div key={`${o.purchaseOrderId}-${o.dueDate}`} className={`text-xs ${late ? 'text-danger-600 font-medium' : 'text-surface-500'}`}>
-                {canOpen ? <Link to={orderPath({ id: o.purchaseOrderId, projectNumber: null })} className="btn-link">{o.number}</Link> : o.number}
+              // By position: one order can have two lines of the item due the same day (Qodo, PR #134).
+              <div key={i} className={`text-xs ${late ? 'text-danger-600 font-medium' : 'text-surface-500'}`}>
+                {o.number === null || o.purchaseOrderId === null ? 'An order'
+                  : canOpen ? <Link to={orderPath({ id: o.purchaseOrderId, projectNumber: null })} className="btn-link">{o.number}</Link> : o.number}
                 {orders.length > 1 && ` · ${formatNumber(num(o.outstanding))}`}
                 {o.dueDate && ` · ${late ? 'overdue, was due' : 'due'} ${formatDate(o.dueDate)}`}
               </div>

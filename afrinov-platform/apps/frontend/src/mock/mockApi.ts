@@ -2752,6 +2752,8 @@ function onLoanOf(materialId: string): number {
 
 /** The Stores order lines still to come in for an item, soonest due first (the server's onOrderByMaterial). */
 function onOrderOf(materialId: string) {
+  // As the server: not counted with procurement off, when those orders can't be received.
+  if (!PROCUREMENT_ENABLED) return [];
   return state.purchaseOrders
     .filter((po) => (po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED') && po.projectNumber == null)
     .flatMap((po) => po.lines
