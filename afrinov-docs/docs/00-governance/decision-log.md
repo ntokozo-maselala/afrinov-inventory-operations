@@ -473,7 +473,9 @@ confirmation. Tagging the item too meant one catalogue entry per project
 - A Projects item is a plain catalogue entry with no project of its own; the
   item form has no Project field, and the "Needs a project" step is gone.
 - A project order (and RFQ) takes any Projects item, whatever project it was
-  tagged with; a Stores order takes Stores items only, both checked by the server.
+  tagged with; a Stores order takes Stores items only, both checked by the
+  server. An order awarded from an RFQ sent before project orders took
+  Projects items only keeps the Stores items it was quoted for.
 - An item tagged with an open project only suggests the order's project while
   none is chosen; it never fixes it.
 - Leftovers received before the separation keep the project they have: issued

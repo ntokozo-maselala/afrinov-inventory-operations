@@ -168,8 +168,11 @@ the one place to receive, and only against an approved Stores order
 - An inactive supplier cannot be ordered from.
 - The order says which project its material is for (ADR-023): a project order
   (or RFQ) takes any Projects item, whatever project it was tagged with, and
-  never a Stores item; a Stores order takes Stores items only. A new item added
-  from an order or RFQ line gets no project of its own.
+  no Stores item; a Stores order takes Stores items only. A new item added
+  from an order or RFQ line gets no project of its own. The one exception:
+  an order awarded from an RFQ sent before project orders were limited to
+  Projects items (Stores ordering roadmap) keeps the Stores items it was
+  quoted for; their delivery is confirmed with the rest, so no stock is added.
 - Each transition and each edit is written to the audit log, with only the
   fields that changed, and shown as the order's history (`GET /:id/history`).
 
