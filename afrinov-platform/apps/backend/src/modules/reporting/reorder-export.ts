@@ -1,6 +1,6 @@
 // The re-order list as an Excel file for the buyer: every URGENT and WARNING
-// item, grouped by category, with the quantity to order (Required Stock less
-// on hand), the unit price, the value of the order and the supplier it last
+// item, grouped by category, with what is already on order and the quantity
+// still to order (Required Stock less on hand and on order), the unit price, the value of the order and the supplier it last
 // came from. Numbers stay numbers, so the buyer can sort and sum in Excel.
 import ExcelJS from 'exceljs';
 import type { StockStatusRow } from './reporting.service.js';
@@ -39,6 +39,7 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
     { key: 'unit', width: 8 },
     { key: 'status', width: 10 },
     { key: 'onHand', width: 10 },
+    { key: 'onOrder', width: 10 },
     { key: 'required', width: 10 },
     { key: 'percent', width: 10 },
     { key: 'reorder', width: 12 },
@@ -53,16 +54,16 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
   ws.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFE3001B' } };
   ws.getCell('A2').value = `Generated ${meta.generatedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC. `
     + `Items below ${meta.bands.warningBelowPercent}% of their Required Stock (urgent below ${meta.bands.urgentBelowPercent}%). `
-    + `Re-order quantity = Required Stock − on hand. Prices excl. VAT, ${meta.currency}.`;
+    + `On order = still to come on approved Stores orders. Re-order quantity = Required Stock − on hand − on order. Prices excl. VAT, ${meta.currency}.`;
   ws.getCell('A2').font = { italic: true, color: { argb: 'FF555555' } };
 
   const header = ws.getRow(4);
-  header.values = ['Code', 'Item', 'Unit', 'Status', 'On hand', 'Required', '% of required', 'Re-order qty',
+  header.values = ['Code', 'Item', 'Unit', 'Status', 'On hand', 'On order', 'Required', '% of required', 'Re-order qty',
     `Unit price (${meta.currency})`, `Re-order value (${meta.currency})`, 'Last supplier', 'Last delivered', 'Where it is kept'];
   header.font = { bold: true };
   header.alignment = { vertical: 'middle', wrapText: true };
   header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } }; });
-  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 13 } };
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 14 } };
 
   const byCategory = new Map<string, StockStatusRow[]>();
   for (const r of rows) byCategory.set(r.category, [...(byCategory.get(r.category) ?? []), r]);
@@ -88,6 +89,7 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
         unit: r.unitOfMeasure,
         status: r.status === 'URGENT' ? 'Urgent' : 'Warning',
         onHand: Number(r.onHand),
+        onOrder: Number(r.onOrder),
         required: Number(r.requiredStock),
         percent: r.percentOfRequired === null ? null : r.percentOfRequired / 100,
         reorder,
@@ -97,7 +99,7 @@ export async function buildReorderXlsx(rows: StockStatusRow[], meta: ReorderMeta
         lastDelivered: r.lastSupplier ? new Date(r.lastSupplier.receivedAt) : null,
         where: r.locations.map((l) => `${l.locationName} (${Number(l.quantity)})`).join(', ') || 'None on hand',
       });
-      for (const key of ['onHand', 'required', 'reorder']) row.getCell(key).numFmt = QTY;
+      for (const key of ['onHand', 'onOrder', 'required', 'reorder']) row.getCell(key).numFmt = QTY;
       row.getCell('percent').numFmt = '0.0%';
       row.getCell('price').numFmt = MONEY;
       row.getCell('value').numFmt = MONEY;

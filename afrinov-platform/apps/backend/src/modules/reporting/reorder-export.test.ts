@@ -6,7 +6,7 @@ import type { StockStatusRow } from './reporting.service.js';
 
 const row = (sku: string, category: string, status: 'URGENT' | 'WARNING', onHand: number, required: number, unitCost: string | null, extra: Partial<StockStatusRow> = {}): StockStatusRow => ({
   materialId: `m-${sku}`, sku, name: `Item ${sku}`, category, unitOfMeasure: 'each',
-  requiredStock: String(required), onHand: String(onHand), onLoan: '0', percentOfRequired: Math.round((onHand / required) * 1000) / 10,
+  requiredStock: String(required), onHand: String(onHand), onLoan: '0', onOrder: '0', orders: [], percentOfRequired: Math.round((onHand / required) * 1000) / 10,
   status, reorderQuantity: String(required - onHand), unitCost,
   locations: onHand > 0 ? [{ locationId: 'l-1', locationName: 'A-1', quantity: String(onHand) }] : [],
   lastSupplier: null, projectNumber: null, project: null, ...extra,
@@ -34,35 +34,36 @@ describe('re-order list export', () => {
       row('CON-1', 'CONSUMABLES', 'URGENT', 11, 100, '42.05', {
         lastSupplier: { id: 'sup-1', name: 'Hydroscand', receivedAt: '2026-09-18T00:00:00.000Z' },
       }),
-      row('CON-2', 'CONSUMABLES', 'WARNING', 10, 50, null),
+      // 25 of its 40 short is on order: 15 left to order.
+      row('CON-2', 'CONSUMABLES', 'WARNING', 10, 50, null, { onOrder: '25', reorderQuantity: '15' }),
     ]);
     expect(ws.getCell('A1').value).toBe('Re-order list');
     expect(String(ws.getCell('A2').value)).toContain('below 40% of their Required Stock (urgent below 20%)');
 
     const t = table(ws);
-    expect(t[0]!.slice(0, 10)).toEqual(['Code', 'Item', 'Unit', 'Status', 'On hand', 'Required', '% of required', 'Re-order qty', 'Unit price (ZAR)', 'Re-order value (ZAR)']);
+    expect(t[0]!.slice(0, 11)).toEqual(['Code', 'Item', 'Unit', 'Status', 'On hand', 'On order', 'Required', '% of required', 'Re-order qty', 'Unit price (ZAR)', 'Re-order value (ZAR)']);
     // Consumables first (the workbook's order), then Tooling.
     expect(t[1]![0]).toBe('Consumables (2)');
-    expect(t[2]!.slice(0, 11)).toEqual(['CON-1', 'Item CON-1', 'each', 'Urgent', 11, 100, 0.11, 89, 42.05, 3742.45, 'Hydroscand']);
-    expect(t[2]![11]).toEqual(new Date('2026-09-18T00:00:00.000Z'));
-    expect(t[3]!.slice(0, 11)).toEqual(['CON-2', 'Item CON-2', 'each', 'Warning', 10, 50, 0.2, 40, undefined, undefined, '']);
-    expect(t[4]!.slice(1, 10)).toEqual(['Subtotal Consumables', undefined, undefined, undefined, undefined, undefined, undefined, undefined, 3742.45]);
+    expect(t[2]!.slice(0, 12)).toEqual(['CON-1', 'Item CON-1', 'each', 'Urgent', 11, 0, 100, 0.11, 89, 42.05, 3742.45, 'Hydroscand']);
+    expect(t[2]![12]).toEqual(new Date('2026-09-18T00:00:00.000Z'));
+    expect(t[3]!.slice(0, 12)).toEqual(['CON-2', 'Item CON-2', 'each', 'Warning', 10, 25, 50, 0.2, 15, undefined, undefined, '']);
+    expect(t[4]!.slice(1, 11)).toEqual(['Subtotal Consumables', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 3742.45]);
     // Blank spacer rows are skipped when reading back.
     expect(t[5]![0]).toBe('Tooling, PPE & Electrical (1)');
-    expect(t[6]!.slice(7, 10)).toEqual([70, 4.2, 294]);
+    expect(t[6]!.slice(8, 11)).toEqual([70, 4.2, 294]);
 
     const totalRow = t.find((r) => String(r[1] ?? '').startsWith('Total re-order value'))!;
     expect(totalRow[1]).toBe('Total re-order value (3 items)');
-    expect(totalRow[9]).toBe(4036.45);
+    expect(totalRow[10]).toBe(4036.45);
     expect(t.some((r) => r[1] === '1 item has no unit price and is not in the total.')).toBe(true);
   });
 
   it('keeps numbers as numbers, with formats for Excel', async () => {
     const ws = await read([row('CON-1', 'CONSUMABLES', 'URGENT', 11, 100, '42.05')]);
     const r = ws.getRow(6);
-    expect(typeof r.getCell(8).value).toBe('number');
-    expect(r.getCell(7).numFmt).toBe('0.0%');
-    expect(r.getCell(10).numFmt).toBe('#,##0.00');
+    expect(typeof r.getCell(9).value).toBe('number');
+    expect(r.getCell(8).numFmt).toBe('0.0%');
+    expect(r.getCell(11).numFmt).toBe('#,##0.00');
   });
 
   it('says so when nothing needs re-ordering', async () => {

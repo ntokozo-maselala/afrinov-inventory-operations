@@ -12,7 +12,11 @@ itself is described in full in `purchase-order-lifecycle.md`.
 An item's stock status becomes URGENT or WARNING — on hand, totalled over
 all locations, below the configured percentage of its Required Stock
 (defaults 20% and 40%) — or a manual need is identified. The Stock status
-page lists these and downloads them as a re-order list (Excel or PDF).
+page lists these and downloads them as a re-order list (Excel or PDF). What
+is already on an approved Stores order is shown as On order and taken off
+the re-order quantity: an item fully covered by orders is listed under
+"Short, on order" (to chase), not "Needs re-ordering". Project orders go
+straight to site and are never counted (ADR-023).
 
 ## Actors
 Store Controller / Procurement (may be the same person), Supplier

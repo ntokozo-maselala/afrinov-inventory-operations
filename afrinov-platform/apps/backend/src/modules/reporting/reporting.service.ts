@@ -16,8 +16,13 @@ export interface StockStatusRow {
   onHand: string;
   /** Tools only: out on loan, still owned; the status counts it with what is on hand. */
   onLoan: string;
+  /** Still to come on approved Stores orders (ordered less received). */
+  onOrder: string;
+  /** The Stores orders it is on, soonest due first. */
+  orders: OnOrderLine[];
   percentOfRequired: number | null;
   status: StockStatus;
+  /** Required Stock less what is owned (on hand and on loan) and what is on order; 0 when none is short. */
   reorderQuantity: string;
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
@@ -88,6 +93,43 @@ async function lastSuppliers(materialIds: string[]): Promise<Map<string, { id: s
   for (const l of lines) {
     if (!out.has(l.materialId)) out.set(l.materialId, { id: l.goodsReceipt.supplier.id, name: l.goodsReceipt.supplier.name, receivedAt: l.goodsReceipt.receivedAt.toISOString() });
   }
+  return out;
+}
+
+/** One Stores order line still to come in: what is left to receive, and when it is due. */
+export interface OnOrderLine { purchaseOrderId: string; number: string; outstanding: string; dueDate: string | null }
+
+// Order statuses with stock still to come: approved (with the supplier) or partly received.
+const OPEN_ORDER_STATUSES = ['APPROVED', 'PARTIALLY_RECEIVED'] as const;
+
+/**
+ * Per item, the Stores order lines still to come in. A project order is left
+ * out: its material goes from the supplier straight to site and is never stock
+ * (ADR-023). A line's due date is its own, or the order's expected delivery.
+ */
+async function onOrderByMaterial(materialIds: string[]): Promise<Map<string, OnOrderLine[]>> {
+  const out = new Map<string, OnOrderLine[]>();
+  if (materialIds.length === 0) return out;
+  const lines = await prisma.purchaseOrderLine.findMany({
+    where: { materialId: { in: materialIds }, purchaseOrder: { status: { in: [...OPEN_ORDER_STATUSES] }, projectNumber: null } },
+    select: {
+      materialId: true, orderedQty: true, receivedQty: true, deliveryDate: true,
+      purchaseOrder: { select: { id: true, number: true, expectedDeliveryDate: true } },
+    },
+  });
+  for (const l of lines) {
+    const outstanding = l.orderedQty.minus(l.receivedQty);
+    if (outstanding.lte(0)) continue;
+    const due = l.deliveryDate ?? l.purchaseOrder.expectedDeliveryDate;
+    out.set(l.materialId, [...(out.get(l.materialId) ?? []), {
+      purchaseOrderId: l.purchaseOrder.id,
+      number: l.purchaseOrder.number,
+      outstanding: outstanding.toString(),
+      dueDate: due ? due.toISOString().slice(0, 10) : null,
+    }]);
+  }
+  // Soonest due first; an order with no date last.
+  for (const list of out.values()) list.sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number));
   return out;
 }
 
@@ -225,11 +267,12 @@ export const ReportingService = {
       orderBy: { name: 'asc' },
     });
     const ids = materials.map((m) => m.id);
-    const [balances, bands, lastSupplier, loans] = await Promise.all([
+    const [balances, bands, lastSupplier, loans, onOrder] = await Promise.all([
       ids.length ? prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }) : Promise.resolve([]),
       getStatusBands(),
       lastSuppliers(ids),
       onLoanByMaterial(prisma, ids),
+      onOrderByMaterial(ids),
     ]);
     const byMaterial = new Map<string, typeof balances>();
     for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
@@ -240,6 +283,10 @@ export const ReportingService = {
       // A tool out on loan is still owned, so it counts towards Required Stock.
       const onLoan = loans.get(m.id) ?? new Prisma.Decimal(0);
       const item = statusFor(m.requiredStock, onHand.plus(onLoan), bands);
+      // The status is what is owned now; what is on order only lowers what is left to order.
+      const orders = onOrder.get(m.id) ?? [];
+      const ordered = orders.reduce((a, o) => a.add(o.outstanding), new Prisma.Decimal(0));
+      const reorderQuantity = Prisma.Decimal.max(0, new Prisma.Decimal(item.reorderQuantity).minus(ordered));
       return {
         materialId: m.id,
         sku: m.sku,
@@ -249,9 +296,11 @@ export const ReportingService = {
         requiredStock: m.requiredStock.toString(),
         onHand: onHand.toString(),
         onLoan: onLoan.toString(),
+        onOrder: ordered.toString(),
+        orders,
         percentOfRequired: item.percentOfRequired,
         status: item.status,
-        reorderQuantity: String(item.reorderQuantity),
+        reorderQuantity: reorderQuantity.toString(),
         unitCost: m.unitCost === null ? null : m.unitCost.toString(),
         locations: mine
           .filter((b) => !b.quantity.isZero())

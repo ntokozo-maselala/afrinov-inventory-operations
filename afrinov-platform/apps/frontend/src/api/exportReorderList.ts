@@ -56,11 +56,11 @@ async function buildInBrowser(category?: string): Promise<ArrayBuffer> {
   ws.getCell('A1').value = category ? `Re-order list: ${categoryLabel(category)}` : 'Re-order list';
   ws.getCell('A2').value = `Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC. `
     + `Items below ${warning}% of their Required Stock (urgent below ${urgent}%). `
-    + `Re-order quantity = Required Stock − on hand. Prices excl. VAT, ${currency}.`;
-  ws.getRow(4).values = ['Code', 'Item', 'Unit', 'Status', 'On hand', 'Required', '% of required', 'Re-order qty',
+    + `On order = still to come on approved Stores orders. Re-order quantity = Required Stock − on hand − on order. Prices excl. VAT, ${currency}.`;
+  ws.getRow(4).values = ['Code', 'Item', 'Unit', 'Status', 'On hand', 'On order', 'Required', '% of required', 'Re-order qty',
     `Unit price (${currency})`, `Re-order value (${currency})`, 'Last supplier', 'Last delivered', 'Where it is kept'];
   ws.getRow(4).font = { bold: true };
-  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 13 } };
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 14 } };
 
   const order = CATEGORIES.map((c) => c.value);
   const categories = [...new Set(rows.map((r) => r.category))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
@@ -78,25 +78,25 @@ async function buildInBrowser(category?: string): Promise<ArrayBuffer> {
       else subtotal += value;
       const row = ws.addRow([
         r.sku, r.name, r.unitOfMeasure, r.status === 'URGENT' ? 'Urgent' : 'Warning',
-        Number(r.onHand), Number(r.requiredStock), r.percentOfRequired === null ? null : r.percentOfRequired / 100,
+        Number(r.onHand), Number(r.onOrder ?? 0), Number(r.requiredStock), r.percentOfRequired === null ? null : r.percentOfRequired / 100,
         reorder, price, value, r.lastSupplier?.name ?? '',
         r.lastSupplier ? new Date(r.lastSupplier.receivedAt) : null,
         r.locations.map((l) => `${l.locationName} (${Number(l.quantity)})`).join(', ') || 'None on hand',
       ]);
-      for (const col of [5, 6, 8]) row.getCell(col).numFmt = QTY;
-      row.getCell(7).numFmt = '0.0%';
-      row.getCell(9).numFmt = MONEY;
+      for (const col of [5, 6, 7, 9]) row.getCell(col).numFmt = QTY;
+      row.getCell(8).numFmt = '0.0%';
       row.getCell(10).numFmt = MONEY;
-      row.getCell(12).numFmt = 'yyyy-mm-dd';
+      row.getCell(11).numFmt = MONEY;
+      row.getCell(13).numFmt = 'yyyy-mm-dd';
     }
-    ws.addRow([null, `Subtotal ${categoryLabel(category)}`, null, null, null, null, null, null, null, Math.round(subtotal * 100) / 100]).font = { bold: true };
+    ws.addRow([null, `Subtotal ${categoryLabel(category)}`, null, null, null, null, null, null, null, null, Math.round(subtotal * 100) / 100]).font = { bold: true };
     ws.addRow([]);
     total += subtotal;
   }
   if (rows.length === 0) {
     ws.addRow([`Nothing ${category ? `in ${categoryLabel(category)} ` : ''}needs re-ordering: every item with a Required Stock is at or above the warning level.`]);
   } else {
-    ws.addRow([null, `Total re-order value (${rows.length} items)`, null, null, null, null, null, null, null, Math.round(total * 100) / 100]).font = { bold: true };
+    ws.addRow([null, `Total re-order value (${rows.length} items)`, null, null, null, null, null, null, null, null, Math.round(total * 100) / 100]).font = { bold: true };
     if (unpriced > 0) ws.addRow([null, `${unpriced} item${unpriced === 1 ? ' has' : 's have'} no unit price and ${unpriced === 1 ? 'is' : 'are'} not in the total.`]);
   }
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
@@ -140,7 +140,7 @@ export async function downloadReorderListPdf(category?: string): Promise<void> {
       heading: `${categoryLabel(c)} (${group.length})`,
       columns: [
         { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Status' },
-        { header: 'On hand', align: 'right' }, { header: 'Required', align: 'right' },
+        { header: 'On hand', align: 'right' }, { header: 'On order', align: 'right' }, { header: 'Required', align: 'right' },
         { header: '% of req.', align: 'right' }, { header: 'Re-order qty', align: 'right' },
         { header: 'Unit' }, { header: 'Unit price', align: 'right' },
         { header: 'Re-order value', align: 'right' }, { header: 'Last supplier', wrap: true },
@@ -149,12 +149,12 @@ export async function downloadReorderListPdf(category?: string): Promise<void> {
         const v = value(r);
         return [
           r.sku, r.name, r.status === 'URGENT' ? 'Urgent' : 'Warning',
-          formatNumber(Number(r.onHand)), formatNumber(Number(r.requiredStock)),
+          formatNumber(Number(r.onHand)), formatNumber(Number(r.onOrder ?? 0)), formatNumber(Number(r.requiredStock)),
           r.percentOfRequired === null ? '' : `${r.percentOfRequired.toFixed(1)}%`, formatNumber(Number(r.reorderQuantity)),
           r.unitOfMeasure, r.unitCost === null ? '-' : money(Number(r.unitCost)), v === null ? '-' : money(v), r.lastSupplier?.name ?? '',
         ];
       }),
-      totals: [['', `Subtotal ${categoryLabel(c)}`, '', '', '', '', '', '', '', money(subtotal(c)), '']],
+      totals: [['', `Subtotal ${categoryLabel(c)}`, '', '', '', '', '', '', '', '', money(subtotal(c)), '']],
     };
   });
 
@@ -162,7 +162,7 @@ export async function downloadReorderListPdf(category?: string): Promise<void> {
     title: category ? `Re-order list: ${categoryLabel(category)}` : 'Re-order list',
     lines: [
       category ? `Category: ${categoryLabel(category)}` : 'All categories',
-      `Items below ${warning}% of their Required Stock (urgent below ${urgent}%). Re-order quantity = Required Stock - on hand. Prices excl. VAT, ${currency}.`,
+      `Items below ${warning}% of their Required Stock (urgent below ${urgent}%). On order = still to come on approved Stores orders. Re-order quantity = Required Stock - on hand - on order. Prices excl. VAT, ${currency}.`,
     ],
     sections: [summary, ...detail],
     notes: unpriced > 0 ? [`${unpriced} item${unpriced === 1 ? ' has' : 's have'} no unit price and ${unpriced === 1 ? 'is' : 'are'} not in the totals.`] : [],

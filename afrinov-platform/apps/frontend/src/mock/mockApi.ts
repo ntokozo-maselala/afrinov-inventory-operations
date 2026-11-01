@@ -2750,6 +2750,20 @@ function onLoanOf(materialId: string): number {
     .reduce((a, t) => a + Number(t.quantity), 0);
 }
 
+/** The Stores order lines still to come in for an item, soonest due first (the server's onOrderByMaterial). */
+function onOrderOf(materialId: string) {
+  return state.purchaseOrders
+    .filter((po) => (po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED') && po.projectNumber == null)
+    .flatMap((po) => po.lines
+      .filter((l) => l.materialId === materialId && Number(l.orderedQty) > Number(l.receivedQty))
+      .map((l) => ({
+        purchaseOrderId: po.id, number: po.number,
+        outstanding: String(Number(l.orderedQty) - Number(l.receivedQty)),
+        dueDate: (l.deliveryDate ?? po.expectedDeliveryDate ?? null)?.slice(0, 10) ?? null,
+      })))
+    .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number));
+}
+
 function computeStockStatus(filter: { status?: StockStatus[]; category?: string; section?: 'STORES' | 'PROJECTS' | 'ALL' }) {
   const balances = computeBalances();
   const bands = mockBands();
@@ -2764,10 +2778,14 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string;
       const onHand = mine.reduce((a, b) => a + b.quantity, 0);
       const lent = onLoanOf(m.id);
       const item = classifyItem(onHand + lent, Number(m.requiredStock), bands);
+      const orders = onOrderOf(m.id);
+      const ordered = orders.reduce((a, o) => a + Number(o.outstanding), 0);
       return {
         materialId: m.id, sku: m.sku, name: m.name, category: m.category, unitOfMeasure: m.unitOfMeasure,
         requiredStock: String(Number(m.requiredStock)), onHand: String(onHand), onLoan: String(lent),
-        percentOfRequired: item.percentOfRequired, status: item.status, reorderQuantity: String(item.reorderQuantity),
+        onOrder: String(ordered), orders,
+        percentOfRequired: item.percentOfRequired, status: item.status,
+        reorderQuantity: String(Math.max(0, Math.round((item.reorderQuantity - ordered) * 10000) / 10000)),
         unitCost: m.unitCost === undefined || m.unitCost === null ? null : String(m.unitCost),
         locations: mine
           .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))

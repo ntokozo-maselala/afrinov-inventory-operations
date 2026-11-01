@@ -17,8 +17,14 @@ the ledger, balances and material master — nothing is stored.
   the July workbook.
 - **Stock status / re-order** — each item URGENT, WARNING, OK or NOT_SET by
   on hand (all locations) as a share of Required Stock, with bands from
-  settings (default below 20% and below 40%); re-order quantity = Required
-  Stock − on hand (`GET /reports/stock-status`, `GET /reports/low-stock`;
+  settings (default below 20% and below 40%); on order = still to come on
+  approved or partly received Stores orders, each with its due date (the
+  line's, or the order's expected delivery); re-order quantity = Required
+  Stock − on hand − on order, so what is already coming isn't ordered twice.
+  The status itself is what is owned now. The Stock status page lists what
+  still needs re-ordering after what is on order, what is short but on order,
+  everything with an order still to come (pending orders, in transit), and
+  what is on an overdue order (`GET /reports/stock-status`, `GET /reports/low-stock`;
   Excel re-order list `GET /reports/reorder-list/export`). Replaces the
   workbook's URGENCY column; an item without Required Stock is NOT_SET,
   not URGENT. Off when `inventory.enableStockAlerts` is false.

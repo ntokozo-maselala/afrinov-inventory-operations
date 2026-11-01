@@ -32,6 +32,11 @@ const db = {
   locations: [] as Loc[],
   transactions: [] as Tx[],
   receipts: [] as Array<{ materialId: string; receivedAt: Date; supplier: string; status: string }>,
+  // Purchase order lines, each with its order's id, number, status, project and expected delivery.
+  orderLines: [] as Array<{
+    materialId: string; orderedQty: number; receivedQty: number; deliveryDate: Date | null;
+    order: { id: string; number: string; status: string; projectNumber: string | null; expectedDeliveryDate: Date | null };
+  }>,
   settings: new Map<string, { value: unknown }>(),
 };
 
@@ -116,6 +121,15 @@ function makePrisma(): unknown {
     setting: {
       findUnique: async ({ where }: { where: { key: string } }) => db.settings.get(where.key) ?? null,
     },
+    purchaseOrderLine: {
+      findMany: async ({ where }: { where: { materialId: { in: string[] }; purchaseOrder: { status: { in: string[] }; projectNumber: null } } }) => db.orderLines
+        .filter((l) => where.materialId.in.includes(l.materialId) && where.purchaseOrder.status.in.includes(l.order.status)
+          && l.order.projectNumber === where.purchaseOrder.projectNumber)
+        .map((l) => ({
+          materialId: l.materialId, orderedQty: DEC(l.orderedQty), receivedQty: DEC(l.receivedQty), deliveryDate: l.deliveryDate,
+          purchaseOrder: { id: l.order.id, number: l.order.number, expectedDeliveryDate: l.order.expectedDeliveryDate },
+        })),
+    },
     goodsReceiptLine: {
       findMany: async ({ where }: { where: { materialId: { in: string[] }; goodsReceipt: { status: string } } }) => db.receipts
         .filter((r) => where.materialId.in.includes(r.materialId) && r.status === where.goodsReceipt.status)
@@ -131,6 +145,7 @@ beforeEach(() => {
   db.locations = [];
   db.transactions = [];
   db.receipts = [];
+  db.orderLines = [];
   db.settings.clear();
 });
 
@@ -289,6 +304,41 @@ describe('ReportingService', () => {
       } finally {
         loans.out.clear();
       }
+    });
+
+    // What is on approved Stores orders is still to come: it lowers what is left to order, not the status.
+    it('counts what is still to come on approved Stores orders, soonest due first', async () => {
+      seedMaterials();
+      db.balances = [{ materialId: 'm-2', locationId: 'l-1', quantity: DEC(10), updatedAt: new Date() }]; // 10 of 50: WARNING, 40 short
+      const order = (id: string, status: string, over: Partial<(typeof db.orderLines)[number]['order']> = {}) => ({
+        id, number: `AFRI-${id}`, status, projectNumber: null, expectedDeliveryDate: new Date('2026-11-20'), ...over,
+      });
+      db.orderLines = [
+        // Partly received: 15 of 25 still to come, due on the order's date.
+        { materialId: 'm-2', orderedQty: 25, receivedQty: 10, deliveryDate: null, order: order('2', 'PARTIALLY_RECEIVED') },
+        // Its own, earlier date.
+        { materialId: 'm-2', orderedQty: 10, receivedQty: 0, deliveryDate: new Date('2026-11-05'), order: order('3', 'APPROVED') },
+        // Not counted: a draft, one awaiting approval, a cancelled one, a received line, and a project order.
+        { materialId: 'm-2', orderedQty: 100, receivedQty: 0, deliveryDate: null, order: order('4', 'DRAFT') },
+        { materialId: 'm-2', orderedQty: 100, receivedQty: 0, deliveryDate: null, order: order('5', 'PENDING_APPROVAL') },
+        { materialId: 'm-2', orderedQty: 100, receivedQty: 0, deliveryDate: null, order: order('6', 'CANCELLED') },
+        { materialId: 'm-2', orderedQty: 5, receivedQty: 5, deliveryDate: null, order: order('7', 'PARTIALLY_RECEIVED') },
+        { materialId: 'm-2', orderedQty: 100, receivedQty: 0, deliveryDate: null, order: order('8', 'APPROVED', { projectNumber: '1369' }) },
+        // More than is short: nothing left to order.
+        { materialId: 'm-3', orderedQty: 40, receivedQty: 0, deliveryDate: null, order: order('9', 'APPROVED', { expectedDeliveryDate: null }) },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus();
+      const cable = rows.find((r) => r.sku === 'SKU-002')!;
+      expect([cable.status, cable.onHand, cable.onOrder, cable.reorderQuantity]).toEqual(['WARNING', '10', '25', '15']);
+      expect(cable.orders).toEqual([
+        { purchaseOrderId: '3', number: 'AFRI-3', outstanding: '10', dueDate: '2026-11-05' },
+        { purchaseOrderId: '2', number: 'AFRI-2', outstanding: '15', dueDate: '2026-11-20' },
+      ]);
+      const paint = rows.find((r) => r.sku === 'SKU-003')!;
+      expect([paint.status, paint.onOrder, paint.reorderQuantity, paint.orders[0]!.dueDate]).toEqual(['URGENT', '40', '0', null]);
+      const bolt = rows.find((r) => r.sku === 'SKU-001')!;
+      expect([bolt.onOrder, bolt.orders, bolt.reorderQuantity]).toEqual(['0', [], '10']);
     });
 
     it('lists an item with no stock anywhere as URGENT', async () => {

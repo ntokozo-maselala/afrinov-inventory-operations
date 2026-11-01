@@ -207,9 +207,11 @@ describe('Order these on Stock status', () => {
     expect(screen.queryByRole('link', { name: /New stock order/ })).not.toBeInTheDocument();
   });
 
-  it('links the store to a new stock order', async () => {
+  // A new order from scratch is raised on Order stock; from here, it is Order these.
+  it('has no New stock order link of its own', async () => {
     stockStatus();
-    expect(await screen.findByRole('link', { name: /New stock order/ })).toHaveAttribute('href', '/stock/orders/new');
+    expect(await screen.findByLabelText('Show')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /New stock order/ })).not.toBeInTheDocument();
   });
 });
 
