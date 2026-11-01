@@ -191,6 +191,25 @@ describe('IssueStock linked from an item', () => {
     await ready();
     expect(screen.queryByText(/On hand at/)).not.toBeInTheDocument();
   });
+
+  // Qodo, PR #132: the server refuses an issue from a deactivated location or item.
+  it('offers no stock in a deactivated location, or of a deactivated item, and starts on an active location', async () => {
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [
+      { ...STOCK[0]!, locationId: 'l-old', locationName: 'OLD-RACK', quantity: '50', locationActive: false },
+      { ...STOCK[0]!, materialActive: true, locationActive: true },
+      { ...STOCK[1]!, materialActive: false },
+    ] : respond(path)));
+    renderPage('/stock/issue?materialId=m-1');
+    await ready();
+    // The most is in the deactivated rack, but the line starts on A-1.
+    expect(await screen.findByText('On hand at A-1: 10 each')).toBeInTheDocument();
+    const input = screen.getByLabelText('Item 1');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'OLD-RACK' } });
+    expect(screen.queryByRole('option', { name: /OLD-RACK/ })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'gloves' } });
+    expect(screen.queryByRole('option', { name: /Welding gloves/ })).not.toBeInTheDocument();
+  });
 });
 
 // Materials Phase 5: project material goes only to its own project.

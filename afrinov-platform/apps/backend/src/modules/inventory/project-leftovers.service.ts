@@ -29,6 +29,8 @@ export interface LeftoverItem {
   locations: string;
   /** False for a deactivated item: still listed, but not issued (Qodo, PR #131). */
   active: boolean;
+  /** Whether some of it is in an active location, the only kind issued from (Qodo, PR #132). */
+  inActiveLocation: boolean;
 }
 
 export interface ProjectLeftovers {
@@ -57,7 +59,7 @@ async function findProject(projectNumber: string, db: Prisma.TransactionClient |
 async function leftoverItems(projectNumber: string | null): Promise<LeftoverItem[]> {
   const materials = await prisma.material.findMany({
     where: { category: PROJECTS_CATEGORY, projectNumber },
-    include: { inventoryBalances: { where: { quantity: { gt: 0 } }, include: { location: { select: { name: true } } } } },
+    include: { inventoryBalances: { where: { quantity: { gt: 0 } }, include: { location: { select: { name: true, active: true } } } } },
     orderBy: { sku: 'asc' },
   });
   return materials.flatMap((m) => {
@@ -72,6 +74,7 @@ async function leftoverItems(projectNumber: string | null): Promise<LeftoverItem
         value: m.unitCost === null ? null : Number(onHand.times(m.unitCost).toFixed(2)),
         locations: m.inventoryBalances.map((b) => `${b.location.name} (${b.quantity.toString()})`).join(', '),
         active: m.active,
+        inActiveLocation: m.inventoryBalances.some((b) => b.location.active),
       }];
   });
 }

@@ -111,6 +111,17 @@ describe('ProjectLeftovers page', () => {
     expect(screen.getAllByText('Project inactive')).toHaveLength(2);
   });
 
+  // Qodo, PR #132: nothing is issued from a deactivated location.
+  it('offers no Issue for an item whose stock is all in deactivated locations', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockResolvedValue({ ...leftovers('ACTIVE'), items: [{ ...ITEMS[0]!, active: true, inActiveLocation: false }, ITEMS[1]!] });
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.queryByRole('link', { name: 'Issue 1369-PIPE' })).not.toBeInTheDocument();
+    expect(screen.getByText('Only in inactive locations')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Issue 1369-FLANGE' })).toBeInTheDocument();
+  });
+
   it('offers no Issue once the project is closed: its leftovers move to Stores', async () => {
     renderPage();
     await screen.findByText('Pipe 150NB');

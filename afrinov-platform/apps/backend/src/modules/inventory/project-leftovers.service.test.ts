@@ -8,7 +8,7 @@ type Mat = { id: string; sku: string; name: string; unitOfMeasure: string; categ
 const db = {
   projects: new Map<string, { projectNumber: string; name: string | null; status: string; active: boolean }>(),
   materials: new Map<string, Mat>(),
-  balances: [] as Array<{ materialId: string; location: { name: string }; quantity: Prisma.Decimal }>,
+  balances: [] as Array<{ materialId: string; location: { name: string; active: boolean }; quantity: Prisma.Decimal }>,
   audit: [] as Array<Record<string, unknown>>,
   // Lines of open project orders and open RFQs, as the queries would find them.
   openOrderLines: [] as Array<{ materialId: string; sku: string; number: string }>,
@@ -68,10 +68,10 @@ beforeEach(() => {
   db.projects.set('1402', { projectNumber: '1402', name: 'Boiler', status: 'ACTIVE', active: true });
   for (const m of [pipe('p1', '1369'), pipe('p2', '1369', null), pipe('p3', '1369'), pipe('p4', '1402')]) db.materials.set(m.id, m);
   db.balances.push(
-    { materialId: 'p1', location: { name: 'A-1' }, quantity: new Prisma.Decimal(4) },
-    { materialId: 'p1', location: { name: 'B-2' }, quantity: new Prisma.Decimal(2) },
-    { materialId: 'p2', location: { name: 'A-1' }, quantity: new Prisma.Decimal(1.5) },
-    { materialId: 'p3', location: { name: 'A-1' }, quantity: new Prisma.Decimal(0) },
+    { materialId: 'p1', location: { active: true, name: 'A-1' }, quantity: new Prisma.Decimal(4) },
+    { materialId: 'p1', location: { active: true, name: 'B-2' }, quantity: new Prisma.Decimal(2) },
+    { materialId: 'p2', location: { active: true, name: 'A-1' }, quantity: new Prisma.Decimal(1.5) },
+    { materialId: 'p3', location: { active: true, name: 'A-1' }, quantity: new Prisma.Decimal(0) },
   );
 });
 
@@ -81,8 +81,8 @@ describe('listing a project\'s leftovers', () => {
     expect(project).toEqual({ projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', closed: true, active: true });
     // Each says whether it is active, so a deactivated one isn't offered to issue (Qodo, PR #131).
     expect(items).toEqual([
-      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true },
-      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true },
+      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, inActiveLocation: true },
+      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, inActiveLocation: true },
     ]);
   });
 
@@ -136,7 +136,7 @@ describe('moving leftovers to Stores', () => {
 
   it('lists and moves Projects items with no project, with no project to close', async () => {
     db.materials.set('p5', { ...pipe('p5', 'X'), sku: 'OLD-PLATE', projectNumber: null });
-    db.balances.push({ materialId: 'p5', location: { name: 'C-3' }, quantity: new Prisma.Decimal(2) });
+    db.balances.push({ materialId: 'p5', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(2) });
     const { project, items } = await ProjectLeftoversService.listUnassigned();
     expect(project).toBeNull();
     expect(items.map((i) => i.sku)).toEqual(['OLD-PLATE']);
