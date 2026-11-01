@@ -58,6 +58,8 @@ export interface CurrentStockRow {
   projectNumber?: string | null;
   project?: { name: string | null; status: string } | null;
   locationId: string; locationName: string; locationType: string;
+  /** Whether the item and the location are active: stock is issued only from active ones. */
+  materialActive?: boolean; locationActive?: boolean;
   quantity: string; belowThreshold: boolean;
   /** The item's status from its total across locations, the same on each of its rows. */
   stockStatus?: StockStatus | null; percentOfRequired?: number | null;

@@ -152,6 +152,9 @@ export const ReportingService = {
           locationId: b.locationId,
           locationName: l.name,
           locationType: l.type,
+          // So Issue stock offers only what the server will issue from (Qodo, PR #132).
+          materialActive: m.active,
+          locationActive: l.active,
           quantity: b.quantity.toString(),
           belowThreshold,
           stockStatus: alertsOn ? item.status : null,

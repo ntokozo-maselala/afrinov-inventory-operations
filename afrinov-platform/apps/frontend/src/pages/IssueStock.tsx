@@ -50,9 +50,11 @@ export function IssueStock() {
   const idem = useIdempotencyKey('issue-stock');
 
   // Only items with stock can be issued, and tools are lent on the Tools page
-  // instead. A closed project's material waits to move to Stores.
+  // instead. A closed project's material waits to move to Stores. Nor from a
+  // deactivated item or location, which the server refuses (Qodo, PR #132).
   const available = useMemo(
     () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r)
+      && r.materialActive !== false && r.locationActive !== false
       && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status)))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
     [stock.data],

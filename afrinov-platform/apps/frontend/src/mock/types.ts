@@ -214,6 +214,9 @@ export interface MockStockRow {
   locationId: string;
   locationName: string;
   locationType: LocationType;
+  /** Whether the item and the location are active, as the server says. */
+  materialActive: boolean;
+  locationActive: boolean;
   quantity: string;
   belowThreshold: boolean;
   /** The item's status from its total across locations; null when stock alerts are off. */
