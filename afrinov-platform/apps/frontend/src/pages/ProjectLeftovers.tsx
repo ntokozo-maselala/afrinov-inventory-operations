@@ -20,8 +20,8 @@ import { api, type ApiError } from '../api/client';
 import { STORES_CATEGORIES } from '../lib/categories';
 import { formatCurrency } from '../lib/currency';
 
-interface LeftoverItem { materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string }
-interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean } | null; items: LeftoverItem[] }
+interface LeftoverItem { materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string; active?: boolean }
+interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean; active?: boolean } | null; items: LeftoverItem[] }
 
 /** Leftovers move to a Stores category other than Tools: a tool is lent one by one, not issued. */
 const CATEGORY_OPTIONS = STORES_CATEGORIES.filter((c) => c.value !== 'TOOLS');
@@ -133,7 +133,10 @@ export function ProjectLeftovers() {
                   )}
                   {!movable && canIssue && (
                     <td className="text-right">
-                      <Link to={`/stock/issue?materialId=${encodeURIComponent(i.materialId)}`} className="btn-secondary btn-sm" aria-label={`Issue ${i.sku}`}>Issue</Link>
+                      {/* Issue stock refuses a deactivated item or project, so neither is offered (Qodo, PR #131). */}
+                      {i.active !== false && project?.active !== false
+                        ? <Link to={`/stock/issue?materialId=${encodeURIComponent(i.materialId)}`} className="btn-secondary btn-sm" aria-label={`Issue ${i.sku}`}>Issue</Link>
+                        : <span className="text-meta">{i.active === false ? 'Item inactive' : 'Project inactive'}</span>}
                     </td>
                   )}
                 </tr>
