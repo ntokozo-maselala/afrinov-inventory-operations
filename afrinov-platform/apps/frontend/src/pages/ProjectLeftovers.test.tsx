@@ -78,6 +78,22 @@ describe('ProjectLeftovers page', () => {
     expect(screen.queryByRole('button', { name: /Move/ })).not.toBeInTheDocument();
   });
 
+  // Qodo, PR #132: an open project's leftovers are issued to it, from here.
+  it('opens each item, and issues an open project’s leftovers, for those who issue stock', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockResolvedValue(leftovers('ACTIVE'));
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.getByRole('link', { name: /1369-PIPE Pipe 150NB/ })).toHaveAttribute('href', '/materials/p-1');
+    expect(screen.getByRole('link', { name: 'Issue 1369-PIPE' })).toHaveAttribute('href', '/stock/issue?materialId=p-1');
+  });
+
+  it('offers no Issue once the project is closed: its leftovers move to Stores', async () => {
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.queryByRole('link', { name: 'Issue 1369-PIPE' })).not.toBeInTheDocument();
+  });
+
   it('says when nothing is left', async () => {
     mockGet.mockResolvedValue(leftovers('COMPLETED', []));
     renderPage();
