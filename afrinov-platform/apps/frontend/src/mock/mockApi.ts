@@ -2511,7 +2511,8 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
 function handleStockCount(b: { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number; note?: string }> }) {
   const lines = b.lines ?? [];
   if (!b.locationId || lines.length === 0) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
-  if (lines.some((l) => !(l.countedQuantity >= 0) || !(l.expectedQuantity >= 0))) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
+  // As the server: what the system shows may be below zero (a booking mistake the count puts right); a count may not.
+  if (lines.some((l) => !(l.countedQuantity >= 0) || !Number.isFinite(l.expectedQuantity))) throw err('VALIDATION_ERROR', 'Invalid stock count payload');
   if (new Set(lines.map((l) => l.materialId)).size !== lines.length) throw err('VALIDATION_ERROR', 'Each item can appear only once in a count');
   const location = findLocation(b.locationId);
   if (!location) throw err('NOT_FOUND', 'Location not found');
