@@ -115,7 +115,10 @@ describe('the new-order form with project material', () => {
     expect(await screen.findByText('Choose the project this order is for.')).toBeInTheDocument();
     expect(mockPost).not.toHaveBeenCalled();
     // New item opens before a project is chosen: the item gets none, the order says which.
-    fireEvent.click(screen.getByRole('button', { name: 'New item' }));
+    // + New item is on each line's material list, the one place to add one.
+    expect(screen.queryByRole('button', { name: 'New item' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: '__new_item__' } });
     const drawer = await screen.findByRole('dialog', { name: 'New item' });
     expect(within(drawer).getByText(/added as a Projects item, and goes on line 1; this order says which project it is for/)).toBeInTheDocument();
     expect(within(drawer).queryByRole('radio')).not.toBeInTheDocument();
