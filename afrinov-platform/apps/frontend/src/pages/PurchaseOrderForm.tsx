@@ -87,6 +87,19 @@ function shownLineDate(own: string, expected: string): string { return own || ex
 /** What to keep for a line when its date is changed: nothing if it matches the order's. */
 function ownLineDate(picked: string, expected: string): string { return picked === expected ? '' : picked; }
 
+/**
+ * Keeps the order's expected delivery on its latest line's date. Lines without
+ * a date of their own show the expected delivery, so when the latest date
+ * changes each keeps the date it showed (it becomes its own), and a line on the
+ * latest date follows the order's date again. Changing one line never moves another.
+ */
+export function alignToLatest(dates: string[], expected: string): { dates: string[]; expected: string } {
+  const shown = dates.map((d) => shownLineDate(d, expected));
+  const latest = shown.filter(Boolean).sort().at(-1) ?? '';
+  if (!latest || latest === expected) return { dates, expected };
+  return { dates: shown.map((d) => (d === latest ? '' : d)), expected: latest };
+}
+
 // The line columns, in the order of the purchase order template and the
 // Manhours and Material workbook: item, units, quantity, unit price, subtotal,
 // then the delivery date. Units comes from the item; the subtotal is unit
@@ -273,7 +286,13 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
       return { ...row, materialId, unitPrice: filled ? priceFrom(cost) : row.unitPrice };
     }));
   }
-  function removeLine(i: number) { setLines((l) => l.filter((_, idx) => idx !== i)); }
+  function removeLine(i: number) { applyDates(lines.filter((_, idx) => idx !== i), expected); }
+  /** Sets the lines and the expected delivery together, the expected delivery on the latest line's date. */
+  function applyDates(nextLines: DraftLine[], nextExpected: string) {
+    const aligned = alignToLatest(nextLines.map((l) => l.deliveryDate), nextExpected);
+    setLines(nextLines.map((l, idx) => ({ ...l, deliveryDate: aligned.dates[idx]! })));
+    setExpected(aligned.expected);
+  }
 
   async function save(submit: boolean) {
     setValidation(null);
@@ -347,8 +366,8 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
             <Field label="VAT rate (%)" htmlFor="po-vat" help={currency === 'ZAR' ? `Rand orders start at ${formatRate(settingRate)}.` : `${currency} orders start at 0%.`}>
               <Input id="po-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatOverride(e.target.value)} />
             </Field>
-            <Field label="Expected delivery" htmlFor="po-expected" help="Each line is due then, unless you change its date.">
-              <Input id="po-expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} />
+            <Field label="Expected delivery" htmlFor="po-expected" help="The latest delivery date of the lines. A line without a date of its own is due then.">
+              <Input id="po-expected" type="date" value={expected} onChange={(e) => applyDates(lines, e.target.value)} />
             </Field>
           </div>
           {supplier && <SupplierDetailsFields value={details} onChange={setDetails} idPrefix="po-new-supplier" supplier={supplier} />}
@@ -404,7 +423,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 <div className="col-span-10 md:col-span-1">
                   <Input
                     type="date" value={shownLineDate(l.deliveryDate, expected)}
-                    onChange={(e) => updateLine(i, { deliveryDate: ownLineDate(e.target.value, expected) })}
+                    onChange={(e) => applyDates(lines.map((row, idx) => (idx === i ? { ...row, deliveryDate: ownLineDate(e.target.value, expected) } : row)), expected)}
                     aria-label={`Line ${i + 1} delivery date`}
                     title={l.deliveryDate ? 'This line’s own delivery date' : 'The expected delivery, until changed for this line'}
                     className={l.deliveryDate ? undefined : 'text-surface-500'}
@@ -543,6 +562,13 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const [dates, setDates] = useState<Record<string, string>>(
     () => Object.fromEntries(po.lines.map((l) => [l.id, l.deliveryDate?.slice(0, 10) ?? ''])),
   );
+  /** Sets the lines' dates and the expected delivery together, the expected delivery on the latest line's date. */
+  function applyDates(nextDates: Record<string, string>, nextExpected: string) {
+    const ids = po.lines.map((l) => l.id);
+    const aligned = alignToLatest(ids.map((id) => nextDates[id] ?? ''), nextExpected);
+    setDates(Object.fromEntries(ids.map((id, idx) => [id, aligned.dates[idx]!])));
+    setExpected(aligned.expected);
+  }
   const [details, setDetails] = useState<OrderDetailsDraft>(() => draftFromOrder(po));
   const [busy, setBusy] = useState(false);
   // Each line's subtotal at the prices being typed, for its Subtotal column.
@@ -610,7 +636,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
                 <LineValue label={`${l.material.sku} subtotal`} align="right">{editMoney[i]?.subtotal ? formatMoney(editMoney[i]!.subtotal, po.currency ?? 'ZAR') : '—'}</LineValue>
               </div>
               <Input id={`po-edit-date-${l.id}`} aria-label={`${l.material.sku} delivery date`} type="date" value={shownLineDate(dates[l.id] ?? '', expectedDeliveryDate)}
-                onChange={(e) => setDates((d) => ({ ...d, [l.id]: ownLineDate(e.target.value, expectedDeliveryDate) }))}
+                onChange={(e) => applyDates({ ...dates, [l.id]: ownLineDate(e.target.value, expectedDeliveryDate) }, expectedDeliveryDate)}
                 title={dates[l.id] ? 'This line’s own delivery date' : 'The expected delivery, until changed for this line'}
                 className={`col-span-12 md:col-span-1 ${dates[l.id] ? '' : 'text-surface-500'}`} />
             </div>
@@ -620,8 +646,8 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
           <Field label="VAT rate (%)" htmlFor="po-edit-vat" help={(po.currency ?? 'ZAR') === 'ZAR' ? 'Rand orders start at the VAT setting.' : 'Orders in other currencies start at 0%.'}>
             <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
           </Field>
-          <Field label="Expected delivery" htmlFor="po-edit-expected" help="Each line is due then, unless you change its date.">
-            <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} />
+          <Field label="Expected delivery" htmlFor="po-edit-expected" help="The latest delivery date of the lines. A line without a date of its own is due then.">
+            <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => applyDates(dates, e.target.value)} />
           </Field>
         </div>
         {po.supplier && (
