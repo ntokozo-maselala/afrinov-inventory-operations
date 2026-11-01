@@ -27,6 +27,8 @@ import { STORES_CATEGORIES, categoryLabel, sectionOf, type MaterialSection } fro
 import type { Material } from '../api/types';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { STATUS_LABEL, type StockStatus } from '../lib/stockStatus';
+import type { StockStatusItem } from './StockStatus';
 
 const hasPrice = (m: Material) => m.unitCost !== null && m.unitCost !== undefined && m.unitCost !== '';
 
@@ -50,10 +52,14 @@ const TABS: Array<{ value: MaterialSection; label: string }> = [
  * Defaults to Stores unless `section=PROJECTS`. The add form starts with the selected section.
  */
 export function Materials() {
+  const [params, setParams] = useSearchParams();
   const mats = useApi<Material[]>('/materials');
+  // On hand beside the reorder level, from Stock status (Stores only: Projects
+  // material isn't held in the store). If it can't load, the column shows a dash.
+  const status = useApi<StockStatusItem[]>(params.get('section') === 'PROJECTS' ? null : '/reports/stock-status');
+  const stock = useMemo(() => new Map((status.data ?? []).map((r) => [r.materialId, r])), [status.data]);
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
-  const [params, setParams] = useSearchParams();
   const section: MaterialSection = params.get('section') === 'PROJECTS' ? 'PROJECTS' : 'STORES';
   const views = VIEWS.filter((v) => section === 'STORES' || !v.stores);
   const view = views.find((v) => v.value === (params.get('view') ?? '')) ?? views[0]!;
@@ -166,7 +172,7 @@ export function Materials() {
           isLoading={mats.loading}
           rowKey={(m) => m.id}
           rows={filtered}
-          columns={section === 'STORES' ? storesColumns() : projectsColumns()}
+          columns={section === 'STORES' ? storesColumns(stock) : projectsColumns()}
           emptyState={(
             <EmptyState
               title={filtering ? 'No materials match' : section === 'STORES' ? 'No Stores materials yet' : 'No Projects materials yet'}
@@ -207,13 +213,33 @@ const tailColumns: DataTableColumn<Material>[] = [
   { key: 'status', header: 'Status', render: (m) => m.active ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral" dot>Inactive</Badge>, width: '7rem' },
 ];
 
-/** Return Stores table columns, including category and reorder level. */
-function storesColumns(): DataTableColumn<Material>[] {
+const STATUS_TEXT: Partial<Record<StockStatus, string>> = { URGENT: 'text-danger-600 font-semibold', WARNING: 'text-warning-600 font-semibold' };
+
+/**
+ * On hand across all locations, coloured as Stock status grades it against the
+ * reorder level. Tools out on loan are still owned, so they count too.
+ */
+function onHandCell(m: Material, r: StockStatusItem | undefined) {
+  if (!m.active) return <span className="text-surface-400" title="Inactive item">—</span>;
+  if (!r) return <span className="text-surface-400" title="Not known">—</span>;
+  const onLoan = Number(r.onLoan ?? 0);
+  const title = r.percentOfRequired === null ? 'No reorder level set' : `${STATUS_LABEL[r.status]}: ${r.percentOfRequired}% of the reorder level`;
+  return (
+    <div title={title}>
+      <span className={`font-mono ${STATUS_TEXT[r.status] ?? ''}`}>{formatNumber(Number(r.onHand))}</span>
+      {onLoan > 0 && <div className="text-xs text-surface-500">+{formatNumber(onLoan)} checked out</div>}
+    </div>
+  );
+}
+
+/** Return Stores table columns, including on hand and the reorder level it is measured against. */
+function storesColumns(stock: Map<string, StockStatusItem>): DataTableColumn<Material>[] {
   return [
     skuColumn,
     nameColumn,
     { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{categoryLabel(m.category)}</span> },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
+    { key: 'onHand', header: 'On hand', align: 'right', className: 'text-num', render: (m) => onHandCell(m, stock.get(m.id)), width: '7rem' },
     { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },
     ...tailColumns,
   ];
