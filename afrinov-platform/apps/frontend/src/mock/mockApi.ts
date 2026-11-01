@@ -2563,7 +2563,7 @@ function mockLeftoverItems(projectNumber: string | null) {
       const onHand = held.reduce((sum, b) => sum + b.quantity, 0);
       return [{
         materialId: m.id, sku: m.sku, name: m.name, unitOfMeasure: m.unitOfMeasure, onHand: String(onHand), active: m.active,
-        inActiveLocation: held.some((b) => findLocation(b.locationId)?.active !== false),
+        hasActiveLocation: held.some((b) => findLocation(b.locationId)?.active !== false),
         value: m.unitCost ? Math.round(onHand * Number(m.unitCost) * 100) / 100 : null,
         locations: held.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity})`).join(', '),
       }];

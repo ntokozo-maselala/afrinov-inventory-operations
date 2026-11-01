@@ -243,6 +243,51 @@ describe('line delivery dates follow the expected delivery', () => {
     expect(screen.getByLabelText('Line 1 delivery date')).toHaveValue('2026-11-11');
   });
 
+  // Qodo, PR #133: typing a date fires a change for each part-typed value (year 0002, 0020, …).
+  it('aligns a typed expected delivery only once it is committed, so part-typed dates never land on the lines', async () => {
+    appAt('/purchase-orders/new');
+    await waitFor(() => expect(screen.getByLabelText('Deliver to')).toHaveValue('Afrinov (PTY) Ltd'));
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-1' } });
+    fireEvent.change(screen.getByLabelText('Expected delivery'), { target: { value: '2026-11-10' } });
+    fireEvent.blur(screen.getByLabelText('Expected delivery'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 2 delivery date'), { target: { value: '2026-11-20' } });
+    expect(screen.getByLabelText('Expected delivery')).toHaveValue('2026-11-20');
+
+    // Line 1 keeps the 10th it showed; line 2, on the latest date, follows the order's.
+    expect(screen.getByLabelText('Line 1 delivery date')).toHaveValue('2026-11-10');
+
+    // Part-typed: the field shows what is typed, line 2 follows it, and line 1 keeps its own date.
+    const field = screen.getByLabelText('Expected delivery');
+    for (const v of ['0002-11-15', '0020-11-15', '0202-11-15', '2026-11-15']) {
+      fireEvent.change(field, { target: { value: v } });
+      expect(field).toHaveValue(v);
+      expect(screen.getByLabelText('Line 1 delivery date')).toHaveValue('2026-11-10');
+      expect(screen.getByLabelText('Line 2 delivery date')).toHaveValue(v);
+    }
+    // Committed: still the latest, so nothing moves.
+    fireEvent.blur(field);
+    expect(field).toHaveValue('2026-11-15');
+    expect(screen.getByLabelText('Line 1 delivery date')).toHaveValue('2026-11-10');
+    expect(screen.getByLabelText('Line 2 delivery date')).toHaveValue('2026-11-15');
+
+    // Saved straight from the field, without leaving it: aligned on saving.
+    fireEvent.change(field, { target: { value: '2026-11-05' } });
+    for (const n of [1, 2]) {
+      fireEvent.change(screen.getByLabelText(`Line ${n} material`), { target: { value: 'm-1' } });
+      fireEvent.change(screen.getByLabelText(`Line ${n} quantity`), { target: { value: '1' } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    // The 5th is earlier than line 1's 10th: line 2 keeps the 5th it showed, and the order's is the 10th.
+    expect(mockPost.mock.calls[0]![1]).toMatchObject({
+      expectedDeliveryDate: '2026-11-10',
+      lines: [{ materialId: 'm-1', orderedQty: 1 }, { materialId: 'm-1', orderedQty: 1, deliveryDate: '2026-11-05' }],
+    });
+    expect(mockPost.mock.calls[0]![1].lines[0]).not.toHaveProperty('deliveryDate');
+  });
+
   it('on Edit, a line set back to the expected delivery follows it again', async () => {
     appAt('/purchase-orders/po-1/edit');
     const date = await screen.findByLabelText('DISC-115 delivery date');

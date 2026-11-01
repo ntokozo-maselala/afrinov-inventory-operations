@@ -30,7 +30,7 @@ export interface LeftoverItem {
   /** False for a deactivated item: still listed, but not issued (Qodo, PR #131). */
   active: boolean;
   /** Whether some of it is in an active location, the only kind issued from (Qodo, PR #132). */
-  inActiveLocation: boolean;
+  hasActiveLocation: boolean;
 }
 
 export interface ProjectLeftovers {
@@ -74,7 +74,7 @@ async function leftoverItems(projectNumber: string | null): Promise<LeftoverItem
         value: m.unitCost === null ? null : Number(onHand.times(m.unitCost).toFixed(2)),
         locations: m.inventoryBalances.map((b) => `${b.location.name} (${b.quantity.toString()})`).join(', '),
         active: m.active,
-        inActiveLocation: m.inventoryBalances.some((b) => b.location.active),
+        hasActiveLocation: m.inventoryBalances.some((b) => b.location.active),
       }];
   });
 }

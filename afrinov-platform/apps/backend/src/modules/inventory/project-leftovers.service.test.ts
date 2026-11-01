@@ -81,8 +81,8 @@ describe('listing a project\'s leftovers', () => {
     expect(project).toEqual({ projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', closed: true, active: true });
     // Each says whether it is active, so a deactivated one isn't offered to issue (Qodo, PR #131).
     expect(items).toEqual([
-      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, inActiveLocation: true },
-      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, inActiveLocation: true },
+      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, hasActiveLocation: true },
+      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, hasActiveLocation: true },
     ]);
   });
 

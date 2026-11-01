@@ -188,7 +188,7 @@ export function Materials() {
           <MaterialForm
             section={section}
             onCancel={() => setAdding(false)}
-            onSaved={(m) => { setAdding(false); mats.reload(); toast.success(`${m.sku} added`); }}
+            onSaved={(m) => { setAdding(false); mats.reload(); status.reload(); toast.success(`${m.sku} added`); }}
             onError={(err) => toast.error('Could not add item', err.message)}
           />
         </Drawer>

@@ -287,18 +287,26 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
     }));
   }
   function removeLine(i: number) { applyDates(lines.filter((_, idx) => idx !== i), expected); }
-  /** Sets the lines and the expected delivery together, the expected delivery on the latest line's date. */
+  /**
+   * Sets the lines and the expected delivery together, the expected delivery on
+   * the latest line's date, and returns what it set. The Expected delivery field
+   * calls it once its date is committed (on leaving it, and on saving), not on
+   * each keystroke, so a part-typed date never lands on the lines (Qodo, PR #133).
+   */
   function applyDates(nextLines: DraftLine[], nextExpected: string) {
     const aligned = alignToLatest(nextLines.map((l) => l.deliveryDate), nextExpected);
-    setLines(nextLines.map((l, idx) => ({ ...l, deliveryDate: aligned.dates[idx]! })));
+    const alignedLines = nextLines.map((l, idx) => ({ ...l, deliveryDate: aligned.dates[idx]! }));
+    setLines(alignedLines);
     setExpected(aligned.expected);
+    return { lines: alignedLines, expected: aligned.expected };
   }
 
   async function save(submit: boolean) {
     setValidation(null);
     if (!supplierId) { setValidation('Select a supplier.'); return; }
     if (!stores && !orderProject) { setValidation('Choose the project this order is for.'); return; }
-    const validLines = lines.filter((l) => l.materialId && Number(l.orderedQty) > 0);
+    const dated = applyDates(lines, expected);
+    const validLines = dated.lines.filter((l) => l.materialId && Number(l.orderedQty) > 0);
     if (validLines.length === 0) { setValidation('Add at least one line with a positive quantity.'); return; }
     if (validLines.some((l) => l.unitPrice.trim() !== '' && !(Number(l.unitPrice) >= 0))) { setValidation('A unit price must be 0 or more, or left blank.'); return; }
     const problem = checkVat(vatRate) ?? checkDetails(details);
@@ -309,7 +317,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
       const created = await api.post<{ id: string; number: string }>('/purchase-orders', {
         supplierId,
         notes: notes.trim() || undefined,
-        expectedDeliveryDate: expected || undefined,
+        expectedDeliveryDate: dated.expected || undefined,
         vatRate: Number(vatRate),
         ...detailsBody({ ...details, projectNumber: orderProject }, 'create'),
         lines: validLines.map((l) => ({
@@ -367,7 +375,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
               <Input id="po-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatOverride(e.target.value)} />
             </Field>
             <Field label="Expected delivery" htmlFor="po-expected" help="The latest delivery date of the lines. A line without a date of its own is due then.">
-              <Input id="po-expected" type="date" value={expected} onChange={(e) => applyDates(lines, e.target.value)} />
+              <Input id="po-expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} onBlur={() => applyDates(lines, expected)} />
             </Field>
           </div>
           {supplier && <SupplierDetailsFields value={details} onChange={setDetails} idPrefix="po-new-supplier" supplier={supplier} />}
@@ -566,8 +574,10 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   function applyDates(nextDates: Record<string, string>, nextExpected: string) {
     const ids = po.lines.map((l) => l.id);
     const aligned = alignToLatest(ids.map((id) => nextDates[id] ?? ''), nextExpected);
-    setDates(Object.fromEntries(ids.map((id, idx) => [id, aligned.dates[idx]!])));
+    const alignedDates: Record<string, string> = Object.fromEntries(ids.map((id, idx) => [id, aligned.dates[idx]!]));
+    setDates(alignedDates);
     setExpected(aligned.expected);
+    return { dates: alignedDates, expected: aligned.expected };
   }
   const [details, setDetails] = useState<OrderDetailsDraft>(() => draftFromOrder(po));
   const [busy, setBusy] = useState(false);
@@ -583,19 +593,20 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
     const problem = checkVat(vatRate) ?? checkDetails(details);
     if (problem) { setValidation(problem); return; }
     const rate = Number(vatRate);
+    const dated = applyDates(dates, expectedDeliveryDate);
     // Only the lines whose price or date changed are sent.
     const linePrices = po.lines
       .map((l) => ({ lineId: l.id, before: l.unitPrice === null || l.unitPrice === undefined ? null : Number(l.unitPrice), after: prices[l.id]!.trim() === '' ? null : Number(prices[l.id]) }))
       .filter((p) => p.before !== p.after)
       .map(({ lineId, after }) => ({ lineId, unitPrice: after }));
     const lineDeliveryDates = po.lines
-      .filter((l) => (l.deliveryDate?.slice(0, 10) ?? '') !== dates[l.id])
-      .map((l) => ({ lineId: l.id, deliveryDate: dates[l.id] || null }));
+      .filter((l) => (l.deliveryDate?.slice(0, 10) ?? '') !== dated.dates[l.id])
+      .map((l) => ({ lineId: l.id, deliveryDate: dated.dates[l.id] || null }));
     setBusy(true);
     try {
       await api.patch(`/purchase-orders/${po.id}`, {
         notes: notes.trim() || undefined,
-        expectedDeliveryDate: expectedDeliveryDate || null,
+        expectedDeliveryDate: dated.expected || null,
         ...detailsBody(details, 'edit'),
         ...(rate !== Number(po.vatRate ?? 15) ? { vatRate: rate } : {}),
         ...(linePrices.length > 0 ? { linePrices } : {}),
@@ -647,7 +658,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
             <Input id="po-edit-vat" type="number" min="0" max="100" step="0.01" value={vatRate} onChange={(e) => setVatRate(e.target.value)} />
           </Field>
           <Field label="Expected delivery" htmlFor="po-edit-expected" help="The latest delivery date of the lines. A line without a date of its own is due then.">
-            <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => applyDates(dates, e.target.value)} />
+            <Input id="po-edit-expected" type="date" value={expectedDeliveryDate} onChange={(e) => setExpected(e.target.value)} onBlur={() => applyDates(dates, expectedDeliveryDate)} />
           </Field>
         </div>
         {po.supplier && (
