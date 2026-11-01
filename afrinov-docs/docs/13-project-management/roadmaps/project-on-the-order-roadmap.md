@@ -10,14 +10,14 @@ After this roadmap a Projects item is a plain catalogue entry ("10mm Plate"), an
 
 It amends the [Materials Sections Roadmap](materials-sections-roadmap.md), Phases 5 and 6, which put the project on the item.
 
-**Status:** Phase 1 merged as #129; Phase 2 in #130; Phase 3 on `feature/project-on-the-order-3`, built on #130. Phase 4 not started.
+**Status:** All four phases built: Phase 1 merged as #129, Phase 2 in #130, Phase 3 in #131 (built on #130), Phase 4 on `docs/project-on-the-order-4` (built on #131). Recorded as ADR-023.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | The server takes the project from the order | M | Built (#129) |
-| 2 | Ordering screens: any Projects item on any project order | M | Built |
-| 3 | Catalogue screens: no project on the item | M | Built |
-| 4 | Docs and ADR | S | Proposed |
+| 2 | Ordering screens: any Projects item on any project order | M | Built (#130) |
+| 3 | Catalogue screens: no project on the item | M | Built (#131) |
+| 4 | Docs and ADR | S | Built |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days.
 
@@ -100,8 +100,8 @@ Size M. Frontend.
 
 Size S.
 
-- [ ] **4.1 ADR-023** records that a project lives on the order, amending the Materials Sections decisions behind Phases 5 and 6, and ADR-022's leftovers.
-- [ ] **4.2** Business rules, the purchase order lifecycle, the RFQ process, the page inventory, the glossary (Projects material), the change log, and this roadmap's status.
+- [x] **4.1 ADR-023** records that a project lives on the order, amending the Materials Sections decisions behind Phases 5 and 6, and ADR-022's leftovers.
+- [x] **4.2** Business rules, the purchase order lifecycle (which covers RFQs: there is no separate RFQ process document), goods receiving, the page inventory, the glossary (Projects material), the change log, a note on the Materials Sections Roadmap, and this roadmap's status.
 
 ## After this roadmap (not in scope)
 

@@ -456,3 +456,44 @@ stock counts and opening balances are not receiving and are unchanged.
 (`COUNTER_RECEIPTS_OFF`), `procurement.routes.ts` (`POST /goods-receipts`),
 `afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx`,
 `afrinov-platform/apps/frontend/src/lib/orderKind.ts` (`canReceiveStock`).
+
+### ADR-023 — A project lives on the order, not the catalogue item
+**Date:** 2026-11-01 · **Status:** Accepted · **Amends:** the Materials Sections decisions behind its Phases 5 and 6; ADR-022 (leftovers)
+
+**Context:** Each Projects item belonged to one project (`materials.project_number`),
+and ordering refused an item with no project or another project's item. That
+made sense while project material came into the store, where the store had to
+know whose stock was on the shelf. Since ADR-021, project material goes from
+the supplier straight to site and is never stock, so its project is already
+known where it matters: on the purchase order, its RFQ and its delivery
+confirmation. Tagging the item too meant one catalogue entry per project
+(`PROJ-AFRI-1325-PLATE`), items waiting for a project, and a step to give them one.
+
+**Decision:** The order says which project its material is for.
+- A Projects item is a plain catalogue entry with no project of its own; the
+  item form has no Project field, and the "Needs a project" step is gone.
+- A project order (and RFQ) takes any Projects item, whatever project it was
+  tagged with; a Stores order takes Stores items only, both checked by the server.
+- An item tagged with an open project only suggests the order's project while
+  none is chosen; it never fixes it.
+- Leftovers received before the separation keep the project they have: issued
+  only to that project, moved to Stores once it closes. Leftovers on an item
+  with no project aren't issued but moved to Stores
+  (`/materials/no-project/leftovers`). Moving to Stores is refused while the
+  item is on an open project order or RFQ.
+- No stock is created that can't be issued: a counter receipt and `POST
+  /stock-items` refuse a Projects item with no project.
+
+**Consequences:** No migration: `materials.project_number` stays, for leftovers
+only. A project's material is read from its orders (the Projects page links to
+them). With procurement off there are no orders to carry a project, so new
+project material can't be received or issued; only items tagged before can.
+Per-project duplicates in the catalogue can be merged later.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/procurement.service.ts`,
+`rfq.service.ts`, `afrinov-platform/apps/backend/src/modules/inventory/material-section.ts`
+(`refuseProjectMaterialOnStoresOrder`, `projectForNewMaterial`),
+`project-leftovers.service.ts`, `stock-receipt.service.ts`,
+`afrinov-platform/apps/frontend/src/pages/PurchaseOrderForm.tsx`, `RfqForm.tsx`,
+`Materials.tsx`, `MaterialDetail.tsx`, `components/MaterialForm.tsx`,
+`afrinov-docs/docs/13-project-management/roadmaps/project-on-the-order-roadmap.md`.

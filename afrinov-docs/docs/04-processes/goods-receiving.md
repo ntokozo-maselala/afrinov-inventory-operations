@@ -23,7 +23,8 @@ Which way depends on whether procurement is switched on
    number (required), the delivery date (a day in South Africa, defaults to
    today; may not be in the future) and one to 50 lines of item, location
    and quantity. A supplier or item not yet in the app can be added from
-   the form.
+   the form. A Projects item with no project is refused, as its stock could
+   never be issued (ADR-023).
 2. `POST /api/v1/stock-receipts` → `StockReceiptService.receive`, in one
    transaction: checks supplier, items and locations are active; numbers
    the receipt `GR-YYYY-NNNN`; creates a `goods_receipts` row already
