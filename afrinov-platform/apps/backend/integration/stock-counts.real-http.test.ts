@@ -90,6 +90,26 @@ describe('stock counts over real HTTP', () => {
     expect(await onHand(items.disc)).toBe('16');
   });
 
+  // The app never takes stock below zero, but data from before those guards can be
+  // (the first demo seed issued from Boiler Shop with nothing moved there). The count
+  // screen flags it, and counting it is how it is put right.
+  it('puts a balance below zero right', async () => {
+    const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-CNT-below-${run}`, name: `Count below ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+    expect(m.status).toBe(200);
+    // Booked straight into the ledger, as the old seed did: the API refuses it.
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    await prisma.inventoryTransaction.create({ data: { materialId: m.body.id, locationId: rackId, type: 'ADJUSTMENT', quantity: -4, reasonCode: 'OTHER', actorId: admin.id } });
+    await prisma.inventoryBalance.create({ data: { materialId: m.body.id, locationId: rackId, quantity: -4 } });
+    expect(await onHand(m.body.id)).toBe('-4');
+
+    const res = await api<{ lines: Array<{ variance: string }> }>('POST', '/stock-counts', {
+      locationId: rackId, lines: [{ materialId: m.body.id, expectedQuantity: -4, countedQuantity: 0 }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.lines[0]!.variance).toBe('4');
+    expect(await onHand(m.body.id)).toBe('0');
+  });
+
   it('rejects negative counts, repeated items and unknown locations', async () => {
     const line = { materialId: items.tape, expectedQuantity: 4, countedQuantity: 4 };
     expect((await api('POST', '/stock-counts', { locationId: rackId, lines: [{ ...line, countedQuantity: -1 }] })).status).toBe(400);
