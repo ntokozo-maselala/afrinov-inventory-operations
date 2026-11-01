@@ -147,6 +147,27 @@ describe('ReceiveStock page', () => {
     expect(screen.getByLabelText('Item 1')).toHaveValue('Cutting disc (DISC-115)');
   });
 
+  // Qodo, PR #132: a Projects item with no project is refused at the counter, so it isn't offered.
+  it('offers only what the counter can receive: no Projects item with no project, and new items as Stores items', async () => {
+    addedMaterials = [
+      { id: 'm-plain', sku: 'PLATE-10MM', name: 'Plain plate', unitOfMeasure: 'each', active: true, category: 'PROJECT_MATERIAL', projectNumber: null } as never,
+      { id: 'm-tagged', sku: '1369-PIPE', name: 'Tagged pipe', unitOfMeasure: 'm', active: true, category: 'PROJECT_MATERIAL', projectNumber: '1369' } as never,
+    ];
+    renderPage();
+    await ready();
+    const input = screen.getByLabelText('Item 1');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'plate' } });
+    expect(screen.queryByRole('option', { name: /Plain plate/ })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'pipe' } });
+    expect(within(screen.getByRole('listbox')).getByRole('option', { name: /Tagged pipe/ })).toBeInTheDocument();
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole('button', { name: 'New item' }));
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).queryByRole('radio', { name: /Projects/ })).not.toBeInTheDocument();
+    expect(within(drawer).getByLabelText(/Category/)).toBeInTheDocument();
+  });
+
   it('does not offer New item to someone who cannot add items', async () => {
     perms.canManageMaterials = false;
     renderPage();

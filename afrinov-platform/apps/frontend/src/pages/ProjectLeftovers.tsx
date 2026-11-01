@@ -31,7 +31,9 @@ export function ProjectLeftovers() {
   const unassigned = !projectNumber;
   const path = unassigned ? '/materials/no-project/leftovers' : `/projects/${encodeURIComponent(projectNumber)}/leftovers`;
   const leftovers = useApi<Leftovers>(path);
-  const canMove = usePermissions().hasPermission('materials:manage');
+  const { hasPermission } = usePermissions();
+  const canMove = hasPermission('materials:manage');
+  const canIssue = hasPermission('inventory:issue');
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,12 +108,14 @@ export function ProjectLeftovers() {
                 <th scope="col">Where</th>
                 <th scope="col" className="text-right">Value</th>
                 {movable && canMove && <th scope="col">Stores category</th>}
+                {!movable && canIssue && <th scope="col"><span className="sr-only">Issue</span></th>}
               </tr>
             </thead>
             <tbody>
               {items.map((i) => (
                 <tr key={i.materialId}>
-                  <td><span className="font-mono text-xs">{i.sku}</span> {i.name}</td>
+                  {/* Each item opens its page; an open project's is issued from here (Qodo, PR #132). */}
+                  <td><Link to={`/materials/${i.materialId}`} className="btn-link"><span className="font-mono text-xs">{i.sku}</span> {i.name}</Link></td>
                   <td className="text-right font-mono">{i.onHand} {i.unitOfMeasure}</td>
                   <td className="text-meta">{i.locations}</td>
                   <td className="text-right font-mono">{i.value === null ? <span className="text-surface-300">No unit cost</span> : formatCurrency(i.value, 'ZAR')}</td>
@@ -127,6 +131,11 @@ export function ProjectLeftovers() {
                       </Select>
                     </td>
                   )}
+                  {!movable && canIssue && (
+                    <td className="text-right">
+                      <Link to={`/stock/issue?materialId=${encodeURIComponent(i.materialId)}`} className="btn-secondary btn-sm" aria-label={`Issue ${i.sku}`}>Issue</Link>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -135,6 +144,7 @@ export function ProjectLeftovers() {
                 <th scope="row" colSpan={3}>{items.length} item{items.length === 1 ? '' : 's'}</th>
                 <td className="text-right font-mono">{formatCurrency(totalValue, 'ZAR')}</td>
                 {movable && canMove && <td />}
+                {!movable && canIssue && <td />}
               </tr>
             </tfoot>
           </table>
