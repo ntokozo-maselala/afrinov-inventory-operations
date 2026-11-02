@@ -175,13 +175,11 @@ export function SupplierDetailsFields({ value, onChange, idPrefix, supplier }: {
 
 interface ProjectOpt { projectNumber: string; name?: string | null; active: boolean; status?: string }
 
-export function PurchaseOrderDetailsFields({ value, onChange, idPrefix, projectSetBy, hideProject = false, requireProject = false }: {
+export function PurchaseOrderDetailsFields({ value, onChange, idPrefix, hideProject = false, requireProject = false }: {
   value: OrderDetailsDraft;
   onChange: (next: OrderDetailsDraft) => void;
   /** Keeps ids unique when two forms are open. */
   idPrefix: string;
-  /** The SKU of the project material that fixes the order's project, if any. */
-  projectSetBy?: string;
   /** A Stores order has no project (Stores ordering roadmap), so no Project field. */
   hideProject?: boolean;
   /** Procurement buys for one project: the project must be chosen, and can't be cleared. */
@@ -207,11 +205,10 @@ export function PurchaseOrderDetailsFields({ value, onChange, idPrefix, projectS
               label="Project"
               htmlFor={id('project')}
               required={requireProject}
-              help={projectSetBy
-                ? `Set by ${projectSetBy}: project material is ordered only for its own project.`
-                : requireProject ? 'Procurement buys for one project. Stores stock is ordered from Store → Order stock.' : 'Leave blank for general store stock.'}
+              // The order says which project its material is for; no line fixes it (Project on the Order Roadmap, Phase 2).
+              help={requireProject ? 'Procurement buys for one project. Stores stock is ordered from Store → Order stock.' : 'Leave blank for general store stock.'}
             >
-              <Select id={id('project')} value={value.projectNumber} onChange={(e) => set('projectNumber', e.target.value)} disabled={!!projectSetBy}>
+              <Select id={id('project')} value={value.projectNumber} onChange={(e) => set('projectNumber', e.target.value)}>
                 <option value="" disabled={requireProject}>{requireProject ? 'Choose the project…' : 'No project'}</option>
                 {listed.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` — ${p.name}` : ''}</option>)}
               </Select>

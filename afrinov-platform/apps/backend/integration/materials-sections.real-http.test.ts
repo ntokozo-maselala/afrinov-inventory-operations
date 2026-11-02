@@ -50,10 +50,18 @@ describe('Stores and Projects materials over real HTTP', () => {
     expect(value.body.sections.PROJECTS.items).toBeGreaterThanOrEqual(1);
   });
 
-  it('refuses a Projects material without a project, or with Required Stock', async () => {
+  // Project on the Order Roadmap, Phase 2: the order says which project it is for.
+  it('adds a Projects material with no project, and refuses one with Required Stock', async () => {
     const noProject = await create({ sku: `IT-SEC-X1-${run}`, category: 'PROJECT_MATERIAL' });
-    expect(noProject.status).toBe(400);
-    expect(noProject.body.error?.message).toMatch(/needs the project/);
+    expect(noProject.status).toBe(200);
+    expect(noProject.body).toMatchObject({ section: 'PROJECTS', projectNumber: null });
+    // With opening stock it still needs one: stock with no project can't be issued.
+    const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections opening ${run}`, type: 'RACK' });
+    const opening = await api<{ error: { message: string } }>('POST', '/stock-items', {
+      sku: `IT-SEC-X1B-${run}`, name: 'Opening plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', initialQuantity: 2, locationId: loc.body.id,
+    });
+    expect(opening.status).toBe(400);
+    expect(opening.body.error.message).toMatch(/needs the project/);
     const withRequired = await create({ sku: `IT-SEC-X2-${run}`, category: 'PROJECT_MATERIAL', projectNumber, requiredStock: 5 });
     expect(withRequired.status).toBe(400);
     expect(withRequired.body.error?.message).toMatch(/no Required Stock/);

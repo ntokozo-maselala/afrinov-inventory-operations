@@ -57,14 +57,15 @@ async function lineWithNewItem() {
 }
 
 describe('+ New item on an order line', () => {
-  it('adds the item as a Projects item for the order\'s project, and puts it on the line', async () => {
+  // Project on the Order Roadmap, Phase 2: the new item gets no project of its own; the order says which.
+  it('adds the item as a Projects item with no project, and puts it on the line', async () => {
     renderForm();
     await waitFor(() => expect(screen.getByRole('option', { name: /1369 — Plant upgrade/ })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: '1369' } });
     const drawer = await lineWithNewItem();
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
-    expect(within(drawer).getByText(/added as a Projects item for 1369, and goes on line 1/)).toBeInTheDocument();
-    // The order fixes the section and project, so the drawer doesn't ask for either.
+    expect(within(drawer).getByText(/added as a Projects item, and goes on line 1; this order says which project it is for/)).toBeInTheDocument();
+    // The order fixes the section, and the item needs no project, so the drawer asks for neither.
     expect(within(drawer).queryByRole('radio')).not.toBeInTheDocument();
     expect(within(drawer).queryByLabelText('Project')).not.toBeInTheDocument();
 
@@ -74,13 +75,15 @@ describe('+ New item on an order line', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
 
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/materials', expect.objectContaining({
-      sku: '1369-FLANGE-150', name: 'Flange 150NB', category: 'PROJECT_MATERIAL', projectNumber: '1369',
+      sku: '1369-FLANGE-150', name: 'Flange 150NB', category: 'PROJECT_MATERIAL',
     })));
+    expect(mockPost.mock.calls.find((c) => c[0] === '/materials')![1]).not.toHaveProperty('projectNumber');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New item' })).not.toBeInTheDocument());
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new');
     expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(850);
-    // Project material sets the order's project, as any other would.
-    expect(screen.getByLabelText('Project')).toBeDisabled();
+    // The order's project stays the buyer's choice.
+    expect(screen.getByLabelText('Project')).toBeEnabled();
+    expect(screen.getByLabelText('Project')).toHaveValue('1369');
   });
 
   it('leaves the line as it was when cancelled', async () => {
@@ -92,7 +95,7 @@ describe('+ New item on an order line', () => {
     expect(mockPost).not.toHaveBeenCalled();
   });
 
-  it('keeps an item made for another project off this order, saying why', async () => {
+  it('puts an item tagged with another project on this order too: the order says which project', async () => {
     mockPost.mockImplementation(async () => created({ projectNumber: '1402', project: { projectNumber: '1402', name: 'Boiler', status: 'ACTIVE' } }));
     renderForm();
     await waitFor(() => expect(screen.getByRole('option', { name: /1369 — Plant upgrade/ })).toBeInTheDocument());
@@ -101,8 +104,8 @@ describe('+ New item on an order line', () => {
     fireEvent.change(within(drawer).getByLabelText(/SKU/), { target: { value: '1402-FLANGE' } });
     fireEvent.change(within(drawer).getByLabelText(/Item name/), { target: { value: 'Flange' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
-    expect(await screen.findByText(/It is for project 1402, and this order is for 1369/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Line 1 material')).toHaveValue('');
+    await waitFor(() => expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-new'));
+    expect(screen.getByLabelText('Project')).toHaveValue('1369');
   });
 
   // Review: the line kept the price of the item it held before.

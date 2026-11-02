@@ -34,7 +34,8 @@ export interface UpdateMaterialInput {
   projectNumber?: string;
 }
 
-const withProject = { project: { select: { projectNumber: true, name: true, status: true } } } as const;
+// Active too, so an order doesn't suggest a deactivated project from an item's tag (Qodo, PR #130).
+const withProject = { project: { select: { projectNumber: true, name: true, status: true, active: true } } } as const;
 
 /** A material as the API returns it: with its section and project. */
 function shape<M extends { category: string }>(m: M) {

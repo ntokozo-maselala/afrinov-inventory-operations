@@ -280,7 +280,7 @@ const PROJECT_DELIVERY_REFUSED = "Project material goes from the supplier straig
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
   const p = state.projects.find((x) => x.projectNumber === projectNumber);
-  return { projectNumber, name: p?.name ?? null, status: p?.status ?? null };
+  return { projectNumber, name: p?.name ?? null, status: p?.status ?? null, active: p?.active ?? true };
 }
 
 // AFRI-0001, AFRI-0002, …: one past the highest AFRI number, never below the
@@ -915,10 +915,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (serialNumber) checkSerial(serialNumber, b.category);
     const projectNumber = b.projectNumber?.trim() || null;
     if (sectionOf(b.category) === 'STORES' && projectNumber) throw err('VALIDATION_ERROR', 'A Stores material has no project. Choose the Project Material category for material bought for one job.');
+    // As the server: a Projects item needs no project of its own; the order says which (Project on the Order Roadmap, Phase 2).
     if (sectionOf(b.category) === 'PROJECTS') {
-      if (!projectNumber) throw err('VALIDATION_ERROR', 'A Projects material needs the project it is for');
       if (Number(b.requiredStock ?? 0) > 0) throw err('VALIDATION_ERROR', 'A Projects material has no Required Stock: it is bought for its job, not re-ordered');
-      checkOpenProject(projectNumber);
+      if (projectNumber) checkOpenProject(projectNumber);
     }
     const created: MockMaterial = {
       id: nextId('mat'),

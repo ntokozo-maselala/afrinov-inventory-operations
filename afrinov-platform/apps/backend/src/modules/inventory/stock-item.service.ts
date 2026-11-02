@@ -97,7 +97,7 @@ export const StockItemService = {
     return prisma.$transaction(async (tx) => {
       const existing = await tx.material.findUnique({ where: { sku } });
       if (existing) throw Errors.conflict(`An item with this SKU already exists.`);
-      const projectNumber = await projectForNewMaterial(input, tx);
+      const projectNumber = await projectForNewMaterial(input, tx, { projectRequired: true });
 
       const material = await tx.material.create({
         data: {
