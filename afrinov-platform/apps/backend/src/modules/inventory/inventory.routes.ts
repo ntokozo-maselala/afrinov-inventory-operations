@@ -101,7 +101,9 @@ export const stockCountSchema = z.object({
   note: z.string().trim().max(500).optional(),
   lines: z.array(z.object({
     materialId: uuidSchema,
-    expectedQuantity: z.number().min(0),
+    // What the system shows, checked against the balance when posting. It can be below
+    // zero after a booking mistake, which is what the count is there to correct.
+    expectedQuantity: z.number(),
     countedQuantity: z.number().min(0),
     note: z.string().trim().max(200).optional(),
   })).min(1).max(2000),

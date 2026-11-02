@@ -713,6 +713,17 @@ describe('mock API mutation flows', () => {
         .rejects.toMatchObject({ code: 'CONFLICT' });
       expect(await onHand('mat-1')).toBe(disc);
     });
+
+    // Qodo, PR #135: as the server, what the system shows may be below zero (a booking
+    // mistake the count puts right); a counted quantity may not.
+    it('takes a system quantity below zero, but never a counted one', async () => {
+      const disc = await onHand('mat-1');
+      // Past the check: refused only because the shelf isn't really at -4 here.
+      await expect(api.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: 'mat-1', expectedQuantity: -4, countedQuantity: 0 }] }))
+        .rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(api.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: 'mat-1', expectedQuantity: disc, countedQuantity: -1 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    });
   });
 
   describe('receiving stock at the counter', () => {

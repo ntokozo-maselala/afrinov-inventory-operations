@@ -613,3 +613,18 @@ describe('inventory routes', () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe('the stock count body', () => {
+  const line = (expectedQuantity: number, countedQuantity: number) => ({
+    locationId: '11111111-1111-4111-8111-111111111111',
+    lines: [{ materialId: '22222222-2222-4222-8222-222222222222', expectedQuantity, countedQuantity }],
+  });
+
+  // A balance below zero comes from a booking mistake; the count screen flags it, and
+  // counting it is how it is put right, so what the system shows may be negative.
+  it('takes a system quantity below zero, but never a counted one', async () => {
+    const { stockCountSchema } = await import('./inventory.routes.js');
+    expect(stockCountSchema.safeParse(line(-4, 0)).success).toBe(true);
+    expect(stockCountSchema.safeParse(line(4, -1)).success).toBe(false);
+  });
+});
