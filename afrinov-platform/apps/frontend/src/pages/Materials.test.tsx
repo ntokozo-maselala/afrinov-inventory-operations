@@ -69,4 +69,56 @@ describe('Materials page', () => {
     expect(await screen.findByText('Item OLD')).toBeInTheDocument();
     expect(screen.queryByText('Item NOPRICE')).not.toBeInTheDocument();
   });
+
+  // On hand beside the reorder level, coloured as Stock status grades it.
+  describe('On hand', () => {
+    const status = (sku: string, onHand: string, over: Record<string, unknown> = {}) => ({
+      materialId: `m-${sku}`, sku, onHand, onLoan: '0', status: 'OK', percentOfRequired: 100, ...over,
+    });
+    const withStock = (rows: unknown[] | Error) => mockGet.mockImplementation(async (path: string) => {
+      if (path === '/reports/stock-status') { if (rows instanceof Error) throw rows; return rows; }
+      return ITEMS;
+    });
+    const onHandOf = (sku: string) => {
+      const row = screen.getByText(`Item ${sku}`).closest('tr')!;
+      const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+      return row.querySelectorAll('td')[headers.indexOf('On hand')]!;
+    };
+
+    it('shows each Stores item\'s stock on hand next to its reorder level', async () => {
+      withStock([
+        status('PRICED', '25'),
+        status('NOPRICE', '1', { status: 'URGENT', percentOfRequired: 10 }),
+        status('NOREQ', '4', { status: 'NOT_SET', percentOfRequired: null, onLoan: '2' }),
+      ]);
+      renderAt('/materials');
+      await screen.findByText('Item PRICED');
+      const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+      expect(headers.indexOf('On hand')).toBe(headers.indexOf('Reorder') - 1);
+      expect(mockGet).toHaveBeenCalledWith('/reports/stock-status');
+
+      expect(onHandOf('PRICED')).toHaveTextContent('25');
+      expect(onHandOf('NOPRICE')).toHaveTextContent('1');
+      expect(onHandOf('NOPRICE').querySelector('[title]')).toHaveAttribute('title', 'Urgent: 10% of the reorder level');
+      expect(onHandOf('NOPRICE').querySelector('.text-danger-600')).not.toBeNull();
+      // A tool on loan is still owned: shown with what is on the shelf.
+      expect(onHandOf('NOREQ')).toHaveTextContent('+2 checked out');
+      // Stock status lists active items only.
+      expect(onHandOf('OLD').querySelector('[title="Inactive item"]')).not.toBeNull();
+    });
+
+    it('shows a dash when stock can\'t be loaded, and the catalogue still lists', async () => {
+      withStock(Object.assign(new Error('down'), { code: 'SERVICE_UNAVAILABLE' }));
+      renderAt('/materials');
+      expect(await screen.findByText('Item PRICED')).toBeInTheDocument();
+      expect(onHandOf('PRICED')).toHaveTextContent('—');
+    });
+
+    it('isn\'t on the Projects tab: Projects material isn\'t held in the store', async () => {
+      renderAt('/materials?section=PROJECTS');
+      await screen.findByRole('tab', { name: /Projects/, selected: true });
+      expect(screen.queryByRole('columnheader', { name: 'On hand' })).not.toBeInTheDocument();
+      expect(mockGet).not.toHaveBeenCalledWith('/reports/stock-status');
+    });
+  });
 });

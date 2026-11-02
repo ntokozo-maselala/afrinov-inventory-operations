@@ -91,6 +91,20 @@ describe('Materials: Stores and Projects tabs', () => {
     expect(within(drawer).getByRole('radio', { name: /Projects/ })).toBeChecked();
     expect(within(drawer).queryByLabelText(/^Project(?!s)/)).not.toBeInTheDocument();
   });
+
+  // Qodo, PR #133: a new item would otherwise show its On hand as not known until the page is reloaded.
+  it('reloads stock on hand with the list once a Stores item is added', async () => {
+    list();
+    await screen.findByText('DISC');
+    const stockLoads = () => mockGet.mock.calls.filter(([path]) => path === '/reports/stock-status').length;
+    expect(stockLoads()).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    const drawer = screen.getByRole('dialog');
+    fireEvent.change(within(drawer).getByLabelText(/^SKU/), { target: { value: 'CON-9' } });
+    fireEvent.change(within(drawer).getByLabelText(/^Item name/), { target: { value: 'Glue' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(stockLoads()).toBe(2));
+  });
 });
 
 const form = (props: Record<string, unknown> = {}) => render(<MaterialForm onCancel={vi.fn()} onSaved={vi.fn()} onError={vi.fn()} {...props} />);

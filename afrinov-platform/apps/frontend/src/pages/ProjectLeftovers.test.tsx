@@ -114,7 +114,7 @@ describe('ProjectLeftovers page', () => {
   // Qodo, PR #132: nothing is issued from a deactivated location.
   it('offers no Issue for an item whose stock is all in deactivated locations', async () => {
     auth.roles = ['STORE_CONTROLLER'];
-    mockGet.mockResolvedValue({ ...leftovers('ACTIVE'), items: [{ ...ITEMS[0]!, active: true, inActiveLocation: false }, ITEMS[1]!] });
+    mockGet.mockResolvedValue({ ...leftovers('ACTIVE'), items: [{ ...ITEMS[0]!, active: true, hasActiveLocation: false }, ITEMS[1]!] });
     renderPage();
     await screen.findByText('Pipe 150NB');
     expect(screen.queryByRole('link', { name: 'Issue 1369-PIPE' })).not.toBeInTheDocument();

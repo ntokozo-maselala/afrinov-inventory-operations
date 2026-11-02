@@ -160,7 +160,9 @@ the one place to receive, and only against an approved Stores order
   edited in `DRAFT` and `PENDING_APPROVAL`, and in `APPROVED` when
   `purchaseOrders.allowEditAfterApproval` is on.
 - A line without its own delivery date is due on the order's expected
-  delivery.
+  delivery. On the order's form (new or edit) the expected delivery stays on the
+  latest line date: a line given a later date moves it, and the other lines
+  keep the dates they showed.
 - An order cannot be cancelled once anything has been received.
 - Received quantity per line is always ≤ ordered quantity. Over-receipt is
   refused when the receipt is recorded and rolls back if it is posted; an
