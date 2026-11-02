@@ -183,6 +183,8 @@ describe('usePermissions — the role check sheet', () => {
       'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:receive', 'receipts:view',
       // Stores orders: those without a project (Stores ordering roadmap).
       'stores:order',
+      // A later due date for a tool loan is the store's decision.
+      'tools:extend',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
     PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],

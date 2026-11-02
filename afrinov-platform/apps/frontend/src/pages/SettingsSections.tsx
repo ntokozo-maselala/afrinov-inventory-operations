@@ -93,6 +93,9 @@ export function SettingsInventory() {
   const defaultUnitOfMeasure = useSetting('inventory.defaultUnitOfMeasure');
   const enableStockAlerts = useSetting('inventory.enableStockAlerts');
   const toolOverdueDays = useSetting('inventory.toolOverdueDays');
+  const toolMaxLoanDays = useSetting('inventory.toolMaxLoanDays');
+  const toolEscalateDays = useSetting('inventory.toolEscalateDays');
+  const toolOverdueCheckout = useSetting('inventory.toolOverdueCheckout');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
@@ -115,6 +118,30 @@ export function SettingsInventory() {
           value={Number(draft['inventory.toolOverdueDays'] ?? 7)}
           onChange={(v) => setDraft('inventory.toolOverdueDays', v)}
           error={errors['inventory.toolOverdueDays'] ?? null}
+        />
+      )}
+      {toolMaxLoanDays && (
+        <NumberField
+          def={toolMaxLoanDays}
+          value={Number(draft['inventory.toolMaxLoanDays'] ?? 30)}
+          onChange={(v) => setDraft('inventory.toolMaxLoanDays', v)}
+          error={errors['inventory.toolMaxLoanDays'] ?? null}
+        />
+      )}
+      {toolEscalateDays && (
+        <NumberField
+          def={toolEscalateDays}
+          value={Number(draft['inventory.toolEscalateDays'] ?? 14)}
+          onChange={(v) => setDraft('inventory.toolEscalateDays', v)}
+          error={errors['inventory.toolEscalateDays'] ?? null}
+        />
+      )}
+      {toolOverdueCheckout && (
+        <EnumField
+          def={toolOverdueCheckout}
+          value={(draft['inventory.toolOverdueCheckout'] as string) ?? 'warn'}
+          onChange={(v) => setDraft('inventory.toolOverdueCheckout', v)}
+          error={errors['inventory.toolOverdueCheckout'] ?? null}
         />
       )}
       <TextField

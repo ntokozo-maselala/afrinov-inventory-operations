@@ -158,6 +158,8 @@ const TIME_FORMATS = ['24h', '12h'] as const;
 const LANDING_PAGES = ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders'] as const;
 const THEMES = ['system', 'light', 'dark'] as const;
 const DENSITIES = ['comfortable', 'compact'] as const;
+// Lending to someone with an overdue tool: warn (lend with a reason), or block contractors only, or block everyone.
+export const TOOL_OVERDUE_CHECKOUT = ['warn', 'block-contractors', 'block'] as const;
 
 export const SETTING_CATALOG: readonly SettingDefinition[] = [
   // ── General ────────────────────────────────────────────────────────────
@@ -173,7 +175,11 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.urgentBelowPercent', type: 'number', category: 'inventory', description: 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.', default: 20, validate: NON_NEG(100) },
   { key: 'inventory.warningBelowPercent', type: 'number', category: 'inventory', description: 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT). At or above it, the item is OK.', default: 40, validate: NON_NEG(1000) },
   { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'Default unit of measure suggested for new materials.', default: 'each', validate: isLength(1, 20) },
-  { key: 'inventory.toolOverdueDays', type: 'number', category: 'inventory', description: 'A tool checked out longer than this many days is overdue: flagged on the Tools page and counted on the Dashboard.', default: 7, validate: POS_INT(1, 365) },
+  // Tool loans (04-processes/tool-loans.md). The key predates due dates: it is the default loan period.
+  { key: 'inventory.toolOverdueDays', type: 'number', category: 'inventory', description: 'Default tool loan period, in days: a tool checked out is due back this many days later unless another due date is set at check-out. Older loans with no due date fall due this many days after they went out.', default: 7, validate: POS_INT(1, 365) },
+  { key: 'inventory.toolMaxLoanDays', type: 'number', category: 'inventory', description: 'The longest a tool may be lent for, in days from check-out, extensions included. Only an administrator can set a later due date.', default: 30, validate: POS_INT(1, 365) },
+  { key: 'inventory.toolEscalateDays', type: 'number', category: 'inventory', description: 'A tool this many days past its due date needs a decision: check it in, extend the loan or write it off as lost. Flagged on the Tools page and the Dashboard.', default: 14, validate: POS_INT(1, 365) },
+  { key: 'inventory.toolOverdueCheckout', type: 'enum', category: 'inventory', description: 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', default: 'warn', enumOptions: TOOL_OVERDUE_CHECKOUT, validate: ENUM(TOOL_OVERDUE_CHECKOUT) },
   { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.', default: true },
 
   // ── Purchase Orders ─────────────────────────────────────────────────────

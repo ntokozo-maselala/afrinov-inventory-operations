@@ -67,13 +67,24 @@ describe('Dashboard', () => {
   });
 
   it('counts the tools out on loan, and links to the overdue ones', async () => {
-    const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2 });
+    const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2, state: overdue ? 'OVERDUE' : 'ON_LOAN' });
     tools = [{ materialId: 'm-1', loans: [loan('2', false), loan('1', true)] }, { materialId: 'm-2', loans: [] }];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const card = (await screen.findByText('Tools checked out')).closest('a')!;
     expect(card).toHaveAttribute('href', '/tools?view=overdue');
     expect(card).toHaveTextContent('3');
     expect(card).toHaveTextContent('1 overdue');
+  });
+
+  it('says how many overdue tools need a decision, and links to them', async () => {
+    tools = [{ materialId: 'm-1', loans: [
+      { loanId: 'a', out: '1', overdue: true, state: 'OVERDUE' },
+      { loanId: 'b', out: '2', overdue: true, state: 'NEEDS_DECISION' },
+    ] }];
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = (await screen.findByText('Tools checked out')).closest('a')!;
+    expect(card).toHaveAttribute('href', '/tools?view=decide');
+    expect(card).toHaveTextContent('3 overdue, 2 need a decision');
   });
 });
 

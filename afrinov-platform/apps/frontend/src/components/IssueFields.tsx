@@ -7,7 +7,7 @@ import { useApi } from '../hooks/useApi';
 import type { ApiError } from '../api/client';
 
 export interface RecipientOption { id: string; name: string; type: 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR' }
-export interface ProjectOption { projectNumber: string; name?: string | null; status?: string }
+export interface ProjectOption { projectNumber: string; name?: string | null; status?: string; endDate?: string | null }
 
 const TYPE_GROUP: Array<[RecipientOption['type'], string]> = [
   ['WORKER', 'Workers'],

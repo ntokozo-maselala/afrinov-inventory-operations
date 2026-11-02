@@ -25,7 +25,8 @@ permission is required (see `authorization.md`).
 | InventoryTransfer (action) | inserts two linked rows | `POST /inventory-transfers` — transfer:inventory |
 | InventoryAdjustment (action) | inserts an ADJUSTMENT row | `POST /inventory-adjustments` — adjust:inventory |
 | StockCount (action) | inserts COUNT_VARIANCE adjustments | `POST /stock-counts` (location, 1–2000 lines) — adjust:inventory |
-| ToolCheckOut / ToolCheckIn (action) | `inventory_transactions` (`LOAN`, `LOAN_RETURN`) | `GET /tools` — signed in; `POST /tools/check-out` — checkout:tool; `POST /tools/check-in` — checkin:tool |
+| ToolCheckOut / ToolCheckIn (action) | `inventory_transactions` (`LOAN` with `due_on`, `LOAN_RETURN`) | `GET /tools` — signed in; `POST /tools/check-out` — checkout:tool; `POST /tools/check-in` — checkin:tool |
+| ToolLoanExtension | `tool_loan_extensions` (added to only) | `POST /tools/loans/:id/extend` — extend:tool_loan; listed on each loan in `GET /tools` |
 | Project | `projects` | `GET /projects` (q, status, active), `GET /projects/:projectNumber` — auth; `POST`, `PATCH`, `DELETE` (archive) — manage:projects |
 | Recipient | `recipients` | `GET /recipients` (q, type, active), `GET /recipients/:id` — auth; `POST`, `PATCH /:id` (incl. active) — manage:recipients |
 | Report: CurrentStock | derived | `GET /reports/current-stock` (category, locationId, materialId) — view:reports |

@@ -53,6 +53,7 @@ model User {
   cancelledRfqs        Rfq[]             @relation("RFQ_CancelledBy")
   rfqQuoteFiles        RfqQuoteFile[]    @relation("RFQ_QuoteFileUploadedBy")
   idempotencyKeys      IdempotencyKey[]
+  toolLoanExtensions   ToolLoanExtension[]
 
   @@map("users")
 }
@@ -628,6 +629,11 @@ model InventoryTransaction {
   // (the slip). Earlier issue lines carry their own id; reversals and other
   // types carry none.
   issueId       String?                  @map("issue_id")
+  // Tool loans (LOAN): the day the tool is due back, agreed at check-out. Set
+  // when the loan is posted and never changed; a later date is a
+  // ToolLoanExtension. Null on loans from before due dates, which fall due
+  // inventory.toolOverdueDays after they went out.
+  dueOn         DateTime?                @map("due_on") @db.Date
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")
   reasonNote    String?                  @map("reason_note")
@@ -653,6 +659,7 @@ model InventoryTransaction {
   pairedBy   InventoryTransaction? @relation("TransferPair")
   reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
   reversedBy InventoryTransaction? @relation("Reversal")
+  loanExtensions ToolLoanExtension[]
 
   @@index([materialId, locationId, postedAt])
   @@index([referenceType, referenceId])
@@ -661,6 +668,24 @@ model InventoryTransaction {
   @@index([recipientId])
   @@index([issueId])
   @@map("inventory_transactions")
+}
+
+// A tool loan given a later due date, and why. Only ever added to, never
+// changed: a loan is due on its latest extension's date, or else on the one
+// agreed at check-out.
+model ToolLoanExtension {
+  id        String   @id @default(uuid())
+  loanId    String   @map("loan_id")
+  dueOn     DateTime @map("due_on") @db.Date
+  reason    String
+  actorId   String   @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  loan  InventoryTransaction @relation(fields: [loanId], references: [id])
+  actor User                 @relation(fields: [actorId], references: [id])
+
+  @@index([loanId])
+  @@map("tool_loan_extensions")
 }
 
 // ADR-002: derived/materialized view. Application code never writes to this

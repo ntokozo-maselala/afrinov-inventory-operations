@@ -505,3 +505,38 @@ Per-project duplicates in the catalogue can be merged later.
 `afrinov-platform/apps/frontend/src/pages/PurchaseOrderForm.tsx`, `RfqForm.tsx`,
 `Materials.tsx`, `MaterialDetail.tsx`, `components/MaterialForm.tsx`,
 `afrinov-docs/docs/13-project-management/roadmaps/project-on-the-order-roadmap.md`.
+
+### ADR-024 — A tool loan has a due date; its state is worked out, not stored
+**Date:** 2026-11-02 · **Status:** Accepted · **Amends:** the overdue flag (`inventory.toolOverdueDays`, migration 20260101000012)
+
+**Context:** A tool loan was flagged overdue once it had been out longer than
+one number of days, the same for a drill lent for a shift and a generator sent
+to a site for a project. Nobody agreed a return date, a loan could not be
+extended without a false check-in, and a tool could stay overdue indefinitely.
+Owned stock counts tools out on loan, so a tool that will never come back
+still counted against Required Stock.
+
+**Decision:**
+- Each check-out agrees a due date, kept on the `LOAN` row (`due_on`). The
+  row is still never updated.
+- A later date is an extension in `tool_loan_extensions`, with who, when and
+  why. Rows there are only ever added.
+- A loan’s state (ON_LOAN, DUE_SOON, OVERDUE, NEEDS_DECISION) is worked out
+  from its due date and today each time, as a tool’s state already was from
+  the ledger. Nothing stores it, so it cannot disagree with the movements.
+- Nothing happens to a tool automatically: no write-off, no refused return.
+  A loan that needs a decision waits for a person to check it in, extend it or
+  declare it lost.
+- Lending to someone with an overdue tool asks for a reason by default; the
+  store can block it for contractors or for everyone.
+
+**Consequences:** One migration adds the column, the table, three settings and
+`extend:tool_loan`. Loans from before it have no due date and fall due the
+default period after they went out, so nothing flagged before changes. There
+are no notifications: recipients mostly do not sign in, so the store sees what
+is due on the Tools page and the Dashboard.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/tool-loan-terms.ts`,
+`tool-loan.service.ts`, `tool.routes.ts`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000033_tool_loan_due_dates/migration.sql`,
+`afrinov-docs/docs/04-processes/tool-loans.md`.

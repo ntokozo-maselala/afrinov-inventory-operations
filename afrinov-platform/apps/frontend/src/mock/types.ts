@@ -199,6 +199,8 @@ export interface MockInventoryTransaction {
   reversesId?: string;
   /** Issues and tool loans: shared by every line one issue or check-out posted (the slip). */
   issueId?: string;
+  /** Tool loans: YYYY-MM-DD it is due back, agreed at check-out. Absent on loans from before due dates. */
+  dueOn?: string;
 }
 
 export interface MockStockRow {

@@ -72,16 +72,22 @@ function approvalCard(mine: Waiting[], pending: Waiting[] | null, sides: { proje
 /** An order in an approval queue: its project tells which side approves it. */
 interface Waiting { projectNumber?: string | null }
 
-/** Tools out on loan and how many are overdue, linking to the Tools page. */
+/** Tools out on loan, how many are overdue and how many need a decision, linking to the Tools page. */
 function toolsCard(tools: ToolRow[]) {
   const loans = tools.flatMap((tool) => tool.loans);
-  const out = loans.reduce((count, loan) => count + Number(loan.out), 0);
-  const overdue = loans.filter((loan) => loan.overdue).reduce((count, loan) => count + Number(loan.out), 0);
+  const count = (of: typeof loans) => of.reduce((n, loan) => n + Number(loan.out), 0);
+  const out = count(loans);
+  const overdue = count(loans.filter((loan) => loan.overdue));
+  const decide = count(loans.filter((loan) => loan.state === 'NEEDS_DECISION'));
+  const note = out === 0 ? 'all in store'
+    : overdue === 0 ? 'none overdue'
+      : decide > 0 ? `${formatNumber(overdue)} overdue, ${formatNumber(decide)} need${decide === 1 ? 's' : ''} a decision`
+        : `${formatNumber(overdue)} overdue`;
   return {
     label: 'Tools checked out', value: formatNumber(out),
     tone: overdue > 0 ? 'danger' as const : 'neutral' as const,
-    note: out === 0 ? 'all in store' : overdue > 0 ? `${formatNumber(overdue)} overdue` : 'none overdue',
-    to: overdue > 0 ? '/tools?view=overdue' : '/tools?view=out',
+    note,
+    to: decide > 0 ? '/tools?view=decide' : overdue > 0 ? '/tools?view=overdue' : '/tools?view=out',
   };
 }
 

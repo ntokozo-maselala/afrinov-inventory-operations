@@ -26,6 +26,8 @@ export const PermissionCode = {
   AdjustInventory: 'adjust:inventory',
   CheckOutTool: 'checkout:tool',
   CheckInTool: 'checkin:tool',
+  // Giving a tool loan a later due date: the store's decision, not the borrower's.
+  ExtendToolLoan: 'extend:tool_loan',
   ManageUsers: 'manage:users',
   ViewUsers: 'view:users',
   ManageRoles: 'manage:roles',
@@ -61,6 +63,7 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.AdjustInventory,
     PermissionCode.CheckOutTool,
     PermissionCode.CheckInTool,
+    PermissionCode.ExtendToolLoan,
     PermissionCode.ManageProjects,
     PermissionCode.ManageRecipients,
     // No view:purchase_order: project orders and RFQs are Procurement's, and the

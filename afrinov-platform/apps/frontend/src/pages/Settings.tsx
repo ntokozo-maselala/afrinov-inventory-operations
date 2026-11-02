@@ -340,6 +340,10 @@ function labelForKey(key: string): string {
     .replace(/^Code Of Conduct$/, 'Code of conduct')
     .replace(/^Rfq Instructions$/, 'RFQ instructions')
     .replace(/^Rfq Quote Email$/, 'Quotes returned to')
+    .replace(/^Tool Overdue Days$/, 'Default tool loan period (days)')
+    .replace(/^Tool Max Loan Days$/, 'Longest tool loan (days)')
+    .replace(/^Tool Escalate Days$/, 'Tool loan needs a decision after (days late)')
+    .replace(/^Tool Overdue Checkout$/, 'Lending to someone with an overdue tool')
     .trim();
 }
 
@@ -351,6 +355,9 @@ const OPTION_LABELS: Record<string, string> = {
   'receive-stock': 'Receive stock',
   'low-stock': 'Stock status',
   'purchase-orders': 'Purchase orders',
+  warn: 'Warn, and ask for a reason',
+  'block-contractors': 'Block contractors, warn for everyone else',
+  block: 'Block everyone until the overdue tools are back or extended',
 };
 
 function humanizeOption(value: string): string {
