@@ -153,21 +153,44 @@ describe('Tools page', () => {
     expect(within(drawer).queryByLabelText('Reason to lend anyway', { exact: false })).not.toBeInTheDocument();
   });
 
-  it('extends a loan to a later date with a reason, retry-safe', async () => {
+  it('changes a due date to a later one with a reason, retry-safe', async () => {
     perms.extend = true;
     renderPage();
     await screen.findByText('Scraper');
-    fireEvent.click(within(row('Scraper')).getByRole('button', { name: 'Extend Scraper for Bukho' }));
+    fireEvent.click(within(row('Scraper')).getByRole('button', { name: 'Change the due date of Scraper for Bukho' }));
     const drawer = await screen.findByRole('dialog');
     expect(within(drawer).getByLabelText('New due date', { exact: false })).toHaveValue(at(7));
-    fireEvent.click(within(drawer).getByRole('button', { name: 'Extend loan' }));
-    expect(await within(drawer).findByText('Say why the loan is extended.')).toBeInTheDocument();
-    fireEvent.change(within(drawer).getByLabelText('Why it is needed longer', { exact: false }), { target: { value: 'Shutdown over-ran' } });
-    fireEvent.click(within(drawer).getByRole('button', { name: 'Extend loan' }));
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Change due date' }));
+    expect(await within(drawer).findByText('Say why the due date is changing.')).toBeInTheDocument();
+    fireEvent.change(within(drawer).getByLabelText('Why the date is changing', { exact: false }), { target: { value: 'Shutdown over-ran' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Change due date' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith(
-      '/tools/loans/t-2/extend', { dueOn: at(7), reason: 'Shutdown over-ran' }, { idempotencyKey: expect.any(String) },
+      '/tools/loans/t-2/due-date', { dueOn: at(7), reason: 'Shutdown over-ran' }, { idempotencyKey: expect.any(String) },
     ));
     expect(await screen.findByText(/^Scraper with Bukho is now due back /)).toBeInTheDocument();
+  });
+
+  it('moves a due date earlier too, but not to the same day or before today', async () => {
+    perms.extend = true;
+    renderPage();
+    await screen.findByText('Scraper');
+    fireEvent.click(within(row('Scraper')).getByRole('button', { name: 'Change the due date of Scraper for Sabelo' }));
+    const drawer = await screen.findByRole('dialog');
+    const date = within(drawer).getByLabelText('New due date', { exact: false });
+    expect(date).toHaveAttribute('min', today());
+    fireEvent.change(within(drawer).getByLabelText('Why the date is changing', { exact: false }), { target: { value: 'Wrong day picked' } });
+    fireEvent.change(date, { target: { value: at(3) } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Change due date' }));
+    expect(await within(drawer).findByText(/already due back on/)).toBeInTheDocument();
+    fireEvent.change(date, { target: { value: at(-1) } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Change due date' }));
+    expect(await within(drawer).findByText('The due date cannot be before today.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+    fireEvent.change(date, { target: { value: at(1) } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Change due date' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith(
+      '/tools/loans/t-3/due-date', { dueOn: at(1), reason: 'Wrong day picked' }, { idempotencyKey: expect.any(String) },
+    ));
   });
 
   it('checks a tool in, asking what happened when it was lost', async () => {

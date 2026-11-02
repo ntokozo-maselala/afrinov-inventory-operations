@@ -1,9 +1,10 @@
 // When a tool loan is due back, and what state it is in (04-processes/tool-loans.md).
 //
 // A loan has no stored state: it is worked out each time from its due date and
-// today. The due date is agreed at check-out (dueOn on the LOAN row); an
-// extension gives a later one; a loan from before due dates falls due the
-// default loan period after it went out. Dates are calendar days (YYYY-MM-DD),
+// today. The due date is agreed at check-out (dueOn on the LOAN row); a change
+// (tool_loan_extensions) gives a later or earlier one, and the most recent
+// change wins; a loan from before due dates falls due the default loan period
+// after it went out. Dates are calendar days (YYYY-MM-DD),
 // compared as whole UTC days, as purchase order due dates are.
 //
 // Pure functions only, so the rules are tested without a database.
@@ -89,9 +90,45 @@ export function dueOnProblem(dueOn: string, args: {
   return null;
 }
 
-/** When a loan is due: its latest extension, else the date agreed at check-out, else the default period after it went out. */
-export function effectiveDueOn(loan: { outDay: string; dueOn: string | null; extendedTo: string | null }, terms: LoanTerms): string {
-  return loan.extendedTo ?? loan.dueOn ?? addDays(loan.outDay, terms.defaultDays);
+/** One change of a loan's due date, later or earlier. */
+export interface DueChange { id: string; at: Date; dueOn: string }
+
+/** A loan's due dates over time: the one agreed at check-out, then each change, oldest first. */
+export interface LoanDates { outDay: string; agreed: string; changes: DueChange[] }
+
+/**
+ * A loan's due dates from its row and its changes (any order). A loan from
+ * before due dates was agreed the default period after it went out.
+ */
+export function loanDatesOf(
+  loan: { postedAt: Date; dueOn: Date | null },
+  changes: Array<{ id: string; createdAt: Date; dueOn: Date }>,
+  terms: LoanTerms,
+): LoanDates {
+  const outDay = dayOf(loan.postedAt);
+  return {
+    outDay,
+    agreed: loan.dueOn ? dayOf(loan.dueOn) : addDays(outDay, terms.defaultDays),
+    changes: changes
+      .map((c) => ({ id: c.id, at: c.createdAt, dueOn: dayOf(c.dueOn) }))
+      .sort((a, b) => a.at.getTime() - b.at.getTime() || (a.id < b.id ? -1 : 1)),
+  };
+}
+
+/** When a loan is due now: its most recent change, else the date agreed at check-out. */
+export const currentDueOn = (d: LoanDates): string => d.changes.at(-1)?.dueOn ?? d.agreed;
+
+/** When a loan was due at a moment: the most recent change made by then, else the agreed date. */
+export function dueOnAt(d: LoanDates, at: Date): string {
+  let due = d.agreed;
+  for (const c of d.changes) if (c.at.getTime() <= at.getTime()) due = c.dueOn;
+  return due;
+}
+
+/** The date a change replaced: the change before it, else the agreed date. */
+export function dueOnBefore(d: LoanDates, changeId: string): string {
+  const i = d.changes.findIndex((c) => c.id === changeId);
+  return i > 0 ? d.changes[i - 1]!.dueOn : d.agreed;
 }
 
 /** A loan's state today, and how many days late it is (negative: days still to go). */

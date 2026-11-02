@@ -41,7 +41,7 @@ registered unless `PROCUREMENT_ENABLED=false`.
 | Count stock at a location | `POST /stock-counts` |
 | Reverse a movement | `POST /inventory-transactions/:id/reversal` |
 | Check out tool / Check in tool | `POST /tools/check-out`, `POST /tools/check-in` |
-| Extend a tool loan | `POST /tools/loans/:id/extend` |
+| Change a tool loan's due date (later or earlier; listed on Movements) | `POST /tools/loans/:id/due-date` |
 
 ## Operations
 | Transaction | API |

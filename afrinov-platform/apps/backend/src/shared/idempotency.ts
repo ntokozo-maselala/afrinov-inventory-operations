@@ -41,7 +41,7 @@ export type IdempotencyEndpoint =
   | 'POST /inventory-returns'
   | 'POST /inventory-transactions/:id/returns'
   | 'POST /inventory-transactions/:id/reversal'
-  | 'POST /tools/loans/:id/extend';
+  | 'POST /tools/loans/:id/due-date';
 
 /**
  * Stable hash of the request, so a reused key with a different payload is

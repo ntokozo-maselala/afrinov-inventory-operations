@@ -7,9 +7,11 @@
 // once share a slip (issueId), as an issue does.
 //
 // Every loan has a due date, agreed at check-out and kept on the LOAN row. A
-// later date is an extension with a reason (tool_loan_extensions); the loan
-// row is never changed. Whether a loan is due soon, overdue or needs a
-// decision is worked out from the due date each time (tool-loan-terms.ts).
+// different date, later or earlier, is a change with a reason
+// (tool_loan_extensions); the loan row is never changed. Whether a loan is due
+// soon, overdue or needs a decision is worked out from the due date each time
+// (tool-loan-terms.ts). Movements lists the changes beside the loan's
+// check-out and check-in (InventoryService.queryHistory).
 //
 // Loans are corrected by checking the tool in or out again, not by reversing
 // the movement (see InventoryService.reverse).
@@ -21,9 +23,9 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
-import { SettingsService } from '../settings/settings.service.js';
+import { loanTerms } from './tool-loan-dates.js';
 import {
-  TERM_SETTINGS, dayOf, defaultDueOn, dueOnProblem, effectiveDueOn, loanState, overdueBlocksCheckout, termsFrom,
+  addDays, currentDueOn, dayOf, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState, overdueBlocksCheckout,
   type LoanState, type LoanTerms,
 } from './tool-loan-terms.js';
 
@@ -53,9 +55,9 @@ export interface CheckInInput {
   actorId: string;
 }
 
-export interface ExtendInput {
+export interface DueDateChangeInput {
   loanId: string;
-  /** YYYY-MM-DD, after the current due date. */
+  /** YYYY-MM-DD, later or earlier than the current due date, but not before today. */
   dueOn: string;
   reason: string;
   /** The caller may set a due date past the longest loan (an administrator). */
@@ -63,11 +65,42 @@ export interface ExtendInput {
   actorId: string;
 }
 
+/** A change of a loan's due date. */
 export interface LoanExtension {
   dueOn: string;
+  /** The date it replaced. */
+  previousDueOn: string;
   reason: string;
   extendedBy: string;
   extendedAt: string;
+}
+
+/**
+ * One step in a loan's life, oldest first (GET /tools/loans/:id/history).
+ * BECAME_OVERDUE is worked out from the dates and never stored.
+ */
+export type LoanEvent =
+  | { kind: 'CHECKED_OUT'; at: string; by: string; quantity: string; dueOn: string; note: string | null; overdueOverrideReason: string | null }
+  | { kind: 'DUE_DATE_CHANGED'; at: string; by: string; dueOn: string; previousDueOn: string; reason: string }
+  | { kind: 'BECAME_OVERDUE'; at: string; dueOn: string }
+  | { kind: 'CHECKED_IN'; at: string; by: string; quantity: string; condition: ToolCondition; note: string | null; dueOn: string; daysLate: number };
+
+export interface LoanHistory {
+  loanId: string;
+  materialId: string;
+  sku: string;
+  name: string;
+  recipientName: string | null;
+  projectNumber: string | null;
+  locationName: string;
+  quantity: string;
+  /** Still out. */
+  out: string;
+  dueOn: string;
+  /** Null once it is all back. */
+  state: LoanState | null;
+  daysLate: number;
+  events: LoanEvent[];
 }
 
 export interface OpenLoan {
@@ -134,26 +167,21 @@ async function returnedByLoan(tx: Pick<Tx, 'inventoryTransaction'>, loanIds: str
   return new Map(groups.map((g) => [g.referenceId!, g._sum.quantity ?? toDecimal(0)]));
 }
 
-async function loanTerms(): Promise<LoanTerms> {
-  return termsFrom(await SettingsService.getValues(Object.values(TERM_SETTINGS)));
-}
-
 const asDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
 
-/** When a loan row is due, from its own date and its extensions (any order). */
-function dueOf(loan: { postedAt: Date; dueOn: Date | null; loanExtensions: Array<{ dueOn: Date }> }, terms: LoanTerms): string {
-  const extendedTo = loan.loanExtensions.reduce<string | null>((latest, e) => {
-    const day = dayOf(e.dueOn);
-    return latest === null || day > latest ? day : latest;
-  }, null);
-  return effectiveDueOn({ outDay: dayOf(loan.postedAt), dueOn: loan.dueOn ? dayOf(loan.dueOn) : null, extendedTo }, terms);
+/** The due date changes a loan row is read with. */
+const CHANGES = { select: { id: true, createdAt: true, dueOn: true } } as const;
+
+/** When a loan row is due now: its most recent change, else its own date. */
+function dueOf(loan: { postedAt: Date; dueOn: Date | null; loanExtensions: Array<{ id: string; createdAt: Date; dueOn: Date }> }, terms: LoanTerms): string {
+  return currentDueOn(loanDatesOf(loan, loan.loanExtensions, terms));
 }
 
 /** The recipient's loans still out and past their due date, most overdue first. */
 async function overdueLoansOf(tx: Tx, recipientId: string, today: string, terms: LoanTerms): Promise<OverdueLoan[]> {
   const loans = await tx.inventoryTransaction.findMany({
     where: { type: InventoryTransactionType.LOAN, recipientId },
-    include: { material: { select: { sku: true, name: true } }, loanExtensions: { select: { dueOn: true } } },
+    include: { material: { select: { sku: true, name: true } }, loanExtensions: CHANGES },
   });
   const returned = await returnedByLoan(tx, loans.map((l) => l.id));
   const overdue: OverdueLoan[] = [];
@@ -183,7 +211,7 @@ export const ToolLoanService = {
           recipient: { select: { name: true } },
           location: { select: { name: true } },
           actor: { select: { name: true } },
-          loanExtensions: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { name: true } } } },
+          loanExtensions: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { actor: { select: { name: true } } } },
         },
         orderBy: { postedAt: 'asc' },
       }),
@@ -196,7 +224,8 @@ export const ToolLoanService = {
       const lent = l.quantity.negated();
       const out = lent.minus(returned.get(l.id) ?? 0);
       if (!out.gt(0)) continue;
-      const dueOn = dueOf(l, terms);
+      const dates = loanDatesOf(l, l.loanExtensions, terms);
+      const dueOn = currentDueOn(dates);
       const { state, daysLate } = loanState(dueOn, today, terms);
       open.set(l.materialId, [...(open.get(l.materialId) ?? []), {
         loanId: l.id,
@@ -217,7 +246,7 @@ export const ToolLoanService = {
         state,
         overdue: daysLate > 0,
         extensions: l.loanExtensions.map((e) => ({
-          dueOn: dayOf(e.dueOn), reason: e.reason, extendedBy: e.actor.name, extendedAt: e.createdAt.toISOString(),
+          dueOn: dayOf(e.dueOn), previousDueOn: dueOnBefore(dates, e.id), reason: e.reason, extendedBy: e.actor.name, extendedAt: e.createdAt.toISOString(),
         })),
       }]);
     }
@@ -327,6 +356,8 @@ export const ToolLoanService = {
             projectNumber: input.projectNumber ?? null,
             reasonNote: note,
             dueOn: asDate(dueOn),
+            // Kept on the check-out itself so Movements shows it beside the loan.
+            overdueOverrideReason: overdue.length > 0 ? overrideReason : null,
           },
         });
         loanIds.push(loan.id);
@@ -445,33 +476,34 @@ export const ToolLoanService = {
   },
 
   /**
-   * Give a loan still out a later due date, with a reason. Recorded as an
-   * extension; the loan and its earlier dates are kept. Same limits as at
+   * Give a loan still out a different due date, later or earlier, with a
+   * reason. Recorded as a change; the loan and its earlier dates are kept, so
+   * a mistaken date is put right by another change. Same limits as at
    * check-out: not before today, not after the project ends, and no more than
    * the longest loan from check-out unless the caller may exceed it.
    */
-  async extend(input: ExtendInput, within?: Tx): Promise<{ loanId: string; dueOn: string; extensionId: string }> {
+  async changeDueDate(input: DueDateChangeInput, within?: Tx): Promise<{ loanId: string; dueOn: string; previousDueOn: string; extensionId: string }> {
     const reason = input.reason.trim();
-    if (!reason) throw Errors.validation('Say why the loan is extended');
+    if (!reason) throw Errors.validation('Say why the due date is changing');
 
     return inTx(within, async (tx) => {
-      // One extension of a loan at a time, so two cannot both pass the "after the current date" check.
+      // One change of a loan at a time, so two cannot both read the same current date.
       await lock(tx, [`loan:${input.loanId}`]);
       const loan = await tx.inventoryTransaction.findUnique({
         where: { id: input.loanId },
-        include: { project: { select: { endDate: true } }, loanExtensions: { select: { dueOn: true } } },
+        include: { project: { select: { endDate: true } }, loanExtensions: CHANGES },
       });
       if (!loan) throw Errors.notFound('Tool check-out');
-      if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out can be extended');
+      if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out has a due date');
       const returned = await returnedByLoan(tx, [loan.id]);
       if (!loan.quantity.negated().minus(returned.get(loan.id) ?? 0).gt(0)) {
-        throw Errors.invalidState('This check-out is all back already, so there is nothing to extend');
+        throw Errors.invalidState('This check-out is all back already, so its due date cannot change');
       }
 
       const terms = await loanTerms();
       const today = dayOf(new Date());
       const current = dueOf(loan, terms);
-      if (input.dueOn <= current) throw Errors.validation(`The new due date must be after the current one, ${current}.`);
+      if (input.dueOn === current) throw Errors.validation(`The tool is already due back on ${current}.`);
       const problem = dueOnProblem(input.dueOn, {
         outDay: dayOf(loan.postedAt), today, terms, projectNumber: loan.projectNumber,
         projectEnd: loan.project?.endDate ? dayOf(loan.project.endDate) : null, canExceedMax: input.canExceedMaxLoan === true,
@@ -491,7 +523,99 @@ export const ToolLoanService = {
           after: { dueOn: input.dueOn, reason, extensionId: extension.id } as Prisma.InputJsonValue,
         },
       });
-      return { loanId: loan.id, dueOn: input.dueOn, extensionId: extension.id };
+      return { loanId: loan.id, dueOn: input.dueOn, previousDueOn: current, extensionId: extension.id };
     });
+  },
+
+  /**
+   * One loan from check-out to now: every check-out, due date change and
+   * check-in in order, with the days it went overdue worked out between them.
+   * Any of the loan's rows leads here: the check-out, a check-in or a change
+   * all name the loan.
+   */
+  async history(loanId: string, now = new Date()): Promise<LoanHistory> {
+    const loan = await prisma.inventoryTransaction.findUnique({
+      where: { id: loanId },
+      include: {
+        material: { select: { sku: true, name: true } },
+        location: { select: { name: true } },
+        recipient: { select: { name: true } },
+        actor: { select: { name: true } },
+        loanExtensions: { include: { actor: { select: { name: true } } } },
+      },
+    });
+    if (!loan || loan.type !== InventoryTransactionType.LOAN) throw Errors.notFound('Tool check-out');
+    const [returns, terms] = await Promise.all([
+      prisma.inventoryTransaction.findMany({
+        where: { type: InventoryTransactionType.LOAN_RETURN, referenceType: TOOL_LOAN_REFERENCE, referenceId: loan.id },
+        include: { actor: { select: { name: true } } },
+        orderBy: [{ postedAt: 'asc' }, { id: 'asc' }],
+      }),
+      loanTerms(),
+    ]);
+    const dates = loanDatesOf(loan, loan.loanExtensions, terms);
+    const byId = new Map(loan.loanExtensions.map((e) => [e.id, e]));
+    const lent = loan.quantity.negated();
+
+    // What was recorded, oldest first; a check-in made in the same moment as a change comes after it.
+    const recorded: Array<{ at: Date; out: Decimal; event: LoanEvent }> = [
+      {
+        at: loan.postedAt, out: lent,
+        event: {
+          kind: 'CHECKED_OUT' as const, at: loan.postedAt.toISOString(), by: loan.actor.name, quantity: lent.toString(),
+          dueOn: dates.agreed, note: loan.reasonNote, overdueOverrideReason: loan.overdueOverrideReason,
+        },
+      },
+      ...dates.changes.map((c) => ({
+        at: c.at, out: toDecimal(0),
+        event: {
+          kind: 'DUE_DATE_CHANGED' as const, at: c.at.toISOString(), by: byId.get(c.id)!.actor.name,
+          dueOn: c.dueOn, previousDueOn: dueOnBefore(dates, c.id), reason: byId.get(c.id)!.reason,
+        },
+      })),
+      ...returns.map((r) => {
+        const dueOn = dueOnAt(dates, r.postedAt);
+        return {
+          at: r.postedAt, out: r.quantity.negated(),
+          event: {
+            kind: 'CHECKED_IN' as const, at: r.postedAt.toISOString(), by: r.actor.name, quantity: r.quantity.toString(),
+            condition: (r.reasonCode === AdjustmentReasonCode.DAMAGE ? 'DAMAGED' : r.reasonCode === AdjustmentReasonCode.LOSS ? 'LOST' : 'GOOD') as ToolCondition,
+            note: r.reasonNote, dueOn, daysLate: daysBetween(dueOn, dayOf(r.postedAt)),
+          },
+        };
+      }),
+    ].sort((a, b) => a.at.getTime() - b.at.getTime() || (a.event.kind === 'CHECKED_IN' ? 1 : 0) - (b.event.kind === 'CHECKED_IN' ? 1 : 0));
+
+    // Between one record and the next, a loan still out goes overdue the day after it is due.
+    const events: LoanEvent[] = [];
+    let out = toDecimal(0);
+    recorded.forEach((r, i) => {
+      events.push(r.event);
+      out = out.plus(r.out);
+      const until = recorded[i + 1]?.at ?? now;
+      const due = dueOnAt(dates, r.at);
+      const overdueFrom = asDate(addDays(due, 1));
+      if (out.gt(0) && overdueFrom > r.at && overdueFrom <= until) {
+        events.push({ kind: 'BECAME_OVERDUE', at: overdueFrom.toISOString(), dueOn: due });
+      }
+    });
+
+    const dueOn = currentDueOn(dates);
+    const { state, daysLate } = loanState(dueOn, dayOf(now), terms);
+    return {
+      loanId: loan.id,
+      materialId: loan.materialId,
+      sku: loan.material.sku,
+      name: loan.material.name,
+      recipientName: loan.recipient?.name ?? null,
+      projectNumber: loan.projectNumber,
+      locationName: loan.location.name,
+      quantity: lent.toString(),
+      out: out.toString(),
+      dueOn,
+      state: out.gt(0) ? state : null,
+      daysLate,
+      events,
+    };
   },
 };

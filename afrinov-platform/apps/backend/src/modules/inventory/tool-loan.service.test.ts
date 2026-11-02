@@ -1,7 +1,7 @@
 // Tool check-out and check-in, on a small in-memory ledger: a loan takes the
 // tool off the shelf, a check-in brings it back, and a lost tool is written off.
-// Each loan is due back on a date, can be extended, and someone with an
-// overdue tool is lent more only with a reason.
+// Each loan is due back on a date that can be changed, later or earlier, and
+// someone with an overdue tool is lent more only with a reason.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 
@@ -9,7 +9,7 @@ type Row = {
   id: string; materialId: string; locationId: string; type: string; quantity: Prisma.Decimal;
   issueId?: string | null; recipientId?: string | null; projectNumber?: string | null; reasonCode?: string | null;
   reasonNote?: string | null; referenceType?: string | null; referenceId?: string | null; actorId: string; postedAt: Date;
-  dueOn?: Date | null;
+  dueOn?: Date | null; overdueOverrideReason?: string | null;
 };
 type Extension = { id: string; loanId: string; dueOn: Date; reason: string; actorId: string; createdAt: Date };
 
@@ -45,6 +45,7 @@ const project = () => ({ projectNumber: 'AFRI-1325', active: true, endDate: db.p
 const withRelations = (r: Row) => ({
   ...r,
   dueOn: r.dueOn ?? null,
+  overdueOverrideReason: r.overdueOverrideReason ?? null,
   recipient: r.recipientId ? { name: names[r.recipientId] } : null,
   location: { name: names[r.locationId] },
   actor: { name: names[r.actorId] },
@@ -87,7 +88,7 @@ const client = {
   },
   toolLoanExtension: {
     create: async ({ data }: { data: Omit<Extension, 'id' | 'createdAt'> }) => {
-      const row = { ...data, id: `ext-${++seq}`, createdAt: new Date() };
+      const row = { ...data, id: `ext-${++seq}`, createdAt: new Date(Date.now() + seq) };
       db.extensions.push(row);
       return row;
     },
@@ -266,6 +267,8 @@ describe('ToolLoanService lending to someone with an overdue tool', () => {
 
     await lendScraper('r-sabelo', { overrideReason: '  Shutdown crew short of scrapers ' });
     expect(db.audit.at(-1)).toMatchObject({ after: expect.objectContaining({ overdueOverride: { reason: 'Shutdown crew short of scrapers', loanIds: [late] } }) });
+    // On the check-out itself, so Movements can show it; not on loans lent with nothing overdue.
+    expect(db.ledger.filter((r) => r.type === 'LOAN').map((r) => r.overdueOverrideReason ?? null)).toEqual([null, 'Shutdown crew short of scrapers']);
   });
 
   it('lends freely to someone whose tools are due today or are all back', async () => {
@@ -288,28 +291,46 @@ describe('ToolLoanService lending to someone with an overdue tool', () => {
   });
 });
 
-describe('ToolLoanService.extend', () => {
+describe('ToolLoanService.changeDueDate', () => {
   it('gives a later due date with a reason, keeps the history, and clears the overdue flag', async () => {
     const loanId = pastLoan('r-sabelo', 10, daysFromNow(-3));
     const newDue = day(daysFromNow(4));
-    const res = await ToolLoanService.extend({ loanId, dueOn: newDue, reason: ' Shutdown over-ran ', actorId: 'u-1' });
-    expect(res).toEqual({ loanId, dueOn: newDue, extensionId: expect.any(String) });
+    const res = await ToolLoanService.changeDueDate({ loanId, dueOn: newDue, reason: ' Shutdown over-ran ', actorId: 'u-1' });
+    expect(res).toEqual({ loanId, dueOn: newDue, previousDueOn: day(daysFromNow(-3)), extensionId: expect.any(String) });
     expect(db.locks).toContain(`afrinov:tool:loan:${loanId}`);
     expect(db.audit).toEqual([expect.objectContaining({
       action: 'TOOL_LOAN_EXTEND', before: { dueOn: day(daysFromNow(-3)) }, after: { dueOn: newDue, reason: 'Shutdown over-ran', extensionId: res.extensionId },
     })]);
     expect((await tool('m-scraper')).loans[0]).toMatchObject({
       dueOn: newDue, state: 'ON_LOAN', overdue: false,
-      extensions: [{ dueOn: newDue, reason: 'Shutdown over-ran', extendedBy: 'Vusi', extendedAt: expect.any(String) }],
+      extensions: [{ dueOn: newDue, previousDueOn: day(daysFromNow(-3)), reason: 'Shutdown over-ran', extendedBy: 'Vusi', extendedAt: expect.any(String) }],
     });
     // The loan row keeps the date agreed at check-out.
     expect(day(db.ledger.find((r) => r.id === loanId)!.dueOn!)).toBe(day(daysFromNow(-3)));
   });
 
-  it('refuses a date that is not later, is before today, or is past the longest loan', async () => {
+  it('moves a date earlier too, and the most recent change wins over a later date', async () => {
+    const loanId = pastLoan('r-sabelo', 2, daysFromNow(5));
+    // A slip of the finger: a month out instead of a week.
+    await ToolLoanService.changeDueDate({ loanId, dueOn: day(daysFromNow(26)), reason: 'Shutdown over-ran', actorId: 'u-1' });
+    const fixed = await ToolLoanService.changeDueDate({ loanId, dueOn: day(daysFromNow(12)), reason: 'Wrong month picked', actorId: 'u-1' });
+    expect(fixed).toMatchObject({ dueOn: day(daysFromNow(12)), previousDueOn: day(daysFromNow(26)) });
+    expect((await tool('m-scraper')).loans[0]).toMatchObject({
+      dueOn: day(daysFromNow(12)),
+      extensions: [
+        expect.objectContaining({ dueOn: day(daysFromNow(26)), previousDueOn: day(daysFromNow(5)) }),
+        expect.objectContaining({ dueOn: day(daysFromNow(12)), previousDueOn: day(daysFromNow(26)), reason: 'Wrong month picked' }),
+      ],
+    });
+    // Earlier than it was first agreed is fine too, down to today.
+    await expect(ToolLoanService.changeDueDate({ loanId, dueOn: day(daysFromNow(0)), reason: 'Job finished early', actorId: 'u-1' })).resolves.toBeDefined();
+    expect((await tool('m-scraper')).loans[0]).toMatchObject({ dueOn: day(daysFromNow(0)), state: 'DUE_SOON' });
+  });
+
+  it('refuses the same date, a date before today, or one past the longest loan', async () => {
     const loanId = pastLoan('r-sabelo', 10, daysFromNow(-3));
-    const extend = (dueOn: string, canExceedMaxLoan = false) => ToolLoanService.extend({ loanId, dueOn, reason: 'Still needed', actorId: 'u-1', canExceedMaxLoan });
-    await expect(extend(day(daysFromNow(-3)))).rejects.toMatchObject({ message: `The new due date must be after the current one, ${day(daysFromNow(-3))}.` });
+    const extend = (dueOn: string, canExceedMaxLoan = false) => ToolLoanService.changeDueDate({ loanId, dueOn, reason: 'Still needed', actorId: 'u-1', canExceedMaxLoan });
+    await expect(extend(day(daysFromNow(-3)))).rejects.toMatchObject({ message: `The tool is already due back on ${day(daysFromNow(-3))}.` });
     await expect(extend(day(daysFromNow(-1)))).rejects.toMatchObject({ message: 'The due date cannot be before today.' });
     // 30 days from when it went out, ten days ago.
     await expect(extend(day(daysFromNow(21)))).rejects.toMatchObject({ message: expect.stringContaining('at most 30 days') });
@@ -319,11 +340,39 @@ describe('ToolLoanService.extend', () => {
 
   it('refuses without a reason, and for anything but an open check-out', async () => {
     const loanId = pastLoan('r-sabelo', 2, daysFromNow(5));
-    await expect(ToolLoanService.extend({ loanId, dueOn: day(daysFromNow(9)), reason: '  ', actorId: 'u-1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(ToolLoanService.extend({ loanId: 'nope', dueOn: day(daysFromNow(9)), reason: 'x', actorId: 'u-1' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    await expect(ToolLoanService.extend({ loanId: db.ledger[0]!.id, dueOn: day(daysFromNow(9)), reason: 'x', actorId: 'u-1' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(ToolLoanService.changeDueDate({ loanId, dueOn: day(daysFromNow(9)), reason: '  ', actorId: 'u-1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(ToolLoanService.changeDueDate({ loanId: 'nope', dueOn: day(daysFromNow(9)), reason: 'x', actorId: 'u-1' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(ToolLoanService.changeDueDate({ loanId: db.ledger[0]!.id, dueOn: day(daysFromNow(9)), reason: 'x', actorId: 'u-1' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
     await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 1, condition: 'GOOD' }] });
-    await expect(ToolLoanService.extend({ loanId, dueOn: day(daysFromNow(9)), reason: 'x', actorId: 'u-1' }))
+    await expect(ToolLoanService.changeDueDate({ loanId, dueOn: day(daysFromNow(9)), reason: 'x', actorId: 'u-1' }))
       .rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringContaining('all back') });
+  });
+});
+
+describe('ToolLoanService.history', () => {
+  it('tells one loan in order: out, overdue, a new date, back late, with nothing stored for going overdue', async () => {
+    const loanId = pastLoan('r-sabelo', 10, daysFromNow(-6));
+    // It went overdue five days ago; the date was moved three days ago, to yesterday; it came back today.
+    db.extensions.push({ id: 'ext-a', loanId, dueOn: new Date(`${day(daysFromNow(-1))}T00:00:00Z`), reason: 'Pour delayed', actorId: 'u-1', createdAt: daysFromNow(-3) });
+    db.ledger.push({
+      id: 'ret-a', materialId: 'm-scraper', locationId: 'l-store', type: 'LOAN_RETURN', quantity: D(1), actorId: 'u-1', postedAt: new Date(),
+      reasonCode: 'DAMAGE', reasonNote: 'Bent blade', referenceType: 'ToolLoan', referenceId: loanId,
+    });
+
+    const h = await ToolLoanService.history(loanId);
+    expect(h).toMatchObject({ loanId, sku: 'TL-0002', recipientName: 'Sabelo', quantity: '1', out: '0', dueOn: day(daysFromNow(-1)), state: null });
+    expect(h.events.map((e) => e.kind)).toEqual(['CHECKED_OUT', 'BECAME_OVERDUE', 'DUE_DATE_CHANGED', 'BECAME_OVERDUE', 'CHECKED_IN']);
+    expect(h.events[0]).toMatchObject({ dueOn: day(daysFromNow(-6)), by: 'Vusi' });
+    expect(h.events[1]).toMatchObject({ at: `${day(daysFromNow(-5))}T00:00:00.000Z`, dueOn: day(daysFromNow(-6)) });
+    expect(h.events[2]).toMatchObject({ dueOn: day(daysFromNow(-1)), previousDueOn: day(daysFromNow(-6)), reason: 'Pour delayed' });
+    expect(h.events[4]).toMatchObject({ condition: 'DAMAGED', note: 'Bent blade', dueOn: day(daysFromNow(-1)), daysLate: 1 });
+  });
+
+  it('says how a loan still out stands today, and is only for check-outs', async () => {
+    const loanId = pastLoan('r-sabelo', 1, daysFromNow(4));
+    const h = await ToolLoanService.history(loanId);
+    expect(h).toMatchObject({ out: '1', state: 'ON_LOAN', daysLate: -4 });
+    expect(h.events.map((e) => e.kind)).toEqual(['CHECKED_OUT']);
+    await expect(ToolLoanService.history(db.ledger[0]!.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });

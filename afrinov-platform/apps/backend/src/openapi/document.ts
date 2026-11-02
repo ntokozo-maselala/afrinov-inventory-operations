@@ -18,7 +18,7 @@ import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
-import { toolCheckInSchema, toolCheckOutSchema, toolLoanExtendSchema } from '../modules/inventory/tool.routes.js';
+import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
   moveLeftoversSchema,
@@ -128,7 +128,7 @@ const movementFilters = z.object({
   q: z.string().optional().openapi({ description: 'Matches item code or name, location, project or who it was issued to.' }),
   report: z.enum(['issued', 'transfers', 'writeoffs', 'loans', 'returned']).optional().openapi({
     description: 'A Movements report: issued stock, transfers (the out leg, with otherLocationName), write-offs (adjustments other than count differences), '
-      + 'tool loans (LOAN and LOAN_RETURN: tools checked out and back in) or returned stock (RETURN, by the date it came back, each with returnOf: '
+      + 'tool loans (LOAN and LOAN_RETURN: tools checked out and back in, with their due date changes) or returned stock (RETURN, by the date it came back, each with returnOf: '
       + 'the issue it came from). Overrides type.',
   }),
 });
@@ -226,6 +226,11 @@ export const OPERATIONS: Operation[] = [
   // Stock movements
   {
     method: 'get', path: '/inventory-transactions', tag: 'Stock movements', summary: 'Movement history, newest first',
+    description: 'Ledger lines, and (for all movements and report=loans, unless type or issue slips narrow it) tool loan due date '
+      + 'changes listed among them by when they were made: type DUE_DATE_CHANGE, quantity null (no stock moved), dueOn the new date, '
+      + 'previousDueOn the one it replaced, reasonNote why, referenceId the loan. A check-out (LOAN) carries dueOn (agreed), '
+      + 'currentDueOn and overdueOverrideReason; a check-in (LOAN_RETURN) carries dueOn (as it stood then) and daysLate '
+      + '(zero or less: on time). One cursor pages both.',
     query: movementQuery,
   },
   {
@@ -284,12 +289,20 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },
   {
-    method: 'post', path: '/tools/loans/:id/extend', tag: 'Tools', summary: 'Give a tool loan a later due date',
-    description: 'Recorded as an extension with its reason; the loan and its earlier dates are kept. The new date must be '
-      + 'after the current one and not before today, and is held to the same limits as at check-out (the project’s '
-      + 'end date, and inventory.toolMaxLoanDays from check-out unless an administrator). 409 when the loan is all back. '
-      + 'Retry-safe with an Idempotency-Key header.',
-    permissions: [P.ExtendToolLoan], body: toolLoanExtendSchema, success: 201, errors: [404, 409],
+    method: 'post', path: '/tools/loans/:id/due-date', tag: 'Tools', summary: 'Change a tool loan’s due date, later or earlier',
+    description: 'Recorded as a change with its reason; the loan and its earlier dates are kept, and the most recent change wins. '
+      + 'The new date must differ from the current one and not be before today, and is held to the same limits as at '
+      + 'check-out (the project’s end date, and inventory.toolMaxLoanDays from check-out unless an administrator). '
+      + '409 when the loan is all back. Returns the new and previous dates. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ExtendToolLoan], body: toolLoanDueDateSchema, success: 201, errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/tools/loans/:id/history', tag: 'Tools', summary: 'One tool loan from check-out to now',
+    description: 'The loan (tool, recipient, project, location, how many were lent and are still out, its due date and state, '
+      + 'null once all back) and its events oldest first: CHECKED_OUT (agreed due date, override reason), DUE_DATE_CHANGED '
+      + '(new and previous date, reason), CHECKED_IN (condition, the due date then and daysLate) and BECAME_OVERDUE, which '
+      + 'is worked out from the dates and never stored. 404 unless :id is a check-out.',
+    errors: [404],
   },
   {
     method: 'get', path: '/inventory-issues', tag: 'Reports', summary: 'Issued stock: issue slips with their lines, newest first',

@@ -2,8 +2,8 @@
 // (and project), any number of tools, as one slip due back on one date (POST
 // /tools/check-out). Check in: each open loan of one tool, how many came back
 // and in what condition; a lost tool needs a note and is written off (POST
-// /tools/check-in). Extend: a later due date for one loan, with a reason (POST
-// /tools/loans/:id/extend).
+// /tools/check-in). Change due date: a later or earlier date for one loan, with a
+// reason (POST /tools/loans/:id/due-date).
 import { useMemo, useState } from 'react';
 import { Button } from './Button';
 import { Badge } from './Badge';
@@ -15,7 +15,7 @@ import { RecipientSelect, ProjectSelect, useIssueOptions } from './IssueFields';
 import { api, type ApiError } from '../api/client';
 import { formatDate, formatNumber } from '../lib/format';
 import { useIdempotencyKey } from '../lib/idempotency';
-import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
+import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
 import { today } from '../lib/dates';
 import { useIsAdmin } from '../hooks/usePermissions';
 import type { OpenLoan, ToolRow } from '../api/types';
@@ -34,7 +34,7 @@ export function LoanDue({ loan }: { loan: OpenLoan }) {
     <span className="inline-flex flex-wrap items-center gap-1">
       <Badge tone={s.tone}>{s.label}</Badge>
       <span className={`text-xs ${loan.overdue ? 'text-danger-600 font-medium' : 'text-surface-500'}`}>
-        due {formatDay(loan.dueOn)}, {lateness(loan)}{loan.extensions.length > 0 ? ` · extended ${loan.extensions.length === 1 ? 'once' : `${loan.extensions.length} times`}` : ''}
+        due {formatDay(loan.dueOn)}, {lateness(loan)}{loan.extensions.length > 0 ? ` · date changed ${loan.extensions.length === 1 ? 'once' : `${loan.extensions.length} times`}` : ''}
       </span>
     </span>
   );
@@ -100,7 +100,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
     setError(null);
     const filled = lines.filter((l) => l.stockKey || l.quantity);
     if (!recipientId) { setError('Choose who the tools are checked out to.'); return; }
-    if (blocked) { setError(`${recipient?.name ?? 'This person'} has overdue tools. Check them in or extend their loans first.`); return; }
+    if (blocked) { setError(`${recipient?.name ?? 'This person'} has overdue tools. Check them in or change their due dates first.`); return; }
     if (filled.length === 0) { setError('Add at least one tool.'); return; }
     if (filled.some((l) => !l.stockKey || !(Number(l.quantity) > 0))) { setError('Every line needs a tool and a quantity above zero.'); return; }
     if (over.size > 0) { setError('Some lines ask for more than is in store.'); return; }
@@ -147,7 +147,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
             ))}
           </ul>
           <p className="mt-1">{blocked
-            ? 'Check them in or extend their loans on the Tools page before lending more.'
+            ? 'Check them in or change their due dates on the Tools page before lending more.'
             : 'You can still lend tools, but say why below.'}</p>
         </Alert>
       )}
@@ -290,7 +290,12 @@ export function CheckInForm({ tool, onCancel, onDone }: {
   );
 }
 
-export function ExtendLoanForm({ tool, loan, onCancel, onDone }: {
+/**
+ * A different due date for a loan still out, later or earlier, with a reason.
+ * Each change is kept and listed on Movements, so a wrong date is put right by
+ * changing it again.
+ */
+export function ChangeDueDateForm({ tool, loan, onCancel, onDone }: {
   tool: ToolRow;
   loan: OpenLoan;
   onCancel: () => void;
@@ -299,20 +304,20 @@ export function ExtendLoanForm({ tool, loan, onCancel, onDone }: {
   const terms = useLoanTerms();
   const isAdmin = useIsAdmin();
   const { projects } = useIssueOptions();
-  // Retry-safe: a retry after a lost response replays the extension instead of adding a second.
-  const idem = useIdempotencyKey('extend-tool-loan');
+  // Retry-safe: a retry after a lost response replays the change instead of adding a second.
+  const idem = useIdempotencyKey('change-tool-due-date');
   const projectEnd = projects.find((p) => p.projectNumber === loan.projectNumber)?.endDate?.slice(0, 10) ?? null;
   // The server counts the longest loan from the day it went out, in UTC.
   const latest = latestDueOn(loan.checkedOutAt.slice(0, 10), terms, projectEnd, isAdmin);
-  const now = today();
-  const earliest = addDays(loan.dueOn, 1) > now ? addDays(loan.dueOn, 1) : now;
+  const earliest = today();
+  // Most changes give more time, so offer a later date first.
   const suggested = (() => {
-    const from = loan.dueOn > now ? loan.dueOn : now;
+    const from = loan.dueOn > earliest ? loan.dueOn : earliest;
     const pick = addDays(from, terms.defaultDays);
     return latest && pick > latest ? latest : pick;
   })();
   const atLimit = latest !== undefined && latest < earliest;
-  const [dueOn, setDueOn] = useState(atLimit ? '' : suggested);
+  const [dueOn, setDueOn] = useState(atLimit || suggested === loan.dueOn ? '' : suggested);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -321,13 +326,14 @@ export function ExtendLoanForm({ tool, loan, onCancel, onDone }: {
     e.preventDefault();
     setError(null);
     if (!dueOn) { setError('Choose the new due date.'); return; }
-    if (dueOn < earliest) { setError(`The new due date must be ${formatDay(earliest)} or later.`); return; }
+    if (dueOn === loan.dueOn) { setError(`The tool is already due back on ${formatDay(dueOn)}.`); return; }
+    if (dueOn < earliest) { setError('The due date cannot be before today.'); return; }
     if (latest && dueOn > latest) { setError(`The latest due date is ${formatDay(latest)}.`); return; }
-    if (!reason.trim()) { setError('Say why the loan is extended.'); return; }
+    if (!reason.trim()) { setError('Say why the due date is changing.'); return; }
     const body = { dueOn, reason: reason.trim() };
     setBusy(true);
     try {
-      await api.post(`/tools/loans/${loan.loanId}/extend`, body, { idempotencyKey: idem.keyFor({ loanId: loan.loanId, ...body }) });
+      await api.post(`/tools/loans/${loan.loanId}/due-date`, body, { idempotencyKey: idem.keyFor({ loanId: loan.loanId, ...body }) });
       idem.confirm();
       onDone(`${tool.name} with ${loan.recipientName ?? 'its borrower'} is now due back ${formatDay(dueOn)}`);
     } catch (err) {
@@ -349,31 +355,34 @@ export function ExtendLoanForm({ tool, loan, onCancel, onDone }: {
         {loan.extensions.length > 0 && (
           <ul className="text-xs text-surface-500 space-y-0.5">
             {loan.extensions.map((x) => (
-              <li key={x.extendedAt}>Extended to {formatDay(x.dueOn)} by {x.extendedBy} on {formatDate(x.extendedAt)}: {x.reason}</li>
+              <li key={x.extendedAt}>
+                Moved {movedWay(x.previousDueOn, x.dueOn)} to {formatDay(x.dueOn)} by {x.extendedBy} on {formatDate(x.extendedAt)}: {x.reason}
+              </li>
             ))}
           </ul>
         )}
       </div>
       {atLimit ? (
-        <Alert tone="warning" title="This loan cannot be extended further">
+        <Alert tone="warning" title="This due date cannot be changed">
           {projectEnd && latest === projectEnd
             ? `Project ${loan.projectNumber} ends on ${formatDay(projectEnd)}. Move the project's end date to lend the tool for longer, or check it in.`
             : `A tool can be lent for at most ${terms.maxDays} days. Only an administrator can set a later date; otherwise check it in.`}
         </Alert>
       ) : (
         <>
-          <Field label="New due date" htmlFor="extend-due" required help={latest ? `Latest: ${formatDay(latest)}.` : undefined}>
-            <Input id="extend-due" type="date" min={earliest} max={latest} value={dueOn} onChange={(e) => setDueOn(e.target.value)} required />
+          <Field label="New due date" htmlFor="due-date-new" required help={`Later or earlier, from today${latest ? ` to ${formatDay(latest)}` : ''}.`}>
+            <Input id="due-date-new" type="date" min={earliest} max={latest} value={dueOn} onChange={(e) => setDueOn(e.target.value)} required />
           </Field>
-          <Field label="Why it is needed longer" htmlFor="extend-reason" required>
-            <Textarea id="extend-reason" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Shutdown over-ran by a week" />
+          <Field label="Why the date is changing" htmlFor="due-date-reason" required>
+            <Textarea id="due-date-reason" rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Shutdown over-ran by a week, or the wrong date was picked" />
           </Field>
+          <p className="text-meta">The earlier dates are kept, and the change is listed on Movements.</p>
         </>
       )}
-      {error && <Alert tone="danger" title="Cannot extend">{error}</Alert>}
+      {error && <Alert tone="danger" title="Cannot change the due date">{error}</Alert>}
       <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
-        <Button variant="primary" type="submit" loading={busy} disabled={atLimit}>Extend loan</Button>
+        <Button variant="primary" type="submit" loading={busy} disabled={atLimit}>Change due date</Button>
       </div>
     </form>
   );

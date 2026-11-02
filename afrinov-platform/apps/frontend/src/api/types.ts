@@ -47,8 +47,30 @@ export interface OpenLoan {
   state: LoanState;
   /** Past its due date (OVERDUE or NEEDS_DECISION). */
   overdue: boolean;
-  /** Later due dates given, oldest first. */
-  extensions: Array<{ dueOn: string; reason: string; extendedBy: string; extendedAt: string }>;
+  /** Due date changes, later or earlier, oldest first; previousDueOn is the date each replaced. */
+  extensions: Array<{ dueOn: string; previousDueOn: string; reason: string; extendedBy: string; extendedAt: string }>;
+}
+
+/**
+ * One step in a tool loan's life (GET /tools/loans/:id/history), oldest first.
+ * BECAME_OVERDUE is worked out from the dates; nothing is stored for it.
+ */
+export type LoanEvent =
+  | { kind: 'CHECKED_OUT'; at: string; by: string; quantity: string; dueOn: string; note: string | null; overdueOverrideReason: string | null }
+  | { kind: 'DUE_DATE_CHANGED'; at: string; by: string; dueOn: string; previousDueOn: string; reason: string }
+  | { kind: 'BECAME_OVERDUE'; at: string; dueOn: string }
+  | { kind: 'CHECKED_IN'; at: string; by: string; quantity: string; condition: 'GOOD' | 'DAMAGED' | 'LOST'; note: string | null; dueOn: string; daysLate: number };
+
+export interface LoanHistory {
+  loanId: string; materialId: string; sku: string; name: string;
+  recipientName: string | null; projectNumber: string | null; locationName: string;
+  /** How many were lent, and how many are still out. */
+  quantity: string; out: string;
+  dueOn: string;
+  /** Null once it is all back. */
+  state: LoanState | null;
+  daysLate: number;
+  events: LoanEvent[];
 }
 
 /** ON_LOAN, DUE_SOON (due tomorrow or today), OVERDUE, or NEEDS_DECISION once far enough past due (Settings > Inventory). */
@@ -98,7 +120,8 @@ export interface MovementRow {
   /** Issues: the slip this line belongs to. */
   issueId?: string | null;
   locationId: string; locationName: string;
-  quantity: string; actorId: string; actorName: string;
+  /** Null on a tool loan due date change (type DUE_DATE_CHANGE): no stock moved. */
+  quantity: string | null; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
@@ -114,6 +137,16 @@ export interface MovementRow {
   fromPurchaseOrder?: boolean;
   /** A transfer's other leg: where the stock went to (or came from). */
   otherLocationName?: string | null;
+  /** Tool loans. Check-out: the date agreed. Check-in: the date as it stood then. Due date change: the new date. */
+  dueOn?: string | null;
+  /** Due date change: the date it replaced. */
+  previousDueOn?: string | null;
+  /** Check-out: the date it is due now, after any changes. */
+  currentDueOn?: string | null;
+  /** Check-in: days after the due date it came back; zero or less is on time. */
+  daysLate?: number | null;
+  /** Check-out: why tools were lent to someone who already had an overdue one. */
+  overdueOverrideReason?: string | null;
 }
 
 /**

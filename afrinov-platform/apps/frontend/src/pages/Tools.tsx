@@ -1,8 +1,8 @@
 // Tools: what is in store and what is out, with whom, and until when (GET
 // /tools). A tool is lent, not used up: check it out to a person until a due
 // date, and back in when it returns. A loan past its due date is overdue; far
-// enough past, it needs a decision: check it in, extend it, or write it off as
-// lost. Tools come in through Receive stock and are counted on Count stock
+// enough past, it needs a decision: check it in, change its due date, or write
+// it off as lost. Tools come in through Receive stock and are counted on Count stock
 // like anything else; they are not issued.
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -16,7 +16,7 @@ import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
-import { CheckInForm, CheckOutForm, ExtendLoanForm, LoanDue } from '../components/ToolLoanForms';
+import { ChangeDueDateForm, CheckInForm, CheckOutForm, LoanDue } from '../components/ToolLoanForms';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDate, formatNumber } from '../lib/format';
 import type { OpenLoan, ToolRow } from '../api/types';
@@ -37,7 +37,7 @@ export function Tools() {
   const tools = useApi<ToolRow[]>('/tools');
   const { hasPermission } = usePermissions();
   const canLend = hasPermission('tools:lend');
-  const canExtend = hasPermission('tools:extend');
+  const canChangeDue = hasPermission('tools:extend');
   const toast = useToast();
   // The Dashboard and Recipients link here with ?view=overdue or ?q=<name>.
   const [params] = useSearchParams();
@@ -45,7 +45,7 @@ export function Tools() {
   const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'all'));
   const [checkingOut, setCheckingOut] = useState<{ start?: ToolRow } | null>(null);
   const [checkingIn, setCheckingIn] = useState<ToolRow | null>(null);
-  const [extending, setExtending] = useState<{ tool: ToolRow; loan: OpenLoan } | null>(null);
+  const [changingDue, setChangingDue] = useState<{ tool: ToolRow; loan: OpenLoan } | null>(null);
 
   const all = useMemo(() => tools.data ?? [], [tools.data]);
   const loanFilter = VIEWS.find((v) => v.value === view)?.loans;
@@ -71,7 +71,7 @@ export function Tools() {
   function done(summary: string) {
     setCheckingOut(null);
     setCheckingIn(null);
-    setExtending(null);
+    setChangingDue(null);
     toast.success(summary);
     tools.reload();
   }
@@ -111,9 +111,9 @@ export function Tools() {
                 <span className="text-surface-500"> · {formatNumber(Number(l.out))} since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <LoanDue loan={l} />
-                  {canExtend && (
-                    <Button size="sm" variant="ghost" onClick={() => setExtending({ tool: t, loan: l })} aria-label={`Extend ${t.name} for ${l.recipientName ?? 'its borrower'}`}>
-                      Extend
+                  {canChangeDue && (
+                    <Button size="sm" variant="ghost" onClick={() => setChangingDue({ tool: t, loan: l })} aria-label={`Change the due date of ${t.name} for ${l.recipientName ?? 'its borrower'}`}>
+                      Change due date
                     </Button>
                   )}
                 </div>
@@ -189,9 +189,9 @@ export function Tools() {
           <CheckInForm tool={checkingIn} onCancel={() => setCheckingIn(null)} onDone={done} />
         </Drawer>
       )}
-      {extending && (
-        <Drawer open onClose={() => setExtending(null)} title={`Extend: ${extending.tool.name}`} description="A later due date for this check-out, and why. The earlier dates are kept." width="md">
-          <ExtendLoanForm tool={extending.tool} loan={extending.loan} onCancel={() => setExtending(null)} onDone={done} />
+      {changingDue && (
+        <Drawer open onClose={() => setChangingDue(null)} title={`Due date: ${changingDue.tool.name}`} description="A new due date for this check-out, later or earlier, and why." width="md">
+          <ChangeDueDateForm tool={changingDue.tool} loan={changingDue.loan} onCancel={() => setChangingDue(null)} onDone={done} />
         </Drawer>
       )}
     </div>

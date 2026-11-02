@@ -69,11 +69,11 @@ the tool off its location to a recipient; tools lent together share a slip
 `LOSS`). A loan is open while what was lent exceeds what came back. Stock on
 hand is what is on the shelf; owned = on hand + out on loan, which is what
 stock status counts against Required Stock. Each loan has a due date, agreed
-at check-out (`dueOn` on the `LOAN` row) and moved later only by an extension
-(`tool_loan_extensions`). A loan open past it is in one more state, worked out
+at check-out (`dueOn` on the `LOAN` row) and moved, later or earlier, only by
+a due date change (`tool_loan_extensions`); the most recent change wins. A loan open past it is in one more state, worked out
 from the date and never stored: ON_LOAN, DUE_SOON (due tomorrow or today),
 OVERDUE, then NEEDS_DECISION `inventory.toolEscalateDays` past due, until it
-is checked in, extended or written off (`04-processes/tool-loans.md`). A loan
+is checked in, given a new due date or written off (`04-processes/tool-loans.md`). A loan
 from before due dates falls due `inventory.toolOverdueDays` (default 7) after
 it went out. Loans are not reversed; they are put
 right by checking the tool in or out again. Tools cannot be issued.

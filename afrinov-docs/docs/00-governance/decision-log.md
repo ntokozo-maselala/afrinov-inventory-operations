@@ -540,3 +540,47 @@ is due on the Tools page and the Dashboard.
 `tool-loan.service.ts`, `tool.routes.ts`,
 `afrinov-platform/apps/backend/prisma/migrations/20260101000033_tool_loan_due_dates/migration.sql`,
 `afrinov-docs/docs/04-processes/tool-loans.md`.
+
+### ADR-025 — Movements lists every tool loan event, not only the ones that move stock
+**Date:** 2026-11-02 · **Status:** Accepted · **Amends:** ADR-024 (extensions only later)
+
+**Context:** Movements is where the store looks to see what happened, but it
+listed only ledger lines. A tool loan's agreed due date, each later date and
+its reason, and the reason for lending to someone with an overdue tool were
+recorded but could not be seen there: the due date and extensions only on the
+Tools page while the tool was out, the override reason only in the audit log.
+Once a tool came back, nobody could tell from the app that it came back two
+weeks late. An extension could also only move a date later, so a mistyped date
+could not be put right.
+
+**Decision:**
+- A due date change is not posted as a movement. Every movement moves stock,
+  and a reversal is the same movement with the opposite sign; a zero-quantity
+  row would have to be skipped by every total, count and reconciliation, and a
+  reversal of it would mean nothing.
+- Movements reads both records and lists them together by time: ledger lines
+  from `inventory_transactions`, due date changes from `tool_loan_extensions`
+  (type `DUE_DATE_CHANGE`, no quantity). One cursor pages both. All movements
+  and the Tools check in/out report include them, as do their downloads; the
+  other reports do not. The rule is: if it happened to stock in the store, it
+  is on Movements.
+- The reason for lending to someone with an overdue tool is kept on the
+  check-out (`overdue_override_reason`), set once and never changed, and
+  copied there from the audit log for earlier check-outs.
+- A due date may be moved earlier as well as later, never before today, with a
+  reason. The most recent change wins. A wrong date is put right by another
+  change; nothing is deleted. The route is `POST /tools/loans/:id/due-date`;
+  the permission keeps its code, `extend:tool_loan`.
+- `GET /tools/loans/:id/history` tells one loan in order. The day a loan went
+  overdue is worked out from the dates and shown as such, never stored.
+
+**Consequences:** One migration adds the column and an index and fills in past
+override reasons. Stock totals, balances and reversals are unchanged. A
+consumer of `GET /inventory-transactions` must allow a row with a null
+quantity, or ask for a `type` or a report other than loans.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/inventory.service.ts`
+(`queryHistory`, `listsDueDateChanges`, `mergeNewestFirst`), `tool-loan.service.ts`
+(`changeDueDate`, `history`), `tool-loan-terms.ts`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000034_loan_events_on_movements/migration.sql`,
+`afrinov-platform/apps/frontend/src/components/reports/LedgerReport.tsx`, `components/LoanHistory.tsx`.
