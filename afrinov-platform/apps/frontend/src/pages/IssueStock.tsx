@@ -30,6 +30,9 @@ const stockKey = (r: Pick<CurrentStockRow, 'materialId' | 'locationId'>) => `${r
 // A completed or cancelled project takes no more stock: its leftovers go to Stores.
 const isClosed = (status: string | undefined) => status === 'COMPLETED' || status === 'CANCELLED';
 
+const isProjectMaterial = (r: CurrentStockRow, projectNumber: string) =>
+  sectionOf(r.category) === 'PROJECTS' && r.projectNumber === projectNumber;
+
 let nextKey = 1;
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
 
@@ -62,12 +65,13 @@ export function IssueStock() {
   const byKey = useMemo(() => new Map(available.map((r) => [stockKey(r), r])), [available]);
 
   // Project material goes only to its own project: a line holding some sets the
-  // issue's project, which can't change while it is there, and other projects'
-  // material is not offered.
+  // issue's project, which can't change while it is there. Once the issue has a
+  // project, only that project's material is offered: no Stores items, and no
+  // other project's material.
   const lockedBy = lines.map((l) => byKey.get(l.stockKey)).find((r) => r && sectionOf(r.category) === 'PROJECTS');
   const issueProject = lockedBy?.projectNumber ?? projectNumber;
   const itemOptions = useMemo<SearchOption[]>(() => available
-    .filter((r) => sectionOf(r.category) === 'STORES' || !issueProject || r.projectNumber === issueProject)
+    .filter((r) => !issueProject || isProjectMaterial(r, issueProject))
     .map((r) => ({
       value: stockKey(r),
       label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}`,
@@ -100,6 +104,17 @@ export function IssueStock() {
 
   function update(key: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  // Picking a project drops the Stores lines already chosen, which it no longer
+  // offers. (The project can't change while a line holds project material.)
+  function chooseProject(next: string) {
+    setProjectNumber(next);
+    if (!next) return;
+    setLines((ls) => {
+      const kept = ls.filter((l) => { const r = byKey.get(l.stockKey); return !l.stockKey || (r && isProjectMaterial(r, next)); });
+      return kept.length > 0 ? kept : [emptyLine()];
+    });
   }
 
   async function submit(e: React.FormEvent) {
@@ -173,11 +188,14 @@ export function IssueStock() {
             <RecipientSelect id="issue-recipient" value={recipientId} onChange={setRecipientId} recipients={recipients} disabled={loading} invalid={!!error && !recipientId} />
             <ProjectSelect
               id="issue-project"
+              label="Project"
               value={issueProject}
-              onChange={setProjectNumber}
+              onChange={chooseProject}
               projects={projectOptions}
               disabled={loading || !!lockedBy}
-              help={lockedBy ? `Set by ${lockedBy.materialSku}: project material is issued only to its own project.` : undefined}
+              help={lockedBy
+                ? `Set by ${lockedBy.materialSku}: project material is issued only to its own project.`
+                : issueProject ? `Only ${issueProject}'s material is listed. Choose No project to issue Stores items.` : undefined}
             />
           </div>
           {optionsError && (
@@ -205,7 +223,7 @@ export function IssueStock() {
                       onChange={(v) => update(l.key, { stockKey: v })}
                       options={itemOptions}
                       placeholder={stock.loading ? 'Loading stock…' : 'Search by name, code or location'}
-                      noMatchText="No item in stock matches"
+                      noMatchText={issueProject ? `No ${issueProject} material in stock matches` : 'No item in stock matches'}
                       disabled={stock.loading}
                       autoFocus={focusKey === l.key}
                     />

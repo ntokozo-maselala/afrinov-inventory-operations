@@ -61,8 +61,9 @@ export function RecipientSelect({ id, value, onChange, recipients, invalid, disa
   );
 }
 
-export function ProjectSelect({ id, value, onChange, projects, disabled, help = 'Link the issue to a project so it shows in consumption reports.' }: {
+export function ProjectSelect({ id, value, onChange, projects, disabled, label = 'Project (optional)', help = 'Link the issue to a project so it shows in consumption reports.' }: {
   id: string;
+  label?: string;
   help?: string;
   value: string;
   onChange: (projectNumber: string) => void;
@@ -70,7 +71,7 @@ export function ProjectSelect({ id, value, onChange, projects, disabled, help = 
   disabled?: boolean;
 }) {
   return (
-    <Field label="Project (optional)" htmlFor={id} help={help}>
+    <Field label={label} htmlFor={id} help={help}>
       <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
         <option value="">No project</option>
         {projects.map((p) => (
