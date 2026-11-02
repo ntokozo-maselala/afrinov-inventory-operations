@@ -307,7 +307,7 @@ function drawHeader(doc: PDFKit.PDFDocument, report: ReportResult): void {
     `with movements in the selected period (${report.kpis.rangeLabel}). ` +
     `A total of ${report.kpis.skuCount} SKU${report.kpis.skuCount === 1 ? '' : 's'} are tracked, ` +
     `with a combined inventory value of ${fmtCurrency(report.kpis.inventoryValue, report.currency)}. ` +
-    `${report.kpis.lowStockCount} item(s) are at or below their reorder threshold and ` +
+    `${report.kpis.lowStockCount} item(s) are running short of their required stock and ` +
     `${report.kpis.outOfStockCount} are completely out of stock.`,
     { width: CONTENT_WIDTH, align: 'left' },
   );

@@ -1971,7 +1971,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 
     'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),
-    'notifications.enableLowStockNotifications': row('notifications.enableLowStockNotifications', true, 'boolean', 'notifications', 'Generate alerts when materials fall below their reorder threshold.'),
+    'notifications.enableLowStockNotifications': row('notifications.enableLowStockNotifications', true, 'boolean', 'notifications', 'Generate alerts when materials run short of their required stock (Urgent or Warning on Stock status).'),
     'notifications.enablePurchaseOrderNotifications': row('notifications.enablePurchaseOrderNotifications', true, 'boolean', 'notifications', 'Alert when purchase orders need approval or reach a new state.'),
 
     'appearance.theme': row('appearance.theme', 'light', 'enum', 'appearance', 'Default visual theme when no browser preference is saved.', ['system', 'light', 'dark']),
