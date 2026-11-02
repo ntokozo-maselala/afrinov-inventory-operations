@@ -23,7 +23,7 @@ redirects to Purchase orders.
 | Raised by | Procurement, on New purchase order | The store controller, on Order stock |
 | Seen by | Procurement, approvers and Admin (`view:purchase_order`) | The store controller and Admin (`order:stores_stock`) |
 | Project | Required | None |
-| Lines | That project's material | Stores items from the catalogue |
+| Lines | Projects items, any of them: the order says which project they are for (ADR-023) | Stores items from the catalogue only |
 | Raise, edit, submit, cancel, close | `create`/`submit`/`cancel`/`close:purchase_order` | `order:stores_stock` |
 | Approved by | Approvers, by value | The storeman, by value, against his own limit |
 | Delivery | Straight to site: Procurement **confirms delivery** on the order (`POST /:id/confirm-delivery`); no stock is added | Into stock: on Receive stock, against the order |
@@ -51,7 +51,8 @@ with `CANCELLED` before anything is received (ADR-007; full rules in
    The order can also be started from where the need shows: the re-order
    list on Stock status and a Stores item's page link to
    `/stock/orders/new?supplierId=…&materialIds=…`, a Projects item's page to
-   `/purchase-orders/new?materialIds=…`, and a supplier's page to the form
+   `/purchase-orders/new?materialIds=…` (an item tagged with an open project
+   suggests it as the order's project; the buyer can change it), and a supplier's page to the form
    the viewer orders from; each fills in the supplier and lines, prices from each item's unit cost and quantities up to
    Required Stock where it is set. Without a supplier, the items' last
    supplier is suggested when they share one.
@@ -165,6 +166,13 @@ the one place to receive, and only against an approved Stores order
   refused when the receipt is recorded and rolls back if it is posted; an
   authorised override is **Planned**.
 - An inactive supplier cannot be ordered from.
+- The order says which project its material is for (ADR-023): a project order
+  (or RFQ) takes any Projects item, whatever project it was tagged with, and
+  no Stores item; a Stores order takes Stores items only. A new item added
+  from an order or RFQ line gets no project of its own. The one exception:
+  an order awarded from an RFQ sent before project orders were limited to
+  Projects items (Stores ordering roadmap) keeps the Stores items it was
+  quoted for; their delivery is confirmed with the rest, so no stock is added.
 - Each transition and each edit is written to the audit log, with only the
   fields that changed, and shown as the order's history (`GET /:id/history`).
 
