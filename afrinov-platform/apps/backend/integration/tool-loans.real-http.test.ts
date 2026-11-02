@@ -16,6 +16,10 @@ const DAY = 86_400_000;
 const day = (offset: number) => new Date(Date.now() + offset * DAY).toISOString().slice(0, 10);
 interface ToolRow { materialId: string; inStore: string; onLoan: string; owned: string; loans: OpenLoan[] }
 interface HistoryRow { id: string; type: string; quantity: string; reasonCode: string | null; issueId: string | null; recipientName: string | null }
+interface MovementRow {
+  id: string; cursor: string; type: string; quantity: string | null; referenceId: string | null; reasonNote: string | null; recipientName: string | null;
+  dueOn: string | null; previousDueOn: string | null; currentDueOn: string | null; daysLate: number | null; overdueOverrideReason: string | null;
+}
 
 describe('tool loans over real HTTP', () => {
   const run = runId();
@@ -234,40 +238,80 @@ describe('tool loans over real HTTP', () => {
     });
     expect(lent.status).toBe(201);
     expect(await onShelf(drillId)).toBe('1');
+    // The reason is on the check-out itself, as Movements shows it.
+    const report = await api<MovementRow[]>('GET', `/inventory-transactions?report=loans&materialId=${drillId}&limit=1`);
+    expect(report.body[0]).toMatchObject({ id: lent.body.loanIds[0], overdueOverrideReason: 'Second crew on the boiler' });
 
     expect((await api('POST', '/tools/check-in', { lines: [lateId, lent.body.loanIds[0]!].map((loanId) => ({ loanId, quantity: 1, condition: 'GOOD' })) })).status).toBe(201);
     expect(await onShelf(drillId)).toBe('3');
   });
 
-  it('extends a loan for the store controller, replays a retry, and keeps the history; a technician cannot', async () => {
+  it('changes a due date for the store controller, later then earlier, replays a retry, and keeps the history; a technician cannot', async () => {
     const out = await api<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId, lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }] });
     const loanId = out.body.loanIds[0]!;
 
     const technician = await newUser('TECHNICIAN');
-    expect((await technician('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(10), reason: 'Still on site' })).status).toBe(403);
+    expect((await technician('POST', `/tools/loans/${loanId}/due-date`, { dueOn: day(10), reason: 'Still on site' })).status).toBe(403);
 
     const storeman = await newUser('STORE_CONTROLLER');
-    const key = `it-extend-${run}`;
-    const first = await storeman<{ dueOn: string; extensionId: string }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(10), reason: 'Still on site' }, { 'Idempotency-Key': key });
+    const key = `it-due-date-${run}`;
+    const first = await storeman<{ dueOn: string; previousDueOn: string; extensionId: string }>('POST', `/tools/loans/${loanId}/due-date`, { dueOn: day(10), reason: 'Still on site' }, { 'Idempotency-Key': key });
     expect(first.status).toBe(201);
-    const again = await storeman<{ extensionId: string }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(10), reason: 'Still on site' }, { 'Idempotency-Key': key });
+    expect(first.body).toMatchObject({ dueOn: day(10), previousDueOn: day(7) });
+    const again = await storeman<{ extensionId: string }>('POST', `/tools/loans/${loanId}/due-date`, { dueOn: day(10), reason: 'Still on site' }, { 'Idempotency-Key': key });
     expect(again.status).toBe(201);
     expect(again.body.extensionId).toBe(first.body.extensionId);
     expect(await prisma.toolLoanExtension.count({ where: { loanId } })).toBe(1);
 
-    const notLater = await storeman<{ error: { message: string } }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(9), reason: 'Shorter' });
-    expect(notLater.status).toBe(400);
-    expect(notLater.body.error.message).toBe(`The new due date must be after the current one, ${day(10)}.`);
+    const same = await storeman<{ error: { message: string } }>('POST', `/tools/loans/${loanId}/due-date`, { dueOn: day(10), reason: 'Again' });
+    expect(same.status).toBe(400);
+    expect(same.body.error.message).toBe(`The tool is already due back on ${day(10)}.`);
+    // Earlier is allowed, with a reason, and wins because it is the most recent.
+    const earlier = await storeman('POST', `/tools/loans/${loanId}/due-date`, { dueOn: day(9), reason: 'Wrong day picked' });
+    expect(earlier.status).toBe(201);
 
     const loan = (await tool(drillId)).loans.find((l) => l.loanId === loanId)!;
-    expect(loan).toMatchObject({ dueOn: day(10), extensions: [{ dueOn: day(10), reason: 'Still on site', extendedBy: `IT STORE_CONTROLLER ${run}` }] });
-    const audit = await prisma.auditLogEntry.findFirst({ where: { action: 'TOOL_LOAN_EXTEND', entityId: loanId } });
+    expect(loan).toMatchObject({
+      dueOn: day(9),
+      extensions: [
+        { dueOn: day(10), reason: 'Still on site', extendedBy: `IT STORE_CONTROLLER ${run}` },
+        { dueOn: day(9), reason: 'Wrong day picked', extendedBy: `IT STORE_CONTROLLER ${run}` },
+      ],
+    });
+    const audit = await prisma.auditLogEntry.findFirst({ where: { action: 'TOOL_LOAN_EXTEND', entityId: loanId }, orderBy: { createdAt: 'asc' } });
     expect(audit).toMatchObject({ before: { dueOn: day(7) }, after: expect.objectContaining({ dueOn: day(10), reason: 'Still on site' }) });
 
     expect((await api('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'GOOD' }] })).status).toBe(201);
-    const allBack = await storeman<{ error: { code: string } }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(12), reason: 'Late' });
+    const allBack = await storeman<{ error: { code: string } }>('POST', `/tools/loans/${loanId}/due-date`, { dueOn: day(12), reason: 'Late' });
     expect(allBack.status).toBe(409);
     expect(await onShelf(drillId)).toBe('3');
+
+    // Movements lists the changes among the check-out and check-in, newest first, with no quantity.
+    const report = await api<MovementRow[]>('GET', `/inventory-transactions?report=loans&materialId=${drillId}&limit=4`);
+    expect(report.status).toBe(200);
+    expect(report.body.map((r) => [r.type, r.quantity, r.dueOn, r.previousDueOn])).toEqual([
+      ['LOAN_RETURN', '1', day(9), null],
+      ['DUE_DATE_CHANGE', null, day(9), day(10)],
+      ['DUE_DATE_CHANGE', null, day(10), day(7)],
+      ['LOAN', '-1', day(7), null],
+    ]);
+    expect(report.body[0]).toMatchObject({ daysLate: -9 });
+    expect(report.body[1]).toMatchObject({ referenceId: loanId, reasonNote: 'Wrong day picked', recipientName: `IT fitter ${run}` });
+    expect(report.body[3]).toMatchObject({ currentDueOn: day(9) });
+    // The cursor of the last row continues past both kinds.
+    const next = await api<MovementRow[]>('GET', `/inventory-transactions?report=loans&materialId=${drillId}&limit=4&before=${encodeURIComponent(report.body[1]!.cursor)}`);
+    expect(next.body.slice(0, 2).map((r) => r.type)).toEqual(['DUE_DATE_CHANGE', 'LOAN']);
+    const summary = await api<{ total: number; byType: Record<string, number> }>('GET', `/inventory-transactions/summary?report=loans&materialId=${drillId}`);
+    expect(summary.body.byType['DUE_DATE_CHANGE']).toBe(2);
+    // Other reports leave them out.
+    const writeOffs = await api<MovementRow[]>('GET', `/inventory-transactions?report=writeoffs&materialId=${drillId}`);
+    expect(writeOffs.body.some((r) => r.type === 'DUE_DATE_CHANGE')).toBe(false);
+
+    const history = await api<{ state: string | null; events: Array<{ kind: string }> }>('GET', `/tools/loans/${loanId}/history`);
+    expect(history.status).toBe(200);
+    expect(history.body).toMatchObject({ state: null });
+    expect(history.body.events.map((e) => e.kind)).toEqual(['CHECKED_OUT', 'DUE_DATE_CHANGED', 'DUE_DATE_CHANGED', 'CHECKED_IN']);
+    expect((await api('GET', `/tools/loans/${report.body[0]!.id}/history`)).status).toBe(404);
   });
 
   it('lets a technician lend and take back tools, and forbids a viewer', async () => {

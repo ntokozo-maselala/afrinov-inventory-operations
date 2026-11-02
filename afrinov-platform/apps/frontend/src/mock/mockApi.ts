@@ -1547,17 +1547,24 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Inventory transactions
   if (method === 'GET' && p === '/inventory-transactions') {
     const limit = Math.min(qs.limit ? Number(qs.limit) : 200, 1000);
-    return olderThan(filterHistory(qs), qs.before, (t) => t.postedAt).slice(0, limit).map((t) => enrichMovement(t));
+    // As the server: tool loan due date changes are listed among the movements, newest first, on one cursor.
+    const rows = [
+      ...filterHistory(qs).map((t) => ({ id: t.id, postedAt: t.postedAt, row: () => enrichMovement(t) })),
+      ...filterDueDateChanges(qs).map((c) => ({ id: c.id, postedAt: c.createdAt, row: () => dueDateChangeRow(c) })),
+    ].sort((a, b) => b.postedAt.localeCompare(a.postedAt) || b.id.localeCompare(a.id));
+    return olderThan(rows, qs.before, (r) => r.postedAt).slice(0, limit).map((r) => r.row());
   }
   if (method === 'GET' && p === '/inventory-transactions/summary') {
     const byType: Record<string, number> = {};
     const list = filterHistory(qs);
     for (const t of list) byType[t.type] = (byType[t.type] ?? 0) + 1;
-    return { total: list.length, byType };
+    const changes = filterDueDateChanges(qs).length;
+    if (changes > 0) byType.DUE_DATE_CHANGE = changes;
+    return { total: list.length + changes, byType };
   }
   if (method === 'GET' && p === '/inventory-transactions/writeoffs-by-responsible') return writeoffsByResponsible(qs);
   if (method === 'GET' && p === '/inventory-transactions/actors') {
-    const ids = new Set(state.transactions.map((t) => t.actorId));
+    const ids = new Set([...state.transactions, ...state.toolLoanExtensions].map((t) => t.actorId));
     return mockUsers.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, name: u.name })).sort((a, b) => a.name.localeCompare(b.name));
   }
   // Mirrors StockReceiptService.receive: a posted goods receipt with no
@@ -1611,8 +1618,10 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/tools') return listTools();
   if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
   if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
-  const extendMatch = p.match(/^\/tools\/loans\/([^/]+)\/extend$/);
-  if (method === 'POST' && extendMatch) return handleToolExtend(decodeURIComponent(extendMatch[1]!), (body as ToolExtendBody) ?? {});
+  const dueDateMatch = p.match(/^\/tools\/loans\/([^/]+)\/due-date$/);
+  if (method === 'POST' && dueDateMatch) return handleToolDueDate(decodeURIComponent(dueDateMatch[1]!), (body as ToolDueDateBody) ?? {});
+  const loanHistoryMatch = p.match(/^\/tools\/loans\/([^/]+)\/history$/);
+  if (method === 'GET' && loanHistoryMatch) return loanHistory(decodeURIComponent(loanHistoryMatch[1]!));
   if (method === 'POST' && p === '/inventory-transfers') {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
@@ -2240,13 +2249,14 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
 // Tool loans, as the backend's ToolLoanService: a check-out takes a tool off
 // its location to a recipient (LOAN) until a due date, a check-in brings it
 // back (LOAN_RETURN), and a lost tool comes back on paper and is written off
-// (ADJUSTMENT, LOSS). An extension gives a loan a later due date.
+// (ADJUSTMENT, LOSS). A due date change gives a loan a later or earlier date;
+// the most recent change wins.
 interface ToolCheckOutBody {
   recipientId?: string; projectNumber?: string; note?: string; dueOn?: string; overrideReason?: string;
   lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
 }
 interface ToolCheckInBody { lines?: Array<{ loanId: string; quantity: number; condition: 'GOOD' | 'DAMAGED' | 'LOST'; note?: string }> }
-interface ToolExtendBody { dueOn?: string; reason?: string }
+interface ToolDueDateBody { dueOn?: string; reason?: string }
 
 const returnedOnLoan = (loanId: string) => state.transactions
   .filter((t) => t.type === 'LOAN_RETURN' && t.referenceType === 'ToolLoan' && t.referenceId === loanId)
@@ -2258,10 +2268,25 @@ const plusDays = (day: string, n: number) => utcDay(new Date(Date.parse(`${day}T
 const daysFrom = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 const projectEndOf = (projectNumber?: string) => state.projects.find((p) => p.projectNumber === projectNumber)?.endDate?.slice(0, 10) ?? null;
 
-/** When a loan is due: its latest extension, else its own date, else the default period after it went out. */
+/** A loan's due date changes, oldest first. */
+const loanChanges = (loanId: string) => state.toolLoanExtensions
+  .filter((e) => e.loanId === loanId)
+  .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+/** The date agreed at check-out, else the default period after it went out. */
+const agreedDueOn = (t: MockInventoryTransaction) => t.dueOn ?? plusDays(utcDay(t.postedAt), loanSetting('toolOverdueDays', 7));
+/** When a loan was due at a moment: the most recent change made by then, else the agreed date. */
+function loanDueOnAt(t: MockInventoryTransaction, at: string): string {
+  return loanChanges(t.id).filter((e) => e.createdAt <= at).at(-1)?.dueOn ?? agreedDueOn(t);
+}
+/** When a loan is due now: its most recent change, else the agreed date. */
 function loanDueOn(t: MockInventoryTransaction): string {
-  const extended = state.toolLoanExtensions.filter((e) => e.loanId === t.id).map((e) => e.dueOn).sort().at(-1);
-  return extended ?? t.dueOn ?? plusDays(utcDay(t.postedAt), loanSetting('toolOverdueDays', 7));
+  return loanChanges(t.id).at(-1)?.dueOn ?? agreedDueOn(t);
+}
+/** The date a change replaced. */
+function dueOnBefore(t: MockInventoryTransaction, changeId: string): string {
+  const changes = loanChanges(t.id);
+  const i = changes.findIndex((e) => e.id === changeId);
+  return i > 0 ? changes[i - 1]!.dueOn : agreedDueOn(t);
 }
 
 function loanState(dueOn: string, today: string) {
@@ -2306,8 +2331,9 @@ function listTools() {
             quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
             checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
             daysOut, dueOn, ...loanState(dueOn, utcDay(new Date())),
-            extensions: state.toolLoanExtensions.filter((e) => e.loanId === t.id).map((e) => ({
-              dueOn: e.dueOn, reason: e.reason, extendedBy: mockUsers.find((u) => u.id === e.actorId)?.name ?? 'Unknown', extendedAt: e.createdAt,
+            extensions: loanChanges(t.id).map((e) => ({
+              dueOn: e.dueOn, previousDueOn: dueOnBefore(t, e.id), reason: e.reason,
+              extendedBy: mockUsers.find((u) => u.id === e.actorId)?.name ?? 'Unknown', extendedAt: e.createdAt,
             })),
           };
         });
@@ -2372,26 +2398,72 @@ function handleToolCheckOut(b: ToolCheckOutBody): { slipId: string; loanIds: str
     state.transactions.push({
       id, issueId: slipId, postedAt, type: 'LOAN', materialId: l.materialId, locationId: l.locationId, quantity: String(-l.quantity),
       actorId: 'user-1', recipientId: b.recipientId, projectNumber: b.projectNumber, reasonNote: b.note?.trim() || undefined, dueOn,
+      overdueOverrideReason: overdue.length > 0 ? b.overrideReason?.trim() : undefined,
     });
     return id;
   });
   return { slipId, loanIds, dueOn };
 }
 
-function handleToolExtend(loanId: string, b: ToolExtendBody): { loanId: string; dueOn: string; extensionId: string } {
+function handleToolDueDate(loanId: string, b: ToolDueDateBody): { loanId: string; dueOn: string; previousDueOn: string; extensionId: string } {
   const reason = b.reason?.trim();
   if (!b.dueOn || !reason) throw err('VALIDATION_ERROR', 'A new due date and a reason are required');
   const loan = state.transactions.find((t) => t.id === loanId);
   if (!loan) throw err('NOT_FOUND', 'Tool check-out not found');
-  if (loan.type !== 'LOAN') throw err('INVALID_STATE', 'Only a tool check-out can be extended');
-  if (!(-Number(loan.quantity) - returnedOnLoan(loanId) > 0)) throw err('INVALID_STATE', 'This check-out is all back already, so there is nothing to extend');
+  if (loan.type !== 'LOAN') throw err('INVALID_STATE', 'Only a tool check-out has a due date');
+  if (!(-Number(loan.quantity) - returnedOnLoan(loanId) > 0)) throw err('INVALID_STATE', 'This check-out is all back already, so its due date cannot change');
   const current = loanDueOn(loan);
-  if (b.dueOn <= current) throw err('VALIDATION_ERROR', `The new due date must be after the current one, ${current}.`);
+  if (b.dueOn === current) throw err('VALIDATION_ERROR', `The tool is already due back on ${current}.`);
   const problem = dueOnProblem(b.dueOn, utcDay(loan.postedAt), utcDay(new Date()), loan.projectNumber);
   if (problem) throw err('VALIDATION_ERROR', problem);
   const extensionId = nextId('ext');
   state.toolLoanExtensions.push({ id: extensionId, loanId, dueOn: b.dueOn, reason, actorId: 'user-1', createdAt: new Date().toISOString() });
-  return { loanId, dueOn: b.dueOn, extensionId };
+  return { loanId, dueOn: b.dueOn, previousDueOn: current, extensionId };
+}
+
+type MockLoanEvent =
+  | { kind: 'CHECKED_OUT'; at: string; by: string; quantity: string; dueOn: string; note: string | null; overdueOverrideReason: string | null }
+  | { kind: 'DUE_DATE_CHANGED'; at: string; by: string; dueOn: string; previousDueOn: string; reason: string }
+  | { kind: 'BECAME_OVERDUE'; at: string; dueOn: string }
+  | { kind: 'CHECKED_IN'; at: string; by: string; quantity: string; condition: 'GOOD' | 'DAMAGED' | 'LOST'; note: string | null; dueOn: string; daysLate: number };
+
+/** One loan from check-out to now, as GET /tools/loans/:id/history. */
+function loanHistory(loanId: string) {
+  const loan = state.transactions.find((t) => t.id === loanId);
+  if (!loan || loan.type !== 'LOAN') throw err('NOT_FOUND', 'Tool check-out not found');
+  const by = (actorId: string) => mockUsers.find((u) => u.id === actorId)?.name ?? 'Unknown';
+  const lent = -Number(loan.quantity);
+  const recorded: Array<{ at: string; out: number; event: MockLoanEvent }> = [
+    { at: loan.postedAt, out: lent, event: { kind: 'CHECKED_OUT' as const, at: loan.postedAt, by: by(loan.actorId), quantity: String(lent), dueOn: agreedDueOn(loan), note: loan.reasonNote ?? null, overdueOverrideReason: loan.overdueOverrideReason ?? null } },
+    ...loanChanges(loanId).map((c) => ({ at: c.createdAt, out: 0, event: { kind: 'DUE_DATE_CHANGED' as const, at: c.createdAt, by: by(c.actorId), dueOn: c.dueOn, previousDueOn: dueOnBefore(loan, c.id), reason: c.reason } })),
+    ...state.transactions.filter((t) => t.type === 'LOAN_RETURN' && t.referenceType === 'ToolLoan' && t.referenceId === loanId).map((r) => {
+      const dueOn = loanDueOnAt(loan, r.postedAt);
+      const condition: 'GOOD' | 'DAMAGED' | 'LOST' = r.reasonCode === 'DAMAGE' ? 'DAMAGED' : r.reasonCode === 'LOSS' ? 'LOST' : 'GOOD';
+      return {
+        at: r.postedAt, out: -Number(r.quantity),
+        event: { kind: 'CHECKED_IN' as const, at: r.postedAt, by: by(r.actorId), quantity: r.quantity, condition, note: r.reasonNote ?? null, dueOn, daysLate: daysFrom(dueOn, utcDay(r.postedAt)) },
+      };
+    }),
+  ].sort((a, b) => a.at.localeCompare(b.at) || (a.event.kind === 'CHECKED_IN' ? 1 : 0) - (b.event.kind === 'CHECKED_IN' ? 1 : 0));
+  // As the server: between one record and the next, a loan still out goes overdue the day after it is due.
+  const events: MockLoanEvent[] = [];
+  let out = 0;
+  const now = new Date().toISOString();
+  recorded.forEach((r, i) => {
+    events.push(r.event);
+    out += r.out;
+    const due = loanDueOnAt(loan, r.at);
+    const overdueFrom = `${plusDays(due, 1)}T00:00:00.000Z`;
+    if (out > 0 && overdueFrom > r.at && overdueFrom <= (recorded[i + 1]?.at ?? now)) events.push({ kind: 'BECAME_OVERDUE', at: overdueFrom, dueOn: due });
+  });
+  const dueOn = loanDueOn(loan);
+  const { state: loanNow, daysLate } = loanState(dueOn, utcDay(new Date()));
+  return {
+    loanId, materialId: loan.materialId, sku: findMaterial(loan.materialId)?.sku ?? '', name: findMaterial(loan.materialId)?.name ?? '',
+    recipientName: state.recipients.find((r) => r.id === loan.recipientId)?.name ?? null, projectNumber: loan.projectNumber ?? null,
+    locationName: findLocation(loan.locationId)?.name ?? '—', quantity: String(lent), out: String(out),
+    dueOn, state: out > 0 ? loanNow : null, daysLate, events,
+  };
 }
 
 function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[] } {
@@ -3248,5 +3320,51 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     referenceId: t.referenceId,
     reversesId: t.reversesId,
     reversedById: state.transactions.find((r) => r.reversesId === t.id)?.id,
+    ...(() => {
+      // As the server: a check-out's agreed and current due date, a check-in's due date then and lateness.
+      if (t.type === 'LOAN') return { dueOn: agreedDueOn(t), currentDueOn: loanDueOn(t), overdueOverrideReason: t.overdueOverrideReason ?? null };
+      const loan = t.type === 'LOAN_RETURN' ? state.transactions.find((x) => x.id === t.referenceId && x.type === 'LOAN') : undefined;
+      if (!loan) return {};
+      const dueOn = loanDueOnAt(loan, t.postedAt);
+      return { dueOn, daysLate: daysFrom(dueOn, utcDay(t.postedAt)) };
+    })(),
+  };
+}
+
+/** Which due date changes a Movements query lists, as the server's listsDueDateChanges and dueDateChangeWhere. */
+function filterDueDateChanges(qs: Record<string, string>) {
+  if (qs.type || (qs.report && qs.report !== 'loans')) return [];
+  const inRange = inDayRange(qs);
+  const needle = qs.q?.trim().toLowerCase();
+  const scope = mockLocationScope(qs);
+  return state.toolLoanExtensions.filter((c) => {
+    const loan = state.transactions.find((t) => t.id === c.loanId);
+    if (!loan) return false;
+    if (qs.materialId && loan.materialId !== qs.materialId) return false;
+    if (qs.projectNumber && loan.projectNumber !== qs.projectNumber) return false;
+    if (scope ? !scope.includes(loan.locationId) : qs.locationId && loan.locationId !== qs.locationId) return false;
+    if (qs.actorId && c.actorId !== qs.actorId) return false;
+    if (qs.recipientId && (qs.recipientId === '__none__' ? !!loan.recipientId : loan.recipientId !== qs.recipientId)) return false;
+    if (!inRange(c.createdAt)) return false;
+    if (needle) {
+      const m = findMaterial(loan.materialId);
+      const hay = [m?.sku, m?.name, findLocation(loan.locationId)?.name, loan.projectNumber, state.recipients.find((r) => r.id === loan.recipientId)?.name]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+}
+
+/** A due date change as a Movements row: its loan's item, place, person and project, and no quantity. */
+function dueDateChangeRow(c: State['toolLoanExtensions'][number]): MockMovementRow {
+  const loan = state.transactions.find((t) => t.id === c.loanId)!;
+  return {
+    ...enrichMovement(loan),
+    id: c.id, cursor: `${c.createdAt}_${c.id}`, postedAt: c.createdAt, type: 'DUE_DATE_CHANGE', quantity: null,
+    actorId: c.actorId, actorName: mockUsers.find((u) => u.id === c.actorId)?.name ?? 'Unknown',
+    reasonCode: undefined, reasonNote: c.reason, referenceType: 'ToolLoan', referenceId: loan.id, reversesId: undefined, reversedById: undefined,
+    returnedQuantity: null, otherLocationName: null, returnOf: null,
+    dueOn: c.dueOn, previousDueOn: dueOnBefore(loan, c.id), currentDueOn: null, daysLate: null, overdueOverrideReason: null,
   };
 }

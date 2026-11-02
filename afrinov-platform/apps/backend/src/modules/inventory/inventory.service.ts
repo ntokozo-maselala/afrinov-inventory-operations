@@ -18,6 +18,8 @@ import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../.
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
+import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
+import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -306,13 +308,149 @@ function olderThan(cursor: string): Prisma.InventoryTransactionWhereInput {
   return { OR: [{ postedAt: { lt: at } }, { postedAt: at, id: { lt: id } }] };
 }
 
+/**
+ * A tool loan's due date changed (tool_loan_extensions). Not a movement: no
+ * stock moves, so it never counts in a stock total. Movements lists it among
+ * the ledger lines, so everything that happened to stock in the store is in
+ * one place.
+ */
+export const DUE_DATE_CHANGE = 'DUE_DATE_CHANGE' as const;
+
+/**
+ * Whether a history filter also lists due date changes: all movements and
+ * the tool loans report, unless it asks for one movement type or for the
+ * lines of issue slips.
+ */
+export function listsDueDateChanges(filter: Omit<HistoryFilter, 'before' | 'limit'>): boolean {
+  return !filter.type && !filter.issueIds && (filter.report === undefined || filter.report === 'loans');
+}
+
+/**
+ * The due date changes a history filter selects: by when they were made and
+ * who made them, and by their loan's item, location, person, project or the
+ * search, as the loan itself would be.
+ */
+export function dueDateChangeWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): Prisma.ToolLoanExtensionWhereInput {
+  const where: Prisma.ToolLoanExtensionWhereInput = {
+    loan: historyWhere({ ...filter, from: undefined, to: undefined, actorId: undefined, type: undefined, report: undefined, issueIds: undefined }),
+  };
+  const createdAt = dayRange(filter.from, filter.to);
+  if (createdAt) where.createdAt = createdAt;
+  if (filter.actorId) where.actorId = filter.actorId;
+  return where;
+}
+
+function changesOlderThan(cursor: string): Prisma.ToolLoanExtensionWhereInput {
+  const { at, id } = parseCursor(cursor);
+  return { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] };
+}
+
+/** What a Movements row says about its tool loan's due dates; all null on other rows. */
+interface LoanRowFields {
+  /** Check-out: the date agreed. Check-in: the date as it stood then. Change: the new date. */
+  dueOn: string | null;
+  /** Change: the date it replaced. */
+  previousDueOn: string | null;
+  /** Check-out: the date it is due now, after any changes. */
+  currentDueOn: string | null;
+  /** Check-in: days after the due date it came back; zero or less is on time. */
+  daysLate: number | null;
+  /** Check-out: why tools were lent to someone with an overdue one. */
+  overdueOverrideReason: string | null;
+}
+
+const NO_LOAN_FIELDS: LoanRowFields = { dueOn: null, previousDueOn: null, currentDueOn: null, daysLate: null, overdueOverrideReason: null };
+
+function loanFields(
+  t: { id: string; type: InventoryTransactionType; referenceId: string | null; postedAt: Date; overdueOverrideReason: string | null },
+  dates: Map<string, LoanDates>,
+): LoanRowFields {
+  if (t.type === InventoryTransactionType.LOAN) {
+    const d = dates.get(t.id);
+    return { ...NO_LOAN_FIELDS, dueOn: d?.agreed ?? null, currentDueOn: d ? currentDueOn(d) : null, overdueOverrideReason: t.overdueOverrideReason };
+  }
+  const d = t.type === InventoryTransactionType.LOAN_RETURN && t.referenceId ? dates.get(t.referenceId) : undefined;
+  if (!d) return NO_LOAN_FIELDS;
+  const due = dueOnAt(d, t.postedAt);
+  return { ...NO_LOAN_FIELDS, dueOn: due, daysLate: daysBetween(due, dayOf(t.postedAt)) };
+}
+
+/** A due date change as a Movements row: its loan's item, place, person and project; no quantity. */
+function dueDateChangeRow(
+  c: Prisma.ToolLoanExtensionGetPayload<{
+    include: { actor: { select: { name: true } }; loan: { include: { material: true; location: true; recipient: { select: { name: true; type: true } } } } };
+  }>,
+  dates: Map<string, LoanDates>,
+) {
+  const d = dates.get(c.loanId);
+  return {
+    id: c.id,
+    cursor: pageCursor(c.createdAt, c.id),
+    postedAt: c.createdAt.toISOString(),
+    type: DUE_DATE_CHANGE as InventoryTransactionType | typeof DUE_DATE_CHANGE,
+    materialId: c.loan.materialId,
+    materialSku: c.loan.material.sku,
+    materialName: c.loan.material.name,
+    unitOfMeasure: c.loan.material.unitOfMeasure,
+    issueId: c.loan.issueId,
+    locationId: c.loan.locationId,
+    locationName: c.loan.location.name,
+    quantity: null as string | null,
+    actorId: c.actorId,
+    actorName: c.actor.name,
+    recipientId: c.loan.recipientId,
+    recipientName: c.loan.recipient?.name ?? null,
+    recipientType: c.loan.recipient?.type ?? null,
+    reasonCode: null,
+    reasonNote: c.reason,
+    projectNumber: c.loan.projectNumber,
+    referenceType: 'ToolLoan',
+    referenceId: c.loanId,
+    reversesId: null,
+    reversedById: null,
+    returnedQuantity: null,
+    otherLocationName: null,
+    returnOf: null,
+    receiptNumber: null,
+    supplierName: null,
+    deliveryRef: null,
+    fromPurchaseOrder: false,
+    ...NO_LOAN_FIELDS,
+    dueOn: dayOf(c.dueOn),
+    previousDueOn: d ? dueOnBefore(d, c.id) : null,
+  };
+}
+
+/**
+ * Two lists already newest first, as one, newest first, cut to `take`. Each
+ * list keeps its own order (the database's), so the cursor of the last row
+ * shown continues both.
+ */
+export function mergeNewestFirst<A, B>(
+  a: A[], timeOfA: (x: A) => Date, b: B[], timeOfB: (x: B) => Date, idOf: (x: A | B) => string, take: number,
+): Array<{ a: A } | { b: B }> {
+  const out: Array<{ a: A } | { b: B }> = [];
+  let i = 0;
+  let j = 0;
+  while (out.length < take && (i < a.length || j < b.length)) {
+    const x = a[i];
+    const y = b[j];
+    const takeB = x === undefined || (y !== undefined && (
+      timeOfB(y).getTime() > timeOfA(x).getTime() || (timeOfB(y).getTime() === timeOfA(x).getTime() && idOf(y) > idOf(x))));
+    if (takeB) out.push({ b: b[j++]! });
+    else out.push({ a: a[i++]! });
+  }
+  return out;
+}
+
 export const InventoryService = {
   async queryHistory(filter: HistoryFilter, maxRows = 1000) {
     const base = historyWhere(filter);
     const where = filter.before ? { AND: [base, olderThan(filter.before)] } : base;
     // Cap the page size to prevent unbounded memory usage from a single request.
     const take = Math.min(filter.limit ?? 200, maxRows);
-    const rows = await prisma.inventoryTransaction.findMany({
+    const changeWhere = listsDueDateChanges(filter) ? dueDateChangeWhere(filter) : null;
+    const [fetched, changes] = await Promise.all([prisma.inventoryTransaction.findMany({
       where,
       include: {
         material: true,
@@ -323,7 +461,27 @@ export const InventoryService = {
       },
       orderBy: [{ postedAt: 'desc' }, { id: 'desc' }],
       take,
-    });
+    }), changeWhere === null ? [] : prisma.toolLoanExtension.findMany({
+      where: filter.before ? { AND: [changeWhere, changesOlderThan(filter.before)] } : changeWhere,
+      include: {
+        actor: { select: { name: true } },
+        loan: { include: { material: true, location: true, recipient: { select: { name: true, type: true } } } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take,
+    })]);
+    // One page, newest first, of movements and due date changes together.
+    const page = mergeNewestFirst(fetched, (t) => t.postedAt, changes, (c) => c.createdAt, (x) => x.id, take);
+    const rows = page.flatMap((p) => ('a' in p ? [p.a] : []));
+    const keptChanges = page.flatMap((p) => ('b' in p ? [p.b] : []));
+    // A tool loan's due dates: agreed on its check-out, as they stood at a
+    // check-in, and before and after each change.
+    const loanIds = [
+      ...rows.filter((t) => t.type === InventoryTransactionType.LOAN).map((t) => t.id),
+      ...rows.filter((t) => t.type === InventoryTransactionType.LOAN_RETURN && t.referenceId).map((t) => t.referenceId!),
+      ...keptChanges.map((c) => c.loanId),
+    ];
+    const loanDates = loanIds.length === 0 ? new Map<string, LoanDates>() : await loanDatesFor(prisma, loanIds, await loanTerms());
     // Receipts point at their goods receipt; show its number, supplier and
     // delivery/invoice number alongside the movement.
     const receiptIds = [...new Set(rows.filter((t) => t.referenceType === 'GoodsReceipt' && t.referenceId).map((t) => t.referenceId!))];
@@ -353,11 +511,11 @@ export const InventoryService = {
       select: { id: true, location: { select: { name: true } } },
     });
     const partnerLocation = new Map(partners.map((p) => [p.id, p.location.name]));
-    return rows.map((t) => ({
+    const movements = new Map(rows.map((t) => [t.id, {
       id: t.id,
       cursor: historyCursor(t),
       postedAt: t.postedAt.toISOString(),
-      type: t.type,
+      type: t.type as InventoryTransactionType | typeof DUE_DATE_CHANGE,
       materialId: t.materialId,
       materialSku: t.material.sku,
       materialName: t.material.name,
@@ -365,7 +523,8 @@ export const InventoryService = {
       issueId: t.issueId,
       locationId: t.locationId,
       locationName: t.location.name,
-      quantity: t.quantity.toString(),
+      // Null on a due date change: no stock moved.
+      quantity: t.quantity.toString() as string | null,
       actorId: t.actorId,
       actorName: t.actor.name,
       recipientId: t.recipientId,
@@ -389,7 +548,9 @@ export const InventoryService = {
         // fromPurchaseOrder: such a receipt also moved the order's received quantities, so it cannot be reversed here.
         return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null, fromPurchaseOrder: !!r?.purchaseOrderId };
       })(),
-    }));
+      ...loanFields(t, loanDates),
+    }]));
+    return page.map((p) => ('a' in p ? movements.get(p.a.id)! : dueDateChangeRow(p.b, loanDates)));
   },
 
   /**
@@ -432,22 +593,37 @@ export const InventoryService = {
     });
   },
 
-  /** How many movements of each type the filter selects, for the totals above the list. */
+  /**
+   * How many rows of each type the filter selects, for the totals above the
+   * list: movements by type, and due date changes as DUE_DATE_CHANGE.
+   */
   async historySummary(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<{ total: number; byType: Record<string, number> }> {
-    const groups = await prisma.inventoryTransaction.groupBy({ by: ['type'], where: historyWhere(filter), _count: { _all: true } });
-    const byType = Object.fromEntries(groups.map((g) => [g.type, g._count._all]));
-    return { total: groups.reduce((n, g) => n + g._count._all, 0), byType };
+    const [groups, changes] = await Promise.all([
+      prisma.inventoryTransaction.groupBy({ by: ['type'], where: historyWhere(filter), _count: { _all: true } }),
+      listsDueDateChanges(filter) ? prisma.toolLoanExtension.count({ where: dueDateChangeWhere(filter) }) : 0,
+    ]);
+    const byType: Record<string, number> = Object.fromEntries(groups.map((g) => [g.type, g._count._all]));
+    if (changes > 0) byType[DUE_DATE_CHANGE] = changes;
+    return { total: groups.reduce((n, g) => n + g._count._all, 0) + changes, byType };
   },
 
-  /** How many movements the filter selects (the export checks this before building). */
+  /** How many rows the filter selects, due date changes included (the export checks this before building). */
   async historyCount(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<number> {
-    return prisma.inventoryTransaction.count({ where: historyWhere(filter) });
+    const [movements, changes] = await Promise.all([
+      prisma.inventoryTransaction.count({ where: historyWhere(filter) }),
+      listsDueDateChanges(filter) ? prisma.toolLoanExtension.count({ where: dueDateChangeWhere(filter) }) : 0,
+    ]);
+    return movements + changes;
   },
 
-  /** Everyone who has posted a movement, for the "by" filter. Names only. */
+  /** Everyone who has posted a movement or changed a due date, for the "by" filter. Names only. */
   async historyActors(): Promise<Array<{ id: string; name: string }>> {
-    const ids = await prisma.inventoryTransaction.findMany({ distinct: ['actorId'], select: { actorId: true } });
-    const users = await prisma.user.findMany({ where: { id: { in: ids.map((r) => r.actorId) } }, select: { id: true, name: true } });
+    const [posted, changed] = await Promise.all([
+      prisma.inventoryTransaction.findMany({ distinct: ['actorId'], select: { actorId: true } }),
+      prisma.toolLoanExtension.findMany({ distinct: ['actorId'], select: { actorId: true } }),
+    ]);
+    const ids = [...new Set([...posted, ...changed].map((r) => r.actorId))];
+    const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
     return users.sort((a, b) => a.name.localeCompare(b.name));
   },
 

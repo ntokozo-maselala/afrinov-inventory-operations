@@ -81,3 +81,11 @@ export function lateness(loan: Pick<OpenLoan, 'daysLate'>): string {
   if (loan.daysLate === -1) return 'due tomorrow';
   return loan.daysLate < 0 ? `due in ${days}` : `${days} late`;
 }
+
+/** How a check-in compares with its due date: "On time", "1 day late". */
+export function lateBy(daysLate: number): string {
+  return daysLate > 0 ? `${daysLate} day${daysLate === 1 ? '' : 's'} late` : 'On time';
+}
+
+/** Which way a due date change went. */
+export const movedWay = (previousDueOn: string, dueOn: string): 'later' | 'earlier' => (dueOn > previousDueOn ? 'later' : 'earlier');

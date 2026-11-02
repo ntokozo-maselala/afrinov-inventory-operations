@@ -630,10 +630,13 @@ model InventoryTransaction {
   // types carry none.
   issueId       String?                  @map("issue_id")
   // Tool loans (LOAN): the day the tool is due back, agreed at check-out. Set
-  // when the loan is posted and never changed; a later date is a
+  // when the loan is posted and never changed; a different date is a
   // ToolLoanExtension. Null on loans from before due dates, which fall due
   // inventory.toolOverdueDays after they went out.
   dueOn         DateTime?                @map("due_on") @db.Date
+  // Tool loans (LOAN): why tools were lent to someone who already had an
+  // overdue one. Set when the loan is posted and never changed.
+  overdueOverrideReason String?          @map("overdue_override_reason")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")
   reasonNote    String?                  @map("reason_note")
@@ -670,9 +673,10 @@ model InventoryTransaction {
   @@map("inventory_transactions")
 }
 
-// A tool loan given a later due date, and why. Only ever added to, never
-// changed: a loan is due on its latest extension's date, or else on the one
-// agreed at check-out.
+// A tool loan's due date changed, later or earlier, and why. Only ever added
+// to, never changed: a loan is due on the date of its most recent change, or
+// else on the one agreed at check-out. Listed on Movements beside the loan's
+// check-out and check-in.
 model ToolLoanExtension {
   id        String   @id @default(uuid())
   loanId    String   @map("loan_id")
@@ -685,6 +689,7 @@ model ToolLoanExtension {
   actor User                 @relation(fields: [actorId], references: [id])
 
   @@index([loanId])
+  @@index([createdAt])
   @@map("tool_loan_extensions")
 }
 

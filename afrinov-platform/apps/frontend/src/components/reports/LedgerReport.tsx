@@ -2,6 +2,8 @@
 // row each, from → to), write-offs, tool loans (out and back in), and returned
 // stock (each return linked to the issue it came back from). Paged from
 // GET /inventory-transactions; a row opens its detail to reverse or return.
+// All movements and tool loans also list each change of a tool's due date
+// (DUE_DATE_CHANGE): it moves no stock, so it has no quantity.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
@@ -16,6 +18,7 @@ import { useToast } from '../Toast';
 import { TransactionDrawer } from '../TransactionDrawer';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import { formatCurrency } from '../../lib/currency';
+import { formatDay, lateBy, movedWay } from '../../lib/toolLoans';
 import type { MovementRow, WriteoffsByResponsible } from '../../api/types';
 
 export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
@@ -24,7 +27,7 @@ const EMPTY: Record<LedgerReportKind, string> = {
   all: 'Nothing was recorded for these dates and filters.',
   transfers: 'No stock was moved between locations for these dates and filters.',
   writeoffs: 'Nothing was written off or adjusted for these dates and filters. Count differences are under Stock counts.',
-  loans: 'No tools were checked out or in for these dates and filters.',
+  loans: 'No tools were checked out or in, and no due dates changed, for these dates and filters.',
   returned: 'No unused stock came back for these dates and filters.',
 };
 
@@ -169,6 +172,7 @@ function ResponsibleTotals({ data, failed, active, onChoose }: {
 type Col = DataTableColumn<MovementRow>;
 const none = <span className="text-surface-300">—</span>;
 const qty = (m: MovementRow, signed = true) => {
+  if (m.quantity === null) return <span className="text-meta">No stock moved</span>;
   const n = Number(m.quantity);
   const shown = signed ? m.quantity : String(Math.abs(n));
   return <span className={`font-mono ${signed ? (n >= 0 ? 'text-success-700' : 'text-danger-700') : ''}`}>{shown}{m.unitOfMeasure ? <span className="text-meta"> {m.unitOfMeasure}</span> : null}</span>;
@@ -179,6 +183,40 @@ const loc: Col = { key: 'loc', header: 'Location', render: (m) => m.locationName
 const by: Col = { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span>, width: '9rem' };
 const reason: Col = { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace(/_/g, ' ').toLowerCase()}</span> : none, width: '8rem' };
 const issuedTo: Col = { key: 'to', header: 'Issued to', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : none, width: '9rem' };
+/** When a tool is due back, as its row tells it: agreed at check-out, as it stood at check-in, or the change. */
+function dueBack(m: MovementRow) {
+  if (!m.dueOn) return none;
+  if (m.type === 'DUE_DATE_CHANGE') {
+    return (
+      <span className="whitespace-nowrap">
+        {m.previousDueOn && <><span className="text-surface-400 line-through">{formatDay(m.previousDueOn)}</span> → </>}
+        <span className="font-medium">{formatDay(m.dueOn)}</span>
+        {m.previousDueOn && <span className="block text-meta">moved {movedWay(m.previousDueOn, m.dueOn)}</span>}
+      </span>
+    );
+  }
+  if (m.type === 'LOAN_RETURN') {
+    const late = (m.daysLate ?? 0) > 0;
+    return <span className="whitespace-nowrap">{formatDay(m.dueOn)}<span className={`block text-xs ${late ? 'text-danger-700 font-medium' : 'text-success-700'}`}>{lateBy(m.daysLate ?? 0)}</span></span>;
+  }
+  return (
+    <span className="whitespace-nowrap">
+      {formatDay(m.dueOn)}
+      {m.currentDueOn && m.currentDueOn !== m.dueOn && <span className="block text-meta">now {formatDay(m.currentDueOn)}</span>}
+    </span>
+  );
+}
+
+/** The note, with why tools were lent to someone with an overdue one. */
+const loanNote = (m: MovementRow) => (m.reasonNote || m.overdueOverrideReason
+  ? (
+    <span className="text-meta">
+      {m.reasonNote}
+      {m.overdueOverrideReason && <span className="block text-warning-700">Lent while overdue: {m.overdueOverrideReason}</span>}
+    </span>
+  )
+  : none);
+
 const project: Col = { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : none, width: '8rem' };
 
 const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[]> = {
@@ -187,7 +225,14 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     { key: 'type', header: 'Type', render: (m) => <MovementBadge type={m.type} />, width: '8rem' },
     item, loc,
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m), width: '8rem' },
-    reason, issuedTo, project,
+    {
+      ...reason,
+      // A due date change says what moved and why.
+      render: (m, i) => (m.type === 'DUE_DATE_CHANGE' && m.dueOn
+        ? <span className="text-meta">{m.previousDueOn ? `${formatDay(m.previousDueOn)} → ` : ''}{formatDay(m.dueOn)}: {m.reasonNote}</span>
+        : reason.render(m, i)),
+    },
+    issuedTo, project,
     { key: 'ref', header: 'Reference', render: (m) => m.referenceType ? <span className="text-meta">{m.referenceType}</span> : none },
     by,
   ],
@@ -221,8 +266,9 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m, false), width: '7rem' },
     { key: 'who', header: 'Person', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : none, width: '9rem' },
     project, loc,
+    { key: 'due', header: 'Due back', render: dueBack, width: '9rem' },
     { key: 'cond', header: 'Condition', render: (m) => toolCondition(m) || none, width: '7rem' },
-    { key: 'note', header: 'Note', render: (m) => m.reasonNote ? <span className="text-meta">{m.reasonNote}</span> : none },
+    { key: 'note', header: 'Note', render: loanNote },
     by,
   ],
   returned: (open) => [

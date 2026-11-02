@@ -29,7 +29,7 @@ export const toolCheckInSchema = z.object({
   })).min(1).max(50),
 });
 
-export const toolLoanExtendSchema = z.object({
+export const toolLoanDueDateSchema = z.object({
   dueOn: z.iso.date(),
   reason: z.string().trim().min(1).max(500),
 });
@@ -61,17 +61,24 @@ export async function toolRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send(await ToolLoanService.checkIn({ ...parsed.data, actorId: actorId(req) }));
   });
 
-  app.post('/tools/loans/:id/extend', { preHandler: [app.authenticate] }, async (req, reply) => {
+  // A later or earlier due date, with a reason. The permission keeps its first name, extend:tool_loan.
+  app.post('/tools/loans/:id/due-date', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ExtendToolLoan);
-    const parsed = toolLoanExtendSchema.safeParse(req.body);
+    const parsed = toolLoanDueDateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'A new due date and a reason are required', details: parsed.error.flatten() } });
     }
     const { id } = req.params as { id: string };
     const exceed = await canExceedMaxLoan(req);
-    return idempotentMutation(req, reply, 'POST /tools/loans/:id/extend', async (tx) => ({
+    return idempotentMutation(req, reply, 'POST /tools/loans/:id/due-date', async (tx) => ({
       statusCode: 201,
-      body: await ToolLoanService.extend({ loanId: id, ...parsed.data, canExceedMaxLoan: exceed, actorId: actorId(req) }, tx),
+      body: await ToolLoanService.changeDueDate({ loanId: id, ...parsed.data, canExceedMaxLoan: exceed, actorId: actorId(req) }, tx),
     }));
+  });
+
+  // One loan from check-out to now, for the movement detail on Movements.
+  app.get('/tools/loans/:id/history', { preHandler: [app.authenticate] }, async (req) => {
+    const { id } = req.params as { id: string };
+    return ToolLoanService.history(id);
   });
 }

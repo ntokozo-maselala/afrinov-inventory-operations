@@ -47,6 +47,7 @@ const movementTone: Record<string, Tone> = {
   RETURN: 'success',
   LOAN: 'info',
   LOAN_RETURN: 'info',
+  DUE_DATE_CHANGE: 'neutral',
 };
 
 const movementLabel: Record<string, string> = {
@@ -58,6 +59,8 @@ const movementLabel: Record<string, string> = {
   RETURN: 'Return',
   LOAN: 'Check out',
   LOAN_RETURN: 'Check in',
+  // A tool loan's due date changed: listed among the movements, but no stock moved.
+  DUE_DATE_CHANGE: 'Due date moved',
 };
 
 export function MovementBadge({ type }: MovementBadgeProps) {

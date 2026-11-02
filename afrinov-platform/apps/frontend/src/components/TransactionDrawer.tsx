@@ -7,6 +7,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import type { MovementRow } from '../api/types';
 import { locationLabel } from '../lib/locations';
 import { useIdempotencyKey } from '../lib/idempotency';
+import { formatDay, lateBy } from '../lib/toolLoans';
+import { LoanHistory } from './LoanHistory';
 
 
 interface Props {
@@ -21,13 +23,21 @@ interface Props {
 /** What the recipient was to a movement: who it was issued to, unless the movement says otherwise. */
 export function recipientLabel(type: string): string {
   if (type === 'ADJUSTMENT') return 'Responsible';
-  if (type === 'LOAN' || type === 'LOAN_RETURN') return 'Checked out to';
+  if (type === 'LOAN' || type === 'LOAN_RETURN' || type === 'DUE_DATE_CHANGE') return 'Checked out to';
   if (type === 'RETURN') return 'Returned by';
   return 'Issued to';
 }
 
+/** The tool loan a row belongs to: a check-out is the loan; its check-ins, write-off and due date changes name it. */
+export function loanOf(t: Pick<MovementRow, 'id' | 'type' | 'referenceType' | 'referenceId'>): string | null {
+  if (t.type === 'LOAN') return t.id;
+  return t.referenceType === 'ToolLoan' ? t.referenceId ?? null : null;
+}
+
 // The ledger is never edited. A mistaken movement is corrected by posting a
-// reversing entry (POST /inventory-transactions/:id/reversal).
+// reversing entry (POST /inventory-transactions/:id/reversal). A tool loan's
+// due date change is not a movement: it is shown here with its loan, and put
+// right by another change on the Tools page.
 export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onReturned, onError }: Props) {
   const { hasPermission } = usePermissions();
   const [reversing, setReversing] = useState(false);
@@ -47,6 +57,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   // eslint-enable react-hooks/set-state-in-effect
 
   const isTransfer = transaction.type === 'TRANSFER_IN' || transaction.type === 'TRANSFER_OUT';
+  const isDueDateChange = transaction.type === 'DUE_DATE_CHANGE';
+  const loanId = loanOf(transaction);
   // A receipt against a purchase order also moved the order's received
   // quantities, so the server only lets it be put right on the order. A
   // counter receipt (Receive stock) is reversed like any other movement.
@@ -111,13 +123,24 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           <dt className="text-surface-500">When</dt>
           <dd className="col-span-2">{new Date(transaction.postedAt).toLocaleString()}</dd>
           <dt className="text-surface-500">Type</dt>
-          <dd className="col-span-2">{transaction.type}</dd>
+          <dd className="col-span-2">{isDueDateChange ? 'Due date moved' : transaction.type}</dd>
           <dt className="text-surface-500">Material</dt>
           <dd className="col-span-2">{transaction.materialSku} — {transaction.materialName}</dd>
           <dt className="text-surface-500">Location</dt>
           <dd className="col-span-2">{transaction.locationName}</dd>
           <dt className="text-surface-500">Quantity</dt>
-          <dd className="col-span-2 text-num">{transaction.quantity}</dd>
+          <dd className="col-span-2 text-num">{transaction.quantity ?? 'No stock moved'}</dd>
+          {transaction.dueOn && (
+            <>
+              <dt className="text-surface-500">{isDueDateChange ? 'Due date' : 'Due back'}</dt>
+              <dd className="col-span-2">
+                {isDueDateChange && transaction.previousDueOn ? `${formatDay(transaction.previousDueOn)} → ` : ''}
+                {formatDay(transaction.dueOn)}
+                {transaction.type === 'LOAN' && transaction.currentDueOn && transaction.currentDueOn !== transaction.dueOn && ` (now ${formatDay(transaction.currentDueOn)})`}
+                {transaction.type === 'LOAN_RETURN' && transaction.daysLate != null && ` · ${lateBy(transaction.daysLate).toLowerCase()}`}
+              </dd>
+            </>
+          )}
           <dt className="text-surface-500">Recorded by</dt>
           <dd className="col-span-2">{transaction.actorName || '—'}</dd>
           {transaction.supplierName && (
@@ -152,8 +175,14 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           )}
           {transaction.reasonNote && (
             <>
-              <dt className="text-surface-500">Note</dt>
+              <dt className="text-surface-500">{isDueDateChange ? 'Why' : 'Note'}</dt>
               <dd className="col-span-2">{transaction.reasonNote}</dd>
+            </>
+          )}
+          {transaction.overdueOverrideReason && (
+            <>
+              <dt className="text-surface-500">Lent while overdue</dt>
+              <dd className="col-span-2">{transaction.overdueOverrideReason}</dd>
             </>
           )}
         </dl>
@@ -189,6 +218,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           onError={onError}
         />
       )}
+
+      {loanId && <LoanHistory loanId={loanId} />}
 
       {canReverse && (
         <section className="space-y-3 border-t border-surface-200 pt-4">

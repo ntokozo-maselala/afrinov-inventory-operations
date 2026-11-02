@@ -2,7 +2,8 @@
 // allowed, and what state a loan is in on a given day.
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_TERMS, addDays, daysBetween, defaultDueOn, dueOnProblem, effectiveDueOn, loanState, overdueBlocksCheckout, termsFrom,
+  DEFAULT_TERMS, addDays, currentDueOn, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState,
+  overdueBlocksCheckout, termsFrom,
 } from './tool-loan-terms.js';
 
 const terms = DEFAULT_TERMS; // 7-day period, 30 at most, a decision 14 days late, warn
@@ -46,10 +47,26 @@ describe('tool loan terms', () => {
     expect(dueOnProblem('2026-10-29', { ...args, projectEnd: '2026-10-01' })).toMatch(/ends on 2026-10-01/);
   });
 
-  it('is due on its latest extension, else its own date, else the loan period after it went out', () => {
-    expect(effectiveDueOn({ outDay: '2026-10-28', dueOn: '2026-11-02', extendedTo: '2026-11-09' }, terms)).toBe('2026-11-09');
-    expect(effectiveDueOn({ outDay: '2026-10-28', dueOn: '2026-11-02', extendedTo: null }, terms)).toBe('2026-11-02');
-    expect(effectiveDueOn({ outDay: '2026-10-28', dueOn: null, extendedTo: null }, terms)).toBe('2026-11-04');
+  it('is due on its most recent change, else its own date, else the loan period after it went out', () => {
+    const out = new Date('2026-10-28T08:00:00Z');
+    const at = (iso: string) => new Date(iso);
+    const day = (d: string) => new Date(`${d}T00:00:00Z`);
+    // Made later, then pulled earlier: the most recent change wins, not the latest date.
+    const dates = loanDatesOf({ postedAt: out, dueOn: day('2026-11-02') }, [
+      { id: 'c-2', createdAt: at('2026-11-03T09:00:00Z'), dueOn: day('2026-11-06') },
+      { id: 'c-1', createdAt: at('2026-11-01T09:00:00Z'), dueOn: day('2026-12-16') },
+    ], terms);
+    expect(dates.changes.map((c) => c.id)).toEqual(['c-1', 'c-2']);
+    expect(currentDueOn(dates)).toBe('2026-11-06');
+    expect(dueOnAt(dates, at('2026-10-30T12:00:00Z'))).toBe('2026-11-02');
+    expect(dueOnAt(dates, at('2026-11-02T12:00:00Z'))).toBe('2026-12-16');
+    expect(dueOnAt(dates, at('2026-11-03T09:00:00Z'))).toBe('2026-11-06');
+    expect(dueOnBefore(dates, 'c-1')).toBe('2026-11-02');
+    expect(dueOnBefore(dates, 'c-2')).toBe('2026-12-16');
+
+    expect(currentDueOn(loanDatesOf({ postedAt: out, dueOn: day('2026-11-02') }, [], terms))).toBe('2026-11-02');
+    // A loan from before due dates: the loan period after it went out.
+    expect(currentDueOn(loanDatesOf({ postedAt: out, dueOn: null }, [], terms))).toBe('2026-11-04');
   });
 
   it('is on loan, then due soon the day before and on the day, then overdue, then needs a decision', () => {

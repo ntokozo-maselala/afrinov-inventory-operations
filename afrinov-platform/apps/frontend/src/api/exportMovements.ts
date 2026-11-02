@@ -12,7 +12,22 @@ const LIMIT = 10_000;
 
 const TYPE_LABEL: Record<string, string> = {
   RECEIPT: 'Receipt', ISSUE: 'Issue', TRANSFER_OUT: 'Transfer out', TRANSFER_IN: 'Transfer in', ADJUSTMENT: 'Adjustment', RETURN: 'Return', LOAN: 'Check out', LOAN_RETURN: 'Check in',
+  DUE_DATE_CHANGE: 'Due date moved',
 };
+
+/** When a tool loan is due, as its row tells it, in the backend download's words. */
+export function dueText(m: MovementRow): string {
+  if (!m.dueOn) return '';
+  if (m.type === 'DUE_DATE_CHANGE') return m.previousDueOn ? `${m.previousDueOn} → ${m.dueOn}` : m.dueOn;
+  if (m.type === 'LOAN') return m.currentDueOn && m.currentDueOn !== m.dueOn ? `${m.dueOn} (now ${m.currentDueOn})` : m.dueOn;
+  if (m.type === 'LOAN_RETURN' && m.daysLate != null) return m.daysLate > 0 ? `${m.dueOn} (${m.daysLate} day${m.daysLate === 1 ? '' : 's'} late)` : `${m.dueOn} (on time)`;
+  return m.dueOn;
+}
+
+/** The note, with why tools were lent to someone with an overdue one. */
+const noteText = (m: MovementRow) => [m.reasonNote, m.overdueOverrideReason ? `Lent while overdue: ${m.overdueOverrideReason}` : null].filter(Boolean).join(' · ');
+/** A quantity, or nothing for a due date change, which moves no stock. */
+const quantityOf = (m: MovementRow, abs = false) => (m.quantity === null ? '' : formatNumber(abs ? Math.abs(Number(m.quantity)) : Number(m.quantity)));
 
 /** The person column, named for the report, as the backend's download names it. */
 const PERSON_HEADER: Partial<Record<string, string>> = { writeoffs: 'Responsible', loans: 'Checked out to', returned: 'Returned by' };
@@ -58,15 +73,15 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   const report = new URLSearchParams(query).get('report') ?? '';
   const person = PERSON_HEADER[report] ?? 'Issued to';
   const notKnown = (m: MovementRow) => (report === 'writeoffs' && m.reasonCode && RESPONSIBLE_REASONS.has(m.reasonCode) ? 'Not known' : '');
-  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Reason', 'Note', 'Reference', 'By'];
+  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Due back', 'Reason', 'Note', 'Reference', 'By'];
   ws.getRow(4).font = { bold: true };
   for (const m of rows) {
     const type = TYPE_LABEL[m.type] ?? m.type;
     ws.addRow([
       new Date(m.postedAt),
       m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type,
-      m.materialSku, m.materialName, m.locationName, Number(m.quantity), m.unitOfMeasure ?? '',
-      m.recipientName ?? notKnown(m), m.projectNumber ?? '', m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '', m.reasonNote ?? '',
+      m.materialSku, m.materialName, m.locationName, m.quantity === null ? null : Number(m.quantity), m.unitOfMeasure ?? '',
+      m.recipientName ?? notKnown(m), m.projectNumber ?? '', dueText(m), m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '', noteText(m),
       m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : m.referenceType ?? '',
       m.actorName,
     ]);
@@ -94,9 +109,9 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
     { header: 'Code', cell: (m) => m.materialSku },
     { header: 'Item', wrap: true, cell: (m) => m.materialName },
     { header: 'Location', wrap: true, cell: (m) => m.locationName },
-    { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Number(m.quantity)) },
+    { header: 'Quantity', align: 'right', cell: (m) => quantityOf(m) },
     { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
-    { header: 'Reason', wrap: true, cell: (m) => [reason(m), m.reasonNote].filter(Boolean).join(': ') },
+    { header: 'Reason', wrap: true, cell: (m) => [reason(m), m.type === 'DUE_DATE_CHANGE' ? dueText(m) : null, m.reasonNote].filter(Boolean).join(': ') },
     { header: 'Issued to', wrap: true, cell: (m) => m.recipientName ?? '' },
     { header: 'Project', cell: (m) => m.projectNumber ?? '' },
     { header: 'By', cell: (m) => m.actorName },
@@ -128,12 +143,13 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
     { header: 'Movement', cell: typeLabel },
     { header: 'Code', cell: (m) => m.materialSku },
     { header: 'Tool', wrap: true, cell: (m) => m.materialName },
-    { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
+    { header: 'Quantity', align: 'right', cell: (m) => quantityOf(m, true) },
     { header: 'Person', wrap: true, cell: (m) => m.recipientName ?? '' },
     { header: 'Project', cell: (m) => m.projectNumber ?? '' },
     { header: 'Location', wrap: true, cell: (m) => m.locationName },
+    { header: 'Due back', wrap: true, cell: dueText },
     { header: 'Condition', cell: condition },
-    { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
+    { header: 'Note', wrap: true, cell: noteText },
     { header: 'By', cell: (m) => m.actorName },
   ],
   returned: [

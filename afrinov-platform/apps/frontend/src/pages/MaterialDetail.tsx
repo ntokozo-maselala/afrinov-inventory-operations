@@ -338,7 +338,7 @@ function movementColumns({ onSelect }: { onSelect: (m: MovementRow) => void }): 
     { key: 'when', header: 'When', render: (m) => <button className="text-left btn-link text-meta whitespace-nowrap" onClick={() => onSelect(m)}>{formatDateTime(m.postedAt)}</button> },
     { key: 'type', header: 'Type', render: (m) => <MovementBadge type={m.type} /> },
     { key: 'loc', header: 'Location', render: (m) => m.locationName },
-    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{m.quantity}</span> },
+    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => (m.quantity === null ? <span className="text-meta">No stock moved</span> : <span className="font-mono">{m.quantity}</span>) },
     { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace('_', ' ').toLowerCase()}</span> : <span className="text-surface-300">—</span> },
     { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : <span className="text-surface-300">—</span> },
     { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span> },

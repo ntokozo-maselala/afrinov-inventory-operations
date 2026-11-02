@@ -21,6 +21,7 @@ vi.mock('../hooks/usePermissions', () => ({
 }));
 
 const { Movements } = await import('./Movements');
+const { formatDay } = await import('../lib/toolLoans');
 const { ToastProvider } = await import('../components/Toast');
 
 const row = (n: number) => ({
@@ -60,7 +61,17 @@ const WRITEOFF_TOTALS = {
   ],
 };
 
-function renderAt(url: string, pages: Array<Array<ReturnType<typeof row> & Record<string, unknown>>> = [[row(1)]]) {
+const LOAN_HISTORY = {
+  loanId: 'loan-1', materialId: 'm-1', sku: 'TW-200', name: 'Torque wrench', recipientName: 'Khodani', projectNumber: 'AFRI-1325', locationName: 'Main store',
+  quantity: '1', out: '1', dueOn: '2026-11-06', state: 'ON_LOAN', daysLate: -4,
+  events: [
+    { kind: 'CHECKED_OUT', at: '2026-10-23T07:50:00.000Z', by: 'Thabo', quantity: '1', dueOn: '2026-10-30', note: null, overdueOverrideReason: null },
+    { kind: 'BECAME_OVERDUE', at: '2026-10-31T00:00:00.000Z', dueOn: '2026-10-30' },
+    { kind: 'DUE_DATE_CHANGED', at: '2026-11-02T09:14:00.000Z', by: 'Lerato', dueOn: '2026-11-06', previousDueOn: '2026-10-30', reason: 'Pour delayed.' },
+  ],
+};
+
+function renderAt(url: string, pages: Array<Array<Omit<ReturnType<typeof row>, 'quantity'> & Record<string, unknown>>> = [[row(1)]]) {
   let page = 0;
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/inventory-transactions/summary')) return { total: 205, byType: {} };
@@ -72,6 +83,7 @@ function renderAt(url: string, pages: Array<Array<ReturnType<typeof row> & Recor
     if (path.startsWith('/stock-counts')) return COUNTS;
     if (path.startsWith('/inventory-transactions/writeoffs-by-responsible')) return WRITEOFF_TOTALS;
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
+    if (path.startsWith('/tools/loans/')) return LOAN_HISTORY;
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'Boiler Shop' }];
     if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydroscand' }];
     if (path.startsWith('/recipients')) return [{ id: 'r-1', name: 'Sabelo' }];
@@ -309,6 +321,36 @@ describe('Movements page', () => {
     expect(screen.getByText('Check out')).toBeInTheDocument();
     expect(screen.getByText('Check in')).toBeInTheDocument();
     expect(screen.getByText('Damaged')).toBeInTheDocument();
+  });
+
+  it('lists due date changes among the loans, with no stock moved, when each tool is due and why', async () => {
+    const lines = [
+      { ...row(3), type: 'DUE_DATE_CHANGE', quantity: null, recipientName: 'Khodani', reasonNote: 'Pour delayed.', referenceType: 'ToolLoan', referenceId: 'loan-1',
+        dueOn: '2026-11-06', previousDueOn: '2026-10-30' },
+      { ...row(2), type: 'LOAN_RETURN', quantity: '1', recipientName: 'Sipho', dueOn: '2026-10-16', daysLate: 14, referenceType: 'ToolLoan', referenceId: 'loan-2' },
+      { ...row(1), type: 'LOAN', quantity: '-1', recipientName: 'KTS', dueOn: '2026-10-30', currentDueOn: '2026-11-06', overdueOverrideReason: 'Site needs a drill today' },
+    ];
+    renderAt('/movements?report=loans&from=2026-10-05', [lines]);
+    expect(await screen.findByText('Due date moved')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Due back' })).toBeInTheDocument();
+    const change = screen.getByText('Due date moved').closest('tr')!;
+    expect(within(change).getByText('No stock moved')).toBeInTheDocument();
+    expect(within(change).getByText('moved later')).toBeInTheDocument();
+    expect(within(change).getByText('Pour delayed.')).toBeInTheDocument();
+    expect(within(screen.getByText('Sipho').closest('tr')!).getByText('14 days late')).toBeInTheDocument();
+    const out = screen.getByText('KTS').closest('tr')!;
+    expect(within(out).getByText(`now ${formatDay('2026-11-06')}`)).toBeInTheDocument();
+    expect(within(out).getByText('Lent while overdue: Site needs a drill today')).toBeInTheDocument();
+
+    // Its detail tells the whole loan, with going overdue worked out, not recorded.
+    fireEvent.click(within(change).getAllByRole('button')[0]!);
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByText('No stock moved')).toBeInTheDocument();
+    expect(await within(drawer).findByText('This loan, start to finish')).toBeInTheDocument();
+    expect(within(drawer).getByText('Became overdue')).toBeInTheDocument();
+    expect(within(drawer).getByText(`Due date moved later: ${formatDay('2026-10-30')} → ${formatDay('2026-11-06')}`)).toBeInTheDocument();
+    expect(within(drawer).queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(calls('/tools/loans/')).toEqual(['/tools/loans/loan-1/history']);
   });
 
   it('lists returned stock by the day it came back, with who returned it and a link to the issue it came from', async () => {

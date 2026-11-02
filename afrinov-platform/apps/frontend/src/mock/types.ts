@@ -201,6 +201,8 @@ export interface MockInventoryTransaction {
   issueId?: string;
   /** Tool loans: YYYY-MM-DD it is due back, agreed at check-out. Absent on loans from before due dates. */
   dueOn?: string;
+  /** Tool loans: why tools were lent to someone who already had an overdue one. */
+  overdueOverrideReason?: string;
 }
 
 export interface MockStockRow {
@@ -231,7 +233,8 @@ export interface MockMovementRow {
   /** Paging cursor, as the backend returns it. */
   cursor: string;
   postedAt: string;
-  type: InventoryTransactionType;
+  /** DUE_DATE_CHANGE: a tool loan's due date changed; listed among the movements, no stock moved. */
+  type: InventoryTransactionType | 'DUE_DATE_CHANGE';
   materialId: string;
   materialSku: string;
   materialName: string;
@@ -239,7 +242,8 @@ export interface MockMovementRow {
   issueId?: string | null;
   locationId: string;
   locationName: string;
-  quantity: string;
+  /** Null on a due date change. */
+  quantity: string | null;
   actorId: string;
   actorName: string;
   recipientId?: string;
@@ -259,6 +263,11 @@ export interface MockMovementRow {
   fromPurchaseOrder?: boolean;
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
   returnedQuantity?: string | null;
+  dueOn?: string | null;
+  previousDueOn?: string | null;
+  currentDueOn?: string | null;
+  daysLate?: number | null;
+  overdueOverrideReason?: string | null;
 }
 
 export type MockProjectStatus = 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED';
