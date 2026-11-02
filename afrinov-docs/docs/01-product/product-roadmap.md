@@ -35,7 +35,7 @@ alerting against `Required Stock`.
 
 ## Milestone 4 — Tools & Category-Specific Behaviour
 Tool check-out/check-in state tracking, PPE/consumable distinctions if
-required (pending A-05, A-06 in the assumptions register).
+required (pending A-06 in the assumptions register; A-05 is corrected).
 *Status:* **Planned** (Phase 5 in the root roadmap).
 
 ## Milestone 5 — Reporting & Dashboard

@@ -4,7 +4,7 @@
 
 ## Target process (Procure-to-Stock, simplified)
 ```
-Reorder threshold breached (Required Stock)
+Stock running short of Required Stock (Urgent or Warning)
         |
         v
 Purchase Order created against a Supplier
@@ -35,7 +35,7 @@ InventoryTransaction (Issue) created  --->  InventoryBalance updated
 | Location is free text (6+ spellings of "stores") | Location is a foreign key to a normalised Location master | Implemented |
 | Supplier is free text per transaction | Supplier is a foreign key to a Supplier master | Implemented for goods receipts and POs |
 | No PO exists; receipt just happens | PO created, tracked, matched at receipt (or receipt recorded as ad hoc with a reason) | PO implemented, on by default (`PROCUREMENT_ENABLED`); ad hoc (counter) receipts require a supplier and delivery/invoice number, not a reason |
-| Required Stock is a silent threshold nobody actively watches | System actively surfaces below-threshold materials | Implemented (stock status, re-order list) |
+| Required Stock is a silent target nobody actively watches | System actively surfaces materials running short of it | Implemented (stock status, re-order list) |
 | Five parallel sheet families per category | One Material table with a `category` attribute, one transaction ledger | Implemented |
 | Anyone with the file can edit anything | Role-based access: who can issue, receive, adjust, approve POs | Implemented |
 | No traceability of who changed a balance and why | Every transaction has an actor, timestamp, and reference | Implemented (reference optional on some types) |

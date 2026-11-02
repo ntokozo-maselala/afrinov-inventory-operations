@@ -256,13 +256,19 @@ any balance below zero. It is not a setting and has no override.
 ---
 
 ### ADR-014 — Stock status by percentage of Required Stock
-**Date:** 2026-10-09 (commit b4f2839) · **Status:** Inferred from code
+**Date:** 2026-10-09 (commit b4f2839) · **Status:** Accepted (confirmed with the business 2026-11-02)
 
 **Decision:** Each item is URGENT, WARNING or OK by its total on hand (all
 locations) as a share of its Required Stock, with bands from settings
 (defaults 20% and 40%); NOT_SET when no Required Stock is set. This
 replaces a single "low stock" flag and follows the workbook's URGENCY
 column.
+
+**Confirmed:** 2026-11-02. Required Stock is the quantity to keep on hand,
+not a reorder threshold: an item is flagged when it runs short of it by the
+bands above, and an order tops it back up to it. This corrects assumption
+A-05. The application calls the field Required (Required stock) everywhere;
+it was labelled Reorder on the Materials page and in the reports.
 
 **Evidence:** `afrinov-platform/apps/backend/src/shared/inventory/stock-status.ts:1-54`.
 

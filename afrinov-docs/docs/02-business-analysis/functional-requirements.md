@@ -27,9 +27,10 @@ Traceable to Business Requirements (see `requirements-traceability-matrix.md`).
   posted transactions for a material/location, never as a directly editable
   field. *(→ BR-001, BR-012)*
   *Status:* Implemented: the balance row is recomputed from the ledger sum after every movement; no endpoint edits it.
-- **FR-INV-007** The system shall flag any material whose balance is at or
-  below its required-stock threshold. *(→ BR-007)*
-  *Status:* Implemented differently: an item is flagged URGENT or WARNING when its total on hand is *below* 20% or 40% (configurable) of Required Stock, not "at or below" the threshold itself.
+- **FR-INV-007** The system shall flag any material whose total on hand has
+  run short of its Required Stock: URGENT below 20% of it, WARNING below 40%
+  (configurable). *(→ BR-007)*
+  *Status:* Implemented. Corrected 2026-11-02 from "at or below its required-stock threshold": Required Stock is the quantity to keep on hand, not a threshold (A-05, ADR-014).
 - **FR-INV-008** The system shall track tools as checked-out-to-person state,
   distinct from consumable quantity tracking. *(→ BR-008)*
   *Status:* **Planned** — not implemented.

@@ -20,7 +20,7 @@ not a desktop spreadsheet.
 
 ## Procurement/Buyer (new role, not explicit today)
 **Responsible for:** ordering from suppliers before stock runs out.
-**Goals:** see what's below `Required Stock`; know what's already on order
+**Goals:** see what's running short of `Required Stock`; know what's already on order
 so they don't double-order; get goods receipted quickly and accurately.
 **Needs:** supplier master, PO creation, PO status tracking, receipt matching.
 

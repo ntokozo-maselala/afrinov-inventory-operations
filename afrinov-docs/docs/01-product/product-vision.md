@@ -32,8 +32,8 @@ processes that create and consume it, built to extend into adjacent domains
   in seconds, with full history — not by opening the right worksheet.
 - Every stock change is attributable to a person, a time, and a reason
   (receipt, issue, transfer, adjustment) and cannot be silently overwritten.
-- Reordering is proactive: the system flags materials below `Required Stock`
-  rather than someone noticing a rack is empty.
+- Reordering is proactive: the system flags materials running short of
+  `Required Stock` (Urgent or Warning) rather than someone noticing a rack is empty.
 - The five parallel category workbooks become one system with category as an
   attribute, not five copies of the same logic.
 - The architecture has clear seams (bounded contexts) so Procurement, Sales,

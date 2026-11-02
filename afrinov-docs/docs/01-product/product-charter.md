@@ -49,7 +49,7 @@ See `00-governance/assumptions-register.md`.
 - Zero un-traceable stock changes (every balance change has a transaction record).
 - Time to answer "what's our current stock of X and where" reduced from
   "open the right workbook and find the row" to a direct query.
-- Reorder points (`Required Stock`) actively surfaced, not manually noticed.
+- Items running short of `Required Stock` (Urgent or Warning) actively surfaced, not manually noticed.
 
 ## Initial release
 Inventory + Procurement core: Materials, Locations, Suppliers, Purchase
