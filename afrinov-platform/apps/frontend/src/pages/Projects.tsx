@@ -18,6 +18,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
 import { LeftoversNotice } from '../components/LeftoversNotice';
+import { ClosedProjectToolsNotice, ClosingProjectTools } from '../components/ProjectToolsNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
 import { PROCUREMENT_ENABLED } from '../config/features';
@@ -167,6 +168,8 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
         </Field>
       </div>
 
+      <ClosingProjectTools projectNumber={initial?.projectNumber} status={status} />
+
       <Field label="Client" htmlFor="pj-client">
         <Input id="pj-client" value={client ?? ''} onChange={(e) => setClient(e.target.value)} placeholder="Optional client name" />
       </Field>
@@ -257,6 +260,7 @@ export function Projects() {
       />
 
       <LeftoversNotice className="mb-4" />
+      <ClosedProjectToolsNotice projects={projects.data ?? []} className="mb-4" />
 
       <FilterBar
         onClear={q || statusFilter || !activeOnly ? () => { setQ(''); setStatusFilter(''); setActiveOnly(true); } : undefined}

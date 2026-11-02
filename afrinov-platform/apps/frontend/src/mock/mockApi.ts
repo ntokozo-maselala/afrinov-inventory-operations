@@ -65,6 +65,8 @@ interface State {
   projects: MockProject[];
   recipients: MockRecipient[];
   rfqs: MockRfq[];
+  /** Later due dates given to tool loans, as the backend's tool_loan_extensions. */
+  toolLoanExtensions: Array<{ id: string; loanId: string; dueOn: string; reason: string; actorId: string; createdAt: string }>;
 }
 
 let state: State = freshState();
@@ -97,6 +99,7 @@ function freshState(): State {
       { id: 'rcp-5', name: 'KTS', type: 'CONTRACTOR', active: true },
     ],
     rfqs: [],
+    toolLoanExtensions: [],
   };
 }
 
@@ -1608,6 +1611,8 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/tools') return listTools();
   if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
   if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
+  const extendMatch = p.match(/^\/tools\/loans\/([^/]+)\/extend$/);
+  if (method === 'POST' && extendMatch) return handleToolExtend(decodeURIComponent(extendMatch[1]!), (body as ToolExtendBody) ?? {});
   if (method === 'POST' && p === '/inventory-transfers') {
     const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
     return handleTransfer(b);
@@ -1945,7 +1950,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'general.defaultLandingPage': row('general.defaultLandingPage', 'by-role', 'enum', 'general', 'Where to go after sign-in. "By role" sends technicians to Issue stock and everyone else to the Dashboard.', ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders']),
 
     'inventory.urgentBelowPercent': row('inventory.urgentBelowPercent', 20, 'number', 'inventory', 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.'),
-    'inventory.toolOverdueDays': row('inventory.toolOverdueDays', 7, 'number', 'inventory', 'A tool checked out longer than this many days is overdue: flagged on the Tools page and counted on the Dashboard.'),
+    'inventory.toolOverdueDays': row('inventory.toolOverdueDays', 7, 'number', 'inventory', 'Default tool loan period, in days: a tool checked out is due back this many days later unless another due date is set at check-out. Older loans with no due date fall due this many days after they went out.'),
+    'inventory.toolMaxLoanDays': row('inventory.toolMaxLoanDays', 30, 'number', 'inventory', 'The longest a tool may be lent for, in days from check-out, extensions included. Only an administrator can set a later due date.'),
+    'inventory.toolEscalateDays': row('inventory.toolEscalateDays', 14, 'number', 'inventory', 'A tool this many days past its due date needs a decision: check it in, extend the loan or write it off as lost. Flagged on the Tools page and the Dashboard.'),
+    'inventory.toolOverdueCheckout': row('inventory.toolOverdueCheckout', 'warn', 'enum', 'inventory', 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', ['warn', 'block-contractors', 'block']),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
@@ -2230,14 +2238,49 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
 }
 
 // Tool loans, as the backend's ToolLoanService: a check-out takes a tool off
-// its location to a recipient (LOAN), a check-in brings it back (LOAN_RETURN),
-// and a lost tool comes back on paper and is written off (ADJUSTMENT, LOSS).
-interface ToolCheckOutBody { recipientId?: string; projectNumber?: string; note?: string; lines?: Array<{ materialId: string; locationId: string; quantity: number }> }
+// its location to a recipient (LOAN) until a due date, a check-in brings it
+// back (LOAN_RETURN), and a lost tool comes back on paper and is written off
+// (ADJUSTMENT, LOSS). An extension gives a loan a later due date.
+interface ToolCheckOutBody {
+  recipientId?: string; projectNumber?: string; note?: string; dueOn?: string; overrideReason?: string;
+  lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
+}
 interface ToolCheckInBody { lines?: Array<{ loanId: string; quantity: number; condition: 'GOOD' | 'DAMAGED' | 'LOST'; note?: string }> }
+interface ToolExtendBody { dueOn?: string; reason?: string }
 
 const returnedOnLoan = (loanId: string) => state.transactions
   .filter((t) => t.type === 'LOAN_RETURN' && t.referenceType === 'ToolLoan' && t.referenceId === loanId)
   .reduce((a, t) => a + Number(t.quantity), 0);
+
+const loanSetting = (key: string, fallback: number) => Number(MOCK_SETTINGS[`inventory.${key}`]?.value ?? fallback);
+const utcDay = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+const plusDays = (day: string, n: number) => utcDay(new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000));
+const daysFrom = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+const projectEndOf = (projectNumber?: string) => state.projects.find((p) => p.projectNumber === projectNumber)?.endDate?.slice(0, 10) ?? null;
+
+/** When a loan is due: its latest extension, else its own date, else the default period after it went out. */
+function loanDueOn(t: MockInventoryTransaction): string {
+  const extended = state.toolLoanExtensions.filter((e) => e.loanId === t.id).map((e) => e.dueOn).sort().at(-1);
+  return extended ?? t.dueOn ?? plusDays(utcDay(t.postedAt), loanSetting('toolOverdueDays', 7));
+}
+
+function loanState(dueOn: string, today: string) {
+  const daysLate = daysFrom(dueOn, today);
+  const state = daysLate <= -2 ? 'ON_LOAN' as const : daysLate <= 0 ? 'DUE_SOON' as const
+    : daysLate < loanSetting('toolEscalateDays', 14) ? 'OVERDUE' as const : 'NEEDS_DECISION' as const;
+  return { daysLate, state, overdue: daysLate > 0 };
+}
+
+/** Why a due date is not allowed: before today, after the project ends, or past the longest loan. */
+function dueOnProblem(dueOn: string, outDay: string, today: string, projectNumber?: string): string | null {
+  if (dueOn < today) return 'The due date cannot be before today.';
+  const end = projectEndOf(projectNumber);
+  if (end && dueOn > end && dueOn > today) return `Project ${projectNumber} ends on ${end}, so the tool is due back by then. Move the project's end date to lend it for longer.`;
+  const maxDays = loanSetting('toolMaxLoanDays', 30);
+  const limit = plusDays(outDay, maxDays);
+  if (dueOn > limit) return `A tool can be lent for at most ${maxDays} days, so it is due back by ${limit}. Only an administrator can set a later date.`;
+  return null;
+}
 
 function listTools() {
   const balances = computeBalances();
@@ -2254,14 +2297,20 @@ function listTools() {
         .map((t) => ({ t, out: -Number(t.quantity) - returnedOnLoan(t.id) }))
         .filter(({ out }) => out > 0)
         .map(({ t, out }) => ({ t, out, daysOut: Math.floor((Date.now() - new Date(t.postedAt).getTime()) / 86_400_000) }))
-        .map(({ t, out, daysOut }) => ({
-          loanId: t.id, slipId: t.issueId ?? null, recipientId: t.recipientId ?? null,
-          recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
-          projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
-          quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
-          checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
-          daysOut, overdue: daysOut > Number(MOCK_SETTINGS['inventory.toolOverdueDays']?.value ?? 7),
-        }));
+        .map(({ t, out, daysOut }) => {
+          const dueOn = loanDueOn(t);
+          return {
+            loanId: t.id, slipId: t.issueId ?? null, recipientId: t.recipientId ?? null,
+            recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
+            projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
+            quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
+            checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
+            daysOut, dueOn, ...loanState(dueOn, utcDay(new Date())),
+            extensions: state.toolLoanExtensions.filter((e) => e.loanId === t.id).map((e) => ({
+              dueOn: e.dueOn, reason: e.reason, extendedBy: mockUsers.find((u) => u.id === e.actorId)?.name ?? 'Unknown', extendedAt: e.createdAt,
+            })),
+          };
+        });
       const inStore = locations.reduce((a, l) => a + Number(l.quantity), 0);
       const onLoan = loans.reduce((a, l) => a + Number(l.out), 0);
       return {
@@ -2271,7 +2320,7 @@ function listTools() {
     });
 }
 
-function handleToolCheckOut(b: ToolCheckOutBody): { slipId: string; loanIds: string[] } {
+function handleToolCheckOut(b: ToolCheckOutBody): { slipId: string; loanIds: string[]; dueOn: string } {
   if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the tools are checked out to');
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool');
@@ -2293,17 +2342,56 @@ function handleToolCheckOut(b: ToolCheckOutBody): { slipId: string; loanIds: str
     const inStore = getBalance(t.materialId, t.locationId);
     if (inStore < t.quantity) throw err('INSUFFICIENT_BALANCE', `Cannot check out ${t.quantity} × ${material.sku}: only ${inStore} in store there.`);
   }
-  const slipId = nextId('loan');
   const postedAt = new Date().toISOString();
+  const today = utcDay(postedAt);
+  const end = projectEndOf(b.projectNumber);
+  const period = plusDays(today, Math.min(loanSetting('toolOverdueDays', 7), loanSetting('toolMaxLoanDays', 30)));
+  const dueOn = b.dueOn ?? (end && end < period ? (end < today ? today : end) : period);
+  if (b.dueOn) {
+    const problem = dueOnProblem(b.dueOn, today, today, b.projectNumber);
+    if (problem) throw err('VALIDATION_ERROR', problem);
+  }
+  const overdue = state.transactions
+    .filter((t) => t.type === 'LOAN' && t.recipientId === b.recipientId && -Number(t.quantity) - returnedOnLoan(t.id) > 0)
+    .map((t) => ({ t, ...loanState(loanDueOn(t), today) }))
+    .filter((o) => o.overdue)
+    .sort((x, y) => y.daysLate - x.daysLate);
+  if (overdue.length > 0) {
+    const listed = overdue.map((o) => `${findMaterial(o.t.materialId)?.sku} ${findMaterial(o.t.materialId)?.name}, ${o.daysLate} day${o.daysLate === 1 ? '' : 's'} late`).join('; ');
+    const has = `${recipient.name} has ${overdue.length} overdue tool${overdue.length === 1 ? '' : 's'}: ${listed}.`;
+    const policy = MOCK_SETTINGS['inventory.toolOverdueCheckout']?.value ?? 'warn';
+    const overdueLoans = overdue.map((o) => ({ loanId: o.t.id, daysLate: o.daysLate }));
+    if (policy === 'block' || (policy === 'block-contractors' && recipient.type === 'CONTRACTOR')) {
+      throw err('INVALID_STATE', `${has} Check ${overdue.length === 1 ? 'it' : 'them'} in or extend the loan before lending more.`, { overdueLoans });
+    }
+    if (!b.overrideReason?.trim()) throw err('VALIDATION_ERROR', `${has} Give a reason to lend more anyway.`, { overdueLoans, overrideReasonRequired: true });
+  }
+  const slipId = nextId('loan');
   const loanIds = lines.map((l) => {
     const id = nextId('t');
     state.transactions.push({
       id, issueId: slipId, postedAt, type: 'LOAN', materialId: l.materialId, locationId: l.locationId, quantity: String(-l.quantity),
-      actorId: 'user-1', recipientId: b.recipientId, projectNumber: b.projectNumber, reasonNote: b.note?.trim() || undefined,
+      actorId: 'user-1', recipientId: b.recipientId, projectNumber: b.projectNumber, reasonNote: b.note?.trim() || undefined, dueOn,
     });
     return id;
   });
-  return { slipId, loanIds };
+  return { slipId, loanIds, dueOn };
+}
+
+function handleToolExtend(loanId: string, b: ToolExtendBody): { loanId: string; dueOn: string; extensionId: string } {
+  const reason = b.reason?.trim();
+  if (!b.dueOn || !reason) throw err('VALIDATION_ERROR', 'A new due date and a reason are required');
+  const loan = state.transactions.find((t) => t.id === loanId);
+  if (!loan) throw err('NOT_FOUND', 'Tool check-out not found');
+  if (loan.type !== 'LOAN') throw err('INVALID_STATE', 'Only a tool check-out can be extended');
+  if (!(-Number(loan.quantity) - returnedOnLoan(loanId) > 0)) throw err('INVALID_STATE', 'This check-out is all back already, so there is nothing to extend');
+  const current = loanDueOn(loan);
+  if (b.dueOn <= current) throw err('VALIDATION_ERROR', `The new due date must be after the current one, ${current}.`);
+  const problem = dueOnProblem(b.dueOn, utcDay(loan.postedAt), utcDay(new Date()), loan.projectNumber);
+  if (problem) throw err('VALIDATION_ERROR', problem);
+  const extensionId = nextId('ext');
+  state.toolLoanExtensions.push({ id: extensionId, loanId, dueOn: b.dueOn, reason, actorId: 'user-1', createdAt: new Date().toISOString() });
+  return { loanId, dueOn: b.dueOn, extensionId };
 }
 
 function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[] } {

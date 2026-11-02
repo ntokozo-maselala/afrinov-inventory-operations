@@ -11,8 +11,8 @@ role's grants each time it runs.
 ## Roles as implemented
 | Role | Permissions |
 |---|---|
-| ADMIN | All 32 permission codes |
-| STORE_CONTROLLER | create/edit material; create/edit/delete location, manage location status; receive, issue, transfer, adjust inventory; reverse inventory transaction; manage racks, projects, recipients; order Stores stock: see, raise, edit, submit, approve (within his approval limit), cancel, close and receive orders without a project (ADR-020, ADR-021), but not project orders or RFQs; view goods receipts; view reports; view users (lookup); check out/in tool |
+| ADMIN | All 33 permission codes |
+| STORE_CONTROLLER | create/edit material; create/edit/delete location, manage location status; receive, issue, transfer, adjust inventory; reverse inventory transaction; manage racks, projects, recipients; order Stores stock: see, raise, edit, submit, approve (within his approval limit), cancel, close and receive orders without a project (ADR-020, ADR-021), but not project orders or RFQs; view goods receipts; view reports; view users (lookup); check out/in tool; extend a tool loan |
 | PROCUREMENT | create/edit supplier; view, create, submit, cancel, close project orders (those with a project, ADR-020), confirm their delivery (ADR-021), and requests for quotation; no Stores orders; receive inventory; view goods receipts; manage projects; view reports |
 | APPROVER | view and approve project orders (not Stores orders, ADR-021); view reports |
 | TECHNICIAN | issue inventory; view reports; view users (lookup); check out/in tool |
@@ -24,8 +24,11 @@ Notes on the table, against the original proposal:
   ledger like every signed-in user.
 - Only ADMIN holds `manage:users`, `manage:settings` and `view:audit_log`.
   Settings changes additionally check for the ADMIN role in the route.
-- `checkout:tool`, `checkin:tool`, `edit:supplier` and `manage:roles` are
-  granted but no endpoint checks them (TD-011, TD-013).
+- `edit:supplier` and `manage:roles` are granted but no endpoint checks them
+  (TD-011, TD-013). `checkout:tool` and `checkin:tool` are checked by the
+  Tools endpoints; `extend:tool_loan` by `POST /tools/loans/:id/extend`.
+- A tool loan due date more than `inventory.toolMaxLoanDays` after check-out
+  needs `manage:settings` (ADMIN), on check-out and on extension.
 - Reads of materials, locations, racks, projects, recipients, suppliers,
   settings and the inventory ledger need authentication only, not a
   permission (TD-014). Reports need `view:reports`, which every role has.

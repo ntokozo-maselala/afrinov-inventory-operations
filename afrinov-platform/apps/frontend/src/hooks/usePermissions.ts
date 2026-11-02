@@ -59,6 +59,7 @@ export const PERMISSION_ROLES = {
   'inventory:count': ['STORE_CONTROLLER'], // adjust:inventory (a count posts its differences as adjustments)
   'inventory:reverse': ['STORE_CONTROLLER'], // reverse:inventory_transaction
   'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
+  'tools:extend': ['STORE_CONTROLLER'], // extend:tool_loan
   'locations:manage': ['STORE_CONTROLLER'], // create/edit/delete:location, manage:location_status
   'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // manage:projects
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients

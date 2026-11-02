@@ -18,7 +18,7 @@ import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
-import { toolCheckInSchema, toolCheckOutSchema } from '../modules/inventory/tool.routes.js';
+import { toolCheckInSchema, toolCheckOutSchema, toolLoanExtendSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
   moveLeftoversSchema,
@@ -261,14 +261,20 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/tools', tag: 'Tools', summary: 'Every active tool: in store where, out on loan and with whom',
     description: 'Per tool: inStore (on the shelf, by location), onLoan, owned (in store + on loan) and its open loans '
-      + '(recipient, project, where it came from, how many were lent and how many are still out).',
+      + '(recipient, project, where it came from, how many were lent and how many are still out), each with its due date '
+      + '(dueOn), daysLate (negative while days are left), state (ON_LOAN, DUE_SOON, OVERDUE, or NEEDS_DECISION once '
+      + 'inventory.toolEscalateDays past due), overdue (past its due date) and its extensions, oldest first.',
   },
   {
     method: 'post', path: '/tools/check-out', tag: 'Tools', summary: 'Lend tools to a recipient',
     description: 'One recipient (required), an optional project and note, and up to 50 lines, booked all-or-nothing as one slip. '
       + 'Each line is a LOAN movement that takes the tool off its location. Tools only. '
-      + 'Refused with 422 INSUFFICIENT_BALANCE when fewer are in store there.',
-    permissions: [P.CheckOutTool], body: toolCheckOutSchema, success: 201, errors: [404, 422],
+      + 'Refused with 422 INSUFFICIENT_BALANCE when fewer are in store there. dueOn defaults to inventory.toolOverdueDays '
+      + 'from today, but not after the project’s end date; a chosen dueOn is refused with 400 when before today, after '
+      + 'the project ends, or more than inventory.toolMaxLoanDays away (administrators may exceed that). When the recipient '
+      + 'already has an overdue tool: 400 unless overrideReason is given (details.overdueLoans lists them), or 409 '
+      + 'INVALID_STATE when inventory.toolOverdueCheckout blocks it. Returns the slip, its loans and the due date.',
+    permissions: [P.CheckOutTool], body: toolCheckOutSchema, success: 201, errors: [404, 409, 422],
   },
   {
     method: 'post', path: '/tools/check-in', tag: 'Tools', summary: 'Take lent tools back',
@@ -276,6 +282,14 @@ export const OPERATIONS: Operation[] = [
       + 'GOOD or DAMAGED puts it back in store (LOAN_RETURN); LOST needs a note and writes it off at once '
       + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned.',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
+  },
+  {
+    method: 'post', path: '/tools/loans/:id/extend', tag: 'Tools', summary: 'Give a tool loan a later due date',
+    description: 'Recorded as an extension with its reason; the loan and its earlier dates are kept. The new date must be '
+      + 'after the current one and not before today, and is held to the same limits as at check-out (the project’s '
+      + 'end date, and inventory.toolMaxLoanDays from check-out unless an administrator). 409 when the loan is all back. '
+      + 'Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ExtendToolLoan], body: toolLoanExtendSchema, success: 201, errors: [404, 409],
   },
   {
     method: 'get', path: '/inventory-issues', tag: 'Reports', summary: 'Issued stock: issue slips with their lines, newest first',

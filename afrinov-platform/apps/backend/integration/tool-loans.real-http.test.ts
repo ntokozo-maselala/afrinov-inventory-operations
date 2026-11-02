@@ -8,7 +8,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 
-interface OpenLoan { loanId: string; slipId: string | null; recipientName: string | null; projectNumber: string | null; quantity: string; out: string; daysOut: number; overdue: boolean }
+interface OpenLoan {
+  loanId: string; slipId: string | null; recipientName: string | null; projectNumber: string | null; quantity: string; out: string; daysOut: number; overdue: boolean;
+  dueOn: string; daysLate: number; state: string; extensions: Array<{ dueOn: string; reason: string; extendedBy: string }>;
+}
+const DAY = 86_400_000;
+const day = (offset: number) => new Date(Date.now() + offset * DAY).toISOString().slice(0, 10);
 interface ToolRow { materialId: string; inStore: string; onLoan: string; owned: string; loans: OpenLoan[] }
 interface HistoryRow { id: string; type: string; quantity: string; reasonCode: string | null; issueId: string | null; recipientName: string | null }
 
@@ -46,8 +51,10 @@ describe('tool loans over real HTTP', () => {
     return m.body.id;
   }
 
+  let users = 0;
   async function newUser(role: string) {
-    const email = `it-${role.toLowerCase()}-tl-${run}@example.com`;
+    // Several tests sign in as the same role, so each user gets its own address.
+    const email = `it-${role.toLowerCase()}-tl-${++users}-${run}@example.com`;
     const password = `${role.toLowerCase()}-${run}-pass`;
     expect((await api('POST', '/users', { email, name: `IT ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
     return client(server.port, await login(server.port, email, password));
@@ -88,7 +95,9 @@ describe('tool loans over real HTTP', () => {
     expect(drill).toMatchObject({ inStore: '1', onLoan: '2', owned: '3' });
     expect(drill.loans).toEqual([expect.objectContaining({
       loanId: drillLoanId, slipId: res.body.slipId, recipientName: `IT fitter ${run}`, projectNumber, quantity: '2', out: '2', daysOut: 0, overdue: false,
+      dueOn: day(7), daysLate: -7, state: 'ON_LOAN', extensions: [],
     })]);
+    expect(res.body).toMatchObject({ dueOn: day(7) });
 
     // Both lines share the slip, and the Tool loans report lists them.
     const report = await api<HistoryRow[]>('GET', `/inventory-transactions?report=loans&materialId=${drillId}`);
@@ -167,17 +176,97 @@ describe('tool loans over real HTTP', () => {
     expect(await onShelf(drillId)).toBe('3');
   });
 
-  it('flags a tool out longer than the overdue setting', async () => {
+  it('flags a loan from before due dates once it is out longer than the default loan period', async () => {
     const res = await api<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId, lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }] });
     expect(res.status).toBe(201);
     const loanId = res.body.loanIds[0]!;
     expect((await tool(drillId)).loans.find((l) => l.loanId === loanId)).toMatchObject({ daysOut: 0, overdue: false });
 
-    // Age the loan past the default of 7 days. Only this run's own row on a test database.
-    await prisma.inventoryTransaction.update({ where: { id: loanId }, data: { postedAt: new Date(Date.now() - 10 * 86_400_000) } });
-    expect((await tool(drillId)).loans.find((l) => l.loanId === loanId)).toMatchObject({ daysOut: 10, overdue: true });
+    // Make it a loan from before due dates, out 10 days. Only this run's own row on a test database.
+    await prisma.inventoryTransaction.update({ where: { id: loanId }, data: { postedAt: new Date(Date.now() - 10 * DAY), dueOn: null } });
+    expect((await tool(drillId)).loans.find((l) => l.loanId === loanId)).toMatchObject({ daysOut: 10, overdue: true, dueOn: day(-3), daysLate: 3, state: 'OVERDUE' });
 
     expect((await api('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'GOOD' }] })).status).toBe(201);
+    expect(await onShelf(drillId)).toBe('3');
+  });
+
+  it('holds a loan on a project to the project end date, and a chosen date to the longest loan', async () => {
+    const endsSoon = `IT-TL-END-${run}`;
+    expect((await api('POST', '/projects', { projectNumber: endsSoon, name: `Ends soon ${run}`, endDate: `${day(3)}T00:00:00.000Z` })).status).toBe(201);
+    const capped = await api<{ dueOn: string; loanIds: string[] }>('POST', '/tools/check-out', {
+      recipientId, projectNumber: endsSoon, lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }],
+    });
+    expect(capped.status).toBe(201);
+    expect(capped.body.dueOn).toBe(day(3));
+
+    const tooLong = await api<{ error: { message: string } }>('POST', '/tools/check-out', {
+      recipientId, dueOn: day(45), lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }],
+    });
+    // The administrator may lend past the longest loan; the project still holds.
+    expect(tooLong.status).toBe(201);
+    const technician = await newUser('TECHNICIAN');
+    const refused = await technician<{ error: { message: string } }>('POST', '/tools/check-out', {
+      recipientId, dueOn: day(45), lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }],
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.message).toMatch(/at most 30 days/);
+
+    const loanIds = [capped.body.loanIds[0]!, (tooLong.body as unknown as { loanIds: string[] }).loanIds[0]!];
+    expect((await api('POST', '/tools/check-in', { lines: loanIds.map((loanId) => ({ loanId, quantity: 1, condition: 'GOOD' })) })).status).toBe(201);
+    expect(await onShelf(drillId)).toBe('3');
+  });
+
+  it('asks for a reason before lending more to someone with an overdue tool', async () => {
+    const late = await api<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId, lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }] });
+    const lateId = late.body.loanIds[0]!;
+    await prisma.inventoryTransaction.update({ where: { id: lateId }, data: { postedAt: new Date(Date.now() - 12 * DAY), dueOn: new Date(`${day(-5)}T00:00:00.000Z`) } });
+
+    const asked = await api<{ error: { code: string; message: string; details: { overdueLoans: Array<{ loanId: string }> } } }>('POST', '/tools/check-out', {
+      recipientId, lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }],
+    });
+    expect(asked.status).toBe(400);
+    expect(asked.body.error.message).toMatch(/has 1 overdue tool: .*5 days late\. Give a reason/);
+    expect(asked.body.error.details.overdueLoans.map((l) => l.loanId)).toEqual([lateId]);
+    expect(await onShelf(drillId)).toBe('2');
+
+    const lent = await api<{ loanIds: string[] }>('POST', '/tools/check-out', {
+      recipientId, overrideReason: 'Second crew on the boiler', lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }],
+    });
+    expect(lent.status).toBe(201);
+    expect(await onShelf(drillId)).toBe('1');
+
+    expect((await api('POST', '/tools/check-in', { lines: [lateId, lent.body.loanIds[0]!].map((loanId) => ({ loanId, quantity: 1, condition: 'GOOD' })) })).status).toBe(201);
+    expect(await onShelf(drillId)).toBe('3');
+  });
+
+  it('extends a loan for the store controller, replays a retry, and keeps the history; a technician cannot', async () => {
+    const out = await api<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId, lines: [{ materialId: drillId, locationId: rackId, quantity: 1 }] });
+    const loanId = out.body.loanIds[0]!;
+
+    const technician = await newUser('TECHNICIAN');
+    expect((await technician('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(10), reason: 'Still on site' })).status).toBe(403);
+
+    const storeman = await newUser('STORE_CONTROLLER');
+    const key = `it-extend-${run}`;
+    const first = await storeman<{ dueOn: string; extensionId: string }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(10), reason: 'Still on site' }, { 'Idempotency-Key': key });
+    expect(first.status).toBe(201);
+    const again = await storeman<{ extensionId: string }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(10), reason: 'Still on site' }, { 'Idempotency-Key': key });
+    expect(again.status).toBe(201);
+    expect(again.body.extensionId).toBe(first.body.extensionId);
+    expect(await prisma.toolLoanExtension.count({ where: { loanId } })).toBe(1);
+
+    const notLater = await storeman<{ error: { message: string } }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(9), reason: 'Shorter' });
+    expect(notLater.status).toBe(400);
+    expect(notLater.body.error.message).toBe(`The new due date must be after the current one, ${day(10)}.`);
+
+    const loan = (await tool(drillId)).loans.find((l) => l.loanId === loanId)!;
+    expect(loan).toMatchObject({ dueOn: day(10), extensions: [{ dueOn: day(10), reason: 'Still on site', extendedBy: `IT STORE_CONTROLLER ${run}` }] });
+    const audit = await prisma.auditLogEntry.findFirst({ where: { action: 'TOOL_LOAN_EXTEND', entityId: loanId } });
+    expect(audit).toMatchObject({ before: { dueOn: day(7) }, after: expect.objectContaining({ dueOn: day(10), reason: 'Still on site' }) });
+
+    expect((await api('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'GOOD' }] })).status).toBe(201);
+    const allBack = await storeman<{ error: { code: string } }>('POST', `/tools/loans/${loanId}/extend`, { dueOn: day(12), reason: 'Late' });
+    expect(allBack.status).toBe(409);
     expect(await onShelf(drillId)).toBe('3');
   });
 

@@ -38,9 +38,21 @@ export interface OpenLoan {
   /** How many were lent, and how many of them are still out. */
   quantity: string; out: string;
   checkedOutAt: string; checkedOutBy: string; note: string | null;
-  /** Whole days out, and whether that is past Settings > Inventory's overdue days. */
-  daysOut: number; overdue: boolean;
+  /** Whole days since it went out. */
+  daysOut: number;
+  /** YYYY-MM-DD it is due back: the latest extension's, else the one agreed at check-out. */
+  dueOn: string;
+  /** Days past the due date; zero on the day, negative while there are days to go. */
+  daysLate: number;
+  state: LoanState;
+  /** Past its due date (OVERDUE or NEEDS_DECISION). */
+  overdue: boolean;
+  /** Later due dates given, oldest first. */
+  extensions: Array<{ dueOn: string; reason: string; extendedBy: string; extendedAt: string }>;
 }
+
+/** ON_LOAN, DUE_SOON (due tomorrow or today), OVERDUE, or NEEDS_DECISION once far enough past due (Settings > Inventory). */
+export type LoanState = 'ON_LOAN' | 'DUE_SOON' | 'OVERDUE' | 'NEEDS_DECISION';
 
 /** A tool with what is in store where, what is out, and with whom (GET /tools). */
 export interface ToolRow {

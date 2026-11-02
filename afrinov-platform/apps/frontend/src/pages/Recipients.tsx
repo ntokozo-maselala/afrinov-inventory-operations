@@ -44,11 +44,13 @@ const TYPE_TONE: Record<RecipientType, 'brand' | 'info' | 'warning' | 'neutral'>
 // The people and places stock is issued to ("Issued To").
 export function Recipients() {
   const recipients = useApi<Recipient[]>('/recipients');
-  // Tools each recipient has out on loan, from the Tools page's list.
+  // Tools each recipient has out on loan, and how many of them are overdue, from the Tools page's list.
   const tools = useApi<ToolRow[]>('/tools');
-  const toolsOut = new Map<string, number>();
+  const toolsOut = new Map<string, ToolsOut>();
   for (const l of (tools.data ?? []).flatMap((t) => t.loans)) {
-    if (l.recipientId) toolsOut.set(l.recipientId, (toolsOut.get(l.recipientId) ?? 0) + Number(l.out));
+    if (!l.recipientId) continue;
+    const had = toolsOut.get(l.recipientId) ?? { out: 0, overdue: 0 };
+    toolsOut.set(l.recipientId, { out: had.out + Number(l.out), overdue: had.overdue + (l.overdue ? Number(l.out) : 0) });
   }
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('recipients:manage');
@@ -136,10 +138,13 @@ export function Recipients() {
   );
 }
 
+/** Tools a recipient has out, and how many of them are past their due date. */
+interface ToolsOut { out: number; overdue: number }
+
 function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut }: {
   canManage: boolean;
   canReturn: boolean;
-  toolsOut: Map<string, number>;
+  toolsOut: Map<string, ToolsOut>;
   onEdit: (r: Recipient) => void;
   onSetActive: (r: Recipient, active: boolean) => void;
 }): DataTableColumn<Recipient>[] {
@@ -148,9 +153,16 @@ function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut }: {
     { key: 'type', header: 'Type', render: (r) => <Badge tone={TYPE_TONE[r.type]}>{RECIPIENT_TYPE_LABEL[r.type]}</Badge>, width: '9rem' },
     {
       key: 'tools', header: 'Tools checked out', align: 'right' as const, width: '9rem',
-      render: (r) => (toolsOut.get(r.id)
-        ? <Link to={`/tools?q=${encodeURIComponent(r.name)}`} className="btn-link font-mono">{toolsOut.get(r.id)}</Link>
-        : <span className="text-surface-300">—</span>),
+      render: (r) => {
+        const held = toolsOut.get(r.id);
+        if (!held) return <span className="text-surface-300">—</span>;
+        return (
+          <div>
+            <Link to={`/tools?q=${encodeURIComponent(r.name)}`} className="btn-link font-mono">{held.out}</Link>
+            {held.overdue > 0 && <div className="text-xs font-medium text-danger-600">{held.overdue} overdue</div>}
+          </div>
+        );
+      },
     },
     {
       // What was issued to them this month, less returns; the report links on to each issue.
