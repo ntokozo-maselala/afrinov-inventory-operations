@@ -18,6 +18,14 @@ interface Props {
   onError: (err: ApiError) => void;
 }
 
+/** What the recipient was to a movement: who it was issued to, unless the movement says otherwise. */
+export function recipientLabel(type: string): string {
+  if (type === 'ADJUSTMENT') return 'Responsible';
+  if (type === 'LOAN' || type === 'LOAN_RETURN') return 'Checked out to';
+  if (type === 'RETURN') return 'Returned by';
+  return 'Issued to';
+}
+
 // The ledger is never edited. A mistaken movement is corrected by posting a
 // reversing entry (POST /inventory-transactions/:id/reversal).
 export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onReturned, onError }: Props) {
@@ -126,7 +134,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           )}
           {transaction.recipientName && (
             <>
-              <dt className="text-surface-500">Issued to</dt>
+              <dt className="text-surface-500">{recipientLabel(transaction.type)}</dt>
               <dd className="col-span-2">{transaction.recipientName}</dd>
             </>
           )}

@@ -2,7 +2,7 @@
 // for the date range and filters the user chose. Quantities stay numbers so
 // they can be summed per item in Excel.
 import ExcelJS from 'exceljs';
-import type { InventoryService } from './inventory.service.js';
+import { takesResponsible, type InventoryService } from './inventory.service.js';
 
 type MovementRow = Awaited<ReturnType<typeof InventoryService.queryHistory>>[number];
 
@@ -35,7 +35,10 @@ function reference(m: MovementRow): string {
   return m.referenceType ?? '';
 }
 
-export async function buildMovementsXlsx(rows: MovementRow[], meta: { scope: string; generatedAt: Date }): Promise<Buffer> {
+/** The person column, named for the report: who it was issued to, unless the report says otherwise. */
+const PERSON_HEADER: Partial<Record<string, string>> = { writeoffs: 'Responsible', loans: 'Checked out to', returned: 'Returned by' };
+
+export async function buildMovementsXlsx(rows: MovementRow[], meta: { scope: string; generatedAt: Date; report?: string }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Afrinov IMS';
   wb.created = meta.generatedAt;
@@ -60,7 +63,8 @@ export async function buildMovementsXlsx(rows: MovementRow[], meta: { scope: str
   ws.getCell('A1').font = { bold: true, size: 14 };
   ws.getCell('A2').value = `${meta.scope} · ${rows.length} movement${rows.length === 1 ? '' : 's'} · exported ${meta.generatedAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
   const header = ws.getRow(4);
-  header.values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', 'Issued to', 'Project', 'Reason', 'Note', 'Reference', 'By'];
+  const person = (meta.report && PERSON_HEADER[meta.report]) ?? 'Issued to';
+  header.values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Reason', 'Note', 'Reference', 'By'];
   header.font = { bold: true };
 
   for (const m of rows) {
@@ -73,7 +77,7 @@ export async function buildMovementsXlsx(rows: MovementRow[], meta: { scope: str
       location: m.locationName,
       quantity: Number(m.quantity),
       unit: m.unitOfMeasure,
-      to: m.recipientName ?? '',
+      to: m.recipientName ?? (meta.report === 'writeoffs' && m.reasonCode && takesResponsible(m.reasonCode) ? 'Not known' : ''),
       project: m.projectNumber ?? '',
       reason: m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '',
       note: m.reasonNote ?? '',

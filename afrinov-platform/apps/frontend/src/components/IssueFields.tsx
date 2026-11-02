@@ -31,7 +31,7 @@ export function useIssueOptions(): {
   };
 }
 
-export function RecipientSelect({ id, value, onChange, recipients, invalid, disabled, label = 'Issued to', help = 'Who is receiving the stock: a worker, machine, site or contractor.' }: {
+export function RecipientSelect({ id, value, onChange, recipients, invalid, disabled, notKnownValue, label = 'Issued to', help = 'Who is receiving the stock: a worker, machine, site or contractor.' }: {
   id: string;
   label?: string;
   help?: string;
@@ -40,11 +40,14 @@ export function RecipientSelect({ id, value, onChange, recipients, invalid, disa
   recipients: RecipientOption[];
   invalid?: boolean;
   disabled?: boolean;
+  /** Offers "Not known" with this value, for when nobody can be named. */
+  notKnownValue?: string;
 }) {
   return (
     <Field label={label} htmlFor={id} required help={help}>
       <Select id={id} required value={value} onChange={(e) => onChange(e.target.value)} invalid={invalid} disabled={disabled}>
         <option value="">— choose —</option>
+        {notKnownValue && <option value={notKnownValue}>Not known</option>}
         {TYPE_GROUP.map(([type, label]) => {
           const group = recipients.filter((r) => r.type === type);
           return group.length > 0 && (

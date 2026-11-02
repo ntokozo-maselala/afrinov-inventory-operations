@@ -90,8 +90,10 @@ export interface MovementRow {
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
+  /** Issued to, checked out to or returned by; on a write-off, who was responsible. */
   recipientId?: string | null;
   recipientName?: string | null;
+  recipientType?: string | null;
   returnedQuantity?: string | null;
   /** A return: the issue it came back from (when, which slip, from where). */
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
@@ -100,6 +102,15 @@ export interface MovementRow {
   fromPurchaseOrder?: boolean;
   /** A transfer's other leg: where the stock went to (or came from). */
   otherLocationName?: string | null;
+}
+
+/**
+ * GET /inventory-transactions/writeoffs-by-responsible: damage, loss and scrap
+ * by who was responsible (recipientId null: nobody known), valued at unit cost.
+ */
+export interface WriteoffsByResponsible {
+  currency: string;
+  totals: Array<{ recipientId: string | null; recipientName: string | null; recipientType: string | null; count: number; value: string }>;
 }
 
 /** One entry of the shop's other activity (GET /activity): counts, catalogue, user and settings changes. */

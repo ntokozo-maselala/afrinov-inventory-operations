@@ -148,3 +148,36 @@ describe('mock movements by room', () => {
     expect(roomOnly.every((t) => t.locationId === room)).toBe(true);
   });
 });
+
+describe('mock write-offs: who was responsible', () => {
+  interface Totals { currency: string; totals: Array<{ recipientId: string | null; recipientName: string | null; count: number; value: string }> }
+  const writeOff = (fresh: ReturnType<typeof createMockApi>, body: Record<string, unknown>) =>
+    fresh.post<{ transactionId: string }>('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: -2, reasonCode: 'DAMAGE', ...body });
+
+  it('refuses what the server refuses: no note, another reason, an unknown or inactive recipient', async () => {
+    const fresh = createMockApi();
+    await expect(writeOff(fresh, { recipientId: 'rcp-1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(writeOff(fresh, { reasonCode: 'OTHER', reasonNote: 'x', recipientId: 'rcp-1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(writeOff(fresh, { reasonNote: 'x', recipientId: 'rcp-missing' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('records who was responsible, filters by them or by nobody known, and totals at unit cost', async () => {
+    const fresh = createMockApi();
+    await writeOff(fresh, { reasonNote: 'Dropped off the bench', recipientId: 'rcp-1' });
+    await writeOff(fresh, { reasonCode: 'LOSS', recipientId: null });
+    const reversed = await writeOff(fresh, { quantity: -4, reasonNote: 'Crushed', recipientId: 'rcp-3' });
+    await fresh.post(`/inventory-transactions/${reversed.transactionId}/reversal`, { reason: 'Wrong item' });
+
+    const sabelo = await fresh.get<Row[]>('/inventory-transactions?report=writeoffs&recipientId=rcp-1&limit=1000');
+    expect(sabelo.map((t) => t.recipientName)).toEqual(['Sabelo']);
+    const unknown = await fresh.get<Array<{ reasonCode: string }>>('/inventory-transactions?report=writeoffs&recipientId=__none__&limit=1000');
+    expect(unknown.map((t) => t.reasonCode)).toEqual(['LOSS']);
+
+    const { currency, totals } = await fresh.get<Totals>('/inventory-transactions/writeoffs-by-responsible?locationId=loc-1');
+    expect(currency).toBe('ZAR');
+    expect(totals).toEqual([
+      { recipientId: 'rcp-1', recipientName: 'Sabelo', recipientType: 'WORKER', count: 1, value: '9.00' },
+      { recipientId: null, recipientName: null, recipientType: null, count: 1, value: '9.00' },
+    ]);
+  });
+});

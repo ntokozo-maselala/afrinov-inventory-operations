@@ -1552,6 +1552,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     for (const t of list) byType[t.type] = (byType[t.type] ?? 0) + 1;
     return { total: list.length, byType };
   }
+  if (method === 'GET' && p === '/inventory-transactions/writeoffs-by-responsible') return writeoffsByResponsible(qs);
   if (method === 'GET' && p === '/inventory-transactions/actors') {
     const ids = new Set(state.transactions.map((t) => t.actorId));
     return mockUsers.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, name: u.name })).sort((a, b) => a.name.localeCompare(b.name));
@@ -1618,8 +1619,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     return handleStockCount(body as { locationId?: string; note?: string; lines?: Array<{ materialId: string; expectedQuantity: number; countedQuantity: number; note?: string }> });
   }
   if (method === 'POST' && p === '/inventory-adjustments') {
-    const b = body as { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string };
-    return handleAdjustment(b);
+    return handleAdjustment(body as Parameters<typeof handleAdjustment>[0]);
   }
   if (method === 'GET' && p === '/inventory-returns/returnable') return handleReturnable(qs);
   if (method === 'POST' && p === '/inventory-returns') {
@@ -2492,9 +2492,20 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   return { reversalIds: reversals.map((r) => r.id) };
 }
 
-function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string }): { transactionId: string } {
+/** The write-off reasons that record who was responsible, when anyone is known. */
+const RESPONSIBLE_REASONS = new Set<string>(['DAMAGE', 'LOSS', 'SCRAP']);
+
+// Mirrors InventoryService.adjust, with who was responsible for damage, loss or scrap.
+function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string; recipientId?: string | null }): { transactionId: string } {
   if (!b.materialId || !b.locationId || !b.reasonCode) throw err('VALIDATION_ERROR', 'Invalid adjustment payload');
   if (b.quantity === 0) throw err('VALIDATION_ERROR', 'Quantity must be non-zero');
+  if (b.recipientId) {
+    if (!RESPONSIBLE_REASONS.has(b.reasonCode)) throw err('VALIDATION_ERROR', 'Only damage, loss or scrap records who was responsible.');
+    if (!b.reasonNote?.trim()) throw err('VALIDATION_ERROR', 'Say what happened when naming who was responsible.');
+    const r = state.recipients.find((x) => x.id === b.recipientId);
+    if (!r) throw err('NOT_FOUND', 'Recipient not found');
+    if (!r.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
+  }
   const balance = getBalance(b.materialId, b.locationId);
   if (b.quantity < 0 && balance < -b.quantity) {
     throw err('INSUFFICIENT_BALANCE', `Cannot adjust ${b.quantity} units: only ${balance} available.`);
@@ -2510,8 +2521,35 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
     actorId: 'user-1',
     reasonCode: b.reasonCode,
     reasonNote: b.reasonNote,
+    recipientId: b.recipientId ?? undefined,
   });
   return { transactionId: id };
+}
+
+// Mirrors InventoryService.writeoffsByResponsible: damage, loss and scrap that
+// took stock away, by who was responsible, at unit cost; reversed ones left out.
+function writeoffsByResponsible(qs: Record<string, string>) {
+  const totals = new Map<string | null, { count: number; value: number }>();
+  for (const t of filterHistory({ ...qs, report: 'writeoffs' })) {
+    if (!t.reasonCode || !RESPONSIBLE_REASONS.has(t.reasonCode) || Number(t.quantity) >= 0 || t.reversesId) continue;
+    if (state.transactions.some((r) => r.reversesId === t.id)) continue;
+    const key = t.recipientId ?? null;
+    const sum = totals.get(key) ?? { count: 0, value: 0 };
+    sum.count += 1;
+    sum.value += -Number(t.quantity) * Number(findMaterial(t.materialId)?.unitCost ?? 0);
+    totals.set(key, sum);
+  }
+  // Ties go by name, with nobody known last.
+  const byName = (a: string | null, b: string | null) => (a === null ? (b === null ? 0 : 1) : b === null ? -1 : a.localeCompare(b));
+  return {
+    currency: 'ZAR',
+    totals: [...totals.entries()]
+      .map(([id, sum]) => {
+        const r = id ? state.recipients.find((x) => x.id === id) : undefined;
+        return { recipientId: id, recipientName: r?.name ?? null, recipientType: r?.type ?? null, count: sum.count, value: sum.value.toFixed(2) };
+      })
+      .sort((a, b) => Number(b.value) - Number(a.value) || b.count - a.count || byName(a.recipientName, b.recipientName)),
+  };
 }
 
 // Mirrors StockCountService.post: all or nothing, refused when stock moved since it was shown.
@@ -2953,6 +2991,8 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (scope ? !scope.includes(t.locationId) : qs.locationId && t.locationId !== qs.locationId) return false;
       if (qs.actorId && t.actorId !== qs.actorId) return false;
       if (qs.recipientId && (qs.recipientId === '__none__' ? !!t.recipientId : t.recipientId !== qs.recipientId)) return false;
+      // As the server: on write-offs, nobody known means damage, loss or scrap with nobody named.
+      if (qs.report === 'writeoffs' && qs.recipientId === '__none__' && !RESPONSIBLE_REASONS.has(t.reasonCode ?? '')) return false;
       if (!inRange(t.postedAt)) return false;
       if (needle) {
         const m = findMaterial(t.materialId);

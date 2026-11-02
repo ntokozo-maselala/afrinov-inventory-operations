@@ -396,6 +396,47 @@ describe('InventoryService — ADR-002 invariants', () => {
     ).rejects.toThrow();
   });
 
+  describe('who was responsible for a write-off', () => {
+    const writeOff = (extra: Partial<Parameters<typeof InventoryService.adjust>[0]>) => InventoryService.adjust({
+      materialId: 'mat-1', locationId: 'loc-1', quantity: -1, reasonCode: 'DAMAGE', actorId: 'u', ...extra,
+    });
+
+    beforeEach(async () => {
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    });
+
+    it('records who was responsible on damage, loss and scrap', async () => {
+      for (const reasonCode of ['DAMAGE', 'LOSS', 'SCRAP'] as const) {
+        await writeOff({ reasonCode, reasonNote: 'Dropped off the bench', recipientId: 'user-3' });
+      }
+      expect(trxRows.slice(1).map((r) => r.recipientId)).toEqual(['user-3', 'user-3', 'user-3']);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('7');
+    });
+
+    it('records nobody when nobody is known, with or without a note', async () => {
+      await writeOff({ reasonCode: 'LOSS', recipientId: null });
+      await writeOff({ reasonCode: 'SCRAP' });
+      expect(trxRows.slice(1).map((r) => r.recipientId)).toEqual([null, null]);
+    });
+
+    it('needs a note saying what happened when someone is named', async () => {
+      await expect(writeOff({ recipientId: 'user-3' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(writeOff({ recipientId: 'user-3', reasonNote: '   ' })).rejects.toThrow(/Say what happened/);
+      expect(trxRows).toHaveLength(1);
+    });
+
+    it.each(['COUNT_VARIANCE', 'OTHER'] as const)('refuses a responsible person on %s', async (reasonCode) => {
+      await expect(writeOff({ reasonCode, reasonNote: 'x', recipientId: 'user-3' })).rejects.toThrow(/Only damage, loss or scrap/);
+      expect(trxRows).toHaveLength(1);
+    });
+
+    it('refuses an inactive or unknown recipient', async () => {
+      await expect(writeOff({ reasonNote: 'x', recipientId: 'rcp-inactive' })).rejects.toThrow(/inactive/);
+      await expect(writeOff({ reasonNote: 'x', recipientId: 'rcp-missing' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(trxRows).toHaveLength(1);
+    });
+  });
+
   // ── No negative stock ────────────────────────────────────────────────
   // A fixed rule, not a setting. A leftover row from the retired
   // inventory.enableNegativeStockPrevention setting must not switch it off.
