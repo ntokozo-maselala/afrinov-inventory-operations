@@ -15,6 +15,7 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero, ZERO } from '../../shared/decimal.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { projectForNewMaterial } from './material-section.js';
+import { recomputeBalance, storesStock } from '../../shared/inventory/balances.js';
 
 export type MaterialCategory =
   | 'FASTENERS_SLUGS_INSULATION'
@@ -52,23 +53,6 @@ export interface CreateStockItemResult {
     projectNumber: string | null;
   };
   initialTransactionId: string | null;
-}
-
-async function recomputeBalance(
-  materialId: string,
-  locationId: string,
-  tx: Prisma.TransactionClient,
-): Promise<void> {
-  const agg = await tx.inventoryTransaction.aggregate({
-    where: { materialId, locationId },
-    _sum: { quantity: true },
-  });
-  const total = agg._sum.quantity ?? ZERO;
-  await tx.inventoryBalance.upsert({
-    where: { materialId_locationId: { materialId, locationId } },
-    create: { materialId, locationId, quantity: total },
-    update: { quantity: total },
-  });
 }
 
 export const StockItemService = {
@@ -126,7 +110,7 @@ export const StockItemService = {
           },
         });
         initialTransactionId = trx.id;
-        await recomputeBalance(material.id, input.locationId!, tx);
+        await recomputeBalance(storesStock(material.id, input.locationId!), tx);
       }
 
       await tx.auditLogEntry.create({

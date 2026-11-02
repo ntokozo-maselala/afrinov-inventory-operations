@@ -181,3 +181,18 @@ describe('dropping the Rack table (racks and locations roadmap, Phase 3.3)', () 
     expect(sql).toContain("DELETE FROM \"permissions\" WHERE \"code\" = 'manage:racks'");
   });
 });
+
+describe('stock held for a project (project material through the store roadmap, Phase 1)', () => {
+  it('keys balances by project too, keeps existing stock as Stores stock, and protects a project holding stock', () => {
+    const sql = readMigration('20260101000035_stock_held_for_project');
+    // One Stores balance ('') per item and location, and one per project.
+    expect(sql).toContain('ADD COLUMN     "held_for_project" TEXT NOT NULL DEFAULT \'\'');
+    expect(sql).toContain('PRIMARY KEY ("material_id", "location_id", "held_for_project")');
+    // Movements say whose stock they are; null (Stores) for every one from before.
+    expect(sql).toContain('ALTER TABLE "inventory_transactions" ADD COLUMN     "held_for_project" TEXT;');
+    // Nothing is back-filled, so every balance keeps its quantity.
+    expect(sql).not.toMatch(/^\s*UPDATE\b/im);
+    // A project with stock held for it can't be deleted or renumbered under its balances.
+    expect(sql).toContain('REFERENCES "projects"("project_number") ON DELETE RESTRICT ON UPDATE RESTRICT');
+  });
+});

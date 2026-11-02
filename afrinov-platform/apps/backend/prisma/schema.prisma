@@ -237,7 +237,9 @@ model Project {
   createdAt     DateTime @default(now()) @map("created_at")
 
   manager             User?     @relation("ProjectManager", fields: [managerId], references: [id])
-  inventoryTransactions InventoryTransaction[]
+  inventoryTransactions InventoryTransaction[] @relation("UsedFor")
+  // Stock held for the project (see InventoryTransaction.heldForProject).
+  stockHeld           InventoryTransaction[] @relation("HeldFor")
   purchaseOrders      PurchaseOrder[]
   materials           Material[]
   rfqs                Rfq[]
@@ -640,8 +642,14 @@ model InventoryTransaction {
   // Adjustment reason (mandatory for type=ADJUSTMENT).
   reasonCode    AdjustmentReasonCode?    @map("reason_code")
   reasonNote    String?                  @map("reason_note")
-  // Project linkage (FR-REP-004).
+  // Project linkage (FR-REP-004): who the stock was used for. A Stores item
+  // issued to a project carries it, though it comes out of Stores stock.
   projectNumber String?                  @map("project_number")
+  // Whose stock it is: the project it is held for, or null for Stores stock,
+  // the store's own. Not the same as projectNumber above. A movement adds to
+  // or takes from the balance held for this project only (Project Material
+  // Through the Store Roadmap, Phase 1).
+  heldForProject String?                 @map("held_for_project")
   // Audit fields
   actorId       String                   @map("actor_id")
   postedAt      DateTime                 @default(now()) @map("posted_at")
@@ -656,7 +664,8 @@ model InventoryTransaction {
   material Material  @relation(fields: [materialId], references: [id])
   location Location  @relation(fields: [locationId], references: [id])
   actor    User      @relation(fields: [actorId], references: [id])
-  project  Project?  @relation(fields: [projectNumber], references: [projectNumber])
+  project  Project?  @relation("UsedFor", fields: [projectNumber], references: [projectNumber])
+  heldFor  Project?  @relation("HeldFor", fields: [heldForProject], references: [projectNumber], onDelete: Restrict, onUpdate: Restrict)
   recipient Recipient? @relation(fields: [recipientId], references: [id])
   pairedWith InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
   pairedBy   InventoryTransaction? @relation("TransferPair")
@@ -670,6 +679,7 @@ model InventoryTransaction {
   @@index([type])
   @@index([recipientId])
   @@index([issueId])
+  @@index([materialId, locationId, heldForProject])
   @@map("inventory_transactions")
 }
 
@@ -698,13 +708,18 @@ model ToolLoanExtension {
 model InventoryBalance {
   materialId String   @map("material_id")
   locationId String   @map("location_id")
+  // The project the stock is held for, or '' for Stores stock. Not null, so
+  // it can be part of the key: one Stores balance per item and location, and
+  // one per project. No foreign key, as the row is rebuilt from the ledger;
+  // read and write it through shared/inventory/balances.ts.
+  heldForProject String @default("") @map("held_for_project")
   quantity   Decimal  @db.Decimal(18, 4)
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
   location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
-  @@id([materialId, locationId])
+  @@id([materialId, locationId, heldForProject])
   @@index([locationId])
   @@map("inventory_balances")
 }

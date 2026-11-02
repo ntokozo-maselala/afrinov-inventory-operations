@@ -7,7 +7,7 @@ import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
+import { recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { generateGRNumber, parseReceivedAt } from '../procurement/goods-receipt.service.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
@@ -119,7 +119,7 @@ export const StockReceiptService = {
       // number is locked before stock balances, as there, so a stock receipt
       // and a receipt against an order cannot deadlock.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
-      await lockInventoryBalances(lines, tx);
+      await lockInventoryBalances(lines.map((l) => storesStock(l.materialId, l.locationId)), tx);
       const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
       if (!supplier) throw Errors.notFound('Supplier');
       if (!supplier.active) throw Errors.validation('Supplier is inactive');
@@ -177,7 +177,7 @@ export const StockReceiptService = {
       const touched = new Set(lines.map((l) => `${l.materialId}|${l.locationId}`));
       for (const key of touched) {
         const [materialId, locationId] = key.split('|') as [string, string];
-        await recomputeBalance(materialId, locationId, tx);
+        await recomputeBalance(storesStock(materialId, locationId), tx);
       }
 
       await tx.auditLogEntry.create({

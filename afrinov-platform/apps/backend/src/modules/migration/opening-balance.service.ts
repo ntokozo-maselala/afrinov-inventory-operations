@@ -12,7 +12,7 @@ import { InventoryTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
-import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
+import { recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { assertParent, lockLocationTree } from '../inventory/location.service.js';
 import type { MappedImport } from './mapping.js';
 import { PROBLEM_TEXT } from './workbook-analysis.js';
@@ -190,9 +190,10 @@ export const OpeningBalanceService = {
           });
         }
       }
-      await lockInventoryBalances(receipts, tx);
+      // Opening balances are Stores stock: leftovers take their project from the item.
+      await lockInventoryBalances(receipts.map((r) => storesStock(r.materialId, r.locationId)), tx);
       await tx.inventoryTransaction.createMany({ data: receipts });
-      for (const r of receipts) await recomputeBalance(r.materialId, r.locationId, tx);
+      for (const r of receipts) await recomputeBalance(storesStock(r.materialId, r.locationId), tx);
 
       await tx.auditLogEntry.create({
         data: {

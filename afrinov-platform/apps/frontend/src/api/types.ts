@@ -91,6 +91,8 @@ export interface CurrentStockRow {
   /** Projects material: its project, null until assigned. */
   projectNumber?: string | null;
   project?: { name: string | null; status: string } | null;
+  /** Whose stock the row is: the project it is held for, or null for Stores stock. */
+  heldForProject?: string | null;
   locationId: string; locationName: string; locationType: string;
   /** Whether the item and the location are active: stock is issued only from active ones. */
   materialActive?: boolean; locationActive?: boolean;

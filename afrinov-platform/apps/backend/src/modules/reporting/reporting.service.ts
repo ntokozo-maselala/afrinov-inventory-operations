@@ -3,6 +3,7 @@ import { prisma } from '../../shared/db.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
+import { heldForOf } from '../../shared/inventory/balances.js';
 import { categoryWhere, sectionOf, type MaterialSection } from '../inventory/material-section.js';
 
 export interface StockStatusRow {
@@ -149,7 +150,7 @@ export const ReportingService = {
     if (filter.materialId) where.materialId = filter.materialId;
     const balances = await prisma.inventoryBalance.findMany({
       where,
-      orderBy: [{ materialId: 'asc' }, { locationId: 'asc' }],
+      orderBy: [{ materialId: 'asc' }, { locationId: 'asc' }, { heldForProject: 'asc' }],
     });
 
     const materialIds = Array.from(new Set(balances.map((b) => b.materialId)));
@@ -193,6 +194,8 @@ export const ReportingService = {
           // Projects material: the project it belongs to (null until assigned).
           projectNumber: m.projectNumber,
           project: m.project ? { name: m.project.name, status: m.project.status } : null,
+          // Whose stock this row is: the project it is held for, or null for Stores stock.
+          heldForProject: heldForOf(b),
           unitOfMeasure: m.unitOfMeasure,
           requiredStock: requiredStock.toString(),
           locationId: b.locationId,
