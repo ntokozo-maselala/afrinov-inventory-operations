@@ -46,10 +46,6 @@ export function LeftoversNotice({ projectNumber, className }: { projectNumber?: 
   );
 }
 
-/** A project's items on Materials, where each item's page shows what is left of it. */
-export const projectMaterialsLink = (projectNumber: string | null) =>
-  `/materials?section=PROJECTS&project=${projectNumber ? encodeURIComponent(projectNumber) : 'none'}`;
-
 interface HeldForProject { projectNumber: string | null; name: string | null; status: string | null; items: number }
 
 const itemsText = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
@@ -101,7 +97,7 @@ export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[
               <ul className="space-y-0.5">
                 {open.map((p) => (
                   <li key={p.projectNumber}>
-                    <Link to={projectMaterialsLink(p.projectNumber)} className="btn-link">{name(p)}: {itemsText(p.items)}</Link>
+                    <Link to={leftoversLink(p.projectNumber!)} className="btn-link">{name(p)}: {itemsText(p.items)}</Link>
                   </li>
                 ))}
               </ul>

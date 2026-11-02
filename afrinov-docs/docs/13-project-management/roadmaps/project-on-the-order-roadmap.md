@@ -10,13 +10,13 @@ After this roadmap a Projects item is a plain catalogue entry ("10mm Plate"), an
 
 It amends the [Materials Sections Roadmap](materials-sections-roadmap.md), Phases 5 and 6, which put the project on the item.
 
-**Status:** Phase 1 merged as #129; Phase 2 on `feature/project-on-the-order-2`. Phases 3 and 4 not started.
+**Status:** Phase 1 merged as #129; Phase 2 in #130; Phase 3 on `feature/project-on-the-order-3`, built on #130. Phase 4 not started.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | The server takes the project from the order | M | Built (#129) |
 | 2 | Ordering screens: any Projects item on any project order | M | Built |
-| 3 | Catalogue screens: no project on the item | M | Proposed |
+| 3 | Catalogue screens: no project on the item | M | Built |
 | 4 | Docs and ADR | S | Proposed |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days.
@@ -85,12 +85,14 @@ Size M. Frontend.
 
 Size M. Frontend.
 
-- [ ] **3.1 The item form.** A new Projects item has no Project field (`MaterialForm.tsx`). Editing an existing item leaves its project as it is and doesn't offer to change it.
-- [ ] **3.2 Materials.** The "Needs a project" panel (`NeedsProjectPanel.tsx`) and the Stores tab's "N Projects items need a project" banner go. The Projects tab lists items without a Project column or Project filter; its leftovers notice stays.
-- [ ] **3.3 A Projects item's page.** Its Identity card drops Project and "No project yet". Its **Left in the store** section, shown only while leftovers exist, names the project they belong to when the item has one.
-- [ ] **3.4 Projects page.** Each project's **Materials** link becomes **Orders**, opening Procurement's purchase orders for that project (`/purchase-orders?project=`), for those who see project orders.
-- [ ] **3.5 Leftovers with no project.** Wherever they are flagged, they lead to Project leftovers to be moved to Stores, not to "Give them their projects": the Stock page's project notice (`ProjectStockNotice`), the item's **Left in the store** (Move to Stores), and the Project leftovers page itself, which shows the "no project" group like a closed project's.
-- [ ] **3.6 Older links.** `/materials?section=PROJECTS&project=…` opens the Projects tab without a filter.
+- [x] **3.1 The item form.** A new Projects item has no Project field (`MaterialForm.tsx`). Editing an existing item leaves its project as it is and doesn't offer to change it.
+- [x] **3.2 Materials.** The "Needs a project" panel (`NeedsProjectPanel.tsx`) and the Stores tab's "N Projects items need a project" banner go. The Projects tab lists items without a Project column or Project filter; its leftovers notice stays.
+- [x] **3.3 A Projects item's page.** Its Identity card drops Project and "No project yet". Its **Left in the store** section, shown only while leftovers exist, names the project they belong to when the item has one.
+- [x] **3.4 Projects page.** Each project's **Materials** link becomes **Orders**, opening Procurement's purchase orders for that project (`/purchase-orders?project=`), for those who see project orders.
+- [x] **3.5 Leftovers with no project.** Wherever they are flagged, they lead to Project leftovers to be moved to Stores, not to "Give them their projects": the Stock page's project notice (`ProjectStockNotice`), the item's **Left in the store** (Move to Stores), and the Project leftovers page itself, which shows the "no project" group like a closed project's.
+- [x] **3.6 Older links.** `/materials?section=PROJECTS&project=…` opens the Projects tab without a filter.
+
+- [x] **3.7 How it turned out.** A Projects item's page shows an **Ordering** card (bought for a project on its purchase order, which says which) in place of the Project status card from the Stores and Procurement Separation follow-up; **Left in the store** names the project and its status the leftovers were received for. An open project's leftovers on the Stock notice link to that project's leftovers page. `NeedsProjectPanel.tsx` is removed; its server call (setting an item's project) stays in the API.
 
 **Done when:** nothing asks for, or warns about, a project on a catalogue item.
 

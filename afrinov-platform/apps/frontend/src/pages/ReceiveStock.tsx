@@ -372,7 +372,11 @@ function CounterReceipt() {
   const idem = useIdempotencyKey('receive-stock');
 
   const activeSuppliers = useMemo(() => (suppliers.data ?? []).filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name)), [suppliers.data]);
-  const activeMaterials = useMemo(() => (materials.data ?? []).filter((m) => m.active).sort((a, b) => a.name.localeCompare(b.name)), [materials.data]);
+  // A Projects item with no project is refused at the counter, as its stock
+  // could never be issued, so it isn't offered (Qodo, PR #132).
+  const activeMaterials = useMemo(() => (materials.data ?? [])
+    .filter((m) => m.active && !(m.category === 'PROJECT_MATERIAL' && !m.projectNumber))
+    .sort((a, b) => a.name.localeCompare(b.name)), [materials.data]);
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
   const materialById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
   const heldAt = useHeldAt(stock.data);
@@ -576,8 +580,11 @@ function CounterReceipt() {
       )}
 
       {addingItem && (
-        <Drawer open onClose={() => setAddingItem(false)} title="New item" description="Add the item to the catalogue, then enter the quantity received on this delivery." width="md">
+        <Drawer open onClose={() => setAddingItem(false)} title="New item" description="Add the item to the catalogue as a Stores item, then enter the quantity received on this delivery." width="md">
+          {/* A new item here is Stores stock: a new Projects item has no project, so the counter can't take it. */}
           <MaterialForm
+            section="STORES"
+            fixedBy="Receive stock"
             onCancel={() => setAddingItem(false)}
             onSaved={itemAdded}
             onError={(err) => toast.error('Could not add item', err.message)}

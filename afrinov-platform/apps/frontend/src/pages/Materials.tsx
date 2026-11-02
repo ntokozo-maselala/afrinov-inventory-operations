@@ -1,7 +1,9 @@
 // The catalogue, in two sections (materials sections roadmap, Phase 2):
-// Stores, kept on the shelf and re-ordered, and Projects, bought for one
-// project. The tab and the project are in the link (?section=PROJECTS&
-// project=1369), so a project's page can link to its material.
+// Stores, kept on the shelf and re-ordered, and Projects, bought for projects.
+// The tab is in the link (?section=PROJECTS). A Projects item has no project
+// of its own: the order it is bought on says which (Project on the Order
+// Roadmap, Phase 3), so there is no project filter, column or "needs a
+// project" step; an older ?project= link opens the Projects tab.
 import { useMemo, useState, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -19,19 +21,14 @@ import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { MaterialForm } from '../components/MaterialForm';
-import { NeedsProjectPanel } from '../components/NeedsProjectPanel';
-import { Alert } from '../components/Alert';
 import { useCanManageMaterials } from '../hooks/usePermissions';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
-import { STORES_CATEGORIES, categoryLabel, needsProject, sectionOf, type MaterialSection } from '../lib/categories';
+import { STORES_CATEGORIES, categoryLabel, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 const hasPrice = (m: Material) => m.unitCost !== null && m.unitCost !== undefined && m.unitCost !== '';
-
-/** The "Project" filter's value for Projects items without a project yet. */
-const NO_PROJECT = 'none';
 
 // Which items to show. Read from ?view= so other pages can link straight to,
 // say, the active items still without a price. Required Stock is for Stores only.
@@ -49,10 +46,8 @@ const TABS: Array<{ value: MaterialSection; label: string }> = [
 ];
 
 /**
- * Render the catalog with section, project, and view filters read from the URL.
- * Defaults to Stores unless `section=PROJECTS`; `project=none` selects unassigned Projects items.
- * Projects rows sort by project number and name, with unassigned items last.
- * The add form starts with the selected section and any specific project filter.
+ * Render the catalog with section and view filters read from the URL.
+ * Defaults to Stores unless `section=PROJECTS`. The add form starts with the selected section.
  */
 export function Materials() {
   const mats = useApi<Material[]>('/materials');
@@ -60,7 +55,6 @@ export function Materials() {
   const [category, setCategory] = useState('');
   const [params, setParams] = useSearchParams();
   const section: MaterialSection = params.get('section') === 'PROJECTS' ? 'PROJECTS' : 'STORES';
-  const project = section === 'PROJECTS' ? params.get('project') ?? '' : '';
   const views = VIEWS.filter((v) => section === 'STORES' || !v.stores);
   const view = views.find((v) => v.value === (params.get('view') ?? '')) ?? views[0]!;
   /** Replace a query parameter without adding browser history; an empty value removes it. */
@@ -70,8 +64,8 @@ export function Materials() {
     return next;
   }, { replace: true });
   /**
-   * Replace the section in the URL, clear the project filter, and drop Stores-only
-   * views when switching to Projects. Stores is represented by an absent section parameter.
+   * Replace the section in the URL, and drop Stores-only views when switching
+   * to Projects. Stores is represented by an absent section parameter.
    */
   // Clicking the tab already open keeps its filters; only a real switch clears them.
   const setSection = (value: MaterialSection) => value !== section && setParams((p) => {
@@ -99,36 +93,21 @@ export function Materials() {
     STORES: (mats.data ?? []).filter((m) => sectionOf(m.category) === 'STORES').length,
     PROJECTS: (mats.data ?? []).filter((m) => sectionOf(m.category) === 'PROJECTS').length,
   }), [mats.data]);
-  // The projects that have material, for the Project filter.
-  const projectOptions = useMemo(() => {
-    const seen = new Map<string, string | null>();
-    for (const m of inSection) if (m.projectNumber) seen.set(m.projectNumber, m.project?.name ?? null);
-    return [...seen.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [inSection]);
-  const unassigned = inSection.filter((m) => !m.projectNumber).length;
-  // Projects material with no project yet, wherever the page is: it waits to be assigned (Phase 3).
-  const needingProject = (mats.data ?? []).filter(needsProject);
 
   const filtered = (() => {
     const needle = q.trim().toLowerCase();
     const rows = inSection.filter((m) => {
       if (!view.match(m)) return false;
       if (section === 'STORES' && category && m.category !== category) return false;
-      if (project === NO_PROJECT && m.projectNumber) return false;
-      if (project && project !== NO_PROJECT && m.projectNumber !== project) return false;
       if (needle) {
-        const hay = `${m.sku} ${m.name} ${m.serialNumber ?? ''} ${m.projectNumber ?? ''} ${m.project?.name ?? ''}`.toLowerCase();
+        const hay = `${m.sku} ${m.name} ${m.serialNumber ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-    // Projects material reads by project: grouped together, those without a project last.
-    if (section === 'PROJECTS') {
-      rows.sort((a, b) => (a.projectNumber ?? '￿').localeCompare(b.projectNumber ?? '￿') || a.name.localeCompare(b.name));
-    }
     return rows;
   })();
-  const filtering = !!(q || category || view.value || project);
+  const filtering = !!(q || category || view.value);
 
   return (
     <div>
@@ -136,7 +115,7 @@ export function Materials() {
         title="Materials"
         description={section === 'STORES'
           ? 'Stores material: kept on the shelf and topped up. Each item has a category, unit of measure and reorder level.'
-          : 'Projects material: bought for one project and issued to it, never re-ordered.'}
+          : 'Projects material: bought for a project on its purchase order, which says which project it is for. Never re-ordered, and not held in the store.'}
         actions={
           <RoleGuard permission="materials:manage">
             <Button variant="primary" size="sm" leadingIcon={<Icon.Plus size={14} />} onClick={() => setAdding(true)}>Add item</Button>
@@ -156,43 +135,23 @@ export function Materials() {
         ))}
       </div>
 
-      {section === 'STORES' && needingProject.length > 0 && (
-        <Alert tone="info" title={`${needingProject.length} Projects item${needingProject.length === 1 ? ' needs' : 's need'} a project`} className="mb-4">
-          Until it has one, an item keeps its stock but can&rsquo;t be issued or ordered.{' '}
-          <Link to="/materials?section=PROJECTS&project=none" className="btn-link">{canManage ? 'Give them their projects' : 'See them'}</Link>
-        </Alert>
-      )}
-
-      {section === 'PROJECTS' && canManage && needingProject.length > 0 && (
-        <NeedsProjectPanel items={needingProject} onAssigned={mats.reload} />
-      )}
-
-      {section === 'PROJECTS' && <LeftoversNotice projectNumber={project || undefined} className="mb-4" />}
+      {section === 'PROJECTS' && <LeftoversNotice className="mb-4" />}
 
       <FilterBar
-        onClear={filtering ? () => { setQ(''); setCategory(''); setParams((p) => { const next = new URLSearchParams(p); next.delete('view'); next.delete('project'); return next; }, { replace: true }); } : undefined}
+        onClear={filtering ? () => { setQ(''); setCategory(''); setParams((p) => { const next = new URLSearchParams(p); next.delete('view'); return next; }, { replace: true }); } : undefined}
         count={mats.loading ? 'Loading…' : `${filtered.length} of ${inSection.length}`}
       >
-        <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder={section === 'PROJECTS' ? 'SKU, name or project…' : 'SKU, name or serial number…'} />
+        <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder={section === 'PROJECTS' ? 'SKU or name…' : 'SKU, name or serial number…'} />
         <Field label="Show" htmlFor="materials-view" className={FILTER_WIDTH}>
           <Select id="materials-view" value={view.value} onChange={(e) => setParam('view', e.target.value)}>
             {views.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
           </Select>
         </Field>
-        {section === 'STORES' ? (
+        {section === 'STORES' && (
           <Field label="Category" htmlFor="materials-category" className={FILTER_WIDTH}>
             <Select id="materials-category" value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All categories</option>
               {STORES_CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-          </Field>
-        ) : (
-          <Field label="Project" htmlFor="materials-project" className={FILTER_WIDTH}>
-            <Select id="materials-project" value={project} onChange={(e) => setParam('project', e.target.value)}>
-              <option value="">All projects</option>
-              {projectOptions.map(([n, name]) => <option key={n} value={n}>{n}{name ? ` · ${name}` : ''}</option>)}
-              {project && project !== NO_PROJECT && !projectOptions.some(([n]) => n === project) && <option value={project}>{project}</option>}
-              {unassigned > 0 && <option value={NO_PROJECT}>No project yet ({unassigned})</option>}
             </Select>
           </Field>
         )}
@@ -211,7 +170,7 @@ export function Materials() {
           emptyState={(
             <EmptyState
               title={filtering ? 'No materials match' : section === 'STORES' ? 'No Stores materials yet' : 'No Projects materials yet'}
-              description={filtering ? 'Try clearing filters.' : section === 'STORES' ? 'Add materials to start tracking inventory.' : 'Add the material bought for a project, with the project it is for.'}
+              description={filtering ? 'Try clearing filters.' : section === 'STORES' ? 'Add materials to start tracking inventory.' : 'Add the material bought for projects. The order it is bought on says which project it is for.'}
               action={!filtering && canManage ? <Button variant="primary" onClick={() => setAdding(true)}>Add your first item</Button> : undefined}
             />
           )}
@@ -222,7 +181,6 @@ export function Materials() {
         <Drawer open onClose={() => setAdding(false)} title="Add item" description="Add a new item to the catalogue. The SKU must be unique. Receive stock records the quantity." width="md">
           <MaterialForm
             section={section}
-            projectNumber={project && project !== NO_PROJECT ? project : ''}
             onCancel={() => setAdding(false)}
             onSaved={(m) => { setAdding(false); mats.reload(); toast.success(`${m.sku} added`); }}
             onError={(err) => toast.error('Could not add item', err.message)}
@@ -261,17 +219,11 @@ function storesColumns(): DataTableColumn<Material>[] {
   ];
 }
 
-/** Return Projects table columns with project filter links or an unassigned badge. */
+/** Return Projects table columns: no project, as the order says which (Project on the Order Roadmap). */
 function projectsColumns(): DataTableColumn<Material>[] {
   return [
     skuColumn,
     nameColumn,
-    {
-      key: 'project', header: 'Project',
-      render: (m) => m.projectNumber
-        ? <Link to={`/materials?section=PROJECTS&project=${encodeURIComponent(m.projectNumber)}`} className="btn-link text-sm">{m.projectNumber}{m.project?.name ? ` · ${m.project.name}` : ''}</Link>
-        : <Badge tone="warning" dot>No project yet</Badge>,
-    },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     ...tailColumns,
   ];

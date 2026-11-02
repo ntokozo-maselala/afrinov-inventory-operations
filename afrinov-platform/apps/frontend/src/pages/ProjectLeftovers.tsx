@@ -20,8 +20,8 @@ import { api, type ApiError } from '../api/client';
 import { STORES_CATEGORIES } from '../lib/categories';
 import { formatCurrency } from '../lib/currency';
 
-interface LeftoverItem { materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string }
-interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean } | null; items: LeftoverItem[] }
+interface LeftoverItem { materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string; active?: boolean; inActiveLocation?: boolean }
+interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean; active?: boolean } | null; items: LeftoverItem[] }
 
 /** Leftovers move to a Stores category other than Tools: a tool is lent one by one, not issued. */
 const CATEGORY_OPTIONS = STORES_CATEGORIES.filter((c) => c.value !== 'TOOLS');
@@ -31,7 +31,9 @@ export function ProjectLeftovers() {
   const unassigned = !projectNumber;
   const path = unassigned ? '/materials/no-project/leftovers' : `/projects/${encodeURIComponent(projectNumber)}/leftovers`;
   const leftovers = useApi<Leftovers>(path);
-  const canMove = usePermissions().hasPermission('materials:manage');
+  const { hasPermission } = usePermissions();
+  const canMove = hasPermission('materials:manage');
+  const canIssue = hasPermission('inventory:issue');
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,12 +108,14 @@ export function ProjectLeftovers() {
                 <th scope="col">Where</th>
                 <th scope="col" className="text-right">Value</th>
                 {movable && canMove && <th scope="col">Stores category</th>}
+                {!movable && canIssue && <th scope="col"><span className="sr-only">Issue</span></th>}
               </tr>
             </thead>
             <tbody>
               {items.map((i) => (
                 <tr key={i.materialId}>
-                  <td><span className="font-mono text-xs">{i.sku}</span> {i.name}</td>
+                  {/* Each item opens its page; an open project's is issued from here (Qodo, PR #132). */}
+                  <td><Link to={`/materials/${i.materialId}`} className="btn-link"><span className="font-mono text-xs">{i.sku}</span> {i.name}</Link></td>
                   <td className="text-right font-mono">{i.onHand} {i.unitOfMeasure}</td>
                   <td className="text-meta">{i.locations}</td>
                   <td className="text-right font-mono">{i.value === null ? <span className="text-surface-300">No unit cost</span> : formatCurrency(i.value, 'ZAR')}</td>
@@ -127,6 +131,15 @@ export function ProjectLeftovers() {
                       </Select>
                     </td>
                   )}
+                  {!movable && canIssue && (
+                    <td className="text-right">
+                      {/* Issue stock refuses a deactivated item or project, so neither is offered (Qodo, PR #131). */}
+                      {/* Nor when all of it is in deactivated locations (Qodo, PR #132). */}
+                      {i.active !== false && project?.active !== false && i.inActiveLocation !== false
+                        ? <Link to={`/stock/issue?materialId=${encodeURIComponent(i.materialId)}`} className="btn-secondary btn-sm" aria-label={`Issue ${i.sku}`}>Issue</Link>
+                        : <span className="text-meta">{i.active === false ? 'Item inactive' : project?.active === false ? 'Project inactive' : 'Only in inactive locations'}</span>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -135,6 +148,7 @@ export function ProjectLeftovers() {
                 <th scope="row" colSpan={3}>{items.length} item{items.length === 1 ? '' : 's'}</th>
                 <td className="text-right font-mono">{formatCurrency(totalValue, 'ZAR')}</td>
                 {movable && canMove && <td />}
+                {!movable && canIssue && <td />}
               </tr>
             </tfoot>
           </table>

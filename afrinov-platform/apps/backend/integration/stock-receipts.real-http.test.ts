@@ -70,6 +70,18 @@ describe('receiving stock over real HTTP (procurement off)', () => {
     expect(gr).toMatchObject({ status: 'POSTED', purchaseOrderId: null, deliveryRef: `INV-${run}` });
   });
 
+  // Qodo, PR #131: a Projects item with no project isn't issued, so it isn't received either.
+  it('refuses project material with no project, which could never be issued', async () => {
+    const plain = await api<{ id: string }>('POST', '/materials', { sku: `IT-RCV-PLATE-${run}`, name: 'Plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' });
+    expect(plain.status).toBe(200);
+    const res = await api<{ error: { message: string } }>('POST', '/stock-receipts', {
+      supplierId, deliveryRef: `INV-PLATE-${run}`, lines: [{ materialId: plain.body.id, locationId: rackId, quantity: 1 }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/project material with no project, so it isn't received into the store/);
+    expect((await ledgerAndBalance(plain.body.id, rackId)).ledger).toBe('0');
+  });
+
   it('shows the supplier and invoice number on the movement', async () => {
     const history = await api<HistoryRow[]>('GET', `/inventory-transactions?materialId=${discId}`);
     const row = history.body.find((t) => t.id === firstReceipt.transactionIds[0])!;

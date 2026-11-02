@@ -4,49 +4,38 @@
 // drawer on the Materials, Material detail and Receive stock pages.
 //
 // The first choice is the section: Stores (kept on the shelf, with a category
-// and Required Stock) or Projects (bought for one project, never re-ordered).
-// Both are fixed once the item exists; an item moved in from the old Project
-// Material category without a project can be given one here. Added from an
-// order or RFQ line, the section is fixed by it (`fixedBy`) and not shown: the
-// drawer's description says what the item will be. Such a Projects item gets
-// no project of its own: the order says which project it is for (Project on
-// the Order Roadmap, Phase 2).
+// and Required Stock) or Projects (bought for projects, never re-ordered).
+// It is fixed once the item exists. Added from an order or RFQ line, the
+// section is fixed by it (`fixedBy`) and not shown: the drawer's description
+// says what the item will be. A Projects item has no project of its own: the
+// order it is bought on says which (Project on the Order Roadmap, Phase 3),
+// so the form never asks for one, nor changes one an older item was tagged with.
 import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
-import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { PROJECTS_CATEGORY, STORES_CATEGORIES, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 
 export interface CreatedMaterial { id: string; sku: string; name: string }
 
-interface ProjectOpt { projectNumber: string; name?: string | null; status?: string; active?: boolean }
-
 /** A stored decimal ("12.5000") as the user would type it ("12.5"); blank when unset. */
 const asInput = (v: string | null | undefined) => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
 
-/** Accept projects unless explicitly inactive, completed, or canceled; missing flags are allowed. */
-const isOpen = (p: ProjectOpt) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED';
-
 /**
  * Render a catalog item form that creates an item or edits `initial`.
- * Editing fixes the SKU, section, and category; a Projects item can be assigned
- * a project only while it has none. Saves call `onSaved`; save errors call `onError`.
+ * Editing fixes the SKU, section, and category. Saves call `onSaved`; save errors call `onError`.
  */
-export function MaterialForm({ initial, section: startSection = 'STORES', projectNumber: startProject = '', fixedBy, onCancel, onSaved, onError }: {
+export function MaterialForm({ initial, section: startSection = 'STORES', fixedBy, onCancel, onSaved, onError }: {
   /** The item to edit. Leave it out to add a new item. */
   initial?: Material;
   /** For a new item: the section it starts in, e.g. the Materials tab it was added from. */
   section?: MaterialSection;
-  /** For a new Projects item: the project it starts on. */
-  projectNumber?: string;
   /**
-   * What fixes the section, and a Projects item's project, for a new item,
-   * e.g. "the purchase order for 1369": the section and project given are
-   * used as they are, and their fields are left off the form.
+   * What fixes the section for a new item, e.g. "the purchase order": the
+   * section given is used as it is, and its field is left off the form.
    */
   fixedBy?: string;
   onCancel: () => void; onSaved: (material: CreatedMaterial) => void; onError: (e: ApiError) => void;
@@ -56,7 +45,6 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
   const [sku, setSku] = useState(initial?.sku ?? '');
   const [name, setName] = useState(initial?.name ?? '');
   const [category, setCategory] = useState(initial && sectionOf(initial.category) === 'STORES' ? initial.category : STORES_CATEGORIES[0]!.value);
-  const [projectNumber, setProjectNumber] = useState(initial?.projectNumber ?? startProject);
   const [unitOfMeasure, setUom] = useState(initial?.unitOfMeasure ?? 'each');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [requiredStock, setReorder] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
@@ -66,12 +54,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
   const [validation, setValidation] = useState<string | null>(null);
   const bands = useStatusBands();
   const projects = section === 'PROJECTS';
-  // A Projects item's project is fixed once it has one; one without can be given it here.
-  // A new item for an order or RFQ line takes the project it is given, or none.
-  const projectFixed = editing ? !!initial?.projectNumber : !!fixedBy;
   const sectionFixed = editing || !!fixedBy;
-  const projectList = useApi<ProjectOpt[]>(projects && !projectFixed ? '/projects?active=true' : null);
-  const openProjects = (projectList.data ?? []).filter(isOpen);
 
   /**
    * Prevent form navigation, show validation errors inline, and create or update the item.
@@ -98,14 +81,12 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
           name: name.trim(), unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost ?? null, description: description.trim() || null,
           ...(projects ? {} : { requiredStock: reorder }),
-          // A project is given only if chosen: none is needed (Qodo, PR #130).
-          ...(projects && !projectFixed && projectNumber ? { projectNumber } : {}),
           ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : {}),
         })
         : await api.post<CreatedMaterial>('/materials', {
           sku: sku.trim(), name: name.trim(), category: itemCategory, unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost, description: description.trim() || undefined,
-          ...(projects ? (projectNumber ? { projectNumber } : {}) : { requiredStock: reorder }),
+          ...(projects ? {} : { requiredStock: reorder }),
           serialNumber: itemCategory === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
         });
       onSaved(saved);
@@ -131,8 +112,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
         {editing && <p className="text-xs text-surface-500 mt-1">Fixed once the item exists.</p>}
       </fieldset>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="SKU / item code" htmlFor="m-sku" required help={fixed ?? (projects ? 'e.g. the project number first: 1369-PIPE-150NB' : undefined)}>
-          <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={projects ? 'e.g. 1369-PIPE-150NB' : 'e.g. M16-WSHR'} autoComplete="off" required invalid={missing(sku)} disabled={editing} />
+        <Field label="SKU / item code" htmlFor="m-sku" required help={fixed}>
+          <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={projects ? 'e.g. PIPE-150NB' : 'e.g. M16-WSHR'} autoComplete="off" required invalid={missing(sku)} disabled={editing} />
         </Field>
         <Field label="Unit of measure" htmlFor="m-uom" required>
           <Input id="m-uom" value={unitOfMeasure} onChange={(e) => setUom(e.target.value)} required invalid={missing(unitOfMeasure)} />
@@ -141,23 +122,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', projec
       <Field label="Item name" htmlFor="m-name" required>
         <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. M16 flat washer" required invalid={missing(name)} />
       </Field>
-      {projects ? (
-        projectFixed ? (
-          !editing ? null : (
-            <Field label="Project" htmlFor="m-project" help="Fixed once the item has its project.">
-              <Input id="m-project" value={`${initial!.projectNumber}${initial!.project?.name ? ` · ${initial!.project.name}` : ''}`} disabled />
-            </Field>
-          )
-        ) : (
-          // Optional: the order an item is bought on says which project it is for (Project on the Order Roadmap).
-          <Field label="Project" htmlFor="m-project" help="Optional. The order it is bought on says which project it is for. Only open projects are listed." error={projectList.error ? 'Couldn’t load projects. Close and reopen to try again.' : null}>
-            <Select id="m-project" value={projectNumber} onChange={(e) => setProjectNumber(e.target.value)}>
-              <option value="">{projectList.loading ? 'Loading…' : 'No project'}</option>
-              {openProjects.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` · ${p.name}` : ''}</option>)}
-            </Select>
-          </Field>
-        )
-      ) : (
+      {!projects && (
         <Field label="Category" htmlFor="m-cat" required help={fixed}>
           <Select id="m-cat" value={category} onChange={(e) => setCategory(e.target.value)} disabled={editing}>
             {STORES_CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

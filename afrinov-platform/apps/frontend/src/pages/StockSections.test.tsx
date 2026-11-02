@@ -70,8 +70,8 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
     await screen.findByText('DISC');
     // A closed project's: leftovers to move to Stores.
     expect(await screen.findByRole('link', { name: '1 item to move to Stores' })).toHaveAttribute('href', '/projects/1369/leftovers');
-    // An open project's: to its items on Materials, to be issued to it.
-    expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toHaveAttribute('href', '/materials?section=PROJECTS&project=1402');
+    // An open project's: to what is left of it, to be issued to it (Project on the Order Roadmap, Phase 3).
+    expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toHaveAttribute('href', '/projects/1402/leftovers');
     // One with no project isn't issued: it moves to Stores (Project on the Order Roadmap; Qodo, PR #129).
     expect(screen.getByText(/1 item with no project, which aren.t issued/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Move them to Stores' })).toHaveAttribute('href', '/materials/no-project/leftovers');

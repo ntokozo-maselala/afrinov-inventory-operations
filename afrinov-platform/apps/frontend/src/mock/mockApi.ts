@@ -1564,6 +1564,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const deliveryRef = b.deliveryRef?.trim();
     if (!deliveryRef) throw err('VALIDATION_ERROR', 'Enter the delivery note or invoice number');
     const receivedAt = mockReceivedAt(b.receivedAt);
+    // As the server: a Projects item with no project isn't received, as it couldn't be issued.
+    for (const l of b.lines ?? []) {
+      const m = findMaterial(l.materialId);
+      if (m && m.category === 'PROJECT_MATERIAL' && !m.projectNumber) {
+        throw err('VALIDATION_ERROR', `${m.sku} is project material with no project, so it isn't received into the store: stock with no project can't be issued.`);
+      }
+    }
     const lines = b.lines ?? [];
     if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
     if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');
@@ -1675,7 +1682,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!project) throw err('NOT_FOUND', 'Project not found');
     const closed = project.status === 'COMPLETED' || project.status === 'CANCELLED';
     if (method === 'GET' && !leftoversPath[2]) {
-      return { project: { projectNumber: project.projectNumber, name: project.name ?? null, status: project.status, closed }, items: mockLeftoverItems(projectNumber) };
+      return { project: { projectNumber: project.projectNumber, name: project.name ?? null, status: project.status, closed, active: project.active !== false }, items: mockLeftoverItems(projectNumber) };
     }
     if (method === 'POST' && leftoversPath[2]) {
       const items = (body as { items?: Array<{ materialId: string; category: string }> })?.items ?? [];
@@ -2555,7 +2562,8 @@ function mockLeftoverItems(projectNumber: string | null) {
       if (held.length === 0) return [];
       const onHand = held.reduce((sum, b) => sum + b.quantity, 0);
       return [{
-        materialId: m.id, sku: m.sku, name: m.name, unitOfMeasure: m.unitOfMeasure, onHand: String(onHand),
+        materialId: m.id, sku: m.sku, name: m.name, unitOfMeasure: m.unitOfMeasure, onHand: String(onHand), active: m.active,
+        inActiveLocation: held.some((b) => findLocation(b.locationId)?.active !== false),
         value: m.unitCost ? Math.round(onHand * Number(m.unitCost) * 100) / 100 : null,
         locations: held.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity})`).join(', '),
       }];
@@ -2862,6 +2870,8 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       locationId: l.id,
       locationName: l.name,
       locationType: l.type,
+      materialActive: m.active,
+      locationActive: l.active,
       quantity: String(b.quantity),
       ...(() => {
         const item = classifyItem((totals.get(m.id) ?? 0) + onLoanOf(m.id), required, bands);

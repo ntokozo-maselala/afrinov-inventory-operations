@@ -78,6 +78,56 @@ describe('ProjectLeftovers page', () => {
     expect(screen.queryByRole('button', { name: /Move/ })).not.toBeInTheDocument();
   });
 
+  // Qodo, PR #132: an open project's leftovers are issued to it, from here.
+  it('opens each item, and issues an open project’s leftovers, for those who issue stock', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockResolvedValue(leftovers('ACTIVE'));
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.getByRole('link', { name: /1369-PIPE Pipe 150NB/ })).toHaveAttribute('href', '/materials/p-1');
+    expect(screen.getByRole('link', { name: 'Issue 1369-PIPE' })).toHaveAttribute('href', '/stock/issue?materialId=p-1');
+  });
+
+  // Qodo, PR #131: Issue stock refuses a deactivated item or project.
+  it('offers no Issue for a deactivated item, or for a deactivated project', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockResolvedValue({ ...leftovers('ACTIVE'), items: [{ ...ITEMS[0]!, active: false }, ITEMS[1]!] });
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/projects/1369/leftovers']}>
+        <ToastProvider><Routes><Route path="/projects/:projectNumber/leftovers" element={<ProjectLeftovers />} /></Routes></ToastProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText('Pipe 150NB');
+    expect(screen.queryByRole('link', { name: 'Issue 1369-PIPE' })).not.toBeInTheDocument();
+    expect(screen.getByText('Item inactive')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Issue 1369-FLANGE' })).toBeInTheDocument();
+    unmount();
+
+    const open = leftovers('ACTIVE');
+    mockGet.mockResolvedValue({ ...open, project: { ...open.project, active: false } });
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.queryByRole('link', { name: /^Issue / })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Project inactive')).toHaveLength(2);
+  });
+
+  // Qodo, PR #132: nothing is issued from a deactivated location.
+  it('offers no Issue for an item whose stock is all in deactivated locations', async () => {
+    auth.roles = ['STORE_CONTROLLER'];
+    mockGet.mockResolvedValue({ ...leftovers('ACTIVE'), items: [{ ...ITEMS[0]!, active: true, inActiveLocation: false }, ITEMS[1]!] });
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.queryByRole('link', { name: 'Issue 1369-PIPE' })).not.toBeInTheDocument();
+    expect(screen.getByText('Only in inactive locations')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Issue 1369-FLANGE' })).toBeInTheDocument();
+  });
+
+  it('offers no Issue once the project is closed: its leftovers move to Stores', async () => {
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.queryByRole('link', { name: 'Issue 1369-PIPE' })).not.toBeInTheDocument();
+  });
+
   it('says when nothing is left', async () => {
     mockGet.mockResolvedValue(leftovers('COMPLETED', []));
     renderPage();
