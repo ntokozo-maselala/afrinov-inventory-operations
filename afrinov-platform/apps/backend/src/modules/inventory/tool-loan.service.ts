@@ -204,7 +204,8 @@ export const ToolLoanService = {
     const ids = tools.map((t) => t.id);
     if (ids.length === 0) return [];
     const [balances, loans] = await Promise.all([
-      prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }),
+      // In store means Stores stock, the only stock checked out (Qodo, PR #142).
+      prisma.inventoryBalance.findMany({ where: { materialId: { in: ids }, heldForProject: '' }, include: { location: { select: { name: true } } } }),
       prisma.inventoryTransaction.findMany({
         where: { type: InventoryTransactionType.LOAN, materialId: { in: ids } },
         include: {

@@ -7,6 +7,7 @@ import { Alert } from './Alert';
 import type { StockValue } from '../pages/Dashboard';
 import type { CurrentStockRow } from '../api/types';
 import { sectionOf } from '../lib/categories';
+import { isStoresStock } from '../lib/heldFor';
 
 export interface ProjectLeftoverCount { projectNumber: string; name: string | null; status: string; items: number }
 
@@ -62,7 +63,9 @@ const itemsText = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
 export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[]; className?: string }) {
   const byProject = new Map<string, HeldForProject & { ids: Set<string> }>();
   for (const r of rows) {
-    if (sectionOf(r.category) !== 'PROJECTS' || Number(r.quantity) <= 0) continue;
+    // Leftovers are Stores stock with the item's project; stock held for a
+    // project is that project's own, not a leftover.
+    if (sectionOf(r.category) !== 'PROJECTS' || !isStoresStock(r) || Number(r.quantity) <= 0) continue;
     const key = r.projectNumber ?? '';
     const held = byProject.get(key) ?? { projectNumber: r.projectNumber ?? null, name: r.project?.name ?? null, status: r.project?.status ?? null, items: 0, ids: new Set<string>() };
     held.ids.add(r.materialId);

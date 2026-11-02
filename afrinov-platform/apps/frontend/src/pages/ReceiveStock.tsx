@@ -1,19 +1,21 @@
 // Receive stock: the one place a delivery to the store is booked, with the
 // delivery note or invoice number and the date.
 //
-// With procurement on, every delivery is against an approved Stores order
-// (Approved or Partly received): choose the order, and its outstanding lines
-// are filled in; the receipt credits the order (POST /goods-receipts). An
-// order a delivery completes is closed from the confirmation, and one that
-// will receive nothing more can be closed with the delivery, with a reason.
-// The order's page and Order stock link here with ?order=. There is no
-// receipt without an order: the server refuses one too.
+// With procurement on, every delivery is against an approved order (Approved
+// or Partly received): the store's own, or a project's, whose stock is held
+// for that project (Project Material Through the Store Roadmap, Phase 2).
+// Choose the order, and its outstanding lines are filled in; the receipt
+// credits the order (POST /goods-receipts). A Stores order a delivery
+// completes is closed from the confirmation, and one that will receive
+// nothing more can be closed with the delivery, with a reason; a project
+// order is Procurement's to close. The order's page and Order stock link here
+// with ?order=. There is no receipt without an order: the server refuses one too.
 //
 // With procurement off there are no orders, so a delivery is a counter
 // receipt: the supplier and any number of items (POST /stock-receipts).
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { orderKindOf, orderPath } from '../lib/orderKind';
+import { orderPath } from '../lib/orderKind';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -43,11 +45,13 @@ import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
+/** An order waiting for delivery, as GET /purchase-orders/receivable gives it: no prices. */
 interface OpenOrder extends OrderForReceipt {
-  status: string; projectNumber?: string | null; expectedDeliveryDate?: string | null; supplier?: { name: string } | null;
+  status: string; projectNumber?: string | null; expectedDeliveryDate?: string | null;
+  supplier?: { name: string } | null; project?: { name: string | null } | null;
 }
 /** The delivery just booked against an order, for the confirmation above the form. */
-interface Booked { receipt: string; order: { id: string; number: string; projectNumber: null }; status: string | null }
+interface Booked { receipt: string; order: { id: string; number: string; projectNumber: string | null }; status: string | null }
 
 interface Line { key: number; materialId: string; locationId: string; quantity: string }
 
@@ -75,8 +79,11 @@ function useHeldAt(stock: CurrentStockRow[] | null | undefined) {
   }, [stock]);
 }
 
-/** Only Stores orders arrive here: project material goes from the supplier straight to site. */
-const receivable = (o: OpenOrder) => orderKindOf(o) === 'stores' && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(o.status);
+/** The store's orders and projects' alike: project material comes through the store too. */
+const receivable = (o: OpenOrder) => ['APPROVED', 'PARTIALLY_RECEIVED'].includes(o.status);
+/** "AFRI-1325 · Plant upgrade" for a project order; null for a Stores order. */
+const projectOf = (o: Pick<OpenOrder, 'projectNumber' | 'project'>) =>
+  (o.projectNumber ? `${o.projectNumber}${o.project?.name ? ` · ${o.project.name}` : ''}` : null);
 const owedLines = (o: OpenOrder) => o.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty)).length;
 
 const breadcrumb = [{ label: 'Stock', to: '/stock' }, { label: 'Receive stock' }];
@@ -97,7 +104,8 @@ export function ReceiveStock() {
 function ReceiveAgainstOrder() {
   const locations = useApi<Location[]>('/locations');
   const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
-  const orders = useApi<OpenOrder[]>('/purchase-orders?kind=stores');
+  // Every order this user receives: the store's own, and projects' (a receiving view, no prices).
+  const orders = useApi<OpenOrder[]>('/purchase-orders/receivable');
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
   const [params] = useSearchParams();
@@ -158,7 +166,7 @@ function ReceiveAgainstOrder() {
     } else {
       const order = openOrders.find((o) => o.id === orderPreset);
       if (order) chooseOrder(order.id, order);
-      else setError('That order has nothing left to receive: it may be fully received, closed, not yet approved, or not one of the store’s orders.');
+      else setError('That order has nothing left to receive: it may be fully received, closed, not yet approved, or not an order you receive.');
     }
   }
 
@@ -195,6 +203,13 @@ function ReceiveAgainstOrder() {
     orders.reload();
     stock.reload();
     let status: string | null = null;
+    // A project order is Procurement's: the store receives it, but neither
+    // opens nor closes it, so there is nothing more to read.
+    if (order.projectNumber) {
+      setBooked({ receipt: receipt.number, order: { id: order.id, number: order.number, projectNumber: order.projectNumber }, status });
+      setBusy(false);
+      return;
+    }
     try {
       status = (await api.get<{ status: string }>(`/purchase-orders/${order.id}`)).status;
       // Nothing more is coming: the order is closed, short with the reason, as Close PO
@@ -237,7 +252,7 @@ function ReceiveAgainstOrder() {
     <div>
       <PageHeader
         title="Receive stock"
-        description={'Book a delivery against one of the store’s approved orders: choose the order, then what arrived, the delivery note or invoice number and the date. The order is credited with what arrived.'}
+        description={'Book a delivery against an approved order, the store’s own or a project’s: choose the order, then what arrived, the delivery note or invoice number and the date. The order is credited with what arrived, and a project order’s stock is held for its project.'}
         breadcrumb={breadcrumb}
       />
 
@@ -253,6 +268,9 @@ function ReceiveAgainstOrder() {
       {booked && (
         <Alert tone="success" title={`Received on ${booked.receipt} against ${booked.order.number}`} className="max-w-4xl mb-4">
           <div className="space-y-2">
+            {booked.order.projectNumber && (
+              <p>The stock is held for project {booked.order.projectNumber}. Procurement closes {booked.order.number} once nothing more is to come.</p>
+            )}
             {booked.status === 'RECEIVED' && <p>Everything on {booked.order.number} has arrived. Close it once nothing more is to be done on it.</p>}
             {booked.status === 'PARTIALLY_RECEIVED' && <p>The rest of {booked.order.number} stays outstanding for its next delivery.</p>}
             {booked.status === 'CLOSED' && <p>{booked.order.number} is closed.</p>}
@@ -260,7 +278,7 @@ function ReceiveAgainstOrder() {
               {booked.status === 'RECEIVED' && (
                 <Button size="sm" variant="primary" onClick={() => void closeBookedOrder()} loading={closing}>Close {booked.order.number}</Button>
               )}
-              <Link to={orderPath(booked.order)} className="btn-secondary btn-sm">Open {booked.order.number}</Link>
+              {!booked.order.projectNumber && <Link to={orderPath(booked.order)} className="btn-secondary btn-sm">Open {booked.order.number}</Link>}
               <Button size="sm" variant="ghost" onClick={() => setBooked(null)}>Dismiss</Button>
             </div>
           </div>
@@ -272,7 +290,7 @@ function ReceiveAgainstOrder() {
 
       {nothingToReceive && (
         <Alert tone="info" title={'No approved orders are waiting for delivery'} className="max-w-4xl mb-4">
-          {'Stock comes into the store against an approved Stores order. '}
+          {'Stock comes into the store against an approved order: the store’s own, or a project’s. '}
           <Link to="/stock/orders" className="btn-link">Go to Order stock</Link>
         </Alert>
       )}
@@ -288,7 +306,9 @@ function ReceiveAgainstOrder() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field
               label="Order" htmlFor="rcv-order" required
-              help={chosenOrder?.supplier?.name ? `Supplier: ${chosenOrder.supplier.name}` : 'The store’s approved orders still waiting for delivery.'}
+              help={chosenOrder
+                ? [chosenOrder.supplier?.name && `Supplier: ${chosenOrder.supplier.name}`, projectOf(chosenOrder) && `Held for project ${projectOf(chosenOrder)}`].filter(Boolean).join(' · ') || undefined
+                : 'Approved orders still waiting for delivery: the store’s own and projects’.'}
             >
               <Select id="rcv-order" value={orderId} onChange={(e) => chooseOrder(e.target.value)} disabled={loading || !orders.data} invalid={!!error && !orderId}>
                 <option value="">{loading ? 'Loading…' : '— choose —'}</option>
@@ -296,7 +316,7 @@ function ReceiveAgainstOrder() {
                   const owed = owedLines(o);
                   return (
                     <option key={o.id} value={o.id}>
-                      {o.number}{o.supplier?.name ? ` · ${o.supplier.name}` : ''} · {owed} line{owed === 1 ? '' : 's'} outstanding{o.expectedDeliveryDate ? `, expected ${formatDate(o.expectedDeliveryDate)}` : ''}
+                      {o.number}{o.projectNumber ? ` · for ${projectOf(o)}` : ''}{o.supplier?.name ? ` · ${o.supplier.name}` : ''} · {owed} line{owed === 1 ? '' : 's'} outstanding{o.expectedDeliveryDate ? `, expected ${formatDate(o.expectedDeliveryDate)}` : ''}
                     </option>
                   );
                 })}
@@ -325,11 +345,14 @@ function ReceiveAgainstOrder() {
                   />
                 ))}
               </div>
-              <label className="flex items-center gap-2 text-sm text-surface-700 pt-1">
-                <input type="checkbox" checked={closeShort} onChange={(e) => setCloseShort(e.target.checked)} className="h-4 w-4" />
-                Nothing more is coming: close {chosenOrder.number} after this delivery
-              </label>
-              {closeShort && (
+              {/* A project order is Procurement's to close. */}
+              {!chosenOrder.projectNumber && (
+                <label className="flex items-center gap-2 text-sm text-surface-700 pt-1">
+                  <input type="checkbox" checked={closeShort} onChange={(e) => setCloseShort(e.target.checked)} className="h-4 w-4" />
+                  Nothing more is coming: close {chosenOrder.number} after this delivery
+                </label>
+              )}
+              {closeShort && !chosenOrder.projectNumber && (
                 <Field label="Why nothing more is coming" htmlFor="rcv-close-reason" required help="Kept on the order's Activity, as Close PO keeps it.">
                   <Input id="rcv-close-reason" value={closeReason} onChange={(e) => setCloseReason(e.target.value)} maxLength={500} invalid={!!error && !closeReason.trim()} />
                 </Field>

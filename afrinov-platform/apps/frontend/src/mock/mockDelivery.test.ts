@@ -1,5 +1,6 @@
-// The mock confirms a project order's delivery and refuses to receive one into
-// stock, as the server does (Stores and Procurement Separation Roadmap, Phase 3).
+// The mock receives a project order into stock held for its project, and no
+// longer confirms one, as the server does (Project Material Through the Store
+// Roadmap, Phase 2).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
@@ -41,28 +42,32 @@ describe('mock: the delivery date of a receipt', () => {
 });
 
 describe('mock: delivery of a project order', () => {
-  it('confirms what arrived, line by line, then in full', async () => {
+  type StockRow = { materialId: string; locationId: string; quantity: string; heldForProject?: string | null };
+  const heldFor = async (projectNumber: string) => (await api.get<StockRow[]>('/reports/current-stock?materialId=mat-9'))
+    .filter((r) => r.heldForProject === projectNumber).reduce((a, r) => a + Number(r.quantity), 0);
+
+  it('lists it among the orders waiting for delivery, with its project and no prices', async () => {
     const po = await approvedProjectOrder();
-    const line = po.lines[0]!.id;
-    expect((await api.post<Order>(`/purchase-orders/${po.id}/confirm-delivery`, { lines: [{ lineId: line, quantity: 1 }] })).status).toBe('PARTIALLY_RECEIVED');
-    expect(await messageOf(api.post(`/purchase-orders/${po.id}/confirm-delivery`, { lines: [{ lineId: line, quantity: 4 }] }))).toMatch(/more than the 3 still outstanding/);
-    const done = await api.post<Order>(`/purchase-orders/${po.id}/confirm-delivery`, { lines: [{ lineId: line, quantity: 3 }] });
-    expect(done.status).toBe('RECEIVED');
-    expect(Number(done.lines[0]!.receivedQty)).toBe(4);
+    const listed = (await api.get<Array<Record<string, unknown> & { id: string; lines: Array<Record<string, unknown>> }>>('/purchase-orders/receivable')).find((o) => o.id === po.id)!;
+    expect(listed).toMatchObject({ projectNumber: 'AFRI-1325', status: 'APPROVED' });
+    expect(listed.lines[0]).not.toHaveProperty('unitPrice');
   });
 
-  it('refuses to receive it into stock, by either way in', async () => {
+  it('receives it into stock held for the project, by either way in', async () => {
     const po = await approvedProjectOrder();
-    expect(await messageOf(api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' }))).toMatch(/goes from the supplier straight to site/);
-    expect(await messageOf(api.post('/goods-receipts', {
+    const before = await heldFor('AFRI-1325');
+    await api.post('/goods-receipts', {
       supplierId: 'sup-1', purchaseOrderId: po.id, post: true, lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity: 1, purchaseOrderLineId: po.lines[0]!.id }],
-    }))).toMatch(/goes from the supplier straight to site/);
+    });
+    expect(await heldFor('AFRI-1325')).toBe(before + 1);
+    expect((await api.post<Order>(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' })).status).toBe('RECEIVED');
+    expect(await heldFor('AFRI-1325')).toBe(before + 4);
   });
 
-  it("doesn't confirm a Stores order, which is received into stock", async () => {
-    const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 2, unitPrice: 5 }] });
-    const submitted = await api.post<Order>(`/purchase-orders/${po.id}/submit`, {});
-    if (submitted.status === 'PENDING_APPROVAL') await api.post(`/purchase-orders/${po.id}/approve`, {});
-    expect(await messageOf(api.post(`/purchase-orders/${po.id}/confirm-delivery`, { lines: [{ lineId: po.lines[0]!.id, quantity: 1 }] }))).toMatch(/A Stores order is received into stock/);
+  it('no longer confirms a delivery on the order, of either kind', async () => {
+    const po = await approvedProjectOrder();
+    expect(await messageOf(api.post(`/purchase-orders/${po.id}/confirm-delivery`, { lines: [{ lineId: po.lines[0]!.id, quantity: 1 }] }))).toMatch(/received into stock now/);
+    const stores = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 2, unitPrice: 5 }] });
+    expect(await messageOf(api.post(`/purchase-orders/${stores.id}/confirm-delivery`, { lines: [{ lineId: stores.lines[0]!.id, quantity: 1 }] }))).toMatch(/received into stock now/);
   });
 });

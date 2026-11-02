@@ -52,6 +52,8 @@ const COUNTER_RECEIPTS_OFF = 'Deliveries to the store are booked against an appr
 interface Balance {
   materialId: string;
   locationId: string;
+  /** The project the stock is held for, or null for Stores stock. */
+  heldForProject: string | null;
   quantity: number;
 }
 
@@ -122,8 +124,9 @@ function nextId(prefix: string): string {
 function computeBalances(): Balance[] {
   const map = new Map<string, Balance>();
   for (const t of state.transactions) {
-    const key = `${t.materialId}|${t.locationId}`;
-    const existing = map.get(key) ?? { materialId: t.materialId, locationId: t.locationId, quantity: 0 };
+    // As the server: one balance per item, location and project held for.
+    const key = `${t.materialId}|${t.locationId}|${t.heldForProject ?? ''}`;
+    const existing = map.get(key) ?? { materialId: t.materialId, locationId: t.locationId, heldForProject: t.heldForProject ?? null, quantity: 0 };
     existing.quantity += Number(t.quantity);
     map.set(key, existing);
   }
@@ -278,7 +281,7 @@ function refuseProjectMaterialOnStoresOrder(projectNumber: string | null | undef
 }
 
 // As the server: a project order goes to site, so it isn't received into stock.
-const PROJECT_DELIVERY_REFUSED = "Project material goes from the supplier straight to site, so it isn't received into stock: Procurement confirms its delivery on the order.";
+const DELIVERY_IS_RECEIVED = 'Project orders are received into stock now: the store books each delivery on Receive stock.';
 
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
@@ -1147,6 +1150,23 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (p === '/rfqs' || p.startsWith('/rfqs/')) return routeRfq(method, p, qs, body);
 
   // Purchase Orders
+  // As the server: orders waiting for delivery, in a receiving view with no
+  // prices. The mock signs in as Admin, who receives both kinds.
+  if (method === 'GET' && p === '/purchase-orders/receivable') {
+    return state.purchaseOrders
+      .filter((po) => po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED')
+      .sort((a, b) => a.number.localeCompare(b.number))
+      .map((po) => ({
+        id: po.id, number: po.number, status: po.status, supplierId: po.supplierId, projectNumber: po.projectNumber ?? null,
+        expectedDeliveryDate: po.expectedDeliveryDate ?? null,
+        supplier: { name: findSupplier(po.supplierId)?.name ?? '' },
+        project: po.projectNumber ? { name: state.projects.find((x) => x.projectNumber === po.projectNumber)?.name ?? null } : null,
+        lines: po.lines.map((l) => {
+          const m = findMaterial(l.materialId);
+          return { id: l.id, materialId: l.materialId, orderedQty: l.orderedQty, receivedQty: l.receivedQty, material: { sku: m?.sku ?? '', name: m?.name ?? '', unitOfMeasure: m?.unitOfMeasure ?? '' } };
+        }),
+      }));
+  }
   if (method === 'GET' && p === '/purchase-orders') {
     // As the server: ?awaitingMyApproval=true is the pending orders the signed-in
     // user may approve now, oldest first.
@@ -1284,52 +1304,17 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
-  // As the server (Stores and Procurement Separation Roadmap, Phase 3): project
-  // material goes from the supplier straight to site, so Procurement confirms
-  // what arrived on the order, and no stock is added.
+  // As the server (Project Material Through the Store Roadmap, Phase 2): retired,
+  // as project orders are received on Receive stock.
   if (method === 'POST' && /^\/purchase-orders\/[^/]+\/confirm-delivery$/.test(p)) {
     const id = p.slice('/purchase-orders/'.length, -'/confirm-delivery'.length);
-    const po = state.purchaseOrders.find((x) => x.id === id);
-    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.projectNumber == null) throw err('VALIDATION_ERROR', 'A Stores order is received into stock: book its delivery on Receive stock.');
-    if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', 'Only an approved or partly delivered purchase order can have its delivery confirmed');
-    const b = (body ?? {}) as { lines?: Array<{ lineId: string; quantity: number }>; deliveryRef?: string; deliveredOn?: string };
-    if (!b.lines?.length) throw err('VALIDATION_ERROR', 'Confirm what arrived on at least one line.');
-    if (b.deliveredOn && b.deliveredOn > mockToday()) throw err('VALIDATION_ERROR', 'The delivery date is still to come.');
-    const credited = new Map<string, number>();
-    for (const l of b.lines) {
-      const line = po.lines.find((x) => x.id === l.lineId);
-      if (!line) throw err('VALIDATION_ERROR', `Line ${l.lineId} is not on purchase order ${po.number}`);
-      const sku = findMaterial(line.materialId)?.sku ?? line.materialId;
-      if (credited.has(line.id)) throw err('VALIDATION_ERROR', `${sku} is given twice.`);
-      const outstanding = Math.round((Number(line.orderedQty) - Number(line.receivedQty)) * 1e4) / 1e4;
-      if (!fourDecimals(Number(l.quantity))) throw err('VALIDATION_ERROR', 'Invalid delivery confirmation');
-      if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', `Enter what arrived of ${sku}, or leave the line out.`);
-      if (Number(l.quantity) > outstanding) throw err('VALIDATION_ERROR', `${sku}: ${l.quantity} is more than the ${outstanding} still outstanding.`);
-      credited.set(line.id, Number(l.quantity));
-    }
-    const before = { status: po.status };
-    for (const line of po.lines) if (credited.has(line.id)) line.receivedQty = String(Math.round((Number(line.receivedQty) + credited.get(line.id)!) * 1e4) / 1e4);
-    const allIn = po.lines.every((line) => Number(line.receivedQty) >= Number(line.orderedQty));
-    po.status = allIn ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
-    const at = b.deliveredOn ?? mockToday();
-    if (allIn) {
-      po.deliveredAt = new Date(`${at}T00:00:00Z`).toISOString();
-      po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
-    }
-    po.history ??= [];
-    po.history.push({
-      id: nextId('audit'), action: 'PO_DELIVERY_CONFIRMED', actorId: 'u-admin', before,
-      after: { status: po.status, deliveredOn: at, deliveryRef: b.deliveryRef?.trim() || null, lines: [...credited].map(([lineId, quantity]) => ({ lineId, quantity: String(quantity) })) },
-      createdAt: new Date().toISOString(),
-    });
-    return po;
+    if (!state.purchaseOrders.some((x) => x.id === id)) throw err('NOT_FOUND', 'Purchase order not found');
+    throw err('VALIDATION_ERROR', DELIVERY_IS_RECEIVED);
   }
   if (method === 'POST' && p.endsWith('/receive')) {
     const id = p.slice('/purchase-orders/'.length, -'/receive'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.projectNumber != null) throw err('VALIDATION_ERROR', PROJECT_DELIVERY_REFUSED);
     if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive from ${po.status}`);
     const b = (body as { locationId?: string; deliveryNotes?: string }) ?? {};
     if (!b.locationId) throw err('VALIDATION_ERROR', 'locationId is required');
@@ -1356,6 +1341,7 @@ function route(method: string, path: string, body?: unknown): unknown {
           referenceId: po.id,
           postedAt: new Date().toISOString(),
           actorId: 'u-admin',
+          heldForProject: po.projectNumber ?? undefined,
         });
       }
     }
@@ -1486,7 +1472,6 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.purchaseOrderId) {
       const po = state.purchaseOrders.find((p) => p.id === b.purchaseOrderId);
       if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-      if (po.projectNumber != null) throw err('VALIDATION_ERROR', PROJECT_DELIVERY_REFUSED);
       if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive against a purchase order in status ${po.status}`);
       // As the server: every line names its order line, on this order, within what is outstanding.
       if (po.supplierId !== b.supplierId) throw err('VALIDATION_ERROR', `${po.number} is with another supplier. Choose the order's supplier, or another order.`);
@@ -2142,6 +2127,8 @@ interface IssueBody {
 }
 /** Posts a goods receipt into stock and credits its order's lines. */
 function handleReceiptPost(gr: MockGoodsReceipt): void {
+  // As the server: a delivery against a project order is held for its project.
+  const heldForProject = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId)?.projectNumber ?? undefined;
   // Post Receipt transactions and update PO receivedQty.
   for (const line of gr.lines) {
     state.transactions.push({
@@ -2154,6 +2141,7 @@ function handleReceiptPost(gr: MockGoodsReceipt): void {
       actorId: 'user-1',
       referenceType: 'GoodsReceipt',
       referenceId: gr.id,
+      heldForProject,
     });
     if (line.purchaseOrderLineId) {
       const po = state.purchaseOrders.find((p) => p.id === gr.purchaseOrderId);
@@ -2308,7 +2296,8 @@ function dueOnProblem(dueOn: string, outDay: string, today: string, projectNumbe
 }
 
 function listTools() {
-  const balances = computeBalances();
+  // As the server: in store means Stores stock.
+  const balances = computeBalances().filter((b) => !b.heldForProject);
   return state.materials
     .filter((m) => m.category === 'TOOLS' && m.active)
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -2558,7 +2547,7 @@ function handleReturn(id: string, b: { quantity?: number; locationId?: string; r
   const transactionId = nextId('t');
   state.transactions.push({
     id: transactionId, postedAt: new Date().toISOString(), type: 'RETURN', materialId: issue.materialId, locationId,
-    quantity: String(qty), actorId: 'user-1', recipientId: issue.recipientId, projectNumber: issue.projectNumber,
+    quantity: String(qty), actorId: 'user-1', recipientId: issue.recipientId, projectNumber: issue.projectNumber, heldForProject: issue.heldForProject,
     reasonNote: b.reason?.trim() || undefined, referenceType: 'Return', referenceId: issue.id,
   });
   return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - qty) };
@@ -2627,7 +2616,7 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   }
   for (const leg of legs) {
     const qty = Number(leg.quantity);
-    const balance = getBalance(leg.materialId, leg.locationId);
+    const balance = getBalance(leg.materialId, leg.locationId, leg.heldForProject ?? null);
     if (qty > 0 && balance < qty) {
       throw err('INSUFFICIENT_BALANCE', `Cannot reverse: only ${balance} of the ${qty} units are still in stock.`);
     }
@@ -2752,7 +2741,8 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
 
 /** Projects material still in stock for a project, or with no project (null), by SKU. */
 function mockLeftoverItems(projectNumber: string | null) {
-  const balances = computeBalances().filter((b) => b.quantity > 0);
+  // As the server: leftovers are Stores stock, not stock held for a project.
+  const balances = computeBalances().filter((b) => b.quantity > 0 && !b.heldForProject);
   return state.materials
     .filter((m) => m.category === 'PROJECT_MATERIAL' && (m.projectNumber ?? null) === projectNumber)
     .sort((a, b) => a.sku.localeCompare(b.sku))
@@ -2809,9 +2799,10 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
   return { moved: items.length };
 }
 
-function getBalance(materialId: string, locationId: string): number {
+/** Stores stock of an item at a location, unless a project is given. */
+function getBalance(materialId: string, locationId: string, heldForProject: string | null = null): number {
   return state.transactions
-    .filter((t) => t.materialId === materialId && t.locationId === locationId)
+    .filter((t) => t.materialId === materialId && t.locationId === locationId && (t.heldForProject ?? null) === heldForProject)
     .reduce((acc, t) => acc + Number(t.quantity), 0);
 }
 
@@ -2966,7 +2957,8 @@ function onOrderOf(materialId: string) {
 }
 
 function computeStockStatus(filter: { status?: StockStatus[]; category?: string; section?: 'STORES' | 'PROJECTS' | 'ALL' }) {
-  const balances = computeBalances();
+  // As the server: status, reorder and value count Stores stock, not stock held for a project.
+  const balances = computeBalances().filter((b) => !b.heldForProject);
   const bands = mockBands();
   const order: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
   // As the server: re-ordering is for Stores, so Projects material is left out unless asked for.
@@ -3064,8 +3056,9 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
   const balances = computeBalances();
   const bands = mockBands();
   const alertsOn = MOCK_SETTINGS['inventory.enableStockAlerts']?.value !== false;
+  // As the server: an item's status counts its Stores stock only.
   const totals = new Map<string, number>();
-  for (const b of balances) totals.set(b.materialId, (totals.get(b.materialId) ?? 0) + b.quantity);
+  for (const b of balances) if (!b.heldForProject) totals.set(b.materialId, (totals.get(b.materialId) ?? 0) + b.quantity);
   const matMap = new Map(state.materials.map((m) => [m.id, m]));
   const locMap = new Map(state.locations.map((l) => [l.id, l]));
   const rows: MockStockRow[] = [];
@@ -3084,6 +3077,7 @@ function computeCurrentStock(qs: Record<string, string>): MockStockRow[] {
       category: m.category,
       projectNumber: m.projectNumber ?? null,
       project: projectInfo(m.projectNumber),
+      heldForProject: b.heldForProject,
       unitOfMeasure: m.unitOfMeasure,
       requiredStock: String(required),
       locationId: l.id,

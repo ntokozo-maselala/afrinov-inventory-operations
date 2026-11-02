@@ -193,6 +193,8 @@ export interface MockInventoryTransaction {
   reasonCode?: AdjustmentReasonCode;
   reasonNote?: string;
   projectNumber?: string;
+  /** Whose stock it is: the project it is held for; absent for Stores stock. */
+  heldForProject?: string;
   referenceType?: string;
   referenceId?: string;
   pairedWithId?: string;
@@ -206,6 +208,8 @@ export interface MockInventoryTransaction {
 }
 
 export interface MockStockRow {
+  /** Whose stock the row is: the project it is held for, or null for Stores stock. */
+  heldForProject?: string | null;
   materialId: string;
   materialSku: string;
   materialName: string;

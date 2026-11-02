@@ -13,7 +13,6 @@ import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { PROJECT_DELIVERY_REFUSED } from '../procurement/procurement.service.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -536,6 +535,9 @@ export const InventoryService = {
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
+      // Whose stock moved: the project it is held for, or null for Stores stock.
+      // Not projectNumber, which says who the stock was used for.
+      heldForProject: t.heldForProject,
       referenceType: t.referenceType,
       referenceId: t.referenceId,
       reversesId: t.reversesId,
@@ -881,12 +883,12 @@ export const InventoryService = {
       const alertsOn = await SettingsService.getValue<boolean>('inventory.enableStockAlerts', tx);
       for (const t of totals.values()) await recomputeBalance(t, tx);
       if (alertsOn) {
-        // The item's status from its total across locations, as the stock status report shows it.
+        // The item's status from its Stores total across locations, as the stock status report shows it.
         const bands = await getStatusBands(tx);
         for (const materialId of new Set([...totals.values()].map((t) => t.materialId))) {
           const material = materials.get(materialId);
           if (!material) continue;
-          const all = await tx.inventoryBalance.aggregate({ where: { materialId }, _sum: { quantity: true } });
+          const all = await tx.inventoryBalance.aggregate({ where: { materialId, heldForProject: '' }, _sum: { quantity: true } });
           if (needsAttention(classifyItem(Number(all._sum.quantity ?? 0), Number(material.requiredStock), bands).status)) {
             events.push({ type: 'StockThresholdReached', materialId });
           }
@@ -1128,19 +1130,21 @@ export const InventoryService = {
       // Postings against one order wait for each other, so each reads the
       // status the last one left and its Activity entry shows the real
       // transition.
+      let po: { projectNumber: string | null; status: string } | null = null;
       if (gr.purchaseOrderId) {
         await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${gr.purchaseOrderId} FOR UPDATE`;
+        po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId }, select: { projectNumber: true, status: true } });
       }
       await lockPurchaseOrderLines(gr.lines.map((line) => line.purchaseOrderLineId).filter((id): id is string => Boolean(id)), tx);
-      await lockInventoryBalances(gr.lines.map((line) => storesStock(line.materialId, line.locationId)), tx);
+      // A delivery against a project order is held for that project; any
+      // other is Stores stock (Project Material Through the Store Roadmap).
+      const heldForProject = po?.projectNumber ?? null;
+      const stockOf = (line: { materialId: string; locationId: string }) => ({ materialId: line.materialId, locationId: line.locationId, heldForProject });
+      await lockInventoryBalances(gr.lines.map(stockOf), tx);
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
       // The order may have been cancelled or closed since the receipt was recorded.
       if (gr.purchaseOrderId) {
-        const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
-        // Project material goes to site, never into stock: a receipt saved
-        // against a project order (before that rule, too) isn't posted.
-        if (po && po.projectNumber != null) throw Errors.validation(PROJECT_DELIVERY_REFUSED);
         if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
           throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
         }
@@ -1179,6 +1183,7 @@ export const InventoryService = {
             referenceType: 'GoodsReceipt',
             referenceId: gr.id,
             actorId: input.actorId,
+            heldForProject,
           },
         });
 
@@ -1204,7 +1209,7 @@ export const InventoryService = {
           }
         }
 
-        await recomputeBalance(storesStock(line.materialId, line.locationId), tx);
+        await recomputeBalance(stockOf(line), tx);
       }
 
       await tx.goodsReceipt.update({

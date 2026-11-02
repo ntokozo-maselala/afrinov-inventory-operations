@@ -192,3 +192,23 @@ describe('MaterialDetail stock held for a project', () => {
     expect(within(table).getByText('A-1 · held for AFRI-1325')).toBeInTheDocument();
   });
 });
+
+// Project Material Through the Store Roadmap, Phase 2: a Projects item's stock
+// received against a project order is that project's, not a leftover.
+describe('MaterialDetail Projects item received for a project', () => {
+  beforeEach(() => {
+    perms.manage = true;
+    material = { ...DISC, id: 'm-1', category: 'PROJECT_MATERIAL', projectNumber: null, requiredStock: '0' };
+    stock = [{ ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '6', heldForProject: 'AFRI-1325' }];
+    mockGet.mockReset();
+    mockPatch.mockReset();
+  });
+
+  it('lists it as held for the project, and offers no move to Stores', async () => {
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'In the store for projects' });
+    expect(within(table).getByText('AFRI-1325')).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Left in the store' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
+  });
+});

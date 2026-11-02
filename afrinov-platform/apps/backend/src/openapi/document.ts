@@ -488,6 +488,12 @@ export const OPERATIONS: Operation[] = [
     query: listPOQuerySchema, errors: [400, 403],
   },
   {
+    method: 'get', path: '/purchase-orders/receivable', tag: 'Purchase orders', summary: 'Orders waiting for delivery that you receive',
+    description: 'APPROVED and PARTIALLY_RECEIVED orders, for Receive stock: Stores orders to those with `order:stores_stock`, project orders to those with `receive:purchase_order`. '
+      + 'A receiving view: the supplier, the project, and each line\'s item with what is ordered and received so far; no prices, approvals or RFQ. Empty for anyone who receives neither kind.',
+    procurement: true, permissions: [P.ReceiveInventory], errors: [403],
+  },
+  {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
     description: 'A Stores order (no project) needs `order:stores_stock`, a project order `view:purchase_order`; to anyone without it the order is not found (404), and so are its history and approval.',
     procurement: true, errors: [403, 404],
@@ -527,16 +533,15 @@ export const OPERATIONS: Operation[] = [
     summary: 'Receive everything still outstanding',
     description: 'Receives each line\'s outstanding quantity into the given location and marks the order RECEIVED. '
       + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts. '
-      + 'A Stores order only (also needs `order:stores_stock`): a project order goes to site, so it is refused (400) and its delivery is confirmed instead.',
-    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [400, 404, 409],
+      + 'A Stores order also needs `order:stores_stock`. A project order\'s stock is held for its project. To anyone who receives neither kind the order is not found (404).',
+    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [400, 403, 404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/confirm-delivery', tag: 'Purchase orders',
-    summary: 'Confirm what arrived on site against a project order',
-    description: 'Project material goes from the supplier straight to site, so no stock is added: each line is credited with what arrived, '
-      + 'and the order moves to PARTIALLY_RECEIVED, or RECEIVED once nothing is outstanding. A project order only (400 for a Stores order); '
-      + 'allowed when APPROVED or PARTIALLY_RECEIVED. A quantity may not exceed what is outstanding.',
-    procurement: true, permissions: [P.CreatePurchaseOrder], body: confirmDeliverySchema, errors: [400, 404, 409],
+    summary: 'Retired: project orders are received on Receive stock',
+    description: 'Project material comes through the store, so a project order\'s delivery is received into stock held for the project (POST /goods-receipts). '
+      + 'This refuses every request (400), pointing there; confirmations made before stay on the order\'s Activity.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: confirmDeliverySchema, errors: [400, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/close', tag: 'Purchase orders', summary: 'Close an order that will receive nothing more',
@@ -558,8 +563,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED), or with post: true record and post it in one step',
-    description: 'Against an approved Stores order (purchaseOrderId is required: a receipt with no order is refused with 400). '
-      + 'Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
+    description: 'Against an approved order (purchaseOrderId is required: a receipt with no order is refused with 400): a Stores order needs `order:stores_stock`, '
+      + 'a project order `receive:purchase_order`, and its stock is held for the order\'s project. Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
       + 'refused with 400 if still to come). Retry-safe with an Idempotency-Key header, as Receive stock sends: a '
       + 'repeat replays the first receipt, and the same key with other details is refused with 409.',
     procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404, 409],

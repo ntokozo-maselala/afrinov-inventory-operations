@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
-import { PROJECT_DELIVERY_REFUSED, RECEIVABLE_STATUSES } from './procurement.service.js';
+import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -122,8 +122,6 @@ export const GoodsReceiptService = {
         include: { lines: { include: { material: { select: { sku: true } } } } },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      // Project material goes to site, not into stock: its delivery is confirmed on the order.
-      if (po.projectNumber != null) throw Errors.validation(PROJECT_DELIVERY_REFUSED);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
       }

@@ -125,6 +125,8 @@ export interface MovementRow {
   /** Null on a tool loan due date change (type DUE_DATE_CHANGE): no stock moved. */
   quantity: string | null; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
+  /** Whose stock moved: the project it is held for, or null for Stores stock (not who it was used for). */
+  heldForProject?: string | null;
   referenceType?: string | null; referenceId?: string | null;
   reversesId?: string | null; reversedById?: string | null;
   /** Issued to, checked out to or returned by; on a write-off, who was responsible. */

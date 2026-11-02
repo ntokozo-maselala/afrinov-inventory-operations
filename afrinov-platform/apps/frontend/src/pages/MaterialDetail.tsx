@@ -20,7 +20,7 @@ import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
 import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
-import { balanceKey, locationWithHolder } from '../lib/heldFor';
+import { balanceKey, isStoresStock, locationWithHolder } from '../lib/heldFor';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -73,6 +73,10 @@ export function MaterialDetail() {
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
+  // A Projects item's stock: leftovers (Stores stock, from before project
+  // material came through the store) apart from stock held for a project.
+  const leftoverRows = (stock.data ?? []).filter((r) => isStoresStock(r) && Number(r.quantity) > 0);
+  const heldRows = (stock.data ?? []).filter((r) => !isStoresStock(r) && Number(r.quantity) > 0);
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;
@@ -195,8 +199,25 @@ export function MaterialDetail() {
 
           <div className="lg:col-span-2 space-y-6">
             {!storesItem ? (
-              // Received before project material went straight to site: shown only while some is left.
-              total > 0 && (
+              <>
+              {/* Received into the store for a project, against its order: that project's own stock. */}
+              {heldRows.length > 0 && (
+                <section>
+                  <SectionHeader title="In the store for projects" description="Received against project orders and held for each project." />
+                  <DataTable
+                    ariaLabel="In the store for projects"
+                    rowKey={balanceKey}
+                    rows={heldRows}
+                    columns={[
+                      { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                      { key: 'project', header: 'Held for', render: (r) => r.heldForProject },
+                      { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
+                    ]}
+                  />
+                </section>
+              )}
+              {/* Received before project material went straight to site: shown only while some is left. */}
+              {leftoverRows.length > 0 && (
                 <section>
                   <SectionHeader
                     title="Left in the store"
@@ -215,14 +236,15 @@ export function MaterialDetail() {
                   <DataTable
                     ariaLabel="Left in the store"
                     rowKey={balanceKey}
-                    rows={(stock.data ?? []).filter((r) => Number(r.quantity) > 0)}
+                    rows={leftoverRows}
                     columns={[
-                      { key: 'loc', header: 'Location', render: locationWithHolder },
+                      { key: 'loc', header: 'Location', render: (r) => r.locationName },
                       { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
                     ]}
                   />
                 </section>
-              )
+              )}
+              </>
             ) : (
             <section>
               <SectionHeader title="Stock by location" description="Current balance for this material at each location." />
