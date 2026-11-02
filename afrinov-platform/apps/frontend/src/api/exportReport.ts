@@ -227,7 +227,7 @@ async function buildXlsxInBrowser(report: ReportResult): Promise<ArrayBuffer> {
     { header: 'Category', key: 'category', width: 28 },
     { header: 'UoM', key: 'uom', width: 10 },
     { header: 'Quantity', key: 'quantity', width: 12 },
-    { header: 'Reorder', key: 'reorder', width: 12 },
+    { header: 'Required', key: 'required', width: 12 },
     { header: 'Unit cost', key: 'unitCost', width: 14 },
     { header: 'Inventory value', key: 'value', width: 18 },
     { header: 'Status', key: 'status', width: 14 },
@@ -337,7 +337,7 @@ function buildPdfInBrowser(report: ReportResult): ArrayBuffer {
   }
   add(`Inventory requiring attention (${report.exceptions.length})`);
   for (const l of report.exceptions) {
-    add(`  ${l.sku.padEnd(20)} ${l.name.slice(0, 30).padEnd(30)} ${l.locationName.slice(0, 16).padEnd(16)} on-hand=${fmtQty(l.quantity).padStart(8)} reorder=${fmtQty(l.requiredStock).padStart(8)} [${stLabel(l.status)}]`);
+    add(`  ${l.sku.padEnd(20)} ${l.name.slice(0, 30).padEnd(30)} ${l.locationName.slice(0, 16).padEnd(16)} on-hand=${fmtQty(l.quantity).padStart(8)} required=${fmtQty(l.requiredStock).padStart(8)} [${stLabel(l.status)}]`);
   }
   add('');
   add(`Detailed inventory (page ${report.page})`);

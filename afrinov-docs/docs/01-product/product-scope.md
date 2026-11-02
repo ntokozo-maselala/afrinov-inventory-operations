@@ -46,7 +46,7 @@
 - **Scrap sales tracking** (`Scrap Material` sheet) — revenue-side event, not
   inventory; candidate for Finance/Operations integration later.
 - **Advanced MRP / demand forecasting** — `Required Stock` is a static
-  threshold in v1, not a forecast.
+  target level in v1, not a forecast.
 - **Multi-site / multi-currency.** *(A single currency is chosen in
   settings, `general.defaultCurrency`; there is no conversion.)*
 

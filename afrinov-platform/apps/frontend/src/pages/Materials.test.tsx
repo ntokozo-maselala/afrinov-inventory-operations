@@ -70,7 +70,7 @@ describe('Materials page', () => {
     expect(screen.queryByText('Item NOPRICE')).not.toBeInTheDocument();
   });
 
-  // On hand beside the reorder level, coloured as Stock status grades it.
+  // On hand beside Required Stock, coloured as Stock status grades it.
   describe('On hand', () => {
     const status = (sku: string, onHand: string, over: Record<string, unknown> = {}) => ({
       materialId: `m-${sku}`, sku, onHand, onLoan: '0', status: 'OK', percentOfRequired: 100, ...over,
@@ -85,7 +85,7 @@ describe('Materials page', () => {
       return row.querySelectorAll('td')[headers.indexOf('On hand')]!;
     };
 
-    it('shows each Stores item\'s stock on hand next to its reorder level', async () => {
+    it('shows each Stores item\'s stock on hand next to its required stock, under the same name as the Stock page', async () => {
       withStock([
         status('PRICED', '25'),
         status('NOPRICE', '1', { status: 'URGENT', percentOfRequired: 10 }),
@@ -94,12 +94,13 @@ describe('Materials page', () => {
       renderAt('/materials');
       await screen.findByText('Item PRICED');
       const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
-      expect(headers.indexOf('On hand')).toBe(headers.indexOf('Reorder') - 1);
+      expect(headers.indexOf('On hand')).toBe(headers.indexOf('Required') - 1);
+      expect(headers).not.toContain('Reorder');
       expect(mockGet).toHaveBeenCalledWith('/reports/stock-status');
 
       expect(onHandOf('PRICED')).toHaveTextContent('25');
       expect(onHandOf('NOPRICE')).toHaveTextContent('1');
-      expect(onHandOf('NOPRICE').querySelector('[title]')).toHaveAttribute('title', 'Urgent: 10% of the reorder level');
+      expect(onHandOf('NOPRICE').querySelector('[title]')).toHaveAttribute('title', 'Urgent: 10% of required stock');
       expect(onHandOf('NOPRICE').querySelector('.text-danger-600')).not.toBeNull();
       // A tool on loan is still owned: shown with what is on the shelf.
       expect(onHandOf('NOREQ')).toHaveTextContent('+2 checked out');

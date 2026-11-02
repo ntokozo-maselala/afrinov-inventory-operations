@@ -148,7 +148,7 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
     { header: 'Category', key: 'category', width: 28 },
     { header: 'UoM', key: 'uom', width: 10 },
     { header: 'Quantity', key: 'quantity', width: 12 },
-    { header: 'Reorder', key: 'reorder', width: 12 },
+    { header: 'Required', key: 'required', width: 12 },
     { header: 'Unit cost', key: 'unitCost', width: 14 },
     { header: 'Inventory value', key: 'value', width: 18 },
     { header: 'Status', key: 'status', width: 14 },
@@ -307,7 +307,7 @@ function drawHeader(doc: PDFKit.PDFDocument, report: ReportResult): void {
     `with movements in the selected period (${report.kpis.rangeLabel}). ` +
     `A total of ${report.kpis.skuCount} SKU${report.kpis.skuCount === 1 ? '' : 's'} are tracked, ` +
     `with a combined inventory value of ${fmtCurrency(report.kpis.inventoryValue, report.currency)}. ` +
-    `${report.kpis.lowStockCount} item(s) are at or below their reorder threshold and ` +
+    `${report.kpis.lowStockCount} item(s) are running short of their required stock and ` +
     `${report.kpis.outOfStockCount} are completely out of stock.`,
     { width: CONTENT_WIDTH, align: 'left' },
   );
@@ -411,7 +411,7 @@ function drawExceptionsTable(doc: PDFKit.PDFDocument, report: ReportResult): voi
   ensureSpace(doc, 60);
   sectionTitle(doc, 'Inventory requiring attention');
   drawTable(doc,
-    ['SKU', 'Material', 'Location', 'On hand', 'Reorder', 'Status'],
+    ['SKU', 'Material', 'Location', 'On hand', 'Required', 'Status'],
     report.exceptions.map((l) => [
       l.sku,
       l.name,

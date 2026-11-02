@@ -18,7 +18,7 @@ idea, that's noted — this becomes the AS-IS → TO-BE terminology bridge.
 | Stock Issue | The event of stock leaving stores for use (by a person, on a project) | Rows where `In/Out = OUT` / `Check Out` |
 | Stock Transfer | Movement of stock between two locations without changing total on-hand | Not currently modelled distinctly — appears as manual dual edits |
 | Stock Adjustment | A correction to on-hand quantity not caused by a receipt or issue (count variance, damage, scrap) | Not currently modelled; `Scrap Material` sheet is the closest analogue |
-| Required Stock | The minimum quantity that should be kept on hand before reordering | `Required Stock` column |
+| Required Stock | The quantity of an item to keep on hand. Stock status is on hand as a percentage of it, and an order tops stock back up to it; it is not a reorder trigger (ADR-014). Shown as Required in the application | `Required Stock` column |
 | Brought Forward | Opening balance carried from the prior period | `Brought Forward` column |
 | Project | A client job that consumes material and tools, identified by number | `Project No.` (e.g. `AFRI-1325`), `Project No.` sheet |
 | Supplier | An external vendor that supplies materials | `Supplier Name` (free text) |

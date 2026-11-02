@@ -47,7 +47,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
   const [category, setCategory] = useState(initial && sectionOf(initial.category) === 'STORES' ? initial.category : STORES_CATEGORIES[0]!.value);
   const [unitOfMeasure, setUom] = useState(initial?.unitOfMeasure ?? 'each');
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [requiredStock, setReorder] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
+  const [requiredStock, setRequiredStock] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
   const [unitCost, setUnitCost] = useState(asInput(initial?.unitCost));
   const [serialNumber, setSerialNumber] = useState(initial?.serialNumber ?? '');
   const [busy, setBusy] = useState(false);
@@ -58,7 +58,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
 
   /**
    * Prevent form navigation, show validation errors inline, and create or update the item.
-   * Stores saves include a nonnegative reorder level; Projects saves omit it.
+   * Stores saves include a nonnegative Required Stock; Projects saves omit it.
    * On edit, blank cost and description clear their stored values.
    * Request errors and errors thrown by `onSaved` go to `onError`; if `onError`
    * throws, the submission rejects.
@@ -67,8 +67,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
     e.preventDefault();
     setValidation(null);
     if (!sku.trim() || !name.trim() || !unitOfMeasure.trim()) { setValidation('SKU, name and unit of measure are required.'); return; }
-    const reorder = projects ? 0 : Number(requiredStock);
-    if (!projects && (requiredStock.trim() === '' || !Number.isFinite(reorder) || reorder < 0)) { setValidation('Reorder level must be 0 or positive.'); return; }
+    const required = projects ? 0 : Number(requiredStock);
+    if (!projects && (requiredStock.trim() === '' || !Number.isFinite(required) || required < 0)) { setValidation('Required stock must be 0 or positive.'); return; }
     const cost = unitCost.trim() === '' ? undefined : Number(unitCost);
     if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) { setValidation('Unit cost must be 0 or positive.'); return; }
     const itemCategory = projects ? PROJECTS_CATEGORY : category;
@@ -80,13 +80,13 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
         ? await api.patch<CreatedMaterial>(`/materials/${initial.id}`, {
           name: name.trim(), unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost ?? null, description: description.trim() || null,
-          ...(projects ? {} : { requiredStock: reorder }),
+          ...(projects ? {} : { requiredStock: required }),
           ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : {}),
         })
         : await api.post<CreatedMaterial>('/materials', {
           sku: sku.trim(), name: name.trim(), category: itemCategory, unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost, description: description.trim() || undefined,
-          ...(projects ? {} : { requiredStock: reorder }),
+          ...(projects ? {} : { requiredStock: required }),
           serialNumber: itemCategory === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
         });
       onSaved(saved);
@@ -139,15 +139,15 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {!projects && (
-          <Field label="Reorder level" htmlFor="m-reorder" help={`Stock status compares stock on hand with this: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
-            <Input id="m-reorder" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setReorder(e.target.value)} />
+          <Field label="Required stock" htmlFor="m-required" help={`The level to keep this item topped up to. Stock status compares stock on hand with it: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
+            <Input id="m-required" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setRequiredStock(e.target.value)} />
           </Field>
         )}
         <Field label="Unit cost" htmlFor="m-cost" help={editing ? 'In ZAR excl. VAT. Leave it blank if the price is not known.' : 'Optional, in ZAR excl. VAT.'}>
           <Input id="m-cost" type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="0.00" />
         </Field>
       </div>
-      {projects && <p className="text-xs text-surface-500">Projects material has no reorder level: it is bought for its project, not kept topped up.</p>}
+      {projects && <p className="text-xs text-surface-500">Projects material has no required stock: it is bought for its project, not kept topped up.</p>}
       {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
       <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>

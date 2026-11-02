@@ -30,7 +30,8 @@ location is picked by the user, not defaulted.
    structured.
 
 ## 3. Store controller notices low stock
-1. Dashboard surfaces materials where `on-hand < Required Stock`
+1. Dashboard surfaces materials running short of `Required Stock` (on hand
+   below 40% of it is Warning, below 20% Urgent; the bands are settings)
    (today: the store controller has to notice a rack looks empty).
 2. Controller reviews, decides to order, creates a Purchase Order against a
    supplier from the Supplier Master.

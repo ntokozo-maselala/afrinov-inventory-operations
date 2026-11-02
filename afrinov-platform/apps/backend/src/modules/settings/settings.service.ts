@@ -203,7 +203,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
 
   // ── Notifications ──────────────────────────────────────────────────────
   { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },
-  { key: 'notifications.enableLowStockNotifications', type: 'boolean', category: 'notifications', description: 'Generate alerts when materials fall below their reorder threshold.', default: true },
+  { key: 'notifications.enableLowStockNotifications', type: 'boolean', category: 'notifications', description: 'Generate alerts when materials run short of their required stock (Urgent or Warning on Stock status).', default: true },
   { key: 'notifications.enablePurchaseOrderNotifications', type: 'boolean', category: 'notifications', description: 'Alert when purchase orders need approval or reach a new state.', default: true },
 
   // ── Appearance ────────────────────────────────────────────────────────

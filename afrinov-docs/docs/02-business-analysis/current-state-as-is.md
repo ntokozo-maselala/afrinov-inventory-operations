@@ -35,8 +35,8 @@ and `Sheet1` (836 rows, unclassified working data).
 - **Current Stock** on each `Main` sheet = `Brought Forward + IN - OUT`,
   where `IN`/`OUT` are period totals, apparently summed or hand-updated from
   the corresponding `Issued` sheet.
-- **Required Stock** sits beside Current Stock as a static reorder threshold
-  with no automated alerting — a human has to look.
+- **Required Stock** sits beside Current Stock as a static target level (the
+  quantity to keep on hand) with no automated alerting — a human has to look.
 - **Issued sheets** are the real transaction log: one row per movement, with
   `Time & Date`, item, `Rack`, `Current Stock` (snapshot at time of entry),
   `Stock Issued` (quantity), `In/Out`, `Supplier Name`, `Issued By:`,

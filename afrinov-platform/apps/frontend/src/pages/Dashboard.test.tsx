@@ -111,7 +111,7 @@ describe('Dashboard analytics', () => {
     expect(screen.getByRole('img', { name: /Current stock value by category: Consumables .*75%/ })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Stock value by location' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /Central Store 60%; Workshop 40%/ })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Urgent: 2, Warning: 1, In range: 9, No reorder level: 2' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Urgent: 2, Warning: 1, In range: 9, No required stock: 2' })).toBeInTheDocument();
     expect(screen.getByText('On hand × unit cost · excluding VAT')).toBeInTheDocument();
   });
 });

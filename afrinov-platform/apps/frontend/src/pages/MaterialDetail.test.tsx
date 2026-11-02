@@ -58,10 +58,10 @@ describe('MaterialDetail editing', () => {
 
     expect(screen.getByLabelText(/SKU/)).toBeDisabled();
     expect(screen.getByLabelText(/Category/)).toBeDisabled();
-    expect(screen.getByLabelText(/Reorder level/)).toHaveValue(100);
+    expect(screen.getByLabelText(/Required stock/)).toHaveValue(100);
     expect(screen.getByLabelText(/Unit cost/)).toHaveValue(12.5);
 
-    fireEvent.change(screen.getByLabelText(/Reorder level/), { target: { value: '40' } });
+    fireEvent.change(screen.getByLabelText(/Required stock/), { target: { value: '40' } });
     fireEvent.change(screen.getByLabelText(/Unit cost/), { target: { value: '' } });
     const before = { item: gets('/materials/'), stock: gets('/reports/current-stock') };
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -85,12 +85,12 @@ describe('MaterialDetail editing', () => {
     expect(mockPatch.mock.calls[0]![1]).toMatchObject({ serialNumber: null });
   });
 
-  it('refuses a negative reorder level without calling the server', async () => {
+  it('refuses a negative required stock without calling the server', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText(/Reorder level/), { target: { value: '-1' } });
+    fireEvent.change(screen.getByLabelText(/Required stock/), { target: { value: '-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(await screen.findByText('Reorder level must be 0 or positive.')).toBeInTheDocument();
+    expect(await screen.findByText('Required stock must be 0 or positive.')).toBeInTheDocument();
     expect(mockPatch).not.toHaveBeenCalled();
   });
 

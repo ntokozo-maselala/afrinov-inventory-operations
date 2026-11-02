@@ -88,7 +88,7 @@ something to render immediately:
 - 2 projects, plus racks and recipients
 - 1 posted goods receipt
 - 20 ledger transactions (receipts, issues, a transfer, an adjustment)
-- Reorder thresholds set so the dashboard shows a few "below threshold" items
+- Required stock set so the dashboard shows a few items running short
 
 Mutations through the UI (creating a PO, issuing stock, transferring, etc.)
 update the in-memory store and the UI re-renders. **State is lost on a full
