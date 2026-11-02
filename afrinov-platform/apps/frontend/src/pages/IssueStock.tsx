@@ -19,6 +19,7 @@ import { today } from '../lib/dates';
 import { useIdempotencyKey } from '../lib/idempotency';
 import type { CurrentStockRow } from '../api/types';
 import { needsProject, sectionOf } from '../lib/categories';
+import { isStoresStock } from '../lib/heldFor';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
@@ -55,8 +56,10 @@ export function IssueStock() {
   // Only items with stock can be issued, and tools are lent on the Tools page
   // instead. A closed project's material waits to move to Stores. Nor from a
   // deactivated item or location, which the server refuses (Qodo, PR #132).
+  // Issues take Stores stock, so stock held for a project isn't offered; it
+  // would share its item and location key with the Stores row (Qodo, PR #142).
   const available = useMemo(
-    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r)
+    () => (stock.data ?? []).filter((r) => isStoresStock(r) && Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r)
       && r.materialActive !== false && r.locationActive !== false
       && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status)))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),

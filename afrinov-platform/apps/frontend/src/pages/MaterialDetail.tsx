@@ -20,6 +20,7 @@ import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
 import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
+import { balanceKey, locationWithHolder } from '../lib/heldFor';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -213,10 +214,10 @@ export function MaterialDetail() {
                   />
                   <DataTable
                     ariaLabel="Left in the store"
-                    rowKey={(r) => r.locationId}
+                    rowKey={balanceKey}
                     rows={(stock.data ?? []).filter((r) => Number(r.quantity) > 0)}
                     columns={[
-                      { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                      { key: 'loc', header: 'Location', render: locationWithHolder },
                       { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
                     ]}
                   />
@@ -228,10 +229,11 @@ export function MaterialDetail() {
               <DataTable
                 ariaLabel="Stock by location"
                 isLoading={stock.loading}
-                rowKey={(r) => r.locationId}
+                rowKey={balanceKey}
                 rows={stock.data ?? []}
                 columns={[
-                  { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                  // A location can hold Stores stock and stock held for a project: each its own line.
+                  { key: 'loc', header: 'Location', render: locationWithHolder },
                   { key: 'type', header: 'Type', render: (r) => <span className="text-meta">{r.locationType}</span> },
                   { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
                   { key: 'required', header: 'Required', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
