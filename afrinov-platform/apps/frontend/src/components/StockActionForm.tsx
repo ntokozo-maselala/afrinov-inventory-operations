@@ -88,7 +88,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
           </div>
           {kind === 'transfer' && (
             <div className="text-right">
-              <div className="text-eyebrow">Reorder at</div>
+              <div className="text-eyebrow">Required</div>
               <div className="text-h2 font-mono text-surface-500">{row.requiredStock}</div>
             </div>
           )}

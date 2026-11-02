@@ -74,7 +74,7 @@ describe('Materials: Stores and Projects tabs', () => {
     expect(screen.queryByText('No project yet')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /Needs a project/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('Reorder')).not.toBeInTheDocument();
+    expect(screen.queryByText('Required')).not.toBeInTheDocument();
   });
 
   it('opens an older link to one project on the whole Projects tab', async () => {
@@ -111,10 +111,10 @@ const form = (props: Record<string, unknown> = {}) => render(<MaterialForm onCan
 const fill = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe('the item form asks for the section first', () => {
-  it('a Projects item has no Project field and no reorder level, and is added with no project', async () => {
+  it('a Projects item has no Project field and no required stock, and is added with no project', async () => {
     form();
     fireEvent.click(screen.getByRole('radio', { name: /Projects/ }));
-    expect(screen.queryByLabelText('Reorder level')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Required stock')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Project(?!s)/)).not.toBeInTheDocument();
     fill(/^SKU/, 'PLATE-10MM');
     fill(/^Item name/, 'Plate');
@@ -127,12 +127,12 @@ describe('the item form asks for the section first', () => {
     expect(mockGet).not.toHaveBeenCalledWith(expect.stringMatching(/^\/projects/));
   });
 
-  it('a Stores item has a category (not Project Material) and a reorder level', async () => {
+  it('a Stores item has a category (not Project Material) and required stock', async () => {
     form();
     expect(screen.queryByRole('option', { name: 'Project Material' })).not.toBeInTheDocument();
     fill(/^SKU/, 'CON-9');
     fill(/^Item name/, 'Glue');
-    fill('Reorder level', '12');
+    fill('Required stock', '12');
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     const body = mockPost.mock.calls[0]![1] as Record<string, unknown>;
@@ -164,11 +164,11 @@ const detail = (id: string) => render(
 );
 
 describe('an item’s page says where it belongs', () => {
-  it('a Projects item says only that it is Projects material, with no project or reorder level', async () => {
+  it('a Projects item says only that it is Projects material, with no project or required stock', async () => {
     detail('m-1369-PIPE');
     expect(await screen.findByText('1369-PIPE · Projects')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '1369 · Plant upgrade' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Reorder at')).not.toBeInTheDocument();
+    expect(screen.queryByText('Required stock')).not.toBeInTheDocument();
     // Project material goes to site, never into the store (Qodo, PR #125).
     expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
   });
@@ -185,10 +185,10 @@ describe('an item’s page says where it belongs', () => {
     expect(screen.queryByRole('button', { name: 'Choose one' })).not.toBeInTheDocument();
   });
 
-  it('a Stores item shows its section, category and reorder level', async () => {
+  it('a Stores item shows its section, category and required stock', async () => {
     detail('m-DISC');
     expect(await screen.findByText('DISC · Stores · Consumables')).toBeInTheDocument();
-    expect(screen.getByText('Reorder at')).toBeInTheDocument();
+    expect(screen.getByText('Required stock')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Stock summary' })).toBeInTheDocument();
   });
 });
@@ -224,7 +224,7 @@ describe('a Projects item has no stock status, and names the project only for it
     detail('m-1369-PIPE');
     const table = await screen.findByRole('table', { name: 'Left in the store' });
     expect(within(table).getByText('Main store')).toBeInTheDocument();
-    expect(within(table).queryByText('Reorder')).not.toBeInTheDocument();
+    expect(within(table).queryByText('Required')).not.toBeInTheDocument();
     expect(within(table).queryByText('Item status')).not.toBeInTheDocument();
     expect(screen.getByText(/for project 1369 · Plant upgrade \(Active\). It is issued to that project/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();

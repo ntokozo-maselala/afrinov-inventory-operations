@@ -147,7 +147,7 @@ export function MaterialDetail() {
                 )}
                 <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
                 {material.data.serialNumber && (<><dt className="text-surface-500">Serial number</dt><dd className="col-span-2 text-mono">{material.data.serialNumber}</dd></>)}
-                {sectionOf(material.data.category) === 'STORES' && (<><dt className="text-surface-500">Reorder at</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd></>)}
+                {sectionOf(material.data.category) === 'STORES' && (<><dt className="text-surface-500">Required stock</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd></>)}
                 <dt className="text-surface-500">Unit cost</dt>
                 <dd className="col-span-2 text-num">
                   {hasPrice
@@ -234,7 +234,7 @@ export function MaterialDetail() {
                   { key: 'loc', header: 'Location', render: (r) => r.locationName },
                   { key: 'type', header: 'Type', render: (r) => <span className="text-meta">{r.locationType}</span> },
                   { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
-                  { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
+                  { key: 'required', header: 'Required', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },
                   { key: 'status', header: 'Item status', render: (r) => <StockStatusBadge status={r.stockStatus} percent={r.percentOfRequired} /> },
                 ]}
                 emptyState={(

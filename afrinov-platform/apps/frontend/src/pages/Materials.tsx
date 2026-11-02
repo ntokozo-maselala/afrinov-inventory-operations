@@ -54,7 +54,7 @@ const TABS: Array<{ value: MaterialSection; label: string }> = [
 export function Materials() {
   const [params, setParams] = useSearchParams();
   const mats = useApi<Material[]>('/materials');
-  // On hand beside the reorder level, from Stock status (Stores only: Projects
+  // On hand beside Required Stock, from Stock status (Stores only: Projects
   // material isn't held in the store). If it can't load, the column shows a dash.
   const status = useApi<StockStatusItem[]>(params.get('section') === 'PROJECTS' ? null : '/reports/stock-status');
   const stock = useMemo(() => new Map((status.data ?? []).map((r) => [r.materialId, r])), [status.data]);
@@ -120,7 +120,7 @@ export function Materials() {
       <PageHeader
         title="Materials"
         description={section === 'STORES'
-          ? 'Stores material: kept on the shelf and topped up. Each item has a category, unit of measure and reorder level.'
+          ? 'Stores material: kept on the shelf and topped up. Each item has a category, unit of measure and required stock (the level to keep on hand).'
           : 'Projects material: bought for a project on its purchase order, which says which project it is for. Never re-ordered, and not held in the store.'}
         actions={
           <RoleGuard permission="materials:manage">
@@ -216,14 +216,14 @@ const tailColumns: DataTableColumn<Material>[] = [
 const STATUS_TEXT: Partial<Record<StockStatus, string>> = { URGENT: 'text-danger-600 font-semibold', WARNING: 'text-warning-600 font-semibold' };
 
 /**
- * On hand across all locations, coloured as Stock status grades it against the
- * reorder level. Tools out on loan are still owned, so they count too.
+ * On hand across all locations, coloured as Stock status grades it against
+ * Required Stock. Tools out on loan are still owned, so they count too.
  */
 function onHandCell(m: Material, r: StockStatusItem | undefined) {
   if (!m.active) return <span className="text-surface-400" title="Inactive item">—</span>;
   if (!r) return <span className="text-surface-400" title="Not known">—</span>;
   const onLoan = Number(r.onLoan ?? 0);
-  const title = r.percentOfRequired === null ? 'No reorder level set' : `${STATUS_LABEL[r.status]}: ${r.percentOfRequired}% of the reorder level`;
+  const title = r.percentOfRequired === null ? 'No required stock set' : `${STATUS_LABEL[r.status]}: ${r.percentOfRequired}% of required stock`;
   return (
     <div title={title}>
       <span className={`font-mono ${STATUS_TEXT[r.status] ?? ''}`}>{formatNumber(Number(r.onHand))}</span>
@@ -232,7 +232,7 @@ function onHandCell(m: Material, r: StockStatusItem | undefined) {
   );
 }
 
-/** Return Stores table columns, including on hand and the reorder level it is measured against. */
+/** Return Stores table columns, including on hand and the Required Stock it is measured against. */
 function storesColumns(stock: Map<string, StockStatusItem>): DataTableColumn<Material>[] {
   return [
     skuColumn,
@@ -240,7 +240,7 @@ function storesColumns(stock: Map<string, StockStatusItem>): DataTableColumn<Mat
     { key: 'cat', header: 'Category', render: (m) => <span className="text-meta">{categoryLabel(m.category)}</span> },
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     { key: 'onHand', header: 'On hand', align: 'right', className: 'text-num', render: (m) => onHandCell(m, stock.get(m.id)), width: '7rem' },
-    { key: 'reorder', header: 'Reorder', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '6rem' },
+    { key: 'required', header: 'Required', align: 'right', className: 'text-num', render: (m) => <span className="font-mono">{formatNumber(Number(m.requiredStock))}</span>, width: '7rem' },
     ...tailColumns,
   ];
 }

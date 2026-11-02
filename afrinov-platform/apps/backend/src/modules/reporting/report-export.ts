@@ -148,7 +148,7 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
     { header: 'Category', key: 'category', width: 28 },
     { header: 'UoM', key: 'uom', width: 10 },
     { header: 'Quantity', key: 'quantity', width: 12 },
-    { header: 'Reorder', key: 'reorder', width: 12 },
+    { header: 'Required', key: 'required', width: 12 },
     { header: 'Unit cost', key: 'unitCost', width: 14 },
     { header: 'Inventory value', key: 'value', width: 18 },
     { header: 'Status', key: 'status', width: 14 },
@@ -411,7 +411,7 @@ function drawExceptionsTable(doc: PDFKit.PDFDocument, report: ReportResult): voi
   ensureSpace(doc, 60);
   sectionTitle(doc, 'Inventory requiring attention');
   drawTable(doc,
-    ['SKU', 'Material', 'Location', 'On hand', 'Reorder', 'Status'],
+    ['SKU', 'Material', 'Location', 'On hand', 'Required', 'Status'],
     report.exceptions.map((l) => [
       l.sku,
       l.name,
