@@ -1,5 +1,5 @@
-import type { FastifyInstance } from 'fastify';
-import { ReportingService } from './reporting.service.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { ReportingService, type StockStatusRow } from './reporting.service.js';
 import { ReportService } from './report.service.js';
 import { parseReportQuery } from './report-query.schema.js';
 import { buildInventoryPdf, buildInventoryXlsx } from './report-export.js';
@@ -10,7 +10,7 @@ import { MonthEndService, type StockReportQuery } from './month-end.service.js';
 import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { requirePermission } from '../../shared/authorization.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { Errors } from '../../shared/errors.js';
 
@@ -23,7 +23,20 @@ function exportFilename(rangeLabel: string, generatedAt: string, extension: 'xls
   return `afrinov-inventory-report-${range}-${date}.${extension}`;
 }
 
-export async function reportingRoutes(app: FastifyInstance): Promise<void> {
+/**
+ * Stock status as this user may see it: the Stores orders' ids and numbers only
+ * for someone who can open Stores orders (the order routes answer others 404);
+ * what is on order and when it is due stays, as it sets the re-order quantity
+ * (Qodo, PR #134).
+ */
+async function forViewer(req: FastifyRequest, rows: StockStatusRow[]): Promise<StockStatusRow[]> {
+  if (await userHasPermission(req, PermissionCode.OrderStoresStock)) return rows;
+  return rows.map((r) => ({ ...r, orders: r.orders.map((o) => ({ ...o, purchaseOrderId: null, number: null })) }));
+}
+
+/** `procurementEnabled`: what is on approved Stores orders is counted only then (Qodo, PR #134). */
+export async function reportingRoutes(app: FastifyInstance, opts: { procurementEnabled?: boolean } = {}): Promise<void> {
+  const orders = !!opts.procurementEnabled;
   // ── Existing per-resource reads (kept for the dashboard / low-stock page)
   app.get('/reports/current-stock', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
@@ -54,7 +67,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
     const status = (q['status'] ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
     const allowed = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
     if (status.some((x) => !allowed.includes(x))) throw Errors.validation(`status must be one or more of ${allowed.join(', ')}`);
-    return ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'] });
+    return forViewer(req, await ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'], orders }));
   });
 
   // The stock report: the workbook's Summary and Stock Report sheets, as at the end of
@@ -120,11 +133,13 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
   app.get('/reports/reorder-list/export', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ViewReports);
     const category = (req.query as Record<string, string | undefined>)['category'] || undefined;
-    const [rows, bands, currency] = await Promise.all([
-      ReportingService.stockStatus({ status: ['URGENT', 'WARNING'], category }),
+    const [graded, bands, currency] = await Promise.all([
+      ReportingService.stockStatus({ status: ['URGENT', 'WARNING'], category, orders }),
       getStatusBands(),
       SettingsService.getValue<string>('general.defaultCurrency'),
     ]);
+    // What to order: an item whose shortfall is all on order is left out, as on the page (Qodo, PR #134).
+    const rows = graded.filter((r) => Number(r.reorderQuantity) > 0);
     const generatedAt = new Date();
     const buf = await buildReorderXlsx(rows, { generatedAt, bands, currency, category });
     return reply
@@ -137,7 +152,7 @@ export async function reportingRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/reports/low-stock', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
-    return ReportingService.lowStock();
+    return forViewer(req, await ReportingService.lowStock({ orders }));
   });
 
   app.get('/reports/project-consumption/:projectNumber', { preHandler: [app.authenticate] }, async (req) => {

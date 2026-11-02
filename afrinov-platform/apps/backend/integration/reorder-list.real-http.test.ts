@@ -55,6 +55,6 @@ describe('stock status and re-order list over real HTTP', () => {
     let found: unknown[] | null = null;
     ws.eachRow((r) => { const v = (r.values as unknown[]).slice(1); if (v[0] === sku) found = v; });
     expect(found).not.toBeNull();
-    expect(found!.slice(3, 11)).toEqual(['Urgent', 11, 100, 0.11, 89, 42.05, 3742.45, supplierName]);
+    expect(found!.slice(3, 12)).toEqual(['Urgent', 11, 0, 100, 0.11, 89, 42.05, 3742.45, supplierName]);
   });
 });

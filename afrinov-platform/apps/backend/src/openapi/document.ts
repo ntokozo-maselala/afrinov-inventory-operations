@@ -603,8 +603,9 @@ export const OPERATIONS: Operation[] = [
     method: 'get', path: '/reports/stock-status', tag: 'Reports', summary: 'Stock status of every active item',
     description: 'On hand across all locations as a percentage of Required Stock: URGENT below '
       + 'inventory.urgentBelowPercent (default 20), WARNING below inventory.warningBelowPercent (default 40), '
-      + 'otherwise OK; NOT_SET when the item has no Required Stock. With the re-order quantity (Required Stock '
-      + 'less on hand) and stock per location. Optional ?status=URGENT,WARNING and ?category= filters. '
+      + 'otherwise OK; NOT_SET when the item has no Required Stock. With what is on order (still to come on approved '
+      + 'or partly received Stores orders, per order with its due date), the re-order quantity (Required Stock '
+      + 'less on hand and on order) and stock per location. Optional ?status=URGENT,WARNING and ?category= filters. '
       + 'Most urgent first.',
     permissions: [P.ViewReports], errors: [400],
   },

@@ -3,6 +3,11 @@
 // URGENCY column does, with the re-order quantity. GET /reports/stock-status.
 // The bands are settings (Settings → Inventory).
 //
+// What is on approved Stores orders is still to come: shown as On order, with
+// each order and when it is due, and taken off the re-order quantity, so what
+// is already coming isn't ordered twice. Needs re-ordering lists what is still
+// short after it; Short, on order and Overdue orders are what to chase.
+//
 // A buyer ticks items and chooses Order these: a new purchase order opens
 // with them filled in, from their last supplier. Items from other suppliers
 // stay ticked for the next order.
@@ -12,7 +17,6 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
-import { canReceiveStock } from '../lib/orderKind';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { PageHeader } from '../components/PageHeader';
@@ -23,12 +27,14 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Alert } from '../components/Alert';
 import { Icon } from '../components/Icon';
 import { StockStatusBadge } from '../components/StockStatusBadge';
-import { formatNumber } from '../lib/format';
+import { formatDate, formatNumber } from '../lib/format';
 import { needsAttention, type StockStatus as Status } from '../lib/stockStatus';
 import { DownloadMenu } from '../components/DownloadMenu';
 import { downloadReorderList, downloadReorderListPdf } from '../api/exportReorderList';
 import { STORES_CATEGORIES } from '../lib/categories';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { orderPath } from '../lib/orderKind';
+import { todayInSouthAfrica } from '../lib/rfq';
 
 /** One item, as GET /reports/stock-status returns it. */
 export interface StockStatusItem {
@@ -41,8 +47,13 @@ export interface StockStatusItem {
   onHand: string;
   /** Tools: out on loan, still owned; the status counts it with what is on hand. */
   onLoan?: string;
+  /** Still to come on approved Stores orders. */
+  onOrder?: string;
+  /** The Stores orders it is on, soonest due first. */
+  orders?: OnOrderLine[];
   percentOfRequired: number | null;
   status: Status;
+  /** Required Stock less what is owned and what is on order. */
   reorderQuantity: string;
   unitCost: string | null;
   locations: Array<{ locationId: string; locationName: string; quantity: string }>;
@@ -53,8 +64,20 @@ export interface StockStatusItem {
   project?: { name: string | null; status: string } | null;
 }
 
-const VIEWS: Array<{ value: string; label: string }> = [
+/** One Stores order line still to come in; the order is null for someone who can't open Stores orders. */
+export interface OnOrderLine { purchaseOrderId: string | null; number: string | null; outstanding: string; dueDate: string | null }
+
+/** Its orders due before today, still to come. */
+const overdueOrders = (r: StockStatusItem, today: string) => (r.orders ?? []).filter((o) => o.dueDate !== null && o.dueDate < today);
+
+const VIEWS: Array<{ value: string; label: string; procurement?: boolean }> = [
+  // Short even after what is on order.
   { value: 'attention', label: 'Needs re-ordering' },
+  // Short, but on order: to chase, not to order again.
+  { value: 'on-order', label: 'Short, on order', procurement: true },
+  // Anything on an approved Stores order still to come, whatever its status: in transit.
+  { value: 'pending', label: 'Pending orders (in transit)', procurement: true },
+  { value: 'overdue', label: 'Overdue orders', procurement: true },
   { value: 'URGENT', label: 'Urgent' },
   { value: 'WARNING', label: 'Warning' },
   { value: 'OK', label: 'OK' },
@@ -91,7 +114,6 @@ export function StockStatus() {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   // The re-order list is Stores stock, ordered by the store (Stores ordering roadmap).
-  const canReceive = canReceiveStock(hasPermission);
   const canOrder = PROCUREMENT_ENABLED && hasPermission('stores:order');
   // Kept for this tab, so the items left after one order are still ticked on return.
   const [tickedIds, setTickedIds] = useState<string[]>(() => (canOrder ? readTicked() : []));
@@ -114,7 +136,9 @@ export function StockStatus() {
   const isAdmin = useIsAdmin();
   const [q, setQ] = useState('');
   const [params] = useSearchParams();
-  const [view, setView] = useState(() => (VIEWS.some((v) => v.value === params.get('view')) ? params.get('view')! : 'attention'));
+  const views = VIEWS.filter((v) => PROCUREMENT_ENABLED || !v.procurement);
+  const [view, setView] = useState(() => (views.some((v) => v.value === params.get('view')) ? params.get('view')! : 'attention'));
+  const today = todayInSouthAfrica();
   const [category, setCategory] = useState('');
 
   const counts = useMemo(() => {
@@ -123,15 +147,18 @@ export function StockStatus() {
     return c;
   }, [items.data]);
 
-  // What the download would hold: the items to re-order, in the chosen category if one is.
-  const toReorder = (items.data ?? []).filter((r) => needsAttention(r.status) && (!category || r.category === category)).length;
+  // What the download would hold: the items still to order after what is on order, in the chosen category if one is.
+  const toReorder = (items.data ?? []).filter((r) => needsAttention(r.status) && num(r.reorderQuantity) > 0 && (!category || r.category === category)).length;
 
   const filtered = useMemo(() => {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return (items.data ?? []).filter((r) => {
-      if (view === 'attention' && !needsAttention(r.status)) return false;
+      if (view === 'attention' && !(needsAttention(r.status) && num(r.reorderQuantity) > 0)) return false;
+      if (view === 'on-order' && !(needsAttention(r.status) && num(r.onOrder) > 0)) return false;
+      if (view === 'pending' && !(num(r.onOrder) > 0)) return false;
+      if (view === 'overdue' && overdueOrders(r, today).length === 0) return false;
       if (view === 'out' && num(r.onHand) > 0) return false;
-      if (view !== 'attention' && view !== 'all' && view !== 'out' && r.status !== view) return false;
+      if (!['attention', 'on-order', 'pending', 'overdue', 'all', 'out'].includes(view) && r.status !== view) return false;
       if (category && r.category !== category) return false;
       if (terms.length > 0) {
         const hay = `${r.sku} ${r.name} ${r.locations.map((l) => l.locationName).join(' ')}`.toLowerCase();
@@ -139,7 +166,7 @@ export function StockStatus() {
       }
       return true;
     });
-  }, [items.data, q, view, category]);
+  }, [items.data, q, view, category, today]);
 
   return (
     <div>
@@ -152,25 +179,13 @@ export function StockStatus() {
             under {isAdmin ? <Link to="/settings/inventory" className="btn-link">Settings → Inventory</Link> : 'Settings → Inventory'}.
           </>
         )}
+        // Ordering is from the ticked items (Order these); receiving is on Receive stock and new orders on Order stock.
         actions={(
-          <div className="flex flex-wrap gap-2">
-            <DownloadMenu
-              label="Download re-order list"
-              onDownload={(format) => (format === 'pdf' ? downloadReorderListPdf : downloadReorderList)(category || undefined)}
-              disabled={!items.data || toReorder === 0}
-            />
-            {/* When the order arrives, it is booked on Receive stock. */}
-            {canReceive && (
-              <Link to="/stock/receive" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                <Icon.ArrowDown size={14} /> Receive stock
-              </Link>
-            )}
-            {canOrder && (
-              <Link to="/stock/orders/new" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                <Icon.Cart size={14} /> New stock order
-              </Link>
-            )}
-          </div>
+          <DownloadMenu
+            label="Download re-order list"
+            onDownload={(format) => (format === 'pdf' ? downloadReorderListPdf : downloadReorderList)(category || undefined)}
+            disabled={!items.data || toReorder === 0}
+          />
         )}
       />
 
@@ -197,7 +212,7 @@ export function StockStatus() {
         <SearchField id="ss-search" value={q} onChange={setQ} placeholder="Item, code or location…" />
         <Field label="Show" htmlFor="ss-view" className={FILTER_WIDTH}>
           <Select id="ss-view" value={view} onChange={(e) => setView(e.target.value)}>
-            {VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+            {views.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
           </Select>
         </Field>
         <Field label="Category" htmlFor="ss-category" className={FILTER_WIDTH}>
@@ -234,11 +249,15 @@ export function StockStatus() {
           isLoading={items.loading}
           rowKey={(r) => r.materialId}
           rows={filtered}
-          columns={canOrder ? [tickColumn(filtered, tickedIds, setTicked), ...COLUMNS] : COLUMNS}
+          columns={columnsFor(canOrder, filtered, tickedIds, setTicked, today)}
           emptyState={
             <EmptyState
-              title={view === 'attention' ? 'Nothing needs re-ordering' : 'No items match'}
-              description={view === 'attention' ? `Every item with a Required Stock has at least ${bands.warningBelowPercent}% of it on hand.` : 'Try another filter.'}
+              title={EMPTY_TITLE[view] ?? 'No items match'}
+              description={view === 'attention'
+                ? `Every item with a Required Stock has at least ${bands.warningBelowPercent}% of it on hand${PROCUREMENT_ENABLED ? ', or enough on order' : ''}.`
+                : view === 'on-order' ? 'Nothing short is on an approved Stores order.'
+                  : view === 'pending' ? 'No approved Stores order has anything still to come.'
+                  : view === 'overdue' ? 'Every Stores order still to come is due today or later.' : 'Try another filter.'}
             />
           }
         />
@@ -264,6 +283,52 @@ export function StockStatus() {
       )}
     </div>
   );
+}
+
+const EMPTY_TITLE: Record<string, string> = {
+  attention: 'Nothing needs re-ordering', 'on-order': 'Nothing short is on order', pending: 'Nothing is on order', overdue: 'No overdue orders',
+};
+
+/** The table's columns: the tick when the user orders, and On order after On hand when procurement is on. */
+function columnsFor(
+  canOrder: boolean, shown: StockStatusItem[], tickedIds: string[], setTicked: (ids: string[]) => void, today: string,
+): DataTableColumn<StockStatusItem>[] {
+  const cols = PROCUREMENT_ENABLED
+    ? COLUMNS.flatMap((c) => (c.key === 'onHand' ? [c, onOrderColumn(canOrder, today)] : [c]))
+    : COLUMNS;
+  return canOrder ? [tickColumn(shown, tickedIds, setTicked), ...cols] : cols;
+}
+
+/** What is still to come, and on which orders, when due; an order past its date is flagged. */
+function onOrderColumn(canOpen: boolean, today: string): DataTableColumn<StockStatusItem> {
+  return {
+    key: 'onOrder',
+    header: 'On order',
+    align: 'right',
+    className: 'text-num',
+    render: (r) => {
+      const orders = r.orders ?? [];
+      if (orders.length === 0) return <span className="text-surface-400">—</span>;
+      return (
+        <div>
+          <span className="font-mono">{formatNumber(num(r.onOrder))}</span>
+          {orders.map((o, i) => {
+            const late = o.dueDate !== null && o.dueDate < today;
+            return (
+              // By position: one order can have two lines of the item due the same day (Qodo, PR #134).
+              <div key={i} className={`text-xs ${late ? 'text-danger-600 font-medium' : 'text-surface-500'}`}>
+                {o.number === null || o.purchaseOrderId === null ? 'An order'
+                  : canOpen ? <Link to={orderPath({ id: o.purchaseOrderId, projectNumber: null })} className="btn-link">{o.number}</Link> : o.number}
+                {orders.length > 1 && ` · ${formatNumber(num(o.outstanding))}`}
+                {o.dueDate && ` · ${late ? 'overdue, was due' : 'due'} ${formatDate(o.dueDate)}`}
+              </div>
+            );
+          })}
+        </div>
+      );
+    },
+    width: '11rem',
+  };
 }
 
 /** A tick per row, and one in the heading for every row shown. */
