@@ -43,11 +43,13 @@ async function historyFilter(q: Record<string, string | undefined>): Promise<Omi
 
 /** The filters in words, for the top of the download. */
 async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>): Promise<string> {
-  const [material, location, actor] = await Promise.all([
+  const [material, location, actor, recipient] = await Promise.all([
     f.materialId ? prisma.material.findUnique({ where: { id: f.materialId }, select: { sku: true } }) : null,
     f.locationId ? prisma.location.findUnique({ where: { id: f.locationId }, select: { name: true } }) : null,
     f.actorId ? prisma.user.findUnique({ where: { id: f.actorId }, select: { name: true } }) : null,
+    f.recipientId && f.recipientId !== '__none__' ? prisma.recipient.findUnique({ where: { id: f.recipientId }, select: { name: true } }) : null,
   ]);
+  const writeoffs = f.report === 'writeoffs';
   return [
     f.from || f.to ? `${f.from ?? 'the start'} to ${f.to ?? 'today'}` : 'All dates',
     f.report ? { issued: 'issued stock', transfers: 'transfers', writeoffs: 'write-offs and adjustments', loans: 'tool loans', returned: 'returned stock' }[f.report] : null,
@@ -55,6 +57,8 @@ async function describeHistoryFilter(f: Omit<HistoryFilter, 'before' | 'limit'>)
     material ? `item ${material.sku}` : null,
     location ? `at ${location.name}${f.locationIds && f.locationIds.length > 1 ? ' and the locations inside it' : ''}` : null,
     actor ? `by ${actor.name}` : null,
+    f.recipientId === '__none__' ? (writeoffs ? 'nobody known responsible' : 'no recipient recorded') : null,
+    recipient ? `${writeoffs ? 'responsible' : 'recipient'}: ${recipient.name}` : null,
     f.projectNumber ? `project ${f.projectNumber}` : null,
     f.q?.trim() ? `matching "${f.q.trim()}"` : null,
   ].filter(Boolean).join(', ');
@@ -83,6 +87,8 @@ export const adjustmentSchema = z.object({
   quantity: z.number(),
   reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER']),
   reasonNote: z.string().optional(),
+  // Who was responsible for damaged, lost or scrapped stock; null or left out when nobody is known.
+  recipientId: uuidSchema.nullable().optional(),
 });
 
 export const stockReceiptSchema = z.object({
@@ -165,6 +171,11 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     return InventoryService.historyActors();
   });
 
+  // The Write-offs report's totals by who was responsible; the service sets the report itself.
+  app.get('/inventory-transactions/writeoffs-by-responsible', { preHandler: [app.authenticate] }, async (req) => {
+    return InventoryService.writeoffsByResponsible(await historyFilter(req.query as Record<string, string | undefined>));
+  });
+
   app.get('/inventory-transactions/export', { preHandler: [app.authenticate] }, async (req, reply) => {
     const filter = await historyFilter(req.query as Record<string, string | undefined>);
     const count = await InventoryService.historyCount(filter);
@@ -175,7 +186,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     }
     const rows = await InventoryService.queryHistory({ ...filter, limit: MOVEMENTS_EXPORT_LIMIT }, MOVEMENTS_EXPORT_LIMIT);
     const now = new Date();
-    const buf = await buildMovementsXlsx(rows, { scope: await describeHistoryFilter(filter), generatedAt: now });
+    const buf = await buildMovementsXlsx(rows, { scope: await describeHistoryFilter(filter), generatedAt: now, report: filter.report });
     return reply
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       .header('Content-Disposition', `attachment; filename="${movementsFilename(filter.from, filter.to, now)}"`)

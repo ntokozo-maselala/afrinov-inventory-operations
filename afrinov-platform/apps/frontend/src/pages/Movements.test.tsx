@@ -52,6 +52,14 @@ const COUNTS = [
   { id: 'c-1', cursor: 'c1', at: '2026-09-25T08:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 3, adjusted: 0, note: null, differences: [], lines: [] },
 ];
 
+const WRITEOFF_TOTALS = {
+  currency: 'ZAR',
+  totals: [
+    { recipientId: 'r-1', recipientName: 'Sabelo', recipientType: 'WORKER', count: 2, value: '96.00' },
+    { recipientId: null, recipientName: null, recipientType: null, count: 1, value: '64.00' },
+  ],
+};
+
 function renderAt(url: string, pages: Array<Array<ReturnType<typeof row> & Record<string, unknown>>> = [[row(1)]]) {
   let page = 0;
   mockGet.mockImplementation(async (path: string) => {
@@ -62,6 +70,7 @@ function renderAt(url: string, pages: Array<Array<ReturnType<typeof row> & Recor
     if (path.startsWith('/stock-receipts')) return [RECEIPT];
     if (path.startsWith('/inventory-issues')) return [SLIP];
     if (path.startsWith('/stock-counts')) return COUNTS;
+    if (path.startsWith('/inventory-transactions/writeoffs-by-responsible')) return WRITEOFF_TOTALS;
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
     if (path.startsWith('/locations')) return [{ id: 'l-1', name: 'Boiler Shop' }];
     if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydroscand' }];
@@ -243,6 +252,30 @@ describe('Movements page', () => {
       { title: 'Received stock, 25 Sept 2026 to 30 Sept 2026', lines: ['Supplier: Hydroscand'] },
     ));
     expect(exports.excel).not.toHaveBeenCalled();
+  });
+
+  it('shows who was responsible for each write-off, the totals by person, and filters by choosing one', async () => {
+    renderAt('/movements?report=writeoffs&from=2026-10-01&to=2026-10-31', [[
+      { ...row(1), type: 'ADJUSTMENT', reasonCode: 'DAMAGE', recipientId: 'r-1', recipientName: 'Sabelo', reasonNote: 'Dropped off the bench' },
+      { ...row(2), type: 'ADJUSTMENT', reasonCode: 'LOSS' },
+      { ...row(3), type: 'ADJUSTMENT', reasonCode: 'OTHER' },
+    ]]);
+    await screen.findByText('SKU-1');
+    expect(within(screen.getByText('SKU-1').closest('tr')!).getByText('Sabelo')).toBeInTheDocument();
+    expect(within(screen.getByText('SKU-2').closest('tr')!).getByText('Not known')).toBeInTheDocument();
+    expect(within(screen.getByText('SKU-3').closest('tr')!).queryByText('Not known')).not.toBeInTheDocument();
+
+    const totals = await screen.findByRole('region', { name: 'Written off by who was responsible' });
+    expect(within(totals).getByText('Not known')).toBeInTheDocument();
+    expect(within(totals).getByText('3')).toBeInTheDocument();
+    expect(screen.getByLabelText('Responsible')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Not known' })).toBeInTheDocument();
+
+    fireEvent.click(within(totals).getByRole('button', { name: 'Sabelo' }));
+    await waitFor(() => expect(listCalls().at(-1)).toBe('/inventory-transactions?from=2026-10-01&to=2026-10-31&recipientId=r-1&report=writeoffs&limit=100'));
+    expect(within(totals).getByRole('button', { name: 'Sabelo' })).toHaveAttribute('aria-pressed', 'true');
+    // The totals keep every person in view.
+    expect(calls('/inventory-transactions/writeoffs-by-responsible').every((p) => !p.includes('recipientId'))).toBe(true);
   });
 
   it('downloads a ledger report as a PDF of that report, and as Excel', async () => {

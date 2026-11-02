@@ -121,7 +121,10 @@ const movementFilters = z.object({
   locationId: z.string().optional(),
   inside: z.enum(['true', 'false']).optional().openapi({ description: 'true: the location and the locations inside it (a room and its racks). Otherwise just the location.' }),
   actorId: z.string().optional().openapi({ description: 'Who posted the movement.' }),
-  recipientId: z.string().optional().openapi({ description: "Who it was issued to; '__none__' for issues with no recipient recorded." }),
+  recipientId: z.string().optional().openapi({
+    description: "Who it was issued to (with report=writeoffs: who was responsible); '__none__' for none recorded "
+      + '(with report=writeoffs: damage, loss or scrap with nobody known).',
+  }),
   q: z.string().optional().openapi({ description: 'Matches item code or name, location, project or who it was issued to.' }),
   report: z.enum(['issued', 'transfers', 'writeoffs', 'loans', 'returned']).optional().openapi({
     description: 'A Movements report: issued stock, transfers (the out leg, with otherLocationName), write-offs (adjustments other than count differences), '
@@ -233,6 +236,15 @@ export const OPERATIONS: Operation[] = [
     method: 'get', path: '/inventory-transactions/actors', tag: 'Stock movements', summary: 'Everyone who has posted a movement (id and name)',
   },
   {
+    method: 'get', path: '/inventory-transactions/writeoffs-by-responsible', tag: 'Stock movements',
+    summary: 'Write-off totals by who was responsible',
+    description: 'Damage, loss and scrap that took stock away, for the same filters as the write-offs report: per responsible '
+      + 'recipient (recipientId null: nobody known), how many write-offs and their value at unit cost (an item with no unit '
+      + 'cost counts as 0), largest value first (ties by name, nobody known last), as { currency, totals }. Reversed write-offs and their reversals are left out. '
+      + 'The report filter is implied.',
+    query: movementFilters,
+  },
+  {
     method: 'get', path: '/inventory-transactions/export', tag: 'Stock movements', summary: 'Download the filtered movement history as Excel',
     description: 'Refused with 400 when the filters select more than 10,000 movements.',
     query: movementFilters, errors: [400],
@@ -326,6 +338,9 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/inventory-adjustments', tag: 'Stock movements', summary: 'Correct stock up or down with a reason',
+    description: 'A signed quantity with a reason. DAMAGE, LOSS and SCRAP may name who was responsible (recipientId, an '
+      + 'active recipient); naming someone needs a reasonNote saying what happened. Other reasons take no recipientId. '
+      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location or recipient.',
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
   },
   {

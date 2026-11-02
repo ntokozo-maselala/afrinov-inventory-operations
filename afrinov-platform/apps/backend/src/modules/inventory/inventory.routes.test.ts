@@ -27,7 +27,9 @@ const { mockedIssue, mockedTransfer, mockedAdjust, mockedQueryHistory, mockedRev
 }));
 
 const { mockedReceive, mockedReceiptList, mockedCountList } = vi.hoisted(() => ({ mockedReceive: vi.fn(), mockedReceiptList: vi.fn(), mockedCountList: vi.fn() }));
-const { mockedSummary, mockedActors, mockedCount, mockedSlips } = vi.hoisted(() => ({ mockedSummary: vi.fn(), mockedActors: vi.fn(), mockedCount: vi.fn(), mockedSlips: vi.fn() }));
+const { mockedSummary, mockedActors, mockedCount, mockedSlips, mockedByResponsible } = vi.hoisted(() => ({
+  mockedSummary: vi.fn(), mockedActors: vi.fn(), mockedCount: vi.fn(), mockedSlips: vi.fn(), mockedByResponsible: vi.fn(),
+}));
 vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive, list: mockedReceiptList } }));
 vi.mock('./stock-count.service.js', () => ({ StockCountService: { list: mockedCountList } }));
 
@@ -56,6 +58,7 @@ vi.mock('./inventory.service.js', () => ({
     historySummary: mockedSummary,
     historyActors: mockedActors,
     historyCount: mockedCount,
+    writeoffsByResponsible: mockedByResponsible,
     issueSlips: mockedSlips,
     reverse: mockedReverse,
     returnToStock: mockedReturn,
@@ -364,6 +367,50 @@ describe('inventory routes', () => {
         expect.objectContaining({ actorId: 'user-admin' }),
         undefined,
       );
+    });
+
+    it('forwards who was responsible, or null for nobody known', async () => {
+      for (const recipientId of [RECIPIENT_UUID, null]) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/v1/inventory-adjustments',
+          headers: authed(),
+          payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: -1, reasonCode: 'DAMAGE', reasonNote: 'Dropped', recipientId },
+        });
+        expect(res.statusCode).toBe(201);
+        expect(mockedAdjust).toHaveBeenLastCalledWith(expect.objectContaining({ recipientId }), undefined);
+      }
+    });
+
+    it('returns 400 when recipientId is not an id', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/inventory-adjustments',
+        headers: authed(),
+        payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: -1, reasonCode: 'LOSS', recipientId: 'Sabelo' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(mockedAdjust).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /api/v1/inventory-transactions/writeoffs-by-responsible', () => {
+    it('returns 401 without auth', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/v1/inventory-transactions/writeoffs-by-responsible' });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('returns the totals for the filters', async () => {
+      const totals = { currency: 'ZAR', totals: [{ recipientId: RECIPIENT_UUID, recipientName: 'Sabelo', recipientType: 'WORKER', count: 2, value: '64.00' }] };
+      mockedByResponsible.mockResolvedValue(totals);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/v1/inventory-transactions/writeoffs-by-responsible?from=2026-10-01&to=2026-10-31&locationId=${VALID_UUID}`,
+        headers: authed(),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual(totals);
+      expect(mockedByResponsible).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-10-01', to: '2026-10-31', locationId: VALID_UUID }));
     });
   });
 

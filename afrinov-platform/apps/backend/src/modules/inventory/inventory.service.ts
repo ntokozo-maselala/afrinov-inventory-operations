@@ -50,8 +50,14 @@ export interface AdjustmentInput {
   quantity: number | string | Decimal;
   reasonCode: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER';
   reasonNote?: string;
+  /** Who was responsible (damage, loss or scrap only); naming someone needs a note saying what happened. */
+  recipientId?: string | null;
   actorId: string;
 }
+
+/** The write-off reasons that record who was responsible, when anyone is known. */
+export const RESPONSIBLE_REASONS = ['DAMAGE', 'LOSS', 'SCRAP'] as const;
+export const takesResponsible = (reason: string) => (RESPONSIBLE_REASONS as readonly string[]).includes(reason);
 
 export interface ReturnInput {
   issueTransactionId: string;
@@ -224,7 +230,10 @@ export interface HistoryFilter {
   /** A room and the locations inside it, from locationId with inside=true; wins over locationId. */
   locationIds?: string[];
   actorId?: string;
-  /** Who it was issued to; '__none__' for issues with no recipient recorded. */
+  /**
+   * Who it was issued to (on write-offs: who was responsible); '__none__' for
+   * none recorded (on write-offs: damage, loss or scrap with nobody known).
+   */
   recipientId?: string;
   /** Matches the item code or name, the location, the project or who it was issued to. */
   q?: string;
@@ -267,6 +276,8 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
   else if (filter.locationId) where.locationId = filter.locationId;
   if (filter.actorId) where.actorId = filter.actorId;
   if (filter.recipientId) where.recipientId = filter.recipientId === '__none__' ? null : filter.recipientId;
+  // Other adjustments never name anyone, so "nobody known" means a write-off that could have.
+  if (filter.report === 'writeoffs' && filter.recipientId === '__none__') where.reasonCode = { in: [...RESPONSIBLE_REASONS] };
   if (filter.issueIds) where.issueId = { in: filter.issueIds };
   const postedAt = dayRange(filter.from, filter.to);
   if (postedAt) where.postedAt = postedAt;
@@ -439,6 +450,59 @@ export const InventoryService = {
     const users = await prisma.user.findMany({ where: { id: { in: ids.map((r) => r.actorId) } }, select: { id: true, name: true } });
     return users.sort((a, b) => a.name.localeCompare(b.name));
   },
+
+  /**
+   * The Write-offs report's totals by who was responsible: damage, loss and
+   * scrap that took stock away, valued at the item's unit cost (an item with
+   * none counts as 0). Reversed write-offs and their reversals are left out.
+   * recipientId null is "not known". Largest value first, in the report
+   * currency the other value reports use. Any other report in the filter is ignored.
+   */
+  async writeoffsByResponsible(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<{
+    currency: string;
+    totals: Array<{ recipientId: string | null; recipientName: string | null; recipientType: string | null; count: number; value: string }>;
+  }> {
+    const groups = await prisma.inventoryTransaction.groupBy({
+      by: ['recipientId', 'materialId'],
+      where: {
+        AND: [
+          historyWhere({ ...filter, report: 'writeoffs' }),
+          { reasonCode: { in: [...RESPONSIBLE_REASONS] }, quantity: { lt: 0 }, reversesId: null, reversedBy: { is: null } },
+        ],
+      },
+      _sum: { quantity: true },
+      _count: { _all: true },
+    });
+    const materialIds = [...new Set(groups.map((g) => g.materialId))];
+    const recipientIds = [...new Set(groups.map((g) => g.recipientId).filter((id): id is string => !!id))];
+    const [materials, people] = await Promise.all([
+      materialIds.length ? prisma.material.findMany({ where: { id: { in: materialIds } }, select: { id: true, unitCost: true } }) : [],
+      recipientIds.length ? prisma.recipient.findMany({ where: { id: { in: recipientIds } }, select: { id: true, name: true, type: true } }) : [],
+    ]);
+    const unitCost = new Map(materials.map((m) => [m.id, m.unitCost]));
+    const person = new Map(people.map((p) => [p.id, p]));
+    const totals = new Map<string | null, { count: number; value: Decimal }>();
+    for (const g of groups) {
+      const t = totals.get(g.recipientId) ?? { count: 0, value: new Prisma.Decimal(0) };
+      t.count += g._count._all;
+      const cost = unitCost.get(g.materialId);
+      if (cost && g._sum.quantity) t.value = t.value.add(g._sum.quantity.negated().mul(cost));
+      totals.set(g.recipientId, t);
+    }
+    // Ties go by name, with nobody known last.
+    const name = (id: string | null) => (id ? person.get(id)?.name ?? '' : null);
+    const byName = (a: string | null, b: string | null) => (a === null ? (b === null ? 0 : 1) : b === null ? -1 : a.localeCompare(b));
+    return {
+      currency: process.env.REPORT_CURRENCY ?? 'ZAR',
+      totals: [...totals.entries()]
+        .sort(([ia, a], [ib, b]) => b.value.comparedTo(a.value) || b.count - a.count || byName(name(ia), name(ib)))
+        .map(([id, t]) => {
+          const p = id ? person.get(id) : undefined;
+          return { recipientId: id, recipientName: p?.name ?? null, recipientType: p?.type ?? null, count: t.count, value: t.value.toFixed(2) };
+        }),
+    };
+  },
+
   /**
    * Reverse a movement by posting an opposite entry that points at it. The
    * ledger has no update path, so this is the only way to correct a mistake.
@@ -815,11 +879,16 @@ export const InventoryService = {
   async adjust(input: AdjustmentInput, within?: Prisma.TransactionClient): Promise<{ transactionId: string }> {
     const qty = toDecimal(input.quantity);
     if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
+    if (input.recipientId) {
+      if (!takesResponsible(input.reasonCode)) throw Errors.validation('Only damage, loss or scrap records who was responsible.');
+      if (!input.reasonNote?.trim()) throw Errors.validation('Say what happened when naming who was responsible.');
+    }
 
     return inTx(within, async (tx) => {
       await lockInventoryBalances([{ materialId: input.materialId, locationId: input.locationId }], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
+      if (input.recipientId) await checkRecipientActive(input.recipientId, tx);
 
       // See issue(): stock can never go below zero.
       if (qty.isNegative()) {
@@ -840,6 +909,7 @@ export const InventoryService = {
           quantity: qty,
           reasonCode: input.reasonCode,
           reasonNote: input.reasonNote ?? null,
+          recipientId: input.recipientId ?? null,
           actorId: input.actorId,
         },
       });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
+import { RecipientSelect, type RecipientOption } from './IssueFields';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import type { CurrentStockRow } from '../api/types';
@@ -31,17 +32,31 @@ const REASONS = [
   { value: 'OTHER', label: 'Other' },
 ];
 
+// Damage, loss and scrap say who was responsible, or that nobody is known;
+// the choice is never left blank. Naming someone needs a note saying what happened.
+const RESPONSIBLE_HELP: Partial<Record<string, string>> = {
+  DAMAGE: 'Who or what damaged it: a worker, machine, site or contractor.',
+  LOSS: 'Who had it last. Choose Not known if it went missing from the store.',
+  SCRAP: 'Scrap is often nobody’s fault (expired, obsolete, offcuts). Choose Not known if so.',
+};
+const NOT_KNOWN = '__none__';
+
 export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props) {
   const [quantity, setQuantity] = useState('');
   const [note, setNote] = useState('');
   const [toLocationId, setToLocationId] = useState('');
   const [reasonCode, setReasonCode] = useState(REASONS[0]!.value);
+  const [responsible, setResponsible] = useState('');
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const locations = useApi<Location[]>('/locations');
+  const recipients = useApi<RecipientOption[]>(kind === 'adjust' ? '/recipients?active=true' : null);
   const idem = useIdempotencyKey(`stock-action-${kind}`);
 
-  function reset() { setQuantity(''); setNote(''); setValidation(null); }
+  const responsibleHelp = RESPONSIBLE_HELP[reasonCode];
+  const named = !!responsibleHelp && responsible !== '' && responsible !== NOT_KNOWN;
+
+  function reset() { setQuantity(''); setNote(''); setResponsible(''); setValidation(null); }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,6 +69,8 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
     if (kind === 'transfer' && !toLocationId) { setValidation('Choose a destination location.'); return; }
     if (kind === 'transfer' && toLocationId === row.locationId) { setValidation('Source and destination must differ.'); return; }
     if (kind === 'transfer' && qty < 0) { setValidation('Enter a positive quantity.'); return; }
+    if (kind === 'adjust' && responsibleHelp && !responsible) { setValidation('Choose who was responsible, or Not known.'); return; }
+    if (kind === 'adjust' && named && !note.trim()) { setValidation('Say what happened when naming who was responsible.'); return; }
 
     setBusy(true);
     try {
@@ -63,7 +80,11 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
         onSuccess(`Transferred ${qty} × ${row.materialSku}`);
       } else {
         // Adjustments accept a signed quantity: positive to add, negative to remove.
-        const adjustBody = { materialId: row.materialId, locationId: row.locationId, quantity: qty, reasonCode, reasonNote: note || undefined };
+        // recipientId: who was responsible, null for nobody known; other reasons send none.
+        const adjustBody = {
+          materialId: row.materialId, locationId: row.locationId, quantity: qty, reasonCode, reasonNote: note || undefined,
+          recipientId: responsibleHelp ? (named ? responsible : null) : undefined,
+        };
         await api.post('/inventory-adjustments', adjustBody, { idempotencyKey: idem.keyFor(adjustBody) });
         onSuccess(`Adjusted ${row.materialSku} by ${qty > 0 ? '+' : ''}${qty}`);
       }
@@ -122,9 +143,26 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
               {REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
           </Field>
-          <Field label="Note (optional)" htmlFor="note">
-            <Textarea id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Two discs cracked in the grinder" />
+          {responsibleHelp && (
+            <RecipientSelect
+              id="responsible"
+              label="Responsible"
+              help={responsibleHelp}
+              value={responsible}
+              onChange={setResponsible}
+              recipients={recipients.data ?? []}
+              notKnownValue={NOT_KNOWN}
+              invalid={!!validation && !responsible}
+            />
+          )}
+          <Field label={named ? 'What happened' : 'Note (optional)'} htmlFor="note" required={named}>
+            <Textarea id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Two discs cracked in the grinder" invalid={!!validation && named && !note.trim()} />
           </Field>
+          {named && (
+            <Alert tone="info" title="This records who was involved, not who is at fault.">
+              Any follow-up, such as a deduction from pay, is a manager&apos;s decision and needs the person&apos;s written agreement.
+            </Alert>
+          )}
         </>
       )}
 

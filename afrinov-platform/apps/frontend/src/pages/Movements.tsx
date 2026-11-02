@@ -2,7 +2,7 @@
 // an end date for a range) and narrow it with the filters that report has.
 // Every record has one home: receipts under Received stock, issues under Issued
 // stock, count differences under Stock counts, transfers under Transfers, other
-// adjustments under Write-offs, tools lent and back under Tool loans,
+// adjustments under Write-offs (with who was responsible), tools lent and back under Tool loans,
 // catalogue and user changes under Other changes
 // (Admin and Store Controller); All movements is the full ledger. The report,
 // day and filters live in the address, so a report can be bookmarked or shared.
@@ -45,7 +45,7 @@ const REPORTS: Array<{ id: ReportId; label: string; filters: Filter[] }> = [
   { id: 'returned', label: 'Returned stock', filters: ['recipientId', 'locationId', 'materialId', 'q'] },
   { id: 'counts', label: 'Stock counts', filters: ['locationId'] },
   { id: 'transfers', label: 'Transfers', filters: ['actorId', 'materialId'] },
-  { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['locationId', 'actorId', 'materialId'] },
+  { id: 'writeoffs', label: 'Write-offs and adjustments', filters: ['recipientId', 'locationId', 'actorId', 'materialId'] },
   { id: 'loans', label: 'Tools check in/out', filters: ['recipientId', 'materialId', 'locationId'] },
   { id: 'other', label: 'Other changes', filters: ['entityType', 'actorId'] },
 ];
@@ -134,8 +134,10 @@ export function Movements() {
 
   const showView = (v: ReportView) => setParam('view', v === 'cards' ? 'cards' : null);
 
-  // Tools are checked out to someone; stock is issued to them, and returned by them.
-  const recipientLabel = report.id === 'loans' ? 'Checked out to' : report.id === 'returned' ? 'Returned by' : 'Issued to';
+  // Tools are checked out to someone; stock is issued to them, and returned by them;
+  // a write-off says who was responsible, or that nobody is known.
+  const recipientLabel = report.id === 'loans' ? 'Checked out to' : report.id === 'returned' ? 'Returned by' : report.id === 'writeoffs' ? 'Responsible' : 'Issued to';
+  const noRecipientLabel = report.id === 'writeoffs' ? 'Not known' : 'Not recorded';
 
   /** The filters that are set, in words, for the top of the PDF. */
   function filterWords(): string[] {
@@ -145,7 +147,7 @@ export function Movements() {
       const v = params.get(f);
       if (!v) continue;
       if (f === 'supplierId') words.push(`Supplier: ${name(suppliers.data, v)}`);
-      else if (f === 'recipientId') words.push(`${recipientLabel}: ${v === '__none__' ? 'Not recorded' : name(recipients.data, v)}`);
+      else if (f === 'recipientId') words.push(`${recipientLabel}: ${v === '__none__' ? noRecipientLabel : name(recipients.data, v)}`);
       else if (f === 'locationId') words.push(`Location: ${name(locations.data, v)}${inside ? ' and the locations inside it' : ''}`);
       else if (f === 'actorId') words.push(`Person: ${name(actors.data, v)}`);
       else if (f === 'materialId') words.push(`Item: ${itemOptions.find((o) => o.value === v)?.label ?? v}`);
@@ -224,7 +226,7 @@ export function Movements() {
             <Select id="mv-recipient" value={params.get('recipientId') ?? ''} onChange={(e) => setParam('recipientId', e.target.value)}>
               <option value="">Anyone</option>
               {(recipients.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-              <option value="__none__">Not recorded</option>
+              <option value="__none__">{noRecipientLabel}</option>
             </Select>
           </Field>
         )}
@@ -277,7 +279,14 @@ export function Movements() {
           : report.id === 'issued' ? <IssuedStockReport query={query} view={view} onView={showView} />
           : report.id === 'counts' ? <StockCountsReport query={query} view={view} onView={showView} />
             : report.id === 'other' ? <OtherActivity query={query} />
-              : <LedgerReport kind={report.id as LedgerReportKind} query={query} />
+              : (
+                <LedgerReport
+                  kind={report.id as LedgerReportKind}
+                  query={query}
+                  responsible={params.get('recipientId')}
+                  onResponsible={(id) => setParam('recipientId', id)}
+                />
+              )
       )}
     </div>
   );

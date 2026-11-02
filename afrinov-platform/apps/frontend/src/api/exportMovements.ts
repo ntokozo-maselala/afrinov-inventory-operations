@@ -14,6 +14,10 @@ const TYPE_LABEL: Record<string, string> = {
   RECEIPT: 'Receipt', ISSUE: 'Issue', TRANSFER_OUT: 'Transfer out', TRANSFER_IN: 'Transfer in', ADJUSTMENT: 'Adjustment', RETURN: 'Return', LOAN: 'Check out', LOAN_RETURN: 'Check in',
 };
 
+/** The person column, named for the report, as the backend's download names it. */
+const PERSON_HEADER: Partial<Record<string, string>> = { writeoffs: 'Responsible', loans: 'Checked out to', returned: 'Returned by' };
+const RESPONSIBLE_REASONS = new Set(['DAMAGE', 'LOSS', 'SCRAP']);
+
 export async function downloadMovements(query: string): Promise<void> {
   const params = new URLSearchParams(query);
   const from = params.get('from');
@@ -51,7 +55,10 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   const ws = wb.addWorksheet('Movements');
   ws.getCell('A1').value = 'Stock movements';
   ws.getCell('A2').value = `${rows.length} movement${rows.length === 1 ? '' : 's'}`;
-  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', 'Issued to', 'Project', 'Reason', 'Note', 'Reference', 'By'];
+  const report = new URLSearchParams(query).get('report') ?? '';
+  const person = PERSON_HEADER[report] ?? 'Issued to';
+  const notKnown = (m: MovementRow) => (report === 'writeoffs' && m.reasonCode && RESPONSIBLE_REASONS.has(m.reasonCode) ? 'Not known' : '');
+  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Reason', 'Note', 'Reference', 'By'];
   ws.getRow(4).font = { bold: true };
   for (const m of rows) {
     const type = TYPE_LABEL[m.type] ?? m.type;
@@ -59,7 +66,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
       new Date(m.postedAt),
       m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type,
       m.materialSku, m.materialName, m.locationName, Number(m.quantity), m.unitOfMeasure ?? '',
-      m.recipientName ?? '', m.projectNumber ?? '', m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '', m.reasonNote ?? '',
+      m.recipientName ?? notKnown(m), m.projectNumber ?? '', m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '', m.reasonNote ?? '',
       m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : m.referenceType ?? '',
       m.actorName,
     ]);
@@ -112,6 +119,7 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
     { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Number(m.quantity)) },
     { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
     { header: 'Reason', wrap: true, cell: reason },
+    { header: 'Responsible', wrap: true, cell: (m) => m.recipientName ?? (m.reasonCode && RESPONSIBLE_REASONS.has(m.reasonCode) ? 'Not known' : '') },
     { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
     { header: 'By', cell: (m) => m.actorName },
   ],

@@ -15,7 +15,8 @@ import { Drawer } from '../Modal';
 import { useToast } from '../Toast';
 import { TransactionDrawer } from '../TransactionDrawer';
 import { formatDateTime, formatNumber } from '../../lib/format';
-import type { MovementRow } from '../../api/types';
+import { formatCurrency } from '../../lib/currency';
+import type { MovementRow, WriteoffsByResponsible } from '../../api/types';
 
 export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
 
@@ -45,22 +46,41 @@ export function toolCondition(m: Pick<MovementRow, 'type' | 'reasonCode'>): stri
   return m.reasonCode === 'DAMAGE' ? 'Damaged' : m.reasonCode === 'LOSS' ? 'Lost' : 'Good';
 }
 
-export function LedgerReport({ kind, query }: { kind: LedgerReportKind; query: string }) {
+/** The write-off reasons that say who was responsible. */
+const RESPONSIBLE_REASONS = new Set(['DAMAGE', 'LOSS', 'SCRAP']);
+const NOT_KNOWN = '__none__';
+const typeLabel = (type: string | null) => (type ? type.charAt(0) + type.slice(1).toLowerCase() : '');
+
+export function LedgerReport({ kind, query, responsible, onResponsible }: {
+  kind: LedgerReportKind;
+  query: string;
+  /** Write-offs: the responsible filter that is set ('__none__' for nobody known), and how to change it. */
+  responsible?: string | null;
+  onResponsible?: (recipientId: string | null) => void;
+}) {
   const q = kind === 'all' ? query : `${query}&report=${kind}`;
   const list = usePagedList<MovementRow>(`/inventory-transactions?${q}`, 100);
   const summary = useApi<{ total: number }>(`/inventory-transactions/summary?${q}`);
+  // The totals keep every person in view, so they ignore the responsible filter itself.
+  const totalsQuery = new URLSearchParams(query);
+  totalsQuery.delete('recipientId');
+  const totals = useApi<WriteoffsByResponsible>(kind === 'writeoffs' ? `/inventory-transactions/writeoffs-by-responsible?${totalsQuery.toString()}` : null);
   const [selected, setSelected] = useState<MovementRow | null>(null);
   const toast = useToast();
 
   function reload() {
     list.reload();
     summary.reload();
+    if (kind === 'writeoffs') totals.reload();
   }
 
   if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={reload} />;
   return (
     <>
       {list.stale && <StaleDataNotice error={list.error} onRetry={reload} />}
+      {kind === 'writeoffs' && (
+        <ResponsibleTotals data={totals.data} failed={!!totals.error} active={responsible ?? null} onChoose={onResponsible} />
+      )}
       <p className="text-meta mb-2">{list.loaded && summary.data ? `${formatNumber(list.rows.length)} of ${formatNumber(summary.data.total)} shown` : ' '}</p>
       <DataTable
         ariaLabel="Movements report"
@@ -87,6 +107,60 @@ export function LedgerReport({ kind, query }: { kind: LedgerReportKind; query: s
         </Drawer>
       )}
     </>
+  );
+}
+
+/**
+ * Damage, loss and scrap by who was responsible, valued at unit cost, above
+ * the Write-offs list. Choosing a row shows only that person's write-offs.
+ */
+function ResponsibleTotals({ data, failed, active, onChoose }: {
+  data: WriteoffsByResponsible | null | undefined;
+  failed: boolean;
+  active: string | null;
+  onChoose?: (recipientId: string | null) => void;
+}) {
+  if (failed) return <p className="text-meta mb-3">The totals by who was responsible couldn&apos;t be loaded.</p>;
+  if (!data || data.totals.length === 0) return null;
+  const count = data.totals.reduce((n, t) => n + t.count, 0);
+  const value = data.totals.reduce((v, t) => v + Number(t.value), 0);
+  return (
+    <section className="surface-card p-4 mb-4" aria-labelledby="writeoff-totals">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <h2 id="writeoff-totals" className="text-h3">Written off by who was responsible</h2>
+        <p className="text-meta">Damage, loss and scrap at unit cost; an item with no unit cost counts as nothing.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="table table-compact">
+          <thead>
+            <tr><th>Responsible</th><th className="text-right">Write-offs</th><th className="text-right">Value</th></tr>
+          </thead>
+          <tbody>
+            {data.totals.map((t) => {
+              const key = t.recipientId ?? NOT_KNOWN;
+              const name = t.recipientName ?? 'Not known';
+              return (
+                <tr key={key} className={active === key ? 'bg-surface-100 font-medium' : undefined}>
+                  <td>
+                    {onChoose ? (
+                      <button type="button" className="btn-link" aria-pressed={active === key} onClick={() => onChoose(active === key ? null : key)}>{name}</button>
+                    ) : name}
+                    {t.recipientType && <span className="text-meta"> · {typeLabel(t.recipientType)}</span>}
+                  </td>
+                  <td className="text-right text-num">{formatNumber(t.count)}</td>
+                  <td className="text-right text-num">{formatCurrency(Number(t.value), data.currency)}</td>
+                </tr>
+              );
+            })}
+            <tr className="font-medium">
+              <td>Total</td>
+              <td className="text-right text-num">{formatNumber(count)}</td>
+              <td className="text-right text-num">{formatCurrency(value, data.currency)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -126,6 +200,11 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     when(open), item, loc,
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m), width: '8rem' },
     reason,
+    {
+      key: 'resp', header: 'Responsible', width: '9rem',
+      render: (m) => (m.recipientName ? <span className="text-meta">{m.recipientName}</span>
+        : m.reasonCode && RESPONSIBLE_REASONS.has(m.reasonCode) ? <span className="text-meta italic">Not known</span> : none),
+    },
     { key: 'note', header: 'Note', render: (m) => m.reasonNote ? <span className="text-meta">{m.reasonNote}</span> : none },
     by,
   ],
