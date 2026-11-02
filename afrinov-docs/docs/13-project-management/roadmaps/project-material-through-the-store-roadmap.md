@@ -14,11 +14,11 @@ The third answer decides the design. Since the [Project on the Order Roadmap](pr
 
 It amends ADR-021 (straight to site; Procurement confirms delivery) and ADR-023 (only leftovers carry a project, on the item). Recorded as ADR-025 in Phase 5.
 
-**Status:** Proposed. Nothing built.
+**Status:** Phase 1 built on `feature/project-stock-1` (not yet merged). Phases 2 to 5 proposed.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
-| 1 | Stock is held for a project | L | Proposed |
+| 1 | Stock is held for a project | L | Built |
 | 2 | The storeman receives project orders | M | Proposed |
 | 3 | Issue, return, count and move by project | M | Proposed |
 | 4 | Stock, project and report screens | M | Proposed |
@@ -56,26 +56,28 @@ The new field records **whose stock it is**: `held_for_project`. A Stores issue 
 | Project orders already confirmed as delivered to site | Left as history: nobody counted that material into the store, so nothing is back-filled | Proposed |
 | Who receives project orders | The store controller (and Admin), who may see a project order only to receive it: not its prices, approval or RFQ | Proposed: needed before Phase 2 |
 | Issuing one project's stock to another | Refused. Moving stock between projects is left out of this roadmap; a closed project's stock still goes to Stores | Proposed |
-| Leftovers from before | Keep their project: the migration gives their stock the item's project, so nothing changes for them | Proposed |
+| Leftovers from before | Keep their project on the item until Phase 3, when issuing starts reading the stock's project; Phase 3 then gives their stock the item's project. Phase 1 back-fills nothing (see Phase 1) | 2 Nov 2026 |
 
 ### Order of work
 
-One branch and pull request per phase, in order. Phase 1 changes no behaviour on screen (every balance it creates for new stock is Stores, as today), so it can merge and deploy on its own and be checked against live data first. Phases 2 and 3 change what the storeman does and should reach the business together.
+One branch and pull request per phase, in order. Phase 1 changes no behaviour on screen (all stock stays Stores stock, as today), so it can merge and deploy on its own and be checked against live data first. Phases 2 and 3 change what the storeman does and should reach the business together.
 
 ## Phase 1: Stock is held for a project
 
 Size L. Backend and migration. The risky phase: it changes how balances are keyed on live stock data. Read `docs/engineering/README.md` (database assurance) before starting.
 
-- [ ] **1.1 The ledger records whose stock it is.** A nullable `held_for_project` on `inventory_transactions`, referencing `projects`, in a new migration. Back-fill: a transaction for a Projects item that has `materials.project_number` takes that project, so today's leftovers keep their project; everything else stays null (Stores).
-  Files: `prisma/schema.prisma`, new migration
-- [ ] **1.2 Balances are per project.** `inventory_balances` gains `held_for_project` and a surrogate key, with a unique index on (material, location, held for) using `NULLS NOT DISTINCT` (PostgreSQL 16), so there is exactly one Stores balance per item and location. The migration rebuilds every balance from the ledger and **stops with an error** if any item × location total differs from before.
-  Files: new migration, `src/db/migrations.test.ts`
-- [ ] **1.3 Every write names the stock it touches.** `lockInventoryBalances`, `recomputeBalance` and `getCurrentBalance` take the project held for. Each service passes it: receipts, issues, returns, transfers (both legs keep it), adjustments and write-offs, stock counts, tool loans (always Stores), reversals (copy the original's), opening balances and the workbook import (Stores, or the leftover's project).
-  Files: `shared/inventory/balances.ts`, `modules/inventory/balances.ts`, `inventory.service.ts`, `stock-receipt.service.ts`, `stock-count.service.ts`, `tool-loan.service.ts`, `project-leftovers.service.ts`, `stock-item.service.ts`, `location.service.ts`, `procurement/procurement.service.ts`, `migration/opening-balance.service.ts`, `migration/reconciliation.ts`, `db/seed.ts`
-- [ ] **1.4 Reports read the same totals.** Current stock returns one row per item × location × project held for; every report that sums an item still gets the same total.
-  Files: `reporting/report.service.ts`, `reporting.service.ts`, `openapi/document.ts`, `mock/mockApi.ts`
+*Built on `feature/project-stock-1` (migration `20260101000035_stock_held_for_project`).* One change from the plan: **nothing is back-filled.** Giving today's leftovers their item's project in the migration would have meant every movement working out whose stock it is from the item, a stopgap Phase 3 replaces, plus a stock move when leftovers go to Stores. So every existing movement stays Stores stock, and leftovers keep their project on the item until Phase 3.
 
-Tests: a real-database migration test (balances before and after agree; a leftover's stock is held for its project), `balances` unit tests, and the existing integration suite unchanged.
+- [x] **1.1 The ledger records whose stock it is.** A nullable `held_for_project` on `inventory_transactions`, referencing `projects` with `ON DELETE RESTRICT ON UPDATE RESTRICT`, so a project holding stock can't be deleted or renumbered under its balances. Separate from `project_number` (who the stock was used for).
+  Files: `prisma/schema.prisma`, new migration
+- [x] **1.2 Balances are per project.** `inventory_balances` gains `held_for_project`, `''` for Stores stock (not null, so it can be part of the key and Prisma can address the row), and its primary key becomes (material, location, held for). Every existing balance becomes `''` with the same quantity, so nothing is rebuilt.
+  Files: new migration, `src/db/migrations.test.ts`
+- [x] **1.3 Every write names the stock it touches.** `lockInventoryBalances`, `recomputeBalance` and `getCurrentBalance` take a key whose project is required (`storesStock()` for Stores). Returns and reversals go back to the stock they came from; everything else posts Stores stock until Phases 2 and 3. `stock-item.service.ts` uses the shared recompute instead of its own copy.
+  Files: `shared/inventory/balances.ts`, `modules/inventory/balances.ts`, `inventory.service.ts`, `stock-receipt.service.ts`, `stock-count.service.ts`, `tool-loan.service.ts`, `stock-item.service.ts`, `procurement/procurement.service.ts`, `migration/opening-balance.service.ts`, `db/seed.ts`, `integration/helpers.ts`
+- [x] **1.4 Reports read the same totals.** Current stock says whose stock each row is (`heldForProject`); reports that sum an item read every row, so totals are unchanged.
+  Files: `reporting/reporting.service.ts`, `openapi/document.ts`, `frontend/src/api/types.ts`
+
+Tests: unit tests for the balance key and for returns and reversals keeping the project, a migration test, and the existing suites unchanged (backend 951 unit, 195 integration). The migration was also run on a database holding stock in the old format: every balance kept its quantity as Stores stock, a second balance held for a project was accepted, and deleting a project holding stock was refused.
 
 **Done when:** the migration runs on a copy of live data with every total unchanged, and nothing on screen looks different.
 
@@ -100,6 +102,8 @@ Tests: `procurement.real-http.test.ts` and `stock-receipts.real-http.test.ts` (a
 
 Size M. Backend and frontend. Needs Phase 1.
 
+- [ ] **3.0 Leftovers' stock takes their project.** A migration gives the movements of each Projects item that has `materials.project_number` that project as `held_for_project`, and rebuilds those balances, **stopping with an error** if any item × location total changes. Left out of Phase 1 so that until issuing reads the stock's project, leftovers keep working from the item.
+  Files: new migration, `src/db/migrations.test.ts`
 - [ ] **3.1 Issue stock takes from the project's own stock.** With a project chosen, the item list is that project's stock (as PR #140 already filters, now from `held_for_project` instead of the item); with none, Stores stock only. The server deducts from the stock held for the issue's project and refuses another project's stock. A Stores item can still be issued to a project, from Stores stock, as today.
   Files: `pages/IssueStock.tsx`, `inventory.service.ts`, `material-section.ts` (`checkProjectMaterial` reads the stock, not the item)
 - [ ] **3.2 A return goes back to the stock it came from.** Returning an issued line puts it back held for the same project; a reversal does the same.
@@ -139,5 +143,5 @@ Size S–M. Backend, frontend and docs.
 
 ## Releasing
 
-- **Phase 1:** back up the database (`pg_dump`) before deploying. The migration rebuilds every balance and refuses to finish if any total changes. Run it on a copy of live data first.
+- **Phase 1:** back up the database (`pg_dump`) before deploying: the migration changes the `inventory_balances` primary key. No data changes; every balance keeps its quantity as Stores stock.
 - **Phase 2:** apply any permission migration (`npx prisma migrate deploy`). Tell Procurement that Confirm delivery is gone and the storeman now books project deliveries.
