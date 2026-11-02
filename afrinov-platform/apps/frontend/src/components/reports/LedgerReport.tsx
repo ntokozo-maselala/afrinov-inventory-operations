@@ -8,7 +8,7 @@ import { useApi } from '../../hooks/useApi';
 import { usePagedList } from '../../hooks/usePagedList';
 import { Button } from '../Button';
 import { DataTable, type DataTableColumn } from '../DataTable';
-import { MovementBadge } from '../Badge';
+import { Badge, MovementBadge } from '../Badge';
 import { EmptyState, ErrorState } from '../EmptyState';
 import { StaleDataNotice } from '../StaleDataNotice';
 import { Drawer } from '../Modal';
@@ -160,6 +160,8 @@ function ResponsibleTotals({ data, failed, active, onChoose }: {
           </tbody>
         </table>
       </div>
+      {/* The list below is every write-off for the filters, so say what these totals leave out. */}
+      <p className="text-meta mt-2">Reversed write-offs, their reversals and stock added back are listed below but not counted here.</p>
     </section>
   );
 }
@@ -198,7 +200,11 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
   ],
   writeoffs: (open) => [
     when(open), item, loc,
-    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m), width: '8rem' },
+    {
+      key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', width: '9rem',
+      // Marked because the totals by who was responsible leave these out.
+      render: (m) => <>{qty(m)}{m.reversesId ? <> <Badge tone="neutral">Reversal</Badge></> : m.reversedById ? <> <Badge tone="neutral">Reversed</Badge></> : null}</>,
+    },
     reason,
     {
       key: 'resp', header: 'Responsible', width: '9rem',

@@ -259,13 +259,20 @@ describe('Movements page', () => {
       { ...row(1), type: 'ADJUSTMENT', reasonCode: 'DAMAGE', recipientId: 'r-1', recipientName: 'Sabelo', reasonNote: 'Dropped off the bench' },
       { ...row(2), type: 'ADJUSTMENT', reasonCode: 'LOSS' },
       { ...row(3), type: 'ADJUSTMENT', reasonCode: 'OTHER' },
+      { ...row(4), type: 'ADJUSTMENT', reasonCode: 'DAMAGE', recipientName: 'Sabelo', reversedById: 'tx-5' },
+      { ...row(5), type: 'ADJUSTMENT', reasonCode: 'DAMAGE', recipientName: 'Sabelo', quantity: '1', reversesId: 'tx-4' },
     ]]);
     await screen.findByText('SKU-1');
     expect(within(screen.getByText('SKU-1').closest('tr')!).getByText('Sabelo')).toBeInTheDocument();
     expect(within(screen.getByText('SKU-2').closest('tr')!).getByText('Not known')).toBeInTheDocument();
     expect(within(screen.getByText('SKU-3').closest('tr')!).queryByText('Not known')).not.toBeInTheDocument();
+    // The totals leave reversed write-offs and their reversals out, so the list marks them.
+    expect(within(screen.getByText('SKU-1').closest('tr')!).queryByText(/^Revers/)).not.toBeInTheDocument();
+    expect(within(screen.getByText('SKU-4').closest('tr')!).getByText('Reversed')).toBeInTheDocument();
+    expect(within(screen.getByText('SKU-5').closest('tr')!).getByText('Reversal')).toBeInTheDocument();
 
     const totals = await screen.findByRole('region', { name: 'Written off by who was responsible' });
+    expect(within(totals).getByText(/listed below but not counted here/)).toBeInTheDocument();
     expect(within(totals).getByText('Not known')).toBeInTheDocument();
     expect(within(totals).getByText('3')).toBeInTheDocument();
     expect(screen.getByLabelText('Responsible')).toBeInTheDocument();
