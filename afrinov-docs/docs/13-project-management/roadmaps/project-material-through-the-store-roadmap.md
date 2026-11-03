@@ -14,12 +14,12 @@ The third answer decides the design. Since the [Project on the Order Roadmap](pr
 
 It amends ADR-021 (straight to site; Procurement confirms delivery) and ADR-023 (only leftovers carry a project, on the item). Recorded as ADR-025 in Phase 5.
 
-**Status:** Phase 1 built on `feature/project-stock-1` (not yet merged). Phases 2 to 5 proposed.
+**Status:** Phase 1 built on `feature/project-stock-1` (PR #142) and Phase 2 on `feature/project-stock-2` (PR #143), neither merged yet. Phases 3 to 5 proposed.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Stock is held for a project | L | Built |
-| 2 | The storeman receives project orders | M | Proposed |
+| 2 | The storeman receives project orders | M | Built |
 | 3 | Issue, return, count and move by project | M | Proposed |
 | 4 | Stock, project and report screens | M | Proposed |
 | 5 | Closing a project, docs and ADR | S–M | Proposed |
@@ -52,9 +52,9 @@ The new field records **whose stock it is**: `held_for_project`. A Stores issue 
 | Where project material is delivered | To the store, all of it | 2 Nov 2026 |
 | Who books a project delivery | The storeman, on Receive stock | 2 Nov 2026 |
 | One item on two projects | Allowed, so stock carries its project (not the item) | 2 Nov 2026 |
-| Confirm delivery on a project order | Retired: a project order is received into stock like a Stores order | Proposed |
-| Project orders already confirmed as delivered to site | Left as history: nobody counted that material into the store, so nothing is back-filled | Proposed |
-| Who receives project orders | The store controller (and Admin), who may see a project order only to receive it: not its prices, approval or RFQ | Proposed: needed before Phase 2 |
+| Confirm delivery on a project order | Retired: a project order is received into stock like a Stores order | 2 Nov 2026 |
+| Project orders already confirmed as delivered to site | Left as history: nobody counted that material into the store, so nothing is back-filled. The order still reads "Delivered to site" | Built so in Phase 2 |
+| Who receives project orders | The store controller (and Admin), through a receiving-only view of the order: its supplier, project, lines and what each owes, not its prices, approval or RFQ | 2 Nov 2026 |
 | Issuing one project's stock to another | Refused. Moving stock between projects is left out of this roadmap; a closed project's stock still goes to Stores | Proposed |
 | Leftovers from before | Keep their project on the item until Phase 3, when issuing starts reading the stock's project; Phase 3 then gives their stock the item's project. Phase 1 back-fills nothing (see Phase 1) | 2 Nov 2026 |
 
@@ -85,16 +85,27 @@ Tests: unit tests for the balance key and for returns and reversals keeping the 
 
 Size M. Backend and frontend. Needs Phase 1, and the decision on who receives project orders.
 
-- [ ] **2.1 The server receives project orders into stock.** The three `PROJECT_DELIVERY_REFUSED` refusals go: receive (`procurement.service.ts`), goods receipts (`goods-receipt.service.ts`) and stock receipts (`inventory.service.ts`). A receipt against a project order posts stock held for the order's project.
+*Built on `feature/project-stock-2` (PR #143), with no migration.* Two changes from the plan: the store controller needed no new permission, as `receive:purchase_order` (store controller and Admin) already says who receives orders; and Qodo's remaining findings on PR #142, which only became real once project stock existed, were fixed first, as step 2.0.
+
+- [x] **2.0 Stores-only views stay Stores-only.** Move to Stores refuses an item with stock held for a project; Project leftovers, the tool list, stock status, re-order and stock alerts count Stores stock only; the inventory report and its exports name the project a line is held for ("A-1 · held for AFRI-1325"); movement history returns `heldForProject`.
+  Files: `project-leftovers.service.ts`, `reporting.service.ts`, `report.service.ts`, `report-export.ts`, `tool-loan.service.ts`, `inventory.service.ts`
+
+- [x] **2.1 The server receives project orders into stock.** The three `PROJECT_DELIVERY_REFUSED` refusals go: receive (`procurement.service.ts`), goods receipts (`goods-receipt.service.ts`) and stock receipts (`inventory.service.ts`). A receipt against a project order posts stock held for the order's project.
   Files: `procurement.service.ts`, `goods-receipt.service.ts`, `inventory.service.ts`
-- [ ] **2.2 The store controller may receive one.** A project order that is Approved or Partly received is visible to those who receive orders, for receiving only: its lines and what each owes, not its prices, approval panel or RFQ. Today it is *not found* to them (`kindsSeen`, Separation Phase 4.1), so this needs care: a permission or a receiving view, not `view:purchase_order` back.
-  Files: `procurement.routes.ts`, `shared/permissions.ts`, possibly a migration for the permission
-- [ ] **2.3 Receive stock lists project orders.** The Order list shows approved project orders as well as Stores orders, each labelled with its project ("AFRI-1325 · Plant upgrade"); the rest of the form is unchanged. The confirmation says the stock is held for the project.
-  Files: `pages/ReceiveStock.tsx`, `lib/orderKind.ts`, `mock/mockApi.ts`
-- [ ] **2.4 Confirm delivery is retired.** The order page no longer offers it; `POST /purchase-orders/:id/confirm-delivery` refuses with a message pointing to Receive stock. Orders already confirmed keep their history.
+- [x] **2.2 The store controller may receive one.** A receiving view, `GET /purchase-orders/receivable`, lists the Approved and Partly received orders of the kinds the user receives: supplier, project, lines and what each owes, with no prices, approval or RFQ. Receiving a project order and reading its receipts need `receive:purchase_order`; the order itself stays Procurement's (*not found* to the store), and a buyer who can see it but not receive it is refused (403), not told it is missing.
+  Files: `procurement.routes.ts`, `procurement.service.ts`, `openapi/document.ts`
+- [x] **2.3 Receive stock lists project orders.** The Order list, from the receiving view, shows project orders beside Stores orders, labelled with their project ("AFRI-0430 · for AFRI-1325 · Plant upgrade"); the form shows "Held for project AFRI-1325". The confirmation says the stock is held for the project and leaves closing the order to Procurement.
+  Files: `pages/ReceiveStock.tsx`, `mock/mockApi.ts`
+- [x] **2.4 Confirm delivery is retired.** The order page no longer offers it; `POST /purchase-orders/:id/confirm-delivery` refuses with a message pointing to Receive stock. Orders already confirmed keep their history, and an order finished that way still reads "Delivered to site".
   Files: `procurement.service.ts`, `procurement.routes.ts`, `pages/PurchaseOrderDetail.tsx`, `openapi/document.ts`
 
-Tests: `procurement.real-http.test.ts` and `stock-receipts.real-http.test.ts` (a project order received in part and in full; the stock is held for its project; the store controller sees no prices), `ReceiveStock.test.tsx`, `PoConfirmDelivery.test.tsx` (now the refusal), `PoReceiveDelivery.test.tsx`.
+Also built in review on PR #143, so that stock held for a project is counted as that project's wherever stock is added up:
+
+- **Reports.** Month-end lists project stock a line per item and project, with no Required Stock or status; Stores figures count Stores stock only. The inventory report's project totals credit the project stock is held for, not the item's. The Dashboard's stock value includes held stock under its project, and the "Leftovers to move to Stores" notice counts only leftovers, which Move to Stores can take.
+- **Screens.** A Projects item's page lists "In the store for projects" apart from leftovers, and offers Issue only for Stores stock. The Stock page lists what is held for each project, each item linking to its page, until Phase 4 gives project stock its own views.
+  Files: `month-end.service.ts`, `month-end-export.ts`, `report.service.ts`, `reporting.service.ts`, `pages/MaterialDetail.tsx`, `pages/MonthEnd.tsx`, `pages/Dashboard.tsx`, `pages/PurchaseOrderDetail.tsx`, `components/LeftoversNotice.tsx`, the mock reports
+
+Tests: `procurement.real-http.test.ts` (a project order received in part and then in full, by goods receipt and by Receive; the stock is held for its project and Stores stock is untouched; the receiving view has no prices; the buyer is refused; Confirm delivery refuses), `PoProjectDelivery.test.tsx` (replacing `PoConfirmDelivery.test.tsx`), `PoReceiveDelivery.test.tsx`, `PoApproval.test.tsx`, `mockDelivery.test.ts`, and the report, month-end, item and Stock page suites. Backend 958 unit and 194 integration tests, frontend 1,109.
 
 **Done when:** the storeman books a delivery against AFRI-1325's order, and the stock shows as AFRI-1325's.
 
@@ -119,11 +130,11 @@ Tests: `inventory.service.test.ts`, `consumption.real-http.test.ts`, `returns.re
 
 Size M. Frontend and reporting. Needs Phases 1 to 3.
 
-- [ ] **4.1 Stock shows project stock again.** Stock gets back a Projects view, by project, with each project's material and where it is (reversing the Separation follow-up "Stock is the store's, Stores only"). Stores keeps reorder levels and statuses; project stock has none.
+- [ ] **4.1 Stock shows project stock again.** Stock gets back a Projects view, by project, with each project's material and where it is (reversing the Separation follow-up "Stock is the store's, Stores only"). Stores keeps reorder levels and statuses; project stock has none. *Phase 2 added a stopgap: a "Held for projects" list above the table, linking each item to its page.*
   Files: `pages/Stock.tsx`, `components/LeftoversNotice.tsx`, `pages/Dashboard.tsx`
-- [ ] **4.2 A project's page and a Projects item's page show stock in the store.** The project lists its stock by item and location; a Projects item lists how much is held for each project.
+- [ ] **4.2 A project's page and a Projects item's page show stock in the store.** The project lists its stock by item and location; a Projects item lists how much is held for each project. *The item's side was built in Phase 2 ("In the store for projects").*
   Files: `pages/Projects.tsx`, `pages/MaterialDetail.tsx`, `lib/projectStatus.ts`
-- [ ] **4.3 Reports.** Month-end and the stock report show project stock by project; consumption still counts issues by `project_number`, so a project's consumption is unchanged, and project material now also shows as received and on hand in between.
+- [ ] **4.3 Reports.** Month-end and the stock report show project stock by project; consumption still counts issues by `project_number`, so a project's consumption is unchanged, and project material now also shows as received and on hand in between. *Phase 2 already totals held stock under its project in month-end, the inventory report and the Dashboard; what is left is showing it by project on screen and in the exports.*
   Files: `reporting/month-end.service.ts`, `month-end-export.ts`, `report.service.ts`, `report-export.ts`, `consumption.service.ts`, `pages/MonthEnd.tsx`, `api/exportMonthEnd.ts`
 
 Tests: `StockSections.test.tsx`, `MaterialsSections.test.tsx`, `month-end.service.test.ts`, `consumption.test.ts`, `report.service.test.ts`.
@@ -144,4 +155,4 @@ Size S–M. Backend, frontend and docs.
 ## Releasing
 
 - **Phase 1:** back up the database (`pg_dump`) before deploying: the migration changes the `inventory_balances` primary key. No data changes; every balance keeps its quantity as Stores stock.
-- **Phase 2:** apply any permission migration (`npx prisma migrate deploy`). Tell Procurement that Confirm delivery is gone and the storeman now books project deliveries.
+- **Phase 2:** no migration; the store controller already has `receive:purchase_order`. Deploy it with Phase 3, since stock received for a project can't be issued until then. Tell Procurement that Confirm delivery is gone and the storeman now books project deliveries.
