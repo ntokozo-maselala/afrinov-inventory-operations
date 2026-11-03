@@ -77,6 +77,29 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
     expect(screen.getByRole('link', { name: 'Move them to Stores' })).toHaveAttribute('href', '/materials/no-project/leftovers');
   });
 
+  // Qodo, PR #143: the Dashboard's project total includes stock held for
+  // projects, so the Stock page lists it by project, each item to its page.
+  it('lists stock held for projects by project, linking each item, and keeps it out of the leftovers', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/locations') return [];
+      return [
+        ...ROWS,
+        row('BEAM', 'PROJECT_MATERIAL', '4', { requiredStock: '0', stockStatus: 'NOT_SET', heldForProject: 'AFRI-1402' }),
+        row('BEAM', 'PROJECT_MATERIAL', '2', { requiredStock: '0', stockStatus: 'NOT_SET', heldForProject: 'AFRI-1402', locationId: 'l-2', locationName: 'B-2' }),
+        row('BOLT', 'CONSUMABLES', '10', { heldForProject: 'AFRI-1325' }),
+      ];
+    });
+    stockPage();
+    await screen.findByText('DISC');
+    expect(screen.getByText('Held for projects')).toBeInTheDocument();
+    expect(within(screen.getByText(/Project AFRI-1325:/)).getByRole('link', { name: 'Item BOLT' })).toHaveAttribute('href', '/materials/m-BOLT');
+    // Both locations' stock, as one line for the item.
+    expect(screen.getByText(/Project AFRI-1402:/)).toHaveTextContent('Project AFRI-1402: Item BEAM (6 each)');
+    // Not leftovers, and not in the Stores table.
+    expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toBeInTheDocument();
+    expect(skus()).toEqual(['DISC']);
+  });
+
   // Qodo, PR #126: from the page's own rows, so a deactivated item still in the
   // store isn't lost, and nothing depends on another report loading.
   it('lists project material from the stock rows themselves, not another report', async () => {

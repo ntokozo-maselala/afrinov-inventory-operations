@@ -21,7 +21,7 @@ import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
+import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
 import {
@@ -204,7 +204,8 @@ export const ToolLoanService = {
     const ids = tools.map((t) => t.id);
     if (ids.length === 0) return [];
     const [balances, loans] = await Promise.all([
-      prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, include: { location: { select: { name: true } } } }),
+      // In store means Stores stock, the only stock checked out (Qodo, PR #142).
+      prisma.inventoryBalance.findMany({ where: { materialId: { in: ids }, heldForProject: '' }, include: { location: { select: { name: true } } } }),
       prisma.inventoryTransaction.findMany({
         where: { type: InventoryTransactionType.LOAN, materialId: { in: ids } },
         include: {
@@ -294,14 +295,15 @@ export const ToolLoanService = {
 
     return prisma.$transaction(async (tx) => {
       await lock(tx, totals.keys());
-      await lockInventoryBalances([...totals.values()], tx);
+      // Tools are Stores items, so their stock is the store's own.
+      await lockInventoryBalances([...totals.values()].map((t) => storesStock(t.materialId, t.locationId)), tx);
       await checkRecipientActive(input.recipientId, tx);
       if (input.projectNumber) await checkProjectActive(input.projectNumber, tx);
       for (const t of totals.values()) {
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category !== 'TOOLS') throw Errors.validation(`${material.sku} is not a tool; issue it on Issue stock instead`);
         await checkLocationActive(t.locationId, tx);
-        const inStore = await getCurrentBalance(t.materialId, t.locationId, tx);
+        const inStore = await getCurrentBalance(storesStock(t.materialId, t.locationId), tx);
         if (inStore.lt(t.qty)) {
           throw Errors.insufficientBalance(
             `Cannot check out ${t.qty.toString()} × ${material.sku}: only ${inStore.toString()} in store there.`,
@@ -362,7 +364,7 @@ export const ToolLoanService = {
         });
         loanIds.push(loan.id);
       }
-      for (const t of totals.values()) await recomputeBalance(t.materialId, t.locationId, tx);
+      for (const t of totals.values()) await recomputeBalance(storesStock(t.materialId, t.locationId), tx);
 
       await tx.auditLogEntry.create({
         data: {
@@ -400,7 +402,7 @@ export const ToolLoanService = {
         if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out can be checked in');
       }
       await lock(tx, loans.map((l) => `${l.materialId}:${l.locationId}`));
-      await lockInventoryBalances(loans, tx);
+      await lockInventoryBalances(loans.map((l) => storesStock(l.materialId, l.locationId)), tx);
 
       // Read after the lock, so two check-ins of one loan cannot both pass.
       const returned = await returnedByLoan(tx, loanIds);
@@ -459,7 +461,7 @@ export const ToolLoanService = {
       }
       for (const key of new Set(loans.map((l) => `${l.materialId}|${l.locationId}`))) {
         const [materialId, locationId] = key.split('|') as [string, string];
-        await recomputeBalance(materialId, locationId, tx);
+        await recomputeBalance(storesStock(materialId, locationId), tx);
       }
 
       await tx.auditLogEntry.create({

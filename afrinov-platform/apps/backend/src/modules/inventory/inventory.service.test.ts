@@ -27,6 +27,7 @@ type TxRow = {
   reasonCode?: string | null;
   reasonNote?: string | null;
   projectNumber?: string | null;
+  heldForProject?: string | null;
   recipientId?: string | null;
   referenceType?: string | null;
   referenceId?: string | null;
@@ -60,7 +61,10 @@ const materialProjects: Record<string, string> = { 'pipe-1325': 'AFRI-1325', 'pi
 const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
 const rowLocks: Array<{ sql: string; values: unknown[]; auditEntriesBefore: number }> = [];
 
-function balKey(materialId: string, locationId: string) { return `${materialId}|${locationId}`; }
+// A balance row: Stores stock ('') unless held for a project, as the table keys it.
+function balKey(materialId: string, locationId: string, heldForProject = '') { return `${materialId}|${locationId}|${heldForProject}`; }
+type BalWhere = { materialId_locationId_heldForProject: { materialId: string; locationId: string; heldForProject: string } };
+const balKeyOf = ({ materialId_locationId_heldForProject: k }: BalWhere) => balKey(k.materialId, k.locationId, k.heldForProject);
 
 type GRStatus = 'DRAFT' | 'SUBMITTED' | 'POSTED';
 
@@ -94,7 +98,8 @@ const purchaseOrders = new Map<string, POEntry>();
 const fakeTx = {
   inventoryTransaction: {
     create: async ({ data }: { data: Omit<TxRow, 'id'> }) => {
-      const row: TxRow = { id: `trx-${++idSeq}`, ...data, postedAt: data.postedAt ?? new Date() };
+      // Stores stock unless held for a project, as the column defaults in the table.
+      const row: TxRow = { id: `trx-${++idSeq}`, heldForProject: null, ...data, postedAt: data.postedAt ?? new Date() };
       trxRows.push(row);
       return row;
     },
@@ -114,6 +119,9 @@ const fakeTx = {
       }
       return row;
     },
+    // The first row matching every field in `where` (a reversal of an issue, say).
+    findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+      trxRows.find((r) => Object.entries(where).every(([k, v]) => (r as unknown as Record<string, unknown>)[k] === v)) ?? null,
     findUnique: async ({ where, include }: { 
       where: { id: string }; 
       include?: {
@@ -143,22 +151,22 @@ const fakeTx = {
       }
       return out as TxRow;
     },
-    // Sums rows matching every field in `where` (materialId + locationId for
-    // balances; type + referenceType + referenceId for returns).
+    // Sums rows matching every field in `where` (materialId + locationId +
+    // heldForProject for balances; type + referenceType + referenceId for
+    // returns). A field a row was created without reads as null, as in the table.
     aggregate: async ({ where }: { where: Record<string, unknown> }) => {
       const total = trxRows
-        .filter((r) => Object.entries(where).every(([k, v]) => (r as Record<string, unknown>)[k] === v))
+        .filter((r) => Object.entries(where).every(([k, v]) => ((r as Record<string, unknown>)[k] ?? null) === v))
         .reduce((acc, r) => acc.plus(r.quantity), new Prisma.Decimal(0));
       return { _sum: { quantity: trxRows.length === 0 ? null : total } };
     },
   },
   inventoryBalance: {
-    findUnique: async ({ where }: { where: { materialId_locationId: { materialId: string; locationId: string } } }) => {
-      const key = balKey(where.materialId_locationId.materialId, where.materialId_locationId.locationId);
-      return balances.get(key) ?? null;
+    findUnique: async ({ where }: { where: BalWhere }) => {
+      return balances.get(balKeyOf(where)) ?? null;
     },
-    upsert: async ({ where, update, create }: { where: { materialId_locationId: { materialId: string; locationId: string } }; update: { quantity: Prisma.Decimal }; create: { materialId: string; locationId: string; quantity: Prisma.Decimal } }) => {
-      const key = balKey(where.materialId_locationId.materialId, where.materialId_locationId.locationId);
+    upsert: async ({ where, update, create }: { where: BalWhere; update: { quantity: Prisma.Decimal }; create: { materialId: string; locationId: string; quantity: Prisma.Decimal } }) => {
+      const key = balKeyOf(where);
       const existing = balances.get(key);
       if (existing) existing.quantity = update.quantity;
       else balances.set(key, { materialId: create.materialId, locationId: create.locationId, quantity: create.quantity });
@@ -313,8 +321,9 @@ async function issueOne(input: {
   return { transactionId: transactionIds[0]! };
 }
 
-function getBalance(materialId: string, locationId: string): Prisma.Decimal {
-  return balances.get(balKey(materialId, locationId))?.quantity ?? new Prisma.Decimal(0);
+/** Stores stock unless a project is given. */
+function getBalance(materialId: string, locationId: string, heldForProject = ''): Prisma.Decimal {
+  return balances.get(balKey(materialId, locationId, heldForProject))?.quantity ?? new Prisma.Decimal(0);
 }
 
 describe('InventoryService — ADR-002 invariants', () => {
@@ -706,6 +715,26 @@ describe('InventoryService — ADR-002 invariants', () => {
       expect(getBalance('mat-1', 'loc-2').toString()).toBe('2');
     });
 
+    // Project Material Through the Store Roadmap, Phase 1: nothing issues a
+    // project's own stock yet, so the issue is written as Phase 3 will post it.
+    it('puts stock back as the project\'s when it was issued from stock held for the project', async () => {
+      trxRows.push({
+        id: 'held-issue', materialId: 'mat-1', locationId: 'loc-1', type: 'ISSUE', quantity: new Prisma.Decimal(-6),
+        actorId: 'u', postedAt: new Date(), recipientId: 'user-3', projectNumber: 'AFRI-1325', heldForProject: 'AFRI-1325',
+      });
+      const { transactionId } = await InventoryService.returnToStock({ issueTransactionId: 'held-issue', quantity: 2, actorId: 'u' });
+      expect(trxRows.find((r) => r.id === transactionId)).toMatchObject({ type: 'RETURN', heldForProject: 'AFRI-1325' });
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('-4');
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');
+    });
+
+    it('puts Stores stock back as Stores stock, though it was used for a project', async () => {
+      const issueId = await issued(10);
+      const { transactionId } = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 3, actorId: 'u' });
+      expect(trxRows.find((r) => r.id === transactionId)).toMatchObject({ projectNumber: 'AFRI-1325', heldForProject: null });
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('0');
+    });
+
     it('only accepts an unreversed issue', async () => {
       const { transactionId: adjustment } = await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
       await expect(InventoryService.returnToStock({ issueTransactionId: adjustment, quantity: 1, actorId: 'u' })).rejects.toThrow(/Only an issue/);
@@ -836,6 +865,16 @@ describe('InventoryService — ADR-002 invariants', () => {
         await InventoryService.returnMany({ lines: [{ issueTransactionId: id, usedUp: 7 }], actorId: 'u' });
         await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, quantity: 4 }], actorId: 'u' }))
           .rejects.toThrow(/Cannot return 4 × SKU: only 3 of the 10 issued is still out/);
+      });
+
+      it('refuses a quantity finer than the four decimal places it is stored with, on any of the three', async () => {
+        const id = await discIssue();
+        for (const line of [{ quantity: 0.00001 }, { usedUp: 0.00001 }, { quantity: 1, broken: 0.00005 }]) {
+          await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, ...line }], actorId: 'u' }))
+            .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Quantities can have at most 4 decimal places' });
+        }
+        expect(outcomes).toHaveLength(0);
+        expect(trxRows.filter((r) => r.type === 'RETURN')).toHaveLength(0);
       });
 
       it('refuses used up or broken on an item that does not track use', async () => {
@@ -1046,13 +1085,29 @@ describe('InventoryService — ADR-002 invariants', () => {
       ).rejects.toThrow(/purchase order/);
     });
 
+    it('takes a reversal from the stock the movement went into: a project\'s, not Stores', async () => {
+      goodsReceipts.set('gr-3', { id: 'gr-3', status: 'POSTED', purchaseOrderId: null, lines: [] });
+      trxRows.push({
+        id: 'held-receipt', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
+        actorId: 'u', postedAt: new Date(), referenceType: 'GoodsReceipt', referenceId: 'gr-3', heldForProject: 'AFRI-1325',
+      });
+      balances.set(balKey('mat-1', 'loc-1', 'AFRI-1325'), { materialId: 'mat-1', locationId: 'loc-1', quantity: new Prisma.Decimal(5) });
+      // Stores stock of the same item at the same place doesn't count towards it.
+      await InventoryService.adjust({ materialId: 'mat-1', locationId: 'loc-1', quantity: 9, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+
+      const { reversalIds } = await InventoryService.reverse({ transactionId: 'held-receipt', reason: 'Booked twice', actorId: 'u' });
+      expect(trxRows.find((r) => r.id === reversalIds[0])).toMatchObject({ reversesId: 'held-receipt', heldForProject: 'AFRI-1325' });
+      expect(getBalance('mat-1', 'loc-1', 'AFRI-1325').toString()).toBe('0');
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('9');
+    });
+
     it('reverses stock received at the counter (no purchase order)', async () => {
       goodsReceipts.set('gr-2', { id: 'gr-2', status: 'POSTED', purchaseOrderId: null, lines: [] });
       trxRows.push({
         id: 'counter-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(5),
-        actorId: 'u', postedAt: new Date(), referenceType: 'GoodsReceipt', referenceId: 'gr-2',
+        actorId: 'u', postedAt: new Date(), referenceType: 'GoodsReceipt', referenceId: 'gr-2', heldForProject: null,
       });
-      balances.set('mat-1|loc-1', { materialId: 'mat-1', locationId: 'loc-1', quantity: new Prisma.Decimal(5) });
+      balances.set(balKey('mat-1', 'loc-1'), { materialId: 'mat-1', locationId: 'loc-1', quantity: new Prisma.Decimal(5) });
       const { reversalIds } = await InventoryService.reverse({ transactionId: 'counter-trx', reason: 'Booked twice', actorId: 'u' });
       expect(trxRows.find((r) => r.id === reversalIds[0])).toMatchObject({ type: 'RECEIPT', referenceId: 'gr-2', reversesId: 'counter-trx' });
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('0');

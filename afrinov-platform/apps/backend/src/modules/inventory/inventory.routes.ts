@@ -8,6 +8,7 @@ import { InventoryService, type HistoryFilter } from './inventory.service.js';
 import { ConsumableOutcomeService } from './consumable-outcome.service.js';
 import { buildMovementsXlsx, movementsFilename, MOVEMENTS_EXPORT_LIMIT } from './movements-export.js';
 import { prisma } from '../../shared/db.js';
+import { toDecimal, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
 import { StockReceiptService } from './stock-receipt.service.js';
 import { StockCountService } from './stock-count.service.js';
 import { locationsWithin } from './location.service.js';
@@ -72,6 +73,8 @@ export const issueSchema = z.object({
     materialId: uuidSchema,
     locationId: uuidSchema,
     quantity: z.number().positive(),
+    // The stock the line takes: the issue's project's own, or null/left out for Stores stock.
+    heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
   })).min(1).max(50),
 });
 
@@ -80,6 +83,9 @@ export const transferSchema = z.object({
   fromLocationId: uuidSchema,
   toLocationId: uuidSchema,
   quantity: z.number().positive(),
+  // Whose stock it takes: the project it is held for, or null/left out for
+  // Stores stock (Project Material Through the Store Roadmap, Phase 3).
+  heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
 });
 
 export const adjustmentSchema = z.object({
@@ -90,6 +96,9 @@ export const adjustmentSchema = z.object({
   reasonNote: z.string().optional(),
   // Who was responsible for damaged, lost or scrapped stock; null or left out when nobody is known.
   recipientId: uuidSchema.nullable().optional(),
+  // Whose stock it takes: the project it is held for, or null/left out for
+  // Stores stock (Project Material Through the Store Roadmap, Phase 3).
+  heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
 });
 
 export const stockReceiptSchema = z.object({
@@ -116,8 +125,11 @@ export const stockCountSchema = z.object({
   })).min(1).max(2000),
 });
 
+/** A positive quantity the Decimal(18, 4) columns can hold exactly; finer ones would be stored rounded, even as zero. */
+const storedQuantity = z.number().positive().refine((q) => fitsQuantityColumn(toDecimal(q)), { message: QUANTITY_PRECISION_MESSAGE });
+
 export const returnSchema = z.object({
-  quantity: z.number().positive(),
+  quantity: storedQuantity,
   locationId: uuidSchema.optional(),
   reason: z.string().trim().max(500).optional(),
 });
@@ -130,9 +142,9 @@ export const returnSchema = z.object({
 export const returnManySchema = z.object({
   lines: z.array(z.object({
     issueTransactionId: z.string().min(1),
-    quantity: z.number().positive().optional(),
-    usedUp: z.number().positive().optional(),
-    broken: z.number().positive().optional(),
+    quantity: storedQuantity.optional(),
+    usedUp: storedQuantity.optional(),
+    broken: storedQuantity.optional(),
     locationId: uuidSchema.optional(),
   }).refine((l) => l.quantity !== undefined || l.usedUp !== undefined || l.broken !== undefined, {
     message: 'Each line needs something coming back: on the shelf, used up or broken',
@@ -153,7 +165,7 @@ export const reversalSchema = z.object({
 /** Part of an issue of a tracked consumable used up or broken (POST /inventory-transactions/:id/outcomes). */
 export const consumableOutcomeSchema = z.object({
   outcome: z.enum(['USED_UP', 'BROKEN']),
-  quantity: z.number().positive(),
+  quantity: storedQuantity,
   note: z.string().trim().max(500).optional(),
 });
 

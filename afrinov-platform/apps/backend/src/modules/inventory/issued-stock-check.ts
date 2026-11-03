@@ -25,16 +25,21 @@ const n = (x: unknown) => Number(x ?? 0);
 export async function checkIssuedStock(db: Client): Promise<IssuedStockCheck> {
   const problems: string[] = [];
 
-  // Stored balances against the ledger, both ways round.
-  const balances = await db.$queryRaw<Array<{ sku: string; location: string; balance: unknown; ledger: unknown }>>`
-    SELECT m.sku, l.name AS location, COALESCE(b.quantity, 0) AS balance, COALESCE(t.total, 0) AS ledger
-    FROM (SELECT material_id, location_id, SUM(quantity) AS total FROM inventory_transactions GROUP BY material_id, location_id) t
-    FULL JOIN inventory_balances b USING (material_id, location_id)
+  // Stored balances against the ledger, both ways round. A balance is an item
+  // at a location held for a project, or for none (Stores, '' in the balance row).
+  const balances = await db.$queryRaw<Array<{ sku: string; location: string; held_for_project: string; balance: unknown; ledger: unknown }>>`
+    SELECT m.sku, l.name AS location, held_for_project, COALESCE(b.quantity, 0) AS balance, COALESCE(t.total, 0) AS ledger
+    FROM (
+      SELECT material_id, location_id, COALESCE(held_for_project, '') AS held_for_project, SUM(quantity) AS total
+      FROM inventory_transactions GROUP BY material_id, location_id, COALESCE(held_for_project, '')
+    ) t
+    FULL JOIN inventory_balances b USING (material_id, location_id, held_for_project)
     JOIN materials m ON m.id = material_id
     JOIN locations l ON l.id = location_id`;
   for (const b of balances) {
-    if (n(b.balance) !== n(b.ledger)) problems.push(`${b.sku} at ${b.location}: stored balance ${n(b.balance)}, the ledger adds up to ${n(b.ledger)}`);
-    if (n(b.balance) < 0) problems.push(`${b.sku} at ${b.location}: balance is negative (${n(b.balance)})`);
+    const where = `${b.sku} at ${b.location}${b.held_for_project ? ` held for ${b.held_for_project}` : ''}`;
+    if (n(b.balance) !== n(b.ledger)) problems.push(`${where}: stored balance ${n(b.balance)}, the ledger adds up to ${n(b.ledger)}`);
+    if (n(b.balance) < 0) problems.push(`${where}: balance is negative (${n(b.balance)})`);
   }
 
   // Every issue: what came back (net of reversed returns) and what is marked (live marks only).

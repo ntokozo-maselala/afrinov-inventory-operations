@@ -21,6 +21,7 @@ import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
 import { MovementReason } from '../components/MovementReason';
 import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
+import { balanceKey, isStoresStock, locationWithHolder } from '../lib/heldFor';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -73,6 +74,21 @@ export function MaterialDetail() {
   const toast = useToast();
 
   const total = (stock.data ?? []).reduce((acc, r) => acc + Number(r.quantity), 0);
+  // A Projects item's stock: leftovers (Stores stock, from before project
+  // material came through the store) apart from stock held for a project.
+  const leftoverRows = (stock.data ?? []).filter((r) => isStoresStock(r) && Number(r.quantity) > 0);
+  const heldRows = (stock.data ?? []).filter((r) => !isStoresStock(r) && Number(r.quantity) > 0);
+  // Check out lends Stores stock only (Qodo, PR #143). Issue takes Stores stock
+  // or stock held for a project, which goes to that project (Project Material
+  // Through the Store Roadmap, Phase 3). Both only from active locations, and
+  // held stock only of a project that still takes issues, as Issue stock offers
+  // them (Qodo, PR #145).
+  const openProjects = useApi<Array<{ projectNumber: string; status?: string }>>(heldRows.length > 0 ? '/projects?active=true' : null);
+  const takesIssues = new Set((openProjects.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED').map((p) => p.projectNumber));
+  const usable = (r: { quantity: string; locationActive?: boolean }) => Number(r.quantity) > 0 && r.locationActive !== false;
+  const storesTotal = (stock.data ?? []).filter((r) => isStoresStock(r) && usable(r)).reduce((acc, r) => acc + Number(r.quantity), 0);
+  const issuable = !!material.data && ((storesTotal > 0 && !needsProject(material.data))
+    || heldRows.some((r) => usable(r) && takesIssues.has(r.heldForProject!)));
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;
@@ -120,8 +136,8 @@ export function MaterialDetail() {
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
             {/* Any active item: a Projects item's project is chosen on the order (Project on the Order Roadmap, Phase 2). */}
             {active && canOrder && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
-            {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
-            {active && total > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
+            {active && storesTotal > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
+            {active && issuable && !isTool && canIssue && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
               ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
               : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
@@ -160,14 +176,15 @@ export function MaterialDetail() {
               </dl>
             </section>
             {!storesItem ? (
-              // Project material goes from the supplier straight to site: it has no
-              // stock status, and no project of its own: the order it is bought on
-              // says which (Project on the Order Roadmap, Phase 3).
+              // Project material comes through the store, held for the project its
+              // order is for: it has no stock status, and no project of its own
+              // (Project on the Order Roadmap, Phase 3; Project Material Through
+              // the Store Roadmap, Phase 2).
               <section className="surface-card p-4 space-y-2">
                 <h2 className="text-h3 text-surface-900">Ordering</h2>
                 <p className="text-meta">
-                  Bought for a project on its purchase order, which says which project it is for. Project material goes from the supplier straight to site, so it isn&rsquo;t held in the store.
-                  {total > 0 && ' What is shown as left in the store was received before.'}
+                  Bought for a project on its purchase order, which says which project it is for. The store receives it against that order and holds it for that project.
+                  {leftoverRows.length > 0 && ' What is shown as left in the store was received before project material came through the store.'}
                 </p>
               </section>
             ) : (
@@ -196,8 +213,25 @@ export function MaterialDetail() {
 
           <div className="lg:col-span-2 space-y-6">
             {!storesItem ? (
-              // Received before project material went straight to site: shown only while some is left.
-              total > 0 && (
+              <>
+              {/* Received into the store for a project, against its order: that project's own stock. */}
+              {heldRows.length > 0 && (
+                <section>
+                  <SectionHeader title="In the store for projects" description="Received against project orders and held for each project." />
+                  <DataTable
+                    ariaLabel="In the store for projects"
+                    rowKey={balanceKey}
+                    rows={heldRows}
+                    columns={[
+                      { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                      { key: 'project', header: 'Held for', render: (r) => r.heldForProject },
+                      { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
+                    ]}
+                  />
+                </section>
+              )}
+              {/* Received before project material went straight to site: shown only while some is left. */}
+              {leftoverRows.length > 0 && (
                 <section>
                   <SectionHeader
                     title="Left in the store"
@@ -215,25 +249,27 @@ export function MaterialDetail() {
                   />
                   <DataTable
                     ariaLabel="Left in the store"
-                    rowKey={(r) => r.locationId}
-                    rows={(stock.data ?? []).filter((r) => Number(r.quantity) > 0)}
+                    rowKey={balanceKey}
+                    rows={leftoverRows}
                     columns={[
                       { key: 'loc', header: 'Location', render: (r) => r.locationName },
                       { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
                     ]}
                   />
                 </section>
-              )
+              )}
+              </>
             ) : (
             <section>
               <SectionHeader title="Stock by location" description="Current balance for this material at each location." />
               <DataTable
                 ariaLabel="Stock by location"
                 isLoading={stock.loading}
-                rowKey={(r) => r.locationId}
+                rowKey={balanceKey}
                 rows={stock.data ?? []}
                 columns={[
-                  { key: 'loc', header: 'Location', render: (r) => r.locationName },
+                  // A location can hold Stores stock and stock held for a project: each its own line.
+                  { key: 'loc', header: 'Location', render: locationWithHolder },
                   { key: 'type', header: 'Type', render: (r) => <span className="text-meta">{r.locationType}</span> },
                   { key: 'qty', header: 'On hand', align: 'right', className: 'text-num', render: (r) => <span className="font-mono font-medium">{formatNumber(Number(r.quantity))}</span> },
                   { key: 'required', header: 'Required', align: 'right', className: 'text-num', render: (r) => <span className="font-mono text-surface-500">{formatNumber(Number(r.requiredStock))}</span> },

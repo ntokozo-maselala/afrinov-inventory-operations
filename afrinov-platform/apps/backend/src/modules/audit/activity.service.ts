@@ -60,8 +60,8 @@ const FIELD_LABEL: Record<string, string> = {
   contactPerson: 'contact person', contactPhone: 'contact phone', roles: 'roles',
 };
 
-/** The fields an edit changed, in words; activation is said separately. */
-function changed(before: unknown, after: unknown): { fields: string[]; active?: boolean } {
+/** The fields an edit changed, in words; activation and tracking use after issue are said separately. */
+function changed(before: unknown, after: unknown): { fields: string[]; active?: boolean; trackUse?: boolean } {
   const b = (before ?? {}) as Json;
   const a = (after ?? {}) as Json;
   const fields: string[] = [];
@@ -69,12 +69,18 @@ function changed(before: unknown, after: unknown): { fields: string[]; active?: 
     if (key in a && JSON.stringify(a[key]) !== JSON.stringify(b[key])) fields.push(FIELD_LABEL[key]!);
   }
   const active = 'active' in a && a['active'] !== b['active'] ? Boolean(a['active']) : undefined;
-  return { fields, active };
+  // An item's Track use after issue (ADR-026); an item saved before it existed counts as off.
+  const trackUse = 'trackUse' in a && Boolean(a['trackUse']) !== Boolean(b['trackUse']) ? Boolean(a['trackUse']) : undefined;
+  return { fields, active, trackUse };
 }
 
 function editSentence(noun: string, label: string, before: unknown, after: unknown): string {
-  const { fields, active } = changed(before, after);
-  const parts = [active === undefined ? null : active ? 'reactivated it' : 'deactivated it', fields.length ? `changed ${fields.join(', ')}` : null].filter(Boolean);
+  const { fields, active, trackUse } = changed(before, after);
+  const parts = [
+    active === undefined ? null : active ? 'reactivated it' : 'deactivated it',
+    trackUse === undefined ? null : `switched ${trackUse ? 'on' : 'off'} tracking use after issue`,
+    fields.length ? `changed ${fields.join(', ')}` : null,
+  ].filter(Boolean);
   return `Edited ${noun} ${label}${parts.length ? `: ${parts.join('; ')}` : ''}`;
 }
 

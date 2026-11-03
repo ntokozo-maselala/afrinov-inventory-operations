@@ -313,21 +313,16 @@ export interface CloseInput {
   reason?: string;
 }
 
-/** Today in South Africa, as YYYY-MM-DD: the server's own clock runs in UTC, two hours behind. */
-function todayInSouthAfrica(now = new Date()): string {
-  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-}
-
 /** Statuses a purchase order can be received against. */
 export const RECEIVABLE_STATUSES: PurchaseOrderStatus[] = ['APPROVED', 'PARTIALLY_RECEIVED'];
 
 /**
- * Project material goes from the supplier straight to site, so a project
- * order is never received into stock (Stores and Procurement Separation
- * Roadmap, Phase 3): Procurement confirms its delivery on the order instead.
+ * Project material comes through the store (Project Material Through the
+ * Store Roadmap, Phase 2): a project order's delivery is received on Receive
+ * stock, so it is no longer confirmed on the order.
  */
-export const PROJECT_DELIVERY_REFUSED =
-  "Project material goes from the supplier straight to site, so it isn't received into stock: Procurement confirms its delivery on the order.";
+export const DELIVERY_IS_RECEIVED =
+  "Project orders are received into stock now: the store books each delivery on Receive stock.";
 
 export interface ConfirmDeliveryInput {
   id: string;
@@ -370,6 +365,28 @@ export const PurchaseOrderService = {
       orderBy: { createdAt: 'desc' },
     });
     return orders.map(withTotals);
+  },
+
+  /**
+   * Orders still waiting for delivery (Approved or Partly received) of the
+   * kinds asked for, as Receive stock needs them: who supplies them, the
+   * project, and each line's item with what is ordered and received so far.
+   * No prices, approvals or RFQ: the store receives project orders without
+   * seeing them (Project Material Through the Store Roadmap, Phase 2).
+   */
+  async receivable(kinds: { stores: boolean; projects: boolean }) {
+    if (!kinds.stores && !kinds.projects) return [];
+    const projectNumber = kinds.stores && kinds.projects ? undefined : kinds.stores ? null : { not: null };
+    return prisma.purchaseOrder.findMany({
+      where: { status: { in: RECEIVABLE_STATUSES }, ...(projectNumber === undefined ? {} : { projectNumber }) },
+      select: {
+        id: true, number: true, status: true, supplierId: true, projectNumber: true, expectedDeliveryDate: true,
+        supplier: { select: { name: true } },
+        project: { select: { name: true } },
+        lines: { select: { id: true, materialId: true, orderedQty: true, receivedQty: true, material: { select: { sku: true, name: true, unitOfMeasure: true } } } },
+      },
+      orderBy: { number: 'asc' },
+    });
   },
 
   /**
@@ -773,11 +790,13 @@ export const PurchaseOrderService = {
         include: { lines: true },
       });
       if (!po) throw Errors.notFound('PurchaseOrder');
-      if (kindOfOrder(po) === 'projects') throw Errors.validation(PROJECT_DELIVERY_REFUSED);
+      // A project order's delivery is held for its project; a Stores order's is
+      // Stores stock (Project Material Through the Store Roadmap, Phase 2).
+      const stockOf = (materialId: string) => ({ materialId, locationId: input.locationId, heldForProject: po.projectNumber });
       // The order before its stock, as posting a goods receipt locks them, so
       // the two cannot deadlock.
       await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.id} FOR UPDATE`;
-      await lockInventoryBalances(po.lines.map((line) => ({ materialId: line.materialId, locationId: input.locationId })), tx);
+      await lockInventoryBalances(po.lines.map((line) => stockOf(line.materialId)), tx);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });
       }
@@ -815,9 +834,10 @@ export const PurchaseOrderService = {
               referenceType: 'PurchaseOrder',
               referenceId: po.id,
               actorId,
+              heldForProject: po.projectNumber,
             },
           });
-          await recomputeBalance(line.materialId, input.locationId, tx);
+          await recomputeBalance(stockOf(line.materialId), tx);
         }
 
         await tx.purchaseOrderLine.update({
@@ -841,81 +861,18 @@ export const PurchaseOrderService = {
   },
 
   /**
-   * Procurement confirms what arrived on site against a project order. Its
-   * lines are credited and the order moves to Partly received, or Received
-   * once nothing is outstanding, as a delivery into stock would; but no stock
-   * is added anywhere, as the material never reaches the workshop.
+   * Retired (Project Material Through the Store Roadmap, Phase 2): project
+   * material comes through the store, so the store receives each delivery on
+   * Receive stock, into stock held for the project. Confirming one here, with
+   * no stock, would let the same delivery be booked twice. Confirmations made
+   * before stay on the order's Activity.
    *
-   * @throws {ApiError} NOT_FOUND; VALIDATION_ERROR for a Stores order, a line
-   * not on the order or given twice, a quantity of 0 or more than is
-   * outstanding, or a day to come; INVALID_STATE unless approved or partly
-   * received; CONFLICT when the order changed meanwhile.
+   * @throws {ApiError} NOT_FOUND; VALIDATION_ERROR otherwise.
    */
-  async confirmDelivery(input: ConfirmDeliveryInput, actorId: string) {
-    return prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${input.id} FOR UPDATE`;
-      const po = await tx.purchaseOrder.findUnique({
-        where: { id: input.id },
-        include: { lines: { include: { material: { select: { sku: true } } } } },
-      });
-      if (!po) throw Errors.notFound('PurchaseOrder');
-      if (kindOfOrder(po) === 'stores') throw Errors.validation('A Stores order is received into stock: book its delivery on Receive stock.');
-      if (!RECEIVABLE_STATUSES.includes(po.status)) {
-        throw Errors.invalidState('Only an approved or partly delivered purchase order can have its delivery confirmed', { status: po.status });
-      }
-      if (input.lines.length === 0) throw Errors.validation('Confirm what arrived on at least one line.');
-      // Calendar days in South Africa, as the buyer picks them: the server's clock runs in UTC.
-      const today = todayInSouthAfrica();
-      const day = input.deliveredOn ?? today;
-      if (day > today) throw Errors.validation('The delivery date is still to come.');
-
-      const credited = new Map<string, Prisma.Decimal>();
-      for (const l of input.lines) {
-        const line = po.lines.find((x) => x.id === l.lineId);
-        if (!line) throw Errors.validation(`Line ${l.lineId} is not on purchase order ${po.number}`);
-        if (credited.has(line.id)) throw Errors.validation(`${line.material.sku} is given twice.`);
-        // As the order line keeps it, to 4 decimal places, so the check, the credit and the record agree.
-        const quantity = new Prisma.Decimal(l.quantity).toDecimalPlaces(4);
-        if (!gtZero(quantity)) throw Errors.validation(`Enter what arrived of ${line.material.sku}, or leave the line out.`);
-        const outstanding = toDecimal(line.orderedQty).minus(toDecimal(line.receivedQty));
-        if (quantity.gt(outstanding)) {
-          throw Errors.validation(`${line.material.sku}: ${quantity.toString()} is more than the ${outstanding.toString()} still outstanding.`);
-        }
-        credited.set(line.id, quantity);
-      }
-      const receivedAfter = (line: (typeof po.lines)[number]) => toDecimal(line.receivedQty).plus(credited.get(line.id) ?? 0);
-      const allIn = po.lines.every((line) => receivedAfter(line).gte(toDecimal(line.orderedQty)));
-      const status: PurchaseOrderStatus = allIn ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
-      // Delivered today: now. On an earlier day: that day, with no time of day made up.
-      const at = day === today ? new Date() : toDateOnly(day);
-
-      const claimed = await tx.purchaseOrder.updateMany({
-        where: { id: po.id, status: po.status },
-        data: { status, ...(allIn ? { deliveredAt: at, deliveredById: actorId } : {}) },
-      });
-      if (claimed.count === 0) {
-        throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
-      }
-      for (const line of po.lines) {
-        if (credited.has(line.id)) await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { receivedQty: receivedAfter(line) } });
-      }
-      await tx.auditLogEntry.create({
-        data: {
-          actorId,
-          action: 'PO_DELIVERY_CONFIRMED',
-          entityType: 'PurchaseOrder',
-          entityId: po.id,
-          before: { status: po.status },
-          after: {
-            status,
-            deliveredOn: day,
-            deliveryRef: cleanText(input.deliveryRef),
-            lines: [...credited].map(([lineId, quantity]) => ({ lineId, quantity: quantity.toString() })),
-          },
-        },
-      });
-      return tx.purchaseOrder.findUnique({ where: { id: po.id } });
-    });
+  async confirmDelivery(input: Pick<ConfirmDeliveryInput, 'id'>, _actorId: string): Promise<never> {
+    const po = await prisma.purchaseOrder.findUnique({ where: { id: input.id }, select: { id: true } });
+    if (!po) throw Errors.notFound('PurchaseOrder');
+    throw Errors.validation(DELIVERY_IS_RECEIVED);
   },
 
   async cancel(input: CancelInput, actorId: string) {

@@ -12,7 +12,7 @@ import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
-import { getCurrentBalance, recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
+import { getCurrentBalance, recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 
@@ -141,7 +141,8 @@ export const StockCountService = {
     return inTx(within, async (tx) => {
       // One count at a time per location, so two counters cannot both correct the same difference.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`afrinov:stock-count:${input.locationId}`}))`;
-      await lockInventoryBalances(lines.map((line) => ({ materialId: line.materialId, locationId: input.locationId })), tx);
+      // A count is of Stores stock; counting a project's stock comes with Phase 3.
+      await lockInventoryBalances(lines.map((line) => storesStock(line.materialId, input.locationId)), tx);
 
       const location = await tx.location.findUnique({ where: { id: input.locationId } });
       if (!location) throw Errors.notFound('Location');
@@ -155,7 +156,7 @@ export const StockCountService = {
       const current = new Map<string, Prisma.Decimal>();
       const moved: Array<{ sku: string; expected: string; current: string }> = [];
       for (const l of lines) {
-        const balance = await getCurrentBalance(l.materialId, input.locationId, tx);
+        const balance = await getCurrentBalance(storesStock(l.materialId, input.locationId), tx);
         current.set(l.materialId, balance);
         if (!balance.eq(l.expected)) moved.push({ sku: skuById.get(l.materialId)!, expected: l.expected.toString(), current: balance.toString() });
       }
@@ -188,7 +189,7 @@ export const StockCountService = {
             actorId: input.actorId,
           },
         });
-        await recomputeBalance(l.materialId, input.locationId, tx);
+        await recomputeBalance(storesStock(l.materialId, input.locationId), tx);
         results.push({ materialId: l.materialId, variance: variance.toString(), transactionId: trx.id });
         events.push({ type: 'InventoryAdjusted', materialId: l.materialId, locationId: input.locationId, quantity: variance.toNumber() });
       }

@@ -12,7 +12,7 @@ import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
-import { toDecimal, gtZero } from '../../shared/decimal.js';
+import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { returnedAgainst } from './inventory.service.js';
 import { closedOffAgainst, writeOutcome } from './consumable-outcomes.js';
@@ -90,6 +90,7 @@ export const ConsumableOutcomeService = {
   async record(input: RecordOutcomeInput, within?: Tx): Promise<{ outcomeId: string } & IssueUse> {
     const qty = toDecimal(input.quantity);
     if (!gtZero(qty)) throw Errors.validation('Quantity must be positive');
+    if (!fitsQuantityColumn(qty)) throw Errors.validation(QUANTITY_PRECISION_MESSAGE);
 
     return inTx(within, async (tx) => {
       const issue = await tx.inventoryTransaction.findUnique({
@@ -105,8 +106,13 @@ export const ConsumableOutcomeService = {
         throw Errors.invalidState(`${issue.material.sku} does not track use after issue. Switch it on for the item first.`);
       }
 
-      // The same lock a return against this issue takes, so the two cannot both spend what is still out.
-      await lockInventoryBalances([{ materialId: issue.materialId, locationId: issue.locationId }], tx);
+      // The same lock a return against this issue and its reversal take, so
+      // they cannot both spend what is still out.
+      await lockInventoryBalances([{ materialId: issue.materialId, locationId: issue.locationId, heldForProject: issue.heldForProject }], tx);
+      // A reversal may have committed while this waited for the lock.
+      if (await tx.inventoryTransaction.findFirst({ where: { reversesId: issue.id }, select: { id: true } })) {
+        throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to mark.`);
+      }
       const before = await issueUse(tx, issue);
       const stillOut = toDecimal(before.stillOut);
       if (qty.gt(stillOut)) {

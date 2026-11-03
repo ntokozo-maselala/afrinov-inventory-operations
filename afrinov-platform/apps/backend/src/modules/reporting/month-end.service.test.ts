@@ -3,7 +3,7 @@ import { Prisma, type Material } from '@prisma/client';
 import { MonthEndService } from './month-end.service.js';
 
 const mocks = vi.hoisted(() => ({
-  balances: vi.fn(), materials: vi.fn(), locations: vi.fn(), setting: vi.fn(), consumption: vi.fn(),
+  balances: vi.fn(), materials: vi.fn(), locations: vi.fn(), projects: vi.fn(), setting: vi.fn(), consumption: vi.fn(),
 }));
 // Tools out on loan, per item (see tool-loans.ts); none unless a test lends some.
 const loans = vi.hoisted(() => ({ out: new Map<string, number>() }));
@@ -13,20 +13,20 @@ vi.mock('../../shared/inventory/tool-loans.js', async () => {
 });
 vi.mock('../../shared/db.js', () => ({ prisma: {
   inventoryTransaction: { groupBy: mocks.balances },
-  material: { findMany: mocks.materials }, location: { findMany: mocks.locations },
+  material: { findMany: mocks.materials }, location: { findMany: mocks.locations }, project: { findMany: mocks.projects },
 } }));
 vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValue: mocks.setting } }));
 vi.mock('./consumption.service.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('./consumption.service.js')>(), ConsumptionService: { report: mocks.consumption },
 }));
 
-type ReportMaterial = Pick<Material, 'id' | 'sku' | 'name' | 'category' | 'requiredStock' | 'unitCost' | 'active'>;
+type ReportMaterial = Pick<Material, 'id' | 'sku' | 'name' | 'category' | 'requiredStock' | 'unitCost' | 'active'> & { projectNumber?: string | null };
 const material = (id: string, overrides: Partial<ReportMaterial> = {}): ReportMaterial => ({
   id, sku: `CON-${id}`, name: `Item ${id}`, category: 'CONSUMABLES',
   requiredStock: new Prisma.Decimal(10), unitCost: new Prisma.Decimal(2), active: true, ...overrides,
 });
-const balance = (materialId: string, quantity: number | null, locationId = 'a') => ({
-  materialId, locationId, _sum: { quantity: quantity === null ? null : new Prisma.Decimal(quantity) },
+const balance = (materialId: string, quantity: number | null, locationId = 'a', heldForProject: string | null = null) => ({
+  materialId, locationId, heldForProject, _sum: { quantity: quantity === null ? null : new Prisma.Decimal(quantity) },
 });
 const used = (sku: string, value: number | null, category = 'CONSUMABLES') => ({ sku, name: sku, category, used: 3, value });
 
@@ -48,7 +48,7 @@ describe('MonthEndService.report', () => {
   it('requests all ledger history strictly before next month and usage within the chosen month', async () => {
     const report = await MonthEndService.report({ month: '2026-09' });
     expect(mocks.balances).toHaveBeenCalledExactlyOnceWith({
-      by: ['materialId', 'locationId'], where: { postedAt: { lt: new Date('2026-10-01T00:00:00Z') } }, _sum: { quantity: true },
+      by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: new Date('2026-10-01T00:00:00Z') } }, _sum: { quantity: true },
     });
     expect(mocks.consumption).toHaveBeenCalledExactlyOnceWith({ from: '2026-09-01', to: '2026-09-30' });
     expect(report).toEqual({
@@ -69,7 +69,7 @@ describe('MonthEndService.report', () => {
   it('reports a range of days: stock as at midnight after the last day, usage within it', async () => {
     const report = await MonthEndService.report({ from: '2026-09-07', to: '2026-09-13', month: '2026-01' });
     expect(mocks.balances).toHaveBeenCalledExactlyOnceWith({
-      by: ['materialId', 'locationId'], where: { postedAt: { lt: new Date('2026-09-14T00:00:00Z') } }, _sum: { quantity: true },
+      by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: new Date('2026-09-14T00:00:00Z') } }, _sum: { quantity: true },
     });
     expect(mocks.consumption).toHaveBeenCalledExactlyOnceWith({ from: '2026-09-07', to: '2026-09-13' });
     expect(report).toMatchObject({ month: null, from: '2026-09-07', to: '2026-09-13' });
@@ -138,6 +138,40 @@ describe('MonthEndService.report', () => {
       { sku: 'OLD-10', name: 'OLD-10', location: '', used: 3, value: null },
     ]);
     expect(report.total).toEqual({ items: 2, itemsInStock: 2, value: 10, urgent: 1, warning: 0, usedValue: 5.8 });
+  });
+
+  // Project Material Through the Store Roadmap, Phase 2: stock received
+  // against a project order is that project's, not the store's.
+  it('keeps stock held for a project out of Stores figures and puts it under the project that holds it', async () => {
+    mocks.materials.mockResolvedValue([
+      material('1'),
+      { ...material('BEAM', { category: 'PROJECT_MATERIAL', requiredStock: new Prisma.Decimal(0) }), sku: 'PRJ-BEAM', projectNumber: 'AFRI-1325', project: { name: 'Plant upgrade', status: 'ACTIVE' } },
+    ]);
+    mocks.balances.mockResolvedValue([
+      balance('1', 2), balance('1', 2, 'b', 'AFRI-1402'),
+      balance('BEAM', 3), balance('BEAM', 4, 'a', 'AFRI-1325'), balance('BEAM', 6, 'b', 'AFRI-1402'),
+    ]);
+    mocks.projects.mockResolvedValue([{ projectNumber: 'AFRI-1402', name: 'Door rails', status: 'ACTIVE' }]);
+    const report = await MonthEndService.report({ month: '2026-09' });
+
+    // A Stores item counts its Stores stock only: 2 of 10 still wants re-ordering.
+    expect(report.categories[0]!.items).toEqual([expect.objectContaining({ sku: 'CON-1', location: 'A-1', currentStock: 2, value: 4, reorderQuantity: 8, status: 'WARNING' })]);
+    // Project stock: a line per project holding it. The leftover keeps the item's project;
+    // the Stores item bought for AFRI-1402 is that project's material.
+    expect(report.categories[1]!.items.map((i) => [i.sku, i.project, i.location, i.currentStock])).toEqual([
+      ['PRJ-BEAM', 'AFRI-1325', 'A-1', 7],
+      ['CON-1', 'AFRI-1402', 'B-2', 2],
+      ['PRJ-BEAM', 'AFRI-1402', 'B-2', 6],
+    ]);
+    expect(report.projects).toEqual([
+      { projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 14 },
+      { projectNumber: 'AFRI-1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 16 },
+    ]);
+    // Required Stock is the store's measure: 2 of the Stores item's 10, held for a
+    // project, raises no status or re-order (Qodo, PR #143).
+    expect(report.categories[1]!.items.find((i) => i.sku === 'CON-1')).toMatchObject({ requiredStock: 0, status: 'NOT_SET', percentOfRequired: null, reorderQuantity: null });
+    expect(report.categories[1]).toMatchObject({ urgent: 0, warning: 0 });
+    expect(mocks.projects).toHaveBeenCalledWith(expect.objectContaining({ where: { projectNumber: { in: ['AFRI-1402'] } } }));
   });
 
   it('propagates dependency failures instead of returning a partial report', async () => {

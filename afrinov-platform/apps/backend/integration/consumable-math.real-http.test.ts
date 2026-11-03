@@ -233,8 +233,29 @@ describe('the numbers agree after every operation on issued stock', () => {
     expect(await onHand(discId, rackA)).toBe(20);
   });
 
+  // Qodo, PR #144: each checked the other before taking the lock they share.
+  it('never lets a reversal and a mark or return on the same issue both go through at the same moment', async () => {
+    for (let round = 0; round < 6; round++) {
+      const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+        recipientId: workerId, lines: [{ materialId: discId, locationId: rackA, quantity: 2 }],
+      }, key());
+      expect(issued.status).toBe(201);
+      const [id] = issued.body.transactionIds as [string];
+      const other = round % 2 === 0
+        ? api('POST', `/inventory-transactions/${id}/outcomes`, { outcome: 'USED_UP', quantity: 1 }, key())
+        : api('POST', '/inventory-returns', { lines: [{ issueTransactionId: id, quantity: 1 }] }, key());
+      const [reversal, booking] = await Promise.all([
+        api('POST', `/inventory-transactions/${id}/reversal`, { reason: 'Issued twice' }, key()),
+        other,
+      ]);
+      expect([reversal.status, booking.status].filter((s) => s === 201), `round ${round}: ${reversal.status} and ${booking.status}`).toHaveLength(1);
+      expect([reversal.status, booking.status].every((s) => s === 201 || s === 409)).toBe(true);
+      expect((await checkIssuedStock(prisma)).problems, `round ${round}`).toEqual([]);
+    }
+  });
+
   it('is caught by the database check when a stored balance does not match the ledger', async () => {
-    const where = { materialId_locationId: { materialId: gloveId, locationId: rackA } };
+    const where = { materialId_locationId_heldForProject: { materialId: gloveId, locationId: rackA, heldForProject: '' } };
     const before = await prisma.inventoryBalance.findUniqueOrThrow({ where });
     await prisma.inventoryBalance.update({ where, data: { quantity: before.quantity.plus(5) } });
     try {

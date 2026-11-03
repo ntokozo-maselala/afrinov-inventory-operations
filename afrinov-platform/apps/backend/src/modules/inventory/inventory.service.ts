@@ -12,8 +12,7 @@ import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
-import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { PROJECT_DELIVERY_REFUSED } from '../procurement/procurement.service.js';
+import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -28,6 +27,8 @@ export interface IssueLine {
   materialId: string;
   locationId: string;
   quantity: number | string | Decimal;
+  /** The stock it takes: held for the issue's project, or Stores stock (null or left out). */
+  heldForProject?: string | null;
 }
 
 // One entry at the store counter: one recipient, optionally one project, and
@@ -44,6 +45,8 @@ export interface TransferInput {
   fromLocationId: string;
   toLocationId: string;
   quantity: number | string | Decimal;
+  /** Whose stock moves: a project's, kept at both ends, or Stores stock (null or left out). */
+  heldForProject?: string | null;
   actorId: string;
 }
 
@@ -55,6 +58,8 @@ export interface AdjustmentInput {
   reasonNote?: string;
   /** Who was responsible (damage, loss or scrap only); naming someone needs a note saying what happened. */
   recipientId?: string | null;
+  /** Whose stock is adjusted: a project's, or Stores stock (null or left out). */
+  heldForProject?: string | null;
   actorId: string;
 }
 
@@ -139,6 +144,11 @@ async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.Transac
   }
 }
 
+/** Stock can be held only for a project that exists (the ledger's foreign key, said plainly). */
+async function checkProjectExists(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+  if (!(await tx.project.findUnique({ where: { projectNumber }, select: { projectNumber: true } }))) throw Errors.notFound('Project');
+}
+
 
 async function lockPurchaseOrderLines(lineIds: string[], tx: Prisma.TransactionClient): Promise<void> {
   for (const lineId of [...new Set(lineIds)].sort()) {
@@ -168,6 +178,8 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
 }): Promise<{ transactionId: string | null; outcomeIds: string[]; materialId: string; locationId: string; issued: Decimal; alreadyReturned: Decimal; closedOff: Decimal }> {
   const usedUp = input.usedUp ?? toDecimal(0);
   const broken = input.broken ?? toDecimal(0);
+  // Each is stored to four decimal places; a finer one would be stored rounded, even as zero.
+  if (![input.qty, usedUp, broken].every(fitsQuantityColumn)) throw Errors.validation(QUANTITY_PRECISION_MESSAGE);
   const marking = gtZero(usedUp) || gtZero(broken);
   const restocking = gtZero(input.qty);
   const issue = await tx.inventoryTransaction.findUnique({
@@ -185,8 +197,14 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
 
   const issued = issue.quantity.negated();
   const locationId = input.locationId ?? issue.locationId;
+  // It goes back to the stock it came out of: Stores, or the project it was held for.
   // Returns and outcomes against this issue share what is still out, so both take this lock.
-  await lockInventoryBalances([{ materialId: issue.materialId, locationId: issue.locationId }, { materialId: issue.materialId, locationId }], tx);
+  const back = { materialId: issue.materialId, locationId, heldForProject: issue.heldForProject };
+  await lockInventoryBalances([{ ...back, locationId: issue.locationId }, back], tx);
+  // A reversal may have committed while this waited for the lock.
+  if (await tx.inventoryTransaction.findFirst({ where: { reversesId: issue.id }, select: { id: true } })) {
+    throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
+  }
   const alreadyReturned = await returnedAgainst(issue.id, tx);
   const closedOff = closedTotal((await closedOffAgainst(tx, [issue.id])).get(issue.id));
   const returnable = issued.minus(alreadyReturned).minus(closedOff);
@@ -228,12 +246,13 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
       actorId: input.actorId,
       recipientId: issue.recipientId,
       projectNumber: issue.projectNumber,
+      heldForProject: issue.heldForProject,
       reasonNote: note,
       referenceType: 'Return',
       referenceId: issue.id,
     },
   });
-  await recomputeBalance(issue.materialId, locationId, tx);
+  await recomputeBalance(back, tx);
 
   await tx.auditLogEntry.create({
     data: {
@@ -319,7 +338,9 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
     // NULL <> 'StockCount' is not true in SQL, so a plain `not` would drop unreferenced rows.
     and.push({ OR: [{ referenceType: null }, { referenceType: { not: 'StockCount' } }] });
   }
-  if (filter.projectNumber) where.projectNumber = filter.projectNumber;
+  // A project's movements: stock used for it, and its own stock received,
+  // moved or adjusted (held for it), which names no project it was used for (Qodo, PR #145).
+  if (filter.projectNumber) and.push({ OR: [{ projectNumber: filter.projectNumber }, { heldForProject: filter.projectNumber }] });
   // A room and its racks (inside=true), else the one location.
   if (filter.locationIds) where.locationId = { in: filter.locationIds };
   else if (filter.locationId) where.locationId = filter.locationId;
@@ -339,6 +360,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
         { material: { name: contains } },
         { location: { name: contains } },
         { projectNumber: contains },
+        { heldForProject: contains },
         { recipient: { name: contains } },
       ],
     });
@@ -702,6 +724,9 @@ export const InventoryService = {
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
+      // Whose stock moved: the project it is held for, or null for Stores stock.
+      // Not projectNumber, which says who the stock was used for.
+      heldForProject: t.heldForProject,
       referenceType: t.referenceType,
       referenceId: t.referenceId,
       reversesId: t.reversesId,
@@ -899,13 +924,6 @@ export const InventoryService = {
           }
         }
 
-        if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
-          throw Errors.invalidState('Part of this issue has been returned. Reverse the returns first.');
-        }
-        if (original.type === InventoryTransactionType.ISSUE && gtZero(closedTotal((await closedOffAgainst(tx, [original.id])).get(original.id)))) {
-          throw Errors.invalidState('Part of this issue has been marked used up or broken. Withdraw those first.');
-        }
-
         const legs = [original];
         if (original.pairedWithId) {
           const partner = await tx.inventoryTransaction.findUnique({
@@ -923,9 +941,17 @@ export const InventoryService = {
 
         // A reversal must not take any balance below zero.
         await lockInventoryBalances(legs, tx);
+        // Checked under the lock that returns and used up or broken marks take,
+        // so one booked at the same moment cannot slip past.
+        if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
+          throw Errors.invalidState('Part of this issue has been returned. Reverse the returns first.');
+        }
+        if (original.type === InventoryTransactionType.ISSUE && gtZero(closedTotal((await closedOffAgainst(tx, [original.id])).get(original.id)))) {
+          throw Errors.invalidState('Part of this issue has been marked used up or broken. Withdraw those first.');
+        }
         for (const leg of legs) {
           if (!leg.quantity.isPositive()) continue;
-          const balance = await getCurrentBalance(leg.materialId, leg.locationId, tx);
+          const balance = await getCurrentBalance(leg, tx);
           if (balance.lt(leg.quantity)) {
             throw Errors.insufficientBalance(
               `Cannot reverse: only ${balance.toString()} of the ${leg.quantity.toString()} units are still in stock.`,
@@ -946,6 +972,7 @@ export const InventoryService = {
                 actorId: input.actorId,
                 recipientId: leg.recipientId,
                 projectNumber: leg.projectNumber,
+                heldForProject: leg.heldForProject,
                 reasonCode: leg.reasonCode,
                 reasonNote: reason,
                 referenceType: leg.referenceType,
@@ -963,7 +990,7 @@ export const InventoryService = {
         }
 
         for (const leg of legs) {
-          await recomputeBalance(leg.materialId, leg.locationId, tx);
+          await recomputeBalance(leg, tx);
         }
 
         const reversalIds = reversals.map((r) => r.id);
@@ -991,16 +1018,19 @@ export const InventoryService = {
   async issue(input: IssueInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[] }> {
     if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
-    const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, qty: toDecimal(l.quantity) }));
+    const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, heldForProject: l.heldForProject ?? null, qty: toDecimal(l.quantity) }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Issue quantity must be positive');
 
-    // The same item from the same location on two lines is checked as one total.
-    const totals = new Map<string, { materialId: string; locationId: string; qty: Decimal }>();
+    // Each line takes the stock it names: Stores stock, or the stock held for
+    // the issue's project (Project Material Through the Store Roadmap, Phase 3).
+    // Leftovers are Stores stock with their project on the item. The same stock
+    // on two lines is checked as one total.
+    const totals = new Map<string, { materialId: string; locationId: string; heldForProject: string | null; qty: Decimal }>();
     for (const l of lines) {
-      const key = `${l.materialId}|${l.locationId}`;
+      const key = `${l.materialId}|${l.locationId}|${l.heldForProject ?? ''}`;
       const t = totals.get(key);
       if (t) t.qty = t.qty.plus(l.qty);
-      else totals.set(key, { materialId: l.materialId, locationId: l.locationId, qty: l.qty });
+      else totals.set(key, { materialId: l.materialId, locationId: l.locationId, heldForProject: l.heldForProject, qty: l.qty });
     }
 
     return inTx(within, async (tx) => {
@@ -1013,10 +1043,23 @@ export const InventoryService = {
         if (materials.has(t.materialId)) continue;
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
-        refuseUnassigned(material);
         materials.set(t.materialId, material);
       }
-      checkProjectMaterial(input.projectNumber, [...materials.values()]);
+      // A project's own stock goes to that project only.
+      for (const t of totals.values()) {
+        if (t.heldForProject && t.heldForProject !== (input.projectNumber ?? null)) {
+          const sku = materials.get(t.materialId)!.sku;
+          throw Errors.validation(input.projectNumber
+            ? `${sku} at this location is held for project ${t.heldForProject}, so it can't be issued to project ${input.projectNumber}.`
+            : `${sku} at this location is held for project ${t.heldForProject}: issue it to that project.`);
+        }
+      }
+      // Stores stock follows the item's rules: a leftover goes to its item's
+      // project, and a Projects item with no project isn't issued. Stock held
+      // for a project is that project's, whatever the item says.
+      const fromStores = [...new Set([...totals.values()].filter((t) => !t.heldForProject).map((t) => t.materialId))].map((id) => materials.get(id)!);
+      for (const material of fromStores) refuseUnassigned(material);
+      checkProjectMaterial(input.projectNumber, fromStores);
 
       for (const t of totals.values()) {
         const material = materials.get(t.materialId)!;
@@ -1024,7 +1067,7 @@ export const InventoryService = {
 
         // Stock can never go below zero. This is a fixed rule, not a setting:
         // a negative balance means the ledger no longer matches the shelf.
-        const balance = await getCurrentBalance(t.materialId, t.locationId, tx);
+        const balance = await getCurrentBalance(t, tx);
         if (balance.lt(t.qty)) {
           throw Errors.insufficientBalance(
             `Cannot issue ${t.qty.toString()} × ${material.sku}: only ${balance.toString()} available.`,
@@ -1044,6 +1087,7 @@ export const InventoryService = {
             postedAt,
             materialId: l.materialId,
             locationId: l.locationId,
+            heldForProject: l.heldForProject,
             type: InventoryTransactionType.ISSUE,
             quantity: l.qty.negated(),
             actorId: input.actorId,
@@ -1060,14 +1104,14 @@ export const InventoryService = {
         type: 'InventoryIssued', materialId: l.materialId, locationId: l.locationId, quantity: l.qty.toNumber(),
       }));
       const alertsOn = await SettingsService.getValue<boolean>('inventory.enableStockAlerts', tx);
-      for (const t of totals.values()) await recomputeBalance(t.materialId, t.locationId, tx);
+      for (const t of totals.values()) await recomputeBalance(t, tx);
       if (alertsOn) {
-        // The item's status from its total across locations, as the stock status report shows it.
+        // The item's status from its Stores total across locations, as the stock status report shows it.
         const bands = await getStatusBands(tx);
         for (const materialId of new Set([...totals.values()].map((t) => t.materialId))) {
           const material = materials.get(materialId);
           if (!material) continue;
-          const all = await tx.inventoryBalance.aggregate({ where: { materialId }, _sum: { quantity: true } });
+          const all = await tx.inventoryBalance.aggregate({ where: { materialId, heldForProject: '' }, _sum: { quantity: true } });
           if (needsAttention(classifyItem(Number(all._sum.quantity ?? 0), Number(material.requiredStock), bands).status)) {
             events.push({ type: 'StockThresholdReached', materialId });
           }
@@ -1203,13 +1247,19 @@ export const InventoryService = {
       throw Errors.validation('Source and destination locations must differ');
     }
 
+    // The stock keeps its project as it moves: Stores stock stays Stores stock,
+    // a project's stays that project's (Project Material Through the Store Roadmap, Phase 3).
+    const heldForProject = input.heldForProject ?? null;
+    const from = { materialId: input.materialId, locationId: input.fromLocationId, heldForProject };
+    const to = { materialId: input.materialId, locationId: input.toLocationId, heldForProject };
     return inTx(within, async (tx) => {
-      await lockInventoryBalances([{ materialId: input.materialId, locationId: input.fromLocationId }, { materialId: input.materialId, locationId: input.toLocationId }], tx);
+      await lockInventoryBalances([from, to], tx);
       await checkMaterialActive(input.materialId, tx);
+      if (heldForProject) await checkProjectExists(heldForProject, tx);
       await checkLocationActive(input.fromLocationId, tx);
       await checkLocationActive(input.toLocationId, tx);
 
-      const balance = await getCurrentBalance(input.materialId, input.fromLocationId, tx);
+      const balance = await getCurrentBalance(from, tx);
       if (balance.lt(qty)) {
         throw Errors.insufficientBalance(
           `Cannot transfer ${qty.toString()} units: only ${balance.toString()} available at source.`,
@@ -1221,6 +1271,7 @@ export const InventoryService = {
         data: {
           materialId: input.materialId,
           locationId: input.fromLocationId,
+          heldForProject,
           type: InventoryTransactionType.TRANSFER_OUT,
           quantity: qty.negated(),
           actorId: input.actorId,
@@ -1231,6 +1282,7 @@ export const InventoryService = {
         data: {
           materialId: input.materialId,
           locationId: input.toLocationId,
+          heldForProject,
           type: InventoryTransactionType.TRANSFER_IN,
           quantity: qty,
           actorId: input.actorId,
@@ -1243,8 +1295,8 @@ export const InventoryService = {
         data: { pairedWithId: inn.id },
       });
 
-      await recomputeBalance(input.materialId, input.fromLocationId, tx);
-      await recomputeBalance(input.materialId, input.toLocationId, tx);
+      await recomputeBalance(from, tx);
+      await recomputeBalance(to, tx);
 
       await dispatchDomainEvents([
         {
@@ -1268,15 +1320,19 @@ export const InventoryService = {
       if (!input.reasonNote?.trim()) throw Errors.validation('Say what happened when naming who was responsible.');
     }
 
+    // Stores stock, or a project's own (Project Material Through the Store Roadmap, Phase 3).
+    const heldForProject = input.heldForProject ?? null;
+    const stock = { materialId: input.materialId, locationId: input.locationId, heldForProject };
     return inTx(within, async (tx) => {
-      await lockInventoryBalances([{ materialId: input.materialId, locationId: input.locationId }], tx);
+      await lockInventoryBalances([stock], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
+      if (heldForProject) await checkProjectExists(heldForProject, tx);
       if (input.recipientId) await checkRecipientActive(input.recipientId, tx);
 
       // See issue(): stock can never go below zero.
       if (qty.isNegative()) {
-        const balance = await getCurrentBalance(input.materialId, input.locationId, tx);
+        const balance = await getCurrentBalance(stock, tx);
         if (balance.lt(qty.negated())) {
           throw Errors.insufficientBalance(
             `Cannot adjust ${qty.toString()} units: only ${balance.toString()} available.`,
@@ -1289,6 +1345,7 @@ export const InventoryService = {
         data: {
           materialId: input.materialId,
           locationId: input.locationId,
+          heldForProject,
           type: InventoryTransactionType.ADJUSTMENT,
           quantity: qty,
           reasonCode: input.reasonCode,
@@ -1298,7 +1355,7 @@ export const InventoryService = {
         },
       });
 
-      await recomputeBalance(input.materialId, input.locationId, tx);
+      await recomputeBalance(stock, tx);
 
       await dispatchDomainEvents([
         { type: 'InventoryAdjusted', materialId: input.materialId, locationId: input.locationId, quantity: qty.toNumber() },
@@ -1325,19 +1382,21 @@ export const InventoryService = {
       // Postings against one order wait for each other, so each reads the
       // status the last one left and its Activity entry shows the real
       // transition.
+      let po: { projectNumber: string | null; status: string } | null = null;
       if (gr.purchaseOrderId) {
         await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${gr.purchaseOrderId} FOR UPDATE`;
+        po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId }, select: { projectNumber: true, status: true } });
       }
       await lockPurchaseOrderLines(gr.lines.map((line) => line.purchaseOrderLineId).filter((id): id is string => Boolean(id)), tx);
-      await lockInventoryBalances(gr.lines, tx);
+      // A delivery against a project order is held for that project; any
+      // other is Stores stock (Project Material Through the Store Roadmap).
+      const heldForProject = po?.projectNumber ?? null;
+      const stockOf = (line: { materialId: string; locationId: string }) => ({ materialId: line.materialId, locationId: line.locationId, heldForProject });
+      await lockInventoryBalances(gr.lines.map(stockOf), tx);
       if (gr.status === 'POSTED') throw Errors.invalidState('Goods receipt already posted');
       if (gr.status === 'DRAFT') throw Errors.invalidState('Goods receipt must be SUBMITTED before posting');
       // The order may have been cancelled or closed since the receipt was recorded.
       if (gr.purchaseOrderId) {
-        const po = await tx.purchaseOrder.findUnique({ where: { id: gr.purchaseOrderId } });
-        // Project material goes to site, never into stock: a receipt saved
-        // against a project order (before that rule, too) isn't posted.
-        if (po && po.projectNumber != null) throw Errors.validation(PROJECT_DELIVERY_REFUSED);
         if (po && po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') {
           throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
         }
@@ -1376,6 +1435,7 @@ export const InventoryService = {
             referenceType: 'GoodsReceipt',
             referenceId: gr.id,
             actorId: input.actorId,
+            heldForProject,
           },
         });
 
@@ -1401,7 +1461,7 @@ export const InventoryService = {
           }
         }
 
-        await recomputeBalance(line.materialId, line.locationId, tx);
+        await recomputeBalance(stockOf(line), tx);
       }
 
       await tx.goodsReceipt.update({

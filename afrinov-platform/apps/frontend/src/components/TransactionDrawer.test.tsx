@@ -42,6 +42,17 @@ describe('TransactionDrawer', () => {
     mockHasPermission.mockReset().mockReturnValue(true);
   });
 
+  // Qodo, PR #145: whose stock moved, apart from who it was used for.
+  it('names the project the stock is held for, apart from the project it was used for', () => {
+    render(<TransactionDrawer transaction={{ ...issue, type: 'TRANSFER_OUT', quantity: '-2', projectNumber: null, heldForProject: 'AFRI-1325' }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByText('Held for').nextElementSibling).toHaveTextContent('AFRI-1325');
+    expect(screen.queryByText('Project')).not.toBeInTheDocument();
+    cleanup();
+    render(<TransactionDrawer transaction={{ ...issue, projectNumber: 'AFRI-1325', heldForProject: null }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByText('Project').nextElementSibling).toHaveTextContent('AFRI-1325');
+    expect(screen.queryByText('Held for')).not.toBeInTheDocument();
+  });
+
   it.each([' ', 'ab', '  ab  '])('rejects a reason shorter than three trimmed characters: %j', (reason) => {
     renderDrawer();
     fireEvent.click(screen.getByRole('button', { name: 'Reverse this movement' }));

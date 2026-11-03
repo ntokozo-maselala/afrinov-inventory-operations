@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet, perms, exports } = vi.hoisted(() => ({
@@ -41,6 +41,8 @@ const SLIP = {
     { ...row(2), materialSku: 'GLOVE-L', materialName: 'Welding gloves', quantity: '-2', returnedQuantity: '0', issueId: 'iss-1', reversedById: 'tx-r' },
   ],
 };
+// The slips Issued stock lists; a test that needs items that track use replaces them.
+let issueSlips: unknown[] = [SLIP];
 const COUNTS = [
   { id: 'c-3', cursor: 'c3', at: '2026-09-25T10:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 2, adjusted: 1, note: null,
     differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
@@ -79,7 +81,7 @@ function renderAt(url: string, pages: Array<Array<Omit<ReturnType<typeof row>, '
     if (path.startsWith('/activity')) return [{ id: 'a-1', cursor: 'c', at: '2026-10-12T08:00:00.000Z', action: 'CREATE', entityType: 'Material', entityId: 'm-1',
       actorId: 'u-1', actorName: 'Vusi', summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' }];
     if (path.startsWith('/stock-receipts')) return [RECEIPT];
-    if (path.startsWith('/inventory-issues')) return [SLIP];
+    if (path.startsWith('/inventory-issues')) return issueSlips;
     if (path.startsWith('/stock-counts')) return COUNTS;
     if (path.startsWith('/inventory-transactions/writeoffs-by-responsible')) return WRITEOFF_TOTALS;
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
@@ -100,7 +102,7 @@ const todayIso = () => {
 };
 
 describe('Movements page', () => {
-  beforeEach(() => { mockGet.mockReset(); perms.activity = false; });
+  beforeEach(() => { mockGet.mockReset(); perms.activity = false; issueSlips = [SLIP]; });
 
   it('opens on All movements for today, a single day, with no type filter', async () => {
     renderAt('/movements');
@@ -208,6 +210,32 @@ describe('Movements page', () => {
     expect(screen.getByText(/1 issue, 2 lines/)).toBeInTheDocument();
     fireEvent.click(within(disc).getAllByRole('button')[0]!);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('shows what each person still has for items that track use, in the table and on the slip cards', async () => {
+    issueSlips = [{
+      ...SLIP,
+      lines: [
+        // 10 issued, 2 back, 6 used up, 1 broken: 1 still out.
+        { ...row(1), materialSku: 'DISC-115', quantity: '-10', returnedQuantity: '2', usedUpQuantity: '6', brokenQuantity: '1', trackUse: true, issueId: 'iss-1' },
+        { ...row(2), materialSku: 'BLADE-9', quantity: '-4', returnedQuantity: '0', usedUpQuantity: '4', brokenQuantity: '0', trackUse: true, issueId: 'iss-1' },
+        { ...row(3), materialSku: 'GLOVE-L', materialName: 'Welding gloves', quantity: '-2', returnedQuantity: '0', usedUpQuantity: '0', brokenQuantity: '0', trackUse: false, issueId: 'iss-1' },
+      ],
+    }];
+    renderAt('/movements?report=issued&from=2026-09-25');
+    const table = await screen.findByRole('table', { name: 'Issued stock' });
+    expect(within(table).getByRole('columnheader', { name: 'Still out' })).toBeInTheDocument();
+    const out = (sku: string) => cells(within(table).getByText(sku).closest('tr')!).at(-2);
+    expect(out('DISC-115')).toBe('1');
+    expect(out('BLADE-9')).toBe('0');
+    // Gloves do not track use: nothing to say.
+    expect(out('GLOVE-L')).toBe('—');
+
+    cleanup();
+    renderAt('/movements?report=issued&view=cards&from=2026-09-25');
+    const card = await screen.findByRole('region', { name: 'Issue to Sabelo' });
+    expect(within(card).getByRole('columnheader', { name: 'Still out' })).toBeInTheDocument();
+    expect(cells(within(card).getByText('DISC-115').closest('tr')!).at(-2)).toBe('1');
   });
 
   it('shows stock counts as a flat table by default: sheet lines, older differences, and counts with none', async () => {

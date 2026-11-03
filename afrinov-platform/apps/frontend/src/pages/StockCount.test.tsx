@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -92,6 +92,31 @@ describe('StockCount page', () => {
   it('adds an item found that is not listed, with nothing on the system', async () => {
     renderPage();
     await chooseA1();
+    const add = screen.getByLabelText(/Found an item/);
+    fireEvent.focus(add);
+    fireEvent.change(add, { target: { value: 'bolt' } });
+    fireEvent.mouseDown(within(screen.getByRole('listbox')).getByRole('option', { name: /M12 bolt/ }));
+    count('M12 bolt', '25');
+    expect(within(screen.getByText('M12 bolt').closest('tr')!).getByText('+25')).toBeInTheDocument();
+  });
+
+  // Qodo, PR #142: a count is of Stores stock, as the server posts it.
+  it('counts Stores stock only: stock held for a project is not listed, and an item held only for one is added at 0', async () => {
+    const storesOnly = stockAtA1;
+    // Put back for the tests after this one, which copy it in beforeEach.
+    onTestFinished(() => { stockAtA1 = storesOnly; });
+    stockAtA1 = [
+      ...storesOnly,
+      { ...storesOnly[0]!, heldForProject: 'AFRI-1325', quantity: '50' },
+      { materialId: 'm-9', materialSku: 'BOLT-M12', materialName: 'M12 bolt', unitOfMeasure: 'each', quantity: '8', heldForProject: 'AFRI-1325' },
+    ] as typeof stockAtA1;
+    renderPage();
+    await chooseA1();
+    expect(screen.getAllByText('Cutting disc')).toHaveLength(1);
+    expect(screen.queryByText('M12 bolt')).not.toBeInTheDocument();
+    count('Cutting disc', '7');
+    expect(within(screen.getByText('Cutting disc').closest('tr')!).getByText('-3')).toBeInTheDocument();
+
     const add = screen.getByLabelText(/Found an item/);
     fireEvent.focus(add);
     fireEvent.change(add, { target: { value: 'bolt' } });

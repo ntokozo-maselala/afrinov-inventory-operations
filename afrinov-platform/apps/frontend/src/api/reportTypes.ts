@@ -39,6 +39,8 @@ export interface ReportInventoryLine {
   lastUpdated: string | null;
   /** Projects material: its project, null until assigned; null for Stores. */
   projectNumber?: string | null;
+  /** Whose stock the line is: the project it is held for, or null for Stores stock. */
+  heldForProject?: string | null;
 }
 
 /** Projects material per project (materials sections roadmap, Phase 4). */
@@ -97,6 +99,8 @@ export interface ReportMovementRow {
   reasonCode: string | null;
   reasonNote: string | null;
   projectNumber: string | null;
+  /** Whose stock moved: the project it is held for, or null for Stores stock. */
+  heldForProject?: string | null;
   referenceType: string | null;
   referenceId: string | null;
   // Set on a reversal (the movement it cancels) and on a reversed movement

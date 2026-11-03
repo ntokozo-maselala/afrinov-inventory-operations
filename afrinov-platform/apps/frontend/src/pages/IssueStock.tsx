@@ -19,19 +19,28 @@ import { today } from '../lib/dates';
 import { useIdempotencyKey } from '../lib/idempotency';
 import type { CurrentStockRow } from '../api/types';
 import { needsProject, sectionOf } from '../lib/categories';
+import { isStoresStock, balanceKey } from '../lib/heldFor';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
 
-const stockKey = (r: Pick<CurrentStockRow, 'materialId' | 'locationId'>) => `${r.materialId}|${r.locationId}`;
+// One option per balance: an item at a location, Stores stock or a project's own.
+const stockKey = balanceKey;
 
 // A completed or cancelled project takes no more stock: its leftovers go to Stores.
 const isClosed = (status: string | undefined) => status === 'COMPLETED' || status === 'CANCELLED';
 
-const isProjectMaterial = (r: CurrentStockRow, projectNumber: string) =>
-  sectionOf(r.category) === 'PROJECTS' && r.projectNumber === projectNumber;
+/**
+ * The project a row's stock goes to: the one it is held for, or, for a
+ * leftover (Stores stock of a Projects item), the item's project. Null for
+ * Stores stock anyone may take (Project Material Through the Store Roadmap, Phase 3).
+ */
+const projectOf = (r: CurrentStockRow): string | null =>
+  r.heldForProject || (sectionOf(r.category) === 'PROJECTS' ? r.projectNumber ?? null : null);
+
+const isProjectMaterial = (r: CurrentStockRow, projectNumber: string) => projectOf(r) === projectNumber;
 
 let nextKey = 1;
 const emptyLine = (): Line => ({ key: nextKey++, stockKey: '', quantity: '' });
@@ -53,35 +62,42 @@ export function IssueStock() {
   const idem = useIdempotencyKey('issue-stock');
 
   // Only items with stock can be issued, and tools are lent on the Tools page
-  // instead. A closed project's material waits to move to Stores. Nor from a
-  // deactivated item or location, which the server refuses (Qodo, PR #132).
+  // instead. Nor from a deactivated item or location, which the server refuses
+  // (Qodo, PR #132). Stores stock follows its item: a closed project's leftovers
+  // wait to move to Stores, and a Projects item with no project isn't issued.
+  // Stock held for a project is that project's, whatever its item says, and is
+  // offered while that project takes issues: active, and neither completed nor
+  // cancelled (Qodo, PR #145).
+  const takesIssues = useMemo(() => new Set(projects.filter((p) => !isClosed(p.status)).map((p) => p.projectNumber)), [projects]);
   const available = useMemo(
-    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS' && !needsProject(r)
+    () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS'
       && r.materialActive !== false && r.locationActive !== false
-      && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status)))
+      && (isStoresStock(r)
+        ? !needsProject(r) && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status))
+        : takesIssues.has(r.heldForProject!)))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
-    [stock.data],
+    [stock.data, takesIssues],
   );
   const byKey = useMemo(() => new Map(available.map((r) => [stockKey(r), r])), [available]);
 
-  // Project material goes only to its own project: a line holding some sets the
-  // issue's project, which can't change while it is there. Once the issue has a
-  // project, only that project's material is offered: no Stores items, and no
-  // other project's material.
-  const lockedBy = lines.map((l) => byKey.get(l.stockKey)).find((r) => r && sectionOf(r.category) === 'PROJECTS');
-  const issueProject = lockedBy?.projectNumber ?? projectNumber;
+  // Project material goes only to its own project: a line holding some (held
+  // for the project, or a leftover) sets the issue's project, which can't change
+  // while it is there. Once the issue has a project, only that project's
+  // material is offered: no Stores items, and no other project's material.
+  const lockedBy = lines.map((l) => byKey.get(l.stockKey)).find((r) => r && projectOf(r));
+  const issueProject = (lockedBy && projectOf(lockedBy)) || projectNumber;
   const itemOptions = useMemo<SearchOption[]>(() => available
     .filter((r) => !issueProject || isProjectMaterial(r, issueProject))
     .map((r) => ({
       value: stockKey(r),
-      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}`,
+      label: `${r.materialName} (${r.materialSku}) · ${locationName(r.locationId, r.locationName)}${r.heldForProject ? ` · held for ${r.heldForProject}` : ''}`,
       detail: `${r.quantity} ${r.unitOfMeasure} on hand`,
     })), [available, issueProject, locationName]);
   const projectOptions = useMemo(() => {
     const open = projects.filter((p) => !isClosed(p.status));
-    const locked = lockedBy?.projectNumber;
+    const locked = lockedBy && projectOf(lockedBy);
     return locked && !open.some((p) => p.projectNumber === locked)
-      ? [{ projectNumber: locked, name: lockedBy?.project?.name ?? null }, ...open]
+      ? [{ projectNumber: locked, name: lockedBy?.heldForProject ? null : lockedBy?.project?.name ?? null }, ...open]
       : open;
   }, [projects, lockedBy]);
 
@@ -133,7 +149,8 @@ export function IssueStock() {
         projectNumber: issueProject || undefined,
         lines: filled.map((l) => {
           const r = byKey.get(l.stockKey)!;
-          return { materialId: r.materialId, locationId: r.locationId, quantity: Number(l.quantity) };
+          // The stock the line takes: the project's own, or Stores stock.
+          return { materialId: r.materialId, locationId: r.locationId, quantity: Number(l.quantity), heldForProject: r.heldForProject ?? null };
         }),
       };
       await api.post('/inventory-issues', issueBody, { idempotencyKey: idem.keyFor(issueBody) });
@@ -216,7 +233,7 @@ export function IssueStock() {
               const over = overIssued.has(l.stockKey);
               return (
                 <div key={l.key} className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_auto] gap-2 items-start">
-                  <Field label={`Item ${i + 1}`} htmlFor={`issue-item-${l.key}`} help={row ? `On hand at ${locationName(row.locationId, row.locationName)}: ${row.quantity} ${row.unitOfMeasure}` : undefined}>
+                  <Field label={`Item ${i + 1}`} htmlFor={`issue-item-${l.key}`} help={row ? `${row.heldForProject ? `Held for ${row.heldForProject} at` : 'On hand at'} ${locationName(row.locationId, row.locationName)}: ${row.quantity} ${row.unitOfMeasure}` : undefined}>
                     <SearchSelect
                       id={`issue-item-${l.key}`}
                       value={l.stockKey}

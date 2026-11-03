@@ -8,7 +8,8 @@ type Mat = { id: string; sku: string; name: string; unitOfMeasure: string; categ
 const db = {
   projects: new Map<string, { projectNumber: string; name: string | null; status: string; active: boolean }>(),
   materials: new Map<string, Mat>(),
-  balances: [] as Array<{ materialId: string; location: { name: string; active: boolean }; quantity: Prisma.Decimal }>,
+  // Stores stock ('') unless held for a project, as the table keys it.
+  balances: [] as Array<{ materialId: string; location: { name: string; active: boolean }; quantity: Prisma.Decimal; heldForProject?: string }>,
   audit: [] as Array<Record<string, unknown>>,
   // Lines of open project orders and open RFQs, as the queries would find them.
   openOrderLines: [] as Array<{ materialId: string; sku: string; number: string }>,
@@ -24,7 +25,8 @@ const client = {
     findMany: async ({ where }: { where: { category: string; projectNumber: string } }) => [...db.materials.values()]
       .filter((m) => m.category === where.category && m.projectNumber === where.projectNumber)
       .sort((a, b) => a.sku.localeCompare(b.sku))
-      .map((m) => ({ ...m, inventoryBalances: db.balances.filter((b) => b.materialId === m.id && b.quantity.gt(0)) })),
+      // Leftovers are the Stores balances, as the service asks.
+      .map((m) => ({ ...m, inventoryBalances: db.balances.filter((b) => b.materialId === m.id && b.quantity.gt(0) && (b.heldForProject ?? '') === '') })),
     updateMany: async ({ where, data }: { where: { id: string; category: string; projectNumber: string }; data: Partial<Mat> }) => {
       const m = db.materials.get(where.id);
       if (!m || m.category !== where.category || m.projectNumber !== where.projectNumber) return { count: 0 };
@@ -39,6 +41,13 @@ const client = {
     findFirst: async ({ where }: { where: { materialId: { in: string[] } } }) => {
       const l = firstOpen(db.openOrderLines, where.materialId.in);
       return l ? { material: { sku: l.sku }, purchaseOrder: { number: l.number } } : null;
+    },
+  },
+  inventoryBalance: {
+    // Stock held for a project, other than Stores stock, of any of the items.
+    findFirst: async ({ where }: { where: { materialId: { in: string[] } } }) => {
+      const b = db.balances.find((x) => where.materialId.in.includes(x.materialId) && (x.heldForProject ?? '') !== '' && !x.quantity.isZero());
+      return b ? { heldForProject: b.heldForProject, material: { sku: db.materials.get(b.materialId)!.sku } } : null;
     },
   },
   rfqLine: {
@@ -89,6 +98,26 @@ describe('listing a project\'s leftovers', () => {
   it('says whether the project is closed, and refuses an unknown one', async () => {
     expect((await ProjectLeftoversService.list('1402')).project.closed).toBe(false);
     await expect(ProjectLeftoversService.list('NOPE')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+describe('stock held for a project (Project Material Through the Store Roadmap, Phase 2)', () => {
+  // Received against a project order: that project's own stock, not a leftover.
+  beforeEach(() => {
+    db.balances.push({ materialId: 'p1', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(9), heldForProject: '1369' });
+  });
+
+  it('is not listed as a leftover', async () => {
+    const { items } = await ProjectLeftoversService.list('1369');
+    expect(items.find((i) => i.materialId === 'p1')).toMatchObject({ onHand: '6', locations: 'A-1 (4), B-2 (2)' });
+  });
+
+  // Qodo, PR #142: moving the item would strand that stock under the project.
+  it('keeps the item project material, moving nothing', async () => {
+    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p2', category: 'CONSUMABLES' }, { materialId: 'p1', category: 'CONSUMABLES' }], 'user-1'))
+      .rejects.toThrow('1369-P1 has stock in the store held for project 1369, so it stays project material until that stock is used or moved.');
+    expect(db.materials.get('p2')).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: '1369' });
+    expect(db.audit).toEqual([]);
   });
 });
 

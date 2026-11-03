@@ -45,6 +45,14 @@ describe('activityWhere', () => {
 describe('describeActivity', () => {
   it('describes items added and edited, naming what changed', () => {
     expect(say({ after: { sku: 'WSHR-16', name: 'Flat washer' } })).toEqual({ summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' });
+    // Qodo, PR #144: switching Track use after issue is named, on or off.
+    expect(say({ action: 'UPDATE', before: { sku: 'DISC-125', name: 'Grinding disc', trackUse: false }, after: { sku: 'DISC-125', name: 'Grinding disc', trackUse: true } }).summary)
+      .toBe('Edited item DISC-125 Grinding disc: switched on tracking use after issue');
+    expect(say({ action: 'UPDATE', before: { sku: 'DISC-125', name: 'Grinding disc', trackUse: true, unitCost: '30' }, after: { sku: 'DISC-125', name: 'Grinding disc', trackUse: false, unitCost: '32' } }).summary)
+      .toBe('Edited item DISC-125 Grinding disc: switched off tracking use after issue; changed unit price');
+    // Saved again unchanged, or before the setting existed and still off: nothing to say.
+    expect(say({ action: 'UPDATE', before: { sku: 'DISC-125', name: 'Grinding disc' }, after: { sku: 'DISC-125', name: 'Grinding disc', trackUse: false } }).summary)
+      .toBe('Edited item DISC-125 Grinding disc');
     expect(say({ action: 'UPDATE', before: { sku: 'WSHR-16', name: 'Flat washer', requiredStock: '10', active: true }, after: { sku: 'WSHR-16', name: 'Flat washer', requiredStock: '20', active: false } }).summary)
       .toBe('Edited item WSHR-16 Flat washer: deactivated it; changed required stock');
   });

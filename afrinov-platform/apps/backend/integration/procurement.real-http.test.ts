@@ -872,9 +872,10 @@ describe('receiving stock over real HTTP', () => {
       expect((await user('GET', '/purchase-orders?kind=stores')).status).toBe(403);
     });
 
-    // Stores and Procurement Separation Roadmap, Phase 3: project material goes
-    // from the supplier straight to site, so Procurement confirms its delivery
-    // on the order and nothing is added to stock; the store receives Stores orders only.
+    // Project Material Through the Store Roadmap, Phase 2: project material
+    // comes through the store. The store receives a project order into stock
+    // held for its project, seeing only what receiving needs; Procurement's
+    // Confirm delivery is retired.
     describe('delivery of a project order', () => {
       interface Lined { id: string; status: string; lines: Array<{ id: string; orderedQty: string; receivedQty: string }> }
 
@@ -888,90 +889,85 @@ describe('receiving stock over real HTTP', () => {
         expect(order.status).toBe('APPROVED');
         return order;
       }
-      const confirm = (who: typeof api, id: string, body: Record<string, unknown>) => who<Lined & { error: { message: string } }>('POST', `/purchase-orders/${id}/confirm-delivery`, body);
+      const receive = (who: typeof api, order: Lined, quantity: number) => who<{ id: string; number: string; error?: { message: string } }>('POST', '/goods-receipts', {
+        purchaseOrderId: order.id, supplierId, deliveryRef: `DN-${run}`, post: true,
+        lines: [{ materialId: beamId, locationId, quantity, purchaseOrderLineId: order.lines[0]!.id }],
+      });
+      const held = async () => ledgerAndBalance(beamId, locationId, projectNumber);
 
-      it('lets the buyer confirm what arrived on site, line by line, adding no stock', async () => {
+      it('lets the store receive it, part then the rest, into stock held for the project', async () => {
         const order = await approvedProjectOrder();
-        const line = order.lines[0]!.id;
-        const part = await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.5 }], deliveryRef: 'DN-4410', deliveredOn: '2026-10-28' });
-        expect(part.status).toBe(200);
-        expect(part.body.status).toBe('PARTIALLY_RECEIVED');
-        const rest = await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 2.5 }] });
-        expect(rest.body.status).toBe('RECEIVED');
-        const after = (await api<Lined & { deliveredAt: string | null }>('GET', `/purchase-orders/${order.id}`)).body;
-        expect(Number(after.lines[0]!.receivedQty)).toBe(4);
-        expect(after.deliveredAt).toBeTruthy();
+        const before = await held();
+        const stores = await ledgerAndBalance(beamId, locationId);
 
-        // Nothing went into stock: no stock movement points at the order.
-        expect(await prisma.inventoryTransaction.count({ where: { referenceId: order.id } })).toBe(0);
-        // Each confirmation is on the order's Activity, with what arrived.
-        const history = (await api<Array<{ action: string; after: Record<string, unknown> }>>('GET', `/purchase-orders/${order.id}/history`)).body;
-        const confirmed = history.filter((e) => e.action === 'PO_DELIVERY_CONFIRMED');
-        expect(confirmed).toHaveLength(2);
-        expect(confirmed.map((e) => e.after)).toContainEqual(expect.objectContaining({ deliveryRef: 'DN-4410', deliveredOn: '2026-10-28', lines: [{ lineId: line, quantity: '1.5' }] }));
-        // Then closed as any received order.
+        const part = await receive(storeman, order, 1.5);
+        expect(part.status).toBe(201);
+        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('PARTIALLY_RECEIVED');
+        expect((await receive(storeman, order, 2.5)).status).toBe(201);
+        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('RECEIVED');
+
+        // Held for the project, its balance in step with the ledger; Stores stock untouched.
+        const after = await held();
+        expect(Number(after.ledger) - Number(before.ledger)).toBe(4);
+        expect(after.balance).toBe(after.ledger);
+        expect(await ledgerAndBalance(beamId, locationId)).toEqual(stores);
+        const movements = await prisma.inventoryTransaction.findMany({ where: { referenceType: 'GoodsReceipt', referenceId: part.body.id } });
+        expect(movements.map((m) => m.heldForProject)).toEqual([projectNumber]);
+        // Current stock says whose it is.
+        const rows = (await api<Array<{ materialId: string; locationId: string; heldForProject: string | null; quantity: string }>>('GET', `/reports/current-stock?materialId=${beamId}`)).body;
+        expect(rows.find((r) => r.locationId === locationId && r.heldForProject === projectNumber)?.quantity).toBe(after.balance);
+
+        // The store sees its receipt; Procurement closes the order.
+        expect((await storeman<Array<{ id: string }>>('GET', '/goods-receipts')).body.map((r) => r.id)).toContain(part.body.id);
+        expect((await storeman('GET', `/goods-receipts/${part.body.id}`)).status).toBe(200);
         expect((await buyer<{ status: string }>('POST', `/purchase-orders/${order.id}/close`, {})).body.status).toBe('CLOSED');
       });
 
-      it('refuses more than is outstanding, a day to come, an order not yet approved, and a Stores order', async () => {
+      it('shows the store a receiving view of it: the project, lines and what is owed, no prices', async () => {
         const order = await approvedProjectOrder();
-        const line = order.lines[0]!.id;
-        const tooMuch = await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 5 }] });
-        expect(tooMuch.status).toBe(400);
-        expect(tooMuch.body.error.message).toMatch(/more than the 4 still outstanding/);
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1 }], deliveredOn: '2099-01-01' })).status).toBe(400);
-
-        const draft = await buyer<{ id: string; lines: Array<{ id: string }> }>('POST', '/purchase-orders', projectOrder());
-        const draftLine = (await api<Lined>('GET', `/purchase-orders/${draft.body.id}`)).body.lines[0]!.id;
-        expect((await confirm(buyer, draft.body.id, { lines: [{ lineId: draftLine, quantity: 1 }] })).status).toBe(409);
-
-        // The store's own order is received into stock, not confirmed; to a buyer it isn't even found.
+        const listed = (await storeman<Array<Record<string, unknown> & { id: string; lines: Array<Record<string, unknown>> }>>('GET', '/purchase-orders/receivable')).body;
+        const mine = listed.find((o) => o.id === order.id)!;
+        expect(mine).toMatchObject({ projectNumber, status: 'APPROVED', supplierId });
+        expect(mine.lines[0]).toMatchObject({ id: order.lines[0]!.id, orderedQty: '4', receivedQty: '0' });
+        expect(mine.lines[0]).not.toHaveProperty('unitPrice');
+        expect(mine).not.toHaveProperty('totals');
+        // Its own orders are there too.
         const store = await approvedOrder(2);
-        expect((await confirm(api, store.id, { lines: [{ lineId: store.lines[0]!.id, quantity: 1 }] })).status).toBe(400);
-        expect((await confirm(buyer, store.id, { lines: [{ lineId: store.lines[0]!.id, quantity: 1 }] })).status).toBe(404);
+        expect((await storeman<Array<{ id: string }>>('GET', '/purchase-orders/receivable')).body.map((o) => o.id)).toContain(store.id);
+        // The order itself stays Procurement's: not found to the store.
+        expect((await storeman('GET', `/purchase-orders/${order.id}`)).status).toBe(404);
+        expect((await storeman('GET', `/purchase-orders/${order.id}/history`)).status).toBe(404);
+        // The buyer receives neither kind, so lists nothing to receive.
+        expect((await buyer<Array<{ id: string }>>('GET', '/purchase-orders/receivable')).body).toEqual([]);
       });
 
-      it("receives no project order into stock, by either way in, and the storeman doesn't even find one", async () => {
+      it('keeps the buyer from receiving it, and no longer confirms a delivery on the order', async () => {
         const order = await approvedProjectOrder();
-        const line = order.lines[0]!;
-        const receiptBody = { purchaseOrderId: order.id, supplierId, post: true, lines: [{ materialId: beamId, locationId, quantity: 1, purchaseOrderLineId: line.id }] };
-        // Admin sees both sides, and is told why.
-        const received = await api<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
-        expect(received.status).toBe(400);
-        expect(received.body.error.message).toMatch(/goes from the supplier straight to site/);
-        const receipt = await api<{ error: { message: string } }>('POST', '/goods-receipts', receiptBody);
-        expect(receipt.status).toBe(400);
-        expect(receipt.body.error.message).toMatch(/goes from the supplier straight to site/);
-        // To the store a project order is not found, whatever is tried.
-        expect((await storeman('POST', `/purchase-orders/${order.id}/receive`, { locationId })).status).toBe(404);
-        expect((await storeman('POST', '/goods-receipts', receiptBody)).status).toBe(404);
-        expect((await confirm(storeman, order.id, { lines: [{ lineId: line.id, quantity: 1 }] })).status).toBe(404);
+        // The buyer sees the order, so is refused, not told it is missing.
+        expect((await receive(buyer, order, 1)).status).toBe(403);
+        expect((await buyer('POST', `/purchase-orders/${order.id}/receive`, { locationId })).status).toBe(403);
+        const confirm = await buyer<{ error: { message: string } }>('POST', `/purchase-orders/${order.id}/confirm-delivery`, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }] });
+        expect(confirm.status).toBe(400);
+        expect(confirm.body.error.message).toMatch(/received into stock now: the store books each delivery on Receive stock/);
         expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('APPROVED');
+        expect(await prisma.inventoryTransaction.count({ where: { referenceId: order.id } })).toBe(0);
       });
 
-      // Qodo, PR #121.
-      it('keeps quantities to 4 decimal places, so a fractional order reaches Received', async () => {
-        const order = await approvedProjectOrder(2.5);
-        const line = order.lines[0]!.id;
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.23456 }] })).status).toBe(400);
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 0.00001 }] })).status).toBe(400);
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.2 }] })).body.status).toBe('PARTIALLY_RECEIVED');
-        // 2.5 − 1.2, worked out in a browser, is 1.2999999999999998; the dialog sends 1.3.
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: line, quantity: 1.3 }] })).body.status).toBe('RECEIVED');
-      });
-
-      it('takes today in South Africa as the delivery day, given or left out', async () => {
+      it('receives the rest of it whole with Receive, held for the project', async () => {
         const order = await approvedProjectOrder();
-        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }], deliveredOn: today })).status).toBe(200);
-        // Left out, it is recorded as today in South Africa, not in UTC (Qodo, PR #122).
-        expect((await confirm(buyer, order.id, { lines: [{ lineId: order.lines[0]!.id, quantity: 1 }] })).status).toBe(200);
-        const history = (await api<Array<{ action: string; after: { deliveredOn?: string } }>>('GET', `/purchase-orders/${order.id}/history`)).body;
-        expect(history.filter((e) => e.action === 'PO_DELIVERY_CONFIRMED').map((e) => e.after.deliveredOn)).toEqual([today, today]);
+        const before = await held();
+        expect((await receive(storeman, order, 1)).status).toBe(201);
+        const whole = await storeman<{ status: string }>('POST', `/purchase-orders/${order.id}/receive`, { locationId });
+        expect(whole.status).toBe(200);
+        expect(whole.body.status).toBe('RECEIVED');
+        expect(Number((await held()).ledger) - Number(before.ledger)).toBe(4);
+        const rest = await prisma.inventoryTransaction.findMany({ where: { referenceType: 'PurchaseOrder', referenceId: order.id } });
+        expect(rest.map((m) => [m.quantity.toString(), m.heldForProject])).toEqual([['3', projectNumber]]);
       });
 
-      it("won't post a receipt saved against a project order before Phase 3", async () => {
+      it('posts a receipt saved against it before, into the project\'s stock', async () => {
         const order = await approvedProjectOrder();
+        const before = await held();
         const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
         const saved = await prisma.goodsReceipt.create({
           data: {
@@ -979,11 +975,106 @@ describe('receiving stock over real HTTP', () => {
             lines: { create: [{ materialId: beamId, locationId, quantity: 1, purchaseOrderLineId: order.lines[0]!.id }] },
           },
         });
-        const posted = await api<{ error: { message: string } }>('POST', `/goods-receipts/${saved.id}/post`);
-        expect(posted.status).toBe(400);
-        expect(posted.body.error.message).toMatch(/goes from the supplier straight to site/);
-        expect(await prisma.inventoryTransaction.count({ where: { referenceId: saved.id } })).toBe(0);
-        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.lines[0]!.receivedQty).toMatch(/^0/);
+        expect((await storeman('POST', `/goods-receipts/${saved.id}/post`)).status).toBe(200);
+        expect(Number((await held()).ledger) - Number(before.ledger)).toBe(1);
+        expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('PARTIALLY_RECEIVED');
+      });
+
+      // Project Material Through the Store Roadmap, Phase 3: a project's own
+      // stock goes to that project only, from the stock each line names.
+      describe("issuing and moving a project's own stock", () => {
+        let recipientId: string;
+        let looseId: string;
+        const other = `IT-SO-OTHER-${run}`;
+
+        beforeAll(async () => {
+          const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT project fitter ${run}`, type: 'WORKER' });
+          expect(rcp.status).toBe(201);
+          recipientId = rcp.body.id;
+          expect((await api('POST', '/projects', { projectNumber: other, name: `IT other project ${run}` })).status).toBe(201);
+          // A Projects item with no project of its own: the order says whose it is.
+          const loose = await api<{ id: string }>('POST', '/materials', {
+            sku: `IT-SO-LOOSE-${run}`, name: `Integration loose plate ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'M',
+          });
+          expect(loose.status).toBe(200);
+          looseId = loose.body.id;
+        });
+
+        /** Receives 4 of an item for the project into stock held for it. */
+        async function receivedForProject(itemId: string) {
+          const created = await buyer<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber, lines: [{ materialId: itemId, orderedQty: 4, unitPrice: 40 }] });
+          expect(created.status).toBe(201);
+          const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${created.body.id}/submit`);
+          if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
+          expect((await storeman('POST', `/purchase-orders/${created.body.id}/receive`, { locationId })).status).toBe(200);
+        }
+        const issue = (projectFor: string | undefined, heldForProject: string | null, quantity: number) =>
+          storeman<{ transactionIds: string[]; error?: { message: string } }>('POST', '/inventory-issues', {
+            recipientId, projectNumber: projectFor, lines: [{ materialId: looseId, locationId, quantity, heldForProject }],
+          });
+
+        it('issues it to its project only, and a return puts it back', async () => {
+          await receivedForProject(looseId);
+          const before = await ledgerAndBalance(looseId, locationId, projectNumber);
+
+          // Not to another project, nor to none.
+          const toOther = await issue(other, projectNumber, 1);
+          expect(toOther.status).toBe(400);
+          expect(toOther.body.error!.message).toMatch(new RegExp(`held for project ${projectNumber}, so it can't be issued to project ${other}`));
+          expect((await issue(undefined, projectNumber, 1)).status).toBe(400);
+          // Nor taken as Stores stock: an item with no project isn't issued from there.
+          expect((await issue(projectNumber, null, 1)).status).toBe(400);
+          expect(await ledgerAndBalance(looseId, locationId, projectNumber)).toEqual(before);
+
+          // To its project, from its stock, though the item itself has no project.
+          const issued = await issue(projectNumber, projectNumber, 1.5);
+          expect(issued.status).toBe(201);
+          const [movement] = await prisma.inventoryTransaction.findMany({ where: { id: { in: issued.body.transactionIds } } });
+          expect([movement!.heldForProject, movement!.projectNumber, movement!.quantity.toString()]).toEqual([projectNumber, projectNumber, '-1.5']);
+          const after = await ledgerAndBalance(looseId, locationId, projectNumber);
+          expect(Number(before.ledger) - Number(after.ledger)).toBe(1.5);
+          expect(after.balance).toBe(after.ledger);
+          // No more than it holds.
+          expect((await issue(projectNumber, projectNumber, 100)).status).toBe(422);
+
+          // A return goes back to the project's stock.
+          const returned = await storeman('POST', `/inventory-transactions/${issued.body.transactionIds[0]}/returns`, { quantity: 1 });
+          expect(returned.status).toBe(201);
+          expect(Number((await ledgerAndBalance(looseId, locationId, projectNumber)).ledger)).toBe(Number(after.ledger) + 1);
+        });
+
+        it('moves and adjusts it between locations, keeping its project', async () => {
+          await receivedForProject(looseId);
+          const spare = await api<{ id: string }>('POST', '/locations', { name: `IT project shelf ${run}`, type: 'STOREROOM' });
+          expect(spare.status).toBe(201);
+          const stores = await ledgerAndBalance(looseId, locationId);
+
+          const moved = await storeman<{ outTransactionId: string; inTransactionId: string }>('POST', '/inventory-transfers', {
+            materialId: looseId, fromLocationId: locationId, toLocationId: spare.body.id, quantity: 2, heldForProject: projectNumber,
+          });
+          expect(moved.status).toBe(201);
+          const legs = await prisma.inventoryTransaction.findMany({ where: { id: { in: [moved.body.outTransactionId, moved.body.inTransactionId] } } });
+          expect(legs.map((l) => l.heldForProject)).toEqual([projectNumber, projectNumber]);
+          expect((await ledgerAndBalance(looseId, spare.body.id, projectNumber)).balance).toBe('2');
+          // The project's history finds its own stock moving, by filter and by search (Qodo, PR #145).
+          const ofProject = (await api<Array<{ id: string; heldForProject: string | null }>>('GET', `/inventory-transactions?projectNumber=${projectNumber}&materialId=${looseId}`)).body;
+          expect(ofProject.find((r) => r.id === moved.body.outTransactionId)?.heldForProject).toBe(projectNumber);
+          const found = (await api<Array<{ id: string }>>('GET', `/inventory-transactions?q=${projectNumber}&materialId=${looseId}`)).body;
+          expect(found.map((r) => r.id)).toContain(moved.body.outTransactionId);
+          const reported = (await api<Array<{ id: string }>>('GET', `/reports/movement-history?projectNumber=${projectNumber}&materialId=${looseId}`)).body;
+          expect(reported.map((r) => r.id)).toContain(moved.body.outTransactionId);
+
+          const adjusted = await storeman('POST', '/inventory-adjustments', {
+            materialId: looseId, locationId: spare.body.id, quantity: -0.5, reasonCode: 'DAMAGE', reasonNote: 'Bent in the rack', heldForProject: projectNumber,
+          });
+          expect(adjusted.status).toBe(201);
+          expect((await ledgerAndBalance(looseId, spare.body.id, projectNumber)).balance).toBe('1.5');
+          // Stores stock never moved, and a project that doesn't exist holds nothing.
+          expect(await ledgerAndBalance(looseId, locationId)).toEqual(stores);
+          expect((await storeman('POST', '/inventory-adjustments', {
+            materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', heldForProject: `IT-NOPE-${run}`,
+          })).status).toBe(404);
+        });
       });
 
       it("keeps a saved receipt for the store's order from a buyer: not listed, not found, not posted", async () => {

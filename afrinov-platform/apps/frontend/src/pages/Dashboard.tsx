@@ -28,7 +28,11 @@ export interface StockValue {
   /** Stores and Projects totals (materials sections roadmap, Phase 4). */
   sections?: Record<'STORES' | 'PROJECTS', { items: number; itemsInStock: number; value: number; unpriced: number }>;
   /** Projects material per project; null projectNumber for items with no project yet. */
-  projects?: Array<{ projectNumber: string | null; name: string | null; status: string | null; items: number; itemsInStock: number; value: number; unpriced: number }>;
+  projects?: Array<{
+    projectNumber: string | null; name: string | null; status: string | null; items: number; itemsInStock: number; value: number; unpriced: number;
+    /** Items held as Stores stock, left from before: the only stock Move to Stores takes. */
+    leftovers?: number;
+  }>;
   /** Stores only: Projects material is bought per job, so never urgent or out of stock. */
   status: { URGENT: number; WARNING: number; OK: number; NOT_SET: number; outOfStock: number };
 }
@@ -113,7 +117,7 @@ export function Dashboard() {
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');
   const { data: lowStock, loading: lowStockLoading, error: lowStockError, reload: reloadLowStock } = useApi<StockStatusItem[]>('/reports/low-stock');
   const { data: value, loading: valueLoading, error: valueError, reload: reloadValue } = useApi<StockValue>('/reports/stock-value');
-  // The projects whose material is still in the store, received before it went straight to site.
+  // The projects with material in the store: held for them, or left from before.
   const heldFor = (value?.projects ?? []).filter((p) => p.projectNumber && p.itemsInStock > 0).length;
   const { data: tools, loading: toolsLoading, error: toolsError, reload: reloadTools } = useApi<ToolRow[]>('/tools');
   // The room each location stands in, for the chart's By room view.
@@ -304,10 +308,10 @@ export function Dashboard() {
               <div className="dashboard-chart-empty">No priced stock is available for category comparison.</div>
             )}
             {value?.total.unpriced ? <p className="dashboard-panel-footnote">Unpriced stock is excluded from the valuation total.</p> : null}
-            {/* Project material goes straight to site; only what was received before still sits in the store. */}
+            {/* Project material in the store: received against each project's orders and held for it, or left from before. */}
             {value?.sections && value.sections.PROJECTS.itemsInStock > 0 && (
               <p className="dashboard-panel-footnote">
-                Project material still in the store from before it went straight to site: {formatCurrency(value.sections.PROJECTS.value, value.currency)} across{' '}
+                Project material in the store, held for projects or left from before: {formatCurrency(value.sections.PROJECTS.value, value.currency)} across{' '}
                 {heldFor} project{heldFor === 1 ? '' : 's'}; it is never re-ordered, so the counts above are Stores only.{' '}
                 <Link to="/stock" className="btn-link">By project</Link>
               </p>

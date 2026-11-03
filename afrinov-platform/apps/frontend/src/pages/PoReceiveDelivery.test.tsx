@@ -41,7 +41,7 @@ beforeEach(() => {
   after.status = 'PARTIALLY_RECEIVED';
   let booked = false;
   mockGet.mockReset().mockImplementation(async (path: string) => {
-    if (path === '/purchase-orders?kind=stores') return [
+    if (path === '/purchase-orders/receivable') return [
       ORDER,
       { ...ORDER, id: 'po-2', number: 'AFRI-0400', status: 'CLOSED' },
       { ...ORDER, id: 'po-3', number: 'AFRI-0420', status: 'PENDING_APPROVAL' },
@@ -126,7 +126,38 @@ describe('Receive stock against an approved order', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
   }
 
-  it('offers only the store\u2019s approved orders still to come, with supplier and what each owes', async () => {
+  // Project Material Through the Store Roadmap, Phase 2: project material comes through the store.
+  describe('a project order', () => {
+    const PROJECT_ORDER = { ...ORDER, id: 'po-5', number: 'AFRI-0430', projectNumber: 'AFRI-1325', project: { name: 'Plant upgrade' } };
+    beforeEach(() => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/receivable' ? [ORDER, PROJECT_ORDER] : base(path)));
+    });
+
+    it('is listed beside the store\u2019s orders, naming the project its stock is held for', async () => {
+      receiveStock();
+      expect(await screen.findByRole('option', { name: /^AFRI-0430 \u00b7 for AFRI-1325 \u00b7 Plant upgrade \u00b7 Hydac \u00b7 2 lines outstanding/ })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /^AFRI-0412 \u00b7 Hydac/ })).toBeInTheDocument();
+      await chooseOrder('po-5');
+      expect(screen.getByText('Supplier: Hydac \u00b7 Held for project AFRI-1325 \u00b7 Plant upgrade')).toBeInTheDocument();
+      // Procurement closes its own orders.
+      expect(screen.queryByLabelText(/Nothing more is coming/)).not.toBeInTheDocument();
+    });
+
+    it('books the delivery against it, and says the stock is held for the project, without opening or closing the order', async () => {
+      receiveStock();
+      await chooseOrder('po-5');
+      await fillAndReceive('DN-5');
+      await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/goods-receipts', expect.objectContaining({ purchaseOrderId: 'po-5', deliveryRef: 'DN-5', post: true }), withKey));
+      expect(await screen.findByText('The stock is held for project AFRI-1325. Procurement closes AFRI-0430 once nothing more is to come.')).toBeInTheDocument();
+      // The store doesn't read or close Procurement's order.
+      expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders/po-5');
+      expect(mockPost).not.toHaveBeenCalledWith('/purchase-orders/po-5/close', expect.anything());
+      expect(screen.queryByRole('link', { name: 'Open AFRI-0430' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('offers the approved orders still to come, with supplier and what each owes', async () => {
     receiveStock();
     expect(await screen.findByRole('option', { name: /AFRI-0412 · Hydac · 2 lines outstanding, expected/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'AFRI-0401 · Other · 2 lines outstanding' })).toBeInTheDocument();
@@ -150,7 +181,7 @@ describe('Receive stock against an approved order', () => {
 
   it('says when no approved order is waiting, and points to Order stock', async () => {
     mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?kind=stores') return [{ ...ORDER, status: 'RECEIVED' }];
+      if (path === '/purchase-orders/receivable') return [{ ...ORDER, status: 'RECEIVED' }];
       if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }];
       return [];
     });
@@ -236,7 +267,7 @@ describe('Receive stock against an approved order', () => {
     let fail = true;
     const base = mockGet.getMockImplementation()!;
     mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?kind=stores' && fail) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
+      if (path === '/purchase-orders/receivable' && fail) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
       return base(path);
     });
     receiveStock('/stock/receive?order=po-1');
@@ -250,7 +281,7 @@ describe('Receive stock against an approved order', () => {
   // Qodo, PR #125: with nothing to choose from, no form is offered.
   it('offers no form when the orders fail to load', async () => {
     mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?kind=stores') throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
+      if (path === '/purchase-orders/receivable') throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
       if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }];
       return [];
     });
@@ -264,7 +295,7 @@ describe('Receive stock against an approved order', () => {
     const owedOnlyBolts = { ...ORDER, id: 'po-4', number: 'AFRI-0401', lines: [{ ...ORDER.lines[0]!, receivedQty: '10' }, ORDER.lines[1]!] };
     beforeEach(() => {
       const base = mockGet.getMockImplementation()!;
-      mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders?kind=stores' ? [ORDER, owedOnlyBolts] : base(path)));
+      mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/receivable' ? [ORDER, owedOnlyBolts] : base(path)));
     });
 
     it('chooses the only order still owed the item', async () => {
@@ -297,7 +328,7 @@ describe('Receive stock against an approved order', () => {
       throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
     });
     mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?kind=stores') return [ORDER];
+      if (path === '/purchase-orders/receivable') return [ORDER];
       if (path === '/purchase-orders/po-1') return { ...ORDER, status: 'PARTIALLY_RECEIVED' };
       if (path.startsWith('/locations')) return [{ id: 'loc-2', name: 'Yard', active: true }];
       return [];
@@ -321,7 +352,7 @@ describe('Receive stock against an approved order', () => {
   // Qodo, PR #125: also when no other order is waiting, so there is no form.
   it('says why a linked order can’t be received when no order is waiting at all', async () => {
     mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?kind=stores') return [{ ...ORDER, status: 'CLOSED' }];
+      if (path === '/purchase-orders/receivable') return [{ ...ORDER, status: 'CLOSED' }];
       if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }];
       return [];
     });
@@ -339,6 +370,6 @@ describe('Receive stock against an approved order', () => {
     auth.roles = ['PROCUREMENT'];
     receiveStock();
     expect(await screen.findByText(/Your role cannot receive the store.s orders/)).toBeInTheDocument();
-    expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?kind=stores');
+    expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders/receivable');
   });
 });

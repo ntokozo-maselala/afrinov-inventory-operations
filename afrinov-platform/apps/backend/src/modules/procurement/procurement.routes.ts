@@ -202,6 +202,40 @@ async function requireForOrder(req: FastifyRequest, id: string, forProject: Perm
   await requirePermission(req, kindOfOrder(po) === 'projects' ? forProject : PermissionCode.OrderStoresStock);
 }
 
+/**
+ * Which kinds of order this user receives into the store (Project Material
+ * Through the Store Roadmap, Phase 2): Stores orders with order:stores_stock,
+ * as before, and project orders with receive:purchase_order, which the store
+ * controller holds. Receiving a project order shows only what receiving needs.
+ */
+async function kindsReceived(req: FastifyRequest): Promise<{ stores: boolean; projects: boolean }> {
+  return {
+    stores: await userHasPermission(req, PermissionCode.OrderStoresStock),
+    projects: await userHasPermission(req, PermissionCode.ReceivePurchaseOrder),
+  };
+}
+
+/**
+ * Receiving against an existing order: refused unless this user receives its
+ * kind. Someone who can see the order is forbidden; anyone else gets not
+ * found, so they can't tell it exists. For an order that doesn't exist, the
+ * service answers 404.
+ */
+async function requireReceiveOrder(req: FastifyRequest, id: string): Promise<void> {
+  const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
+  if (!po) return;
+  const kind = kindOfOrder(po);
+  if ((await kindsReceived(req))[kind]) return;
+  if ((await kindsSeen(req))[kind]) await requirePermission(req, kind === 'projects' ? PermissionCode.ReceivePurchaseOrder : PermissionCode.OrderStoresStock);
+  throw Errors.notFound('PurchaseOrder');
+}
+
+/** A receipt is seen by whoever sees its order, or receives orders of its kind. */
+async function receiptKindsSeen(req: FastifyRequest): Promise<{ stores: boolean; projects: boolean }> {
+  const [seen, received] = [await kindsSeen(req), await kindsReceived(req)];
+  return { stores: seen.stores || received.stores, projects: seen.projects || received.projects };
+}
+
 /** Viewing an order: the store sees Stores orders, Procurement and approvers project orders. */
 async function requireViewOrder(req: FastifyRequest, id: string): Promise<void> {
   const seen = await kindsSeen(req);
@@ -269,6 +303,14 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     if (parsed.data.awaitingMyApproval === 'true') return PurchaseOrderService.awaitingApproval(actorId(req), kind);
     return PurchaseOrderService.list({ status: parsed.data.status, projectNumber: parsed.data.projectNumber, kind });
   });
+  // Orders waiting for delivery that this user receives, for Receive stock:
+  // the store's own, and project orders for those who receive them, in a
+  // receiving view with no prices (Project Material Through the Store Roadmap).
+  app.get('/purchase-orders/receivable', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ReceiveInventory);
+    return PurchaseOrderService.receivable(await kindsReceived(req));
+  });
+
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
     const id = (req.params as { id: string }).id;
     await requireViewOrder(req, id);
@@ -329,8 +371,8 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.post('/purchase-orders/:id/receive', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ReceivePurchaseOrder);
     const id = (req.params as { id: string }).id;
-    // Only a Stores order is received into stock, by the store; the service refuses a project order.
-    await requireForOrder(req, id, PermissionCode.ReceivePurchaseOrder);
+    // A Stores order by the store, a project order by those who receive orders into the store.
+    await requireReceiveOrder(req, id);
     const parsed = receiveSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -340,9 +382,9 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     return PurchaseOrderService.receive({ id, ...parsed.data }, actorId(req));
   });
 
-  // Project material goes from the supplier straight to site: Procurement
-  // confirms what arrived, and no stock is added (Stores and Procurement
-  // Separation Roadmap, Phase 3). The buyers who raise project orders confirm them.
+  // Retired: project material comes through the store, so a project order's
+  // delivery is received on Receive stock (Project Material Through the Store
+  // Roadmap, Phase 2). The service refuses, pointing there.
   app.post('/purchase-orders/:id/confirm-delivery', { preHandler: [app.authenticate] }, async (req, reply) => {
     const id = (req.params as { id: string }).id;
     await requireForOrder(req, id, PermissionCode.CreatePurchaseOrder);
@@ -380,18 +422,19 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // A receipt against a Stores order is the store's, as the order is: left
-  // out of the list, and not found, for anyone outside the store.
+  // out of the list, and not found, for anyone outside the store. One against
+  // a project order is seen by Procurement and by those who receive it.
   app.get('/goods-receipts', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewGoodsReceipt);
     const receipts = await GoodsReceiptService.list();
-    const seen = await kindsSeen(req);
+    const seen = await receiptKindsSeen(req);
     return receipts.filter((gr) => !gr.purchaseOrder || seen[kindOfOrder(gr.purchaseOrder)]);
   });
   app.get('/goods-receipts/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewGoodsReceipt);
     const id = (req.params as { id: string }).id;
     const gr = await GoodsReceiptService.getById(id);
-    if (gr.purchaseOrder && !(await kindsSeen(req))[kindOfOrder(gr.purchaseOrder)]) throw Errors.notFound('GoodsReceipt');
+    if (gr.purchaseOrder && !(await receiptKindsSeen(req))[kindOfOrder(gr.purchaseOrder)]) throw Errors.notFound('GoodsReceipt');
     return gr;
   });
 
@@ -404,12 +447,12 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const { post, ...input } = parsed.data;
-    // Every delivery to the store is against an approved Stores order: one
-    // with no order is refused, as a counter receipt is while procurement is on.
+    // Every delivery to the store is against an approved order: one with no
+    // order is refused, as a counter receipt is while procurement is on.
     if (!input.purchaseOrderId) throw Errors.validation(COUNTER_RECEIPTS_OFF);
-    // A Stores order is the store's (not found to anyone else); a project
-    // order is refused by the service, as it goes to site.
-    await requireForOrder(req, input.purchaseOrderId, PermissionCode.ReceiveInventory);
+    // A Stores order by the store; a project order by those who receive orders
+    // into the store, its stock held for the project.
+    await requireReceiveOrder(req, input.purchaseOrderId);
     // Retry-safe with an Idempotency-Key, as Receive stock sends one: a
     // retried delivery replays the first receipt instead of booking it twice.
     return idempotentMutation(req, reply, 'POST /goods-receipts', async (tx) => ({
@@ -423,13 +466,12 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.post('/goods-receipts/:id/post', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ReceiveInventory);
     const id = (req.params as { id: string }).id;
-    // As when it was recorded (Qodo, PR #121): a Stores order's receipt is the
-    // store's; a project order's is refused while posting, as it goes to site.
+    // As when it was recorded (Qodo, PR #121): whoever receives the order's kind.
     const saved = await prisma.goodsReceipt.findUnique({ where: { id }, select: { purchaseOrderId: true } });
     // One saved with no order, before receipts needed one, isn't posted
     // into stock either (Qodo, PR #125).
     if (saved && !saved.purchaseOrderId) throw Errors.validation(COUNTER_RECEIPTS_OFF);
-    if (saved?.purchaseOrderId) await requireForOrder(req, saved.purchaseOrderId, PermissionCode.ReceiveInventory);
+    if (saved?.purchaseOrderId) await requireReceiveOrder(req, saved.purchaseOrderId);
     const posted = await GoodsReceiptService.post(id, actorId(req));
     return reply.send(posted);
   });

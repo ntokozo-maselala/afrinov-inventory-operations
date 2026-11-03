@@ -14,6 +14,7 @@ import { resolveDateWindow, type ReportQuery } from './report-query.schema.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
 import { sectionOf } from '../inventory/material-section.js';
+import { heldForOf } from '../../shared/inventory/balances.js';
 
 type Decimal = Prisma.Decimal;
 type MaterialCategory = PrismaMaterialCategory;
@@ -40,6 +41,11 @@ export interface ReportInventoryLine {
   lastUpdated: string | null;
   /** Projects material: its project, null until assigned; null for Stores. */
   projectNumber: string | null;
+  /**
+   * Whose stock the line is: the project it is held for, or null for Stores
+   * stock. One item can have both at a location, each its own line.
+   */
+  heldForProject: string | null;
 }
 
 /** Projects material per project (materials sections roadmap, Phase 4). */
@@ -102,6 +108,8 @@ export interface ReportMovementRow {
   reasonCode: string | null;
   reasonNote: string | null;
   projectNumber: string | null;
+  /** Whose stock moved: the project it is held for, or null for Stores stock. */
+  heldForProject: string | null;
   referenceType: string | null;
   referenceId: string | null;
   // Set on a reversal (the movement it cancels) and on a reversed movement
@@ -208,6 +216,8 @@ interface MaterialRow {
 interface BalanceRow {
   materialId: string;
   locationId: string;
+  /** '' for Stores stock. */
+  heldForProject: string;
   quantity: Decimal;
   updatedAt: Date;
 }
@@ -272,6 +282,7 @@ function buildLine(
   qty: number,
   lastUpdated: Date | null,
   itemNeedsReorder: boolean,
+  heldForProject: string | null = null,
 ): ReportInventoryLine {
   const required = toNum(m.requiredStock);
   const status = classifyStatus(qty, itemNeedsReorder);
@@ -294,6 +305,7 @@ function buildLine(
     inventoryValue: value,
     status,
     projectNumber: m.projectNumber ?? null,
+    heldForProject,
     lastUpdated: lastUpdated ? lastUpdated.toISOString() : null,
   };
 }
@@ -315,9 +327,11 @@ export const ReportService = {
       loadLocations(),
       getStatusBands(),
     ]);
-    // Status needs each item's total everywhere, even when the report is filtered to some locations.
+    // Status needs each item's Stores total everywhere, even when the report is
+    // filtered to some locations. Stock held for a project isn't Stores stock,
+    // so it doesn't count towards a status (Qodo, PR #142).
     const totalByMaterial = new Map(
-      (await prisma.inventoryBalance.groupBy({ by: ['materialId'], _sum: { quantity: true } }))
+      (await prisma.inventoryBalance.groupBy({ by: ['materialId'], where: { heldForProject: '' }, _sum: { quantity: true } }))
         .map((r) => [r.materialId, toNum(r._sum.quantity)]),
     );
 
@@ -373,6 +387,7 @@ export const ReportService = {
           toNum(b.quantity),
           lastUpdateByMaterial.get(m.id) ?? null,
           itemNeedsReorder,
+          heldForOf(b),
         );
         if (q.stockStatus !== 'ALL' && line.status !== q.stockStatus) continue;
         allLines.push(line);
@@ -467,6 +482,9 @@ export const ReportService = {
       reasonCode: t.reasonCode ?? null,
       reasonNote: t.reasonNote ?? null,
       projectNumber: t.projectNumber ?? null,
+      // Whose stock moved: the project it is held for, or null for Stores stock.
+      // Not projectNumber, which says who the stock was used for.
+      heldForProject: t.heldForProject ?? null,
       referenceType: t.referenceType ?? null,
       referenceId: t.referenceId ?? null,
       reversesId: t.reversesId ?? null,
@@ -625,20 +643,39 @@ export const ReportService = {
     const bySupplier = Array.from(bySupplierMap.values()).sort((a, b) => b.inventoryValue - a.inventoryValue);
 
     // Projects material per project: what each job holds and what it is worth.
-    const byProjectMap = new Map<string, ReportProjectRow>();
+    // Stock held for a project is that project's, whatever the item is tagged
+    // to (an older RFQ may even have bought a Stores item for one); stock left
+    // in the store before keeps the item's own project (Project Material
+    // Through the Store Roadmap, Phase 2).
+    const projectInfo = new Map<string, { name: string | null; status: string }>();
+    for (const m of materials) if (m.projectNumber && m.project) projectInfo.set(m.projectNumber, m.project);
+    const linesByProject = new Map<string, Map<string, ReportInventoryLine[]>>();
     for (const m of materials) {
-      if (sectionOf(m.category) !== 'PROJECTS') continue;
-      if (!linesByMaterial.has(m.id)) continue; // not in the report (see the categories above)
-      const key = m.projectNumber ?? '';
-      const row = byProjectMap.get(key) ?? {
-        projectNumber: m.projectNumber, name: m.project?.name ?? null, status: m.project?.status ?? null,
-        skuCount: 0, quantity: 0, inventoryValue: 0, share: 0,
-      };
-      const lines = linesByMaterial.get(m.id) ?? [];
-      row.skuCount += 1;
-      row.quantity += lines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0);
-      row.inventoryValue += lines.reduce((acc, l) => acc + lineValueOrZero(l), 0);
-      byProjectMap.set(key, row);
+      const projectsItem = sectionOf(m.category) === 'PROJECTS';
+      for (const l of linesByMaterial.get(m.id) ?? []) { // only items in the report (see the categories above)
+        if (!projectsItem && l.heldForProject === null) continue;
+        const key = l.heldForProject ?? m.projectNumber ?? '';
+        const perItem = linesByProject.get(key) ?? new Map<string, ReportInventoryLine[]>();
+        perItem.set(m.id, [...(perItem.get(m.id) ?? []), l]);
+        linesByProject.set(key, perItem);
+      }
+    }
+    const unnamed = [...linesByProject.keys()].filter((k) => k !== '' && !projectInfo.has(k));
+    if (unnamed.length > 0) {
+      for (const p of await prisma.project.findMany({ where: { projectNumber: { in: unnamed } }, select: { projectNumber: true, name: true, status: true } })) {
+        projectInfo.set(p.projectNumber, p);
+      }
+    }
+    const byProjectMap = new Map<string, ReportProjectRow>();
+    for (const [key, perItem] of linesByProject) {
+      const lines = [...perItem.values()].flat();
+      byProjectMap.set(key, {
+        projectNumber: key || null, name: projectInfo.get(key)?.name ?? null, status: projectInfo.get(key)?.status ?? null,
+        skuCount: perItem.size,
+        quantity: lines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0),
+        inventoryValue: lines.reduce((acc, l) => acc + lineValueOrZero(l), 0),
+        share: 0,
+      });
     }
     const byProject = Array.from(byProjectMap.values())
       .map((r) => ({ ...r, share: inventoryValue > 0 ? r.inventoryValue / inventoryValue : 0 }))

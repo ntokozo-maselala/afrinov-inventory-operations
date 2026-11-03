@@ -64,10 +64,19 @@ describe('historyWhere', () => {
         { material: { name: contains } },
         { location: { name: contains } },
         { projectNumber: contains },
+        { heldForProject: contains },
         { recipient: { name: contains } },
       ],
     }]);
     expect(historyWhere({ q: '   ' }).AND).toBeUndefined();
+  });
+
+  // Qodo, PR #145: a project's own stock received, moved or adjusted names no
+  // project it was used for, so the project filter matches whose stock it is too.
+  it('filters by project: stock used for it, and its own stock', () => {
+    const where = historyWhere({ projectNumber: 'AFRI-1325' });
+    expect(where.projectNumber).toBeUndefined();
+    expect(where.AND).toEqual([{ OR: [{ projectNumber: 'AFRI-1325' }, { heldForProject: 'AFRI-1325' }] }]);
   });
 
   it('selects each report: issued stock, transfers by their out leg, write-offs without count differences', () => {

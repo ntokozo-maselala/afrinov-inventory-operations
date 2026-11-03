@@ -101,9 +101,10 @@ vi.mock('../settings/settings.service.js', () => ({
   SettingsService: { getValues: async (keys: string[]) => Object.fromEntries(keys.map((k) => [k, db.settings[k]])) },
 }));
 vi.mock('../../shared/inventory/balances.js', () => ({
-  getCurrentBalance: async (materialId: string, locationId: string) => balance(materialId, locationId),
+  getCurrentBalance: async ({ materialId, locationId }: { materialId: string; locationId: string }) => balance(materialId, locationId),
   recomputeBalance: async () => undefined,
   lockInventoryBalances: async () => undefined,
+  storesStock: (materialId: string, locationId: string) => ({ materialId, locationId, heldForProject: null }),
 }));
 
 const { ToolLoanService } = await import('./tool-loan.service.js');

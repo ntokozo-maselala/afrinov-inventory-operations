@@ -27,6 +27,13 @@ export function stillOutOn(m: ReasonRow): number | null {
   return -n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity);
 }
 
+/** Still out on an issue line of a report: none once the issue is reversed (Qodo, PR #144). */
+export const issueStillOut = (m: ReasonRow & { reversedById?: string | null }): number | null => (m.reversedById ? null : stillOutOn(m));
+
+/** Whether a report's issue lines need used up, broken and still out: an item tracks use, or once did. */
+export const tracksUseOn = (lines: ReasonRow[]): boolean =>
+  lines.some((l) => l.trackUse || n(l.usedUpQuantity) > 0 || n(l.brokenQuantity) > 0);
+
 export interface VisitFigures {
   /** Back on the shelf; only on a return. */
   back: number;
@@ -41,6 +48,21 @@ export function visitFigures(m: ReasonRow): VisitFigures | null {
   if (m.type === 'RETURN' && !m.reversesId) return { back: n(m.quantity), usedUp: n(m.usedUpQuantity), broken: n(m.brokenQuantity), withdrawn: false };
   if (MARK_TYPES.has(m.type)) return { back: 0, usedUp: n(m.usedUpQuantity), broken: n(m.brokenQuantity), withdrawn: m.type === 'OUTCOME_WITHDRAWN' };
   return null;
+}
+
+/**
+ * The Used up, Broken and Still out columns of a download: what each row
+ * itself recorded, so a column adds up. A counter visit gives its used up and
+ * broken, a withdrawal the same as a negative; an issue gives its still out now.
+ */
+export function figureColumns(m: ReasonRow & { reversedById?: string | null }): Array<number | null> {
+  if (m.reversesId) return [null, null, null];
+  const v = visitFigures(m);
+  if (v) {
+    const sign = v.withdrawn ? -1 : 1;
+    return [v.usedUp > 0 ? sign * v.usedUp : null, v.broken > 0 ? sign * v.broken : null, null];
+  }
+  return [null, null, issueStillOut(m)];
 }
 
 /** An adjustment's reason code as words: COUNT_VARIANCE → "count variance". */

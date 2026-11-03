@@ -8,6 +8,7 @@ import { triggerDownload } from './exportReport';
 import type { CountRecord, IssueSlip, ReceiptRecord } from './types';
 import { downloadPdf, type PdfAbout } from '../lib/pdf';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
+import { issueStillOut, tracksUseOn } from '../lib/movementReason';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 /** The most records one download fetches; the page asks for a shorter range beyond it. */
@@ -60,13 +61,18 @@ export async function downloadReceivedStock(query: string): Promise<void> {
 
 export async function downloadIssuedStock(query: string): Promise<void> {
   const slips = await fetchAll<IssueSlip>(`/inventory-issues?${query}`);
+  // As the page: used up, broken and still out when an item tracks use, or once did.
+  const tracked = tracksUseOn(slips.flatMap((s) => s.lines));
   await download(
     'Issued stock',
     `afrinov-issued-stock-${fileRange(query)}.xlsx`,
-    ['Issued', 'Issued to', 'Project', 'Issued by', 'Code', 'Item', 'From location', 'Issued qty', 'Returned', 'Unit', 'Reversed'],
+    ['Issued', 'Issued to', 'Project', 'Issued by', 'Code', 'Item', 'From location', 'Issued qty', 'Returned',
+      ...(tracked ? ['Used up', 'Broken', 'Still out'] : []), 'Unit', 'Reversed'],
     slips.flatMap((s) => s.lines.map((l) => [
       new Date(s.issuedAt), s.recipientName ?? 'Not recorded', s.projectNumber ?? '', s.issuedByName, l.materialSku, l.materialName, l.locationName,
-      Math.abs(Number(l.quantity)), Number(l.returnedQuantity ?? 0), l.unitOfMeasure ?? '', l.reversedById ? 'Yes' : '',
+      Math.abs(Number(l.quantity)), Number(l.returnedQuantity ?? 0),
+      ...(tracked ? [Number(l.usedUpQuantity ?? 0), Number(l.brokenQuantity ?? 0), issueStillOut(l)] : []),
+      l.unitOfMeasure ?? '', l.reversedById ? 'Yes' : '',
     ])),
     'No stock was issued on these dates.',
   );
@@ -114,6 +120,8 @@ export async function downloadReceivedStockPdf(query: string, about: PdfAbout): 
 /** Issued stock as a PDF: each issue slip with who it went to, the project and its lines. */
 export async function downloadIssuedStockPdf(query: string, about: PdfAbout): Promise<void> {
   const slips = await fetchAll<IssueSlip>(`/inventory-issues?${query}`);
+  const tracked = tracksUseOn(slips.flatMap((s) => s.lines));
+  const figure = (q: number | null) => (q === null ? '' : q ? formatNumber(q) : '-');
   await downloadPdf({
     ...about,
     lines: [...about.lines, `${plural(slips.length, 'issue')}, ${plural(slips.reduce((n, s) => n + s.lines.length, 0), 'line')}`],
@@ -125,11 +133,14 @@ export async function downloadIssuedStockPdf(query: string, about: PdfAbout): Pr
         columns: [
           { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'From location', wrap: true },
           { header: 'Issued', align: 'right' as const }, { header: 'Returned', align: 'right' as const },
+          ...(tracked ? [{ header: 'Used up', align: 'right' as const }, { header: 'Broken', align: 'right' as const }, { header: 'Still out', align: 'right' as const }] : []),
           { header: 'Unit' }, { header: 'Reversed' },
         ],
         rows: s.lines.map((l) => [
           l.materialSku, l.materialName, l.locationName, formatNumber(Math.abs(Number(l.quantity))),
-          Number(l.returnedQuantity ?? 0) ? formatNumber(Number(l.returnedQuantity)) : '-', l.unitOfMeasure ?? '', l.reversedById ? 'Yes' : '',
+          Number(l.returnedQuantity ?? 0) ? formatNumber(Number(l.returnedQuantity)) : '-',
+          ...(tracked ? [figure(Number(l.usedUpQuantity ?? 0)), figure(Number(l.brokenQuantity ?? 0)), issueStillOut(l) === null ? '' : formatNumber(issueStillOut(l)!)] : []),
+          l.unitOfMeasure ?? '', l.reversedById ? 'Yes' : '',
         ]),
       })),
   }, `afrinov-issued-stock-${fileRange(query)}.pdf`);

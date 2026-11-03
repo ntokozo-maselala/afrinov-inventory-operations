@@ -65,6 +65,22 @@ describe('Stock page filters from the address', () => {
   });
 });
 
+// Qodo, PR #142: Transfer and Adjust move Stores stock, so stock held for a
+// project is not listed with them.
+describe('Stock page: Stores stock only', () => {
+  it('leaves out stock held for a project, so its Transfer and Adjust never touch Stores stock', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations' ? [] : [
+      ...ROWS, { ...ROWS[0]!, quantity: '50', heldForProject: 'AFRI-1325' },
+    ]));
+    renderAt('/stock');
+    const table = await screen.findByRole('table', { name: 'Stock lines' });
+    const discs = within(table).getAllByText('Cutting disc');
+    expect(discs).toHaveLength(1);
+    expect(within(discs[0]!.closest('tr')!).getByText('30')).toBeInTheDocument();
+    expect(screen.getByText('3 of 3 lines')).toBeInTheDocument();
+  });
+});
+
 describe('Stock page: by room', () => {
   const LOCATIONS = [
     { id: 'store', name: 'Main Storeroom', parentId: null, parent: null },

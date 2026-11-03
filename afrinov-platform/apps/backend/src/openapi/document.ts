@@ -266,7 +266,9 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock to a recipient',
     description: 'One recipient (required), an optional project, and up to 50 lines, booked all-or-nothing. '
-      + 'Lines for the same item and location are checked against stock as one total. '
+      + 'Each line takes Stores stock, or, with heldForProject, the stock held for the issue\'s project: a project\'s own stock '
+      + 'goes to that project only (400 otherwise), while Stores stock follows its item (a leftover goes to its item\'s project). '
+      + 'Lines for the same stock are checked against it as one total. '
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
       + 'material or location, and 400 for an inactive one. Tools are refused (400): they are checked out, not issued.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
@@ -360,7 +362,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/inventory-transfers', tag: 'Stock movements', summary: 'Move stock between two locations',
-    description: 'Records two linked transactions. Refused with 422 INSUFFICIENT_BALANCE when the source is short.',
+    description: 'Records two linked transactions. With heldForProject, moves that project\'s stock, which stays its at the destination; '
+      + 'otherwise Stores stock. Refused with 422 INSUFFICIENT_BALANCE when the source is short, 404 for an unknown project.',
     permissions: [P.TransferInventory], body: transferSchema, success: 201, errors: [404, 422],
   },
   {
@@ -375,7 +378,8 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-adjustments', tag: 'Stock movements', summary: 'Correct stock up or down with a reason',
     description: 'A signed quantity with a reason. DAMAGE, LOSS and SCRAP may name who was responsible (recipientId, an '
       + 'active recipient); naming someone needs a reasonNote saying what happened. Other reasons take no recipientId. '
-      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location or recipient.',
+      + 'With heldForProject, adjusts that project\'s stock; otherwise Stores stock. '
+      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location, recipient or project.',
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
   },
   {
@@ -523,6 +527,12 @@ export const OPERATIONS: Operation[] = [
     query: listPOQuerySchema, errors: [400, 403],
   },
   {
+    method: 'get', path: '/purchase-orders/receivable', tag: 'Purchase orders', summary: 'Orders waiting for delivery that you receive',
+    description: 'APPROVED and PARTIALLY_RECEIVED orders, for Receive stock: Stores orders to those with `order:stores_stock`, project orders to those with `receive:purchase_order`. '
+      + 'A receiving view: the supplier, the project, and each line\'s item with what is ordered and received so far; no prices, approvals or RFQ. Empty for anyone who receives neither kind.',
+    procurement: true, permissions: [P.ReceiveInventory], errors: [403],
+  },
+  {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
     description: 'A Stores order (no project) needs `order:stores_stock`, a project order `view:purchase_order`; to anyone without it the order is not found (404), and so are its history and approval.',
     procurement: true, errors: [403, 404],
@@ -562,16 +572,15 @@ export const OPERATIONS: Operation[] = [
     summary: 'Receive everything still outstanding',
     description: 'Receives each line\'s outstanding quantity into the given location and marks the order RECEIVED. '
       + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts. '
-      + 'A Stores order only (also needs `order:stores_stock`): a project order goes to site, so it is refused (400) and its delivery is confirmed instead.',
-    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [400, 404, 409],
+      + 'A Stores order also needs `order:stores_stock`. A project order\'s stock is held for its project. To anyone who receives neither kind the order is not found (404).',
+    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [400, 403, 404, 409],
   },
   {
     method: 'post', path: '/purchase-orders/:id/confirm-delivery', tag: 'Purchase orders',
-    summary: 'Confirm what arrived on site against a project order',
-    description: 'Project material goes from the supplier straight to site, so no stock is added: each line is credited with what arrived, '
-      + 'and the order moves to PARTIALLY_RECEIVED, or RECEIVED once nothing is outstanding. A project order only (400 for a Stores order); '
-      + 'allowed when APPROVED or PARTIALLY_RECEIVED. A quantity may not exceed what is outstanding.',
-    procurement: true, permissions: [P.CreatePurchaseOrder], body: confirmDeliverySchema, errors: [400, 404, 409],
+    summary: 'Retired: project orders are received on Receive stock',
+    description: 'Project material comes through the store, so a project order\'s delivery is received into stock held for the project (POST /goods-receipts). '
+      + 'This refuses every request (400), pointing there; confirmations made before stay on the order\'s Activity.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: confirmDeliverySchema, errors: [400, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/close', tag: 'Purchase orders', summary: 'Close an order that will receive nothing more',
@@ -593,8 +602,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/goods-receipts', tag: 'Goods receipts', summary: 'Record a delivery (status SUBMITTED), or with post: true record and post it in one step',
-    description: 'Against an approved Stores order (purchaseOrderId is required: a receipt with no order is refused with 400). '
-      + 'Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
+    description: 'Against an approved order (purchaseOrderId is required: a receipt with no order is refused with 400): a Stores order needs `order:stores_stock`, '
+      + 'a project order `receive:purchase_order`, and its stock is held for the order\'s project. Stock does not change until the receipt is posted. receivedAt is the delivery date (defaults to now; '
       + 'refused with 400 if still to come). Retry-safe with an Idempotency-Key header, as Receive stock sends: a '
       + 'repeat replays the first receipt, and the same key with other details is refused with 409.',
     procurement: true, permissions: [P.ReceiveInventory], body: createGRSchema, success: 201, errors: [404, 409],
@@ -668,7 +677,7 @@ export const OPERATIONS: Operation[] = [
 
   // Reports
   {
-    method: 'get', path: '/reports/current-stock', tag: 'Reports', summary: 'Stock on hand per material and location',
+    method: 'get', path: '/reports/current-stock', tag: 'Reports', summary: 'Stock on hand per material, location and project it is held for',
     permissions: [P.ViewReports],
     query: z.object({ category: materialCategorySchema.optional(), locationId: z.string().optional(), materialId: z.string().optional() }),
   },
@@ -705,7 +714,8 @@ export const OPERATIONS: Operation[] = [
     method: 'get', path: '/reports/stock-value', tag: 'Reports', summary: 'Value of the stock on hand, per category',
     description: 'For every active item: on hand across all locations × unit price, added up per category as the stock '
       + "workbook's Summary sheets do, with item counts, items in stock but without a price, each category's share, and "
-      + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock.',
+      + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock. Projects material is also totalled per project, '
+      + 'stock held for a project under that project, with the items it holds as leftovers (Stores stock, which Move to Stores takes).',
     permissions: [P.ViewReports],
   },
   {

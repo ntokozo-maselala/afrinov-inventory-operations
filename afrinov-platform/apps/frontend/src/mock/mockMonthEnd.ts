@@ -76,54 +76,86 @@ export function computeMonthEnd(
   const { month, from, to, end } = resolveRange(q, now);
 
   const locationName = new Map(data.locations.map((l) => [l.id, l.name]));
-  const balance = new Map<string, Map<string, number>>();
+  // Stock at the end per item, then per holder ('' for Stores, else the
+  // project it is held for), then per location.
+  const balance = new Map<string, Map<string, Map<string, number>>>();
   for (const t of data.transactions) {
     if (t.postedAt >= end) continue;
-    const perLocation = balance.get(t.materialId) ?? new Map<string, number>();
+    const holders = balance.get(t.materialId) ?? new Map<string, Map<string, number>>();
+    const holder = t.heldForProject ?? '';
+    const perLocation = holders.get(holder) ?? new Map<string, number>();
     perLocation.set(t.locationId, (perLocation.get(t.locationId) ?? 0) + Number(t.quantity));
-    balance.set(t.materialId, perLocation);
+    holders.set(holder, perLocation);
+    balance.set(t.materialId, holders);
   }
   // Tools out on loan at the end are still owned (see the backend's tool-loans.ts).
   const onLoan = (materialId: string) => -data.transactions
     .filter((t) => t.materialId === materialId && t.postedAt < end && (t.type === 'LOAN' || t.type === 'LOAN_RETURN'))
     .reduce((a, t) => a + Number(t.quantity), 0);
-  const held = (materialId: string) => [...(balance.get(materialId) ?? new Map<string, number>())]
-    .filter(([, q]) => q !== 0)
-    .map(([loc, quantity]) => ({ location: locationName.get(loc) ?? '—', quantity }))
-    .sort((a, b) => b.quantity - a.quantity);
-  const whereKept = (materialId: string) => {
-    const rows = held(materialId);
+  const holdersOf = (materialId: string) => [...(balance.get(materialId) ?? new Map<string, Map<string, number>>())]
+    .filter(([, perLocation]) => [...perLocation.values()].some((q) => q !== 0))
+    .map(([h]) => h);
+  const held = (materialId: string, holders = holdersOf(materialId)) => {
+    const at = new Map<string, number>();
+    for (const h of holders) for (const [loc, q] of balance.get(materialId)?.get(h) ?? []) at.set(loc, (at.get(loc) ?? 0) + q);
+    return [...at]
+      .filter(([, q]) => q !== 0)
+      .map(([loc, quantity]) => ({ location: locationName.get(loc) ?? '—', quantity }))
+      .sort((a, b) => b.quantity - a.quantity);
+  };
+  const whereKept = (rows: Array<{ location: string; quantity: number }>) => {
     if (rows.length === 0) return '';
     return rows.length === 1 ? rows[0]!.location : rows.map((r) => `${r.location} (${round4(r.quantity)})`).join(', ');
   };
   const consumption = data.consumption(from, to);
   const skuToId = new Map(data.materials.map((x) => [x.sku, x.id]));
 
+  // A project's line has no Required Stock, as the server reports it.
+  const itemOf = (x: MockMaterial, holders: string[], project: string | null, forProject = false): MonthEndItem => {
+    const rows = held(x.id, holders);
+    const current = round4(rows.reduce((a, r) => a + r.quantity, 0));
+    const required = forProject ? 0 : Number(x.requiredStock);
+    const unitCost = x.unitCost === undefined || x.unitCost === null ? null : Number(x.unitCost);
+    const owned = round4(current + (holders.includes('') ? onLoan(x.id) : 0));
+    const s = classifyItem(owned, required, data.bands);
+    return {
+      sku: x.sku, name: x.name, location: whereKept(rows), requiredStock: required, currentStock: current, unitCost,
+      value: unitCost === null ? null : round2(current * unitCost),
+      percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
+      reorderQuantity: required > 0 ? round4(required - owned) : null,
+      status: s.status,
+      project,
+    };
+  };
+
   const categories: MonthEndCategory[] = [];
   for (const category of ORDER) {
-    const mine = data.materials
-      .filter((x) => x.category === category && (x.active || held(x.id).length > 0))
-      // Projects material reads project by project, those with no project last.
-      .sort((a, b) => (a.projectNumber ?? '\uffff').localeCompare(b.projectNumber ?? '\uffff')
+    let items: MonthEndItem[];
+    if (category !== 'PROJECT_MATERIAL') {
+      // Stores stock only, as the server counts it: stock held for a project is not the store's.
+      items = data.materials
+        .filter((x) => x.category === category && (x.active || holdersOf(x.id).includes('')))
+        .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }))
+        .map((x) => itemOf(x, [''], x.projectNumber ?? null));
+    } else {
+      // A line per item and project holding it; leftovers keep the item's project.
+      items = [];
+      for (const x of data.materials) {
+        const byProject = new Map<string, string[]>();
+        for (const h of holdersOf(x.id)) {
+          if (h === '' && x.category !== 'PROJECT_MATERIAL') continue;
+          const project = h || (x.projectNumber ?? '');
+          byProject.set(project, [...(byProject.get(project) ?? []), h]);
+        }
+        if (byProject.size === 0 && x.category === 'PROJECT_MATERIAL' && x.active) byProject.set(x.projectNumber ?? '', ['']);
+        for (const [project, holders] of byProject) items.push(itemOf(x, holders, project || null, true));
+      }
+      items.sort((a, b) => (a.project ?? '\uffff').localeCompare(b.project ?? '\uffff')
         || a.sku.localeCompare(b.sku, undefined, { numeric: true }));
-    const items: MonthEndItem[] = mine.map((x) => {
-      const current = round4(held(x.id).reduce((a, r) => a + r.quantity, 0));
-      const required = Number(x.requiredStock);
-      const unitCost = x.unitCost === undefined || x.unitCost === null ? null : Number(x.unitCost);
-      const owned = round4(current + onLoan(x.id));
-      const s = classifyItem(owned, required, data.bands);
-      return {
-        sku: x.sku, name: x.name, location: whereKept(x.id), requiredStock: required, currentStock: current, unitCost,
-        value: unitCost === null ? null : round2(current * unitCost),
-        percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
-        reorderQuantity: required > 0 ? round4(required - owned) : null,
-        status: s.status,
-        project: x.projectNumber ?? null,
-      };
-    });
+    }
     const used = consumption.items
       .filter((i) => i.category === category)
-      .map((i) => ({ sku: i.sku, name: i.name, location: whereKept(skuToId.get(i.sku) ?? ''), used: i.used, value: i.value }))
+      .map((i) => ({ sku: i.sku, name: i.name, location: whereKept(held(skuToId.get(i.sku) ?? '')), used: i.used, value: i.value }))
       .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
     if (items.length === 0 && used.length === 0) continue;
     categories.push({

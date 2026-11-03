@@ -32,6 +32,8 @@ function client(): unknown {
   return {
     $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => { db.locks.push(String(values[0])); return 1; },
     inventoryTransaction: {
+      // A reversal of the issue, looked for again under the lock.
+      findFirst: async ({ where }: { where: { reversesId: string } }) => db.txns.find((x) => x.reversesId === where.reversesId) ?? null,
       findUnique: async ({ where }: { where: { id: string } }) => {
         const t = db.txns.find((x) => x.id === where.id);
         if (!t) return null;
@@ -104,7 +106,7 @@ describe('ConsumableOutcomeService.record', () => {
     expect(db.txns).toHaveLength(1);
     expect(db.audit.at(-1)).toMatchObject({ action: 'CONSUMABLE_OUTCOME', entityId: id, after: { outcomeId: 'o-1', outcome: 'USED_UP', quantity: '6' } });
     // The lock a return against this issue takes too.
-    expect(db.locks).toEqual(['afrinov:inventory-balance:disc:loc-1']);
+    expect(db.locks).toEqual(['afrinov:inventory-balance:disc:loc-1:']);
   });
 
   it('never closes off more than is still out, counting returns and earlier outcomes', async () => {
@@ -115,6 +117,16 @@ describe('ConsumableOutcomeService.record', () => {
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Cannot mark 6 × SKU-disc: only 5 of the 10 issued is still out.' });
     const r = await ConsumableOutcomeService.record({ issueTransactionId: id, outcome: 'USED_UP', quantity: 5, actorId: 'storeman' });
     expect(r).toMatchObject({ returned: '3', usedUp: '5', broken: '2', stillOut: '0' });
+  });
+
+  // Qodo, PR #144: 0.00001 would be stored as zero in a four-decimal column.
+  it('refuses a quantity finer than the four decimal places it is stored with, and writes nothing', async () => {
+    const id = issue();
+    await expect(ConsumableOutcomeService.record({ issueTransactionId: id, outcome: 'USED_UP', quantity: 0.00001, actorId: 'storeman' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Quantities can have at most 4 decimal places' });
+    expect(db.outcomes).toHaveLength(0);
+    const r = await ConsumableOutcomeService.record({ issueTransactionId: id, outcome: 'USED_UP', quantity: 0.0001, actorId: 'storeman' });
+    expect(r.usedUp).toBe('0.0001');
   });
 
   it('only takes an unreversed issue of an item that tracks use', async () => {

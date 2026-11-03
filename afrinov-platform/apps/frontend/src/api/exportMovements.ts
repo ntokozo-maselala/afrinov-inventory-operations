@@ -4,9 +4,10 @@
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
 import type { MovementRow } from './types';
+import { movementProject } from '../lib/heldFor';
 import { downloadPdf, type PdfAbout, type PdfColumn } from '../lib/pdf';
 import { formatDateTime, formatNumber } from '../lib/format';
-import { movementReason } from '../lib/movementReason';
+import { movementReason, figureColumns } from '../lib/movementReason';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const LIMIT = 10_000;
@@ -77,7 +78,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   const report = new URLSearchParams(query).get('report') ?? '';
   const person = PERSON_HEADER[report] ?? 'Issued to';
   const notKnown = (m: MovementRow) => (report === 'writeoffs' && m.reasonCode && RESPONSIBLE_REASONS.has(m.reasonCode) ? 'Not known' : '');
-  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Due back', 'Reason', 'Note', 'Reference', 'By'];
+  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Due back', 'Reason', 'Note', 'Reference', 'By', 'Used up', 'Broken', 'Still out'];
   ws.getRow(4).font = { bold: true };
   for (const m of rows) {
     const type = TYPE_LABEL[m.type] ?? m.type;
@@ -85,9 +86,10 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
       new Date(m.postedAt),
       m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type,
       m.materialSku, m.materialName, m.locationName, m.quantity === null ? null : Number(m.quantity), m.unitOfMeasure ?? '',
-      m.recipientName ?? notKnown(m), m.projectNumber ?? '', dueText(m), movementReason(m), noteText(m),
+      m.recipientName ?? notKnown(m), movementProject(m) ?? '', dueText(m), movementReason(m), noteText(m),
       m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : m.referenceType ?? '',
       m.actorName,
+      ...figureColumns(m),
     ]);
   }
   if (rows.length === 0) ws.addRow(['No movements match these filters.']);
@@ -117,7 +119,7 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
     { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
     { header: 'Reason', wrap: true, cell: (m) => [reason(m), m.type === 'DUE_DATE_CHANGE' ? dueText(m) : null, m.reasonNote].filter(Boolean).join(': ') },
     { header: 'Issued to', wrap: true, cell: (m) => m.recipientName ?? '' },
-    { header: 'Project', cell: (m) => m.projectNumber ?? '' },
+    { header: 'Project', cell: (m) => movementProject(m) ?? '' },
     { header: 'By', cell: (m) => m.actorName },
   ],
   transfers: [
@@ -149,7 +151,7 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
     { header: 'Tool', wrap: true, cell: (m) => m.materialName },
     { header: 'Quantity', align: 'right', cell: (m) => quantityOf(m, true) },
     { header: 'Person', wrap: true, cell: (m) => m.recipientName ?? '' },
-    { header: 'Project', cell: (m) => m.projectNumber ?? '' },
+    { header: 'Project', cell: (m) => movementProject(m) ?? '' },
     { header: 'Location', wrap: true, cell: (m) => m.locationName },
     { header: 'Due back', wrap: true, cell: dueText },
     { header: 'Condition', cell: condition },
@@ -163,7 +165,7 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
     { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
     { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
     { header: 'Returned by', wrap: true, cell: (m) => m.recipientName ?? '' },
-    { header: 'Project', cell: (m) => m.projectNumber ?? '' },
+    { header: 'Project', cell: (m) => movementProject(m) ?? '' },
     { header: 'Back into', wrap: true, cell: (m) => m.locationName },
     { header: 'From the issue of', wrap: true, cell: (m) => (m.returnOf ? `${formatDateTime(m.returnOf.postedAt)}, ${m.returnOf.locationName}` : '') },
     { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },

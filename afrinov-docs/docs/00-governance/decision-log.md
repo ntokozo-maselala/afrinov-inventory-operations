@@ -644,6 +644,6 @@ is a new figure, null for items that do not track use.
 **Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/consumable-outcome.service.ts`,
 `consumable-outcomes.ts`, `inventory.service.ts` (`bookReturn`, `returnToStock`,
 `reverse`, `queryHistory`), `modules/reporting/consumption.service.ts`,
-`afrinov-platform/apps/backend/prisma/migrations/20260101000035_consumable_outcomes/migration.sql`,
-`afrinov-platform/apps/backend/prisma/migrations/20260101000036_outcome_return_link/migration.sql`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000036_consumable_outcomes/migration.sql`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000037_outcome_return_link/migration.sql`,
 `afrinov-platform/apps/frontend/src/pages/ReturnStock.tsx`, `components/ConsumableOutcomes.tsx`, `components/MaterialForm.tsx`.

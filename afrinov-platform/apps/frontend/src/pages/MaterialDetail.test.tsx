@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet, mockPatch, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPatch: vi.fn(), perms: { manage: true } }));
@@ -24,11 +24,14 @@ const STOCK = [{ materialId: 'm-1', materialSku: 'DISC-115', materialName: 'Cutt
 
 let material: Record<string, unknown>;
 let stock: unknown[];
+// The active projects, which say whether stock held for one can still be issued.
+let projects: unknown[] = [{ projectNumber: 'AFRI-1325', status: 'ACTIVE' }];
 
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/materials/')) return material;
     if (path.startsWith('/reports/current-stock')) return stock;
+    if (path.startsWith('/projects')) return projects;
     if (path.startsWith('/settings/values')) return {};
     return [];
   });
@@ -171,5 +174,90 @@ describe('MaterialDetail links', () => {
     await screen.findByRole('button', { name: 'Reactivate' });
     expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+});
+
+// Qodo, PR #142: one location can hold Stores stock and stock held for a
+// project, each its own balance, so each line says whose it is.
+describe('MaterialDetail stock held for a project', () => {
+  beforeEach(() => {
+    perms.manage = true;
+    material = { ...DISC };
+    stock = [...STOCK, { ...STOCK[0]!, quantity: '6', heldForProject: 'AFRI-1325' }];
+    mockGet.mockReset();
+    mockPatch.mockReset();
+  });
+
+  it('lists it on its own line at the location, naming the project', async () => {
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Stock by location' });
+    expect(within(table).getByText('A-1')).toBeInTheDocument();
+    expect(within(table).getByText('A-1 · held for AFRI-1325')).toBeInTheDocument();
+  });
+});
+
+// Project Material Through the Store Roadmap, Phase 2: a Projects item's stock
+// received against a project order is that project's, not a leftover.
+describe('MaterialDetail Projects item received for a project', () => {
+  beforeEach(() => {
+    perms.manage = true;
+    material = { ...DISC, id: 'm-1', category: 'PROJECT_MATERIAL', projectNumber: null, requiredStock: '0' };
+    stock = [{ ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '6', heldForProject: 'AFRI-1325' }];
+    mockGet.mockReset();
+    mockPatch.mockReset();
+  });
+
+  it('lists it as held for the project, and offers no move to Stores', async () => {
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'In the store for projects' });
+    expect(within(table).getByText('AFRI-1325')).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Left in the store' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
+  });
+
+  // Project Material Through the Store Roadmap, Phase 3: stock held for a
+  // project is issued to it, even when the item has no project of its own; the
+  // page says the store holds project material (Qodo, PR #143).
+  it('offers Issue for stock held for a project, and says the store holds it', async () => {
+    renderPage();
+    await screen.findByRole('table', { name: 'In the store for projects' });
+    expect(await screen.findByRole('link', { name: 'Issue' })).toHaveAttribute('href', '/stock/issue?materialId=m-1');
+    expect(screen.getByText(/The store receives it against that order and holds it for that project./)).toBeInTheDocument();
+    expect(screen.queryByText(/was received before/)).not.toBeInTheDocument();
+  });
+
+  // Qodo, PR #145: Issue only for stock Issue stock can offer.
+  it('offers no Issue for held stock at an inactive location, or held for a project that takes no more issues', async () => {
+    stock = [{ ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '6', heldForProject: 'AFRI-1325', locationActive: false }];
+    renderPage();
+    await screen.findByRole('table', { name: 'In the store for projects' });
+    await waitFor(() => expect(gets('/projects')).toBeGreaterThan(0));
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+
+  it('offers no Issue for stock held for a completed project', async () => {
+    projects = [{ projectNumber: 'AFRI-1325', status: 'COMPLETED' }];
+    onTestFinished(() => { projects = [{ projectNumber: 'AFRI-1325', status: 'ACTIVE' }]; });
+    renderPage();
+    await screen.findByRole('table', { name: 'In the store for projects' });
+    await waitFor(() => expect(gets('/projects')).toBeGreaterThan(0));
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+
+  it('offers Issue for a leftover, and says it was received before', async () => {
+    material = { ...material, projectNumber: 'AFRI-1325' };
+    stock = [...stock, { ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '2', heldForProject: null }];
+    renderPage();
+    await screen.findByRole('table', { name: 'Left in the store' });
+    expect(screen.getByRole('link', { name: 'Issue' })).toBeInTheDocument();
+    expect(screen.getByText(/was received before project material came through the store/)).toBeInTheDocument();
+  });
+
+  it('offers no Check out for a tool whose only stock is held for a project', async () => {
+    material = { ...DISC, category: 'TOOLS' };
+    stock = [{ ...STOCK[0]!, quantity: '1', heldForProject: 'AFRI-1325' }];
+    renderPage();
+    await screen.findByRole('table', { name: 'Stock by location' });
+    expect(screen.queryByRole('link', { name: 'Check out' })).not.toBeInTheDocument();
   });
 });

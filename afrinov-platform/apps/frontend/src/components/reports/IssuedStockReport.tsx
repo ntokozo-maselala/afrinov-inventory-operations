@@ -14,7 +14,8 @@ import { Skeleton } from '../Skeleton';
 import { Drawer } from '../Modal';
 import { useToast } from '../Toast';
 import { TransactionDrawer } from '../TransactionDrawer';
-import { formatDateTime } from '../../lib/format';
+import { formatDateTime, formatNumber } from '../../lib/format';
+import { issueStillOut, tracksUseOn } from '../../lib/movementReason';
 import { today } from '../../lib/dates';
 import { ReportBar, countWords, type ReportView } from './ReportView';
 import type { IssueSlip, MovementRow } from '../../api/types';
@@ -42,6 +43,13 @@ const closedOff = (l: MovementRow) => {
   );
 };
 
+// Items that track use: how much the person still has, issued less back, used up and broken.
+const stillOut = (l: MovementRow) => {
+  const out = issueStillOut(l);
+  if (out === null) return none;
+  return <span className={`font-mono ${out > 0 ? 'text-warning-700 font-medium' : 'text-surface-500'}`}>{formatNumber(out)}</span>;
+};
+
 interface Row { s: IssueSlip; l: MovementRow }
 
 function columns(open: (l: MovementRow) => void, tracked: boolean): DataTableColumn<Row>[] {
@@ -58,7 +66,10 @@ function columns(open: (l: MovementRow) => void, tracked: boolean): DataTableCol
     { key: 'loc', header: 'From location', render: ({ l }) => l.locationName, width: '10rem' },
     { key: 'qty', header: 'Issued qty', align: 'right', className: 'text-num', render: ({ l }) => <span className="font-mono">{issued(l)} <span className="text-meta">{l.unitOfMeasure}</span></span>, width: '7rem' },
     { key: 'ret', header: 'Returned', align: 'right', className: 'text-num', render: ({ l }) => <span className="font-mono">{returned(l)}</span>, width: '6rem' },
-    ...(tracked ? [{ key: 'use', header: 'Used up / broken', align: 'right' as const, render: ({ l }: Row) => closedOff(l), width: '9rem' }] : []),
+    ...(tracked ? [
+      { key: 'use', header: 'Used up / broken', align: 'right' as const, render: ({ l }: Row) => closedOff(l), width: '9rem' },
+      { key: 'out', header: 'Still out', align: 'right' as const, className: 'text-num', render: ({ l }: Row) => stillOut(l), width: '6rem' },
+    ] : []),
     { key: 'by', header: 'Issued by', render: ({ s }) => <span className="text-meta">{s.issuedByName}</span>, width: '9rem' },
   ];
 }
@@ -71,7 +82,7 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
   if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows: Row[] = list.rows.flatMap((s) => s.lines.map((l) => ({ s, l })));
   // The used up / broken column only when an item on the page tracks use, or once did.
-  const tracked = rows.some(({ l }) => l.trackUse || Number(l.usedUpQuantity ?? 0) > 0 || Number(l.brokenQuantity ?? 0) > 0);
+  const tracked = tracksUseOn(rows.map(({ l }) => l));
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No stock issued" description="No stock was issued for these dates and filters." />;
   return (
@@ -127,6 +138,7 @@ function SlipCard({ s, tracked, onOpen }: { s: IssueSlip; tracked: boolean; onOp
             <th className="py-1.5 font-normal text-right">Issued</th>
             <th className="py-1.5 font-normal text-right">Returned</th>
             {tracked && <th className="py-1.5 font-normal text-right">Used up / broken</th>}
+            {tracked && <th className="py-1.5 font-normal text-right">Still out</th>}
             <th className="py-1.5 font-normal no-print" aria-label="Actions" />
           </tr>
         </thead>
@@ -141,6 +153,7 @@ function SlipCard({ s, tracked, onOpen }: { s: IssueSlip; tracked: boolean; onOp
               <td className="py-1.5 text-right font-mono">{issued(l)} <span className="text-meta">{l.unitOfMeasure}</span></td>
               <td className="py-1.5 text-right font-mono">{returned(l)}</td>
               {tracked && <td className="py-1.5 text-right">{closedOff(l)}</td>}
+              {tracked && <td className="py-1.5 text-right">{stillOut(l)}</td>}
               <td className="py-1.5 text-right no-print"><Button size="sm" variant="ghost" onClick={() => onOpen(l)}>Details</Button></td>
             </tr>
           ))}

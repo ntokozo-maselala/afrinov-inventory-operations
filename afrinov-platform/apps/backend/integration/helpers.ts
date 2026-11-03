@@ -74,14 +74,15 @@ export async function login(port: number, email: string, password: string): Prom
 }
 
 /**
- * ADR-002 invariant: the stored balance for a (material, location) equals the
- * sum of its ledger transactions. Read straight from the database so the check
- * does not depend on the API code under test.
+ * ADR-002 invariant: the stored balance for a (material, location, project
+ * held for) equals the sum of its ledger transactions. Stores stock unless a
+ * project is given. Read straight from the database so the check does not
+ * depend on the API code under test.
  */
-export async function ledgerAndBalance(materialId: string, locationId: string): Promise<{ ledger: string; balance: string }> {
+export async function ledgerAndBalance(materialId: string, locationId: string, heldForProject: string | null = null): Promise<{ ledger: string; balance: string }> {
   const [agg, row] = await Promise.all([
-    prisma.inventoryTransaction.aggregate({ where: { materialId, locationId }, _sum: { quantity: true } }),
-    prisma.inventoryBalance.findUnique({ where: { materialId_locationId: { materialId, locationId } } }),
+    prisma.inventoryTransaction.aggregate({ where: { materialId, locationId, heldForProject }, _sum: { quantity: true } }),
+    prisma.inventoryBalance.findUnique({ where: { materialId_locationId_heldForProject: { materialId, locationId, heldForProject: heldForProject ?? '' } } }),
   ]);
   return {
     ledger: (agg._sum.quantity ?? 0).toString(),

@@ -16,11 +16,13 @@ interface Mat {
   projectNumber?: string | null; project?: { name: string | null; status: string } | null;
 }
 interface Loc { id: string; name: string; type: string; active: boolean }
-interface Bal { materialId: string; locationId: string; quantity: Prisma.Decimal; updatedAt: Date }
+// heldForProject: '' (Stores) unless held for a project, as the table keys it.
+interface Bal { materialId: string; locationId: string; quantity: Prisma.Decimal; updatedAt: Date; heldForProject?: string }
 interface Tx {
   id: string; postedAt: Date; type: string; materialId: string; locationId: string;
   quantity: Prisma.Decimal; actorId: string; recipientId: string | null; reasonCode: string | null;
   reasonNote: string | null; projectNumber: string | null; referenceType: string | null; referenceId: string | null;
+  heldForProject?: string | null;
   material?: { sku: string; name: string; category: string; unitOfMeasure: string };
   location?: { name: string };
   actor?: { id: string; name: string; email: string };
@@ -38,6 +40,7 @@ const db = {
     order: { id: string; number: string; status: string; projectNumber: string | null; expectedDeliveryDate: Date | null };
   }>,
   settings: new Map<string, { value: unknown }>(),
+  projects: [] as Array<{ projectNumber: string; name: string | null; status: string }>,
 };
 
 const DEC = (n: number) => new Prisma.Decimal(n);
@@ -54,19 +57,23 @@ vi.mock('../../shared/db.js', () => ({
 
 function makePrisma(): unknown {
   return {
+    project: {
+      findMany: async ({ where }: { where: { projectNumber: { in: string[] } } }) => db.projects.filter((p) => where.projectNumber.in.includes(p.projectNumber)),
+    },
     inventoryBalance: {
       findMany: async ({ where, include }: { where?: { locationId?: string; materialId?: string | { in: string[] } }; include?: unknown } = {}) => {
-        let list = db.balances.slice();
+        let list = db.balances.map((b) => ({ heldForProject: '', ...b }));
         if (where?.locationId) list = list.filter((b) => b.locationId === where.locationId);
         const mid = where?.materialId;
         if (typeof mid === 'string') list = list.filter((b) => b.materialId === mid);
         else if (mid?.in) list = list.filter((b) => mid.in.includes(b.materialId));
         return include ? list.map((b) => ({ ...b, location: { name: db.locations.find((l) => l.id === b.locationId)?.name ?? 'Loc' } })) : list;
       },
-      groupBy: async ({ where }: { where?: { materialId?: { in: string[] } } } = {}) => {
+      groupBy: async ({ where }: { where?: { materialId?: { in: string[] }; heldForProject?: string } } = {}) => {
         const sums = new Map<string, Prisma.Decimal>();
         for (const b of db.balances) {
           if (where?.materialId?.in && !where.materialId.in.includes(b.materialId)) continue;
+          if (where?.heldForProject !== undefined && (b.heldForProject ?? '') !== where.heldForProject) continue;
           sums.set(b.materialId, (sums.get(b.materialId) ?? DEC(0)).add(b.quantity));
         }
         return [...sums].map(([materialId, quantity]) => ({ materialId, _sum: { quantity } }));
@@ -93,13 +100,14 @@ function makePrisma(): unknown {
     inventoryTransaction: {
       findMany: async ({ where, take }: { where?: Record<string, unknown>; take?: number } = {}) => {
         let list = db.transactions.slice();
-        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; postedAt?: { gte?: Date; lte?: Date } } | undefined;
+        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; OR?: Array<{ projectNumber?: string; heldForProject?: string }>; postedAt?: { gte?: Date; lte?: Date } } | undefined;
         if (w?.materialId) list = list.filter((t) => t.materialId === w.materialId);
         if (w?.type) {
           const types = typeof w.type === 'string' ? [w.type] : w.type.in;
           list = list.filter((t) => types.includes(t.type));
         }
         if (w?.projectNumber) list = list.filter((t) => t.projectNumber === w.projectNumber);
+        if (w?.OR) list = list.filter((t) => w.OR!.some((c) => (c.projectNumber !== undefined && t.projectNumber === c.projectNumber) || (c.heldForProject !== undefined && t.heldForProject === c.heldForProject)));
         if (w?.postedAt) {
           if (w.postedAt.gte) list = list.filter((t) => t.postedAt >= w.postedAt!.gte!);
           if (w.postedAt.lte) list = list.filter((t) => t.postedAt <= w.postedAt!.lte!);
@@ -253,6 +261,21 @@ describe('ReportingService', () => {
   });
 
   describe('stockStatus', () => {
+    // Qodo, PR #142: Stores can't issue stock held for a project, so it can't make a Stores item look healthy.
+    it('grades a Stores item by its Stores stock, not stock held for a project', async () => {
+      seedMaterials();
+      db.balances = [{ materialId: 'm-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() }];
+      const { ReportingService } = await import('./reporting.service.js');
+      const storesOnly = (await ReportingService.stockStatus()).find((r) => r.materialId === 'm-1')!;
+      const storesRow = (await ReportingService.currentStock()).find((r) => r.materialId === 'm-1')!;
+      db.balances.push({ materialId: 'm-1', locationId: 'l-1', quantity: DEC(100), updatedAt: new Date(), heldForProject: '1369' });
+      const withHeld = (await ReportingService.stockStatus()).find((r) => r.materialId === 'm-1')!;
+      expect(withHeld).toMatchObject({ onHand: '1', status: storesOnly.status, reorderQuantity: storesOnly.reorderQuantity });
+      const rows = (await ReportingService.currentStock()).filter((r) => r.materialId === 'm-1');
+      expect(rows.map((r) => r.heldForProject)).toEqual([null, '1369']);
+      for (const r of rows) expect(r.stockStatus).toBe(storesRow.stockStatus);
+    });
+
     it('is for Stores: Projects material is left out unless asked for', async () => {
       seedMaterials();
       db.materials.push({ id: 'p-1', sku: '1369-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: DEC(0), unitCost: null, active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
@@ -402,10 +425,40 @@ describe('ReportingService', () => {
       });
       // A completed project's leftovers stay with it; items with no project come last.
       expect(v.projects).toEqual([
-        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 2, itemsInStock: 2, value: 300, unpriced: 1 },
-        { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0, unpriced: 0 },
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 2, itemsInStock: 2, value: 300, unpriced: 1, leftovers: 2 },
+        { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0, unpriced: 0, leftovers: 0 },
       ]);
       // Projects material is never urgent or "out of stock": the three Stores items only.
+      expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
+    });
+
+    // Project Material Through the Store Roadmap, Phase 2: stock received for a
+    // project is that project's; its value counts under it (Qodo, PR #143).
+    it('counts the value of stock held for a project under that project, and no status for it', async () => {
+      seedMaterials();
+      db.materials.push({ id: 'p-1', sku: '1369-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: DEC(0), unitCost: DEC(100), active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
+      db.projects = [{ projectNumber: '1402', name: 'Door rails', status: 'ACTIVE' }];
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(4), updatedAt: new Date() },                            // Stores: 4 × 5 = 20
+        { materialId: 'm-2', locationId: 'l-1', quantity: DEC(3), updatedAt: new Date(), heldForProject: '1402' },   // a Stores item bought for 1402: 30
+        { materialId: 'p-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() },                            // leftover of 1369: 100
+        { materialId: 'p-1', locationId: 'l-1', quantity: DEC(2), updatedAt: new Date(), heldForProject: '1369' },   // 200
+        { materialId: 'p-1', locationId: 'l-2', quantity: DEC(4), updatedAt: new Date(), heldForProject: '1402' },   // 400
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const v = await ReportingService.stockValue();
+      // Every item in the store is in the total, held stock included, as the Inventory report counts it.
+      expect(v.total).toEqual({ items: 4, itemsInStock: 3, value: 750, unpriced: 0 });
+      expect(v.sections).toEqual({
+        STORES: { items: 3, itemsInStock: 2, value: 50, unpriced: 0 },
+        PROJECTS: { items: 1, itemsInStock: 1, value: 700, unpriced: 0 },
+      });
+      expect(v.projects).toEqual([
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0, leftovers: 1 },
+        // Everything 1402 holds is held for it: nothing for Move to Stores.
+        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0, leftovers: 0 },
+      ]);
+      // The cable's 3 are held for 1402, not the store's: still urgent and out of stock.
       expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
     });
 
@@ -495,6 +548,19 @@ describe('ReportingService', () => {
       const result = await ReportingService.movementHistory({ projectNumber: 'P-A' });
       expect(result).toHaveLength(1);
       expect(result[0]!.projectNumber).toBe('P-A');
+    });
+
+    // Qodo, PR #145: as the movement history, a project's own stock moving
+    // (held for it, used for nobody yet) is in its history.
+    it('filters by project: stock used for it, and its own stock', async () => {
+      seedMaterials();
+      const row = (id: string, projectNumber: string | null, heldForProject: string | null) => ({
+        id, postedAt: new Date(), type: 'TRANSFER_OUT', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-1), actorId: 'u-1',
+        recipientId: null, reasonCode: null, reasonNote: null, projectNumber, referenceType: null, referenceId: null, heldForProject,
+      });
+      db.transactions = [row('used', 'P-A', null), row('held', null, 'P-A'), row('other', null, 'P-B'), row('stores', null, null)];
+      const { ReportingService } = await import('./reporting.service.js');
+      expect((await ReportingService.movementHistory({ projectNumber: 'P-A' })).map((r) => r.id).sort()).toEqual(['held', 'used']);
     });
 
     it('caps the page size at 1000', async () => {

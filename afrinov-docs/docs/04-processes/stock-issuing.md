@@ -93,6 +93,11 @@ Tools are not issued: they are checked out and back in on the Tools page
 - An issue with returns against it cannot be reversed until the returns are
   reversed; one marked used up or broken, until those are withdrawn.
 - Returns, used up and broken together never exceed what was issued.
+- Quantities are kept to four decimal places; a finer one (0.00001) is refused
+  rather than stored rounded, possibly as zero.
+- A reversal of an issue, and a return or a used up or broken mark against it,
+  check each other under the same lock, so two booked at the same moment
+  cannot both go through.
 - A tool cannot be checked out beyond what is on the shelf (`tool-loans.md`).
 
 ## Exceptions

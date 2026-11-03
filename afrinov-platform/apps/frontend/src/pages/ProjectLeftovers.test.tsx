@@ -177,9 +177,11 @@ describe('LeftoversNotice', () => {
       currency: 'ZAR', categories: [], total: { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
       status: { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 },
       projects: [
-        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 3, itemsInStock: 2, value: 600, unpriced: 0 },
-        { projectNumber: '1402', name: 'Boiler', status: 'ACTIVE', items: 4, itemsInStock: 4, value: 900, unpriced: 0 },
-        { projectNumber: '1100', name: 'Old job', status: 'CANCELLED', items: 2, itemsInStock: 0, value: 0, unpriced: 0 },
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 3, itemsInStock: 2, value: 600, unpriced: 0, leftovers: 2 },
+        { projectNumber: '1402', name: 'Boiler', status: 'ACTIVE', items: 4, itemsInStock: 4, value: 900, unpriced: 0, leftovers: 4 },
+        { projectNumber: '1100', name: 'Old job', status: 'CANCELLED', items: 2, itemsInStock: 0, value: 0, unpriced: 0, leftovers: 0 },
+        // Completed, but all it holds was received against its orders: held for it, not leftovers (Qodo, PR #143).
+        { projectNumber: '1500', name: 'Bridge', status: 'COMPLETED', items: 1, itemsInStock: 1, value: 80, unpriced: 0, leftovers: 0 },
       ],
     });
   });
@@ -192,6 +194,7 @@ describe('LeftoversNotice', () => {
     expect(screen.getByText(/Project 1369 · Plant upgrade is completed/)).toBeInTheDocument();
     expect(screen.queryByText(/1402/)).not.toBeInTheDocument();
     expect(screen.queryByText(/1100/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/1500/)).not.toBeInTheDocument();
   });
 
   it('shows nothing for a project with no leftovers', async () => {

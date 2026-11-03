@@ -17,6 +17,7 @@ import { formatNumber } from '../lib/format';
 import { StockActionForm, type StockActionKind } from '../components/StockActionForm';
 import { STORES_CATEGORIES, categoryLabel, sectionOf } from '../lib/categories';
 import type { CurrentStockRow } from '../api/types';
+import { balanceKey, isStoresStock } from '../lib/heldFor';
 import { ProjectStockNotice } from '../components/LeftoversNotice';
 import { locationLabel, type NamedLocation } from '../lib/locations';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -70,7 +71,9 @@ export function Stock() {
   const inRoom = (locationId: string) => locationId === room || byId.get(locationId)?.parentId === room;
   const placeOf = (r: CurrentStockRow) => { const l = byId.get(r.locationId); return l ? locationLabel(l) : r.locationName; };
 
-  const stores = (stock.data ?? []).filter((r) => sectionOf(r.category) === 'STORES');
+  // The store's own stock: Transfer and Adjust move Stores stock, so stock held
+  // for a project isn't listed here (Project Material Through the Store Roadmap).
+  const stores = (stock.data ?? []).filter((r) => sectionOf(r.category) === 'STORES' && isStoresStock(r));
   const needle = q.trim().toLowerCase();
   const filtered = stores.filter((r) => {
     if (room && !inRoom(r.locationId)) return false;
@@ -143,7 +146,7 @@ export function Stock() {
         <DataTable<CurrentStockRow>
           ariaLabel="Stock lines"
           isLoading={stock.loading || roomPending}
-          rowKey={(r) => `${r.materialId}-${r.locationId}`}
+          rowKey={balanceKey}
           rows={filtered}
           columns={columns({ placeOf, onAction: (kind, row) => setAction({ kind, row }), canTransfer: hasPermission('inventory:transfer'), canAdjust: hasPermission('inventory:adjust') })}
           emptyState={(
