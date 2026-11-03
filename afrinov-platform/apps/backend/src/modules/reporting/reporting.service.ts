@@ -44,6 +44,12 @@ export interface ProjectStockValue {
   itemsInStock: number;
   value: number;
   unpriced: number;
+  /**
+   * Items it holds as Stores stock, left from before project material came
+   * through the store: the only stock Move to Stores takes. Stock held for
+   * the project is used or moved first (Qodo, PR #143).
+   */
+  leftovers: number;
 }
 
 export interface StockValueReport {
@@ -362,6 +368,7 @@ export const ReportingService = {
     const cats = new Map<string, Bucket>();
     const sections: Record<MaterialSection, Bucket> = { STORES: new Map(), PROJECTS: new Map() };
     const projects = new Map<string, Bucket>();
+    const leftovers = new Map<string, Set<string>>();
     const projectInfo = new Map<string, { name: string | null; status: string }>();
     const bucketOf = <K>(map: Map<K, Bucket>, key: K) => map.get(key) ?? map.set(key, new Map()).get(key)!;
     const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
@@ -372,7 +379,10 @@ export const ReportingService = {
       // Each item counts in its category and its section and, for Projects material, its project.
       add(bucketOf(cats, r.category), r.materialId, onHand);
       add(sections[section], r.materialId, onHand);
-      if (section === 'PROJECTS') add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
+      if (section === 'PROJECTS') {
+        add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
+        if (onHand > 0) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
+      }
       if (r.projectNumber && r.project) projectInfo.set(r.projectNumber, r.project);
       if (section === 'STORES') {
         // The counts the Dashboard cards show: Stores only.
@@ -423,6 +433,7 @@ export const ReportingService = {
       projects: [...projects]
         .map(([key, bucket]): ProjectStockValue => ({
           projectNumber: key || null, name: projectInfo.get(key)?.name ?? null, status: projectInfo.get(key)?.status ?? null, ...rounded(sum(bucket)),
+          leftovers: leftovers.get(key)?.size ?? 0,
         }))
         .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
       status,

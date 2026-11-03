@@ -3008,6 +3008,8 @@ function computeStockValue() {
   const cats = new Map<string, Bucket>();
   const sections: Record<'STORES' | 'PROJECTS', Bucket> = { STORES: new Map(), PROJECTS: new Map() };
   const projects = new Map<string, Bucket>();
+  // Per project, the items it holds as leftovers (Stores stock), which Move to Stores takes.
+  const leftovers = new Map<string, Set<string>>();
   const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
   const rows = computeStockStatus({ section: 'ALL' });
   const byId = new Map(rows.map((r) => [r.materialId, r]));
@@ -3017,7 +3019,10 @@ function computeStockValue() {
     const section = sectionOfRow(r.category);
     add(bucketOf(cats, r.category), r.materialId, onHand);
     add(sections[section], r.materialId, onHand);
-    if (section === 'PROJECTS') add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
+    if (section === 'PROJECTS') {
+      add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
+      if (onHand > 0) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
+    }
     if (section === 'STORES') {
       if (onHand <= 0) status.outOfStock++;
       status[r.status]++;
@@ -3058,7 +3063,7 @@ function computeStockValue() {
     projects: [...projects]
       .map(([key, bucket]) => {
         const info = projectInfo(key || null);
-        return { projectNumber: key || null, name: info?.name ?? null, status: info?.status ?? null, ...rounded(sum(bucket)) };
+        return { projectNumber: key || null, name: info?.name ?? null, status: info?.status ?? null, ...rounded(sum(bucket)), leftovers: leftovers.get(key)?.size ?? 0 };
       })
       .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
     status,

@@ -13,12 +13,15 @@ export interface ProjectLeftoverCount { projectNumber: string; name: string | nu
 
 export const isClosedStatus = (status: string | null | undefined) => status === 'COMPLETED' || status === 'CANCELLED';
 
-/** Closed projects with material still in stock, by project number. */
+/**
+ * Closed projects with leftovers in stock, by project number. Stock held for a
+ * project is not a leftover: Move to Stores refuses it (Qodo, PR #143).
+ */
 export function useLeftovers(): ProjectLeftoverCount[] {
   const value = useApi<StockValue>('/reports/stock-value');
   return (value.data?.projects ?? [])
-    .filter((p) => p.projectNumber && isClosedStatus(p.status) && p.itemsInStock > 0)
-    .map((p) => ({ projectNumber: p.projectNumber!, name: p.name, status: p.status!, items: p.itemsInStock }))
+    .filter((p) => p.projectNumber && isClosedStatus(p.status) && (p.leftovers ?? 0) > 0)
+    .map((p) => ({ projectNumber: p.projectNumber!, name: p.name, status: p.status!, items: p.leftovers ?? 0 }))
     .sort((a, b) => a.projectNumber.localeCompare(b.projectNumber));
 }
 

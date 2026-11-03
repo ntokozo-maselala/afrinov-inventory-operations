@@ -144,6 +144,9 @@ describe('Dashboard: Stores counts against the Stores total', () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(await screen.findByText('15 of 20')).toBeInTheDocument();
     expect(screen.getByText('active Stores items')).toBeInTheDocument();
+    // Project material in the store is held for projects or left from before (Qodo, PR #143).
+    expect(screen.getByText(/Project material in the store, held for projects or left from before:/)).toBeInTheDocument();
+    expect(screen.queryByText(/went straight to site/)).not.toBeInTheDocument();
   });
 });
 

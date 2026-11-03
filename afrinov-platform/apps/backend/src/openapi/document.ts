@@ -675,7 +675,8 @@ export const OPERATIONS: Operation[] = [
     method: 'get', path: '/reports/stock-value', tag: 'Reports', summary: 'Value of the stock on hand, per category',
     description: 'For every active item: on hand across all locations × unit price, added up per category as the stock '
       + "workbook's Summary sheets do, with item counts, items in stock but without a price, each category's share, and "
-      + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock.',
+      + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock. Projects material is also totalled per project, '
+      + 'stock held for a project under that project, with the items it holds as leftovers (Stores stock, which Move to Stores takes).',
     permissions: [P.ViewReports],
   },
   {

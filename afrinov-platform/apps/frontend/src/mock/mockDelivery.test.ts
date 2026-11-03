@@ -81,7 +81,7 @@ describe('mock: delivery of a project order', () => {
   });
   // Qodo, PR #143: as the server values it, under the project it is held for.
   it('counts its value on the Dashboard under the project, with no stock status', async () => {
-    type Value = { total: { value: number }; projects: Array<{ projectNumber: string | null; value: number }>; status: Record<string, number> };
+    type Value = { total: { value: number }; projects: Array<{ projectNumber: string | null; value: number; leftovers: number }>; status: Record<string, number> };
     const before = await api.get<Value>('/reports/stock-value');
     const po = await approvedProjectOrder();
     await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
@@ -91,5 +91,8 @@ describe('mock: delivery of a project order', () => {
     expect(added).toBeGreaterThan(0);
     expect(project(after) - project(before)).toBeCloseTo(added);
     expect(after.status).toEqual(before.status);
+    // Held for the project, so not a leftover for Move to Stores.
+    const leftovers = (v: Value) => v.projects.find((p) => p.projectNumber === 'AFRI-1325')?.leftovers ?? 0;
+    expect(leftovers(after)).toBe(leftovers(before));
   });
 });

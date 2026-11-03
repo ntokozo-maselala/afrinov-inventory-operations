@@ -423,8 +423,8 @@ describe('ReportingService', () => {
       });
       // A completed project's leftovers stay with it; items with no project come last.
       expect(v.projects).toEqual([
-        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 2, itemsInStock: 2, value: 300, unpriced: 1 },
-        { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0, unpriced: 0 },
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', items: 2, itemsInStock: 2, value: 300, unpriced: 1, leftovers: 2 },
+        { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0, unpriced: 0, leftovers: 0 },
       ]);
       // Projects material is never urgent or "out of stock": the three Stores items only.
       expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
@@ -452,8 +452,9 @@ describe('ReportingService', () => {
         PROJECTS: { items: 1, itemsInStock: 1, value: 700, unpriced: 0 },
       });
       expect(v.projects).toEqual([
-        { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0 },
-        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0 },
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0, leftovers: 1 },
+        // Everything 1402 holds is held for it: nothing for Move to Stores.
+        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0, leftovers: 0 },
       ]);
       // The cable's 3 are held for 1402, not the store's: still urgent and out of stock.
       expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
