@@ -303,21 +303,12 @@ describe('TransactionDrawer', () => {
       expect(screen.getAllByRole('button', { name: 'Withdraw' })).toHaveLength(1);
     });
 
-    it('records what came back with a key, and refuses more than is still out first', async () => {
-      mockPost.mockResolvedValue({ outcomeId: 'o-3' });
-      const { onOutcomeChanged } = renderTracked();
-      fireEvent.click(screen.getByRole('button', { name: 'Mark used up or broken' }));
-      fireEvent.change(screen.getByLabelText(/What happened/), { target: { value: 'BROKEN' } });
-      fireEvent.change(screen.getByLabelText(/How many/), { target: { value: '3' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Record' }));
-      expect(screen.getByText('Only 2 is still out.')).toBeInTheDocument();
-      expect(mockPost).not.toHaveBeenCalled();
-
-      fireEvent.change(screen.getByLabelText(/How many/), { target: { value: '2' } });
-      fireEvent.change(screen.getByLabelText(/^Note/), { target: { value: ' Shattered ' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Record' }));
-      await waitFor(() => expect(onOutcomeChanged).toHaveBeenCalledWith('Marked broken'));
-      expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/outcomes', { outcome: 'BROKEN', quantity: 2, note: 'Shattered' }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    it('books nothing itself: used up and broken are booked on Return stock', async () => {
+      renderTracked();
+      expect(await screen.findByText('Stub back')).toBeInTheDocument();
+      expect(screen.getByText(/book what was used up or broken on Return stock/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark used up or broken' })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/What happened/)).not.toBeInTheDocument();
     });
 
     it('withdraws an outcome with a reason', async () => {
@@ -340,14 +331,14 @@ describe('TransactionDrawer', () => {
       expect(screen.getByText('At most 2 can come back.')).toBeInTheDocument();
     });
 
-    it('is not shown for an item that does not track use, and offers no form without permission', () => {
+    it('is not shown for an item that does not track use, and offers no withdrawal without permission to reverse', async () => {
       renderTracked({ trackUse: false, usedUpQuantity: '0', brokenQuantity: '0' });
       expect(screen.queryByRole('heading', { name: 'Used up or broken' })).not.toBeInTheDocument();
       cleanup();
-      mockHasPermission.mockImplementation((code: string) => code !== 'inventory:outcome');
+      mockHasPermission.mockImplementation((code: string) => code !== 'inventory:reverse');
       renderTracked();
-      expect(screen.getByRole('heading', { name: 'Used up or broken' })).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Mark used up or broken' })).not.toBeInTheDocument();
+      expect(await screen.findByText('Stub back')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
     });
   });
 });

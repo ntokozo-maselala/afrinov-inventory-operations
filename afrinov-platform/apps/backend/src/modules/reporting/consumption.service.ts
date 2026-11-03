@@ -132,17 +132,18 @@ export const ConsumptionService = {
       orderBy: { postedAt: 'desc' },
     });
 
-    // Issues of items that track use: what came back, at any time, and what was closed off.
-    const tracked = rows.filter((t) => t.type === 'ISSUE' && t.material.trackUse);
+    // Issues of items that track use, and of items switched off since that were
+    // marked before (those marks still count): what came back, at any time, and
+    // what was closed off.
+    const issueIds = rows.filter((t) => t.type === 'ISSUE').map((t) => t.id);
+    const closed = issueIds.length === 0 ? new Map() : await closedOffAgainst(prisma, issueIds);
+    const tracked = rows.filter((t) => t.type === 'ISSUE' && (t.material.trackUse || closed.has(t.id)));
     const trackedIds = tracked.map((t) => t.id);
-    const [returnedRows, closed] = trackedIds.length === 0 ? [[], new Map()] as const : await Promise.all([
-      prisma.inventoryTransaction.groupBy({
-        by: ['referenceId'],
-        where: { type: 'RETURN', referenceType: 'Return', referenceId: { in: trackedIds } },
-        _sum: { quantity: true },
-      }),
-      closedOffAgainst(prisma, trackedIds),
-    ]);
+    const returnedRows = trackedIds.length === 0 ? [] : await prisma.inventoryTransaction.groupBy({
+      by: ['referenceId'],
+      where: { type: 'RETURN', referenceType: 'Return', referenceId: { in: trackedIds } },
+      _sum: { quantity: true },
+    });
     const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity?.toNumber() ?? 0]));
     const use = new Map(tracked.map((t) => {
       const c = closed.get(t.id);

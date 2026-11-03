@@ -178,7 +178,7 @@ describe('inventory reversal permission', () => {
 describe('usePermissions — the role check sheet', () => {
   const EXPECTED: Record<Exclude<RoleName, 'ADMIN'>, string[]> = {
     STORE_CONTROLLER: [
-      'materials:manage', 'materials:create', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:outcome', 'inventory:transfer',
+      'materials:manage', 'materials:create', 'inventory:receive', 'inventory:issue', 'inventory:return', 'inventory:transfer',
       'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage',
       'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:receive', 'receipts:view',
       // Stores orders: those without a project (Stores ordering roadmap).
@@ -190,7 +190,7 @@ describe('usePermissions — the role check sheet', () => {
     PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
     // Approvers open the orders they approve (procurement roadmap Phase 4).
     APPROVER: ['orders:approve', 'orders:view'],
-    TECHNICIAN: ['inventory:issue', 'inventory:return', 'inventory:outcome', 'tools:lend'],
+    TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend'],
     VIEWER: [],
   };
   const ALL = Object.keys(PERMISSION_ROLES);

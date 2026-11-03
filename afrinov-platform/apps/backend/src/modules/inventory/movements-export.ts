@@ -1,7 +1,8 @@
 // The Movements list as an Excel file: one row per movement, newest first,
 // for the date range and filters the user chose. Quantities stay numbers so
-// they can be summed per item in Excel; a tool loan due date change moves no
-// stock, so its quantity is left blank.
+// they can be summed per item in Excel; a tool loan due date change, and a
+// used up or broken mark or its withdrawal, move no stock, so their quantity
+// is left blank.
 import ExcelJS from 'exceljs';
 import { takesResponsible, type InventoryService } from './inventory.service.js';
 
@@ -20,7 +21,32 @@ const TYPE_LABEL: Record<string, string> = {
   LOAN: 'Check out',
   LOAN_RETURN: 'Check in',
   DUE_DATE_CHANGE: 'Due date moved',
+  USED_UP: 'Used up',
+  BROKEN: 'Broken',
+  OUTCOME_WITHDRAWN: 'Withdrawn',
 };
+
+const n = (q: string | null | undefined) => Number(q ?? 0);
+
+/**
+ * The reason column (ADR-026): on an issue of an item that tracks use, how
+ * much is still out; on a return, what came back in that visit; on a mark or
+ * its withdrawal, how many; else the reason code.
+ */
+export function reasonText(m: Pick<MovementRow, 'type' | 'quantity' | 'reasonCode' | 'reversesId' | 'returnedQuantity' | 'usedUpQuantity' | 'brokenQuantity' | 'trackUse'>): string {
+  const parts: string[] = [];
+  if (m.type === 'ISSUE' && !m.reversesId && m.quantity !== null && (m.trackUse || n(m.usedUpQuantity) + n(m.brokenQuantity) > 0)) {
+    parts.push(`still out ${-n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity)}`);
+  }
+  if ((m.type === 'RETURN' && !m.reversesId) || m.type === 'USED_UP' || m.type === 'BROKEN' || m.type === 'OUTCOME_WITHDRAWN') {
+    if (m.type === 'RETURN') parts.push(`back ${n(m.quantity)}`);
+    if (n(m.usedUpQuantity) > 0) parts.push(`used up ${n(m.usedUpQuantity)}`);
+    if (n(m.brokenQuantity) > 0) parts.push(`broken ${n(m.brokenQuantity)}`);
+    if (m.type === 'OUTCOME_WITHDRAWN') parts[0] = `withdrawn: ${parts[0] ?? ''}`;
+  }
+  if (m.reasonCode) parts.push(m.reasonCode.replace(/_/g, ' ').toLowerCase());
+  return parts.join(' · ');
+}
 
 const QTY = '#,##0.####';
 
@@ -33,7 +59,7 @@ export function movementsFilename(from: string | undefined, to: string | undefin
 function reference(m: MovementRow): string {
   if (m.receiptNumber) return [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ');
   if (m.referenceType === 'StockCount') return 'Stock count';
-  if (m.returnOf) return `Return of the issue of ${m.returnOf.postedAt.slice(0, 10)} from ${m.returnOf.locationName}`;
+  if (m.returnOf) return `${m.type === 'RETURN' ? 'Return' : 'Mark'} on the issue of ${m.returnOf.postedAt.slice(0, 10)} from ${m.returnOf.locationName}`;
   return m.referenceType ?? '';
 }
 
@@ -97,7 +123,7 @@ export async function buildMovementsXlsx(rows: MovementRow[], meta: { scope: str
       to: m.recipientName ?? (meta.report === 'writeoffs' && m.reasonCode && takesResponsible(m.reasonCode) ? 'Not known' : ''),
       project: m.projectNumber ?? '',
       due: dueText(m),
-      reason: m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '',
+      reason: reasonText(m),
       note: noteText(m),
       reference: reference(m),
       by: m.actorName,

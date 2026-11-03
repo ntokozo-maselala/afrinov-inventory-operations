@@ -79,7 +79,9 @@ export function computeConsumption(
     r.value += -qty * (unitCost ?? 0);
     r.materials.add(m.id);
     if (t.type === 'ISSUE') r.issues++;
-    const use = t.type === 'ISSUE' && m.trackUse ? trackedUseOf(t) : null;
+    // As the server: also an issue marked before its item was switched off; those marks still count.
+    const marked = t.type === 'ISSUE' && (() => { const c = closedOffOf(data.consumableOutcomes ?? [], t.id); return c.usedUp + c.broken > 0; })();
+    const use = t.type === 'ISSUE' && (m.trackUse || marked) ? trackedUseOf(t) : null;
     if (use) {
       r.usedUp += use.usedUp;
       r.broken += use.broken;

@@ -19,6 +19,7 @@ import { TransactionDrawer } from '../TransactionDrawer';
 import { formatDateTime, formatNumber } from '../../lib/format';
 import { formatCurrency } from '../../lib/currency';
 import { formatDay, lateBy, movedWay } from '../../lib/toolLoans';
+import { MovementReason } from '../MovementReason';
 import type { MovementRow, WriteoffsByResponsible } from '../../api/types';
 
 export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
@@ -179,10 +180,12 @@ const qty = (m: MovementRow, signed = true) => {
   return <span className={`font-mono ${signed ? (n >= 0 ? 'text-success-700' : 'text-danger-700') : ''}`}>{shown}{m.unitOfMeasure ? <span className="text-meta"> {m.unitOfMeasure}</span> : null}</span>;
 };
 const when = (open: (m: MovementRow) => void): Col => ({ key: 'when', header: 'When', render: (m) => <button className="text-left btn-link text-meta whitespace-nowrap" onClick={() => open(m)}>{formatDateTime(m.postedAt)}</button>, width: '11rem' });
-const item: Col = { key: 'mat', header: 'Item', render: (m) => <><Link to={`/materials/${m.materialId}`} className="btn-link text-mono text-xs">{m.materialSku}</Link> <span className="text-surface-700">{m.materialName}</span></> };
+// The code on its own line, never broken, and room for the name beside the other columns.
+const item: Col = { key: 'mat', header: 'Item', render: (m) => <div className="min-w-[8.5rem]"><Link to={`/materials/${m.materialId}`} className="btn-link text-mono text-xs whitespace-nowrap">{m.materialSku}</Link> <span className="block text-surface-700">{m.materialName}</span></div> };
 const loc: Col = { key: 'loc', header: 'Location', render: (m) => m.locationName, width: '10rem' };
 const by: Col = { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span>, width: '9rem' };
-const reason: Col = { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace(/_/g, ' ').toLowerCase()}</span> : none, width: '8rem' };
+// For an issue, also what became of it: back, used up, broken, still out.
+const reason: Col = { key: 'reason', header: 'Reason', render: (m) => <MovementReason movement={m} />, width: '10rem' };
 const issuedTo: Col = { key: 'to', header: 'Issued to', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : none, width: '9rem' };
 /** When a tool is due back, as its row tells it: agreed at check-out, as it stood at check-in, or the change. */
 function dueBack(m: MovementRow) {
@@ -234,7 +237,10 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
         : reason.render(m, i)),
     },
     issuedTo, project,
-    { key: 'ref', header: 'Reference', render: (m) => m.referenceType ? <span className="text-meta">{m.referenceType}</span> : none },
+    // A mark of its own or a withdrawal names the issue it is against.
+    { key: 'ref', header: 'Reference', render: (m) => m.referenceType === 'ConsumableOutcome' && m.returnOf
+      ? <span className="text-meta">Issue of {formatDateTime(m.returnOf.postedAt)}</span>
+      : m.referenceType ? <span className="text-meta">{m.referenceType}</span> : none },
     by,
   ],
   transfers: (open) => [

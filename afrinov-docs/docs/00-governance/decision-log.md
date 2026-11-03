@@ -617,6 +617,20 @@ the wrong record for it: a return puts stock back on the shelf.
   `GET`/`POST /inventory-transactions/:id/outcomes`,
   `POST /consumable-outcomes/:id/withdrawal`; both posts take an
   `Idempotency-Key`.
+- Used up and broken are booked at the counter on **Return stock**, with
+  anything going back on the shelf, as one booking (`POST /inventory-returns`
+  lines take `quantity`, `usedUp`, `broken`). Movements is where people
+  look things up: it shows the result and keeps corrections (withdraw), and
+  books nothing new. The per-issue route stays for API clients.
+- Every counter visit and every withdrawal is on Movements, each at its own
+  time; nothing that was booked is missing from the history. A return's row
+  says what that visit brought back: back on the shelf, and the used up and
+  broken booked with it (`consumable_outcomes.return_transaction_id`). A
+  visit with nothing back on the shelf has no RETURN, so each of its marks is
+  a row of its own (type USED_UP or BROKEN), and each withdrawal is a row
+  (OUTCOME_WITHDRAWN); these move no stock, so their quantity is null. An
+  issue's row says only who it went to and how much is still out, not what
+  came back later.
 - Movements issue rows, Stock used (by recipient and line by line) and their
   downloads carry used up, broken and still out for tracked items. Still out
   is as of now, not as of the end of the period.
@@ -631,4 +645,5 @@ is a new figure, null for items that do not track use.
 `consumable-outcomes.ts`, `inventory.service.ts` (`bookReturn`, `returnToStock`,
 `reverse`, `queryHistory`), `modules/reporting/consumption.service.ts`,
 `afrinov-platform/apps/backend/prisma/migrations/20260101000035_consumable_outcomes/migration.sql`,
-`afrinov-platform/apps/frontend/src/components/ConsumableOutcomes.tsx`, `components/MaterialForm.tsx`.
+`afrinov-platform/apps/backend/prisma/migrations/20260101000036_outcome_return_link/migration.sql`,
+`afrinov-platform/apps/frontend/src/pages/ReturnStock.tsx`, `components/ConsumableOutcomes.tsx`, `components/MaterialForm.tsx`.

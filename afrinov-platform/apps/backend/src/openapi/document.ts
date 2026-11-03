@@ -233,8 +233,12 @@ export const OPERATIONS: Operation[] = [
       + 'changes listed among them by when they were made: type DUE_DATE_CHANGE, quantity null (no stock moved), dueOn the new date, '
       + 'previousDueOn the one it replaced, reasonNote why, referenceId the loan. A check-out (LOAN) carries dueOn (agreed), '
       + 'currentDueOn and overdueOverrideReason; a check-in (LOAN_RETURN) carries dueOn (as it stood then) and daysLate '
-      + '(zero or less: on time). One cursor pages both. An ISSUE carries returnedQuantity, usedUpQuantity and brokenQuantity; '
-      + 'trackUse says whether its item asks for used up or broken.',
+      + '(zero or less: on time). For all movements and report=returned, used up and broken marks booked with nothing going '
+      + 'back on the shelf are listed too, type USED_UP or BROKEN, and every withdrawal of a mark, type OUTCOME_WITHDRAWN: '
+      + 'quantity null, usedUpQuantity or brokenQuantity how many, reasonNote the note or why it was withdrawn, returnOf and '
+      + 'referenceId the issue (ADR-026). One cursor pages them all. An ISSUE carries returnedQuantity, usedUpQuantity and '
+      + 'brokenQuantity so far; a RETURN carries the usedUpQuantity and brokenQuantity marked in the same counter visit; '
+      + 'trackUse says whether the item asks for used up or broken.',
     query: movementQuery,
   },
   {
@@ -386,17 +390,21 @@ export const OPERATIONS: Operation[] = [
     method: 'get', path: '/inventory-returns/returnable', tag: 'Stock movements',
     summary: 'What a recipient can still bring back',
     description: 'Their unreversed issues in the period (YYYY-MM-DD, the `to` day included), newest first, with the '
-      + 'quantity issued, already returned and still out; fully returned issues are left out. At most the latest '
+      + 'quantity issued, already returned, marked used up or broken (closedOff) and still out, and whether the item '
+      + 'tracks use (trackUse); issues with nothing still out are left out. At most the latest '
       + '500 issues are looked at. Refused with 400 without a recipient.',
     permissions: [P.ViewReports], query: returnableQuerySchema, errors: [400],
   },
   {
     method: 'post', path: '/inventory-returns', tag: 'Stock movements',
-    summary: 'Return several items at once',
-    description: 'Up to 100 lines, each against its own issue and optionally into another location, booked '
-      + 'all-or-nothing. Each line is a RETURN as from the single-issue route; lines for the same issue are checked '
-      + 'as one total. Refused with 400 when a line asks for more than is still out, 404 for an unknown issue and '
-      + '409 INVALID_STATE for anything but an unreversed issue.',
+    summary: 'Book what comes back at the counter',
+    description: 'Up to 100 lines, each against its own issue, booked all-or-nothing. On each line, quantity goes '
+      + 'back on the shelf as a RETURN (optionally into another location), and for an item that tracks use, usedUp '
+      + 'and broken are marked against the issue without moving stock (ADR-026); at least one of the three. The '
+      + 'three together, and lines for the same issue, are checked as one total against what is still out. Returns '
+      + 'transactionIds (the RETURN rows) and outcomeIds. Refused with 400 when a line asks for more than is still '
+      + 'out, 404 for an unknown issue, and 409 INVALID_STATE for anything but an unreversed issue or for used up or '
+      + 'broken on an item that does not track use.',
     permissions: [P.IssueInventory], body: returnManySchema, success: 201, errors: [400, 404, 409],
   },
   {

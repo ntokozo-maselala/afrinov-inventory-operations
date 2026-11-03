@@ -135,7 +135,8 @@ const fakeTx = {
         out.actor = u ? { id: u.id, name: u.name } : undefined;
       }
       if (include?.material) {
-        out.material = { sku: 'SKU', name: 'Material' };
+        // An item whose id starts "disc" tracks use after issue.
+        out.material = { sku: 'SKU', name: 'Material', trackUse: row.materialId.startsWith('disc') } as { sku: string; name: string };
       }
       if (include?.location) {
         out.location = { name: 'Location' };
@@ -256,6 +257,11 @@ const fakeTx = {
         groups.set(key, g);
       }
       return [...groups.values()];
+    },
+    create: async ({ data }: { data: { issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: Prisma.Decimal } }) => {
+      const row = { id: `o-${outcomes.length + 1}`, issueTransactionId: data.issueTransactionId, outcome: data.outcome, quantity: data.quantity, withdrawsId: null };
+      outcomes.push(row);
+      return row;
     },
   },
   purchaseOrder: {
@@ -780,13 +786,64 @@ describe('InventoryService — ADR-002 invariants', () => {
       })).rejects.toThrow(/Cannot return 2 × SKU: only 1 of the 4 issued is still out/);
     });
 
-    it('refuses an empty return or a line that is not positive before booking anything', async () => {
+    it('refuses an empty return or a line with nothing coming back before booking anything', async () => {
       const { a } = await twoIssues();
       const before = trxRows.length;
       await expect(InventoryService.returnMany({ lines: [], actorId: 'u' })).rejects.toThrow(/at least one item/);
       await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 1 }, { issueTransactionId: a, quantity: 0 }], actorId: 'u' }))
-        .rejects.toThrow(/must be positive/);
+        .rejects.toThrow(/needs something coming back/);
+      await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 2, usedUp: -1 }], actorId: 'u' }))
+        .rejects.toThrow(/cannot be negative/);
       expect(trxRows).toHaveLength(before);
+    });
+
+    // ADR-026: the counter takes everything that comes back in one booking.
+    describe('used up and broken at the counter', () => {
+      async function discIssue(quantity = 10) {
+        await InventoryService.adjust({ materialId: 'disc-1', locationId: 'loc-1', quantity: 30, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+        return (await issueOne({ materialId: 'disc-1', locationId: 'loc-1', quantity, actorId: 'u' })).transactionId;
+      }
+
+      it('puts some back on the shelf and marks the rest used up and broken, moving stock only for the return', async () => {
+        const id = await discIssue();
+        const { transactionIds, outcomeIds } = await InventoryService.returnMany({
+          lines: [{ issueTransactionId: id, quantity: 2, usedUp: 6, broken: 1 }], reason: 'Disc shattered on the grinder', actorId: 'storeman',
+        });
+        expect(transactionIds).toHaveLength(1);
+        expect(trxRows.find((r) => r.id === transactionIds[0])).toMatchObject({ type: 'RETURN', quantity: new Prisma.Decimal(2), referenceId: id });
+        expect(outcomeIds).toHaveLength(2);
+        expect(outcomes.map((o) => [o.outcome, o.quantity.toString()])).toEqual([['USED_UP', '6'], ['BROKEN', '1']]);
+        // 30 − 10 issued + 2 back; used up and broken left the shelf at the issue.
+        expect(getBalance('disc-1', 'loc-1').toString()).toBe('22');
+        expect(auditLog.filter((a) => a.action === 'CONSUMABLE_OUTCOME')).toHaveLength(2);
+        expect(auditLog.filter((a) => a.action === 'CONSUMABLE_OUTCOME').map((a) => (a.after as { note: string }).note)).toEqual(['Disc shattered on the grinder', 'Disc shattered on the grinder']);
+      });
+
+      it('books a line that is only used up, with no RETURN and no stock change', async () => {
+        const id = await discIssue();
+        const { transactionIds, outcomeIds } = await InventoryService.returnMany({ lines: [{ issueTransactionId: id, usedUp: 10 }], actorId: 'u' });
+        expect(transactionIds).toEqual([]);
+        expect(outcomeIds).toHaveLength(1);
+        expect(trxRows.filter((r) => r.type === 'RETURN')).toHaveLength(0);
+        expect(getBalance('disc-1', 'loc-1').toString()).toBe('20');
+      });
+
+      it('checks the three together against what is still out', async () => {
+        const id = await discIssue();
+        await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, quantity: 4, usedUp: 6, broken: 1 }], actorId: 'u' }))
+          .rejects.toThrow(/Cannot take back 11 × SKU: only 10 of the 10 issued is still out/);
+        // What was marked before counts too.
+        await InventoryService.returnMany({ lines: [{ issueTransactionId: id, usedUp: 7 }], actorId: 'u' });
+        await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, quantity: 4 }], actorId: 'u' }))
+          .rejects.toThrow(/Cannot return 4 × SKU: only 3 of the 10 issued is still out/);
+      });
+
+      it('refuses used up or broken on an item that does not track use', async () => {
+        const { a } = await twoIssues();
+        await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 1, broken: 1 }], actorId: 'u' }))
+          .rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/does not track use after issue/) });
+        expect(outcomes).toHaveLength(0);
+      });
     });
   });
 

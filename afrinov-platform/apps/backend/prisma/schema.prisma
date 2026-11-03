@@ -668,7 +668,9 @@ model InventoryTransaction {
   reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
   reversedBy InventoryTransaction? @relation("Reversal")
   loanExtensions ToolLoanExtension[]
-  consumableOutcomes ConsumableOutcome[]
+  // Issues: used up or broken against it. Returns: the marks booked in the same counter visit.
+  consumableOutcomes ConsumableOutcome[] @relation("OutcomeIssue")
+  bookedOutcomes     ConsumableOutcome[] @relation("OutcomeReturn")
 
   @@index([materialId, locationId, postedAt])
   @@index([referenceType, referenceId])
@@ -718,15 +720,22 @@ model ConsumableOutcome {
   note               String?
   // Unique, so an outcome is withdrawn at most once.
   withdrawsId        String?               @unique @map("withdraws_id")
+  // The RETURN booked in the same counter visit, when some also went back on
+  // the shelf; Movements shows the mark on that row. Without one, the mark is
+  // its own row (nothing went back on the shelf).
+  returnTransactionId String?              @map("return_transaction_id")
   actorId            String                @map("actor_id")
   createdAt          DateTime              @default(now()) @map("created_at")
 
-  issue       InventoryTransaction @relation(fields: [issueTransactionId], references: [id])
+  issue       InventoryTransaction  @relation("OutcomeIssue", fields: [issueTransactionId], references: [id])
+  return      InventoryTransaction? @relation("OutcomeReturn", fields: [returnTransactionId], references: [id])
   actor       User                 @relation(fields: [actorId], references: [id])
   withdraws   ConsumableOutcome?   @relation("OutcomeWithdrawal", fields: [withdrawsId], references: [id])
   withdrawnBy ConsumableOutcome?   @relation("OutcomeWithdrawal")
 
   @@index([issueTransactionId])
+  @@index([returnTransactionId])
+  @@index([createdAt])
   @@map("consumable_outcomes")
 }
 

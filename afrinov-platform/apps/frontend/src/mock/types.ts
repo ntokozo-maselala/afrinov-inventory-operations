@@ -63,6 +63,8 @@ export interface MockMaterial {
 export interface MockConsumableOutcome {
   id: string; issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: number;
   note: string | null; withdrawsId: string | null; actorId: string; createdAt: string;
+  /** The RETURN booked in the same counter visit; that row shows the mark. */
+  returnTransactionId?: string | null;
 }
 
 export interface MockLocation {
@@ -241,8 +243,12 @@ export interface MockMovementRow {
   /** Paging cursor, as the backend returns it. */
   cursor: string;
   postedAt: string;
-  /** DUE_DATE_CHANGE: a tool loan's due date changed; listed among the movements, no stock moved. */
-  type: InventoryTransactionType | 'DUE_DATE_CHANGE';
+  /**
+   * DUE_DATE_CHANGE: a tool loan's due date changed. USED_UP, BROKEN: a mark
+   * booked with nothing back on the shelf; OUTCOME_WITHDRAWN: a mark withdrawn.
+   * Listed among the movements; no stock moved.
+   */
+  type: InventoryTransactionType | 'DUE_DATE_CHANGE' | 'USED_UP' | 'BROKEN' | 'OUTCOME_WITHDRAWN';
   materialId: string;
   materialSku: string;
   materialName: string;

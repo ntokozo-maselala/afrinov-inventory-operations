@@ -48,6 +48,9 @@ const movementTone: Record<string, Tone> = {
   LOAN: 'info',
   LOAN_RETURN: 'info',
   DUE_DATE_CHANGE: 'neutral',
+  USED_UP: 'neutral',
+  BROKEN: 'danger',
+  OUTCOME_WITHDRAWN: 'neutral',
 };
 
 const movementLabel: Record<string, string> = {
@@ -61,6 +64,10 @@ const movementLabel: Record<string, string> = {
   LOAN_RETURN: 'Check in',
   // A tool loan's due date changed: listed among the movements, but no stock moved.
   DUE_DATE_CHANGE: 'Due date moved',
+  // Used up or broken booked with nothing back on the shelf, and withdrawals of such marks (ADR-026): no stock moved.
+  USED_UP: 'Used up',
+  BROKEN: 'Broken',
+  OUTCOME_WITHDRAWN: 'Withdrawn',
 };
 
 export function MovementBadge({ type }: MovementBadgeProps) {

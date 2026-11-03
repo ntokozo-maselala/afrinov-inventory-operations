@@ -6,6 +6,7 @@ import { errorMessage, filenameFromDisposition, triggerDownload } from './export
 import type { MovementRow } from './types';
 import { downloadPdf, type PdfAbout, type PdfColumn } from '../lib/pdf';
 import { formatDateTime, formatNumber } from '../lib/format';
+import { movementReason } from '../lib/movementReason';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const LIMIT = 10_000;
@@ -13,6 +14,9 @@ const LIMIT = 10_000;
 const TYPE_LABEL: Record<string, string> = {
   RECEIPT: 'Receipt', ISSUE: 'Issue', TRANSFER_OUT: 'Transfer out', TRANSFER_IN: 'Transfer in', ADJUSTMENT: 'Adjustment', RETURN: 'Return', LOAN: 'Check out', LOAN_RETURN: 'Check in',
   DUE_DATE_CHANGE: 'Due date moved',
+  USED_UP: 'Used up',
+  BROKEN: 'Broken',
+  OUTCOME_WITHDRAWN: 'Withdrawn',
 };
 
 /** When a tool loan is due, as its row tells it, in the backend download's words. */
@@ -81,7 +85,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
       new Date(m.postedAt),
       m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type,
       m.materialSku, m.materialName, m.locationName, m.quantity === null ? null : Number(m.quantity), m.unitOfMeasure ?? '',
-      m.recipientName ?? notKnown(m), m.projectNumber ?? '', dueText(m), m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '', noteText(m),
+      m.recipientName ?? notKnown(m), m.projectNumber ?? '', dueText(m), movementReason(m), noteText(m),
       m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : m.referenceType ?? '',
       m.actorName,
     ]);
@@ -93,7 +97,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
 /** The most movements one PDF holds; beyond it the page asks for a shorter range. */
 const PDF_LIMIT = 5_000;
 
-const reason = (m: MovementRow) => (m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '');
+const reason = (m: MovementRow) => movementReason(m);
 const typeLabel = (m: MovementRow) => {
   const type = TYPE_LABEL[m.type] ?? m.type;
   return m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type;

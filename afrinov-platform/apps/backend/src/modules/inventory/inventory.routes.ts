@@ -122,12 +122,20 @@ export const returnSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 
-/** Several returns at the counter, each against its own issue (POST /inventory-returns). */
+/**
+ * What comes back at the counter, each line against its own issue (POST
+ * /inventory-returns): quantity back on the shelf, and for an item that tracks
+ * use, usedUp and broken. Each line needs at least one of the three.
+ */
 export const returnManySchema = z.object({
   lines: z.array(z.object({
     issueTransactionId: z.string().min(1),
-    quantity: z.number().positive(),
+    quantity: z.number().positive().optional(),
+    usedUp: z.number().positive().optional(),
+    broken: z.number().positive().optional(),
     locationId: uuidSchema.optional(),
+  }).refine((l) => l.quantity !== undefined || l.usedUp !== undefined || l.broken !== undefined, {
+    message: 'Each line needs something coming back: on the shelf, used up or broken',
   })).min(1).max(100),
   reason: z.string().trim().max(500).optional(),
 });

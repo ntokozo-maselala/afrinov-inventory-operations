@@ -59,9 +59,12 @@ SCRAP, OTHER.
 
 `consumable_outcomes` (ConsumableOutcome, ADR-026): id, issue_transaction_id,
 outcome (`ConsumableOutcomeKind` USED_UP, BROKEN), quantity, note,
-withdraws_id, actor_id, created_at. `withdraws_id` unique (an outcome is
-withdrawn once); FKs to the issue, the actor and the withdrawn outcome; index
-on issue_transaction_id. Added to only; it holds no stock.
+withdraws_id, return_transaction_id, actor_id, created_at. `withdraws_id`
+unique (an outcome is withdrawn once); `return_transaction_id` is the RETURN
+booked in the same counter visit, if any, which shows it on Movements; FKs to
+the issue, the return, the actor and the withdrawn outcome; indexes on
+issue_transaction_id, return_transaction_id and created_at. Added to only; it
+holds no stock.
 
 `reference_type` values written by the code: `GoodsReceipt` (receipts),
 `PurchaseOrder` (receive-all on an order), `Project` (issues with a

@@ -8,14 +8,14 @@
 // outcome, with a reason; the two then count for nothing, as a reversal does
 // in the ledger. Returns and outcomes share one limit, what is still out, so
 // both take the issue's balance lock.
-import { Prisma, InventoryTransactionType, ConsumableOutcomeKind } from '@prisma/client';
+import { Prisma, InventoryTransactionType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { returnedAgainst } from './inventory.service.js';
-import { closedOffAgainst } from './consumable-outcomes.js';
+import { closedOffAgainst, writeOutcome } from './consumable-outcomes.js';
 
 type Decimal = Prisma.Decimal;
 type Tx = Prisma.TransactionClient;
@@ -116,20 +116,10 @@ export const ConsumableOutcomeService = {
         );
       }
 
-      const note = input.note?.trim() || null;
-      const row = await tx.consumableOutcome.create({
-        data: { issueTransactionId: issue.id, outcome: input.outcome as ConsumableOutcomeKind, quantity: qty, note, actorId: input.actorId },
+      const outcomeId = await writeOutcome(tx, {
+        issueTransactionId: issue.id, outcome: input.outcome, quantity: qty, note: input.note?.trim() || null, actorId: input.actorId,
       });
-      await tx.auditLogEntry.create({
-        data: {
-          actorId: input.actorId,
-          action: 'CONSUMABLE_OUTCOME',
-          entityType: 'InventoryTransaction',
-          entityId: issue.id,
-          after: { outcomeId: row.id, outcome: input.outcome, quantity: qty.toString(), note } as Prisma.InputJsonValue,
-        },
-      });
-      return { outcomeId: row.id, ...(await issueUse(tx, issue)) };
+      return { outcomeId, ...(await issueUse(tx, issue)) };
     });
   },
 
@@ -190,7 +180,8 @@ export const ConsumableOutcomeService = {
       prisma.consumableOutcome.findMany({
         where: { issueTransactionId },
         include: { actor: { select: { name: true } } },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        // Marks of one counter visit share a time: used up first, then broken.
+        orderBy: [{ createdAt: 'asc' }, { outcome: 'asc' }, { id: 'asc' }],
       }),
     ]);
     const withdrawalOf = new Map(rows.filter((r) => r.withdrawsId).map((r) => [r.withdrawsId!, r]));

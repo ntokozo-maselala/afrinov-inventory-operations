@@ -1,16 +1,24 @@
 // The Movements filter: which ledger rows a date range, location, user and
 // search select, and how the paging cursor continues a list. Tool loan due
-// date changes are listed among the movements and paged with them.
+// date changes are listed among the movements and paged with them, as are used
+// up and broken marks that have no return to show them, and their withdrawals.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { findMany, changeFindMany } = vi.hoisted(() => ({ findMany: vi.fn(), changeFindMany: vi.fn() }));
+const { findMany, changeFindMany, outcomeFindMany, outcomeGroupBy } = vi.hoisted(() => ({
+  findMany: vi.fn(), changeFindMany: vi.fn(), outcomeFindMany: vi.fn(), outcomeGroupBy: vi.fn(),
+}));
 vi.mock('../../shared/db.js', () => ({
-  prisma: { inventoryTransaction: { findMany }, toolLoanExtension: { findMany: changeFindMany }, goodsReceipt: { findMany: vi.fn(async () => []) } },
+  prisma: {
+    inventoryTransaction: { findMany, groupBy: vi.fn(async () => []) },
+    toolLoanExtension: { findMany: changeFindMany },
+    consumableOutcome: { findMany: outcomeFindMany, groupBy: outcomeGroupBy },
+    goodsReceipt: { findMany: vi.fn(async () => []) },
+  },
 }));
 vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValues: async () => ({}) } }));
 
 const {
-  historyWhere, historyCursor, InventoryService, listsDueDateChanges, dueDateChangeWhere, mergeNewestFirst,
+  historyWhere, historyCursor, InventoryService, listsDueDateChanges, dueDateChangeWhere, mergeNewestFirst, listsOutcomeEvents, outcomeEventWhere,
 } = await import('./inventory.service.js');
 
 describe('historyWhere', () => {
@@ -78,6 +86,8 @@ describe('queryHistory paging', () => {
   beforeEach(() => {
     findMany.mockReset().mockResolvedValue([]);
     changeFindMany.mockReset().mockResolvedValue([]);
+    outcomeFindMany.mockReset().mockResolvedValue([]);
+    outcomeGroupBy.mockReset().mockResolvedValue([]);
   });
 
   it('orders newest first with ties broken by id, and continues after the cursor', async () => {
@@ -126,6 +136,8 @@ describe('due date changes among the movements', () => {
   beforeEach(() => {
     findMany.mockReset().mockResolvedValue([]);
     changeFindMany.mockReset().mockResolvedValue([]);
+    outcomeFindMany.mockReset().mockResolvedValue([]);
+    outcomeGroupBy.mockReset().mockResolvedValue([]);
   });
 
   it('are listed on all movements and the tool loans report, unless a type or issue slips narrow it', () => {
@@ -179,5 +191,70 @@ describe('due date changes among the movements', () => {
       reasonNote: 'Pour delayed', actorName: 'Lerato', recipientName: 'Khodani', projectNumber: 'AFRI-1325', referenceId: 'loan-1', materialSku: 'TW-200',
     });
     expect(rows[1]).toMatchObject({ dueOn: '2026-10-08', currentDueOn: '2026-10-14', overdueOverrideReason: 'Second crew', previousDueOn: null });
+  });
+});
+
+// ADR-026: every counter visit is on Movements. A return's row shows the marks
+// booked with it; a mark with nothing back on the shelf, and every withdrawal,
+// is a row of its own.
+describe('used up and broken among the movements', () => {
+  beforeEach(() => {
+    findMany.mockReset().mockResolvedValue([]);
+    changeFindMany.mockReset().mockResolvedValue([]);
+    outcomeFindMany.mockReset().mockResolvedValue([]);
+    outcomeGroupBy.mockReset().mockResolvedValue([]);
+  });
+
+  it('are listed on all movements and the returned stock report, unless a type or issue slips narrow it', () => {
+    expect(listsOutcomeEvents({})).toBe(true);
+    expect(listsOutcomeEvents({ report: 'returned', recipientId: 'r-1' })).toBe(true);
+    for (const report of ['issued', 'transfers', 'writeoffs', 'loans'] as const) expect(listsOutcomeEvents({ report })).toBe(false);
+    expect(listsOutcomeEvents({ type: 'RETURN' })).toBe(false);
+    expect(listsOutcomeEvents({ issueIds: ['s-1'] })).toBe(false);
+  });
+
+  it('are the marks with no return and every withdrawal, chosen by when and by whom, and by their issue for everything else', () => {
+    const where = outcomeEventWhere({ from: '2026-11-03', to: '2026-11-03', actorId: 'u-1', materialId: 'm-1', recipientId: 'r-1' });
+    expect(where.OR).toEqual([{ withdrawsId: { not: null } }, { returnTransactionId: null }]);
+    expect(where.createdAt).toEqual({ gte: new Date('2026-11-03T00:00:00.000Z'), lt: new Date('2026-11-04T00:00:00.000Z') });
+    expect(where.actorId).toBe('u-1');
+    expect(where.issue).toEqual({ materialId: 'm-1', recipientId: 'r-1' });
+  });
+
+  it('show the marks on the return booked with them, and a mark or withdrawal of its own as a row with no quantity', async () => {
+    const material = { sku: 'CUT-115', name: 'Cut-off disc', unitOfMeasure: 'each', trackUse: true };
+    const back = {
+      id: 'ret-1', postedAt: new Date('2026-11-03T09:39:00Z'), type: 'RETURN', materialId: 'm-1', locationId: 'l-1', quantity: '2', actorId: 'u-1',
+      recipientId: 'r-1', reasonCode: null, reasonNote: null, projectNumber: null, referenceType: 'Return', referenceId: 'iss-1',
+      reversesId: null, pairedWithId: null, issueId: 'slip-1',
+      material, location: { name: 'Main' }, actor: { name: 'Vusi' }, recipient: { name: 'Khodani', type: 'WORKER' }, reversedBy: null,
+    };
+    const issue = {
+      id: 'iss-1', postedAt: new Date('2026-11-03T09:38:00Z'), issueId: 'slip-1', materialId: 'm-1', locationId: 'l-1', recipientId: 'r-1',
+      projectNumber: null, material, location: { name: 'Main' }, recipient: { name: 'Khodani', type: 'WORKER' },
+    };
+    const qty = (n: string) => ({ toString: () => n });
+    const mark = (over: Record<string, unknown>) => ({
+      issueTransactionId: 'iss-1', outcome: 'USED_UP', quantity: qty('3'), note: null, withdrawsId: null, returnTransactionId: null,
+      actorId: 'u-1', actor: { name: 'Vusi' }, issue, ...over,
+    });
+    findMany.mockReset()
+      .mockResolvedValueOnce([back])
+      .mockResolvedValueOnce([{ id: 'iss-1', postedAt: issue.postedAt, issueId: 'slip-1', location: { name: 'Main' } }]);
+    outcomeFindMany.mockResolvedValueOnce([
+      mark({ id: 'wd-1', createdAt: new Date('2026-11-03T10:20:00Z'), outcome: 'BROKEN', quantity: qty('1'), withdrawsId: 'o-2', note: 'Belonged to Sabelo' }),
+      mark({ id: 'o-9', createdAt: new Date('2026-11-03T10:15:00Z') }),
+    ]);
+    outcomeGroupBy.mockResolvedValueOnce([
+      { returnTransactionId: 'ret-1', outcome: 'USED_UP', _sum: { quantity: qty('2') } },
+      { returnTransactionId: 'ret-1', outcome: 'BROKEN', _sum: { quantity: qty('1') } },
+    ]);
+
+    const rows = await InventoryService.queryHistory({ limit: 10 });
+    expect(outcomeGroupBy.mock.calls[0]![0].where).toEqual({ returnTransactionId: { in: ['ret-1'] }, withdrawsId: null });
+    expect(rows.map((r) => r.type)).toEqual(['OUTCOME_WITHDRAWN', 'USED_UP', 'RETURN']);
+    expect(rows[0]).toMatchObject({ quantity: null, brokenQuantity: '1', usedUpQuantity: null, reasonNote: 'Belonged to Sabelo', recipientName: 'Khodani', referenceId: 'iss-1' });
+    expect(rows[1]).toMatchObject({ quantity: null, usedUpQuantity: '3', cursor: '2026-11-03T10:15:00.000Z_o-9', returnOf: { id: 'iss-1', issueId: 'slip-1', locationName: 'Main' } });
+    expect(rows[2]).toMatchObject({ quantity: '2', usedUpQuantity: '2', brokenQuantity: '1', recipientName: 'Khodani' });
   });
 });

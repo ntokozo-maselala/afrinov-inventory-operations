@@ -1,14 +1,14 @@
 // What became of an issue of a tracked consumable (a disc, a blade, a bit), in
-// the movement detail: how much was used up, broken or is still out, each
-// outcome recorded, and a form to record another when the stub or the broken
-// piece comes back (GET/POST /inventory-transactions/:id/outcomes). No stock
-// moves: it left the shelf at the issue. An outcome recorded by mistake is
-// withdrawn with a reason (POST /consumable-outcomes/:id/withdrawal); both are
-// kept, as a reversal is in the ledger.
+// the movement detail: how much was used up, broken or is still out, and each
+// outcome recorded (GET /inventory-transactions/:id/outcomes). Outcomes are
+// booked on Return stock when the stub or the broken piece comes back, not
+// here. An outcome recorded by mistake is withdrawn with a reason (POST
+// /consumable-outcomes/:id/withdrawal); both are kept, as a reversal is in the
+// ledger.
 import { useState } from 'react';
 import { Button } from './Button';
 import { Badge } from './Badge';
-import { Field, Input, Select, Textarea } from './Field';
+import { Field, Textarea } from './Field';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
@@ -29,12 +29,11 @@ export function ConsumableOutcomes({ transaction, onChanged, onError }: {
   onChanged: (message: string) => void;
   onError: (err: ApiError) => void;
 }) {
-  const { hasPermission } = usePermissions();
   const detail = useApi<IssueOutcomes>(`/inventory-transactions/${transaction.id}/outcomes`);
   const d = detail.data;
   const unit = transaction.unitOfMeasure ?? '';
   const stillOut = d ? Number(d.stillOut) : stillOutOf(transaction);
-  const canMark = hasPermission('inventory:outcome') && !!transaction.trackUse && !transaction.reversedById && stillOut > 0;
+  const stillToCome = !!transaction.trackUse && !transaction.reversedById && stillOut > 0;
 
   return (
     <section className="space-y-3 border-t border-surface-200 pt-4" aria-labelledby="issue-use">
@@ -52,7 +51,7 @@ export function ConsumableOutcomes({ transaction, onChanged, onError }: {
           ))}
         </ul>
       )}
-      {canMark && <MarkForm transaction={transaction} stillOut={stillOut} onChanged={onChanged} onError={onError} />}
+      {stillToCome && <p className="text-meta">When it comes back, book what was used up or broken on Return stock, with anything going back on the shelf.</p>}
       {!transaction.trackUse && <p className="text-meta">This item no longer tracks use after issue, so nothing more is recorded here.</p>}
     </section>
   );
@@ -116,65 +115,3 @@ function OutcomeItem({ outcome: o, unit, onChanged, onError }: {
   );
 }
 
-function MarkForm({ transaction, stillOut, onChanged, onError }: {
-  transaction: Omit<MovementRow, 'cursor'>; stillOut: number; onChanged: (message: string) => void; onError: (err: ApiError) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [outcome, setOutcome] = useState<'USED_UP' | 'BROKEN'>('USED_UP');
-  const [quantity, setQuantity] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [validation, setValidation] = useState<string | null>(null);
-  // Scoped to this issue, so another issue opened in the same drawer gets its own key.
-  const idem = useIdempotencyKey(`outcome-${transaction.id}`);
-
-  async function submit() {
-    setValidation(null);
-    const qty = Number(quantity);
-    if (!(qty > 0)) { setValidation('Enter how many.'); return; }
-    if (qty > stillOut) { setValidation(`Only ${formatNumber(stillOut)} is still out.`); return; }
-    setBusy(true);
-    const body = { outcome, quantity: qty, note: note.trim() || undefined };
-    try {
-      await api.post(`/inventory-transactions/${transaction.id}/outcomes`, body, { idempotencyKey: idem.keyFor(body) });
-      idem.confirm();
-      onChanged(outcome === 'BROKEN' ? 'Marked broken' : 'Marked used up');
-    } catch (err) {
-      const e = err as ApiError;
-      idem.resolve(err);
-      if (['VALIDATION_ERROR', 'INVALID_STATE', 'NOT_FOUND'].includes(e.code)) setValidation(e.message);
-      else if (e.code === 'FORBIDDEN') onError({ code: 'FORBIDDEN', message: 'You do not have permission to mark issued stock used up or broken.' });
-      else onError({ code: 'NETWORK_ERROR', message: 'Unable to record it. Please try again.' });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!open) {
-    return <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>Mark used up or broken</Button>;
-  }
-  return (
-    <div className="space-y-2">
-      <p className="text-sm text-surface-600">When the stub or the broken piece comes back. Stock is not changed: it left the shelf when it was issued.</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <Field label="What happened" htmlFor="outcome-kind" required>
-          <Select id="outcome-kind" value={outcome} onChange={(e) => setOutcome(e.target.value as 'USED_UP' | 'BROKEN')}>
-            <option value="USED_UP">Used up</option>
-            <option value="BROKEN">Broken</option>
-          </Select>
-        </Field>
-        <Field label="How many" htmlFor="outcome-qty" required help={`Up to ${formatNumber(stillOut)}.`}>
-          <Input id="outcome-qty" type="number" inputMode="decimal" min="0" max={stillOut} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
-        </Field>
-      </div>
-      <Field label="Note" htmlFor="outcome-note">
-        <Textarea id="outcome-note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional, e.g. disc shattered on the grinder" />
-      </Field>
-      {validation && <p className="text-sm text-danger-700">{validation}</p>}
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" type="button" onClick={() => { setOpen(false); setValidation(null); }} disabled={busy}>Cancel</Button>
-        <Button variant="primary" type="button" onClick={submit} loading={busy}>Record</Button>
-      </div>
-    </div>
-  );
-}

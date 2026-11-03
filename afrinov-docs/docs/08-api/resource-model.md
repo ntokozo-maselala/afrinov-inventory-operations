@@ -21,6 +21,7 @@ permission is required (see `authorization.md`).
 | InventoryTransaction | `inventory_transactions` | `GET /inventory-transactions` (materialId, type, from, to, projectNumber, limit) — auth. Read-only; no update or delete route |
 | InventoryIssue (action) | inserts ISSUE rows | `POST /inventory-issues` (recipient, optional project, 1–50 lines) — issue:inventory |
 | Return (action) | inserts a RETURN row | `POST /inventory-transactions/:id/returns` — issue:inventory |
+| Counter return (action) | RETURN rows and `consumable_outcomes` rows, one transaction | `POST /inventory-returns` (1–100 lines; each `quantity`, `usedUp`, `broken`, at least one) — issue:inventory; `GET /inventory-returns/returnable` lists lines with `trackUse` |
 | ConsumableOutcome (used up or broken) | `consumable_outcomes` (added to only) | `GET /inventory-transactions/:id/outcomes` — auth; `POST /inventory-transactions/:id/outcomes` — issue:inventory; `POST /consumable-outcomes/:id/withdrawal` (reason) — reverse:inventory_transaction. Issue rows in `GET /inventory-transactions` carry `trackUse`, `usedUpQuantity`, `brokenQuantity` |
 | Reversal (action) | inserts opposite rows | `POST /inventory-transactions/:id/reversal` (reason) — reverse:inventory_transaction |
 | InventoryTransfer (action) | inserts two linked rows | `POST /inventory-transfers` — transfer:inventory |

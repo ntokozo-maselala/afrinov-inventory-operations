@@ -1557,10 +1557,12 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Inventory transactions
   if (method === 'GET' && p === '/inventory-transactions') {
     const limit = Math.min(qs.limit ? Number(qs.limit) : 200, 1000);
-    // As the server: tool loan due date changes are listed among the movements, newest first, on one cursor.
+    // As the server: tool loan due date changes, and used up or broken marks of
+    // their own and their withdrawals, are listed among the movements, newest first, on one cursor.
     const rows = [
       ...filterHistory(qs).map((t) => ({ id: t.id, postedAt: t.postedAt, row: () => enrichMovement(t) })),
       ...filterDueDateChanges(qs).map((c) => ({ id: c.id, postedAt: c.createdAt, row: () => dueDateChangeRow(c) })),
+      ...filterOutcomeEvents(qs).map((o) => ({ id: o.id, postedAt: o.createdAt, row: () => outcomeEventRow(o) })),
     ].sort((a, b) => b.postedAt.localeCompare(a.postedAt) || b.id.localeCompare(a.id));
     return olderThan(rows, qs.before, (r) => r.postedAt).slice(0, limit).map((r) => r.row());
   }
@@ -1570,11 +1572,16 @@ function route(method: string, path: string, body?: unknown): unknown {
     for (const t of list) byType[t.type] = (byType[t.type] ?? 0) + 1;
     const changes = filterDueDateChanges(qs).length;
     if (changes > 0) byType.DUE_DATE_CHANGE = changes;
-    return { total: list.length + changes, byType };
+    const events = filterOutcomeEvents(qs);
+    for (const o of events) {
+      const type = o.withdrawsId ? 'OUTCOME_WITHDRAWN' : o.outcome;
+      byType[type] = (byType[type] ?? 0) + 1;
+    }
+    return { total: list.length + changes + events.length, byType };
   }
   if (method === 'GET' && p === '/inventory-transactions/writeoffs-by-responsible') return writeoffsByResponsible(qs);
   if (method === 'GET' && p === '/inventory-transactions/actors') {
-    const ids = new Set([...state.transactions, ...state.toolLoanExtensions].map((t) => t.actorId));
+    const ids = new Set([...state.transactions, ...state.toolLoanExtensions, ...state.consumableOutcomes].map((t) => t.actorId));
     return mockUsers.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, name: u.name })).sort((a, b) => a.name.localeCompare(b.name));
   }
   // Mirrors StockReceiptService.receive: a posted goods receipt with no
@@ -2581,16 +2588,51 @@ function handleReturn(id: string, b: { quantity?: number; locationId?: string; r
   return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - closed - qty) };
 }
 
-// Mirrors InventoryService.returnMany: each line as handleReturn, all-or-nothing.
-function handleReturnMany(b: { lines?: Array<{ issueTransactionId: string; quantity: number; locationId?: string }>; reason?: string }): { transactionIds: string[] } {
+// Mirrors InventoryService.returnMany: on each line, stock back on the shelf
+// and, for an item that tracks use, used up and broken (ADR-026), the three
+// checked together against what is still out; all-or-nothing.
+function handleReturnMany(b: {
+  lines?: Array<{ issueTransactionId: string; quantity?: number; usedUp?: number; broken?: number; locationId?: string }>; reason?: string;
+}): { transactionIds: string[]; outcomeIds: string[] } {
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item that is coming back');
-  if (lines.some((l) => !(Number(l.quantity) > 0))) throw err('VALIDATION_ERROR', 'Return quantity must be positive');
+  const amount = (n: number | undefined) => Number(n ?? 0);
+  if (lines.some((l) => amount(l.quantity) < 0 || amount(l.usedUp) < 0 || amount(l.broken) < 0)) throw err('VALIDATION_ERROR', 'Quantities cannot be negative');
+  if (lines.some((l) => !(amount(l.quantity) + amount(l.usedUp) + amount(l.broken) > 0))) {
+    throw err('VALIDATION_ERROR', 'Each line needs something coming back: on the shelf, used up or broken');
+  }
   const before = state.transactions.length;
+  const outcomesBefore = state.consumableOutcomes.length;
   try {
-    return { transactionIds: lines.map((l) => handleReturn(l.issueTransactionId, { quantity: l.quantity, locationId: l.locationId, reason: b.reason }).transactionId) };
+    const transactionIds: string[] = [];
+    const outcomeIds: string[] = [];
+    for (const l of lines) {
+      const issue = state.transactions.find((t) => t.id === l.issueTransactionId);
+      if (!issue) throw err('NOT_FOUND', 'InventoryTransaction not found');
+      const m = findMaterial(issue.materialId);
+      const marks = amount(l.usedUp) + amount(l.broken);
+      if (marks > 0 && issue.type === 'ISSUE' && !m?.trackUse) {
+        throw err('INVALID_STATE', `${m?.sku ?? 'This item'} does not track use after issue, so it cannot be marked used up or broken. Put it back on the shelf, or switch Track use on for the item first.`);
+      }
+      const total = amount(l.quantity) + marks;
+      const out = -Number(issue.quantity) - returnedAgainst(issue.id) - closedTotal(issue.id);
+      if (issue.type === 'ISSUE' && marks > 0 && total > out) {
+        throw err('VALIDATION_ERROR', `Cannot take back ${total} × ${m?.sku ?? ''}: only ${out} of the ${-Number(issue.quantity)} issued is still out.`);
+      }
+      let returnTransactionId: string | null = null;
+      if (amount(l.quantity) > 0) {
+        returnTransactionId = handleReturn(l.issueTransactionId, { quantity: l.quantity, locationId: l.locationId, reason: b.reason }).transactionId;
+        transactionIds.push(returnTransactionId);
+      }
+      const at = returnTransactionId ? state.transactions.find((t) => t.id === returnTransactionId)!.postedAt : new Date().toISOString();
+      for (const [outcome, quantity] of [['USED_UP', amount(l.usedUp)], ['BROKEN', amount(l.broken)]] as const) {
+        if (quantity > 0) outcomeIds.push(handleOutcome(issue.id, { outcome, quantity, note: b.reason }, { returnTransactionId, createdAt: at }).outcomeId);
+      }
+    }
+    return { transactionIds, outcomeIds };
   } catch (e) {
     state.transactions.length = before;
+    state.consumableOutcomes.length = outcomesBefore;
     throw e;
   }
 }
@@ -2617,7 +2659,7 @@ function handleReturnable(qs: Record<string, string | undefined>): ReturnableLin
         issueTransactionId: t.id, issueId: t.issueId ?? null, postedAt: t.postedAt,
         materialId: t.materialId, sku: m?.sku ?? '', name: m?.name ?? '', unitOfMeasure: m?.unitOfMeasure ?? '',
         locationId: t.locationId, locationName: l?.name ?? '', locationActive: l?.active ?? false,
-        projectNumber: t.projectNumber ?? null,
+        projectNumber: t.projectNumber ?? null, trackUse: !!m?.trackUse,
         issued: String(issued), returned: String(returned), closedOff: String(closedOff), outstanding: String(issued - returned - closedOff),
       }];
     });
@@ -2660,7 +2702,7 @@ function issueOutcomes(id: string): IssueOutcomes {
   };
 }
 
-function handleOutcome(id: string, b: { outcome?: 'USED_UP' | 'BROKEN'; quantity?: number; note?: string }) {
+function handleOutcome(id: string, b: { outcome?: 'USED_UP' | 'BROKEN'; quantity?: number; note?: string }, visit: { returnTransactionId?: string | null; createdAt?: string } = {}) {
   const qty = Number(b.quantity);
   if (!(qty > 0)) throw err('VALIDATION_ERROR', 'Quantity must be positive');
   if (b.outcome !== 'USED_UP' && b.outcome !== 'BROKEN') throw err('VALIDATION_ERROR', 'Say whether it was used up or broken, and how many');
@@ -2676,7 +2718,7 @@ function handleOutcome(id: string, b: { outcome?: 'USED_UP' | 'BROKEN'; quantity
   }
   const row: MockConsumableOutcome = {
     id: nextId('out'), issueTransactionId: id, outcome: b.outcome, quantity: qty, note: b.note?.trim() || null, withdrawsId: null,
-    actorId: 'user-1', createdAt: new Date().toISOString(),
+    actorId: 'user-1', createdAt: visit.createdAt ?? new Date().toISOString(), returnTransactionId: visit.returnTransactionId ?? null,
   };
   state.consumableOutcomes.push(row);
   return { outcomeId: row.id, ...issueUse(issue) };
@@ -3396,8 +3438,14 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
     returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
-    // As the server: what was marked used up or broken, and whether the item asks for it.
+    // As the server: on an issue, what was marked used up or broken so far; on a
+    // return, what its counter visit marked; and whether the item asks for it.
     ...(() => {
+      if (t.type === 'RETURN') {
+        const booked = state.consumableOutcomes.filter((o) => o.returnTransactionId === t.id && !o.withdrawsId);
+        const sum = (kind: string) => String(booked.filter((o) => o.outcome === kind).reduce((a, o) => a + o.quantity, 0));
+        return { usedUpQuantity: sum('USED_UP'), brokenQuantity: sum('BROKEN'), trackUse: !!m?.trackUse };
+      }
       const c = t.type === 'ISSUE' ? closedOffOf(state.consumableOutcomes, t.id) : null;
       return { usedUpQuantity: c ? String(c.usedUp) : null, brokenQuantity: c ? String(c.broken) : null, trackUse: !!m?.trackUse };
     })(),
@@ -3452,6 +3500,50 @@ function filterDueDateChanges(qs: Record<string, string>) {
     }
     return true;
   });
+}
+
+// As the server: used up or broken marks booked with nothing back on the shelf,
+// and every withdrawal, by when and who, and by their issue for the rest.
+function filterOutcomeEvents(qs: Record<string, string>) {
+  if (qs.type || qs.issueIds || (qs.report && qs.report !== 'returned')) return [];
+  const inRange = inDayRange(qs);
+  const needle = qs.q?.trim().toLowerCase();
+  const scope = mockLocationScope(qs);
+  return state.consumableOutcomes.filter((o) => {
+    if (!o.withdrawsId && o.returnTransactionId) return false;
+    const issue = state.transactions.find((t) => t.id === o.issueTransactionId);
+    if (!issue) return false;
+    if (qs.materialId && issue.materialId !== qs.materialId) return false;
+    if (qs.projectNumber && issue.projectNumber !== qs.projectNumber) return false;
+    if (scope ? !scope.includes(issue.locationId) : qs.locationId && issue.locationId !== qs.locationId) return false;
+    if (qs.actorId && o.actorId !== qs.actorId) return false;
+    if (qs.recipientId && (qs.recipientId === '__none__' ? !!issue.recipientId : issue.recipientId !== qs.recipientId)) return false;
+    if (!inRange(o.createdAt)) return false;
+    if (needle) {
+      const m = findMaterial(issue.materialId);
+      const hay = [m?.sku, m?.name, findLocation(issue.locationId)?.name, issue.projectNumber, state.recipients.find((r) => r.id === issue.recipientId)?.name]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+}
+
+/** A mark of its own, or a withdrawal, as a Movements row: its issue's item, place, person and project; no quantity. */
+function outcomeEventRow(o: MockConsumableOutcome): MockMovementRow {
+  const issue = state.transactions.find((t) => t.id === o.issueTransactionId)!;
+  const base = enrichMovement(issue);
+  return {
+    ...base,
+    id: o.id, cursor: `${o.createdAt}_${o.id}`, postedAt: o.createdAt, type: o.withdrawsId ? 'OUTCOME_WITHDRAWN' : o.outcome, quantity: null,
+    actorId: o.actorId, actorName: mockUsers.find((u) => u.id === o.actorId)?.name ?? 'Unknown',
+    reasonCode: undefined, reasonNote: o.note ?? undefined, referenceType: 'ConsumableOutcome', referenceId: issue.id,
+    reversesId: undefined, reversedById: undefined, returnedQuantity: null,
+    usedUpQuantity: o.outcome === 'USED_UP' ? String(o.quantity) : null, brokenQuantity: o.outcome === 'BROKEN' ? String(o.quantity) : null,
+    otherLocationName: null,
+    returnOf: { id: issue.id, postedAt: issue.postedAt, issueId: base.issueId ?? null, locationName: base.locationName },
+    dueOn: null, previousDueOn: null, currentDueOn: null, daysLate: null, overdueOverrideReason: null,
+  };
 }
 
 /** A due date change as a Movements row: its loan's item, place, person and project, and no quantity. */

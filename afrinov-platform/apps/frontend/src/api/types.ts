@@ -110,6 +110,8 @@ export interface ReturnableLine {
   materialId: string; sku: string; name: string; unitOfMeasure: string;
   locationId: string; locationName: string; locationActive: boolean;
   projectNumber: string | null;
+  /** The item tracks use after issue, so the line also takes used up and broken. */
+  trackUse?: boolean;
   /** closedOff: marked used up or broken; outstanding already leaves it out. */
   issued: string; returned: string; closedOff?: string; outstanding: string;
 }
@@ -123,7 +125,13 @@ export interface MovementRow {
   /** Issues: the slip this line belongs to. */
   issueId?: string | null;
   locationId: string; locationName: string;
-  /** Null on a tool loan due date change (type DUE_DATE_CHANGE): no stock moved. */
+  /**
+   * Null on a row that moved no stock: a tool loan due date change
+   * (DUE_DATE_CHANGE), or a used up or broken mark of its own or its
+   * withdrawal (USED_UP, BROKEN, OUTCOME_WITHDRAWN; usedUpQuantity or
+   * brokenQuantity says how many). On a RETURN, usedUpQuantity and
+   * brokenQuantity are what the same counter visit marked.
+   */
   quantity: string | null; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   referenceType?: string | null; referenceId?: string | null;

@@ -19,6 +19,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
+import { MovementReason } from '../components/MovementReason';
 import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type { CurrentStockRow, Material, MovementRow } from '../api/types';
@@ -345,7 +346,8 @@ function movementColumns({ onSelect }: { onSelect: (m: MovementRow) => void }): 
     { key: 'type', header: 'Type', render: (m) => <MovementBadge type={m.type} /> },
     { key: 'loc', header: 'Location', render: (m) => m.locationName },
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => (m.quantity === null ? <span className="text-meta">No stock moved</span> : <span className="font-mono">{m.quantity}</span>) },
-    { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace('_', ' ').toLowerCase()}</span> : <span className="text-surface-300">—</span> },
+    // No Issued to column here, so the reason says who it went to and what became of it.
+    { key: 'reason', header: 'Reason', render: (m) => <MovementReason movement={m} withWho /> },
     { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : <span className="text-surface-300">—</span> },
     { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span> },
   ];

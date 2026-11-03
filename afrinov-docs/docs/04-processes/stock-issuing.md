@@ -46,16 +46,32 @@ costly consumables such as grinding and cutting discs, where the store wants
 to know what was worn out, what broke early and what is still with the
 person. Stock is still counted as used at the issue; nothing here moves stock.
 
-1. When the stub or the broken piece comes back to the counter: Movements →
-   open the issue → **Used up or broken** → Mark used up or broken: what
-   happened (Used up or Broken), how many, optional note.
-2. `POST /api/v1/inventory-transactions/:id/outcomes` (`issue:inventory`):
-   only against an ISSUE that is not reversed, of an item that tracks use; at
-   most what is still out (issued − returned − used up − broken). Returns and
-   outcomes take the same balance lock, so they cannot both spend it.
-3. One `consumable_outcomes` row against the issue; `CONSUMABLE_OUTCOME`
-   audit entry. No ledger row, no balance change.
-4. A mistake is **withdrawn**, with a reason (`POST
+1. When the person comes back to the counter: **Return stock**
+   (`/stock/return`) → Returned by → their issues still out. On each line:
+   **Back on the shelf**, and for an item that tracks use, **Used up** and
+   **Broken**. Still out after is shown as it is typed. One optional note is
+   kept with every line. **Book** books the whole visit.
+2. `POST /api/v1/inventory-returns` (`issue:inventory`), all lines or
+   none: each line takes `quantity`, `usedUp` and `broken`, at least one.
+   Used up and broken only against an unreversed ISSUE of an item that tracks
+   use; the three together at most what is still out (issued − returned −
+   used up − broken). Returns and outcomes take the same balance lock, so
+   they cannot both spend it.
+3. What goes back on the shelf is a RETURN, as below. Each used up or broken
+   is one `consumable_outcomes` row against the issue with a
+   `CONSUMABLE_OUTCOME` audit entry: no ledger row, no balance change.
+
+Movements shows the result on the issue (used up, broken, still out and each
+mark) and books nothing new there. Every visit is in its history at the time
+it was booked: the return's row lists what came back in that visit, back on
+the shelf, used up and broken; a visit with nothing back on the shelf lists
+each mark as a row of its own (Used up, Broken; no stock moved); a withdrawal
+is a row too, with its reason. The issue's row says who it went to and how
+much is still out. `POST
+/api/v1/inventory-transactions/:id/outcomes` records one outcome against one
+issue, for API clients; the app does not use it.
+4. A mistake is **withdrawn** from the issue on Movements, under Correct a
+   mistake, with a reason (`POST
    /api/v1/consumable-outcomes/:id/withdrawal`,
    `reverse:inventory_transaction`): a second row naming the first. Both are
    kept, both count for nothing; `CONSUMABLE_OUTCOME_WITHDRAW` audit entry.

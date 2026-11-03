@@ -54,7 +54,6 @@ export const PERMISSION_ROLES = {
   'inventory:receive': ['STORE_CONTROLLER', 'PROCUREMENT'], // receive:inventory
   'inventory:issue': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory
   'inventory:return': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory (returns are booked by the people who issue)
-  'inventory:outcome': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory (used up or broken is booked at the counter too)
   'inventory:transfer': ['STORE_CONTROLLER'], // transfer:inventory
   'inventory:adjust': ['STORE_CONTROLLER'], // adjust:inventory
   'inventory:count': ['STORE_CONTROLLER'], // adjust:inventory (a count posts its differences as adjustments)

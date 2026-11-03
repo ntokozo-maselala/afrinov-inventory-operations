@@ -23,11 +23,19 @@ interface Props {
   onError: (err: ApiError) => void;
 }
 
+/** The kind of row, in words, for the rows that are not a plain movement type. */
+const TYPE_TEXT: Record<string, string> = {
+  DUE_DATE_CHANGE: 'Due date moved',
+  USED_UP: 'Used up (no stock moved)',
+  BROKEN: 'Broken (no stock moved)',
+  OUTCOME_WITHDRAWN: 'Used up or broken withdrawn (no stock moved)',
+};
+
 /** What the recipient was to a movement: who it was issued to, unless the movement says otherwise. */
 export function recipientLabel(type: string): string {
   if (type === 'ADJUSTMENT') return 'Responsible';
   if (type === 'LOAN' || type === 'LOAN_RETURN' || type === 'DUE_DATE_CHANGE') return 'Checked out to';
-  if (type === 'RETURN') return 'Returned by';
+  if (type === 'RETURN' || type === 'USED_UP' || type === 'BROKEN' || type === 'OUTCOME_WITHDRAWN') return 'Returned by';
   return 'Issued to';
 }
 
@@ -61,6 +69,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
 
   const isTransfer = transaction.type === 'TRANSFER_IN' || transaction.type === 'TRANSFER_OUT';
   const isDueDateChange = transaction.type === 'DUE_DATE_CHANGE';
+  // A used up or broken mark of its own, or its withdrawal: no stock moved; put right on the issue.
+  const isMark = transaction.referenceType === 'ConsumableOutcome';
   const loanId = loanOf(transaction);
   // A receipt against a purchase order also moved the order's received
   // quantities, so the server only lets it be put right on the order. A
@@ -85,6 +95,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !transaction.reversesId
     && !transaction.reversedById
     && !fromPurchaseOrder
+    && !isMark
     // Tool loans are put right by checking the tool in or out again.
     && transaction.type !== 'LOAN' && transaction.type !== 'LOAN_RETURN' && transaction.referenceType !== 'ToolLoan';
 
@@ -132,13 +143,31 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           <dt className="text-surface-500">When</dt>
           <dd className="col-span-2">{new Date(transaction.postedAt).toLocaleString()}</dd>
           <dt className="text-surface-500">Type</dt>
-          <dd className="col-span-2">{isDueDateChange ? 'Due date moved' : transaction.type}</dd>
+          <dd className="col-span-2">{TYPE_TEXT[transaction.type] ?? transaction.type}</dd>
           <dt className="text-surface-500">Material</dt>
           <dd className="col-span-2">{transaction.materialSku} — {transaction.materialName}</dd>
           <dt className="text-surface-500">Location</dt>
           <dd className="col-span-2">{transaction.locationName}</dd>
           <dt className="text-surface-500">Quantity</dt>
           <dd className="col-span-2 text-num">{transaction.quantity ?? 'No stock moved'}</dd>
+          {(transaction.type === 'RETURN' || isMark) && usedUp > 0 && (
+            <>
+              <dt className="text-surface-500">{transaction.type === 'OUTCOME_WITHDRAWN' ? 'Used up withdrawn' : 'Used up'}</dt>
+              <dd className="col-span-2 text-num">{usedUp}</dd>
+            </>
+          )}
+          {(transaction.type === 'RETURN' || isMark) && broken > 0 && (
+            <>
+              <dt className="text-surface-500">{transaction.type === 'OUTCOME_WITHDRAWN' ? 'Broken withdrawn' : 'Broken'}</dt>
+              <dd className="col-span-2 text-num">{broken}</dd>
+            </>
+          )}
+          {isMark && transaction.returnOf && (
+            <>
+              <dt className="text-surface-500">Against the issue of</dt>
+              <dd className="col-span-2">{new Date(transaction.returnOf.postedAt).toLocaleString()} · {transaction.returnOf.locationName}</dd>
+            </>
+          )}
           {transaction.dueOn && (
             <>
               <dt className="text-surface-500">{isDueDateChange ? 'Due date' : 'Due back'}</dt>
@@ -184,7 +213,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           )}
           {transaction.reasonNote && (
             <>
-              <dt className="text-surface-500">{isDueDateChange ? 'Why' : 'Note'}</dt>
+              <dt className="text-surface-500">{isDueDateChange || transaction.type === 'OUTCOME_WITHDRAWN' ? 'Why' : 'Note'}</dt>
               <dd className="col-span-2">{transaction.reasonNote}</dd>
             </>
           )}

@@ -2,7 +2,7 @@
 // broken (ADR-026): no stock moves, returns and outcomes share what is still
 // out, a mistake is withdrawn rather than edited, an issue with outcomes is
 // reversed only once they are withdrawn, and the Consumption report says who
-// still has what.
+// still has what. Return stock books all of it in one counter visit.
 //
 // Run with: npm run test:integration
 import { randomUUID } from 'node:crypto';
@@ -153,5 +153,89 @@ describe('consumable outcomes over real HTTP', () => {
     expect((await api('POST', `/inventory-transactions/${issueId}/reversal`, { reason: 'Wrong worker' })).status).toBe(201);
     expect(await onHand()).toBe('20');
     expect((await mark(issueId, { outcome: 'USED_UP', quantity: 1 })).status).toBe(409);
+  });
+
+  it('books a counter visit on Return stock: back on the shelf, used up and broken, all or nothing', async () => {
+    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+      recipientId, lines: [{ materialId: discId, locationId: rackId, quantity: 10 }, { materialId: gloveId, locationId: rackId, quantity: 2 }],
+    });
+    const [disc, glove] = issued.body.transactionIds as [string, string];
+    expect(await onHand()).toBe('10');
+    const listed = await api<Array<{ issueTransactionId: string; trackUse: boolean }>>('GET', `/inventory-returns/returnable?recipientId=${recipientId}`);
+    expect(listed.body.find((l) => l.issueTransactionId === disc)?.trackUse).toBe(true);
+    expect(listed.body.find((l) => l.issueTransactionId === glove)?.trackUse).toBe(false);
+
+    const visit = (lines: unknown[], key = randomUUID()) =>
+      api<{ transactionIds: string[]; outcomeIds: string[]; error?: { code: string; message: string } }>('POST', '/inventory-returns', { reason: 'Disc shattered on the grinder', lines }, { 'Idempotency-Key': key });
+
+    // Used up on gloves, which do not track use, refuses the whole visit: nothing is booked.
+    const refused = await visit([{ issueTransactionId: disc, quantity: 2, usedUp: 6 }, { issueTransactionId: glove, usedUp: 1 }]);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error?.message).toMatch(/does not track use after issue/);
+    expect(await onHand()).toBe('10');
+    expect((await outcomesOf(disc)).stillOut).toBe('10');
+    // The three together are checked against what is still out.
+    const over = await visit([{ issueTransactionId: disc, quantity: 4, usedUp: 6, broken: 1 }]);
+    expect(over.status).toBe(400);
+    expect(over.body.error?.message).toMatch(/Cannot take back 11 × .*only 10 of the 10 issued is still out/);
+    expect((await visit([{ issueTransactionId: disc }])).status).toBe(400);
+
+    const key = randomUUID();
+    const booked = await visit([{ issueTransactionId: disc, quantity: 2, usedUp: 6, broken: 1 }, { issueTransactionId: glove, quantity: 1 }], key);
+    expect(booked.status).toBe(201);
+    expect(booked.body.transactionIds).toHaveLength(2);
+    expect(booked.body.outcomeIds).toHaveLength(2);
+    // A retry with the same key replays the visit instead of booking it twice.
+    const retry = await visit([{ issueTransactionId: disc, quantity: 2, usedUp: 6, broken: 1 }, { issueTransactionId: glove, quantity: 1 }], key);
+    expect(retry.body.outcomeIds).toEqual(booked.body.outcomeIds);
+
+    // Only the two back on the shelf moved stock.
+    expect(await onHand()).toBe('12');
+    const detail = await outcomesOf(disc);
+    expect(detail).toMatchObject({ returned: '2', usedUp: '6', broken: '1', stillOut: '1' });
+    expect(detail.outcomes.map((o) => [o.outcome, o.quantity, o.note])).toEqual([
+      ['USED_UP', '6', 'Disc shattered on the grinder'], ['BROKEN', '1', 'Disc shattered on the grinder'],
+    ]);
+    const audits = await prisma.auditLogEntry.count({ where: { entityId: disc, action: { in: ['RETURN', 'CONSUMABLE_OUTCOME'] } } });
+    expect(audits).toBe(3);
+  });
+
+  it('records every counter visit and every withdrawal on Movements, so nothing is missing from the history', async () => {
+    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+      recipientId, lines: [{ materialId: discId, locationId: rackId, quantity: 5 }],
+    });
+    const [disc] = issued.body.transactionIds as [string];
+    const visit = (lines: unknown[]) =>
+      api<{ transactionIds: string[]; outcomeIds: string[] }>('POST', '/inventory-returns', { lines }, { 'Idempotency-Key': randomUUID() });
+
+    // One visit with some back on the shelf, one with only stubs.
+    const first = await visit([{ issueTransactionId: disc, quantity: 2, usedUp: 1 }]);
+    expect(first.status).toBe(201);
+    const second = await visit([{ issueTransactionId: disc, usedUp: 1, broken: 1 }]);
+    expect(second.status).toBe(201);
+    const [usedId, brokenId] = second.body.outcomeIds as [string, string];
+    // The broken one was a mistake.
+    expect((await api('POST', `/consumable-outcomes/${brokenId}/withdrawal`, { reason: 'Belonged to another worker' }, { 'Idempotency-Key': randomUUID() })).status).toBe(201);
+
+    interface Row { id: string; type: string; quantity: string | null; usedUpQuantity: string | null; brokenQuantity: string | null; reasonNote: string | null; referenceId: string | null }
+    const rows = (await api<Row[]>('GET', `/inventory-transactions?materialId=${discId}&limit=50`)).body;
+    const ret = rows.find((r) => r.id === first.body.transactionIds[0]);
+    // The return's row shows the stub booked with it.
+    expect(ret).toMatchObject({ type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0' });
+    // The visit with nothing back on the shelf is on its own rows, with no stock quantity.
+    expect(rows.find((r) => r.id === usedId)).toMatchObject({ type: 'USED_UP', quantity: null, usedUpQuantity: '1', referenceId: disc });
+    expect(rows.find((r) => r.id === brokenId)).toMatchObject({ type: 'BROKEN', quantity: null, brokenQuantity: '1' });
+    // The withdrawal is a row too, with its reason.
+    expect(rows.find((r) => r.type === 'OUTCOME_WITHDRAWN' && r.referenceId === disc)).toMatchObject({ quantity: null, brokenQuantity: '1', reasonNote: 'Belonged to another worker' });
+    // The mark booked with the return is not listed twice.
+    expect(rows.filter((r) => r.type === 'USED_UP' && r.referenceId === disc)).toHaveLength(1);
+
+    // The returned stock report has them too; the issued report does not.
+    const returned = (await api<Row[]>('GET', `/inventory-transactions?materialId=${discId}&report=returned&limit=50`)).body;
+    expect(returned.map((r) => r.type)).toEqual(expect.arrayContaining(['RETURN', 'USED_UP', 'BROKEN', 'OUTCOME_WITHDRAWN']));
+    const issuedReport = (await api<Row[]>('GET', `/inventory-transactions?materialId=${discId}&report=issued&limit=50`)).body;
+    expect(issuedReport.every((r) => r.type === 'ISSUE')).toBe(true);
+    const summary = (await api<{ byType: Record<string, number> }>('GET', `/inventory-transactions/summary?materialId=${discId}`)).body;
+    expect(summary.byType).toMatchObject({ USED_UP: expect.any(Number), BROKEN: expect.any(Number), OUTCOME_WITHDRAWN: expect.any(Number) });
   });
 });

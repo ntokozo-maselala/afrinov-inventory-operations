@@ -12,6 +12,11 @@ and the recovery considerations for the migration added in this workstream.
   `(material_id, location_id)` pair, recomputed after every movement. The
   integration helper `ledgerAndBalance()` asserts the ledger sum equals the
   stored balance after each workflow.
+- An issue's figures add up (ADR-026): issued = returned + used up + broken +
+  still out, with still out never negative. `npm run check:issued-stock`
+  (`src/modules/inventory/issued-stock-check.ts`) checks that, and the
+  ledger sums, across a whole database, read-only; `integration/consumable-math.real-http.test.ts`
+  runs it after every operation on issued stock.
 - Balance-changing workflows and PO-receipt workflows take transaction-scoped
   PostgreSQL advisory locks in a stable `(materialId, locationId)` order, so
   concurrent movements serialize instead of both passing a read-then-write

@@ -814,6 +814,31 @@ describe('mock API: a location inside another', () => {
     expect(after).toMatchObject({ name: 'Test room', active: true });
   });
 
+  it('takes back on the shelf, used up and broken at the counter in one booking, all or nothing, as the server', async () => {
+    // mat-5 (grinding disc) tracks use; mat-1 does not.
+    const disc = await issue('mat-5', 'loc-1', 10);
+    const bolt = await issue('mat-1', 'loc-1', 2);
+    const listed = await api.get<Array<{ issueTransactionId: string; trackUse: boolean }>>('/inventory-returns/returnable?recipientId=rcp-1');
+    expect(listed.find((l) => l.issueTransactionId === disc)?.trackUse).toBe(true);
+    expect(listed.find((l) => l.issueTransactionId === bolt)?.trackUse).toBe(false);
+
+    // Used up on an item that does not track use refuses the whole booking.
+    await expect(api.post('/inventory-returns', { lines: [{ issueTransactionId: disc, quantity: 2, usedUp: 6 }, { issueTransactionId: bolt, usedUp: 1 }] }))
+      .rejects.toMatchObject({ code: 'INVALID_STATE' });
+    // The three together are checked against what is still out.
+    await expect(api.post('/inventory-returns', { lines: [{ issueTransactionId: disc, quantity: 4, usedUp: 6, broken: 1 }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect((await api.get<{ stillOut: string }>(`/inventory-transactions/${disc}/outcomes`)).stillOut).toBe('10');
+
+    const booked = await api.post<{ transactionIds: string[]; outcomeIds: string[] }>('/inventory-returns', {
+      reason: 'Disc shattered', lines: [{ issueTransactionId: disc, quantity: 2, usedUp: 6, broken: 1 }, { issueTransactionId: bolt, quantity: 1 }],
+    });
+    expect(booked.transactionIds).toHaveLength(2);
+    expect(booked.outcomeIds).toHaveLength(2);
+    const after = await api.get<{ returned: string; usedUp: string; broken: string; stillOut: string }>(`/inventory-transactions/${disc}/outcomes`);
+    expect(after).toMatchObject({ returned: '2', usedUp: '6', broken: '1', stillOut: '1' });
+  });
+
   it('marks a tracked consumable used up or broken, sharing what is still out with returns, as the server', async () => {
     // mat-5 (grinding disc) tracks use; 35 are at loc-1 in the seed.
     const id = await issue('mat-5', 'loc-1', 10);
