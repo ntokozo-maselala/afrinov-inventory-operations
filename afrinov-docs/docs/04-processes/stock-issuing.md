@@ -92,6 +92,9 @@ Tools are not issued: they are checked out and back in on the Tools page
 - Every issue names an active recipient (ADR-008).
 - An issue with returns against it cannot be reversed until the returns are
   reversed; one marked used up or broken, until those are withdrawn.
+- A return booked together with used up or broken cannot be reversed until
+  those marks are withdrawn, so they never keep counting against an undone
+  return.
 - Returns, used up and broken together never exceed what was issued.
 - Quantities are kept to four decimal places; a finer one (0.00001) is refused
   rather than stored rounded, possibly as zero.

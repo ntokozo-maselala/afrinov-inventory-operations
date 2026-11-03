@@ -27,6 +27,12 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 const n = (q: string | null | undefined) => Number(q ?? 0);
+/** Quantities are kept to four decimal places; rounding there drops floating-point dust (1.1 − 1 − 0.1). */
+const round4 = (x: number) => Math.round(x * 1e4) / 1e4 || 0; // never -0
+/** A figure as the downloads write it, in the browser too: plain digits, at most four decimals. */
+const figureText = (x: number) => String(round4(x));
+const stillOutOf = (m: Pick<MovementRow, 'quantity' | 'returnedQuantity' | 'usedUpQuantity' | 'brokenQuantity'>) =>
+  round4(-n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity));
 
 /**
  * The Used up, Broken and Still out columns (Qodo, PR #144): what each row
@@ -46,7 +52,7 @@ export function figureColumns(m: Pick<MovementRow, 'type' | 'quantity' | 'revers
     return { usedUp: figure(m.usedUpQuantity), broken: figure(m.brokenQuantity), stillOut: null };
   }
   if (m.type === 'ISSUE' && !m.reversedById && m.quantity !== null && (m.trackUse || n(m.usedUpQuantity) + n(m.brokenQuantity) > 0)) {
-    return { ...blank, stillOut: -n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity) };
+    return { ...blank, stillOut: stillOutOf(m) };
   }
   return blank;
 }
@@ -54,18 +60,22 @@ export function figureColumns(m: Pick<MovementRow, 'type' | 'quantity' | 'revers
 /**
  * The reason column (ADR-026): on an issue of an item that tracks use, how
  * much is still out; on a return, what came back in that visit; on a mark or
- * its withdrawal, how many; else the reason code.
+ * its withdrawal, how many; else the reason code. The browser's download
+ * (frontend lib/movementReason.ts movementReason) writes exactly the same
+ * text; both are tested against movement-reason.cases.json.
  */
 export function reasonText(m: Pick<MovementRow, 'type' | 'quantity' | 'reasonCode' | 'reversesId' | 'returnedQuantity' | 'usedUpQuantity' | 'brokenQuantity' | 'trackUse'>): string {
   const parts: string[] = [];
   if (m.type === 'ISSUE' && !m.reversesId && m.quantity !== null && (m.trackUse || n(m.usedUpQuantity) + n(m.brokenQuantity) > 0)) {
-    parts.push(`still out ${-n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity)}`);
+    parts.push(`still out ${figureText(stillOutOf(m))}`);
   }
   if ((m.type === 'RETURN' && !m.reversesId) || m.type === 'USED_UP' || m.type === 'BROKEN' || m.type === 'OUTCOME_WITHDRAWN') {
-    if (m.type === 'RETURN') parts.push(`back ${n(m.quantity)}`);
-    if (n(m.usedUpQuantity) > 0) parts.push(`used up ${n(m.usedUpQuantity)}`);
-    if (n(m.brokenQuantity) > 0) parts.push(`broken ${n(m.brokenQuantity)}`);
-    if (m.type === 'OUTCOME_WITHDRAWN') parts[0] = `withdrawn: ${parts[0] ?? ''}`;
+    const figures = [
+      m.type === 'RETURN' && `back ${figureText(n(m.quantity))}`,
+      n(m.usedUpQuantity) > 0 && `used up ${figureText(n(m.usedUpQuantity))}`,
+      n(m.brokenQuantity) > 0 && `broken ${figureText(n(m.brokenQuantity))}`,
+    ].filter(Boolean).join(', ');
+    parts.push(m.type === 'OUTCOME_WITHDRAWN' ? `withdrawn: ${figures}` : figures);
   }
   if (m.reasonCode) parts.push(m.reasonCode.replace(/_/g, ' ').toLowerCase());
   return parts.join(' · ');

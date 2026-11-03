@@ -210,6 +210,17 @@ describe('TransactionDrawer', () => {
     expect(screen.getByText(/received against a purchase order \(GR-2026-0008\), so it cannot be reversed here: correct it on the order/)).toBeInTheDocument();
   });
 
+  // Qodo, PR #144: undoing the return would leave its used up and broken counting.
+  it('does not offer to reverse a return booked with used up or broken until those are withdrawn', () => {
+    const ret = { ...issue, type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0' };
+    const { unmount } = render(<TransactionDrawer transaction={ret} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Used up or broken was booked with this return/)).toBeInTheDocument();
+    unmount();
+    render(<TransactionDrawer transaction={{ ...ret, usedUpQuantity: '0' }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Reverse this movement' })).toBeInTheDocument();
+  });
+
   describe('returning stock', () => {
     function renderIssue(overrides: Record<string, unknown> = {}) {
       const onReturned = vi.fn();

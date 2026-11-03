@@ -19,7 +19,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
-import { closedOffAgainst, closedTotal, writeOutcome } from './consumable-outcomes.js';
+import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -948,6 +948,12 @@ export const InventoryService = {
         }
         if (original.type === InventoryTransactionType.ISSUE && gtZero(closedTotal((await closedOffAgainst(tx, [original.id])).get(original.id)))) {
           throw Errors.invalidState('Part of this issue has been marked used up or broken. Withdraw those first.');
+        }
+        // Used up or broken booked in the same counter visit would keep counting
+        // after the return is undone, shown only on a reversed row (Qodo, PR #144).
+        if (original.type === InventoryTransactionType.RETURN
+          && await tx.consumableOutcome.count({ where: { returnTransactionId: original.id, ...LIVE_OUTCOME } }) > 0) {
+          throw Errors.invalidState('Used up or broken was booked with this return. Withdraw those first.');
         }
         for (const leg of legs) {
           if (!leg.quantity.isPositive()) continue;

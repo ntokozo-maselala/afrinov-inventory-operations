@@ -279,12 +279,17 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     { key: 'note', header: 'Note', render: loanNote },
     by,
   ],
+  // Returns, and (ADR-026) used up or broken booked with nothing back on the shelf and withdrawals of marks.
   returned: (open) => [
-    when(open), item,
-    { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => qty(m, false), width: '7rem' },
+    when(open),
+    { key: 'type', header: 'Type', render: (m) => <MovementBadge type={m.type} />, width: '8rem' },
+    item,
+    { key: 'qty', header: 'Back on the shelf', align: 'right', className: 'text-num', render: (m) => qty(m, false), width: '8rem' },
+    { key: 'came', header: 'Used up / broken', render: (m) => (m.type === 'RETURN' && !(Number(m.usedUpQuantity ?? 0) + Number(m.brokenQuantity ?? 0) > 0) ? none : <MovementReason movement={{ ...m, reasonNote: null, type: m.type === 'RETURN' ? 'USED_UP' : m.type }} />), width: '9rem' },
     { key: 'who', header: 'Returned by', render: (m) => m.recipientName ? <span className="text-meta">{m.recipientName}</span> : none, width: '9rem' },
     project,
-    { key: 'into', header: 'Back into', render: (m) => m.locationName, width: '9rem' },
+    // A mark moves no stock, so it goes back into nowhere.
+    { key: 'into', header: 'Back into', render: (m) => (m.quantity === null ? none : m.locationName), width: '9rem' },
     {
       key: 'issue', header: 'From the issue of', width: '12rem',
       render: (m) => (m.returnOf

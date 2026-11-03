@@ -5,7 +5,6 @@
 // shelf, and a withdrawal of a mark, are rows of their own and say how many.
 // The screens lay the parts out (components/MovementReason.tsx); the
 // downloads use the one-line text.
-import { formatNumber } from './format';
 import type { MovementRow } from '../api/types';
 
 export type ReasonRow = Pick<MovementRow, 'type' | 'quantity' | 'reasonCode'> &
@@ -15,6 +14,10 @@ export type ReasonRow = Pick<MovementRow, 'type' | 'quantity' | 'reasonCode'> &
 export const MARK_TYPES = new Set(['USED_UP', 'BROKEN', 'OUTCOME_WITHDRAWN']);
 
 const n = (q: string | null | undefined) => Number(q ?? 0);
+/** Quantities are kept to four decimal places; rounding there drops floating-point dust (1.1 − 1 − 0.1). */
+export const round4 = (x: number) => Math.round(x * 1e4) / 1e4 || 0; // never -0
+/** A figure as the downloads write it, on the server too: plain digits, at most four decimals. */
+const figureText = (x: number) => String(round4(x));
 
 /**
  * On an issue of an item that tracks use, how much is still out now; also on
@@ -24,7 +27,7 @@ const n = (q: string | null | undefined) => Number(q ?? 0);
 export function stillOutOn(m: ReasonRow): number | null {
   if (m.type !== 'ISSUE' || m.reversesId || m.quantity === null) return null;
   if (!m.trackUse && n(m.usedUpQuantity) + n(m.brokenQuantity) === 0) return null;
-  return -n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity);
+  return round4(-n(m.quantity) - n(m.returnedQuantity) - n(m.usedUpQuantity) - n(m.brokenQuantity));
 }
 
 /** Still out on an issue line of a report: none once the issue is reversed (Qodo, PR #144). */
@@ -79,18 +82,21 @@ export function counterparty(m: ReasonRow): string | null {
 /**
  * The Reason column as one line, for the downloads. withWho adds who an issue
  * went to or who brought something back, for a table with no column for it.
+ * Without it, the text is exactly what the server's download writes
+ * (movements-export.ts reasonText); both are tested against
+ * backend movement-reason.cases.json.
  */
 export function movementReason(m: ReasonRow, { withWho = false }: { withWho?: boolean } = {}): string {
   const parts: string[] = [];
   if (withWho) { const who = counterparty(m); if (who) parts.push(who); }
   const out = stillOutOn(m);
-  if (out !== null) parts.push(`still out ${formatNumber(out)}`);
+  if (out !== null) parts.push(`still out ${figureText(out)}`);
   const v = visitFigures(m);
   if (v) {
     const figures = [
-      m.type === 'RETURN' && `back ${formatNumber(v.back)}`,
-      v.usedUp > 0 && `used up ${formatNumber(v.usedUp)}`,
-      v.broken > 0 && `broken ${formatNumber(v.broken)}`,
+      m.type === 'RETURN' && `back ${figureText(v.back)}`,
+      v.usedUp > 0 && `used up ${figureText(v.usedUp)}`,
+      v.broken > 0 && `broken ${figureText(v.broken)}`,
     ].filter((p): p is string => !!p).join(', ');
     parts.push(v.withdrawn ? `withdrawn: ${figures}` : figures);
   }

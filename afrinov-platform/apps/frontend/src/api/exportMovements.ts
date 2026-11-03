@@ -160,13 +160,16 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
   ],
   returned: [
     { header: 'When', cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Type', cell: typeLabel },
     { header: 'Code', cell: (m) => m.materialSku },
     { header: 'Item', wrap: true, cell: (m) => m.materialName },
-    { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
+    // A used up or broken mark, or its withdrawal, moves no stock: never shown as 0.
+    { header: 'Back on the shelf', align: 'right', cell: (m) => (m.quantity === null ? 'No stock moved' : formatNumber(Math.abs(Number(m.quantity)))) },
     { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
+    { header: 'Used up / broken', wrap: true, cell: (m) => movementReason({ ...m, quantity: null, type: m.type === 'RETURN' ? 'USED_UP' : m.type }) },
     { header: 'Returned by', wrap: true, cell: (m) => m.recipientName ?? '' },
     { header: 'Project', cell: (m) => movementProject(m) ?? '' },
-    { header: 'Back into', wrap: true, cell: (m) => m.locationName },
+    { header: 'Back into', wrap: true, cell: (m) => (m.quantity === null ? '' : m.locationName) },
     { header: 'From the issue of', wrap: true, cell: (m) => (m.returnOf ? `${formatDateTime(m.returnOf.postedAt)}, ${m.returnOf.locationName}` : '') },
     { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
     { header: 'By', cell: (m) => m.actorName },

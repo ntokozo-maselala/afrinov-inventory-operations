@@ -21,6 +21,7 @@ import { daysAgo, today } from '../lib/dates';
 import { useIdempotencyKey } from '../lib/idempotency';
 import type { ReturnableLine } from '../api/types';
 import { locationLabel } from '../lib/locations';
+import { round4 } from '../lib/movementReason';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
@@ -80,7 +81,8 @@ export function ReturnStock() {
     const e = entry[l.issueTransactionId] ?? {};
     return { back: parseQty(e.back), usedUp: l.trackUse ? parseQty(e.usedUp) : null, broken: l.trackUse ? parseQty(e.broken) : null };
   };
-  const total = (a: Amounts) => positive(a.back) + positive(a.usedUp) + positive(a.broken);
+  // At the four decimals quantities are kept to, so 0.1 + 0.2 closes off 0.3 exactly.
+  const total = (a: Amounts) => round4(positive(a.back) + positive(a.usedUp) + positive(a.broken));
   /** Where a line goes back: the choice, else where it was issued from if that is still in use. */
   const target = (l: ReturnableLine) => into[l.issueTransactionId] ?? (l.locationActive ? l.locationId : '');
   const touched = (l: ReturnableLine) => Object.values(amounts(l)).some((v) => v !== null);
@@ -256,7 +258,7 @@ export function ReturnStock() {
                         const id = l.issueTransactionId;
                         const bad = problem(l);
                         const a = amounts(l);
-                        const after = Number(l.outstanding) - total(a);
+                        const after = round4(Number(l.outstanding) - total(a));
                         const backing = positive(a.back) > 0;
                         return (
                           <tr key={id}>

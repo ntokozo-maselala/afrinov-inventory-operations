@@ -1,6 +1,18 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
-import { buildMovementsXlsx } from './movements-export.js';
+import { readFileSync } from 'node:fs';
+import { buildMovementsXlsx, reasonText } from './movements-export.js';
+
+// The same rows, and the same text, the browser's download is tested against.
+const shared = JSON.parse(readFileSync(new URL('./movement-reason.cases.json', import.meta.url), 'utf8')) as {
+  cases: Array<{ name: string; row: Parameters<typeof reasonText>[0]; text: string }>;
+};
+
+describe('reasonText', () => {
+  it.each(shared.cases.map((c) => [c.name, c] as const))('writes the same text as the browser download: %s', (_name, c) => {
+    expect(reasonText(c.row)).toBe(c.text);
+  });
+});
 
 type ExportRow = Parameters<typeof buildMovementsXlsx>[0][number];
 

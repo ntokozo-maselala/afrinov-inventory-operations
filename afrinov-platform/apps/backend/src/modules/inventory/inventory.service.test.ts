@@ -266,6 +266,9 @@ const fakeTx = {
       }
       return [...groups.values()];
     },
+    // Live marks booked with a return (reversing that return asks).
+    count: async ({ where }: { where: { returnTransactionId?: string } }) =>
+      outcomes.filter((o) => (o as { returnTransactionId?: string }).returnTransactionId === where.returnTransactionId && !o.withdrawsId && !outcomes.some((w) => w.withdrawsId === o.id)).length,
     create: async ({ data }: { data: { issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: Prisma.Decimal } }) => {
       const row = { id: `o-${outcomes.length + 1}`, issueTransactionId: data.issueTransactionId, outcome: data.outcome, quantity: data.quantity, withdrawsId: null };
       outcomes.push(row);

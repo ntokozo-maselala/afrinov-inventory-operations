@@ -2619,8 +2619,9 @@ function handleReturnMany(b: {
       if (marks > 0 && issue.type === 'ISSUE' && !m?.trackUse) {
         throw err('INVALID_STATE', `${m?.sku ?? 'This item'} does not track use after issue, so it cannot be marked used up or broken. Put it back on the shelf, or switch Track use on for the item first.`);
       }
-      const total = amount(l.quantity) + marks;
-      const out = -Number(issue.quantity) - returnedAgainst(issue.id) - closedTotal(issue.id);
+      const round4 = (x: number) => Math.round(x * 1e4) / 1e4 || 0; // never -0
+      const total = round4(amount(l.quantity) + marks);
+      const out = round4(-Number(issue.quantity) - returnedAgainst(issue.id) - closedTotal(issue.id));
       if (issue.type === 'ISSUE' && marks > 0 && total > out) {
         throw err('VALIDATION_ERROR', `Cannot take back ${total} × ${m?.sku ?? ''}: only ${out} of the ${-Number(issue.quantity)} issued is still out.`);
       }
@@ -2756,6 +2757,10 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   }
   if (original.type === 'ISSUE' && closedTotal(original.id) > 0) {
     throw err('INVALID_STATE', 'Part of this issue has been marked used up or broken. Withdraw those first.');
+  }
+  if (original.type === 'RETURN' && state.consumableOutcomes.some((o) => o.returnTransactionId === original.id && !o.withdrawsId
+    && !state.consumableOutcomes.some((w) => w.withdrawsId === o.id))) {
+    throw err('INVALID_STATE', 'Used up or broken was booked with this return. Withdraw those first.');
   }
   if (original.referenceType === 'GoodsReceipt' && state.goodsReceipts.find((g) => g.id === original.referenceId)?.purchaseOrderId) {
     throw err('INVALID_STATE', 'Stock received against a purchase order cannot be reversed here.');

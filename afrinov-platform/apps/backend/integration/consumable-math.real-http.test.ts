@@ -29,6 +29,8 @@ interface Consumption {
 }
 
 const num = (s: string | number | null | undefined) => Number(s ?? 0);
+/** Sums of fractional quantities, at the four decimals they are stored with. */
+const round4 = (x: number) => Math.round(x * 1e4) / 1e4 || 0; // never -0
 
 describe('the numbers agree after every operation on issued stock', () => {
   const run = runId();
@@ -63,7 +65,7 @@ describe('the numbers agree after every operation on issued stock', () => {
       const at = `${step}, issue ${id.slice(0, 8)}`;
 
       // 1. The equation, and nothing negative.
-      expect(num(u.issued) - num(u.returned) - num(u.usedUp) - num(u.broken), `${at}: issued − back − used up − broken`).toBe(num(u.stillOut));
+      expect(round4(num(u.issued) - num(u.returned) - num(u.usedUp) - num(u.broken)), `${at}: issued − back − used up − broken`).toBe(num(u.stillOut));
       expect(num(u.stillOut), `${at}: still out`).toBeGreaterThanOrEqual(0);
 
       // 2. The issue's Movements row says the same.
@@ -75,14 +77,14 @@ describe('the numbers agree after every operation on issued stock', () => {
       const returns = rows.filter((r) => r.type === 'RETURN' && r.referenceId === id && !r.reversesId);
       const returnIds = new Set(returns.map((r) => r.id));
       const reversals = rows.filter((r) => r.type === 'RETURN' && r.reversesId && returnIds.has(r.reversesId));
-      const backInHistory = [...returns, ...reversals].reduce((a, r) => a + num(r.quantity), 0);
+      const backInHistory = round4([...returns, ...reversals].reduce((a, r) => a + num(r.quantity), 0));
       expect(backInHistory, `${at}: returns in the history`).toBe(num(u.returned));
       const marks = (field: 'usedUpQuantity' | 'brokenQuantity', type: 'USED_UP' | 'BROKEN') =>
         returns.reduce((a, r) => a + num(r[field]), 0)
         + rows.filter((r) => r.type === type && r.referenceId === id).reduce((a, r) => a + num(r[field]), 0)
         - rows.filter((r) => r.type === 'OUTCOME_WITHDRAWN' && r.referenceId === id).reduce((a, r) => a + num(r[field]), 0);
-      expect(marks('usedUpQuantity', 'USED_UP'), `${at}: used up in the history`).toBe(num(u.usedUp));
-      expect(marks('brokenQuantity', 'BROKEN'), `${at}: broken in the history`).toBe(num(u.broken));
+      expect(round4(marks('usedUpQuantity', 'USED_UP')), `${at}: used up in the history`).toBe(num(u.usedUp));
+      expect(round4(marks('brokenQuantity', 'BROKEN')), `${at}: broken in the history`).toBe(num(u.broken));
       // Rows that record a mark move no stock.
       for (const r of rows.filter((x) => ['USED_UP', 'BROKEN', 'OUTCOME_WITHDRAWN'].includes(x.type))) expect(r.quantity, `${at}: mark row quantity`).toBeNull();
 
@@ -106,11 +108,11 @@ describe('the numbers agree after every operation on issued stock', () => {
     // 6. Stock used by item: issued less returned, over the issues that count.
     for (const materialId of [discId, gloveId]) {
       const counted = issues.filter((i) => i.materialId === materialId && !history.get(materialId)!.find((r) => r.id === i.id)!.reversedById);
-      const issued = counted.reduce((a, i) => a + num(figures.get(i.id)!.issued), 0);
-      const back = counted.reduce((a, i) => a + num(figures.get(i.id)!.returned), 0);
+      const issued = round4(counted.reduce((a, i) => a + num(figures.get(i.id)!.issued), 0));
+      const back = round4(counted.reduce((a, i) => a + num(figures.get(i.id)!.returned), 0));
       const item = consumption.items.find((b) => b.materialId === materialId);
       if (issued === 0) expect(item?.used ?? 0, `${step}: Stock used for an item with nothing issued`).toBe(0);
-      else expect(item && { issued: item.issued, returned: item.returned, used: item.used }, `${step}: Stock used by item`).toEqual({ issued, returned: back, used: issued - back });
+      else expect(item && { issued: item.issued, returned: item.returned, used: item.used }, `${step}: Stock used by item`).toEqual({ issued, returned: back, used: round4(issued - back) });
     }
 
     // 7. Stock on hand: the stored balance is the ledger's sum, the stock
@@ -119,7 +121,7 @@ describe('the numbers agree after every operation on issued stock', () => {
       for (const locationId of [rackA, rackB]) {
         const { ledger, balance } = await ledgerAndBalance(materialId, locationId);
         expect(num(balance), `${step}: stored balance`).toBe(num(ledger));
-        const fromHistory = history.get(materialId)!.filter((r) => r.locationId === locationId && r.quantity !== null).reduce((a, r) => a + num(r.quantity), 0);
+        const fromHistory = round4(history.get(materialId)!.filter((r) => r.locationId === locationId && r.quantity !== null).reduce((a, r) => a + num(r.quantity), 0));
         expect(fromHistory, `${step}: history quantities at a location`).toBe(num(balance));
         const report = (await api<Array<{ locationId: string; quantity: string }>>('GET', `/reports/current-stock?materialId=${materialId}`)).body;
         expect(num(report.find((s) => s.locationId === locationId)?.quantity), `${step}: Stock report`).toBe(num(balance));
@@ -171,6 +173,11 @@ describe('the numbers agree after every operation on issued stock', () => {
     }, key());
     expect(visit1.status).toBe(201);
     f = await reconcile('visit with all three');
+    // Undoing that return would leave its used up and broken counting: they are withdrawn first (Qodo, PR #144).
+    const undo = await api<{ error: { message: string } }>('POST', `/inventory-transactions/${visit1.body.transactionIds[0]}/reversal`, { reason: 'Wrong worker' }, key());
+    expect(undo.status).toBe(409);
+    expect(undo.body.error.message).toBe('Used up or broken was booked with this return. Withdraw those first.');
+    f = await reconcile('return with marks not reversed');
     expect(f.get(disc)).toMatchObject({ returned: '2', usedUp: '3', broken: '1', stillOut: '4' });
     expect(await onHand(discId, rackA)).toBe(12);
 
@@ -231,6 +238,39 @@ describe('the numbers agree after every operation on issued stock', () => {
     expect((await api('POST', `/inventory-transactions/${disc}/reversal`, { reason: 'Issued to the wrong worker' }, key())).status).toBe(201);
     await reconcile('issue reversed');
     expect(await onHand(discId, rackA)).toBe(20);
+  });
+
+  // Qodo, PR #144: fractional quantities add up exactly, with no floating-point dust.
+  it('agrees on fractional quantities, closing an issue off exactly', async () => {
+    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+      recipientId: workerId, lines: [{ materialId: discId, locationId: rackA, quantity: 0.3 }],
+    }, key());
+    expect(issued.status).toBe(201);
+    const [id] = issued.body.transactionIds as [string];
+    issues.push({ id, materialId: discId });
+    const visit = await api('POST', '/inventory-returns', { lines: [{ issueTransactionId: id, quantity: 0.1, usedUp: 0.2 }] }, key());
+    expect(visit.status).toBe(201);
+    const f = await reconcile('fractional visit');
+    expect(f.get(id)).toMatchObject({ issued: '0.3', returned: '0.1', usedUp: '0.2', stillOut: '0' });
+    // Finer than four decimals is refused, not stored rounded.
+    expect((await api('POST', `/inventory-transactions/${id}/outcomes`, { outcome: 'USED_UP', quantity: 0.00001 }, key())).status).toBe(400);
+  });
+
+  it('is caught by the database check when a used up or broken quantity is not more than zero', async () => {
+    const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
+      recipientId: workerId, lines: [{ materialId: discId, locationId: rackA, quantity: 1 }],
+    }, key());
+    const [id] = issued.body.transactionIds as [string];
+    issues.push({ id, materialId: discId });
+    const actor = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    const bad = await prisma.consumableOutcome.create({ data: { issueTransactionId: id, outcome: 'USED_UP', quantity: -1, actorId: actor.id } });
+    try {
+      const { problems } = await checkIssuedStock(prisma);
+      expect(problems).toEqual([`Used up or broken record ${bad.id} has a quantity of -1.0000, not more than zero`]);
+    } finally {
+      await prisma.consumableOutcome.delete({ where: { id: bad.id } });
+    }
+    expect((await checkIssuedStock(prisma)).problems).toEqual([]);
   });
 
   // Qodo, PR #144: each checked the other before taking the lock they share.

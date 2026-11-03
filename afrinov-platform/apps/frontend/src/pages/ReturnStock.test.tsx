@@ -198,6 +198,20 @@ describe('ReturnStock page', () => {
       expect(screen.queryByRole('link', { name: 'See it in Returned stock' })).not.toBeInTheDocument();
     });
 
+    // Qodo, PR #144: 0.1 + 0.2 is 0.30000000000000004 in floating point.
+    it('closes off an exact fractional remainder, 0.1 back and 0.2 used up of 0.3', async () => {
+      returnable = [line('d', 'Grinding disc', '0.3', { trackUse: true, unitOfMeasure: 'kg' })];
+      renderAt('/stock/return?recipientId=r-1');
+      await screen.findByText('Grinding disc');
+      fireEvent.change(qtyFor('Grinding disc'), { target: { value: '0.1' } });
+      fireEvent.change(usedFor('Grinding disc'), { target: { value: '0.2' } });
+      expect(screen.queryByText(/At most/)).not.toBeInTheDocument();
+      expect(screen.getByText('Grinding disc').closest('tr')!.lastElementChild!.textContent).toBe('0');
+      fireEvent.click(bookButton());
+      await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+      expect(mockPost.mock.calls[0]![1]).toMatchObject({ lines: [{ issueTransactionId: 'd', quantity: 0.1, usedUp: 0.2 }] });
+    });
+
     it('checks the three together against what is still out', async () => {
       renderAt('/stock/return?recipientId=r-1');
       await screen.findByText('Grinding disc');

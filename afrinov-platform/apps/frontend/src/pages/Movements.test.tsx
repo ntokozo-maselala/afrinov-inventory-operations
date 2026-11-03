@@ -393,6 +393,28 @@ describe('Movements page', () => {
     expect(screen.getByRole('link', { name: /Boiler Shop/ })).toHaveAttribute('href', '/movements?report=issued&from=2026-09-28&to=2026-09-28&materialId=m-1&recipientId=r-1');
   });
 
+  // Qodo, PR #144: marks and withdrawals listed here say what they are and move no stock.
+  it('lists used up, broken and withdrawals among returned stock, saying what each recorded and that no stock moved', async () => {
+    const returnOf = { id: 'tx-9', postedAt: '2026-09-28T07:30:00.000Z', issueId: 'slip-9', locationName: 'Boiler Shop' };
+    const base = { ...row(1), recipientId: 'r-1', recipientName: 'Sabelo', locationName: 'Main Storeroom', returnOf, trackUse: true };
+    renderAt('/movements?report=returned&from=2026-10-05', [[
+      { ...base, id: 'w-1', type: 'OUTCOME_WITHDRAWN', quantity: null, brokenQuantity: '1', reasonNote: 'Belonged to Khodani', referenceType: 'ConsumableOutcome' },
+      { ...base, id: 'o-1', type: 'USED_UP', quantity: null, usedUpQuantity: '2', referenceType: 'ConsumableOutcome' },
+      { ...base, id: 'r-9', type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0' },
+      { ...base, id: 'r-8', type: 'RETURN', quantity: '1', usedUpQuantity: '0', brokenQuantity: '0' },
+    ]]);
+    const table = await screen.findByRole('table');
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((r) => within(r).getAllByRole('cell')[1]!.textContent)).toEqual(['Withdrawn', 'Used up', 'Return', 'Return']);
+    // Marks move no stock, so they say so and go back into nowhere.
+    expect(within(rows[0]!).getByText('No stock moved')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('Used up', { selector: 'dt' }).nextElementSibling).toHaveTextContent('2');
+    // A return shows the used up booked with it; a plain return has nothing to add.
+    expect(within(rows[2]!).getByText('Used up', { selector: 'dt' }).nextElementSibling).toHaveTextContent('1');
+    expect(within(rows[3]!).queryByText('Used up', { selector: 'dt' })).not.toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Belonged to Khodani')).toBeInTheDocument();
+  });
+
   it('links what came back on an issue to those returns, from the issue to today', async () => {
     renderAt('/movements?report=issued&from=2026-09-25');
     const link = await screen.findByTitle('See when and where it came back');

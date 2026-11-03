@@ -14,13 +14,14 @@ import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDateTime, formatNumber } from '../lib/format';
+import { round4 } from '../lib/movementReason';
 import type { IssueOutcomes, MovementRow } from '../api/types';
 
 const LABEL: Record<'USED_UP' | 'BROKEN', string> = { USED_UP: 'Used up', BROKEN: 'Broken' };
 
 /** Issued less returned, used up and broken, from a Movements row. */
 export function stillOutOf(t: Pick<MovementRow, 'quantity' | 'returnedQuantity' | 'usedUpQuantity' | 'brokenQuantity'>): number {
-  return -Number(t.quantity) - Number(t.returnedQuantity ?? 0) - Number(t.usedUpQuantity ?? 0) - Number(t.brokenQuantity ?? 0);
+  return round4(-Number(t.quantity) - Number(t.returnedQuantity ?? 0) - Number(t.usedUpQuantity ?? 0) - Number(t.brokenQuantity ?? 0));
 }
 
 export function ConsumableOutcomes({ transaction, onChanged, onError }: {

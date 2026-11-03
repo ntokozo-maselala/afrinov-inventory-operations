@@ -10,6 +10,7 @@ import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDay, lateBy } from '../lib/toolLoans';
 import { LoanHistory } from './LoanHistory';
 import { ConsumableOutcomes } from './ConsumableOutcomes';
+import { round4 } from '../lib/movementReason';
 
 
 interface Props {
@@ -88,10 +89,13 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && transaction.type === 'ISSUE'
     && !transaction.reversesId
     && !transaction.reversedById
-    && issued - returned - usedUp - broken > 0;
+    && round4(issued - returned - usedUp - broken) > 0;
+  // A return booked with used up or broken in the same visit: those are withdrawn first (Qodo, PR #144).
+  const returnWithMarks = transaction.type === 'RETURN' && !transaction.reversesId && usedUp + broken > 0;
   const canReverse = hasPermission('inventory:reverse')
     && !hasReturns
     && !hasOutcomes
+    && !returnWithMarks
     && !transaction.reversesId
     && !transaction.reversedById
     && !fromPurchaseOrder
@@ -252,6 +256,11 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
       {hasReturns && (
         <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
           {returned} of {issued} returned to stock.{!transaction.reversedById && ' To reverse this issue, reverse its returns first.'}
+        </p>
+      )}
+      {returnWithMarks && !transaction.reversedById && hasPermission('inventory:reverse') && (
+        <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
+          Used up or broken was booked with this return. To reverse it, withdraw those on the issue first.
         </p>
       )}
       {hasOutcomes && !hasReturns && !transaction.reversedById && hasPermission('inventory:reverse') && (

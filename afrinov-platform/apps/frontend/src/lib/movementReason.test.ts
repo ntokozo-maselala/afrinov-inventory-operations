@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { movementReason, stillOutOn, visitFigures } from './movementReason';
+
+// The same rows, and the same text, the server's download is tested against.
+const shared = JSON.parse(readFileSync(resolve(process.cwd(), '../backend/src/modules/inventory/movement-reason.cases.json'), 'utf8')) as {
+  cases: Array<{ name: string; row: Parameters<typeof movementReason>[0]; text: string }>;
+};
 
 // Five cut-off discs to Khodani; at the counter, two back on the shelf, two used up, one broken.
 const issue = {
@@ -9,6 +16,10 @@ const issue = {
 const ret = { type: 'RETURN', quantity: '2', reasonCode: null, reversesId: null, recipientName: 'Khodani', usedUpQuantity: '2', brokenQuantity: '1' };
 
 describe('movementReason', () => {
+  it.each(shared.cases.map((c) => [c.name, c] as const))('writes the same text as the server download: %s', (_name, c) => {
+    expect(movementReason(c.row)).toBe(c.text);
+  });
+
   it('says on an issue only who it went to and how much is still out, never what came back later', () => {
     expect(stillOutOn(issue)).toBe(0);
     expect(movementReason(issue, { withWho: true })).toBe('To Khodani · still out 0');
