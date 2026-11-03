@@ -416,6 +416,7 @@ export const PurchaseOrderService = {
         where: { status: 'PENDING_APPROVAL', projectNumber: k === 'stores' ? null : { not: null } },
         include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } }, signatures: true },
       });
+      // Not their own: signRefusal refuses whoever raised it.
       waiting.push(...orders.filter((po) => !signRefusal(k, approvalState(po, settings), po, me)));
     }
     return waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(withTotals);
@@ -580,7 +581,7 @@ export const PurchaseOrderService = {
     const approvalSettings = await loadApprovalSettings();
     return prisma.$transaction(async (tx) => {
       // Takes turns with signing: a signature is for the money as it stood.
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${input.id} FOR UPDATE`;
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (!isEditable(po.status, allowEditAfterApproval)) {
@@ -776,7 +777,6 @@ export const PurchaseOrderService = {
     const state = approvalState(po, settings);
     const me = await signerOf(actorId);
     const refusal = signRefusal(kind, state, po, me);
-    const signed = new Set(po.signatures.map((s) => s.signedById));
     return {
       ...orderTotals(po.lines, po.vatRate ?? 0),
       currency: po.currency,
@@ -791,7 +791,7 @@ export const PurchaseOrderService = {
       canApprove: po.status === 'PENDING_APPROVAL' && !refusal,
       // Only for those who sign this kind of order: to anyone else it isn't theirs to be told.
       reason: po.status === 'PENDING_APPROVAL' && signsOrdersOfKind(kind, me.roles) ? refusal : null,
-      approvers: state.next ? (await listSigners(kind, state.next)).filter((a) => !signed.has(a.id)) : [],
+      approvers: state.next ? await listSigners(kind, state.next, po) : [],
     };
   },
 
@@ -801,7 +801,7 @@ export const PurchaseOrderService = {
     const me = await signerOf(actorId);
     return prisma.$transaction(async (tx) => {
       // Takes turns with an edit, which may clear the signatures or change the money.
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
+      await lockOrder(id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];
@@ -813,8 +813,7 @@ export const PurchaseOrderService = {
       if (state.block) throw Errors.validation(state.block.message);
       const refusal = signRefusal(kind, state, po, me);
       if (refusal) {
-        const signed = new Set(po.signatures.map((s) => s.signedById));
-        const names = state.next ? (await listSigners(kind, state.next)).filter((a) => !signed.has(a.id)).map((a) => a.name) : [];
+        const names = state.next ? (await listSigners(kind, state.next, po)).map((a) => a.name) : [];
         throw Errors.forbidden(`${refusal} ${whoToAsk(names)}`);
       }
       const step = state.next;
@@ -876,6 +875,10 @@ export const PurchaseOrderService = {
   // source of truth).
   async receive(input: ReceiveInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
+      // The order before its stock, as posting a goods receipt locks them, so
+      // the two cannot deadlock; and before its lines are read, so the
+      // shortfall counts a goods receipt posted meanwhile.
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({
         where: { id: input.id },
         include: { lines: true },
@@ -884,9 +887,6 @@ export const PurchaseOrderService = {
       // A project order's delivery is held for its project; a Stores order's is
       // Stores stock (Project Material Through the Store Roadmap, Phase 2).
       const stockOf = (materialId: string) => ({ materialId, locationId: input.locationId, heldForProject: po.projectNumber });
-      // The order before its stock, as posting a goods receipt locks them, so
-      // the two cannot deadlock.
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.id} FOR UPDATE`;
       await lockInventoryBalances(po.lines.map((line) => stockOf(line.materialId)), tx);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });
@@ -972,6 +972,7 @@ export const PurchaseOrderService = {
       throw Errors.forbidden('Cancelling purchase orders is disabled in system settings');
     }
     return prisma.$transaction(async (tx) => {
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
@@ -1006,6 +1007,7 @@ export const PurchaseOrderService = {
   // not fully received — needs a reason, so the shortfall is explained.
   async close(input: CloseInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PARTIALLY_RECEIVED', 'RECEIVED'];
@@ -1056,6 +1058,15 @@ export const PurchaseOrderService = {
     return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
   },
 };
+
+/**
+ * Locks the order's row before anything about it is read. Posting a goods
+ * receipt takes the same lock, so an edit, an approval, a receipt, a cancel
+ * and a close each see the order exactly as the one before left it.
+ */
+async function lockOrder(id: string, tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
+}
 
 function isEditable(status: PurchaseOrderStatus, allowEditAfterApproval = true): boolean {
   if (allowEditAfterApproval) {

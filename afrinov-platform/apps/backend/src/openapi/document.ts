@@ -19,7 +19,7 @@ import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema,
-  consumableOutcomeSchema, outcomeWithdrawalSchema,
+  consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
 } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema } from '../modules/inventory/tool.routes.js';
 import {
@@ -296,7 +296,8 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/tools/check-in', tag: 'Tools', summary: 'Take lent tools back',
     description: 'Each line is against a loan, at most what is still out on it, and comes back to the location it left. '
       + 'GOOD or DAMAGED puts it back in store (LOAN_RETURN); LOST needs a note and writes it off at once '
-      + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned.',
+      + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned. Writing a tool off as LOST also '
+      + 'needs adjust:inventory (403 otherwise): a borrower does not write off what they borrowed.',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },
   {
@@ -380,8 +381,29 @@ export const OPERATIONS: Operation[] = [
     description: 'A signed quantity with a reason. DAMAGE, LOSS and SCRAP may name who was responsible (recipientId, an '
       + 'active recipient); naming someone needs a reasonNote saying what happened. Other reasons take no recipientId. '
       + 'With heldForProject, adjusts that project\'s stock; otherwise Stores stock. '
-      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location, recipient or project.',
-    permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
+      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location, recipient or project. '
+      + 'Worth more than inventory.writeOffApprovalAbove (rand, at the unit cost of the item), or for an item with no cost, '
+      + 'nothing is posted: 202 with status PENDING_APPROVAL, the requestId, value and limit, until someone else approves it. '
+      + 'Otherwise 201 with status POSTED and the transactionId.',
+    permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [202, 404, 422],
+  },
+  {
+    method: 'get', path: '/adjustment-requests', tag: 'Stock movements', summary: 'Adjustments waiting for approval, or decided',
+    description: 'Newest first, at most 200: PENDING unless another status is asked for, each with its item, location, '
+      + 'who asked and who decided. Needs approve:write_off or adjust:inventory.',
+    query: adjustmentRequestQuerySchema, errors: [403],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/approve', tag: 'Stock movements', summary: 'Approve an adjustment someone else asked for',
+    description: 'Posts the ADJUSTMENT, booked to whoever asked for it, checked again against the stock now. 403 for your own '
+      + 'request, 409 INVALID_STATE once decided, 422 when there is no longer enough stock. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ApproveWriteOff], success: 201, errors: [404, 409, 422],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/reject', tag: 'Stock movements', summary: 'Reject or withdraw an adjustment waiting for approval',
+    description: 'Posts nothing. Whoever asked for it may withdraw it with adjust:inventory; anyone else needs approve:write_off. '
+      + '409 INVALID_STATE once decided. Retry-safe with an Idempotency-Key header.',
+    body: adjustmentRejectionSchema, success: 200, errors: [403, 404, 409],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',

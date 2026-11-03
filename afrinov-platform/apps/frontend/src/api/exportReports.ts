@@ -51,9 +51,9 @@ export async function downloadReceivedStock(query: string): Promise<void> {
   await download(
     'Received stock',
     `afrinov-received-stock-${fileRange(query)}.xlsx`,
-    ['Delivery date', 'Supplier', 'Delivery note / invoice no.', 'Receipt no.', 'Received by', 'Code', 'Item', 'Into location', 'Quantity', 'Unit'],
+    ['Booked', 'Delivery note date', 'Supplier', 'Delivery note / invoice no.', 'Receipt no.', 'Received by', 'Code', 'Item', 'Into location', 'Quantity', 'Unit'],
     receipts.flatMap((r) => r.lines.map((l) => [
-      new Date(r.receivedAt), r.supplierName, r.deliveryRef ?? '', r.number, r.receivedByName, l.sku, l.name, l.locationName, Number(l.quantity), l.unitOfMeasure,
+      new Date(r.postedAt), new Date(r.receivedAt), r.supplierName, r.deliveryRef ?? '', r.number, r.receivedByName, l.sku, l.name, l.locationName, Number(l.quantity), l.unitOfMeasure,
     ])),
     'No stock was received on these dates.',
   );
@@ -109,8 +109,8 @@ export async function downloadReceivedStockPdf(query: string, about: PdfAbout): 
     sections: receipts.length === 0
       ? [{ columns: [], rows: [], empty: 'No stock was received on these dates.' }]
       : receipts.map((r) => ({
-        heading: `${formatDate(r.receivedAt)}  ·  ${r.supplierName}  ·  ${r.deliveryRef ?? 'No delivery note'}`,
-        note: `Receipt ${r.number}, received by ${r.receivedByName}`,
+        heading: `${formatDate(r.postedAt)}  ·  ${r.supplierName}  ·  ${r.deliveryRef ?? 'No delivery note'}`,
+        note: `Receipt ${r.number}, received by ${r.receivedByName}; delivery note dated ${formatDate(r.receivedAt)}`,
         columns: [{ header: 'Code' }, { header: 'Item', wrap: true }, { header: 'Into location', wrap: true }, { header: 'Quantity', align: 'right' as const }, { header: 'Unit' }],
         rows: r.lines.map((l) => [l.sku, l.name, l.locationName, formatNumber(Number(l.quantity)), l.unitOfMeasure]),
       })),

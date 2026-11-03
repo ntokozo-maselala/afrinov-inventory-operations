@@ -49,7 +49,10 @@ export interface ReceiptRecord {
   id: string;
   cursor: string;
   number: string;
+  /** The date on the delivery note. */
   receivedAt: string;
+  /** When it was booked into stock: the date the report counts it on. */
+  postedAt: string;
   supplierName: string;
   deliveryRef: string | null;
   receivedByName: string;
@@ -57,11 +60,16 @@ export interface ReceiptRecord {
 }
 
 export const StockReceiptService = {
-  /** Posted deliveries, newest delivery date first, each with its lines, for the received-stock report. */
+  /**
+   * Posted deliveries, newest first, each with its lines, for the
+   * received-stock report. Dated by when they were booked into stock, as the
+   * ledger and the month-end report are, so a period's deliveries add up with
+   * its stock; the delivery note's own date is shown beside it.
+   */
   async list(filter: ReceiptListFilter): Promise<ReceiptRecord[]> {
     const and: Prisma.GoodsReceiptWhereInput[] = [{ status: 'POSTED' }];
-    const receivedAt = dayRange(filter.from, filter.to);
-    if (receivedAt) and.push({ receivedAt });
+    const postedAt = dayRange(filter.from, filter.to);
+    if (postedAt) and.push({ postedAt });
     if (filter.supplierId) and.push({ supplierId: filter.supplierId });
     if (filter.locationIds) and.push({ lines: { some: { locationId: { in: filter.locationIds } } } });
     else if (filter.locationId) and.push({ lines: { some: { locationId: filter.locationId } } });
@@ -79,7 +87,7 @@ export const StockReceiptService = {
     }
     if (filter.before) {
       const { at, id } = parseCursor(filter.before);
-      and.push({ OR: [{ receivedAt: { lt: at } }, { receivedAt: at, id: { lt: id } }] });
+      and.push({ OR: [{ postedAt: { lt: at } }, { postedAt: at, id: { lt: id } }] });
     }
     const receipts = await prisma.goodsReceipt.findMany({
       where: { AND: and },
@@ -88,14 +96,15 @@ export const StockReceiptService = {
         receivedBy: { select: { name: true } },
         lines: { include: { material: { select: { sku: true, name: true, unitOfMeasure: true } }, location: { select: { name: true } } } },
       },
-      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ postedAt: 'desc' }, { id: 'desc' }],
       take: Math.min(filter.limit ?? 50, 200),
     });
     return receipts.map((r) => ({
       id: r.id,
-      cursor: pageCursor(r.receivedAt, r.id),
+      cursor: pageCursor(r.postedAt ?? r.createdAt, r.id),
       number: r.number,
       receivedAt: r.receivedAt.toISOString(),
+      postedAt: (r.postedAt ?? r.createdAt).toISOString(),
       supplierName: r.supplier.name,
       deliveryRef: r.deliveryRef,
       receivedByName: r.receivedBy.name,
@@ -153,6 +162,7 @@ export const StockReceiptService = {
           supplierId: supplier.id,
           deliveryRef,
           status: 'POSTED',
+          postedAt: new Date(),
           receivedById: input.actorId,
           receivedAt,
           lines: { create: lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: l.qty })) },

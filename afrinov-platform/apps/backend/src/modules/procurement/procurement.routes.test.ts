@@ -59,3 +59,20 @@ describe.each([
     expect(schema.safeParse({ ...required, [key]: 123 }).success).toBe(false);
   });
 });
+
+// Order lines keep quantities and prices to 4 decimal places (Decimal(18, 4)):
+// a finer figure would be saved rounded, so the order would not say what was typed.
+describe('order quantities and prices', () => {
+  const line = (orderedQty: number, unitPrice?: number) => ({ ...createBody, lines: [{ ...createBody.lines[0], orderedQty, unitPrice }] });
+
+  it('are kept to 4 decimal places', async () => {
+    const { createGRSchema } = await import('./procurement.routes.js');
+    expect(createPOSchema.safeParse(line(2.5, 0.305)).success).toBe(true);
+    expect(createPOSchema.safeParse(line(0.00001)).success).toBe(false);
+    expect(createPOSchema.safeParse(line(1, 0.30501)).success).toBe(false);
+    expect(updatePOSchema.safeParse({ linePrices: [{ lineId: '30000000-0000-4000-8000-000000000001', unitPrice: 0.30501 }] }).success).toBe(false);
+    const receipt = (quantity: number) => createGRSchema.safeParse({ supplierId: 's', lines: [{ materialId: createBody.lines[0]!.materialId, locationId: createBody.supplierId, quantity }] });
+    expect(receipt(9.7).success).toBe(true);
+    expect(receipt(0.30000000000000004).success).toBe(false);
+  });
+});

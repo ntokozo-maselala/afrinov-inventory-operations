@@ -1677,6 +1677,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'GET' && p === '/tools') return listTools();
+  // Adjustments post at once in the demo (one user), so none ever wait.
+  if (method === 'GET' && p === '/adjustment-requests') return [];
   if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
   if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
   const dueDateMatch = p.match(/^\/tools\/loans\/([^/]+)\/due-date$/);
@@ -2032,6 +2034,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.toolOverdueCheckout': row('inventory.toolOverdueCheckout', 'warn', 'enum', 'inventory', 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', ['warn', 'block-contractors', 'block']),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
+    // The demo has one user, who does everything, so adjustments post at once
+    // there; with a real server they wait for someone else's approval.
+    'inventory.requireWriteOffApproval': row('inventory.requireWriteOffApproval', false, 'boolean', 'inventory', 'When on, adjustments and write-offs worth more than the limit below wait for someone other than whoever asked for them to approve them. When off, every adjustment posts at once.'),
+    'inventory.writeOffApprovalAbove': row('inventory.writeOffApprovalAbove', 1000, 'number', 'inventory', "Adjustments and write-offs worth more than this, in rand at the item's unit cost, wait for someone else to approve them before stock moves. An item with no unit cost always waits. 0: every adjustment waits."),
     'inventory.projectReceivingLocationId': row('inventory.projectReceivingLocationId', '', 'string', 'inventory', 'Where project deliveries are booked on Receive stock, such as the workshop floor: project material is not shelved, it is issued from there. Leave blank to choose a location on each delivery.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
 
@@ -3525,7 +3531,8 @@ function listReceipts(qs: Record<string, string>) {
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id));
   const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
   return olderThan(rows, qs.before, (g) => g.receivedAt).slice(0, limit).map((g) => ({
-    id: g.id, cursor: `${g.receivedAt}_${g.id}`, number: g.number, receivedAt: g.receivedAt,
+    // The demo books each delivery on its note's date.
+    id: g.id, cursor: `${g.receivedAt}_${g.id}`, number: g.number, receivedAt: g.receivedAt, postedAt: g.receivedAt,
     supplierName: findSupplier(g.supplierId)?.name ?? 'Unknown supplier', deliveryRef: g.deliveryRef ?? null,
     receivedByName: mockUsers.find((u) => u.id === 'user-1')?.name ?? 'Unknown user',
     lines: g.lines.map((l) => {

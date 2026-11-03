@@ -17,7 +17,7 @@ import { formatDate, formatNumber } from '../lib/format';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
 import { today } from '../lib/dates';
-import { useIsAdmin } from '../hooks/usePermissions';
+import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
 import type { OpenLoan, ToolRow } from '../api/types';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 
@@ -221,6 +221,8 @@ export function CheckInForm({ tool, onCancel, onDone }: {
   const [back, setBack] = useState<Record<string, Back>>(() => Object.fromEntries(tool.loans.map((l) => [
     l.loanId, { quantity: tool.loans.length === 1 ? l.out : '', condition: 'GOOD' as Condition, note: '' },
   ])));
+  // Lost writes the tool off, which the store does, not the borrower (adjust:inventory).
+  const canWriteOff = usePermissions().hasPermission('inventory:adjust');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const update = (loanId: string, patch: Partial<Back>) => setBack((b) => ({ ...b, [loanId]: { ...b[loanId]!, ...patch } }));
@@ -271,7 +273,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
                 <Select id={`back-cond-${l.loanId}`} value={b.condition} onChange={(e) => update(l.loanId, { condition: e.target.value as Condition })}>
                   <option value="GOOD">Good</option>
                   <option value="DAMAGED">Damaged</option>
-                  <option value="LOST">Lost (write off)</option>
+                  {canWriteOff && <option value="LOST">Lost (write off)</option>}
                 </Select>
               </Field>
               <Field label={b.condition === 'LOST' ? 'What happened' : 'Note (optional)'} htmlFor={`back-note-${l.loanId}`} required={b.condition === 'LOST'}>

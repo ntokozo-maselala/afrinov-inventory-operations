@@ -18,7 +18,9 @@ interface Row { r: ReceiptRecord; l: ReceiptRecord['lines'][number]; i: number }
 const none = <span className="text-surface-300">—</span>;
 
 const COLUMNS: DataTableColumn<Row>[] = [
-  { key: 'date', header: 'Delivery date', render: ({ r }) => <span className="whitespace-nowrap">{formatDate(r.receivedAt)}</span>, width: '8rem' },
+  // Counted on the day it was booked, as its stock is; the delivery note's date beside it.
+  { key: 'date', header: 'Booked', render: ({ r }) => <span className="whitespace-nowrap">{formatDate(r.postedAt)}</span>, width: '8rem' },
+  { key: 'noteDate', header: 'Note dated', render: ({ r }) => <span className="whitespace-nowrap text-meta">{formatDate(r.receivedAt)}</span>, width: '8rem' },
   { key: 'supplier', header: 'Supplier', render: ({ r }) => r.supplierName, width: '10rem' },
   { key: 'ref', header: 'Delivery note', render: ({ r }) => r.deliveryRef ?? none, width: '9rem' },
   { key: 'item', header: 'Item', render: ({ l }) => <><Link to={`/materials/${l.materialId}`} className="btn-link text-mono text-xs">{l.sku}</Link> <span className="text-surface-700">{l.name}</span></> },
@@ -62,7 +64,7 @@ function DeliveryCard({ r }: { r: ReceiptRecord }) {
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
         <div><dt className="text-eyebrow">Supplier</dt><dd className="font-medium">{r.supplierName}</dd></div>
         <div><dt className="text-eyebrow">Delivery note / invoice no.</dt><dd className="font-medium">{r.deliveryRef ?? '—'}</dd></div>
-        <div><dt className="text-eyebrow">Delivery date</dt><dd>{formatDate(r.receivedAt)}</dd></div>
+        <div><dt className="text-eyebrow">Booked</dt><dd>{formatDate(r.postedAt)} <span className="text-meta">· note dated {formatDate(r.receivedAt)}</span></dd></div>
         <div><dt className="text-eyebrow">Received by</dt><dd>{r.receivedByName} <span className="text-meta">· {r.number}</span></dd></div>
       </dl>
       <table className="w-full text-sm">

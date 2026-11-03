@@ -119,6 +119,8 @@ export function SettingsInventory() {
   const toolEscalateDays = useSetting('inventory.toolEscalateDays');
   const toolOverdueCheckout = useSetting('inventory.toolOverdueCheckout');
   const projectReceiving = useSetting('inventory.projectReceivingLocationId');
+  const requireWriteOffApproval = useSetting('inventory.requireWriteOffApproval');
+  const writeOffApprovalAbove = useSetting('inventory.writeOffApprovalAbove');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
@@ -135,6 +137,17 @@ export function SettingsInventory() {
         onChange={(v) => setDraft('inventory.warningBelowPercent', v)}
         error={errors['inventory.warningBelowPercent'] ?? null}
       />
+      {requireWriteOffApproval && (
+        <BooleanField def={requireWriteOffApproval} value={draft['inventory.requireWriteOffApproval'] !== false} onChange={(v) => setDraft('inventory.requireWriteOffApproval', v)} />
+      )}
+      {writeOffApprovalAbove && (
+        <NumberField
+          def={writeOffApprovalAbove}
+          value={Number(draft['inventory.writeOffApprovalAbove'] ?? 1000)}
+          onChange={(v) => setDraft('inventory.writeOffApprovalAbove', v)}
+          error={errors['inventory.writeOffApprovalAbove'] ?? null}
+        />
+      )}
       {toolOverdueDays && (
         <NumberField
           def={toolOverdueDays}

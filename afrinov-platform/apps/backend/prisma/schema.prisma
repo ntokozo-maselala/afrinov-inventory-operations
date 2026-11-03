@@ -67,6 +67,8 @@ model User {
   idempotencyKeys      IdempotencyKey[]
   toolLoanExtensions   ToolLoanExtension[]
   consumableOutcomes   ConsumableOutcome[]
+  requestedAdjustments AdjustmentRequest[] @relation("AdjustmentRequestedBy")
+  decidedAdjustments   AdjustmentRequest[] @relation("AdjustmentDecidedBy")
 
   @@map("users")
 }
@@ -151,6 +153,7 @@ model Material {
   inventoryBalances    InventoryBalance[]
   stockCountLines      StockCountLine[]
   rfqLines             RfqLine[]
+  adjustmentRequests   AdjustmentRequest[]
   project              Project?            @relation(fields: [projectNumber], references: [projectNumber])
 
   @@index([category])
@@ -195,6 +198,7 @@ model Location {
   goodsReceiptLines    GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
+  adjustmentRequests   AdjustmentRequest[]
   parent               Location?  @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
   children             Location[] @relation("LocationParent")
 
@@ -288,6 +292,7 @@ model Recipient {
   updatedAt DateTime      @updatedAt @map("updated_at")
 
   inventoryTransactions InventoryTransaction[]
+  adjustmentRequests    AdjustmentRequest[]
 
   @@index([type])
   @@index([active])
@@ -582,8 +587,13 @@ model GoodsReceipt {
   deliveryRef    String?             @map("delivery_ref")
   status         GoodsReceiptStatus  @default(DRAFT)
   receivedById   String              @map("received_by_id")
+  // The date on the delivery note, which may be earlier than it was booked.
   receivedAt     DateTime            @default(now()) @map("received_at")
   createdAt      DateTime            @default(now()) @map("created_at")
+  // When its stock went into the ledger (status POSTED), which is when it
+  // counts on the reports: a back-dated delivery note never changes a month
+  // already reported. Null until posted.
+  postedAt       DateTime?           @map("posted_at")
 
   purchaseOrder PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id])
   supplier      Supplier           @relation(fields: [supplierId], references: [id])
@@ -592,6 +602,7 @@ model GoodsReceipt {
 
   @@index([status])
   @@index([purchaseOrderId])
+  @@index([status, postedAt])
   @@map("goods_receipts")
 }
 
@@ -719,6 +730,8 @@ model InventoryTransaction {
   // Issues: used up or broken against it. Returns: the marks booked in the same counter visit.
   consumableOutcomes ConsumableOutcome[] @relation("OutcomeIssue")
   bookedOutcomes     ConsumableOutcome[] @relation("OutcomeReturn")
+  // An adjustment posted on approval: the request it came from.
+  adjustmentRequest  AdjustmentRequest?
 
   @@index([materialId, locationId, postedAt])
   @@index([referenceType, referenceId])
@@ -728,6 +741,47 @@ model InventoryTransaction {
   @@index([issueId])
   @@index([materialId, locationId, heldForProject])
   @@map("inventory_transactions")
+}
+
+enum AdjustmentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// An adjustment worth more than inventory.writeOffApprovalAbove, waiting for
+// someone other than whoever asked for it (segregation of duties). Nothing
+// moves until it is approved: approving posts the ADJUSTMENT (transactionId),
+// rejecting posts nothing. value is quantity x the item's unit cost when asked,
+// null when the item has no cost, which also needs approval.
+model AdjustmentRequest {
+  id             String                  @id @default(uuid())
+  materialId     String                  @map("material_id")
+  locationId     String                  @map("location_id")
+  heldForProject String?                 @map("held_for_project")
+  // Signed, as the ADJUSTMENT it becomes.
+  quantity       Decimal                 @db.Decimal(18, 4)
+  reasonCode     AdjustmentReasonCode    @map("reason_code")
+  reasonNote     String?                 @map("reason_note")
+  recipientId    String?                 @map("recipient_id")
+  value          Decimal?                @db.Decimal(18, 2)
+  status         AdjustmentRequestStatus @default(PENDING)
+  requestedById  String                  @map("requested_by_id")
+  requestedAt    DateTime                @default(now()) @map("requested_at")
+  decidedById    String?                 @map("decided_by_id")
+  decidedAt      DateTime?               @map("decided_at")
+  decisionNote   String?                 @map("decision_note")
+  transactionId  String?                 @unique @map("transaction_id")
+
+  material    Material              @relation(fields: [materialId], references: [id])
+  location    Location              @relation(fields: [locationId], references: [id])
+  recipient   Recipient?            @relation(fields: [recipientId], references: [id])
+  requestedBy User                  @relation("AdjustmentRequestedBy", fields: [requestedById], references: [id])
+  decidedBy   User?                 @relation("AdjustmentDecidedBy", fields: [decidedById], references: [id])
+  transaction InventoryTransaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([status, requestedAt])
+  @@map("adjustment_requests")
 }
 
 // A tool loan's due date changed, later or earlier, and why. Only ever added

@@ -21,7 +21,7 @@ export function ConfirmDialog({
       open={open}
       onClose={onClose}
       title={title}
-      description={description}
+      // The description is the body below, so it is not repeated under the title.
       size="sm"
       footer={
         <>

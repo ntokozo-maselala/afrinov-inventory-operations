@@ -40,6 +40,7 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
+import { round4 } from '../lib/movementReason';
 import { todayInSouthAfrica } from '../lib/rfq';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { PROJECT_RECEIVING_LOCATION, type IssuePrefill } from '../lib/issuePrefill';
@@ -237,7 +238,7 @@ function ReceiveAgainstOrder() {
       for (const l of checked.lines) {
         const key = `${l.materialId}|${l.locationId}`;
         const a = arrived.get(key) ?? { materialId: l.materialId, locationId: l.locationId, quantity: 0 };
-        a.quantity += Number(l.quantity);
+        a.quantity = round4(a.quantity + Number(l.quantity)); // 0.1 + 0.2 is not 0.3 in floating point
         arrived.set(key, a);
       }
       const issue: IssuePrefill = { projectNumber: order.projectNumber, lines: [...arrived.values()] };

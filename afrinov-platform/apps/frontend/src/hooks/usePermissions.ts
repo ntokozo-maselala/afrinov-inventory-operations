@@ -57,6 +57,7 @@ export const PERMISSION_ROLES = {
   'inventory:transfer': ['STORE_CONTROLLER'], // transfer:inventory
   'inventory:adjust': ['STORE_CONTROLLER'], // adjust:inventory
   'inventory:count': ['STORE_CONTROLLER'], // adjust:inventory (a count posts its differences as adjustments)
+  'writeoffs:approve': ['STORE_CONTROLLER'], // approve:write_off (someone else's, over the limit; never their own)
   'inventory:reverse': ['STORE_CONTROLLER'], // reverse:inventory_transaction
   'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
   'tools:extend': ['STORE_CONTROLLER'], // extend:tool_loan

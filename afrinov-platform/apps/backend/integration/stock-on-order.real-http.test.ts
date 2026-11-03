@@ -5,7 +5,7 @@
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import ExcelJS from 'exceljs';
-import { ADMIN_EMAIL, client, letAdminSign, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, letAdminSign, login, requireAdminPassword, runId, secondAdmin, startServer, type TestServer } from './helpers.js';
 
 interface StatusRow {
   materialId: string; sku: string; status: string; onHand: string; onOrder: string; reorderQuantity: string;
@@ -17,6 +17,8 @@ describe('stock on order over real HTTP', () => {
   const run = runId();
   let server: TestServer;
   let api: ReturnType<typeof client>;
+  /** Approves what the admin raises: nobody approves their own order. */
+  let checker: ReturnType<typeof client>;
   let materialId: string;
   let supplierId: string;
   let locationId: string;
@@ -33,6 +35,7 @@ describe('stock on order over real HTTP', () => {
     token = await login(server.port, ADMIN_EMAIL, requireAdminPassword());
     api = client(server.port, token);
     await letAdminSign(api);
+    checker = await secondAdmin(server.port, api, run);
     const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-OO-${run}`, name: `On order disc ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: 100 });
     expect(m.status).toBe(200);
     materialId = m.body.id;
@@ -51,7 +54,7 @@ describe('stock on order over real HTTP', () => {
     const created = await api<Order>('POST', '/purchase-orders', { supplierId, lines: [{ materialId: forMaterial, orderedQty: qty, unitPrice: 5 }] });
     expect(created.status).toBe(201);
     const submitted = await api<Order>('POST', `/purchase-orders/${created.body.id}/submit`);
-    if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
+    if (submitted.body.status === 'PENDING_APPROVAL') expect((await checker('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
     return created.body;
   }
 
@@ -70,7 +73,7 @@ describe('stock on order over real HTTP', () => {
     expect(submitted.status).toBe(200);
     if (submitted.body.status === 'PENDING_APPROVAL') {
       expect((await row()).onOrder).toBe('0');
-      const approved = await api('POST', `/purchase-orders/${created.body.id}/approve`);
+      const approved = await checker('POST', `/purchase-orders/${created.body.id}/approve`);
       expect(approved.status).toBe(200);
     }
 

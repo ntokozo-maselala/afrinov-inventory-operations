@@ -217,7 +217,11 @@ export interface IssueSlip {
 
 /** One delivery on the received-stock report (GET /stock-receipts). */
 export interface ReceiptRecord {
-  id: string; cursor: string; number: string; receivedAt: string;
+  id: string; cursor: string; number: string;
+  /** The date on the delivery note, which may be earlier than it was booked. */
+  receivedAt: string;
+  /** When it was booked into stock: the day the report counts it on, as the ledger and month-end do. */
+  postedAt: string;
   supplierName: string; deliveryRef: string | null; receivedByName: string;
   lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; locationName: string; quantity: string }>;
 }

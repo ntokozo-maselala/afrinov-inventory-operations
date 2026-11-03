@@ -8,6 +8,7 @@ import { useApi } from '../hooks/useApi';
 import type { CurrentStockRow } from '../api/types';
 import { locationLabel } from '../lib/locations';
 import { useIdempotencyKey } from '../lib/idempotency';
+import { formatMoney } from '../lib/poMoney';
 
 // Issuing has its own page (IssueStock), so the row drawer only transfers and adjusts.
 export type StockActionKind = 'transfer' | 'adjust';
@@ -41,6 +42,13 @@ const RESPONSIBLE_HELP: Partial<Record<string, string>> = {
 };
 const NOT_KNOWN = '__none__';
 
+const WRITE_OFF_KEYS = ['inventory.requireWriteOffApproval', 'inventory.writeOffApprovalAbove'] as const;
+
+/** Posted at once, or held for someone else's approval (202). */
+type AdjustOutcome =
+  | { status: 'POSTED'; transactionId: string }
+  | { status: 'PENDING_APPROVAL'; requestId: string; value: string | null; limit: string };
+
 export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props) {
   const [quantity, setQuantity] = useState('');
   const [note, setNote] = useState('');
@@ -52,6 +60,10 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
   const locations = useApi<Location[]>('/locations');
   const recipients = useApi<RecipientOption[]>(kind === 'adjust' ? '/recipients?active=true' : null);
   const idem = useIdempotencyKey(`stock-action-${kind}`);
+  // Worth more than the limit, an adjustment waits for someone else to approve it.
+  const writeOff = useApi<Record<string, unknown>>(kind === 'adjust' ? `/settings/values?keys=${WRITE_OFF_KEYS.join(',')}` : null);
+  const approvalOn = writeOff.data?.[WRITE_OFF_KEYS[0]] !== false;
+  const limit = writeOff.data ? String(Number(writeOff.data[WRITE_OFF_KEYS[1]] ?? 0)) : null;
 
   const responsibleHelp = RESPONSIBLE_HELP[reasonCode];
   const named = !!responsibleHelp && responsible !== '' && responsible !== NOT_KNOWN;
@@ -85,8 +97,10 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
           materialId: row.materialId, locationId: row.locationId, quantity: qty, reasonCode, reasonNote: note || undefined,
           recipientId: responsibleHelp ? (named ? responsible : null) : undefined,
         };
-        await api.post('/inventory-adjustments', adjustBody, { idempotencyKey: idem.keyFor(adjustBody) });
-        onSuccess(`Adjusted ${row.materialSku} by ${qty > 0 ? '+' : ''}${qty}`);
+        const outcome = await api.post<AdjustOutcome>('/inventory-adjustments', adjustBody, { idempotencyKey: idem.keyFor(adjustBody) });
+        onSuccess(outcome?.status === 'PENDING_APPROVAL'
+          ? `Sent for approval: ${row.materialSku} by ${qty > 0 ? '+' : ''}${qty}, worth ${outcome.value ? formatMoney(outcome.value) : 'an unknown amount (no unit cost)'}, over the ${formatMoney(outcome.limit)} limit. Nothing moves until someone else approves it under Write-offs to approve.`
+          : `Adjusted ${row.materialSku} by ${qty > 0 ? '+' : ''}${qty}`);
       }
       idem.confirm();
       reset();
@@ -135,7 +149,12 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
 
       {kind === 'adjust' && (
         <>
-          <Field label="Quantity" htmlFor="qty" required help="Positive to add stock, negative to remove.">
+          <Field
+            label="Quantity"
+            htmlFor="qty"
+            required
+            help={`Positive to add stock, negative to remove.${approvalOn && limit !== null ? ` Worth more than ${formatMoney(limit)} at the unit cost, or with no unit cost, it waits for someone else to approve it.` : ''}`}
+          >
             <Input id="qty" type="number" step="0.0001" required value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
           </Field>
           <Field label="Reason" htmlFor="reason" required help="Adjustments are immutable and require a reason. To correct a count, use Count stock.">

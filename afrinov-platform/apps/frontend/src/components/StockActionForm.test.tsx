@@ -85,3 +85,34 @@ describe('StockActionForm: who was responsible for a write-off', () => {
     expect(lastBody().recipientId).toBeUndefined();
   });
 });
+
+// Worth more than the write-off limit, an adjustment waits for someone else's approval.
+describe('StockActionForm: write-offs over the limit', () => {
+  beforeEach(() => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/settings/values')) return { 'inventory.requireWriteOffApproval': true, 'inventory.writeOffApprovalAbove': 1000 };
+      if (path.startsWith('/recipients')) return [];
+      return [{ id: 'l-1', name: 'Boiler Shop' }];
+    });
+  });
+
+  it('says up front when an adjustment waits, and that it was sent for approval rather than posted', async () => {
+    mockPost.mockReset().mockResolvedValue({ status: 'PENDING_APPROVAL', requestId: 'req-1', value: '2000.00', limit: '1000.00' });
+    const { onSuccess } = renderAdjust();
+    expect(await screen.findByText(/Worth more than R\s1\s000,00 at the unit cost, or with no unit cost, it waits for someone else to approve it\./)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'OTHER' } });
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '-40' } });
+    post();
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+    expect(onSuccess.mock.calls[0]![0]).toMatch(/^Sent for approval: GRIND-DISC-125 by -40, worth R\s2\s000,00, over the R\s1\s000,00 limit\. Nothing moves until someone else approves it/);
+  });
+
+  it('says nothing about approval when it is switched off', async () => {
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+      ? { 'inventory.requireWriteOffApproval': false, 'inventory.writeOffApprovalAbove': 1000 }
+      : []));
+    renderAdjust();
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(expect.stringMatching(/^\/settings\/values/)));
+    expect(screen.getByText('Positive to add stock, negative to remove.')).toBeInTheDocument();
+  });
+});

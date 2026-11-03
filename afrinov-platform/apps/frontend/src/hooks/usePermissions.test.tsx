@@ -185,6 +185,8 @@ describe('usePermissions — the role check sheet', () => {
       'stores:order', 'stores:view',
       // A later due date for a tool loan is the store's decision.
       'tools:extend',
+      // Another store controller's write-offs over the limit, never their own.
+      'writeoffs:approve',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
     PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],

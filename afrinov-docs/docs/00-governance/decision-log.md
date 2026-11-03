@@ -713,6 +713,92 @@ unchanged (it reads `project_number`).
 `ProjectLeftovers.tsx`, `components/LeftoversNotice.tsx`,
 `afrinov-docs/docs/13-project-management/roadmaps/project-material-through-the-store-roadmap.md`.
 
+### ADR-028 — Nobody approves their own order or their own large write-off
+**Date:** 2026-11-03 · **Status:** Accepted
+
+**Context:** A store controller could raise, approve, receive and close the
+same Stores order, and an admin the same project order. Any adjustment,
+however large, posted on one person's say-so, so stock could be written off
+or added from nowhere unchecked, and a technician could write off a tool
+they had borrowed by checking it in as lost. These are the classic ways
+stock and money go missing.
+
+**Decision:**
+- **Purchase orders:** whoever raised an order never approves it, whatever
+  their role or limit (`approve()` refuses with who else can; `approval`,
+  the approvers named and "Waiting for my approval" leave them out). Orders
+  submitted with approval switched off still auto-approve, as before.
+- **Write-offs:** an adjustment worth more than
+  `inventory.writeOffApprovalAbove` (R 1 000 by default, at the item's unit
+  cost), or of an item with no unit cost, posts nothing: it becomes an
+  `adjustment_requests` row (202, `PENDING_APPROVAL`). Someone else with
+  `approve:write_off` (store controller, admin) approves it, which checks the
+  stock again and posts the ADJUSTMENT booked to whoever asked, or rejects
+  it with a reason. Whoever asked may withdraw their own. Within the limit an
+  adjustment posts at once. `inventory.requireWriteOffApproval` (on by
+  default) switches the rule off.
+- **Stock counts:** a count difference over the limit becomes a request
+  (COUNT_VARIANCE, the count's id) and the rest of the count posts; once
+  approved it posts as part of its count. An item with any adjustment
+  already waiting at that location can't be counted until that one is
+  decided, or both could correct the same difference. A difference too large
+  for the quantity column is refused.
+- **The rule** (`write-off-limit.ts`, one place for every path): the exact
+  value, quantity × unit cost, is compared with the limit, and only rounded
+  to the cent for storing and showing; a limit of 0 holds every adjustment,
+  of a free item too; an item with no unit cost is always held.
+- **Lost tools:** checking a tool in as lost needs `adjust:inventory`; a
+  borrower checks it in as good or damaged and the store writes it off. A
+  lost tool over the limit, or with no unit cost, stays on loan while its
+  write-off waits (the request keeps the loan and its project), so it can't
+  be lent or checked in again; approving posts its return and its LOSS
+  against the loan, as a lost tool within the limit is; rejecting leaves it
+  on loan to the borrower.
+- **Reversals:** an adjustment over the limit is not reversed directly, as
+  that would undo, or mirror, an approved one on one person's say-so. It is
+  put right by an adjustment the other way, which waits for approval.
+  Movements says so on the adjustment (`reversalNeedsApproval`).
+- **What the screens follow:** sign-in and `/auth/me` return the permission
+  codes the user's roles grant, so a role given `approve:write_off` in the
+  database sees Write-offs to approve and its controls.
+
+**Consequences:** Migration 041 adds the table, the permission and the two
+settings. A store with one store controller needs the admin to approve its
+Stores orders and its large write-offs. Screens: Store → Write-offs to
+approve, and Settings → Inventory.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`,
+`procurement.service.ts` (`approve`, `approval`, `awaitingApproval`),
+`modules/inventory/write-off-approval.service.ts`, `inventory.routes.ts`, `tool.routes.ts`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000041_write_off_approval/migration.sql`,
+`afrinov-platform/apps/backend/integration/write-off-approval.real-http.test.ts`,
+`afrinov-platform/apps/frontend/src/pages/WriteOffApprovals.tsx`.
+
+### ADR-029 — A delivery counts on the day it is booked, not its delivery note's date
+**Date:** 2026-11-03 · **Status:** Accepted
+
+**Context:** A delivery note can be dated earlier than it is booked. The
+ledger booked the stock when it was entered, so month-end closing stock
+counted it then, while the received-stock report counted it on the note's
+date. A delivery noted 31 Oct and booked 2 Nov was in October's received
+stock but not October's closing stock, so the two reports did not add up.
+
+**Decision:** The ledger stays at the booking time: a back-dated note never
+changes a month already reported, and the ledger is never rewritten. Goods
+receipts record when they were posted (`goods_receipts.posted_at`), and the
+received-stock report, its downloads and its paging use that, showing the
+delivery note's date beside it ("Booked", "Note dated").
+
+**Consequences:** Migration 042 adds the column, filled for earlier
+deliveries from their first RECEIPT, or when they were recorded. A report run
+by delivery-note date is no longer offered; the note's date is still on
+every row.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/stock-receipt.service.ts` (`list`),
+`inventory.service.ts` (`postGoodsReceipt`),
+`afrinov-platform/apps/backend/prisma/migrations/20260101000042_goods_receipt_posted_at/migration.sql`,
+`afrinov-platform/apps/frontend/src/components/reports/ReceivedStockReport.tsx`, `src/api/exportReports.ts`.
+
 ### ADR-030 — Purchase orders are signed by role and value
 **Date:** 2026-11-05 · **Status:** Accepted · **Amends:** ADR-021 (who approves Stores orders)
 

@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { dayRange } from '../../shared/dates.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
@@ -229,11 +230,11 @@ export const ReportingService = {
     if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
     // As the movement history: stock used for the project, and its own stock (Qodo, PR #145).
     if (filter.projectNumber) where.OR = [{ projectNumber: filter.projectNumber }, { heldForProject: filter.projectNumber }];
-    if (filter.from || filter.to) {
-      where.postedAt = {};
-      if (filter.from) where.postedAt.gte = new Date(filter.from);
-      if (filter.to) where.postedAt.lte = new Date(filter.to);
-    }
+    // A day's `to` is the whole day, as on the other reports.
+    const postedAt = dayRange(filter.from, filter.to);
+    if (postedAt) where.postedAt = postedAt;
+    // A limit that isn't a positive number (limit=abc) falls back to the default.
+    const limit = filter.limit !== undefined && Number.isFinite(filter.limit) && filter.limit >= 1 ? Math.floor(filter.limit) : 200;
 
     const trx = await prisma.inventoryTransaction.findMany({
       where,
@@ -243,7 +244,7 @@ export const ReportingService = {
         actor: { select: { id: true, name: true, email: true } },
       },
       orderBy: { postedAt: 'desc' },
-      take: Math.min(filter.limit ?? 200, 1000),
+      take: Math.min(limit, 1000),
     });
     return trx.map((t) => ({
       id: t.id,

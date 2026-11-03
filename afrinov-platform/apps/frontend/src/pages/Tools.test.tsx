@@ -6,7 +6,7 @@ import { addDays } from '../lib/toolLoans';
 
 const { mockGet, mockPost, perms, settings } = vi.hoisted(() => ({
   mockGet: vi.fn(), mockPost: vi.fn(),
-  perms: { lend: true, extend: false },
+  perms: { lend: true, extend: false, adjust: true },
   settings: {} as Record<string, unknown>,
 }));
 vi.mock('../api/client', () => ({
@@ -14,7 +14,7 @@ vi.mock('../api/client', () => ({
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 vi.mock('../hooks/usePermissions', () => ({
-  usePermissions: () => ({ hasPermission: (p: string) => (p === 'tools:lend' && perms.lend) || (p === 'tools:extend' && perms.extend) }),
+  usePermissions: () => ({ hasPermission: (p: string) => (p === 'tools:lend' && perms.lend) || (p === 'tools:extend' && perms.extend) || (p === 'inventory:adjust' && perms.adjust) }),
   useIsAdmin: () => false,
 }));
 
@@ -57,6 +57,7 @@ describe('Tools page', () => {
   beforeEach(() => {
     perms.lend = true;
     perms.extend = false;
+    perms.adjust = true;
     for (const k of Object.keys(settings)) delete settings[k];
     mockGet.mockReset().mockImplementation(async (path: string) => {
       if (path === '/tools') return TOOLS;
@@ -210,6 +211,16 @@ describe('Tools page', () => {
     fireEvent.change(within(drawer).getByLabelText('What happened', { exact: false }), { target: { value: 'Left on site' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-in', { lines: [{ loanId: 't-1', quantity: 1, condition: 'LOST', note: 'Left on site' }] }));
+  });
+
+  // Lost writes the tool off: the store's to do, not a borrower's (adjust:inventory).
+  it('offers Lost only to those who may write stock off', async () => {
+    perms.adjust = false;
+    renderPage();
+    await screen.findByText('Makita Hand Drill');
+    fireEvent.click(within(row('Makita Hand Drill')).getByRole('button', { name: 'Check in' }));
+    const condition = within(await screen.findByRole('dialog')).getByLabelText('Condition');
+    expect(within(condition).getAllByRole('option').map((o) => o.textContent)).toEqual(['Good', 'Damaged']);
   });
 
   it('offers no check-out, check-in or extension without permission', async () => {

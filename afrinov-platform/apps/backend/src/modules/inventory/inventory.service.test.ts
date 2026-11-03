@@ -818,6 +818,19 @@ describe('InventoryService — ADR-002 invariants', () => {
       })).rejects.toThrow(/Cannot return 2 × SKU: only 1 of the 4 issued is still out/);
     });
 
+    // Two slips over the same items in opposite order would each hold one lock
+    // and wait for the other's; locking every line's stock first, sorted, as an
+    // issue does, means they queue instead.
+    it('locks every line\'s stock before booking any, in sorted order', async () => {
+      for (const m of ['mat-1', 'mat-2']) await InventoryService.adjust({ materialId: m, locationId: 'loc-1', quantity: 5, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+      const one = (await issueOne({ materialId: 'mat-1', locationId: 'loc-1', quantity: 2, actorId: 'u' })).transactionId;
+      const two = (await issueOne({ materialId: 'mat-2', locationId: 'loc-1', quantity: 2, actorId: 'u' })).transactionId;
+      rowLocks.length = 0;
+      await InventoryService.returnMany({ lines: [{ issueTransactionId: two, quantity: 1 }, { issueTransactionId: one, quantity: 1 }], actorId: 'u' });
+      const balanceLocks = rowLocks.filter((l) => String(l.values[0]).startsWith('afrinov:inventory-balance:')).map((l) => l.values[0]);
+      expect(balanceLocks.slice(0, 2)).toEqual(['afrinov:inventory-balance:mat-1:loc-1:', 'afrinov:inventory-balance:mat-2:loc-1:']);
+    });
+
     it('refuses an empty return or a line with nothing coming back before booking anything', async () => {
       const { a } = await twoIssues();
       const before = trxRows.length;
@@ -1086,6 +1099,20 @@ describe('InventoryService — ADR-002 invariants', () => {
       await expect(
         InventoryService.reverse({ transactionId: 'gr-trx', reason: 'Wrong supplier', actorId: 'u' }),
       ).rejects.toThrow(/purchase order/);
+    });
+
+    // Receiving a whole order at once books against the order itself; reversing
+    // it would leave the order RECEIVED with the stock gone.
+    it('refuses to reverse stock received by receiving the whole order at once', async () => {
+      trxRows.push({
+        id: 'po-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(10),
+        actorId: 'u', postedAt: new Date(), referenceType: 'PurchaseOrder', referenceId: 'po-1',
+      });
+      balances.set(balKey('mat-1', 'loc-1'), { materialId: 'mat-1', locationId: 'loc-1', quantity: new Prisma.Decimal(10) });
+      await expect(
+        InventoryService.reverse({ transactionId: 'po-trx', reason: 'Wrong supplier', actorId: 'u' }),
+      ).rejects.toThrow(/purchase order cannot be reversed/);
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('10');
     });
 
     it('takes a reversal from the stock the movement went into: a project\'s, not Stores', async () => {

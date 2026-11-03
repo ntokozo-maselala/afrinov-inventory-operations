@@ -7,6 +7,7 @@ import { Button } from './Button';
 import { Select, Input } from './Field';
 import { formatNumber } from '../lib/format';
 import { locationLabel } from '../lib/locations';
+import { round4 } from '../lib/movementReason';
 
 export interface OrderForReceipt {
   id: string; number: string; supplierId: string;
@@ -26,7 +27,8 @@ interface LocationOpt { id: string; name: string; parent?: { name: string } | nu
 /** The order's lines with something still outstanding, each filled in with that amount. */
 export function receiptLinesFromOrder(order: OrderForReceipt): ReceiptLineDraft[] {
   return order.lines
-    .map((l) => ({ l, outstanding: Number(l.orderedQty) - Number(l.receivedQty) }))
+    // Rounded to the 4 places the server keeps: 10 - 9.7 is 0.3000000000000007 in floating point.
+    .map((l) => ({ l, outstanding: round4(Number(l.orderedQty) - Number(l.receivedQty)) }))
     .filter(({ outstanding }) => outstanding > 0)
     .map(({ l, outstanding }) => ({
       materialId: l.materialId, locationId: '', quantity: String(outstanding), purchaseOrderLineId: l.id,

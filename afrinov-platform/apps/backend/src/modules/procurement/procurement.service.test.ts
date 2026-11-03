@@ -238,14 +238,26 @@ function makePrisma(): unknown {
         return next;
       },
     },
-  $executeRaw: async () => void 0,
+  // Raw SQL is only locks here. Taking the order's row lock runs whatever
+  // another user committed while this one waited for it (see onOrderLock).
+  $executeRaw: async (sql: TemplateStringsArray) => {
+    if (sql.join('?').includes('FROM purchase_orders') && onOrderLock) {
+      const committedMeanwhile = onOrderLock;
+      onOrderLock = null;
+      committedMeanwhile();
+    }
+  },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
   };
 }
 
 interface SettingRow { key: string; value: unknown; type: string; category: string; description: string; isEditable: boolean; enumOptions: unknown; updatedAt: Date; updatedById: string | null }
 
+/** What another user commits while this request waits for the order's row lock. */
+let onOrderLock: (() => void) | null = null;
+
 beforeEach(() => {
+  onOrderLock = null;
   db.pos.clear();
   db.lines.clear();
   db.suppliers.clear();
@@ -1209,5 +1221,95 @@ describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 
     await PurchaseOrderService.update({ id: po.id, shippingTerms: 'FOB', vatRate: 15, linePrices: [{ lineId, unitPrice: 10 }] }, 'user-1');
     expect(db.pos.get(po.id)!.revision).toBe(0);
     expect(db.audit.length).toBe(logged);
+  });
+});
+
+// Posting a goods receipt locks the order's row. Each change to the order takes
+// the same lock before reading it, so what another user committed meanwhile is
+// what it works from.
+describe('PurchaseOrderService and the order row lock', () => {
+  const lineOf = (poId: string, materialId: string) => [...db.lines.values()].find((l) => l.purchaseOrderId === poId && l.materialId === materialId)!;
+
+  it('receiving the whole order books only what a goods receipt posted meanwhile left outstanding', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-2', { id: 'mat-2', sku: 'B-1', name: 'Bolt', active: true });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [
+      { materialId: 'mat-1', orderedQty: 10, unitPrice: 10 },
+      { materialId: 'mat-2', orderedQty: 5, unitPrice: 10 },
+    ] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'user-2');
+    const a = lineOf(po.id, 'mat-1');
+    db.lines.set(a.id, { ...a, receivedQty: new Prisma.Decimal(4) });
+    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' });
+    // The other 6 of line A arrive on a goods receipt; the order stays partly received.
+    onOrderLock = () => { db.lines.set(a.id, { ...lineOf(po.id, 'mat-1'), receivedQty: new Prisma.Decimal(10) }); };
+
+    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    expect(db.transactions.map((t) => [t.materialId, t.quantity.toString()])).toEqual([['mat-2', '5']]);
+  });
+
+  it('approving checks the limit against prices saved while it waited', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 1000 }] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    // Someone saves a price that takes it past Ona's R500 000.
+    onOrderLock = () => { const l = lineOf(po.id, 'mat-1'); db.lines.set(l.id, { ...l, unitPrice: 600000 }); };
+
+    await expect(PurchaseOrderService.approve(po.id, 'u-ona')).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.pos.get(po.id)!.status).toBe('PENDING_APPROVAL');
+  });
+
+  it('an edit that waited for a goods receipt finds the order partly received, and leaves it so', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 1000 }] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'u-ona');
+    onOrderLock = () => { db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' }); };
+
+    const lineId = lineOf(po.id, 'mat-1').id;
+    await expect(PurchaseOrderService.update({ id: po.id, linePrices: [{ lineId, unitPrice: 60000 }] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(db.pos.get(po.id)!.status).toBe('PARTIALLY_RECEIVED');
+  });
+});
+
+// Segregation of duties: nobody approves an order they raised, whatever their
+// role or limit, so raising, approving and receiving are never one person.
+describe('PurchaseOrderService and approving your own order', () => {
+  async function raisedBy(userId: string, price = 1000) {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: price }] }, userId);
+    await PurchaseOrderService.submit(po.id, userId);
+    return po.id;
+  }
+
+  it('refuses to let whoever raised an order approve it, and names who can', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await raisedBy('u-sb');
+    await expect(PurchaseOrderService.approve(id, 'u-sb')).rejects.toMatchObject({
+      statusCode: 403, message: 'You raised this order, so someone else must approve it. Ask Ona Moloane to approve it.',
+    });
+    expect(db.pos.get(id)!.status).toBe('PENDING_APPROVAL');
+    expect(await PurchaseOrderService.approve(id, 'u-ona')).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
+  });
+
+  it('says so when nobody else may approve it', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await raisedBy('u-sb', 600000); // over Ona's limit: only Simbongile could, and raised it
+    await expect(PurchaseOrderService.approve(id, 'u-sb')).rejects.toMatchObject({
+      statusCode: 403, message: expect.stringMatching(/Nobody else may approve it yet: an admin can give another user approval under Settings → Users\.$/),
+    });
+  });
+
+  it('tells the one who raised it they cannot approve it, and leaves it off their list', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const own = await raisedBy('u-sb');
+    const other = await raisedBy('user-1');
+    expect(await PurchaseOrderService.approval(own, 'u-sb')).toMatchObject({
+      canApprove: false, reason: 'You raised this order, so someone else must approve it.', approvers: [{ id: 'u-ona' }],
+    });
+    expect((await PurchaseOrderService.approval(own, 'u-sb')).approvers).toHaveLength(1);
+    expect((await PurchaseOrderService.awaitingApproval('u-sb')).map((p) => p.id)).toEqual([other]);
   });
 });

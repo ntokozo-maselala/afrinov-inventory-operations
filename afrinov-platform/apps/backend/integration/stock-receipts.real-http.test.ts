@@ -70,6 +70,26 @@ describe('receiving stock over real HTTP (procurement off)', () => {
     expect(gr).toMatchObject({ status: 'POSTED', purchaseOrderId: null, deliveryRef: `INV-${run}` });
   });
 
+  // A delivery note dated earlier than it was booked counts on the day it was
+  // booked, as its stock does in the ledger and on the month-end report, so a
+  // month already reported never changes; the note's own date is kept beside it.
+  it('counts a back-dated delivery on the day it was booked, keeping the delivery note date', async () => {
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const noteDay = day(new Date(Date.now() - 10 * 86_400_000));
+    const tape = await api<{ id: string }>('POST', '/materials', { sku: `IT-TAPE-${run}`, name: 'Insulation tape', category: 'CONSUMABLES', unitOfMeasure: 'roll' });
+    const res = await api<Receipt>('POST', '/stock-receipts', {
+      supplierId, deliveryRef: `INV-LATE-${run}`, receivedAt: noteDay, lines: [{ materialId: tape.body.id, locationId: rackId, quantity: 1 }],
+    });
+    expect(res.status).toBe(201);
+    const listed = async (from: string, to: string) => (await api<Array<{ number: string; receivedAt: string; postedAt: string }>>('GET', `/stock-receipts?from=${from}&to=${to}&q=INV-LATE-${run}`)).body;
+    expect(await listed(noteDay, noteDay)).toEqual([]);
+    const [today] = await listed(day(new Date()), day(new Date()));
+    expect(today?.number).toBe(res.body.number);
+    expect(Date.parse(today!.postedAt) - Date.parse(today!.receivedAt)).toBeGreaterThan(8 * 86_400_000);
+    const posted = await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: res.body.transactionIds[0]! } });
+    expect(day(posted.postedAt)).toBe(today!.postedAt.slice(0, 10));
+  });
+
   // Qodo, PR #131: a Projects item with no project isn't issued, so it isn't received either.
   it('refuses project material with no project, which could never be issued', async () => {
     const plain = await api<{ id: string }>('POST', '/materials', { sku: `IT-RCV-PLATE-${run}`, name: 'Plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' });
