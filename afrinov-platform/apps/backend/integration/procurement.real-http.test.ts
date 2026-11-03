@@ -1061,6 +1061,8 @@ describe('receiving stock over real HTTP', () => {
           expect(ofProject.find((r) => r.id === moved.body.outTransactionId)?.heldForProject).toBe(projectNumber);
           const found = (await api<Array<{ id: string }>>('GET', `/inventory-transactions?q=${projectNumber}&materialId=${looseId}`)).body;
           expect(found.map((r) => r.id)).toContain(moved.body.outTransactionId);
+          const reported = (await api<Array<{ id: string }>>('GET', `/reports/movement-history?projectNumber=${projectNumber}&materialId=${looseId}`)).body;
+          expect(reported.map((r) => r.id)).toContain(moved.body.outTransactionId);
 
           const adjusted = await storeman('POST', '/inventory-adjustments', {
             materialId: looseId, locationId: spare.body.id, quantity: -0.5, reasonCode: 'DAMAGE', reasonNote: 'Bent in the rack', heldForProject: projectNumber,

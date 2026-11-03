@@ -20,6 +20,7 @@ import { formatDateTime, formatNumber } from '../../lib/format';
 import { formatCurrency } from '../../lib/currency';
 import { formatDay, lateBy, movedWay } from '../../lib/toolLoans';
 import type { MovementRow, WriteoffsByResponsible } from '../../api/types';
+import { movementProject } from '../../lib/heldFor';
 
 export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
 
@@ -217,7 +218,7 @@ const loanNote = (m: MovementRow) => (m.reasonNote || m.overdueOverrideReason
   )
   : none);
 
-const project: Col = { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : none, width: '8rem' };
+const project: Col = { key: 'proj', header: 'Project', render: (m) => (movementProject(m) ? <span className="text-mono text-xs">{movementProject(m)}</span> : none), width: '8rem' };
 
 const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[]> = {
   all: (open) => [
