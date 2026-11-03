@@ -15,9 +15,10 @@ const { tx } = vi.hoisted(() => ({
 }));
 vi.mock('../../shared/db.js', () => ({ prisma: { $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx) } }));
 vi.mock('../../shared/inventory/balances.js', () => ({
-  getCurrentBalance: vi.fn(async (materialId: string) => new Prisma.Decimal(materialId === 'm-1' ? 10 : 4)),
+  getCurrentBalance: vi.fn(async ({ materialId }: { materialId: string }) => new Prisma.Decimal(materialId === 'm-1' ? 10 : 4)),
   recomputeBalance: vi.fn(async () => undefined),
   lockInventoryBalances: vi.fn(async () => undefined),
+  storesStock: (materialId: string, locationId: string) => ({ materialId, locationId, heldForProject: null }),
 }));
 vi.mock('../../shared/events.js', () => ({ dispatchDomainEvents: vi.fn(async () => undefined) }));
 

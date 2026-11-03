@@ -18,6 +18,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
 import type { CountRecord, CurrentStockRow, Material } from '../api/types';
+import { isStoresStock } from '../lib/heldFor';
 import { formatDateTime } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { locationLabel } from '../lib/locations';
@@ -83,8 +84,10 @@ export function StockCount() {
   const location = activeLocations.find((l) => l.id === locationId);
   const materialById = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
 
+  // A count is of Stores stock, as the server posts it: stock held for a project
+  // isn't listed, and an item held only for a project is added as found, at 0.
   const rows = useMemo<Row[]>(() => {
-    const listed = (stock.data ?? []).map((r) => ({ materialId: r.materialId, sku: r.materialSku, name: r.materialName, unit: r.unitOfMeasure, system: Number(r.quantity) }));
+    const listed = (stock.data ?? []).filter(isStoresStock).map((r) => ({ materialId: r.materialId, sku: r.materialSku, name: r.materialName, unit: r.unitOfMeasure, system: Number(r.quantity) }));
     const ids = new Set(listed.map((r) => r.materialId));
     const extra = draft.extra.filter((id) => !ids.has(id)).flatMap((id) => {
       const m = materialById.get(id);

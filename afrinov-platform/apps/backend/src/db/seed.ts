@@ -509,7 +509,7 @@ async function ensureTransactions(
   }
   for (const key of touched) {
     const [materialId, locationId] = key.split('|') as [string, string];
-    await recomputeBalancesFor(materialId, locationId);
+    await recomputeBalancesFor({ materialId, locationId, heldForProject: null });
   }
 }
 

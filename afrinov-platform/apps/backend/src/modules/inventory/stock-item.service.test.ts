@@ -115,8 +115,9 @@ function makePrisma(): unknown {
       },
     },
     inventoryBalance: {
-      upsert: async ({ where, create, update }: { where: { materialId_locationId: { materialId: string; locationId: string } }; create: { materialId: string; locationId: string; quantity: Prisma.Decimal }; update: { quantity: Prisma.Decimal } }) => {
-        const k = balKey(where.materialId_locationId.materialId, where.materialId_locationId.locationId);
+      upsert: async ({ where, create, update }: { where: { materialId_locationId_heldForProject: { materialId: string; locationId: string; heldForProject: string } }; create: { materialId: string; locationId: string; quantity: Prisma.Decimal }; update: { quantity: Prisma.Decimal } }) => {
+        const { materialId, locationId } = where.materialId_locationId_heldForProject;
+        const k = balKey(materialId, locationId);
         const existing = db.balances.get(k);
         const row: BalRow = existing
           ? { ...existing, quantity: update.quantity }

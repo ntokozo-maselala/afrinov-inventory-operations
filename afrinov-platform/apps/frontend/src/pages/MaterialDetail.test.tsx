@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockGet, mockPatch, perms } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPatch: vi.fn(), perms: { manage: true } }));
@@ -171,5 +171,24 @@ describe('MaterialDetail links', () => {
     await screen.findByRole('button', { name: 'Reactivate' });
     expect(screen.queryByRole('link', { name: 'Receive' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+});
+
+// Qodo, PR #142: one location can hold Stores stock and stock held for a
+// project, each its own balance, so each line says whose it is.
+describe('MaterialDetail stock held for a project', () => {
+  beforeEach(() => {
+    perms.manage = true;
+    material = { ...DISC };
+    stock = [...STOCK, { ...STOCK[0]!, quantity: '6', heldForProject: 'AFRI-1325' }];
+    mockGet.mockReset();
+    mockPatch.mockReset();
+  });
+
+  it('lists it on its own line at the location, naming the project', async () => {
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Stock by location' });
+    expect(within(table).getByText('A-1')).toBeInTheDocument();
+    expect(within(table).getByText('A-1 · held for AFRI-1325')).toBeInTheDocument();
   });
 });

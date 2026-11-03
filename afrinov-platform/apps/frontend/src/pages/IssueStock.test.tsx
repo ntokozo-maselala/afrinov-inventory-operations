@@ -156,6 +156,20 @@ describe('IssueStock page', () => {
     expect(screen.getByLabelText('Item 2')).toHaveFocus();
   });
 
+  // Qodo, PR #142: issues take Stores stock, so a balance held for a project at
+  // the same item and location is neither offered nor counted as available.
+  it('offers only Stores stock, not stock held for a project at the same place', async () => {
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock')
+      ? [...STOCK, { ...STOCK[0]!, heldForProject: 'AFRI-1325', quantity: '50' }]
+      : respond(path)));
+    renderPage();
+    await ready();
+    fireEvent.focus(screen.getByLabelText('Item 1'));
+    const discs = screen.getAllByRole('option', { name: /DISC-115/ });
+    expect(discs).toHaveLength(1);
+    expect(discs[0]).toHaveTextContent('10 each on hand');
+  });
+
   it('says when recipients cannot be loaded instead of showing an empty list', async () => {
     let fail = true;
     mockGet.mockImplementation(async (path: string) => {

@@ -633,7 +633,7 @@ export const OPERATIONS: Operation[] = [
 
   // Reports
   {
-    method: 'get', path: '/reports/current-stock', tag: 'Reports', summary: 'Stock on hand per material and location',
+    method: 'get', path: '/reports/current-stock', tag: 'Reports', summary: 'Stock on hand per material, location and project it is held for',
     permissions: [P.ViewReports],
     query: z.object({ category: materialCategorySchema.optional(), locationId: z.string().optional(), materialId: z.string().optional() }),
   },

@@ -16,7 +16,8 @@ interface Mat {
   projectNumber?: string | null; project?: { name: string | null; status: string } | null;
 }
 interface Loc { id: string; name: string; type: string; active: boolean }
-interface Bal { materialId: string; locationId: string; quantity: Prisma.Decimal; updatedAt: Date }
+// heldForProject: '' (Stores) unless held for a project, as the table keys it.
+interface Bal { materialId: string; locationId: string; quantity: Prisma.Decimal; updatedAt: Date; heldForProject?: string }
 interface Tx {
   id: string; postedAt: Date; type: string; materialId: string; locationId: string;
   quantity: Prisma.Decimal; actorId: string; recipientId: string | null; reasonCode: string | null;
@@ -56,17 +57,18 @@ function makePrisma(): unknown {
   return {
     inventoryBalance: {
       findMany: async ({ where, include }: { where?: { locationId?: string; materialId?: string | { in: string[] } }; include?: unknown } = {}) => {
-        let list = db.balances.slice();
+        let list = db.balances.map((b) => ({ heldForProject: '', ...b }));
         if (where?.locationId) list = list.filter((b) => b.locationId === where.locationId);
         const mid = where?.materialId;
         if (typeof mid === 'string') list = list.filter((b) => b.materialId === mid);
         else if (mid?.in) list = list.filter((b) => mid.in.includes(b.materialId));
         return include ? list.map((b) => ({ ...b, location: { name: db.locations.find((l) => l.id === b.locationId)?.name ?? 'Loc' } })) : list;
       },
-      groupBy: async ({ where }: { where?: { materialId?: { in: string[] } } } = {}) => {
+      groupBy: async ({ where }: { where?: { materialId?: { in: string[] }; heldForProject?: string } } = {}) => {
         const sums = new Map<string, Prisma.Decimal>();
         for (const b of db.balances) {
           if (where?.materialId?.in && !where.materialId.in.includes(b.materialId)) continue;
+          if (where?.heldForProject !== undefined && (b.heldForProject ?? '') !== where.heldForProject) continue;
           sums.set(b.materialId, (sums.get(b.materialId) ?? DEC(0)).add(b.quantity));
         }
         return [...sums].map(([materialId, quantity]) => ({ materialId, _sum: { quantity } }));
@@ -253,6 +255,21 @@ describe('ReportingService', () => {
   });
 
   describe('stockStatus', () => {
+    // Qodo, PR #142: Stores can't issue stock held for a project, so it can't make a Stores item look healthy.
+    it('grades a Stores item by its Stores stock, not stock held for a project', async () => {
+      seedMaterials();
+      db.balances = [{ materialId: 'm-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() }];
+      const { ReportingService } = await import('./reporting.service.js');
+      const storesOnly = (await ReportingService.stockStatus()).find((r) => r.materialId === 'm-1')!;
+      const storesRow = (await ReportingService.currentStock()).find((r) => r.materialId === 'm-1')!;
+      db.balances.push({ materialId: 'm-1', locationId: 'l-1', quantity: DEC(100), updatedAt: new Date(), heldForProject: '1369' });
+      const withHeld = (await ReportingService.stockStatus()).find((r) => r.materialId === 'm-1')!;
+      expect(withHeld).toMatchObject({ onHand: '1', status: storesOnly.status, reorderQuantity: storesOnly.reorderQuantity });
+      const rows = (await ReportingService.currentStock()).filter((r) => r.materialId === 'm-1');
+      expect(rows.map((r) => r.heldForProject)).toEqual([null, '1369']);
+      for (const r of rows) expect(r.stockStatus).toBe(storesRow.stockStatus);
+    });
+
     it('is for Stores: Projects material is left out unless asked for', async () => {
       seedMaterials();
       db.materials.push({ id: 'p-1', sku: '1369-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: DEC(0), unitCost: null, active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });

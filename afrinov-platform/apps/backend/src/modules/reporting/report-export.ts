@@ -5,7 +5,12 @@
 // report. No second source of truth.
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
-import type { ReportResult, ReportMovementRow } from './report.service.js';
+import type { ReportResult, ReportMovementRow, ReportInventoryLine } from './report.service.js';
+
+/** Where a line's stock is, naming the project when it is held for one. */
+function placeCell(l: Pick<ReportInventoryLine, 'locationName' | 'heldForProject'>): string {
+  return l.heldForProject ? `${l.locationName} · held for ${l.heldForProject}` : l.locationName;
+}
 
 /** "1369 · Plant upgrade (completed)", or "No project yet". */
 function projectLabel(p: { projectNumber: string | null; name: string | null; status: string | null }): string {
@@ -171,7 +176,7 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
       l.inventoryValue,
       STATUS_LABELS[l.status] ?? l.status,
       supplierNameForSku(report, l.sku),
-      l.locationName,
+      placeCell(l),
       fmtDateTime(l.lastUpdated),
     ]);
   }
@@ -415,7 +420,7 @@ function drawExceptionsTable(doc: PDFKit.PDFDocument, report: ReportResult): voi
     report.exceptions.map((l) => [
       l.sku,
       l.name,
-      l.locationName,
+      placeCell(l),
       fmtQty(l.quantity),
       fmtQty(l.requiredStock),
       STATUS_LABELS[l.status] ?? l.status,
@@ -437,7 +442,7 @@ function drawInventoryTable(doc: PDFKit.PDFDocument, report: ReportResult): void
       l.sku,
       l.name,
       categoryLabel(String(l.category)),
-      l.locationName,
+      placeCell(l),
       fmtQty(l.quantity),
       fmtCurrency(l.inventoryValue, report.currency),
       STATUS_LABELS[l.status] ?? l.status,

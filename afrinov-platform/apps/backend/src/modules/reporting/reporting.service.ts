@@ -3,6 +3,7 @@ import { prisma } from '../../shared/db.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { classifyItem, getStatusBands, needsAttention, type StatusBands, type StockStatus } from '../../shared/inventory/stock-status.js';
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
+import { heldForOf } from '../../shared/inventory/balances.js';
 import { categoryWhere, sectionOf, type MaterialSection } from '../inventory/material-section.js';
 
 export interface StockStatusRow {
@@ -71,11 +72,15 @@ const CATEGORY_ORDER = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PP
 
 const STATUS_ORDER: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
 
-/** Total on hand per material, from the balances (the ledger's running totals). */
-async function totalsByMaterial(materialIds?: string[]): Promise<Map<string, Prisma.Decimal>> {
+/**
+ * Stores stock on hand per material, from the balances (the ledger's running
+ * totals). A stock status is a Stores measure, so stock held for a project,
+ * which Stores can't issue, doesn't count towards it (Qodo, PR #142).
+ */
+async function storesTotalsByMaterial(materialIds?: string[]): Promise<Map<string, Prisma.Decimal>> {
   const rows = await prisma.inventoryBalance.groupBy({
     by: ['materialId'],
-    where: materialIds ? { materialId: { in: materialIds } } : undefined,
+    where: { heldForProject: '', ...(materialIds ? { materialId: { in: materialIds } } : {}) },
     _sum: { quantity: true },
   });
   return new Map(rows.map((r) => [r.materialId, r._sum.quantity ?? new Prisma.Decimal(0)]));
@@ -149,7 +154,7 @@ export const ReportingService = {
     if (filter.materialId) where.materialId = filter.materialId;
     const balances = await prisma.inventoryBalance.findMany({
       where,
-      orderBy: [{ materialId: 'asc' }, { locationId: 'asc' }],
+      orderBy: [{ materialId: 'asc' }, { locationId: 'asc' }, { heldForProject: 'asc' }],
     });
 
     const materialIds = Array.from(new Set(balances.map((b) => b.materialId)));
@@ -168,7 +173,7 @@ export const ReportingService = {
       locationIds.length ? prisma.location.findMany({ where: { id: { in: locationIds } } }) : Promise.resolve([]),
       getStatusBands(),
       SettingsService.getValue<boolean>('inventory.enableStockAlerts'),
-      totalsByMaterial(materialIds),
+      storesTotalsByMaterial(materialIds),
     ]);
     // A tool out on loan is still owned, so it counts towards Required Stock.
     const onLoan = await onLoanByMaterial(prisma, materialIds);
@@ -193,6 +198,8 @@ export const ReportingService = {
           // Projects material: the project it belongs to (null until assigned).
           projectNumber: m.projectNumber,
           project: m.project ? { name: m.project.name, status: m.project.status } : null,
+          // Whose stock this row is: the project it is held for, or null for Stores stock.
+          heldForProject: heldForOf(b),
           unitOfMeasure: m.unitOfMeasure,
           requiredStock: requiredStock.toString(),
           locationId: b.locationId,
@@ -246,6 +253,9 @@ export const ReportingService = {
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
+      // Whose stock moved: the project it is held for, or null for Stores stock.
+      // Not projectNumber, which says who the stock was used for.
+      heldForProject: t.heldForProject,
       referenceType: t.referenceType,
       referenceId: t.referenceId,
     }));
@@ -286,7 +296,11 @@ export const ReportingService = {
     for (const b of balances) byMaterial.set(b.materialId, [...(byMaterial.get(b.materialId) ?? []), b]);
 
     const rows = materials.map((m): StockStatusRow => {
-      const mine = byMaterial.get(m.id) ?? [];
+      // Status, reorder and value count Stores stock, which is what Stores can
+      // issue (Qodo, PR #142), and Projects leftovers, which are Stores stock
+      // with the item's project. Stock held for a project is that project's:
+      // it gets its own views (Project Material Through the Store Roadmap, Phase 4).
+      const mine = (byMaterial.get(m.id) ?? []).filter((b) => b.heldForProject === '');
       const onHand = mine.reduce((a, b) => a.add(b.quantity), new Prisma.Decimal(0));
       // A tool out on loan is still owned, so it counts towards Required Stock.
       const onLoan = loans.get(m.id) ?? new Prisma.Decimal(0);
