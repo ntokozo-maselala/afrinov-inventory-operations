@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeConsumption } from './mockConsumption';
 import { NO_PROJECT, NO_RECIPIENT } from '../api/reportTypes';
-import type { MockInventoryTransaction, MockMaterial, MockProject, MockRecipient } from './types';
+import type { MockConsumableOutcome, MockInventoryTransaction, MockMaterial, MockProject, MockRecipient } from './types';
 
 const tx = (id: string, type: 'ISSUE' | 'RETURN' | 'RECEIPT', materialId: string, quantity: number, postedAt: string, extra: Partial<MockInventoryTransaction> = {}): MockInventoryTransaction => ({
   id, type, materialId, locationId: 'loc-1', quantity: String(quantity), postedAt, actorId: 'u', ...extra,
@@ -17,7 +17,7 @@ const projects = [{ projectNumber: 'P-1', name: 'Pump' }] as MockProject[];
 const transactions = [
   tx('r', 'RECEIPT', 'disc', 100, '2026-10-01T08:00:00Z'),
   tx('i1', 'ISSUE', 'disc', -30, '2026-10-02T08:00:00Z', { projectNumber: 'P-1', recipientId: 'rcp-1' }),
-  tx('ret', 'RETURN', 'disc', 5, '2026-10-03T08:00:00Z', { projectNumber: 'P-1', recipientId: 'rcp-1' }),
+  tx('ret', 'RETURN', 'disc', 5, '2026-10-03T08:00:00Z', { projectNumber: 'P-1', recipientId: 'rcp-1', referenceType: 'Return', referenceId: 'i1' }),
   tx('i2', 'ISSUE', 'disc', -10, '2026-10-31T23:00:00Z'),
   tx('i3', 'ISSUE', 'pipe', -2.5, '2026-10-05T08:00:00Z', { projectNumber: 'P-1' }),
   tx('bad', 'ISSUE', 'disc', -7, '2026-10-06T08:00:00Z', { projectNumber: 'P-1' }),
@@ -53,12 +53,28 @@ describe('computeConsumption (mock)', () => {
   it('adds up by recipient, and lists one recipient\u2019s issues and returns newest first', () => {
     const all = run({});
     expect(all.byRecipient).toEqual([
-      { recipientId: 'rcp-1', name: 'Sabelo', type: 'WORKER', value: 1051.25, items: 1, issues: 1 },
-      { recipientId: null, name: null, type: null, value: 420.5, items: 2, issues: 2 },
+      { recipientId: 'rcp-1', name: 'Sabelo', type: 'WORKER', value: 1051.25, items: 1, issues: 1, usedUp: 0, broken: 0, stillOut: 0 },
+      { recipientId: null, name: null, type: null, value: 420.5, items: 2, issues: 2, usedUp: 0, broken: 0, stillOut: 0 },
     ]);
     expect(all.lines).toBeUndefined();
     expect(run({ recipientId: 'rcp-1' }).lines!.map((l) => [l.type, l.quantity, l.issuedBy])).toEqual([['RETURN', -5, 'Vusi'], ['ISSUE', 30, 'Vusi']]);
     expect(run({ recipientId: NO_RECIPIENT }).items.map((i) => [i.sku, i.used])).toEqual([['CON-1', 10], ['PRJ-1', 2.5]]);
+  });
+
+  it('says what was used up, broken or is still out, for items that track use', () => {
+    const tracked = materials.map((m) => (m.id === 'disc' ? { ...m, trackUse: true } : m));
+    const outcome = (id: string, kind: 'USED_UP' | 'BROKEN', quantity: number, withdrawsId: string | null = null): MockConsumableOutcome => ({
+      id, issueTransactionId: 'i1', outcome: kind, quantity, note: null, withdrawsId, actorId: 'u', createdAt: '2026-10-04T08:00:00Z',
+    });
+    const consumableOutcomes = [
+      outcome('o1', 'USED_UP', 20), outcome('o2', 'BROKEN', 3),
+      // Withdrawn, so it counts for nothing.
+      outcome('o3', 'BROKEN', 2), outcome('o4', 'BROKEN', 2, 'o3'),
+    ];
+    const r = computeConsumption({ from: '2026-10-01', to: '2026-10-31', recipientId: 'rcp-1' }, { transactions, materials: tracked, projects, recipients, consumableOutcomes });
+    // 30 issued, 5 back, 20 used up, 3 broken: 2 still out.
+    expect(r.byRecipient[0]).toMatchObject({ usedUp: 20, broken: 3, stillOut: 2 });
+    expect(r.lines!.map((l) => [l.type, l.usedUp, l.broken, l.stillOut])).toEqual([['RETURN', null, null, null], ['ISSUE', 20, 3, 2]]);
   });
 
   it('refuses a backwards range', () => {

@@ -27,6 +27,8 @@ Notes on the table, against the original proposal:
 - `edit:supplier` and `manage:roles` are granted but no endpoint checks them
   (TD-011, TD-013). `checkout:tool` and `checkin:tool` are checked by the
   Tools endpoints; `extend:tool_loan` by `POST /tools/loans/:id/due-date` (the code keeps its first name; it allows a later or earlier date).
+- Marking an issue used up or broken is checked as `issue:inventory`;
+  withdrawing that mark as `reverse:inventory_transaction` (ADR-026).
 - A tool loan due date more than `inventory.toolMaxLoanDays` after check-out
   needs `manage:settings` (ADMIN), on check-out and on extension.
 - Reads of materials, locations, racks, projects, recipients, suppliers,

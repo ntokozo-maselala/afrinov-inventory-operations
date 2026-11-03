@@ -181,6 +181,10 @@ export interface ConsumptionLine {
   quantity: number;
   projectNumber: string | null;
   issuedBy: string;
+  /** Issues of items that track use: marked used up or broken, and still out now. Null otherwise. */
+  usedUp?: number | null;
+  broken?: number | null;
+  stillOut?: number | null;
 }
 
 export interface ConsumptionReport {
@@ -189,10 +193,19 @@ export interface ConsumptionReport {
   currency: string;
   items: ConsumptionItem[];
   byProject: Array<{ projectNumber: string | null; projectName: string | null; value: number; items: number }>;
-  byRecipient: Array<{ recipientId: string | null; name: string | null; type: string | null; value: number; items: number; issues: number }>;
+  /** usedUp, broken and stillOut: quantities of items that track use after issue, as of now. */
+  byRecipient: Array<{
+    recipientId: string | null; name: string | null; type: string | null; value: number; items: number; issues: number;
+    usedUp?: number; broken?: number; stillOut?: number;
+  }>;
   lines?: ConsumptionLine[];
   byCategory: Array<{ category: string; value: number; items: number }>;
   total: { value: number; items: number; unpriced: number };
+}
+
+/** Whether anyone in the report was issued an item that tracks use, so its used up, broken and still out columns say something. */
+export function showsTrackedUse(r: Pick<ConsumptionReport, 'byRecipient'>): boolean {
+  return r.byRecipient.some((x) => !!(x.usedUp || x.broken || x.stillOut));
 }
 
 /**

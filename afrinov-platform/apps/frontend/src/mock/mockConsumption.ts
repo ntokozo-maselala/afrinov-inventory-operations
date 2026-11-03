@@ -1,9 +1,10 @@
 // Mirrors ConsumptionService.report (apps/backend/src/modules/reporting/
 // consumption.service.ts) for frontend-only mode: issued less returned per
 // item in a date range, valued at unit price, by project, recipient and category, with
-// reversed issues and returns left out together with their reversals.
+// reversed issues and returns left out together with their reversals. Items
+// that track use also say what was used up, broken or is still out, as of now.
 import type { ApiError } from '../api/client';
-import type { MockInventoryTransaction, MockMaterial, MockProject, MockRecipient } from './types';
+import type { MockConsumableOutcome, MockInventoryTransaction, MockMaterial, MockProject, MockRecipient } from './types';
 import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionLine, type ConsumptionReport } from '../api/reportTypes';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -11,11 +12,18 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 const fail = (message: string): ApiError => ({ code: 'VALIDATION_ERROR', message });
 
+/** Used up and broken so far against an issue line: outcomes that are neither a withdrawal nor withdrawn. */
+export function closedOffOf(outcomes: MockConsumableOutcome[], issueId: string): { usedUp: number; broken: number } {
+  const live = outcomes.filter((o) => o.issueTransactionId === issueId && !o.withdrawsId && !outcomes.some((w) => w.withdrawsId === o.id));
+  const sum = (kind: MockConsumableOutcome['outcome']) => live.filter((o) => o.outcome === kind).reduce((a, o) => a + o.quantity, 0);
+  return { usedUp: sum('USED_UP'), broken: sum('BROKEN') };
+}
+
 export function computeConsumption(
   qs: Record<string, string>,
   data: {
     transactions: MockInventoryTransaction[]; materials: MockMaterial[]; projects: MockProject[]; currency?: string;
-    recipients?: MockRecipient[]; userName?: (id: string) => string;
+    recipients?: MockRecipient[]; userName?: (id: string) => string; consumableOutcomes?: MockConsumableOutcome[];
   },
   now = new Date(),
 ): ConsumptionReport {
@@ -32,7 +40,15 @@ export function computeConsumption(
   const items = new Map<string, ConsumptionItem>();
   const projects = new Map<string | null, { value: number; materials: Set<string> }>();
   const recipientsById = new Map((data.recipients ?? []).map((r) => [r.id, r]));
-  const recipients = new Map<string | null, { value: number; materials: Set<string>; issues: number }>();
+  const recipients = new Map<string | null, { value: number; materials: Set<string>; issues: number; usedUp: number; broken: number; stillOut: number }>();
+  // An issue of an item that tracks use: what came back at any time, and what was closed off.
+  const trackedUseOf = (t: MockInventoryTransaction) => {
+    const returned = data.transactions
+      .filter((r) => r.type === 'RETURN' && r.referenceType === 'Return' && r.referenceId === t.id)
+      .reduce((a, r) => a + Number(r.quantity), 0);
+    const { usedUp, broken } = closedOffOf(data.consumableOutcomes ?? [], t.id);
+    return { usedUp, broken, stillOut: round4(-Number(t.quantity) - returned - usedUp - broken) };
+  };
   const lines: ConsumptionLine[] = [];
 
   for (const t of data.transactions) {
@@ -59,14 +75,21 @@ export function computeConsumption(
     projects.set(key, p);
 
     const rKey = t.recipientId ?? null;
-    const r = recipients.get(rKey) ?? { value: 0, materials: new Set<string>(), issues: 0 };
+    const r = recipients.get(rKey) ?? { value: 0, materials: new Set<string>(), issues: 0, usedUp: 0, broken: 0, stillOut: 0 };
     r.value += -qty * (unitCost ?? 0);
     r.materials.add(m.id);
     if (t.type === 'ISSUE') r.issues++;
+    const use = t.type === 'ISSUE' && m.trackUse ? trackedUseOf(t) : null;
+    if (use) {
+      r.usedUp += use.usedUp;
+      r.broken += use.broken;
+      r.stillOut += use.stillOut;
+    }
     recipients.set(rKey, r);
     lines.push({
       id: t.id, postedAt: t.postedAt, type: t.type, sku: m.sku, name: m.name, unitOfMeasure: m.unitOfMeasure,
       quantity: round4(-qty), projectNumber: t.projectNumber ?? null, issuedBy: data.userName?.(t.actorId) ?? 'Unknown',
+      usedUp: use?.usedUp ?? null, broken: use?.broken ?? null, stillOut: use?.stillOut ?? null,
     });
   }
 
@@ -97,7 +120,10 @@ export function computeConsumption(
     byRecipient: [...recipients]
       .map(([recipientId, r]) => {
         const who = recipientId ? recipientsById.get(recipientId) : undefined;
-        return { recipientId, name: who?.name ?? null, type: who?.type ?? null, value: round2(r.value), items: r.materials.size, issues: r.issues };
+        return {
+          recipientId, name: who?.name ?? null, type: who?.type ?? null, value: round2(r.value), items: r.materials.size, issues: r.issues,
+          usedUp: round4(r.usedUp), broken: round4(r.broken), stillOut: round4(r.stillOut),
+        };
       })
       .sort((a, b) => b.value - a.value || (a.name ?? '').localeCompare(b.name ?? '')),
     ...(qs.recipientId ? { lines: lines.sort((a, b) => b.postedAt.localeCompare(a.postedAt)).slice(0, 1000) } : {}),

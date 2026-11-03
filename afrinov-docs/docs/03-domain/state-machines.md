@@ -91,7 +91,11 @@ opposite sign whose `reversesId` points at the original (ADR-005). A row
 can be reversed at most once (unique `reversesId`); a reversal cannot itself
 be reversed; both legs of a transfer are reversed together; an issue that
 has had stock returned against it cannot be reversed until the returns are
-reversed; no reversal may take a balance below zero.
+reversed, nor one marked used up or broken until those outcomes are
+withdrawn (ADR-026); no reversal may take a balance below zero.
+
+A consumable outcome (`consumable_outcomes`) has no states either: it is
+added once and withdrawn, at most once, by a second row naming it.
 
 ## Project
 `status` is one of PLANNING, ACTIVE, ON_HOLD, COMPLETED, CANCELLED, set

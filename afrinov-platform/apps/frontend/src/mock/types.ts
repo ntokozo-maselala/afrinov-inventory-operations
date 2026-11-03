@@ -55,6 +55,14 @@ export interface MockMaterial {
   serialNumber?: string | null;
   /** Project Material only: the project it is bought for (null until assigned). */
   projectNumber?: string | null;
+  /** Each issue is later marked used up or broken. Never on a tool. */
+  trackUse?: boolean;
+}
+
+/** Used up or broken against an issue line, as the backend's consumable_outcomes; withdrawsId marks a withdrawal. */
+export interface MockConsumableOutcome {
+  id: string; issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: number;
+  note: string | null; withdrawsId: string | null; actorId: string; createdAt: string;
 }
 
 export interface MockLocation {
@@ -263,6 +271,9 @@ export interface MockMovementRow {
   fromPurchaseOrder?: boolean;
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
   returnedQuantity?: string | null;
+  usedUpQuantity?: string | null;
+  brokenQuantity?: string | null;
+  trackUse?: boolean;
   dueOn?: string | null;
   previousDueOn?: string | null;
   currentDueOn?: string | null;

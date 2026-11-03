@@ -17,7 +17,10 @@ import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
-import { issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema } from '../modules/inventory/inventory.routes.js';
+import {
+  issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema,
+  consumableOutcomeSchema, outcomeWithdrawalSchema,
+} from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema } from '../modules/inventory/tool.routes.js';
 import {
   createMaterialSchema,
@@ -230,7 +233,8 @@ export const OPERATIONS: Operation[] = [
       + 'changes listed among them by when they were made: type DUE_DATE_CHANGE, quantity null (no stock moved), dueOn the new date, '
       + 'previousDueOn the one it replaced, reasonNote why, referenceId the loan. A check-out (LOAN) carries dueOn (agreed), '
       + 'currentDueOn and overdueOverrideReason; a check-in (LOAN_RETURN) carries dueOn (as it stood then) and daysLate '
-      + '(zero or less: on time). One cursor pages both.',
+      + '(zero or less: on time). One cursor pages both. An ISSUE carries returnedQuantity, usedUpQuantity and brokenQuantity; '
+      + 'trackUse says whether its item asks for used up or broken.',
     query: movementQuery,
   },
   {
@@ -374,7 +378,7 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',
     summary: 'Return unused stock from an issue',
     description: 'Posts a RETURN that points at the issue and keeps its recipient and project, into the given location '
-      + '(default: where it was issued from). At most the issued quantity less earlier returns. '
+      + '(default: where it was issued from). At most the issued quantity less earlier returns and what was marked used up or broken. '
       + 'Refused with 400 when that is exceeded and 409 INVALID_STATE for anything but an unreversed issue.',
     permissions: [P.IssueInventory], body: returnSchema, success: 201, errors: [400, 404, 409],
   },
@@ -401,6 +405,29 @@ export const OPERATIONS: Operation[] = [
     description: 'Posts an opposite entry linked to the original; the ledger is never edited. Both legs of a transfer are reversed together. '
       + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal or a goods-receipt receipt, and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
     permissions: [P.ReverseInventoryTransaction], body: reversalSchema, success: 201, errors: [404, 409, 422],
+  },
+  {
+    method: 'get', path: '/inventory-transactions/:id/outcomes', tag: 'Stock movements',
+    summary: 'What became of an issue line: used up or broken',
+    description: 'For an issue: quantity issued, returned, used up, broken and still out (issued less the other three), whether the '
+      + 'item tracks use now, and every outcome oldest first, with its withdrawal when it was withdrawn. 404 for anything but an issue.',
+    errors: [404],
+  },
+  {
+    method: 'post', path: '/inventory-transactions/:id/outcomes', tag: 'Stock movements',
+    summary: 'Mark part of an issue used up or broken',
+    description: 'Only for an item that tracks use after issue (Material.trackUse). No stock moves: it left the shelf at the issue. At most '
+      + 'what is still out, which returns share. Refused with 400 when that is exceeded and 409 INVALID_STATE for anything but an '
+      + 'unreversed issue of a tracked item. Returns the outcome id and where the issue now stands. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.IssueInventory], body: consumableOutcomeSchema, success: 201, errors: [400, 404, 409],
+  },
+  {
+    method: 'post', path: '/consumable-outcomes/:id/withdrawal', tag: 'Stock movements',
+    summary: 'Withdraw a used up or broken outcome recorded by mistake',
+    description: 'Adds a row naming the outcome, with the reason; both are kept and count for nothing together. Refused with 409 CONFLICT '
+      + 'when already withdrawn and 409 INVALID_STATE for a withdrawal. An issue with outcomes is reversed only once they are withdrawn. '
+      + 'Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ReverseInventoryTransaction], body: outcomeWithdrawalSchema, success: 201, errors: [404, 409],
   },
 
   // Projects
@@ -679,7 +706,8 @@ export const OPERATIONS: Operation[] = [
       + 'valued at the unit price, with totals by project and by category. Reversed issues and returns are left out with '
       + 'their reversals. Totals by project, by recipient and by category. Optional ?projectNumber= (__none__ for issues '
       + 'with no project), ?category= and ?recipientId= (__none__ for issues with no recipient recorded); with a recipient, '
-      + 'their issues and returns are listed one by one, newest first (up to 1000).',
+      + 'their issues and returns are listed one by one, newest first (up to 1000). For items that track use, each recipient and each '
+      + 'issue line also carries usedUp, broken and stillOut, as of now.',
     permissions: [P.ViewReports], errors: [400],
   },
   {

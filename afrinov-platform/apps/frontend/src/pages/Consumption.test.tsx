@@ -135,6 +135,22 @@ describe('Consumption page', () => {
     expect(byRecipient.getByRole('link', { name: 'Not recorded' }).getAttribute('href')).toContain('recipientId=__none__');
     // The list of one person's issues lives in the Issued stock report, not here.
     expect(screen.queryByLabelText('Issued to Sabelo')).not.toBeInTheDocument();
+    // Nobody was issued an item that tracks use, so there is nothing to say about it.
+    expect(byRecipient.queryByRole('columnheader', { name: 'Still out' })).not.toBeInTheDocument();
+  });
+
+  it('says what was used up, broken and is still out, for items that track use', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/projects') || path.startsWith('/recipients')) return [];
+      return { ...REPORT, byRecipient: [{ ...REPORT.byRecipient[0], usedUp: 20, broken: 3, stillOut: 2 }, { ...REPORT.byRecipient[1], usedUp: 0, broken: 0, stillOut: 0 }] };
+    });
+    render(<MemoryRouter initialEntries={['/reports/consumption']}><ToastProvider><Consumption /></ToastProvider></MemoryRouter>);
+    const table = within(await screen.findByLabelText('Stock used by recipient'));
+    expect(await table.findByRole('columnheader', { name: 'Still out' })).toBeInTheDocument();
+    const sabelo = table.getByRole('link', { name: 'Sabelo' }).closest('tr')!;
+    // Used up, broken, still out: the last three columns.
+    expect(within(sabelo).getAllByRole('cell').map((c) => c.textContent).slice(-3)).toEqual(['20', '3', '2']);
+    expect(screen.getByText(/as of now, for what was issued in this period/)).toBeInTheDocument();
   });
 });
 

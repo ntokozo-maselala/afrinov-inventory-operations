@@ -3,7 +3,7 @@
 // sheets here from the mock report. The PDF copy is built here in both modes.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
-import type { ConsumptionReport } from './reportTypes';
+import { showsTrackedUse, type ConsumptionReport } from './reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
 import { downloadPdf, type PdfTable } from '../lib/pdf';
 import { formatDate, formatNumber } from '../lib/format';
@@ -63,17 +63,26 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
 
   const wr = wb.addWorksheet('By recipient');
   wr.getCell('A1').value = `Stock issued by recipient, ${r.from} to ${r.to}`;
-  wr.getRow(3).values = ['Issued to', 'Type', 'Issues', 'Items', 'Value'];
+  wr.getRow(3).values = ['Issued to', 'Type', 'Issues', 'Items', 'Value', 'Used up', 'Broken', 'Still out'];
   wr.getRow(3).font = { bold: true };
-  for (const x of r.byRecipient) wr.addRow([x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', x.issues, x.items, x.value]);
+  for (const x of r.byRecipient) {
+    wr.addRow([x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', x.issues, x.items, x.value, x.usedUp ?? 0, x.broken ?? 0, x.stillOut ?? 0]);
+  }
   wr.addRow(['Total', null, null, null, r.total.value]).font = { bold: true };
+  wr.addRow([]);
+  wr.addRow(['Used up, broken and still out count items that track use after issue, as of when this was downloaded.']);
 
   if (r.lines) {
     const wl = wb.addWorksheet('Issues');
     wl.getCell('A1').value = `Issued to ${r.byRecipient[0]?.name ?? 'the recipient'}, ${r.from} to ${r.to}`;
-    wl.getRow(3).values = ['Date', 'Issue/Return', 'Code', 'Item', 'Quantity', 'Unit', 'Project', 'Issued by'];
+    wl.getRow(3).values = ['Date', 'Issue/Return', 'Code', 'Item', 'Quantity', 'Unit', 'Project', 'Issued by', 'Used up', 'Broken', 'Still out'];
     wl.getRow(3).font = { bold: true };
-    for (const l of r.lines) wl.addRow([new Date(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, l.quantity, l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy]);
+    for (const l of r.lines) {
+      wl.addRow([
+        new Date(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, l.quantity, l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy,
+        l.usedUp ?? null, l.broken ?? null, l.stillOut ?? null,
+      ]);
+    }
   }
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
@@ -91,6 +100,9 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
   const order = CATEGORIES.map((c) => c.value);
   const categories = [...new Set(r.items.map((i) => i.category))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   const nothing = 'Nothing was issued for this selection in this period.';
+  // Used up, broken and still out, only when someone was issued an item that tracks use.
+  const tracked = showsTrackedUse(r);
+  const qty = (n: number | null | undefined) => (n ? formatNumber(n) : '-');
 
   const sections: PdfTable[] = [{
     heading: 'By category',
@@ -110,9 +122,15 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
   }
   sections.push({
     heading: 'By who it was issued to',
-    columns: [{ header: 'Issued to', wrap: true }, { header: 'Type' }, { header: 'Issues', align: 'right' }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' }],
-    rows: r.byRecipient.map((x) => [x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', formatNumber(x.issues), formatNumber(x.items), money(x.value)]),
-    totals: [['Total', '', '', formatNumber(r.total.items), money(r.total.value)]],
+    columns: [
+      { header: 'Issued to', wrap: true }, { header: 'Type' }, { header: 'Issues', align: 'right' }, { header: 'Items', align: 'right' }, { header: `Value (${r.currency})`, align: 'right' },
+      ...(tracked ? [{ header: 'Used up', align: 'right' as const }, { header: 'Broken', align: 'right' as const }, { header: 'Still out', align: 'right' as const }] : []),
+    ],
+    rows: r.byRecipient.map((x) => [
+      x.name ?? 'Not recorded', x.type ? x.type.charAt(0) + x.type.slice(1).toLowerCase() : '', formatNumber(x.issues), formatNumber(x.items), money(x.value),
+      ...(tracked ? [qty(x.usedUp), qty(x.broken), qty(x.stillOut)] : []),
+    ]),
+    totals: [['Total', '', '', formatNumber(r.total.items), money(r.total.value), ...(tracked ? ['', '', ''] : [])]],
     empty: nothing,
   });
   for (const category of categories) {
@@ -137,8 +155,12 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
       columns: [
         { header: 'Date' }, { header: 'Issue/Return' }, { header: 'Code' }, { header: 'Item', wrap: true },
         { header: 'Quantity', align: 'right' }, { header: 'Unit' }, { header: 'Project' }, { header: 'Issued by' },
+        ...(tracked ? [{ header: 'Used up', align: 'right' as const }, { header: 'Broken', align: 'right' as const }, { header: 'Still out', align: 'right' as const }] : []),
       ],
-      rows: r.lines.map((l) => [formatDate(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, formatNumber(l.quantity), l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy]),
+      rows: r.lines.map((l) => [
+        formatDate(l.postedAt), l.type === 'ISSUE' ? 'Issue' : 'Return', l.sku, l.name, formatNumber(l.quantity), l.unitOfMeasure, l.projectNumber ?? '', l.issuedBy,
+        ...(tracked ? [qty(l.usedUp), qty(l.broken), l.stillOut == null ? '-' : formatNumber(l.stillOut)] : []),
+      ]),
     });
   }
 
@@ -148,6 +170,7 @@ export async function downloadConsumptionPdf(query: string, filters: string[]): 
     lines: [
       ...(filters.length ? [filters.join('  ·  ')] : ['All projects, everyone, all categories']),
       'Used = issued - returned; reversed issues and returns are left out. Value = used x unit price now, excl. VAT.',
+      ...(tracked ? ['Used up, broken and still out count items that track use after issue, as of now.'] : []),
     ],
     sections,
     notes: r.total.unpriced > 0 ? [`${r.total.unpriced} item${r.total.unpriced === 1 ? ' has' : 's have'} no unit price and ${r.total.unpriced === 1 ? 'is' : 'are'} not in the values.`] : [],

@@ -814,6 +814,37 @@ describe('mock API: a location inside another', () => {
     expect(after).toMatchObject({ name: 'Test room', active: true });
   });
 
+  it('marks a tracked consumable used up or broken, sharing what is still out with returns, as the server', async () => {
+    // mat-5 (grinding disc) tracks use; 35 are at loc-1 in the seed.
+    const id = await issue('mat-5', 'loc-1', 10);
+    const used = await api.post<{ usedUp: string; broken: string; stillOut: string }>(`/inventory-transactions/${id}/outcomes`, { outcome: 'USED_UP', quantity: 6 });
+    expect(used).toMatchObject({ usedUp: '6', broken: '0', stillOut: '4' });
+    await api.post(`/inventory-transactions/${id}/outcomes`, { outcome: 'BROKEN', quantity: 1, note: 'Shattered' });
+    await expect(api.post(`/inventory-transactions/${id}/outcomes`, { outcome: 'USED_UP', quantity: 4 })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(api.post(`/inventory-transactions/${id}/returns`, { quantity: 4 })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    const rows = await api.get<Array<{ id: string; trackUse: boolean; usedUpQuantity: string | null; brokenQuantity: string | null }>>('/inventory-transactions?materialId=mat-5&type=ISSUE');
+    expect(rows.find((r) => r.id === id)).toMatchObject({ trackUse: true, usedUpQuantity: '6', brokenQuantity: '1' });
+    await expect(api.post(`/inventory-transactions/${id}/reversal`, { reason: 'Wrong worker' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    const detail = await api.get<{ stillOut: string; outcomes: Array<{ id: string; withdrawn: unknown }> }>(`/inventory-transactions/${id}/outcomes`);
+    expect(detail.stillOut).toBe('3');
+    for (const o of detail.outcomes) await api.post(`/consumable-outcomes/${o.id}/withdrawal`, { reason: 'Wrong worker' });
+    await expect(api.post(`/consumable-outcomes/${detail.outcomes[0]!.id}/withdrawal`, { reason: 'Twice' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const after = await api.get<{ stillOut: string; outcomes: Array<{ withdrawn: { reason: string } | null }> }>(`/inventory-transactions/${id}/outcomes`);
+    expect(after.stillOut).toBe('10');
+    expect(after.outcomes.every((o) => o.withdrawn?.reason === 'Wrong worker')).toBe(true);
+    await api.post(`/inventory-transactions/${id}/reversal`, { reason: 'Wrong worker' });
+  });
+
+  it('refuses outcomes for an item that does not track use, and track use on a tool', async () => {
+    const id = await issue('mat-1', 'loc-1', 1);
+    await expect(api.post(`/inventory-transactions/${id}/outcomes`, { outcome: 'USED_UP', quantity: 1 })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(api.post('/materials', { sku: 'TL-NEW', name: 'Drill', category: 'TOOLS', unitOfMeasure: 'each', trackUse: true })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    const m = await api.patch<{ trackUse: boolean }>('/materials/mat-1', { trackUse: true });
+    expect(m.trackUse).toBe(true);
+  });
+
   it('keeps a rack inactive while its room is, and says to move locations out before deleting a room', async () => {
     const store = await api.post<{ id: string }>('/locations', { name: 'Test room', type: 'STOREROOM' });
     const rack = await api.post<{ id: string }>('/locations', { name: 'Test rack', type: 'RACK', parentId: store.id });

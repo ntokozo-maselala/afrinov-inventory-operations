@@ -584,3 +584,51 @@ quantity, or ask for a `type` or a report other than loans.
 (`changeDueDate`, `history`), `tool-loan-terms.ts`,
 `afrinov-platform/apps/backend/prisma/migrations/20260101000034_loan_events_on_movements/migration.sql`,
 `afrinov-platform/apps/frontend/src/components/reports/LedgerReport.tsx`, `components/LoanHistory.tsx`.
+
+### ADR-026 — A tracked consumable's issue is closed off as used up or broken, without moving stock
+**Date:** 2026-11-03 · **Status:** Accepted
+
+**Context:** An issue takes stock off the shelf, and Stock used counts it as
+used straight away. For most consumables that is right. For costly ones
+(grinding and cutting discs, blades) the store wants to know whether what was
+issued was worn out, broke early, or is still with the person, and the stub
+or broken piece brought back to the counter was recorded nowhere. A return is
+the wrong record for it: a return puts stock back on the shelf.
+
+**Decision:**
+- An item may **track use after issue** (`materials.track_use`): off by
+  default, switched per item, refused on a tool (tools are lent and checked
+  back in, `tool-loans.md`).
+- Part of an issue line of such an item is closed off as **Used up** or
+  **Broken** (`consumable_outcomes`), with a quantity and an optional note.
+  Nothing is posted to the ledger and no balance changes: the stock left at
+  the issue.
+- **Still out** = issued − returned − used up − broken. Returns and outcomes
+  share that limit and take the issue's balance lock, so neither can spend
+  what the other has.
+- Outcomes are only added to. A mistake is withdrawn by a row naming the
+  outcome (`withdraws_id`, unique), with a reason; both are kept and count
+  for nothing, as a reversal does in the ledger. A withdrawal cannot be
+  withdrawn.
+- An issue with live outcomes cannot be reversed until they are withdrawn,
+  as with returns.
+- Recording needs `issue:inventory`; withdrawing needs
+  `reverse:inventory_transaction`. No new permission code. Routes:
+  `GET`/`POST /inventory-transactions/:id/outcomes`,
+  `POST /consumable-outcomes/:id/withdrawal`; both posts take an
+  `Idempotency-Key`.
+- Movements issue rows, Stock used (by recipient and line by line) and their
+  downloads carry used up, broken and still out for tracked items. Still out
+  is as of now, not as of the end of the period.
+- Switching an item off stops new outcomes; earlier ones stay listed and
+  still count.
+
+**Consequences:** One migration adds the column, the enum and the table.
+Stock totals, balances and the value on Stock used are unchanged; still out
+is a new figure, null for items that do not track use.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/consumable-outcome.service.ts`,
+`consumable-outcomes.ts`, `inventory.service.ts` (`bookReturn`, `returnToStock`,
+`reverse`, `queryHistory`), `modules/reporting/consumption.service.ts`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000035_consumable_outcomes/migration.sql`,
+`afrinov-platform/apps/frontend/src/components/ConsumableOutcomes.tsx`, `components/MaterialForm.tsx`.

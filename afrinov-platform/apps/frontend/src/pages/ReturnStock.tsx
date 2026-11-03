@@ -198,6 +198,7 @@ export function ReturnStock() {
                             <td>
                               <span className="font-mono text-xs">{l.sku}</span> {l.name}
                               {Number(l.returned) > 0 && <span className="block text-xs text-surface-500">{l.returned} of {l.issued} already back</span>}
+                              {Number(l.closedOff ?? 0) > 0 && <span className="block text-xs text-surface-500">{l.closedOff} of {l.issued} marked used up or broken</span>}
                             </td>
                             <td className="text-surface-600">{l.projectNumber ?? <span className="text-surface-300">—</span>}</td>
                             <td className="text-right tabular-nums whitespace-nowrap">{l.outstanding} <span className="text-meta">{l.unitOfMeasure}</span></td>

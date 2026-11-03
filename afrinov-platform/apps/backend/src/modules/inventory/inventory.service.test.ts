@@ -84,6 +84,9 @@ interface POEntry {
   status: string;
 }
 
+// Used up or broken against issue lines (consumable_outcomes); withdrawsId marks a withdrawal.
+let outcomes: Array<{ id: string; issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: Prisma.Decimal; withdrawsId: string | null }> = [];
+
 const goodsReceipts = new Map<string, GREntry>();
 const purchaseOrderLines = new Map<string, POLineEntry>();
 const purchaseOrders = new Map<string, POEntry>();
@@ -240,6 +243,21 @@ const fakeTx = {
       return [...purchaseOrderLines.values()].filter((l) => l.purchaseOrderId === where.purchaseOrderId);
     },
   },
+  consumableOutcome: {
+    // Live outcomes only (neither a withdrawal nor withdrawn), summed per issue line and outcome.
+    groupBy: async ({ where }: { where: { issueTransactionId: { in: string[] } } }) => {
+      const live = outcomes.filter((o) => where.issueTransactionId.in.includes(o.issueTransactionId)
+        && !o.withdrawsId && !outcomes.some((w) => w.withdrawsId === o.id));
+      const groups = new Map<string, { issueTransactionId: string; outcome: string; _sum: { quantity: Prisma.Decimal } }>();
+      for (const o of live) {
+        const key = `${o.issueTransactionId}|${o.outcome}`;
+        const g = groups.get(key) ?? { issueTransactionId: o.issueTransactionId, outcome: o.outcome, _sum: { quantity: new Prisma.Decimal(0) } };
+        g._sum.quantity = g._sum.quantity.plus(o.quantity);
+        groups.set(key, g);
+      }
+      return [...groups.values()];
+    },
+  },
   purchaseOrder: {
     findUnique: async ({ where }: { where: { id: string } }) => purchaseOrders.get(where.id) ?? null,
     update: async ({ where, data }: { where: { id: string }; data: Partial<POEntry> }) => {
@@ -266,6 +284,7 @@ vi.mock('../../shared/db.js', () => ({
     user: fakeTx.user,
     inventoryTransaction: fakeTx.inventoryTransaction,
     auditLogEntry: fakeTx.auditLogEntry,
+    consumableOutcome: fakeTx.consumableOutcome,
   },
 }));
 
@@ -303,6 +322,7 @@ describe('InventoryService — ADR-002 invariants', () => {
     goodsReceipts.clear();
     purchaseOrderLines.clear();
     purchaseOrders.clear();
+    outcomes = [];
   });
 
   it('a positive adjustment increases the balance', async () => {
@@ -696,6 +716,32 @@ describe('InventoryService — ADR-002 invariants', () => {
         .rejects.toThrow(/Reverse the returns first/);
 
       await InventoryService.reverse({ transactionId: returnId, reason: 'Return booked twice', actorId: 'u' });
+      await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
+    });
+
+    it('leaves out what was marked used up or broken, which is no longer out', async () => {
+      const issueId = await issued(10);
+      outcomes.push(
+        { id: 'o-1', issueTransactionId: issueId, outcome: 'USED_UP', quantity: new Prisma.Decimal(5), withdrawsId: null },
+        { id: 'o-2', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(2), withdrawsId: null },
+        // Withdrawn, so it counts for nothing.
+        { id: 'o-3', issueTransactionId: issueId, outcome: 'USED_UP', quantity: new Prisma.Decimal(3), withdrawsId: null },
+        { id: 'o-4', issueTransactionId: issueId, outcome: 'USED_UP', quantity: new Prisma.Decimal(3), withdrawsId: 'o-3' },
+      );
+      await expect(InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 4, actorId: 'u' }))
+        .rejects.toThrow(/only 3 of the 10 issued is still out/);
+      const result = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 2, actorId: 'u' });
+      expect(result).toMatchObject({ returnedQuantity: '2', returnableQuantity: '1' });
+    });
+
+    it('refuses to reverse an issue marked used up or broken until those are withdrawn', async () => {
+      const issueId = await issued(10);
+      outcomes.push({ id: 'o-1', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(1), withdrawsId: null });
+      await expect(InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' }))
+        .rejects.toThrow(/marked used up or broken. Withdraw those first/);
+
+      outcomes.push({ id: 'o-2', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(1), withdrawsId: 'o-1' });
       await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
     });

@@ -272,4 +272,82 @@ describe('TransactionDrawer', () => {
       }
     });
   });
+
+  describe('used up or broken', () => {
+    const detail = (over: Record<string, unknown> = {}) => ({
+      issueTransactionId: 'tx-1', sku: 'SKU-1', name: 'Grinding disc', unitOfMeasure: 'each', trackUse: true,
+      issued: '4', returned: '0', usedUp: '1', broken: '1', stillOut: '2',
+      outcomes: [
+        { id: 'o-1', outcome: 'USED_UP', quantity: '1', note: 'Stub back', recordedBy: 'Vusi', recordedAt: '2026-10-02T08:00:00Z', withdrawn: null },
+        { id: 'o-2', outcome: 'BROKEN', quantity: '1', note: null, recordedBy: 'Vusi', recordedAt: '2026-10-02T09:00:00Z', withdrawn: { by: 'Thandi', at: '2026-10-02T10:00:00Z', reason: 'Wrong issue' } },
+      ],
+      ...over,
+    });
+    const tracked = { ...issue, unitOfMeasure: 'each', trackUse: true, usedUpQuantity: '1', brokenQuantity: '1' };
+
+    function renderTracked(overrides: Record<string, unknown> = {}, d = detail()) {
+      mockGet.mockImplementation(async (path: string) => (path.endsWith('/outcomes') ? d : []));
+      const onOutcomeChanged = vi.fn();
+      const onError = vi.fn();
+      render(<TransactionDrawer transaction={{ ...tracked, ...overrides }} onClose={() => {}} onReversed={vi.fn()} onOutcomeChanged={onOutcomeChanged} onError={onError} />);
+      return { onOutcomeChanged, onError };
+    }
+
+    it('shows what was used up, broken and is still out, with each outcome and its withdrawal', async () => {
+      renderTracked();
+      expect(screen.getByRole('heading', { name: 'Used up or broken' })).toBeInTheDocument();
+      expect(screen.getByText(/Still out 2/)).toBeInTheDocument();
+      expect(await screen.findByText('Stub back')).toBeInTheDocument();
+      expect(screen.getByText(/Withdrawn by Thandi.*Wrong issue/)).toBeInTheDocument();
+      // Only the outcome still standing can be withdrawn.
+      expect(screen.getAllByRole('button', { name: 'Withdraw' })).toHaveLength(1);
+    });
+
+    it('records what came back with a key, and refuses more than is still out first', async () => {
+      mockPost.mockResolvedValue({ outcomeId: 'o-3' });
+      const { onOutcomeChanged } = renderTracked();
+      fireEvent.click(screen.getByRole('button', { name: 'Mark used up or broken' }));
+      fireEvent.change(screen.getByLabelText(/What happened/), { target: { value: 'BROKEN' } });
+      fireEvent.change(screen.getByLabelText(/How many/), { target: { value: '3' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Record' }));
+      expect(screen.getByText('Only 2 is still out.')).toBeInTheDocument();
+      expect(mockPost).not.toHaveBeenCalled();
+
+      fireEvent.change(screen.getByLabelText(/How many/), { target: { value: '2' } });
+      fireEvent.change(screen.getByLabelText(/^Note/), { target: { value: ' Shattered ' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Record' }));
+      await waitFor(() => expect(onOutcomeChanged).toHaveBeenCalledWith('Marked broken'));
+      expect(mockPost).toHaveBeenCalledWith('/inventory-transactions/tx-1/outcomes', { outcome: 'BROKEN', quantity: 2, note: 'Shattered' }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    });
+
+    it('withdraws an outcome with a reason', async () => {
+      mockPost.mockResolvedValue({ withdrawalId: 'o-3' });
+      const { onOutcomeChanged } = renderTracked();
+      fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+      fireEvent.change(screen.getByLabelText(/Why withdraw it/), { target: { value: 'Wrong worker' } });
+      fireEvent.click(screen.getAllByRole('button', { name: 'Withdraw' }).at(-1)!);
+      await waitFor(() => expect(onOutcomeChanged).toHaveBeenCalledWith('Used up withdrawn'));
+      expect(mockPost).toHaveBeenCalledWith('/consumable-outcomes/o-1/withdrawal', { reason: 'Wrong worker' }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    });
+
+    it('leaves out of a return what is no longer out, and holds reversal until outcomes are withdrawn', () => {
+      renderTracked();
+      expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+      expect(screen.getByText(/withdraw those first/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      fireEvent.change(screen.getByLabelText(/Quantity returned/), { target: { value: '3' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      expect(screen.getByText('At most 2 can come back.')).toBeInTheDocument();
+    });
+
+    it('is not shown for an item that does not track use, and offers no form without permission', () => {
+      renderTracked({ trackUse: false, usedUpQuantity: '0', brokenQuantity: '0' });
+      expect(screen.queryByRole('heading', { name: 'Used up or broken' })).not.toBeInTheDocument();
+      cleanup();
+      mockHasPermission.mockImplementation((code: string) => code !== 'inventory:outcome');
+      renderTracked();
+      expect(screen.getByRole('heading', { name: 'Used up or broken' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark used up or broken' })).not.toBeInTheDocument();
+    });
+  });
 });

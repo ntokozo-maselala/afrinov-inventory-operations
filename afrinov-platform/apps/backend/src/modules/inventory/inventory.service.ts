@@ -20,6 +20,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
+import { closedOffAgainst, closedTotal } from './consumable-outcomes.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -87,7 +88,8 @@ export interface ReturnableLine {
   materialId: string; sku: string; name: string; unitOfMeasure: string;
   locationId: string; locationName: string; locationActive: boolean;
   projectNumber: string | null;
-  issued: string; returned: string; outstanding: string;
+  /** closedOff: marked used up or broken (tracked consumables); outstanding already leaves it out. */
+  issued: string; returned: string; closedOff: string; outstanding: string;
 }
 
 /** The most issues the returnable list looks at, newest first. */
@@ -132,7 +134,7 @@ async function lockPurchaseOrderLines(lineIds: string[], tx: Prisma.TransactionC
   }
 }
 
-async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): Promise<Decimal> {
+export async function returnedAgainst(issueId: string, tx: Pick<Prisma.TransactionClient, 'inventoryTransaction'>): Promise<Decimal> {
   const agg = await tx.inventoryTransaction.aggregate({
     where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: issueId },
     _sum: { quantity: true },
@@ -142,12 +144,13 @@ async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): P
 
 /**
  * Book one return against an issue, inside the caller's transaction: checks
- * it is an unreversed issue with at least `qty` still out, posts the RETURN
+ * it is an unreversed issue with at least `qty` still out (issued, less what
+ * came back and what was marked used up or broken), posts the RETURN
  * (keeping the issue's recipient and project), updates the balance and audits.
  */
 async function bookReturn(tx: Prisma.TransactionClient, input: {
   issueTransactionId: string; qty: Decimal; locationId?: string; reason?: string; actorId: string; postedAt: Date;
-}): Promise<{ transactionId: string; materialId: string; locationId: string; issued: Decimal; alreadyReturned: Decimal }> {
+}): Promise<{ transactionId: string; materialId: string; locationId: string; issued: Decimal; alreadyReturned: Decimal; closedOff: Decimal }> {
   const issue = await tx.inventoryTransaction.findUnique({
     where: { id: input.issueTransactionId },
     include: { reversedBy: { select: { id: true } }, material: { select: { sku: true } } },
@@ -162,11 +165,12 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   const locationId = input.locationId ?? issue.locationId;
   await lockInventoryBalances([{ materialId: issue.materialId, locationId: issue.locationId }, { materialId: issue.materialId, locationId }], tx);
   const alreadyReturned = await returnedAgainst(issue.id, tx);
-  const returnable = issued.minus(alreadyReturned);
+  const closedOff = closedTotal((await closedOffAgainst(tx, [issue.id])).get(issue.id));
+  const returnable = issued.minus(alreadyReturned).minus(closedOff);
   if (input.qty.gt(returnable)) {
     throw Errors.validation(
       `Cannot return ${input.qty.toString()} × ${issue.material.sku}: only ${returnable.toString()} of the ${issued.toString()} issued is still out.`,
-      { issued: issued.toString(), returned: alreadyReturned.toString(), returnable: returnable.toString() },
+      { issued: issued.toString(), returned: alreadyReturned.toString(), closedOff: closedOff.toString(), returnable: returnable.toString() },
     );
   }
 
@@ -199,7 +203,7 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
     },
   });
 
-  return { transactionId: trx.id, materialId: issue.materialId, locationId, issued, alreadyReturned };
+  return { transactionId: trx.id, materialId: issue.materialId, locationId, issued, alreadyReturned, closedOff };
 }
 
 export async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
@@ -409,6 +413,9 @@ function dueDateChangeRow(
     reversesId: null,
     reversedById: null,
     returnedQuantity: null,
+    trackUse: c.loan.material.trackUse,
+    usedUpQuantity: null as string | null,
+    brokenQuantity: null as string | null,
     otherLocationName: null,
     returnOf: null,
     receiptNumber: null,
@@ -504,6 +511,8 @@ export const InventoryService = {
       _sum: { quantity: true },
     });
     const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity]));
+    // Tracked consumables: how much of each issue was marked used up or broken.
+    const closedByIssue = await closedOffAgainst(prisma, issueIds);
     // A transfer's other leg: where the stock went to (or came from).
     const partnerIds = rows.map((t) => t.pairedWithId).filter((id): id is string => !!id);
     const partners = partnerIds.length === 0 ? [] : await prisma.inventoryTransaction.findMany({
@@ -538,6 +547,10 @@ export const InventoryService = {
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
       returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
+      // Issues: marked used up or broken. trackUse says whether the item asks for it.
+      trackUse: t.material.trackUse,
+      usedUpQuantity: t.type === InventoryTransactionType.ISSUE ? (closedByIssue.get(t.id)?.usedUp.toString() ?? '0') : null,
+      brokenQuantity: t.type === InventoryTransactionType.ISSUE ? (closedByIssue.get(t.id)?.broken.toString() ?? '0') : null,
       otherLocationName: t.pairedWithId ? partnerLocation.get(t.pairedWithId) ?? null : null,
       returnOf: (() => {
         const i = t.type === InventoryTransactionType.RETURN && t.referenceId ? issueById.get(t.referenceId) : undefined;
@@ -716,6 +729,9 @@ export const InventoryService = {
 
         if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
           throw Errors.invalidState('Part of this issue has been returned. Reverse the returns first.');
+        }
+        if (original.type === InventoryTransactionType.ISSUE && gtZero(closedTotal((await closedOffAgainst(tx, [original.id])).get(original.id)))) {
+          throw Errors.invalidState('Part of this issue has been marked used up or broken. Withdraw those first.');
         }
 
         const legs = [original];
@@ -906,7 +922,7 @@ export const InventoryService = {
         { type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: qty.toNumber() },
       ]);
       const returned = r.alreadyReturned.plus(qty);
-      return { transactionId: r.transactionId, returnedQuantity: returned.toString(), returnableQuantity: r.issued.minus(returned).toString() };
+      return { transactionId: r.transactionId, returnedQuantity: returned.toString(), returnableQuantity: r.issued.minus(returned).minus(r.closedOff).toString() };
     });
   },
 
@@ -937,7 +953,7 @@ export const InventoryService = {
   /**
    * What a recipient can still bring back: their unreversed issues in the
    * period, newest first, with what has come back so far, leaving out those
-   * fully returned. Consumables are mostly used up, so the period matters:
+   * fully returned or marked used up or broken. Consumables are mostly used up, so the period matters:
    * without one this would be every issue they were ever given.
    */
   async returnable(filter: { recipientId: string; from?: string; to?: string }): Promise<ReturnableLine[]> {
@@ -963,11 +979,13 @@ export const InventoryService = {
     });
     const returnedBy = new Map<string, Decimal>();
     for (const r of returns) returnedBy.set(r.referenceId!, (returnedBy.get(r.referenceId!) ?? toDecimal(0)).plus(r.quantity));
+    const closed = await closedOffAgainst(prisma, issues.map((i) => i.id));
 
     return issues.flatMap((i) => {
       const issued = i.quantity.negated();
       const returned = returnedBy.get(i.id) ?? toDecimal(0);
-      const outstanding = issued.minus(returned);
+      const closedOff = closedTotal(closed.get(i.id));
+      const outstanding = issued.minus(returned).minus(closedOff);
       if (!gtZero(outstanding)) return [];
       return [{
         issueTransactionId: i.id,
@@ -983,6 +1001,7 @@ export const InventoryService = {
         projectNumber: i.projectNumber,
         issued: issued.toString(),
         returned: returned.toString(),
+        closedOff: closedOff.toString(),
         outstanding: outstanding.toString(),
       }];
     });

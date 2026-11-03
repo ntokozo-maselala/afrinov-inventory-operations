@@ -54,6 +54,7 @@ model User {
   rfqQuoteFiles        RfqQuoteFile[]    @relation("RFQ_QuoteFileUploadedBy")
   idempotencyKeys      IdempotencyKey[]
   toolLoanExtensions   ToolLoanExtension[]
+  consumableOutcomes   ConsumableOutcome[]
 
   @@map("users")
 }
@@ -124,6 +125,10 @@ model Material {
   // bought for. Stores material has none. Null on a Projects item that has
   // not been assigned its project yet.
   projectNumber String?             @map("project_number")
+  // A consumable whose fate after issue is recorded (a disc, a blade, a bit):
+  // each issue of it is later closed off as used up or broken, and whatever is
+  // neither returned nor closed off is still out with the person. Never a tool.
+  trackUse      Boolean             @default(false) @map("track_use")
   active        Boolean             @default(true)
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")
@@ -663,6 +668,7 @@ model InventoryTransaction {
   reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
   reversedBy InventoryTransaction? @relation("Reversal")
   loanExtensions ToolLoanExtension[]
+  consumableOutcomes ConsumableOutcome[]
 
   @@index([materialId, locationId, postedAt])
   @@index([referenceType, referenceId])
@@ -691,6 +697,37 @@ model ToolLoanExtension {
   @@index([loanId])
   @@index([createdAt])
   @@map("tool_loan_extensions")
+}
+
+enum ConsumableOutcomeKind {
+  USED_UP
+  BROKEN
+}
+
+// What became of a tracked consumable (Material.trackUse) after it was issued:
+// used up or broken, recorded against the issue line when the stub or the
+// broken piece comes back. No stock moves: it left the shelf at the issue.
+// Only ever added to: a mistake is withdrawn by a row that names it
+// (withdrawsId, with the reason in note), and the pair then counts for
+// nothing, as a ledger reversal does.
+model ConsumableOutcome {
+  id                 String                @id @default(uuid())
+  issueTransactionId String                @map("issue_transaction_id")
+  outcome            ConsumableOutcomeKind
+  quantity           Decimal               @db.Decimal(18, 4)
+  note               String?
+  // Unique, so an outcome is withdrawn at most once.
+  withdrawsId        String?               @unique @map("withdraws_id")
+  actorId            String                @map("actor_id")
+  createdAt          DateTime              @default(now()) @map("created_at")
+
+  issue       InventoryTransaction @relation(fields: [issueTransactionId], references: [id])
+  actor       User                 @relation(fields: [actorId], references: [id])
+  withdraws   ConsumableOutcome?   @relation("OutcomeWithdrawal", fields: [withdrawsId], references: [id])
+  withdrawnBy ConsumableOutcome?   @relation("OutcomeWithdrawal")
+
+  @@index([issueTransactionId])
+  @@map("consumable_outcomes")
 }
 
 // ADR-002: derived/materialized view. Application code never writes to this

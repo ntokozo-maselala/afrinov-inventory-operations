@@ -25,7 +25,7 @@ Two records answer "who changed what, when":
 | Recipients | CREATE, UPDATE |
 | Suppliers | CREATE |
 | Purchase orders | UPDATE, PO_SUBMIT, PO_SUBMIT_AUTO_APPROVE, PO_APPROVE, PO_RECEIVE, PO_CANCEL, PO_CLOSE |
-| Stock | RECEIVE_STOCK (counter receipt), STOCK_COUNT, RETURN, REVERSE |
+| Stock | RECEIVE_STOCK (counter receipt), STOCK_COUNT, RETURN, REVERSE, CONSUMABLE_OUTCOME, CONSUMABLE_OUTCOME_WITHDRAW (entity: the issue) |
 | Import | IMPORT_OPENING_BALANCES |
 | Settings | SETTING_UPDATE, SETTING_BULK_UPDATE, SETTING_RESET |
 

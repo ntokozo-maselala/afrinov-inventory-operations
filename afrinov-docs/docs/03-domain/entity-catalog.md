@@ -12,7 +12,8 @@ detail is in `07-data/database-schema.md`.
 - **Attributes:** id, sku (unique), name, description, category (enum:
   FASTENERS_SLUGS_INSULATION, TOOLING_PPE_ELECTRICAL, PROJECT_MATERIAL,
   CONSUMABLES, TOOLS), unitOfMeasure, requiredStock, unitCost (optional),
-  active.
+  active, trackUse (each issue is later marked used up or broken; never on a
+  tool, ADR-026).
 - **Lifecycle:** created, then active or inactive (`PATCH /materials/:id`).
   Category cannot be changed after creation (it is not in the update
   schema).
@@ -91,6 +92,14 @@ detail is in `07-data/database-schema.md`.
 - **Mutable:** never after posting (ADR-002); corrected by reversal
   (ADR-005).
 - **Auditable:** is itself the audit trail for stock.
+
+## ConsumableOutcome
+- **Purpose:** what became of part of an issue line of an item that tracks
+  use: USED_UP or BROKEN (ADR-026). Moves no stock.
+- **Attributes:** id, issue (an ISSUE transaction), outcome, quantity, note,
+  withdraws (the outcome a withdrawal withdraws), actor, createdAt.
+- **Mutable:** never; a mistake is withdrawn by a second row, with a reason.
+- **Auditable:** `CONSUMABLE_OUTCOME`, `CONSUMABLE_OUTCOME_WITHDRAW`.
 
 ## InventoryBalance
 - **Purpose:** current on-hand quantity per material per location.

@@ -147,6 +147,7 @@ export function MaterialDetail() {
                 )}
                 <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
                 {material.data.serialNumber && (<><dt className="text-surface-500">Serial number</dt><dd className="col-span-2 text-mono">{material.data.serialNumber}</dd></>)}
+                {material.data.trackUse && (<><dt className="text-surface-500">After issue</dt><dd className="col-span-2">Each issue is marked used up or broken</dd></>)}
                 {sectionOf(material.data.category) === 'STORES' && (<><dt className="text-surface-500">Required stock</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd></>)}
                 <dt className="text-surface-500">Unit cost</dt>
                 <dd className="col-span-2 text-num">
@@ -324,6 +325,11 @@ export function MaterialDetail() {
               setSelected(null);
               moves.reload();
               toast.success('Stock returned');
+            }}
+            onOutcomeChanged={(message) => {
+              setSelected(null);
+              moves.reload();
+              toast.success(message);
             }}
             onError={(err) => toast.error('Reversal failed', err.message)}
           />

@@ -25,7 +25,7 @@ import type { ReportQuery as MockReportQuery } from '../api/reportTypes';
 import { classifyItem, needsAttention, type StatusBands, type StockStatus } from '../lib/stockStatus';
 import { priceLines } from '../lib/poMoney';
 import { awardConcerns, fourDecimals } from '../lib/rfq';
-import { computeConsumption } from './mockConsumption';
+import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import type {
@@ -42,9 +42,10 @@ import type {
   AdjustmentReasonCode,
   MockRecipient,
   MockRfq,
+  MockConsumableOutcome,
 } from './types';
 import type { ApiError } from '../api/client';
-import type { ReturnableLine } from '../api/types';
+import type { IssueOutcomes, ReturnableLine } from '../api/types';
 
 /** As the server: with procurement on, a delivery is always against an approved Stores order. */
 const COUNTER_RECEIPTS_OFF = 'Deliveries to the store are booked against an approved Stores order: choose the order on Receive stock.';
@@ -67,6 +68,8 @@ interface State {
   rfqs: MockRfq[];
   /** Later due dates given to tool loans, as the backend's tool_loan_extensions. */
   toolLoanExtensions: Array<{ id: string; loanId: string; dueOn: string; reason: string; actorId: string; createdAt: string }>;
+  /** Used up or broken against issue lines of tracked consumables, as the backend's consumable_outcomes. */
+  consumableOutcomes: MockConsumableOutcome[];
 }
 
 let state: State = freshState();
@@ -100,6 +103,7 @@ function freshState(): State {
     ],
     rfqs: [],
     toolLoanExtensions: [],
+    consumableOutcomes: [],
   };
 }
 
@@ -916,6 +920,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     const serialNumber = b.serialNumber?.trim() || null;
     if (serialNumber) checkSerial(serialNumber, b.category);
+    checkTrackUse(b.trackUse, b.category);
     const projectNumber = b.projectNumber?.trim() || null;
     if (sectionOf(b.category) === 'STORES' && projectNumber) throw err('VALIDATION_ERROR', 'A Stores material has no project. Choose the Project Material category for material bought for one job.');
     // As the server: a Projects item needs no project of its own; the order says which (Project on the Order Roadmap, Phase 2).
@@ -935,6 +940,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       active: true,
       serialNumber,
       projectNumber,
+      trackUse: b.trackUse ?? false,
     };
     state.materials.push(created);
     return withSection(created);
@@ -963,6 +969,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
     if (b.unitCost !== undefined) m.unitCost = b.unitCost === null ? undefined : String(b.unitCost);
     if (b.active !== undefined) m.active = b.active;
+    if (b.trackUse !== undefined) {
+      checkTrackUse(b.trackUse, m.category);
+      m.trackUse = b.trackUse;
+    }
     if (b.serialNumber !== undefined) {
       const serialNumber = b.serialNumber?.trim() || null;
       if (serialNumber) checkSerial(serialNumber, m.category, m.id);
@@ -1643,6 +1653,11 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (returnMatch) {
     return handleReturn(returnMatch[1]!, (body as { quantity?: number; locationId?: string; reason?: string }) ?? {});
   }
+  const outcomesMatch = /^\/inventory-transactions\/([^/]+)\/outcomes$/.exec(p);
+  if (outcomesMatch && method === 'GET') return issueOutcomes(outcomesMatch[1]!);
+  if (outcomesMatch && method === 'POST') return handleOutcome(outcomesMatch[1]!, (body as Parameters<typeof handleOutcome>[1]) ?? {});
+  const withdrawalMatch = method === 'POST' ? /^\/consumable-outcomes\/([^/]+)\/withdrawal$/.exec(p) : null;
+  if (withdrawalMatch) return handleOutcomeWithdrawal(withdrawalMatch[1]!, (body as { reason?: string }) ?? {});
   const reversalMatch = method === 'POST' ? /^\/inventory-transactions\/([^/]+)\/reversal$/.exec(p) : null;
   if (reversalMatch) {
     return handleReversal(reversalMatch[1]!, body as { reason?: string } | undefined);
@@ -1797,6 +1812,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/reports/consumption') {
     return computeConsumption(qs, {
       transactions: state.transactions, materials: state.materials, projects: state.projects, recipients: state.recipients,
+      consumableOutcomes: state.consumableOutcomes,
       currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
       userName: (id) => mockUsers.find((u) => u.id === id)?.name ?? 'Unknown',
     });
@@ -2549,9 +2565,10 @@ function handleReturn(id: string, b: { quantity?: number; locationId?: string; r
   if (state.transactions.some((t) => t.reversesId === issue.id)) throw err('INVALID_STATE', 'This issue has been reversed, so there is nothing to return.');
   const issued = -Number(issue.quantity);
   const already = returnedAgainst(issue.id);
+  const closed = closedTotal(issue.id);
   const qty = Number(b.quantity);
-  if (qty > issued - already) {
-    throw err('VALIDATION_ERROR', `Cannot return ${qty}: only ${issued - already} of the ${issued} issued is still out.`);
+  if (qty > issued - already - closed) {
+    throw err('VALIDATION_ERROR', `Cannot return ${qty}: only ${issued - already - closed} of the ${issued} issued is still out.`);
   }
   const locationId = b.locationId ?? issue.locationId;
   if (!findLocation(locationId)) throw err('NOT_FOUND', 'Location not found');
@@ -2561,7 +2578,7 @@ function handleReturn(id: string, b: { quantity?: number; locationId?: string; r
     quantity: String(qty), actorId: 'user-1', recipientId: issue.recipientId, projectNumber: issue.projectNumber,
     reasonNote: b.reason?.trim() || undefined, referenceType: 'Return', referenceId: issue.id,
   });
-  return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - qty) };
+  return { transactionId, returnedQuantity: String(already + qty), returnableQuantity: String(issued - already - closed - qty) };
 }
 
 // Mirrors InventoryService.returnMany: each line as handleReturn, all-or-nothing.
@@ -2592,7 +2609,8 @@ function handleReturnable(qs: Record<string, string | undefined>): ReturnableLin
     .flatMap((t) => {
       const issued = -Number(t.quantity);
       const returned = returnedAgainst(t.id);
-      if (issued - returned <= 0) return [];
+      const closedOff = closedTotal(t.id);
+      if (issued - returned - closedOff <= 0) return [];
       const m = findMaterial(t.materialId);
       const l = findLocation(t.locationId);
       return [{
@@ -2600,9 +2618,81 @@ function handleReturnable(qs: Record<string, string | undefined>): ReturnableLin
         materialId: t.materialId, sku: m?.sku ?? '', name: m?.name ?? '', unitOfMeasure: m?.unitOfMeasure ?? '',
         locationId: t.locationId, locationName: l?.name ?? '', locationActive: l?.active ?? false,
         projectNumber: t.projectNumber ?? null,
-        issued: String(issued), returned: String(returned), outstanding: String(issued - returned),
+        issued: String(issued), returned: String(returned), closedOff: String(closedOff), outstanding: String(issued - returned - closedOff),
       }];
     });
+}
+
+// Mirrors ConsumableOutcomeService: used up or broken against an issue line of
+// a tracked consumable. No stock moves; a mistake is withdrawn, never deleted.
+const closedTotal = (issueId: string) => {
+  const c = closedOffOf(state.consumableOutcomes, issueId);
+  return c.usedUp + c.broken;
+};
+
+function issueUse(issue: MockInventoryTransaction) {
+  const issued = -Number(issue.quantity);
+  const returned = returnedAgainst(issue.id);
+  const { usedUp, broken } = closedOffOf(state.consumableOutcomes, issue.id);
+  return { issued: String(issued), returned: String(returned), usedUp: String(usedUp), broken: String(broken), stillOut: String(issued - returned - usedUp - broken) };
+}
+
+function checkTrackUse(trackUse: boolean | undefined, category: string) {
+  if (trackUse && category === 'TOOLS') throw err('VALIDATION_ERROR', 'Tools are lent and checked back in, so they do not track use after issue');
+}
+
+function issueOutcomes(id: string): IssueOutcomes {
+  const issue = state.transactions.find((t) => t.id === id);
+  if (!issue || issue.type !== 'ISSUE' || issue.reversesId) throw err('NOT_FOUND', 'Issue not found');
+  const m = findMaterial(issue.materialId);
+  const rows = state.consumableOutcomes.filter((o) => o.issueTransactionId === id);
+  const who = (actorId: string) => mockUsers.find((u) => u.id === actorId)?.name ?? 'Unknown';
+  return {
+    issueTransactionId: id, sku: m?.sku ?? '', name: m?.name ?? '', unitOfMeasure: m?.unitOfMeasure ?? '', trackUse: !!m?.trackUse,
+    ...issueUse(issue),
+    outcomes: rows.filter((o) => !o.withdrawsId).map((o) => {
+      const w = rows.find((x) => x.withdrawsId === o.id);
+      return {
+        id: o.id, outcome: o.outcome, quantity: String(o.quantity), note: o.note, recordedBy: who(o.actorId), recordedAt: o.createdAt,
+        withdrawn: w ? { by: who(w.actorId), at: w.createdAt, reason: w.note ?? '' } : null,
+      };
+    }),
+  };
+}
+
+function handleOutcome(id: string, b: { outcome?: 'USED_UP' | 'BROKEN'; quantity?: number; note?: string }) {
+  const qty = Number(b.quantity);
+  if (!(qty > 0)) throw err('VALIDATION_ERROR', 'Quantity must be positive');
+  if (b.outcome !== 'USED_UP' && b.outcome !== 'BROKEN') throw err('VALIDATION_ERROR', 'Say whether it was used up or broken, and how many');
+  const issue = state.transactions.find((t) => t.id === id);
+  if (!issue) throw err('NOT_FOUND', 'InventoryTransaction not found');
+  if (issue.type !== 'ISSUE' || issue.reversesId) throw err('INVALID_STATE', 'Only an issue can be marked used up or broken.');
+  const m = findMaterial(issue.materialId);
+  if (state.transactions.some((t) => t.reversesId === issue.id)) throw err('INVALID_STATE', `This issue of ${m?.sku ?? ''} has been reversed, so there is nothing to mark.`);
+  if (!m?.trackUse) throw err('INVALID_STATE', `${m?.sku ?? 'This item'} does not track use after issue. Switch it on for the item first.`);
+  const before = issueUse(issue);
+  if (qty > Number(before.stillOut)) {
+    throw err('VALIDATION_ERROR', `Cannot mark ${qty} × ${m.sku}: only ${before.stillOut} of the ${before.issued} issued is still out.`);
+  }
+  const row: MockConsumableOutcome = {
+    id: nextId('out'), issueTransactionId: id, outcome: b.outcome, quantity: qty, note: b.note?.trim() || null, withdrawsId: null,
+    actorId: 'user-1', createdAt: new Date().toISOString(),
+  };
+  state.consumableOutcomes.push(row);
+  return { outcomeId: row.id, ...issueUse(issue) };
+}
+
+function handleOutcomeWithdrawal(id: string, b: { reason?: string }) {
+  const reason = b.reason?.trim() ?? '';
+  if (reason.length < 3) throw err('VALIDATION_ERROR', 'Say why this is being withdrawn');
+  const o = state.consumableOutcomes.find((x) => x.id === id);
+  if (!o) throw err('NOT_FOUND', 'ConsumableOutcome not found');
+  if (o.withdrawsId) throw err('INVALID_STATE', 'A withdrawal cannot itself be withdrawn. Record the outcome again instead.');
+  if (state.consumableOutcomes.some((x) => x.withdrawsId === o.id)) throw err('CONFLICT', 'This has already been withdrawn.');
+  const row: MockConsumableOutcome = { ...o, id: nextId('out'), note: reason, withdrawsId: o.id, actorId: 'user-1', createdAt: new Date().toISOString() };
+  state.consumableOutcomes.push(row);
+  const issue = state.transactions.find((t) => t.id === o.issueTransactionId)!;
+  return { withdrawalId: row.id, ...issueUse(issue) };
 }
 
 function handleReversal(id: string, b: { reason?: string } | undefined): { reversalIds: string[] } {
@@ -2616,6 +2706,9 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   }
   if (original.type === 'ISSUE' && returnedAgainst(original.id) > 0) {
     throw err('INVALID_STATE', 'Part of this issue has been returned. Reverse the returns first.');
+  }
+  if (original.type === 'ISSUE' && closedTotal(original.id) > 0) {
+    throw err('INVALID_STATE', 'Part of this issue has been marked used up or broken. Withdraw those first.');
   }
   if (original.referenceType === 'GoodsReceipt' && state.goodsReceipts.find((g) => g.id === original.referenceId)?.purchaseOrderId) {
     throw err('INVALID_STATE', 'Stock received against a purchase order cannot be reversed here.');
@@ -3303,6 +3396,11 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
     recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
     returnedQuantity: t.type === 'ISSUE' ? String(returnedAgainst(t.id)) : null,
+    // As the server: what was marked used up or broken, and whether the item asks for it.
+    ...(() => {
+      const c = t.type === 'ISSUE' ? closedOffOf(state.consumableOutcomes, t.id) : null;
+      return { usedUpQuantity: c ? String(c.usedUp) : null, brokenQuantity: c ? String(c.broken) : null, trackUse: !!m?.trackUse };
+    })(),
     otherLocationName: t.pairedWithId ? findLocation(state.transactions.find((x) => x.id === t.pairedWithId)?.locationId ?? '')?.name ?? null : null,
     // As the server: a return names the issue it came back from.
     returnOf: (() => {
@@ -3364,7 +3462,7 @@ function dueDateChangeRow(c: State['toolLoanExtensions'][number]): MockMovementR
     id: c.id, cursor: `${c.createdAt}_${c.id}`, postedAt: c.createdAt, type: 'DUE_DATE_CHANGE', quantity: null,
     actorId: c.actorId, actorName: mockUsers.find((u) => u.id === c.actorId)?.name ?? 'Unknown',
     reasonCode: undefined, reasonNote: c.reason, referenceType: 'ToolLoan', referenceId: loan.id, reversesId: undefined, reversedById: undefined,
-    returnedQuantity: null, otherLocationName: null, returnOf: null,
+    returnedQuantity: null, usedUpQuantity: null, brokenQuantity: null, otherLocationName: null, returnOf: null,
     dueOn: c.dueOn, previousDueOn: dueOnBefore(loan, c.id), currentDueOn: null, daysLate: null, overdueOverrideReason: null,
   };
 }

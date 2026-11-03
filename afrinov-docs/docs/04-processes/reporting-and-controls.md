@@ -35,7 +35,8 @@ the ledger, balances and material master — nothing is stored.
   recipient's issues line by line (`GET /reports/consumption` and
   `/export`; Stock used page). Replaces the Stock Report sheets and the
   Consumable Box. Reversed issues and returns are left out with their
-  reversals.
+  reversals. For items that track use, also used up, broken and still out
+  (as of now) per recipient and per issue (ADR-026).
 - **Project consumption** — net issued per item for one project
   (`GET /reports/project-consumption/:projectNumber`).
 - **Month-end report** — per category, the workbook's Summary layout (stock

@@ -3,6 +3,7 @@
 // Replaces the workbook's Stock Report sheets, which showed the whole period
 // since the last rollover and never by project. What each person was given,
 // issue by issue, is Movements > Issued stock: a recipient's name opens it.
+// Items that track use add used up, broken and still out by recipient.
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -15,7 +16,7 @@ import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { downloadConsumption, downloadConsumptionPdf } from '../api/exportConsumption';
-import { NO_PROJECT, NO_RECIPIENT, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
+import { NO_PROJECT, NO_RECIPIENT, showsTrackedUse, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
 import { thisMonth, today as todayIso } from '../lib/dates';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -105,6 +106,14 @@ export function Consumption() {
     { key: 'items', header: 'Items', align: 'right', className: 'text-num', render: (r) => formatNumber(r.items), width: '6rem' },
     { key: 'value', header: 'Value', align: 'right', className: 'text-num', render: (r) => <span className="font-mono">{formatCurrency(r.value, currency)}</span>, width: '10rem' },
   ];
+  // Only when someone was issued an item that tracks use; as of now, for the issues in the period.
+  const dash = <span className="text-surface-400">—</span>;
+  const useColumns: DataTableColumn<ConsumptionReport['byRecipient'][number]>[] = [
+    { key: 'usedUp', header: 'Used up', align: 'right', className: 'text-num', render: (r) => (r.usedUp ? formatNumber(r.usedUp) : dash), width: '6rem' },
+    { key: 'broken', header: 'Broken', align: 'right', className: 'text-num', render: (r) => (r.broken ? <span className="text-danger-700">{formatNumber(r.broken)}</span> : dash), width: '6rem' },
+    { key: 'stillOut', header: 'Still out', align: 'right', className: 'text-num', render: (r) => (r.stillOut ? <span className="font-medium">{formatNumber(r.stillOut)}</span> : dash), width: '6rem' },
+  ];
+  const tracked = !!report.data && showsTrackedUse(report.data);
 
   return (
     <div>
@@ -194,9 +203,14 @@ export function Consumption() {
               ariaLabel="Stock used by recipient"
               rows={report.data.byRecipient}
               rowKey={(r) => r.recipientId ?? NO_RECIPIENT}
-              columns={recipientColumns}
+              columns={tracked ? [...recipientColumns, ...useColumns] : recipientColumns}
               emptyState={<EmptyState title="Nothing issued" description="No stock was issued in this period." />}
             />
+            {tracked && (
+              <p className="text-meta mt-2">
+                Used up, broken and still out count items that track use after issue, as of now, for what was issued in this period.
+              </p>
+            )}
           </section>
 
           <section aria-label="By item">

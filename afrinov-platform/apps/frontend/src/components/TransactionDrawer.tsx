@@ -9,6 +9,7 @@ import { locationLabel } from '../lib/locations';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDay, lateBy } from '../lib/toolLoans';
 import { LoanHistory } from './LoanHistory';
+import { ConsumableOutcomes } from './ConsumableOutcomes';
 
 
 interface Props {
@@ -17,6 +18,8 @@ interface Props {
   onReversed: () => void;
   /** Called after stock is returned against this issue. */
   onReturned?: () => void;
+  /** Called after part of this issue is marked used up or broken, or that is withdrawn; with what to tell the user. */
+  onOutcomeChanged?: (message: string) => void;
   onError: (err: ApiError) => void;
 }
 
@@ -38,7 +41,7 @@ export function loanOf(t: Pick<MovementRow, 'id' | 'type' | 'referenceType' | 'r
 // reversing entry (POST /inventory-transactions/:id/reversal). A tool loan's
 // due date change is not a movement: it is shown here with its loan, and put
 // right by another change on the Tools page.
-export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onReturned, onError }: Props) {
+export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, onReturned, onOutcomeChanged, onError }: Props) {
   const { hasPermission } = usePermissions();
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState('');
@@ -66,13 +69,19 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   const issued = transaction.type === 'ISSUE' ? -Number(transaction.quantity) : 0;
   const returned = Number(transaction.returnedQuantity ?? 0);
   const hasReturns = transaction.type === 'ISSUE' && returned > 0;
+  // Tracked consumables: what was marked used up or broken is no longer out, so it can't come back either.
+  const usedUp = Number(transaction.usedUpQuantity ?? 0);
+  const broken = Number(transaction.brokenQuantity ?? 0);
+  const hasOutcomes = transaction.type === 'ISSUE' && usedUp + broken > 0;
+  const showsUse = transaction.type === 'ISSUE' && !transaction.reversesId && (!!transaction.trackUse || hasOutcomes);
   const canReturn = hasPermission('inventory:return')
     && transaction.type === 'ISSUE'
     && !transaction.reversesId
     && !transaction.reversedById
-    && issued - returned > 0;
+    && issued - returned - usedUp - broken > 0;
   const canReverse = hasPermission('inventory:reverse')
     && !hasReturns
+    && !hasOutcomes
     && !transaction.reversesId
     && !transaction.reversedById
     && !fromPurchaseOrder
@@ -209,11 +218,24 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           {returned} of {issued} returned to stock.{!transaction.reversedById && ' To reverse this issue, reverse its returns first.'}
         </p>
       )}
+      {hasOutcomes && !hasReturns && !transaction.reversedById && hasPermission('inventory:reverse') && (
+        <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
+          Part of this issue is marked used up or broken. To reverse it, withdraw those first.
+        </p>
+      )}
+
+      {showsUse && (
+        <ConsumableOutcomes
+          transaction={transaction}
+          onChanged={(message) => onOutcomeChanged?.(message)}
+          onError={onError}
+        />
+      )}
 
       {canReturn && (
         <ReturnSection
           transaction={transaction}
-          returnable={issued - returned}
+          returnable={issued - returned - usedUp - broken}
           onReturned={() => onReturned?.()}
           onError={onError}
         />

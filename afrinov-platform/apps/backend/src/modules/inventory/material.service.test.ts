@@ -1,4 +1,5 @@
-// Unit tests for MaterialService: the serial number a tool kept as one unit carries.
+// Unit tests for MaterialService: the serial number a tool kept as one unit
+// carries, and which items track use after issue.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 type Material = { id: string; sku: string; name: string; category: string; serialNumber: string | null; [k: string]: unknown };
@@ -67,6 +68,26 @@ describe('MaterialService serial numbers', () => {
     expect((await MaterialService.update({ id: m.id, serialNumber: '777' }, 'admin')).serialNumber).toBe('777');
     expect((await MaterialService.update({ id: m.id, name: 'Renamed' }, 'admin')).serialNumber).toBe('777');
     expect((await MaterialService.update({ id: m.id, serialNumber: null }, 'admin')).serialNumber).toBeNull();
+  });
+});
+
+describe('MaterialService track use', () => {
+  it('is off unless asked for, and can be switched on and off later', async () => {
+    const m = await MaterialService.create({ sku: 'CON-1', name: 'Cutting disc', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    expect(m.trackUse).toBe(false);
+    expect((await MaterialService.update({ id: m.id, trackUse: true }, 'admin')).trackUse).toBe(true);
+    expect((await MaterialService.update({ id: m.id, name: 'Cutting disc 230mm' }, 'admin')).trackUse).toBe(true);
+    expect((await MaterialService.update({ id: m.id, trackUse: false }, 'admin')).trackUse).toBe(false);
+    const tracked = await MaterialService.create({ sku: 'CON-2', name: 'Hole saw', category: 'TOOLING_PPE_ELECTRICAL', unitOfMeasure: 'each', trackUse: true }, 'admin');
+    expect(tracked.trackUse).toBe(true);
+  });
+
+  it('refuses it on a tool, which is lent and checked back in', async () => {
+    await expect(MaterialService.create({ sku: 'TL-1', name: 'Drill', category: 'TOOLS', unitOfMeasure: 'each', trackUse: true }, 'admin'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('Tools are lent') });
+    const t = await tool('TL-2');
+    await expect(MaterialService.update({ id: t.id, trackUse: true }, 'admin')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect((await MaterialService.update({ id: t.id, trackUse: false }, 'admin')).trackUse).toBe(false);
   });
 });
 

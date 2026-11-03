@@ -14,6 +14,8 @@ export interface Material {
   /** Projects material: the project it is bought for; null until assigned. */
   projectNumber?: string | null;
   project?: { projectNumber: string; name: string | null; status?: string | null; active?: boolean } | null;
+  /** Each issue is later marked used up or broken (discs, blades, bits). Never on a tool. */
+  trackUse?: boolean;
 }
 
 /** A supplier (GET /suppliers). The vendor fields follow the AFRI-0000_x purchase order template. */
@@ -108,7 +110,8 @@ export interface ReturnableLine {
   materialId: string; sku: string; name: string; unitOfMeasure: string;
   locationId: string; locationName: string; locationActive: boolean;
   projectNumber: string | null;
-  issued: string; returned: string; outstanding: string;
+  /** closedOff: marked used up or broken; outstanding already leaves it out. */
+  issued: string; returned: string; closedOff?: string; outstanding: string;
 }
 
 export interface MovementRow {
@@ -130,6 +133,10 @@ export interface MovementRow {
   recipientName?: string | null;
   recipientType?: string | null;
   returnedQuantity?: string | null;
+  /** Issues: marked used up or broken so far. trackUse: the item asks for it. */
+  usedUpQuantity?: string | null;
+  brokenQuantity?: string | null;
+  trackUse?: boolean;
   /** A return: the issue it came back from (when, which slip, from where). */
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
@@ -147,6 +154,23 @@ export interface MovementRow {
   daysLate?: number | null;
   /** Check-out: why tools were lent to someone who already had an overdue one. */
   overdueOverrideReason?: string | null;
+}
+
+/**
+ * What became of an issue line of a tracked consumable (GET
+ * /inventory-transactions/:id/outcomes). Quantities are decimal strings;
+ * stillOut is issued less returned, used up and broken.
+ */
+export interface IssueOutcomes {
+  issueTransactionId: string; sku: string; name: string; unitOfMeasure: string;
+  /** Whether the item asks for outcomes now; earlier ones stay listed when it is switched off. */
+  trackUse: boolean;
+  issued: string; returned: string; usedUp: string; broken: string; stillOut: string;
+  /** Oldest first; a withdrawn outcome carries its withdrawal. */
+  outcomes: Array<{
+    id: string; outcome: 'USED_UP' | 'BROKEN'; quantity: string; note: string | null; recordedBy: string; recordedAt: string;
+    withdrawn: { by: string; at: string; reason: string } | null;
+  }>;
 }
 
 /**

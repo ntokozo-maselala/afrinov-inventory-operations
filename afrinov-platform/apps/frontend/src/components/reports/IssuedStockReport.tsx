@@ -30,9 +30,21 @@ const returned = (l: MovementRow) => {
   return <Link to={`/movements?${q.toString()}`} className="btn-link" title="See when and where it came back">{l.returnedQuantity}</Link>;
 };
 
+// Items that track use: what was marked used up or broken, e.g. "2 used · 1 broken".
+const closedOff = (l: MovementRow) => {
+  const used = Number(l.usedUpQuantity ?? 0);
+  const broken = Number(l.brokenQuantity ?? 0);
+  if (!(used > 0 || broken > 0)) return l.trackUse && !l.reversedById ? <span className="text-meta">None yet</span> : none;
+  return (
+    <span className="whitespace-nowrap">
+      {used > 0 && `${used} used`}{used > 0 && broken > 0 && ' · '}{broken > 0 && <span className="text-danger-700">{broken} broken</span>}
+    </span>
+  );
+};
+
 interface Row { s: IssueSlip; l: MovementRow }
 
-function columns(open: (l: MovementRow) => void): DataTableColumn<Row>[] {
+function columns(open: (l: MovementRow) => void, tracked: boolean): DataTableColumn<Row>[] {
   return [
     { key: 'when', header: 'Issued', render: ({ l, s }) => <button className="text-left btn-link text-meta whitespace-nowrap" onClick={() => open(l)}>{formatDateTime(s.issuedAt)}</button>, width: '11rem' },
     { key: 'to', header: 'Issued to', render: ({ s }) => <>{s.recipientName ?? 'Not recorded'} {s.recipientType && <span className="text-meta">({typeLabel(s.recipientType)})</span>}</>, width: '10rem' },
@@ -46,6 +58,7 @@ function columns(open: (l: MovementRow) => void): DataTableColumn<Row>[] {
     { key: 'loc', header: 'From location', render: ({ l }) => l.locationName, width: '10rem' },
     { key: 'qty', header: 'Issued qty', align: 'right', className: 'text-num', render: ({ l }) => <span className="font-mono">{issued(l)} <span className="text-meta">{l.unitOfMeasure}</span></span>, width: '7rem' },
     { key: 'ret', header: 'Returned', align: 'right', className: 'text-num', render: ({ l }) => <span className="font-mono">{returned(l)}</span>, width: '6rem' },
+    ...(tracked ? [{ key: 'use', header: 'Used up / broken', align: 'right' as const, render: ({ l }: Row) => closedOff(l), width: '9rem' }] : []),
     { key: 'by', header: 'Issued by', render: ({ s }) => <span className="text-meta">{s.issuedByName}</span>, width: '9rem' },
   ];
 }
@@ -57,6 +70,8 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
 
   if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={list.reload} />;
   const rows: Row[] = list.rows.flatMap((s) => s.lines.map((l) => ({ s, l })));
+  // The used up / broken column only when an item on the page tracks use, or once did.
+  const tracked = rows.some(({ l }) => l.trackUse || Number(l.usedUpQuantity ?? 0) > 0 || Number(l.brokenQuantity ?? 0) > 0);
   const loading = list.loading && !list.loaded;
   const empty = <EmptyState title="No stock issued" description="No stock was issued for these dates and filters." />;
   return (
@@ -66,12 +81,12 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
         {list.loaded ? <>{countWords(list.rows.length, rows.length, list.hasMore, 'issue')}. Issues recorded before slips were kept show one item each.</> : ' '}
       </ReportBar>
       {view === 'table' ? (
-        <DataTable ariaLabel="Issued stock" isLoading={loading} rowKey={({ l }) => l.id} rows={rows} columns={columns(setSelected)} emptyState={empty} />
+        <DataTable ariaLabel="Issued stock" isLoading={loading} rowKey={({ l }) => l.id} rows={rows} columns={columns(setSelected, tracked)} emptyState={empty} />
       ) : loading ? (
         <div className="space-y-3"><Skeleton h={110} /><Skeleton h={110} /></div>
       ) : list.rows.length === 0 ? empty : (
         <div className="space-y-4">
-          {list.rows.map((s) => <SlipCard key={s.id} s={s} onOpen={setSelected} />)}
+          {list.rows.map((s) => <SlipCard key={s.id} s={s} tracked={tracked} onOpen={setSelected} />)}
         </div>
       )}
       {list.hasMore && (
@@ -86,6 +101,7 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
             onClose={() => setSelected(null)}
             onReversed={() => { setSelected(null); list.reload(); toast.success('Issue reversed'); }}
             onReturned={() => { setSelected(null); list.reload(); toast.success('Stock returned'); }}
+            onOutcomeChanged={(message) => { setSelected(null); list.reload(); toast.success(message); }}
             onError={(err) => toast.error('Could not change the issue', err.message)}
           />
         </Drawer>
@@ -94,7 +110,7 @@ export function IssuedStockReport({ query, view, onView }: { query: string; view
   );
 }
 
-function SlipCard({ s, onOpen }: { s: IssueSlip; onOpen: (l: MovementRow) => void }) {
+function SlipCard({ s, tracked, onOpen }: { s: IssueSlip; tracked: boolean; onOpen: (l: MovementRow) => void }) {
   return (
     <section className="surface-card p-4 break-inside-avoid" aria-label={`Issue to ${s.recipientName ?? 'not recorded'}`}>
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
@@ -110,6 +126,7 @@ function SlipCard({ s, onOpen }: { s: IssueSlip; onOpen: (l: MovementRow) => voi
             <th className="py-1.5 font-normal">From location</th>
             <th className="py-1.5 font-normal text-right">Issued</th>
             <th className="py-1.5 font-normal text-right">Returned</th>
+            {tracked && <th className="py-1.5 font-normal text-right">Used up / broken</th>}
             <th className="py-1.5 font-normal no-print" aria-label="Actions" />
           </tr>
         </thead>
@@ -123,6 +140,7 @@ function SlipCard({ s, onOpen }: { s: IssueSlip; onOpen: (l: MovementRow) => voi
               <td className="py-1.5">{l.locationName}</td>
               <td className="py-1.5 text-right font-mono">{issued(l)} <span className="text-meta">{l.unitOfMeasure}</span></td>
               <td className="py-1.5 text-right font-mono">{returned(l)}</td>
+              {tracked && <td className="py-1.5 text-right">{closedOff(l)}</td>}
               <td className="py-1.5 text-right no-print"><Button size="sm" variant="ghost" onClick={() => onOpen(l)}>Details</Button></td>
             </tr>
           ))}

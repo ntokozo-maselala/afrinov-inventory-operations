@@ -5,6 +5,7 @@ import { z } from 'zod';
 const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 import { supplierIdSchema } from '../../shared/ids.js';
 import { InventoryService, type HistoryFilter } from './inventory.service.js';
+import { ConsumableOutcomeService } from './consumable-outcome.service.js';
 import { buildMovementsXlsx, movementsFilename, MOVEMENTS_EXPORT_LIMIT } from './movements-export.js';
 import { prisma } from '../../shared/db.js';
 import { StockReceiptService } from './stock-receipt.service.js';
@@ -138,6 +139,17 @@ export const returnableQuerySchema = z.object({
 });
 
 export const reversalSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+
+/** Part of an issue of a tracked consumable used up or broken (POST /inventory-transactions/:id/outcomes). */
+export const consumableOutcomeSchema = z.object({
+  outcome: z.enum(['USED_UP', 'BROKEN']),
+  quantity: z.number().positive(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const outcomeWithdrawalSchema = z.object({
   reason: z.string().trim().min(3).max(500),
 });
 
@@ -335,6 +347,44 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     return idempotentMutation(req, reply, 'POST /inventory-returns', async (tx) => ({
       statusCode: 201,
       body: await InventoryService.returnMany({ ...parsed.data, actorId: actorId(req) }, tx),
+    }));
+  });
+
+  // Tracked consumables: what became of an issue line, used up or broken.
+  app.get('/inventory-transactions/:id/outcomes', { preHandler: [app.authenticate] }, async (req) => {
+    const { id } = req.params as { id: string };
+    return ConsumableOutcomeService.forIssue(id);
+  });
+
+  // Same people as issuing and returning: it is booked at the counter.
+  app.post('/inventory-transactions/:id/outcomes', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.IssueInventory);
+    const parsed = consumableOutcomeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Say whether it was used up or broken, and how many', details: parsed.error.flatten() },
+      });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /inventory-transactions/:id/outcomes', async (tx) => ({
+      statusCode: 201,
+      body: await ConsumableOutcomeService.record({ issueTransactionId: id, ...parsed.data, actorId: actorId(req) }, tx),
+    }));
+  });
+
+  // Withdrawing an outcome recorded by mistake: the same people who reverse movements.
+  app.post('/consumable-outcomes/:id/withdrawal', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ReverseInventoryTransaction);
+    const parsed = outcomeWithdrawalSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'A reason is required to withdraw it', details: parsed.error.flatten() },
+      });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /consumable-outcomes/:id/withdrawal', async (tx) => ({
+      statusCode: 201,
+      body: await ConsumableOutcomeService.withdraw({ outcomeId: id, reason: parsed.data.reason, actorId: actorId(req) }, tx),
     }));
   });
 

@@ -17,6 +17,8 @@ export interface CreateMaterialInput {
   serialNumber?: string;
   /** Projects material only: the project it is bought for. */
   projectNumber?: string;
+  /** Each issue is later marked used up or broken. Never on a tool. */
+  trackUse?: boolean;
 }
 
 export interface UpdateMaterialInput {
@@ -32,6 +34,7 @@ export interface UpdateMaterialInput {
   serialNumber?: string | null;
   /** Projects material only: assigns its project. */
   projectNumber?: string;
+  trackUse?: boolean;
 }
 
 // Active too, so an order doesn't suggest a deactivated project from an item's tag (Qodo, PR #130).
@@ -47,6 +50,11 @@ async function checkSerial(serialNumber: string, category: string, exceptId?: st
   if (category !== 'TOOLS') throw Errors.validation('Only tools have a serial number');
   const holder = await prisma.material.findFirst({ where: { serialNumber: { equals: serialNumber, mode: 'insensitive' }, ...(exceptId ? { id: { not: exceptId } } : {}) }, select: { sku: true } });
   if (holder) throw Errors.conflict(`Serial number "${serialNumber}" is already on ${holder.sku}`);
+}
+
+/** Tools are lent and come back, so there is nothing to mark used up or broken. */
+function checkTrackUse(trackUse: boolean | undefined, category: string) {
+  if (trackUse && category === 'TOOLS') throw Errors.validation('Tools are lent and checked back in, so they do not track use after issue');
 }
 
 export const MaterialService = {
@@ -79,6 +87,7 @@ export const MaterialService = {
     if (existing) throw Errors.conflict(`Material with SKU "${sku}" already exists`);
     const serialNumber = input.serialNumber?.trim() || null;
     if (serialNumber) await checkSerial(serialNumber, input.category);
+    checkTrackUse(input.trackUse, input.category);
     const projectNumber = await projectForNewMaterial(input, prisma);
 
     const created = await prisma.$transaction(async (tx) => {
@@ -93,6 +102,7 @@ export const MaterialService = {
           description: input.description ?? null,
           serialNumber,
           projectNumber,
+          trackUse: input.trackUse ?? false,
         },
         include: withProject,
       });
@@ -125,6 +135,10 @@ export const MaterialService = {
     if (input.requiredStock !== undefined) data.requiredStock = input.requiredStock;
     if (input.unitCost !== undefined) data.unitCost = input.unitCost;
     if (input.active !== undefined) data.active = input.active;
+    if (input.trackUse !== undefined) {
+      checkTrackUse(input.trackUse, before.category);
+      data.trackUse = input.trackUse;
+    }
     if (input.serialNumber !== undefined) {
       const serialNumber = input.serialNumber?.trim() || null;
       if (serialNumber) await checkSerial(serialNumber, before.category, before.id);

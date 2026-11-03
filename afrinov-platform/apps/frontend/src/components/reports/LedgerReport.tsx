@@ -105,6 +105,7 @@ export function LedgerReport({ kind, query, responsible, onResponsible }: {
             onClose={() => setSelected(null)}
             onReversed={() => { setSelected(null); reload(); toast.success('Movement reversed'); }}
             onReturned={() => { setSelected(null); reload(); toast.success('Stock returned'); }}
+            onOutcomeChanged={(message) => { setSelected(null); reload(); toast.success(message); }}
             onError={(err) => toast.error('Reversal failed', err.message)}
           />
         </Drawer>

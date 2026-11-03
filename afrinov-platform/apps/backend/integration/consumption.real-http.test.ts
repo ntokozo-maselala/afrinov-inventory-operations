@@ -96,6 +96,8 @@ describe('consumption report over real HTTP', () => {
     const all = await api<Report>('GET', `/reports/consumption?${range}`);
     expect(all.body.byRecipient.find((r) => r.recipientId === recipientId)).toEqual({
       recipientId, name: `IT consumption fitter ${run}`, type: 'WORKER', value: 1471.75, items: 2, issues: 3,
+      // Neither item tracks use after issue.
+      usedUp: 0, broken: 0, stillOut: 0,
     });
     expect(all.body.lines).toBeUndefined();
 
