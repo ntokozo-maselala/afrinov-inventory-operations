@@ -45,9 +45,10 @@ export interface ProjectStockValue {
   value: number;
   unpriced: number;
   /**
-   * Items it holds as Stores stock, left from before project material came
-   * through the store: the only stock Move to Stores takes. Stock held for
-   * the project is used or moved first (Qodo, PR #143).
+   * Items Move to Stores takes once the project is closed: its leftovers
+   * (Stores stock left from before project material came through the store,
+   * Qodo, PR #143) and items with stock held for it (Project Material Through
+   * the Store Roadmap, Phase 5).
    */
   leftovers: number;
 }
@@ -397,6 +398,7 @@ export const ReportingService = {
       add(bucketOf(cats, r.category), r.materialId, quantity);
       add(sections[sectionOf(r.category)], r.materialId, quantity);
       add(bucketOf(projects, b.heldForProject), r.materialId, quantity);
+      if (quantity > 0) leftovers.set(b.heldForProject, (leftovers.get(b.heldForProject) ?? new Set()).add(r.materialId));
     }
     const unnamed = [...projects.keys()].filter((k) => k !== '' && !projectInfo.has(k));
     if (unnamed.length > 0) {

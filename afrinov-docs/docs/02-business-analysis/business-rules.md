@@ -21,6 +21,7 @@ column says how the platform implements each rule today.
 | BR-011 (proposed) | Once posted, an inventory transaction is immutable; corrections are new adjustment transactions | Not enforced today — recommended new rule (see ADR-002) | Immutable via the API; corrections are reversals linked to the original (ADR-005) or adjustments |
 | (new, no ID) | Every issue names who received the stock | ADR-008 | Required active recipient on every issue |
 | (new, no ID) | Project material's project is the order's, not the catalogue item's | ADR-023 | A project order or RFQ takes any Projects item; a Stores order Stores items only; an item's old project tag governs only its leftovers |
+| (new, no ID) | Project stock is held for its project and goes only to it | ADR-027 | A project order's delivery is held for the order's project; an issue takes a project's own stock only for that project; returns go back to it; a closed project's held stock moves to Stores with its item |
 | (new, no ID) | With procurement on, stock is received into the store only against an approved Stores order | ADR-022 | `POST /stock-receipts`, and `POST /goods-receipts` without an order, refused (400); the order must be APPROVED or PARTIALLY_RECEIVED |
 | (new, no ID) | Returned stock cannot exceed what is still out on the issue | Platform rule (no workbook source) | Return quantity ≤ issued − already returned |
 

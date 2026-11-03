@@ -647,3 +647,65 @@ is a new figure, null for items that do not track use.
 `afrinov-platform/apps/backend/prisma/migrations/20260101000036_consumable_outcomes/migration.sql`,
 `afrinov-platform/apps/backend/prisma/migrations/20260101000037_outcome_return_link/migration.sql`,
 `afrinov-platform/apps/frontend/src/pages/ReturnStock.tsx`, `components/ConsumableOutcomes.tsx`, `components/MaterialForm.tsx`.
+
+### ADR-027 — Project material comes through the store, held for its project
+**Date:** 2026-11-03 · **Status:** Accepted · **Amends:** ADR-021 (delivery), ADR-023 (whose stock it is)
+
+**Context:** ADR-021 had project material go from the supplier straight to
+site: a project order was never received into stock, and Procurement
+confirmed its delivery on the order. That is not how Afrinov works. On
+2 and 3 Nov 2026 the business confirmed that all project material comes
+through the store, that the storeman books its delivery, that the same
+catalogue item can be bought for two projects at once, and that once
+received it goes straight to the workshop and is issued: it is never shelved.
+Since ADR-023 the project lives on the order, not the item, so the item can't
+say whose stock is on the shelf.
+
+**Decision:** Stock carries its project.
+- Every movement records whose stock it is, `held_for_project` (null for
+  Stores stock), apart from `project_number` (who it was used for). Balances
+  are kept per item, location and project held for (`''` for Stores stock).
+  A project holding stock can't be deleted or renumbered.
+- The store controller (and Admin) receives project orders on Receive stock,
+  through a receiving-only view (`GET /purchase-orders/receivable`: supplier,
+  project, lines and what each owes; no prices, approval or RFQ) with
+  `receive:purchase_order`. The order itself stays Procurement's (not found
+  to the store), and Procurement closes it. The delivery's stock is held for
+  the order's project. Confirm delivery is retired: the endpoint refuses (400)
+  and points to Receive stock; past confirmations stay as history.
+- A setting, `inventory.projectReceivingLocationId`, names one location
+  (such as Workshop floor) that project deliveries are booked to; with none
+  set, the storeman chooses per line. After booking, **Issue it now** opens
+  Issue stock with the project and what arrived filled in. Project stock not
+  yet issued is listed on Stock and Projects.
+- A project's own stock is issued to that project only; an issue line names
+  the stock it takes. Returns and reversals go back to the stock they came
+  from. Transfers and adjustments keep the stock's project (API only); counts
+  stay Stores-only. Project material isn't shelved, so no screen moves it.
+- Stores measures count Stores stock only: stock status, re-order, stock
+  alerts and the tool list. Value reports (month-end, the inventory report,
+  the Dashboard) count held stock under the project it is held for.
+- Leftovers received before keep their project on the item, as Stores stock:
+  no migration gives them a project, so `materials.project_number` is still
+  read for them.
+- When a project is completed or cancelled, Move to Stores takes its held
+  stock off the project onto Stores stock at the same location (a linked
+  TRANSFER_OUT and TRANSFER_IN, reversible), then makes the item a Stores
+  item. It is refused while another project holds the item, the item is
+  another project's material, or it is on an open project order or RFQ. A
+  Stores item held for the project keeps its category; only its stock moves.
+
+**Consequences:** Migration `20260101000035` changes the
+`inventory_balances` primary key (every existing balance kept as Stores
+stock); migrations `20260101000038` and `20260101000039` add settings rows.
+Procurement no longer confirms deliveries. Consumption by project is
+unchanged (it reads `project_number`).
+
+**Evidence:** `afrinov-platform/apps/backend/prisma/schema.prisma`,
+`src/shared/inventory/balances.ts`, `src/modules/inventory/inventory.service.ts`
+(`issue`, `transfer`, `adjust`, `postGoodsReceipt`), `project-leftovers.service.ts`,
+`src/modules/procurement/procurement.routes.ts` (`receivable`, `requireReceiveOrder`),
+`procurement.service.ts`, `src/modules/reporting/`, `src/modules/settings/settings.service.ts`,
+`afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx`, `IssueStock.tsx`,
+`ProjectLeftovers.tsx`, `components/LeftoversNotice.tsx`,
+`afrinov-docs/docs/13-project-management/roadmaps/project-material-through-the-store-roadmap.md`.

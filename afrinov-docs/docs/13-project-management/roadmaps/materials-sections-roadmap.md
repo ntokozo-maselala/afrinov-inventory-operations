@@ -6,7 +6,7 @@ Oct 21, 2026 · Sbonakaliso Ngcobo
 
 Afrinov keeps two kinds of material: **Stores** material, kept on the shelf and topped up, and **Projects** material, bought for one job. Today the catalogue treats them alike: "Project Material" is just one of five categories, with Required Stock, re-ordering and issuing to any project like the rest.
 
-> **Amended by ADR-023** ([Project on the Order Roadmap](project-on-the-order-roadmap.md), Nov 2026): a Projects item no longer belongs to a project. The order it is bought on says which project it is for; only leftovers received before the Stores and Procurement separation keep a project, which governs who they are issued to.
+> **Amended by ADR-023** ([Project on the Order Roadmap](project-on-the-order-roadmap.md), Nov 2026): a Projects item no longer belongs to a project. The order it is bought on says which project it is for; only leftovers received before the Stores and Procurement separation keep a project, which governs who they are issued to. **Amended again by ADR-027** ([Project Material Through the Store Roadmap](project-material-through-the-store-roadmap.md)): project stock carries its project on the stock, and a closed project's held stock moves to Stores with its item.
 
 This roadmap splits the catalogue into a **Stores** section and a **Projects** section. Every material belongs to one section, decided when the item is created. A Projects material belongs to **one project**, is never re-ordered, is reported apart from Stores, and is issued only to its own project. When the project closes, its leftovers move to Stores.
 

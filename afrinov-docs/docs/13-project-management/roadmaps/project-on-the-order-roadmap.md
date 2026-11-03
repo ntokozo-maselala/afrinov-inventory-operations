@@ -12,6 +12,8 @@ It amends the [Materials Sections Roadmap](materials-sections-roadmap.md), Phase
 
 **Status:** All four phases built: Phase 1 merged as #129, Phase 2 in #130, Phase 3 in #131 (built on #130), Phase 4 on `docs/project-on-the-order-4` (built on #131). Recorded as ADR-023.
 
+> **Amended by ADR-027** ([Project Material Through the Store Roadmap](project-material-through-the-store-roadmap.md), Nov 2026): project material now comes through the store, and the stock carries its project (`held_for_project`), so one item can be held for two projects at once. Leftovers keep their project on the item, as this roadmap left them.
+
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | The server takes the project from the order | M | Built (#129) |

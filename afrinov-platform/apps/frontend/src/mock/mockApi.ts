@@ -2906,20 +2906,24 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
 
 /** Projects material still in stock for a project, or with no project (null), by SKU. */
 function mockLeftoverItems(projectNumber: string | null) {
-  // As the server: leftovers are Stores stock, not stock held for a project.
-  const balances = computeBalances().filter((b) => b.quantity > 0 && !b.heldForProject);
+  // As the server: an item's leftovers (Stores stock, its project on the item),
+  // and for a project also any item's stock held for it (Phase 5).
+  const balances = computeBalances().filter((b) => b.quantity > 0);
+  const ownItem = (m: MockMaterial) => m.category === 'PROJECT_MATERIAL' && (m.projectNumber ?? null) === projectNumber;
   return state.materials
-    .filter((m) => m.category === 'PROJECT_MATERIAL' && (m.projectNumber ?? null) === projectNumber)
+    .filter((m) => ownItem(m) || (projectNumber !== null && balances.some((b) => b.materialId === m.id && b.heldForProject === projectNumber)))
     .sort((a, b) => a.sku.localeCompare(b.sku))
     .flatMap((m) => {
-      const held = balances.filter((b) => b.materialId === m.id);
-      if (held.length === 0) return [];
-      const onHand = held.reduce((sum, b) => sum + b.quantity, 0);
+      const mine = balances.filter((b) => b.materialId === m.id && (b.heldForProject ? projectNumber !== null && b.heldForProject === projectNumber : ownItem(m)));
+      if (mine.length === 0) return [];
+      const onHand = mine.reduce((sum, b) => sum + b.quantity, 0);
+      const held = mine.filter((b) => b.heldForProject).reduce((sum, b) => sum + b.quantity, 0);
       return [{
         materialId: m.id, sku: m.sku, name: m.name, unitOfMeasure: m.unitOfMeasure, onHand: String(onHand), active: m.active,
-        hasActiveLocation: held.some((b) => findLocation(b.locationId)?.active !== false),
+        hasActiveLocation: mine.some((b) => findLocation(b.locationId)?.active !== false),
         value: m.unitCost ? Math.round(onHand * Number(m.unitCost) * 100) / 100 : null,
-        locations: held.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity})`).join(', '),
+        locations: mine.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity}${b.heldForProject ? ', held for the project' : ''})`).join(', '),
+        category: m.category, held: String(held),
       }];
     });
 }
@@ -2941,30 +2945,51 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
     const sku = findMaterial(rfq.lines.find((l) => ids.has(l.materialId))!.materialId)?.sku;
     throw err('VALIDATION_ERROR', `${sku} is on ${rfq.number}, which is still open, so it stays project material. Move it once that request is cancelled, or the order it is awarded as is finished.`);
   }
-  // As the server: an item with stock held for a project stays project material.
-  const held = computeBalances().find((b) => ids.has(b.materialId) && b.heldForProject && b.quantity !== 0);
-  if (held) {
-    throw err('VALIDATION_ERROR', `${findMaterial(held.materialId)?.sku} has stock in the store held for project ${held.heldForProject}, so it stays project material until that stock is used or moved.`);
+  // As the server: stock held for another project keeps the item project material;
+  // the closed project's own held stock moves with it.
+  const balances = computeBalances();
+  const heldElsewhere = balances.find((b) => ids.has(b.materialId) && b.heldForProject && b.heldForProject !== projectNumber && b.quantity !== 0);
+  if (heldElsewhere) {
+    throw err('VALIDATION_ERROR', `${findMaterial(heldElsewhere.materialId)?.sku} has stock in the store held for project ${heldElsewhere.heldForProject}, so it stays project material until that stock is used or moved.`);
   }
+  const ownHeld = projectNumber === null ? [] : balances.filter((b) => ids.has(b.materialId) && b.heldForProject === projectNumber && b.quantity !== 0);
   for (const item of items) {
     const m = findMaterial(item.materialId);
     if (!m) throw err('NOT_FOUND', 'Material not found');
-    if (m.category !== 'PROJECT_MATERIAL' || (m.projectNumber ?? null) !== projectNumber) {
+    const heldHere = ownHeld.filter((b) => b.materialId === m.id);
+    const ownItem = m.category === 'PROJECT_MATERIAL' && (m.projectNumber ?? null) === projectNumber;
+    const heldItem = heldHere.length > 0 && (m.category !== 'PROJECT_MATERIAL' || !m.projectNumber || m.projectNumber === projectNumber);
+    if (!ownItem && !heldItem) {
       throw err('VALIDATION_ERROR', projectNumber === null
         ? `${m.sku} is not a Projects item with no project, so it isn't moved from here.`
         : `${m.sku} is not material of project ${projectNumber}, so it isn't moved from it.`);
     }
+    if (m.category !== 'PROJECT_MATERIAL' && item.category !== m.category) throw err('VALIDATION_ERROR', `${m.sku} is already a Stores item, so it stays in its category.`);
     if (!['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
   }
   const at = new Date().toISOString();
   for (const item of items) {
     const m = findMaterial(item.materialId)!;
+    // As the server: the project's held stock to Stores stock, at each location, as a linked pair.
+    let heldMoved = 0;
+    for (const b of ownHeld.filter((x) => x.materialId === m.id && x.quantity > 0)) {
+      const outId = nextId('t');
+      const inId = nextId('t');
+      const note = `Moved to Stores: project ${projectNumber} is closed`;
+      state.transactions.push(
+        { id: outId, postedAt: at, type: 'TRANSFER_OUT', materialId: m.id, locationId: b.locationId, heldForProject: projectNumber!, quantity: String(-b.quantity), actorId: 'user-1', reasonNote: note, referenceType: 'Project', referenceId: projectNumber!, pairedWithId: inId },
+        { id: inId, postedAt: at, type: 'TRANSFER_IN', materialId: m.id, locationId: b.locationId, quantity: String(b.quantity), actorId: 'user-1', reasonNote: note, referenceType: 'Project', referenceId: projectNumber!, pairedWithId: outId },
+      );
+      heldMoved += b.quantity;
+    }
+    const toCategory = m.category === 'PROJECT_MATERIAL' ? item.category : m.category;
     // As the server, each move is in the Activity.
     MOCK_AUDIT.unshift({
       id: nextId('audit'), action: 'MOVE_TO_STORES', entityType: 'Material', entityId: m.id,
-      before: { category: m.category, projectNumber }, after: { category: item.category, projectNumber: null }, createdAt: at, actorId: 'user-1',
+      before: { category: m.category, projectNumber: m.projectNumber ?? null },
+      after: { category: toCategory, projectNumber: null, ...(heldMoved > 0 ? { heldMoved: String(heldMoved), fromProject: projectNumber } : {}) }, createdAt: at, actorId: 'user-1',
     });
-    Object.assign(m, { category: item.category, projectNumber: null, requiredStock: '0' });
+    if (m.category === 'PROJECT_MATERIAL') Object.assign(m, { category: item.category, projectNumber: null, requiredStock: '0' });
   }
   return { moved: items.length };
 }
@@ -3199,6 +3224,8 @@ function computeStockValue() {
     add(bucketOf(cats, r.category), r.materialId, b.quantity);
     add(sections[sectionOfRow(r.category)], r.materialId, b.quantity);
     add(bucketOf(projects, b.heldForProject), r.materialId, b.quantity);
+    // As the server: held stock is moved to Stores with its item once the project closes.
+    if (b.quantity > 0) leftovers.set(b.heldForProject, (leftovers.get(b.heldForProject) ?? new Set()).add(r.materialId));
   }
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const sum = (bucket: Bucket) => {

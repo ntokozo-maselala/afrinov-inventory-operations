@@ -455,8 +455,8 @@ describe('ReportingService', () => {
       });
       expect(v.projects).toEqual([
         { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0, leftovers: 1 },
-        // Everything 1402 holds is held for it: nothing for Move to Stores.
-        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0, leftovers: 0 },
+        // Everything 1402 holds is held for it: once 1402 closes, Move to Stores takes both items (Phase 5).
+        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0, leftovers: 2 },
       ]);
       // The cable's 3 are held for 1402, not the store's: still urgent and out of stock.
       expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });

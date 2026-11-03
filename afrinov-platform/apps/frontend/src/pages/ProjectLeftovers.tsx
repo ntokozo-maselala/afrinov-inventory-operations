@@ -17,10 +17,16 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { api, type ApiError } from '../api/client';
-import { STORES_CATEGORIES } from '../lib/categories';
+import { STORES_CATEGORIES, categoryLabel } from '../lib/categories';
 import { formatCurrency } from '../lib/currency';
 
-interface LeftoverItem { materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string; active?: boolean; hasActiveLocation?: boolean }
+interface LeftoverItem {
+  materialId: string; sku: string; name: string; unitOfMeasure: string; onHand: string; value: number | null; locations: string; active?: boolean; hasActiveLocation?: boolean;
+  /** Its category now; a Stores item held for the project keeps it (Phase 5). */
+  category?: string;
+  /** How much of onHand is held for the project: moved off it onto Stores stock. */
+  held?: string;
+}
 interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean; active?: boolean } | null; items: LeftoverItem[] }
 
 /** Leftovers move to a Stores category other than Tools: a tool is lent one by one, not issued. */
@@ -77,7 +83,7 @@ export function ProjectLeftovers() {
       <PageHeader
         title={title}
         description={project
-          ? `${project.name ? `${project.name}. ` : ''}What is left in stock when a project is completed or cancelled moves to Stores: each item becomes a Stores item in the category you choose, keeping its code, stock, locations, cost and history.`
+          ? `${project.name ? `${project.name}. ` : ''}What is left in stock when a project is completed or cancelled moves to Stores: each item becomes a Stores item in the category you choose, keeping its code, stock, locations, cost and history. Stock held for the project becomes Stores stock where it is.`
           : 'Projects items with no project still in stock aren\u2019t issued, so they move to Stores: each item becomes a Stores item in the category you choose, keeping its code, stock, locations, cost and history.'}
         breadcrumb={breadcrumb}
       />
@@ -116,10 +122,26 @@ export function ProjectLeftovers() {
                 <tr key={i.materialId}>
                   {/* Each item opens its page; an open project's is issued from here (Qodo, PR #132). */}
                   <td><Link to={`/materials/${i.materialId}`} className="btn-link"><span className="font-mono text-xs">{i.sku}</span> {i.name}</Link></td>
-                  <td className="text-right font-mono">{i.onHand} {i.unitOfMeasure}</td>
+                  <td className="text-right font-mono">
+                    {i.onHand} {i.unitOfMeasure}
+                    {Number(i.held ?? 0) > 0 && <div className="text-meta font-sans">{i.held === i.onHand ? 'held for the project' : `${i.held} held for the project`}</div>}
+                  </td>
                   <td className="text-meta">{i.locations}</td>
                   <td className="text-right font-mono">{i.value === null ? <span className="text-surface-300">No unit cost</span> : formatCurrency(i.value, 'ZAR')}</td>
-                  {movable && canMove && (
+                  {movable && canMove && i.category && i.category !== 'PROJECT_MATERIAL' && (
+                    <td>
+                      {/* A Stores item keeps its category: only the stock it holds for the project moves. */}
+                      <Select
+                        aria-label={`Move ${i.sku}`}
+                        value={categories[i.materialId] ?? ''}
+                        onChange={(e) => setCategories((c) => ({ ...c, [i.materialId]: e.target.value }))}
+                      >
+                        <option value="">Leave for now</option>
+                        <option value={i.category}>Move its stock ({categoryLabel(i.category)})</option>
+                      </Select>
+                    </td>
+                  )}
+                  {movable && canMove && (!i.category || i.category === 'PROJECT_MATERIAL') && (
                     <td>
                       <Select
                         aria-label={`Stores category for ${i.sku}`}

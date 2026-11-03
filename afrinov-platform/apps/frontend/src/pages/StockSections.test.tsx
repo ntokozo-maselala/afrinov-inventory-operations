@@ -84,7 +84,7 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
   it('lists project material received and not yet issued by project, with Issue, and keeps it out of the leftovers', async () => {
     mockGet.mockImplementation(async (path: string) => {
       if (path === '/locations') return [];
-      // AFRI-1325 is completed: its stock is listed, but not offered for issue (Qodo, PR #146).
+      // AFRI-1325 is completed: its stock is listed, not offered for issue (Qodo, PR #146), but for Move to Stores.
       if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1402', status: 'ACTIVE' }, { projectNumber: 'AFRI-1325', status: 'COMPLETED' }];
       return [
         ...ROWS,
@@ -100,7 +100,9 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
     // Both locations' stock, as one line for the item.
     expect(await screen.findByRole('link', { name: "Issue project AFRI-1402's material" })).toHaveAttribute('href', '/stock/issue');
     expect(screen.getByText(/Project AFRI-1402:/)).toHaveTextContent('Project AFRI-1402: Item BEAM (6 each) · Issue');
-    expect(screen.getByText(/Project AFRI-1325:/)).toHaveTextContent('Project AFRI-1325: Item BOLT (10 each) · not issued: project completed');
+    // Phase 5: a completed project's stock moves to Stores with its item.
+    expect(screen.getByText(/Project AFRI-1325:/)).toHaveTextContent('Project AFRI-1325: Item BOLT (10 each) · project completed: move to Stores');
+    expect(within(screen.getByText(/Project AFRI-1325:/)).getByRole('link', { name: 'move to Stores' })).toHaveAttribute('href', '/projects/AFRI-1325/leftovers');
     expect(screen.queryByRole('link', { name: "Issue project AFRI-1325's material" })).not.toBeInTheDocument();
     // Not leftovers, and not in the Stores table.
     expect(screen.getByRole('link', { name: 'Project 1402 · Silo: 1 item' })).toBeInTheDocument();

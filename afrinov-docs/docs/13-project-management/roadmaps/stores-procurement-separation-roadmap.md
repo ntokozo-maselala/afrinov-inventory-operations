@@ -10,6 +10,8 @@ It builds on the [Stores Ordering Roadmap](stores-ordering-roadmap.md) (merged a
 
 **Status:** All four phases built: Phase 1 in PR #119, Phase 2 in #120, Phase 3 in #121, and Phase 4 on `feature/stores-roles-docs` (branched from #121), not yet committed. Recorded as ADR-021.
 
+> **Amended by ADR-027** ([Project Material Through the Store Roadmap](project-material-through-the-store-roadmap.md), Nov 2026): project material no longer goes straight to site. The store controller receives project orders into stock held for the project, through a receiving view with no prices, and Confirm delivery is retired. The two sides stay apart otherwise: the store still can't open or change a project order.
+
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 1 | Separate homes for each kind of order | M | Built |

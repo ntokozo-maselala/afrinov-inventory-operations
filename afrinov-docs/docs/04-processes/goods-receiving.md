@@ -5,12 +5,13 @@
 ## Inputs
 Delivery from a supplier with a delivery note or invoice reference
 (mirrors the workbook's `Delivery/Invoice No.` field). With procurement on,
-an approved Stores purchase order (ADR-022).
+an approved purchase order: the store's own, or a project's (ADR-022, ADR-027).
 
 ## Actors
 With procurement on, the Store Controller (and Admin): the server needs
-`receive:inventory` and the order to be the store's (`order:stores_stock`);
-the page also asks for `receive:purchase_order`. With procurement off, anyone with
+`receive:inventory`, and `order:stores_stock` for a Stores order or
+`receive:purchase_order` for a project order (ADR-027); the page asks for
+`receive:purchase_order`. With procurement off, anyone with
 `receive:inventory` (Store Controller, Procurement).
 *Unverified:* who receives on shift in practice.
 
@@ -32,10 +33,13 @@ Which way depends on whether procurement is switched on
    (`reference_type = 'GoodsReceipt'`); recomputes balances; writes a
    `RECEIVE_STOCK` audit entry.
 
-**2. Procurement on: only against an approved Stores order** (ADR-022).
-1. Receive stock lists the store's orders that are APPROVED or
-   PARTIALLY_RECEIVED; there is no supplier to pick, no free lines and no new
-   item. Choosing one fills in its outstanding lines; what arrived is booked
+**2. Procurement on: only against an approved order** (ADR-022), the store's
+own or a project's (ADR-027).
+1. Receive stock lists the orders the user receives that are APPROVED or
+   PARTIALLY_RECEIVED (`GET /purchase-orders/receivable`, which has no
+   prices): the store's own, and projects', labelled with their project
+   ("AFRI-0430 · for AFRI-1325 · Plant upgrade"). There is no supplier to
+   pick, no free lines and no new item. Choosing one fills in its outstanding lines; what arrived is booked
    line by line and to a location, with the delivery note and date, as a goods
    receipt recorded and posted in one step (`POST /goods-receipts` with
    `post: true` and an `Idempotency-Key`). The order's page and Order stock
@@ -51,7 +55,14 @@ Which way depends on whether procurement is switched on
 2. Posting inserts RECEIPT transactions, increments each order line's
    received quantity (never above the ordered quantity), marks the receipt
    `POSTED`, and moves the order to PARTIALLY_RECEIVED or RECEIVED — all in
-   one transaction.
+   one transaction. A project order's RECEIPTs are held for its project
+   (`held_for_project`); a Stores order's are Stores stock.
+3. A project order's lines go to the project receiving location
+   (`inventory.projectReceivingLocationId`, Settings → Inventory) when one is
+   set, with no location to choose; otherwise to a location per line.
+   Project material isn't shelved: the confirmation offers **Issue it now**,
+   which opens Issue stock with the project and what arrived filled in.
+   Procurement closes a project order; the store closes its own.
 
 ## Business rules
 - Quantity received need not equal quantity ordered (partial delivery is

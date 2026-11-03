@@ -209,7 +209,11 @@ export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStoc
                   <Link to="/stock/issue" state={{ issuePrefill: prefill }} className="btn-link" aria-label={`Issue project ${project}'s material`}>Issue</Link>
                 </>
               )}
-              {canIssue && reason && reason !== 'unknown' && <span className="text-meta"> · not issued: {reason}</span>}
+              {/* A closed project's stock moves to Stores with its item (Project Material Through the Store Roadmap, Phase 5). */}
+              {canIssue && (reason === 'project completed' || reason === 'project cancelled') && (
+                <span className="text-meta"> · {reason}: <Link to={leftoversLink(project)} className="btn-link">move to Stores</Link></span>
+              )}
+              {canIssue && reason === 'project not active' && <span className="text-meta"> · not issued: {reason}</span>}
             </li>
           );
         })}

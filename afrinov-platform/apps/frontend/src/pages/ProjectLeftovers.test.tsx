@@ -19,7 +19,7 @@ const ITEMS = [
   { materialId: 'p-1', sku: '1369-PIPE', name: 'Pipe 150NB', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)' },
   { materialId: 'p-2', sku: '1369-FLANGE', name: 'Flange', unitOfMeasure: 'each', onHand: '3', value: null, locations: 'A-1 (3)' },
 ];
-const leftovers = (status: string, items = ITEMS) => ({
+const leftovers = (status: string, items: Array<Record<string, unknown>> = ITEMS) => ({
   project: { projectNumber: '1369', name: 'Plant upgrade', status, closed: status === 'COMPLETED' || status === 'CANCELLED' }, items,
 });
 
@@ -59,6 +59,25 @@ describe('ProjectLeftovers page', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }));
     // Said in the toast, and kept on the page with where they went.
     expect(await screen.findByRole('link', { name: 'Stores tab of Materials' })).toHaveAttribute('href', '/materials');
+  });
+
+  // Project Material Through the Store Roadmap, Phase 5: stock held for the
+  // closed project moves to Stores with its item; a Stores item keeps its category.
+  it('says what is held for the project, and moves a Stores item\x27s stock in its own category', async () => {
+    mockGet.mockResolvedValue(leftovers('COMPLETED', [
+      { ...ITEMS[0]!, onHand: '10', held: '4', category: 'PROJECT_MATERIAL', locations: 'A-1 (6), C-3 (4, held for the project)' },
+      { materialId: 's-1', sku: 'BOLT-M16', name: 'Hex bolt', unitOfMeasure: 'each', onHand: '5', value: 10, locations: 'C-3 (5, held for the project)', held: '5', category: 'CONSUMABLES' },
+    ]));
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.getByText('4 held for the project')).toBeInTheDocument();
+    expect(screen.getByText('held for the project')).toBeInTheDocument();
+    // The bolt is already a Stores item: no category to choose, only whether to move its stock.
+    const bolt = screen.getByLabelText('Move BOLT-M16');
+    expect(within(bolt).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', 'Move its stock (Consumables)']);
+    fireEvent.change(bolt, { target: { value: 'CONSUMABLES' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 's-1', category: 'CONSUMABLES' }] }));
   });
 
   it('shows why a move was refused', async () => {
