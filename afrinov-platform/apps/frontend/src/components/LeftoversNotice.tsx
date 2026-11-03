@@ -99,7 +99,7 @@ export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[
     <>
       {heldProjects.length > 0 && (
         <Alert tone="info" title="Held for projects" className={className}>
-          <p>Received against each project&rsquo;s orders and held for it. Each item&rsquo;s page shows where it is kept.</p>
+          <p>Received against each project&rsquo;s orders and held for it: issued to that project on Issue stock. Each item&rsquo;s page shows where it is kept.</p>
           <ul className="mt-1 space-y-0.5">
             {heldProjects.map(([projectNumber, items]) => (
               <li key={projectNumber}>

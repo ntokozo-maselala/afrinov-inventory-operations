@@ -258,7 +258,9 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/inventory-issues', tag: 'Stock movements', summary: 'Issue stock to a recipient',
     description: 'One recipient (required), an optional project, and up to 50 lines, booked all-or-nothing. '
-      + 'Lines for the same item and location are checked against stock as one total. '
+      + 'Each line takes Stores stock, or, with heldForProject, the stock held for the issue\'s project: a project\'s own stock '
+      + 'goes to that project only (400 otherwise), while Stores stock follows its item (a leftover goes to its item\'s project). '
+      + 'Lines for the same stock are checked against it as one total. '
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
       + 'material or location, and 400 for an inactive one. Tools are refused (400): they are checked out, not issued.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
@@ -352,7 +354,8 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/inventory-transfers', tag: 'Stock movements', summary: 'Move stock between two locations',
-    description: 'Records two linked transactions. Refused with 422 INSUFFICIENT_BALANCE when the source is short.',
+    description: 'Records two linked transactions. With heldForProject, moves that project\'s stock, which stays its at the destination; '
+      + 'otherwise Stores stock. Refused with 422 INSUFFICIENT_BALANCE when the source is short, 404 for an unknown project.',
     permissions: [P.TransferInventory], body: transferSchema, success: 201, errors: [404, 422],
   },
   {
@@ -367,7 +370,8 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-adjustments', tag: 'Stock movements', summary: 'Correct stock up or down with a reason',
     description: 'A signed quantity with a reason. DAMAGE, LOSS and SCRAP may name who was responsible (recipientId, an '
       + 'active recipient); naming someone needs a reasonNote saying what happened. Other reasons take no recipientId. '
-      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location or recipient.',
+      + 'With heldForProject, adjusts that project\'s stock; otherwise Stores stock. '
+      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location, recipient or project.',
     permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
   },
   {

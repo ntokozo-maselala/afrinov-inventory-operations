@@ -167,6 +167,13 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
               <dd className="col-span-2 text-mono text-xs">{transaction.projectNumber}</dd>
             </>
           )}
+          {/* Whose stock moved, when it is a project's own: not who it was used for (Qodo, PR #145). */}
+          {transaction.heldForProject && (
+            <>
+              <dt className="text-surface-500">Held for</dt>
+              <dd className="col-span-2 text-mono text-xs">{transaction.heldForProject}</dd>
+            </>
+          )}
           {transaction.reasonCode && (
             <>
               <dt className="text-surface-500">Reason</dt>

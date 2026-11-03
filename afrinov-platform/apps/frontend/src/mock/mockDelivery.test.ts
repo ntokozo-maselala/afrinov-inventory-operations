@@ -95,4 +95,24 @@ describe('mock: delivery of a project order', () => {
     const leftovers = (v: Value) => v.projects.find((p) => p.projectNumber === 'AFRI-1325')?.leftovers ?? 0;
     expect(leftovers(after)).toBe(leftovers(before));
   });
+  // Project Material Through the Store Roadmap, Phase 3, as the server issues it.
+  it('issues the stock to its project only, and moves it keeping its project', async () => {
+    const po = await approvedProjectOrder();
+    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    const before = await heldFor('AFRI-1325');
+    const issue = (projectNumber: string | undefined, quantity: number) => api.post('/inventory-issues', {
+      recipientId: 'rcp-1', projectNumber, lines: [{ materialId: 'mat-9', locationId: 'loc-1', quantity, heldForProject: 'AFRI-1325' }],
+    });
+    expect(await messageOf(issue(undefined, 1))).toMatch(/held for project AFRI-1325: issue it to that project/);
+    expect(await messageOf(issue('AFRI-1402', 1))).toMatch(/held for project AFRI-1325, so it can.t be issued to project AFRI-1402/);
+    await issue('AFRI-1325', 1);
+    expect(await heldFor('AFRI-1325')).toBe(before - 1);
+    // A transfer keeps the project; Stores stock is untouched.
+    await api.post('/inventory-transfers', { materialId: 'mat-9', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 1, heldForProject: 'AFRI-1325' });
+    expect(await heldFor('AFRI-1325')).toBe(before - 1);
+    // Its movements say whose stock moved, and the project's history finds the transfer (Qodo, PR #145).
+    const rows = await api.get<Array<{ type: string; heldForProject: string | null }>>('/inventory-transactions?projectNumber=AFRI-1325');
+    expect(rows.find((r) => r.type === 'TRANSFER_OUT')?.heldForProject).toBe('AFRI-1325');
+    expect(rows.find((r) => r.type === 'RECEIPT')?.heldForProject).toBe('AFRI-1325');
+  });
 });

@@ -22,6 +22,7 @@ interface Tx {
   id: string; postedAt: Date; type: string; materialId: string; locationId: string;
   quantity: Prisma.Decimal; actorId: string; recipientId: string | null; reasonCode: string | null;
   reasonNote: string | null; projectNumber: string | null; referenceType: string | null; referenceId: string | null;
+  heldForProject?: string | null;
   material?: { sku: string; name: string; category: string; unitOfMeasure: string };
   location?: { name: string };
   actor?: { id: string; name: string; email: string };
@@ -99,13 +100,14 @@ function makePrisma(): unknown {
     inventoryTransaction: {
       findMany: async ({ where, take }: { where?: Record<string, unknown>; take?: number } = {}) => {
         let list = db.transactions.slice();
-        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; postedAt?: { gte?: Date; lte?: Date } } | undefined;
+        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; OR?: Array<{ projectNumber?: string; heldForProject?: string }>; postedAt?: { gte?: Date; lte?: Date } } | undefined;
         if (w?.materialId) list = list.filter((t) => t.materialId === w.materialId);
         if (w?.type) {
           const types = typeof w.type === 'string' ? [w.type] : w.type.in;
           list = list.filter((t) => types.includes(t.type));
         }
         if (w?.projectNumber) list = list.filter((t) => t.projectNumber === w.projectNumber);
+        if (w?.OR) list = list.filter((t) => w.OR!.some((c) => (c.projectNumber !== undefined && t.projectNumber === c.projectNumber) || (c.heldForProject !== undefined && t.heldForProject === c.heldForProject)));
         if (w?.postedAt) {
           if (w.postedAt.gte) list = list.filter((t) => t.postedAt >= w.postedAt!.gte!);
           if (w.postedAt.lte) list = list.filter((t) => t.postedAt <= w.postedAt!.lte!);
@@ -546,6 +548,19 @@ describe('ReportingService', () => {
       const result = await ReportingService.movementHistory({ projectNumber: 'P-A' });
       expect(result).toHaveLength(1);
       expect(result[0]!.projectNumber).toBe('P-A');
+    });
+
+    // Qodo, PR #145: as the movement history, a project's own stock moving
+    // (held for it, used for nobody yet) is in its history.
+    it('filters by project: stock used for it, and its own stock', async () => {
+      seedMaterials();
+      const row = (id: string, projectNumber: string | null, heldForProject: string | null) => ({
+        id, postedAt: new Date(), type: 'TRANSFER_OUT', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-1), actorId: 'u-1',
+        recipientId: null, reasonCode: null, reasonNote: null, projectNumber, referenceType: null, referenceId: null, heldForProject,
+      });
+      db.transactions = [row('used', 'P-A', null), row('held', null, 'P-A'), row('other', null, 'P-B'), row('stores', null, null)];
+      const { ReportingService } = await import('./reporting.service.js');
+      expect((await ReportingService.movementHistory({ projectNumber: 'P-A' })).map((r) => r.id).sort()).toEqual(['held', 'used']);
     });
 
     it('caps the page size at 1000', async () => {

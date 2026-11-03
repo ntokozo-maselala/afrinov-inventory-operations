@@ -71,6 +71,8 @@ export const issueSchema = z.object({
     materialId: uuidSchema,
     locationId: uuidSchema,
     quantity: z.number().positive(),
+    // The stock the line takes: the issue's project's own, or null/left out for Stores stock.
+    heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
   })).min(1).max(50),
 });
 
@@ -79,6 +81,9 @@ export const transferSchema = z.object({
   fromLocationId: uuidSchema,
   toLocationId: uuidSchema,
   quantity: z.number().positive(),
+  // Whose stock it takes: the project it is held for, or null/left out for
+  // Stores stock (Project Material Through the Store Roadmap, Phase 3).
+  heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
 });
 
 export const adjustmentSchema = z.object({
@@ -89,6 +94,9 @@ export const adjustmentSchema = z.object({
   reasonNote: z.string().optional(),
   // Who was responsible for damaged, lost or scrapped stock; null or left out when nobody is known.
   recipientId: uuidSchema.nullable().optional(),
+  // Whose stock it takes: the project it is held for, or null/left out for
+  // Stores stock (Project Material Through the Store Roadmap, Phase 3).
+  heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
 });
 
 export const stockReceiptSchema = z.object({

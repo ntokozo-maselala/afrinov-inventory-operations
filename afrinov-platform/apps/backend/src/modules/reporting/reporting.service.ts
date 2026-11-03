@@ -226,7 +226,8 @@ export const ReportingService = {
     const where: Prisma.InventoryTransactionWhereInput = {};
     if (filter.materialId) where.materialId = filter.materialId;
     if (filter.type) where.type = filter.type as Prisma.InventoryTransactionWhereInput['type'];
-    if (filter.projectNumber) where.projectNumber = filter.projectNumber;
+    // As the movement history: stock used for the project, and its own stock (Qodo, PR #145).
+    if (filter.projectNumber) where.OR = [{ projectNumber: filter.projectNumber }, { heldForProject: filter.projectNumber }];
     if (filter.from || filter.to) {
       where.postedAt = {};
       if (filter.from) where.postedAt.gte = new Date(filter.from);
