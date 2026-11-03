@@ -8,6 +8,7 @@ import type { StockValue } from '../pages/Dashboard';
 import type { CurrentStockRow } from '../api/types';
 import { sectionOf } from '../lib/categories';
 import { isStoresStock } from '../lib/heldFor';
+import { formatNumber } from '../lib/format';
 
 export interface ProjectLeftoverCount { projectNumber: string; name: string | null; status: string; items: number }
 
@@ -62,6 +63,9 @@ const itemsText = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
  * and any with no project yet as needing one first. Built from the Stock
  * page's own rows (inactive items included), so it shows whenever the table
  * can, and the page's load error covers both (Qodo, PR #126).
+ * Stock received against a project's orders, held for it, is listed by
+ * project too, each item linking to its page, until project stock gets its
+ * own views (Project Material Through the Store Roadmap, Phase 4; Qodo, PR #143).
  */
 export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[]; className?: string }) {
   const byProject = new Map<string, HeldForProject & { ids: Set<string> }>();
@@ -80,8 +84,37 @@ export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[
   const open = projects.filter((p) => !isClosedStatus(p.status));
   const unassigned = byProject.get('');
   const name = (p: HeldForProject) => `Project ${p.projectNumber}${p.name ? ` · ${p.name}` : ''}`;
+  // Stock held for a project, per project, then per item across its locations.
+  const heldFor = new Map<string, Map<string, { materialId: string; name: string; unit: string; quantity: number }>>();
+  for (const r of rows) {
+    if (isStoresStock(r) || Number(r.quantity) <= 0) continue;
+    const items = heldFor.get(r.heldForProject!) ?? new Map();
+    const item = items.get(r.materialId) ?? { materialId: r.materialId, name: r.materialName, unit: r.unitOfMeasure, quantity: 0 };
+    item.quantity += Number(r.quantity);
+    items.set(r.materialId, item);
+    heldFor.set(r.heldForProject!, items);
+  }
+  const heldProjects = [...heldFor].sort(([a], [b]) => a.localeCompare(b));
   return (
     <>
+      {heldProjects.length > 0 && (
+        <Alert tone="info" title="Held for projects" className={className}>
+          <p>Received against each project&rsquo;s orders and held for it. Each item&rsquo;s page shows where it is kept.</p>
+          <ul className="mt-1 space-y-0.5">
+            {heldProjects.map(([projectNumber, items]) => (
+              <li key={projectNumber}>
+                Project {projectNumber}:{' '}
+                {[...items.values()].sort((a, b) => a.name.localeCompare(b.name)).map((i, n) => (
+                  <span key={i.materialId}>
+                    {n > 0 && ', '}
+                    <Link to={`/materials/${i.materialId}`} className="btn-link">{i.name}</Link> ({formatNumber(i.quantity)} {i.unit})
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      )}
       {closed.length > 0 && (
         <Alert tone="warning" title="Leftovers to move to Stores" className={className}>
           <ul className="space-y-0.5">
