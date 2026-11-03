@@ -47,7 +47,11 @@ export const updateSupplierSchema = z.object({
 
 const vatRate = z.number().min(0).max(100);
 const unitPrice = z.number().nonnegative().max(1e12);
+/** Percent off a line's unit price, to 2 places (Procurement KPIs count the saving). */
+const discountPercent = z.number().min(0).max(100).refine((n) => Number.isInteger(Math.round(n * 100 * 1e6) / 1e6), 'At most 2 decimal places');
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD');
+/** A line named at most once, so each change is compared with what the line had. */
+const oncePerLine = (rows: Array<{ lineId: string }>) => new Set(rows.map((r) => r.lineId)).size === rows.length;
 const text = (max: number) => z.string().max(max).nullable().optional();
 /** The longest email address there can be. */
 const SUPPLIER_EMAIL_MAX = 320;
@@ -89,6 +93,7 @@ export const createPOSchema = z.object({
         materialId: z.uuid(),
         orderedQty: z.number().positive(),
         unitPrice: z.number().nonnegative().max(1e12).optional(),
+        discountPercent: discountPercent.optional(),
         deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').optional(),
       }),
     )
@@ -99,7 +104,8 @@ export const updatePOSchema = z.object({
   notes: z.string().optional(),
   expectedDeliveryDate: z.string().nullable().optional(),
   vatRate: vatRate.optional(),
-  linePrices: z.array(z.object({ lineId: z.uuid(), unitPrice: unitPrice.nullable() })).max(500).optional(),
+  linePrices: z.array(z.object({ lineId: z.uuid(), unitPrice: unitPrice.nullable() })).max(500).refine(oncePerLine, 'A line can be priced once per change').optional(),
+  lineDiscounts: z.array(z.object({ lineId: z.uuid(), discountPercent })).max(500).refine(oncePerLine, 'A line can be discounted once per change').optional(),
   lineDeliveryDates: z.array(z.object({ lineId: z.uuid(), deliveryDate: day.nullable() })).max(500).optional(),
   ...orderDetails,
 });

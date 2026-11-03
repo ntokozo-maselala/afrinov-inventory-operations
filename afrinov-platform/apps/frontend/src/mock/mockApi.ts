@@ -336,7 +336,7 @@ function mockApproval(po: MockPurchaseOrder) {
 }
 
 // Order money as the server works it out (po-pricing.ts).
-function withPoTotals<T extends { vatRate?: string; currency?: string; lines: Array<{ orderedQty: string; unitPrice?: string | null }> }>(po: T) {
+function withPoTotals<T extends { vatRate?: string; currency?: string; lines: Array<{ orderedQty: string; unitPrice?: string | null; discountPercent?: string }> }>(po: T) {
   const rate = Number(po.vatRate ?? 15);
   const { lines, totals } = priceLines(po.lines, rate);
   return { ...po, currency: po.currency ?? 'ZAR', vatRate: String(rate), lines, totals };
@@ -1226,7 +1226,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     });
   }
   if (method === 'POST' && p === '/purchase-orders') {
-    const b = body as PoDetailsBody & { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number; deliveryDate?: string }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
+    const b = body as PoDetailsBody & { supplierId?: string; lines?: Array<{ materialId: string; orderedQty: number; unitPrice?: number; discountPercent?: number; deliveryDate?: string }>; notes?: string; expectedDeliveryDate?: string; vatRate?: number };
+    // As the server: a discount is 0–100%.
+    if ((b.lines ?? []).some((l) => l.discountPercent !== undefined && !(l.discountPercent >= 0 && l.discountPercent <= 100))) throw err('VALIDATION_ERROR', 'Invalid purchase order payload');
     if (!b.supplierId || !b.lines || b.lines.length === 0) throw err('VALIDATION_ERROR', 'Supplier and at least one line required');
     const supplier = findSupplier(b.supplierId);
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
@@ -1266,6 +1268,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       lines: b.lines.map((l) => ({
         id: nextId('pol'), materialId: l.materialId, orderedQty: String(l.orderedQty), receivedQty: '0',
         unitPrice: l.unitPrice === undefined ? null : String(l.unitPrice),
+        discountPercent: String(l.discountPercent ?? 0),
         deliveryDate: l.deliveryDate ?? null,
       })),
     };
@@ -1401,14 +1404,22 @@ function route(method: string, path: string, body?: unknown): unknown {
     const b = (body as PoDetailsBody & {
       notes?: string | null; expectedDeliveryDate?: string | null; vatRate?: number;
       linePrices?: Array<{ lineId: string; unitPrice: number | null }>;
+      lineDiscounts?: Array<{ lineId: string; discountPercent: number }>;
       lineDeliveryDates?: Array<{ lineId: string; deliveryDate: string | null }>;
     }) ?? {};
+    for (const ld of b.lineDiscounts ?? []) {
+      if (!po.lines.some((l) => l.id === ld.lineId)) throw err('VALIDATION_ERROR', `Line ${ld.lineId} is not on purchase order ${po.number}`);
+      if (!(ld.discountPercent >= 0 && ld.discountPercent <= 100)) throw err('VALIDATION_ERROR', 'Invalid purchase order payload');
+    }
     for (const lp of b.linePrices ?? []) {
       if (!po.lines.some((l) => l.id === lp.lineId)) throw err('VALIDATION_ERROR', `Line ${lp.lineId} is not on purchase order ${po.number}`);
     }
     // To tell whether anything changed: an approved order changed gets a new revision.
     const snapshot = (x: MockPurchaseOrder) => JSON.stringify({ ...x, history: undefined, notes: x.notes || undefined });
     const before = snapshot(po);
+    // And whether its money did, by value: a price, discount or VAT rate sent unchanged is no change.
+    const money = (x: MockPurchaseOrder) => JSON.stringify([Number(x.vatRate ?? 15), x.lines.map((l) => [l.unitPrice == null ? null : Number(l.unitPrice), Number(l.discountPercent ?? 0)])]);
+    const moneyBefore = money(po);
     const nextProject = b.projectNumber === undefined ? undefined : (b.projectNumber?.trim() || null);
     if (nextProject !== undefined && nextProject !== (po.projectNumber ?? null)) {
       // As the server: neither kind of order becomes the other.
@@ -1426,13 +1437,26 @@ function route(method: string, path: string, body?: unknown): unknown {
       const line = po.lines.find((l) => l.id === lp.lineId)!;
       line.unitPrice = lp.unitPrice === null ? null : String(lp.unitPrice);
     }
+    for (const ld of b.lineDiscounts ?? []) po.lines.find((l) => l.id === ld.lineId)!.discountPercent = String(ld.discountPercent);
     for (const ld of b.lineDeliveryDates ?? []) {
       const line = po.lines.find((l) => l.id === ld.lineId);
       if (!line) throw err('VALIDATION_ERROR', `Line ${ld.lineId} is not on purchase order ${po.number}`);
       line.deliveryDate = ld.deliveryDate;
     }
     Object.assign(po, poDetails(b));
-    if (po.status === 'APPROVED' && snapshot(po) !== before) po.revision = (po.revision ?? 0) + 1;
+    if (po.status === 'APPROVED' && snapshot(po) !== before) {
+      po.revision = (po.revision ?? 0) + 1;
+      // As the server: a new price, discount or VAT rate that takes the order past
+      // its approver's limit (or leaves a line unpriced) sends it back for approval,
+      // without the approved small print. The mock's approver is the signed-in user;
+      // an order with no approver on record (as seeded) is left as it is.
+      if (po.approvedBy && money(po) !== moneyBefore) {
+        const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
+        const limit = mockUsers.find((u) => u.id === 'user-1')?.approvalLimit ?? null;
+        const within = limit == null || ((po.currency ?? 'ZAR') === 'ZAR' && Number(totals.net) <= Number(limit));
+        if (totals.unpricedLines > 0 || !within) Object.assign(po, { status: 'PENDING_APPROVAL', approvedAt: null, approvedBy: null, printedTerms: null });
+      }
+    }
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before: null, after: b as Record<string, unknown>, createdAt: new Date().toISOString() });
     return po;
