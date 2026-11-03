@@ -237,7 +237,8 @@ export const OPERATIONS: Operation[] = [
       + 'back on the shelf are listed too, type USED_UP or BROKEN, and every withdrawal of a mark, type OUTCOME_WITHDRAWN: '
       + 'quantity null, usedUpQuantity or brokenQuantity how many, reasonNote the note or why it was withdrawn, returnOf and '
       + 'referenceId the issue (ADR-026). One cursor pages them all. An ISSUE carries returnedQuantity, usedUpQuantity and '
-      + 'brokenQuantity so far; a RETURN carries the usedUpQuantity and brokenQuantity marked in the same counter visit; '
+      + 'brokenQuantity so far; a RETURN carries the usedUpQuantity and brokenQuantity marked in the same counter visit, as booked, '
+      + 'and bookedMarksLive, whether any of those still counts (the return is reversed only once they are withdrawn); '
       + 'trackUse says whether the item asks for used up or broken.',
     query: movementQuery,
   },

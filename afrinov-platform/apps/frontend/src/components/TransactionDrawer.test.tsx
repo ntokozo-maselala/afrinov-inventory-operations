@@ -211,14 +211,16 @@ describe('TransactionDrawer', () => {
   });
 
   // Qodo, PR #144: undoing the return would leave its used up and broken counting.
-  it('does not offer to reverse a return booked with used up or broken until those are withdrawn', () => {
-    const ret = { ...issue, type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0' };
+  it('does not offer to reverse a return booked with used up or broken until those are withdrawn, then does', () => {
+    const ret = { ...issue, type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0', bookedMarksLive: true };
     const { unmount } = render(<TransactionDrawer transaction={ret} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
     expect(screen.getByText(/Used up or broken was booked with this return/)).toBeInTheDocument();
     unmount();
-    render(<TransactionDrawer transaction={{ ...ret, usedUpQuantity: '0' }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    // Withdrawn: the booked quantity stays on the row, and the reversal is offered.
+    render(<TransactionDrawer transaction={{ ...ret, bookedMarksLive: false }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Reverse this movement' })).toBeInTheDocument();
+    expect(screen.queryByText(/Used up or broken was booked with this return/)).not.toBeInTheDocument();
   });
 
   describe('returning stock', () => {

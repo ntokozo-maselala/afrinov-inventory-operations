@@ -151,6 +151,8 @@ export interface MovementRow {
   trackUse?: boolean;
   /** A return: the issue it came back from (when, which slip, from where). */
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
+  /** A RETURN: whether used up or broken booked with it still counts; it is reversed only once they are withdrawn. */
+  bookedMarksLive?: boolean | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
   /** A receipt against a purchase order: it cannot be reversed from the movement, only on the order. */
   fromPurchaseOrder?: boolean;

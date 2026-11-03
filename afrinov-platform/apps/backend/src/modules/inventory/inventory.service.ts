@@ -524,6 +524,7 @@ function dueDateChangeRow(
     trackUse: c.loan.material.trackUse,
     usedUpQuantity: null as string | null,
     brokenQuantity: null as string | null,
+    bookedMarksLive: null as boolean | null,
     otherLocationName: null,
     returnOf: null as { id: string; postedAt: string; issueId: string | null; locationName: string } | null,
     receiptNumber: null,
@@ -577,6 +578,7 @@ function outcomeEventRow(
     trackUse: o.issue.material.trackUse,
     usedUpQuantity: o.outcome === 'USED_UP' ? quantity : null,
     brokenQuantity: o.outcome === 'BROKEN' ? quantity : null,
+    bookedMarksLive: null as boolean | null,
     otherLocationName: null,
     returnOf: { id: o.issue.id, postedAt: o.issue.postedAt.toISOString(), issueId: o.issue.issueId, locationName: o.issue.location.name },
     receiptNumber: null,
@@ -693,6 +695,13 @@ export const InventoryService = {
       where: { returnTransactionId: { in: returnIds }, withdrawsId: null },
       _sum: { quantity: true },
     });
+    // Whether any of them still counts: then the return is reversed only once they are withdrawn.
+    const liveBookedRows = returnIds.length === 0 ? [] : await prisma.consumableOutcome.groupBy({
+      by: ['returnTransactionId'],
+      where: { returnTransactionId: { in: returnIds }, ...LIVE_OUTCOME },
+      _count: { _all: true },
+    });
+    const liveBooked = new Set(liveBookedRows.map((b) => b.returnTransactionId));
     const bookedWith = (returnId: string, outcome: 'USED_UP' | 'BROKEN') =>
       (bookedRows.find((b) => b.returnTransactionId === returnId && b.outcome === outcome)?._sum.quantity ?? toDecimal(0)).toString();
     // A transfer's other leg: where the stock went to (or came from).
@@ -739,6 +748,9 @@ export const InventoryService = {
         : t.type === InventoryTransactionType.RETURN ? bookedWith(t.id, 'USED_UP') : null,
       brokenQuantity: t.type === InventoryTransactionType.ISSUE ? (closedByIssue.get(t.id)?.broken.toString() ?? '0')
         : t.type === InventoryTransactionType.RETURN ? bookedWith(t.id, 'BROKEN') : null,
+      // Returns: whether a mark booked with it still counts (not withdrawn). The
+      // quantities above stay as booked, for the record (Qodo, PR #144).
+      bookedMarksLive: t.type === InventoryTransactionType.RETURN ? liveBooked.has(t.id) : null,
       otherLocationName: t.pairedWithId ? partnerLocation.get(t.pairedWithId) ?? null : null,
       returnOf: ((): { id: string; postedAt: string; issueId: string | null; locationName: string } | null => {
         const i = t.type === InventoryTransactionType.RETURN && t.referenceId ? issueById.get(t.referenceId) : undefined;

@@ -837,6 +837,16 @@ describe('mock API: a location inside another', () => {
     expect(booked.outcomeIds).toHaveLength(2);
     const after = await api.get<{ returned: string; usedUp: string; broken: string; stillOut: string }>(`/inventory-transactions/${disc}/outcomes`);
     expect(after).toMatchObject({ returned: '2', usedUp: '6', broken: '1', stillOut: '1' });
+
+    // The return is reversed only once the marks booked with it are withdrawn (Qodo, PR #144).
+    const returnId = booked.transactionIds[0]!;
+    const returnRow = async () => (await api.get<Array<{ id: string; usedUpQuantity: string; bookedMarksLive: boolean }>>('/inventory-transactions?materialId=mat-5&type=RETURN'))
+      .find((r) => r.id === returnId)!;
+    expect(await returnRow()).toMatchObject({ usedUpQuantity: '6', bookedMarksLive: true });
+    await expect(api.post(`/inventory-transactions/${returnId}/reversal`, { reason: 'Wrong worker' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    for (const id of booked.outcomeIds) await api.post(`/consumable-outcomes/${id}/withdrawal`, { reason: 'Wrong worker' });
+    expect(await returnRow()).toMatchObject({ usedUpQuantity: '6', bookedMarksLive: false });
+    await api.post(`/inventory-transactions/${returnId}/reversal`, { reason: 'Wrong worker' });
   });
 
   it('marks a tracked consumable used up or broken, sharing what is still out with returns, as the server', async () => {

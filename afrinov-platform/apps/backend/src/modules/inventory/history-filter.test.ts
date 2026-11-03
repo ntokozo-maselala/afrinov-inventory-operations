@@ -257,13 +257,16 @@ describe('used up and broken among the movements', () => {
     outcomeGroupBy.mockResolvedValueOnce([
       { returnTransactionId: 'ret-1', outcome: 'USED_UP', _sum: { quantity: qty('2') } },
       { returnTransactionId: 'ret-1', outcome: 'BROKEN', _sum: { quantity: qty('1') } },
-    ]);
+    ]).mockResolvedValueOnce([{ returnTransactionId: 'ret-1', _count: { _all: 1 } }]);
 
     const rows = await InventoryService.queryHistory({ limit: 10 });
     expect(outcomeGroupBy.mock.calls[0]![0].where).toEqual({ returnTransactionId: { in: ['ret-1'] }, withdrawsId: null });
     expect(rows.map((r) => r.type)).toEqual(['OUTCOME_WITHDRAWN', 'USED_UP', 'RETURN']);
     expect(rows[0]).toMatchObject({ quantity: null, brokenQuantity: '1', usedUpQuantity: null, reasonNote: 'Belonged to Sabelo', recipientName: 'Khodani', referenceId: 'iss-1' });
     expect(rows[1]).toMatchObject({ quantity: null, usedUpQuantity: '3', cursor: '2026-11-03T10:15:00.000Z_o-9', returnOf: { id: 'iss-1', issueId: 'slip-1', locationName: 'Main' } });
-    expect(rows[2]).toMatchObject({ quantity: '2', usedUpQuantity: '2', brokenQuantity: '1', recipientName: 'Khodani' });
+    expect(rows[2]).toMatchObject({ quantity: '2', usedUpQuantity: '2', brokenQuantity: '1', recipientName: 'Khodani', bookedMarksLive: true });
+    // Asked over live marks only, so withdrawn ones do not hold the return back.
+    expect(outcomeGroupBy.mock.calls[1]![0].where).toEqual({ returnTransactionId: { in: ['ret-1'] }, withdrawsId: null, withdrawnBy: { is: null } });
+    expect(rows[0]!.bookedMarksLive).toBeNull();
   });
 });

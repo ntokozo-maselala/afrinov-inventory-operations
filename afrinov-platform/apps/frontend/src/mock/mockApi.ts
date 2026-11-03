@@ -3488,7 +3488,8 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
       if (t.type === 'RETURN') {
         const booked = state.consumableOutcomes.filter((o) => o.returnTransactionId === t.id && !o.withdrawsId);
         const sum = (kind: string) => String(booked.filter((o) => o.outcome === kind).reduce((a, o) => a + o.quantity, 0));
-        return { usedUpQuantity: sum('USED_UP'), brokenQuantity: sum('BROKEN'), trackUse: !!m?.trackUse };
+        const bookedMarksLive = booked.some((o) => !state.consumableOutcomes.some((w) => w.withdrawsId === o.id));
+        return { usedUpQuantity: sum('USED_UP'), brokenQuantity: sum('BROKEN'), trackUse: !!m?.trackUse, bookedMarksLive };
       }
       const c = t.type === 'ISSUE' ? closedOffOf(state.consumableOutcomes, t.id) : null;
       return { usedUpQuantity: c ? String(c.usedUp) : null, brokenQuantity: c ? String(c.broken) : null, trackUse: !!m?.trackUse };

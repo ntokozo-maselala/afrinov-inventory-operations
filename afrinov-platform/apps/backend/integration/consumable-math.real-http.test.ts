@@ -177,6 +177,8 @@ describe('the numbers agree after every operation on issued stock', () => {
     const undo = await api<{ error: { message: string } }>('POST', `/inventory-transactions/${visit1.body.transactionIds[0]}/reversal`, { reason: 'Wrong worker' }, key());
     expect(undo.status).toBe(409);
     expect(undo.body.error.message).toBe('Used up or broken was booked with this return. Withdraw those first.');
+    const beforeWithdrawal = (await api<Array<{ id: string; bookedMarksLive: boolean | null }>>('GET', `/inventory-transactions?materialId=${discId}&type=RETURN&limit=100`)).body;
+    expect(beforeWithdrawal.find((r) => r.id === visit1.body.transactionIds[0])?.bookedMarksLive).toBe(true);
     f = await reconcile('return with marks not reversed');
     expect(f.get(disc)).toMatchObject({ returned: '2', usedUp: '3', broken: '1', stillOut: '4' });
     expect(await onHand(discId, rackA)).toBe(12);
@@ -231,6 +233,9 @@ describe('the numbers agree after every operation on issued stock', () => {
       expect((await api('POST', `/consumable-outcomes/${o.id}/withdrawal`, { reason: 'Issued to the wrong worker' }, key())).status).toBe(201);
     }
     f = await reconcile('marks withdrawn');
+    // The return row keeps what was booked, and says nothing of it still counts (Qodo, PR #144).
+    const afterWithdrawal = (await api<Array<{ id: string; usedUpQuantity: string | null; bookedMarksLive: boolean | null }>>('GET', `/inventory-transactions?materialId=${discId}&type=RETURN&limit=100`)).body;
+    expect(afterWithdrawal.find((r) => r.id === visit1.body.transactionIds[0])).toMatchObject({ usedUpQuantity: '3', bookedMarksLive: false });
     expect(f.get(disc)).toMatchObject({ usedUp: '0', broken: '0', stillOut: '8' });
     expect((await api('POST', `/inventory-transactions/${visit1.body.transactionIds[0]}/reversal`, { reason: 'Issued to the wrong worker' }, key())).status).toBe(201);
     f = await reconcile('return reversed');

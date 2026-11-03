@@ -90,8 +90,10 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !transaction.reversesId
     && !transaction.reversedById
     && round4(issued - returned - usedUp - broken) > 0;
-  // A return booked with used up or broken in the same visit: those are withdrawn first (Qodo, PR #144).
-  const returnWithMarks = transaction.type === 'RETURN' && !transaction.reversesId && usedUp + broken > 0;
+  // A return booked with used up or broken that still counts: those are withdrawn
+  // first. Once they are, the booked quantities stay for the record but no
+  // longer hold the reversal back (Qodo, PR #144).
+  const returnWithMarks = transaction.type === 'RETURN' && !transaction.reversesId && !!transaction.bookedMarksLive;
   const canReverse = hasPermission('inventory:reverse')
     && !hasReturns
     && !hasOutcomes
