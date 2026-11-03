@@ -11,9 +11,14 @@
 // files from disk and greps for the expected DDL. The actual migration
 // runner (`prisma migrate deploy`) is exercised by the integration
 // pipeline against a real Postgres.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+// The settings catalog is read, never the database.
+vi.mock('../shared/db.js', () => ({ prisma: {} }));
+const { SETTING_CATALOG } = await import('../modules/settings/settings.service.js');
+
 
 const MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'migrations');
 
@@ -194,5 +199,46 @@ describe('stock held for a project (project material through the store roadmap, 
     expect(sql).not.toMatch(/^\s*UPDATE\b/im);
     // A project with stock held for it can't be deleted or renumbered under its balances.
     expect(sql).toContain('REFERENCES "projects"("project_number") ON DELETE RESTRICT ON UPDATE RESTRICT');
+  });
+});
+
+// A new setting needs its row on databases that already exist: the seed adds
+// rows only where it runs, and Settings can neither show nor save a setting
+// without one (Project Material Through the Store Roadmap, Phase 4).
+describe('settings rows', () => {
+  // The settings in the initial commit's catalog, which the first seed created
+  // before each new one came with a migration.
+  const SEEDED_FIRST = new Set([
+    'general.companyName', 'general.systemDescription', 'general.defaultCurrency', 'general.dateFormat', 'general.timeFormat',
+    'general.defaultPageSize', 'general.defaultLandingPage',
+    'inventory.defaultUnitOfMeasure', 'inventory.enableStockAlerts', 'purchaseOrders.requireApprovalBeforeProcessing',
+    'purchaseOrders.allowCancellation', 'purchaseOrders.allowEditAfterApproval', 'notifications.enableInAppNotifications',
+    'notifications.enableLowStockNotifications', 'notifications.enablePurchaseOrderNotifications',
+    'appearance.theme', 'appearance.density', 'security.sessionTimeoutMinutes',
+  ]);
+
+  /**
+   * The keys of the rows an INSERT INTO "settings" adds. Only an insert gives
+   * a setting its row: an UPDATE naming a key changes a row that must already
+   * be there (Qodo, PR #147).
+   */
+  function insertedSettingKeys(sql: string): Set<string> {
+    const keys = new Set<string>();
+    for (const insert of sql.matchAll(/INSERT INTO "settings"[\s\S]*?;/g)) {
+      for (const row of insert[0].matchAll(/\(\s*'([A-Za-z0-9.]+)'/g)) keys.add(row[1]!);
+    }
+    return keys;
+  }
+
+  it('reads only inserted rows, not a key an UPDATE names', () => {
+    expect([...insertedSettingKeys(`UPDATE "settings" SET "description" = 'x' WHERE "key" = 'a.updated';`)]).toEqual([]);
+    expect([...insertedSettingKeys(`INSERT INTO "settings" ("key", "value") VALUES\n  ('a.one', '1'),\n  ('a.two', '2')\nON CONFLICT ("key") DO NOTHING;`)])
+      .toEqual(['a.one', 'a.two']);
+  });
+
+  it('inserts every setting added since the first seed in a migration', () => {
+    const inserted = insertedSettingKeys(listMigrations().map(readMigration).join('\n'));
+    const missing = SETTING_CATALOG.map((d) => d.key).filter((k) => !SEEDED_FIRST.has(k) && !inserted.has(k));
+    expect(missing).toEqual([]);
   });
 });
