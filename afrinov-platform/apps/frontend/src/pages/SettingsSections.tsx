@@ -84,6 +84,29 @@ export function SettingsGeneral() {
 }
 
 // ── Inventory ──────────────────────────────────────────────────────────
+
+/**
+ * A setting that names a location: the active locations to choose from, or
+ * none. Where project deliveries are booked (Project Material Through the Store
+ * Roadmap, Phase 4). A location no longer active still shows, so it can be changed.
+ */
+function LocationSettingField({ def, value, onChange, error }: { def: SettingValue; value: string; onChange: (v: string) => void; error?: string | null }) {
+  const locations = useApi<Array<{ id: string; name: string; active: boolean }>>('/locations');
+  const options = (locations.data ?? []).filter((l) => l.active || l.id === value).sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <div className="p-3 rounded border border-surface-200 bg-surface-0">
+      <label htmlFor={def.key} className="block text-sm font-medium text-surface-900">Project receiving location</label>
+      <div className="text-xs text-surface-500 mt-0.5 mb-2">{def.description}</div>
+      <Select id={def.key} value={value} onChange={(e) => onChange(e.target.value)} disabled={locations.loading} invalid={!!error}>
+        <option value="">Choose on each delivery</option>
+        {options.map((l) => <option key={l.id} value={l.id}>{l.name}{l.active ? '' : ' (inactive)'}</option>)}
+      </Select>
+      {locations.error && <p className="field-error mt-1">The locations could not be loaded.</p>}
+      {error && <p role="alert" className="field-error mt-1">{error}</p>}
+    </div>
+  );
+}
+
 export function SettingsInventory() {
   const { draft, setDraft, errors, save, saving } = useSettings();
   const toast = useToast();
@@ -96,6 +119,7 @@ export function SettingsInventory() {
   const toolMaxLoanDays = useSetting('inventory.toolMaxLoanDays');
   const toolEscalateDays = useSetting('inventory.toolEscalateDays');
   const toolOverdueCheckout = useSetting('inventory.toolOverdueCheckout');
+  const projectReceiving = useSetting('inventory.projectReceivingLocationId');
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
@@ -149,6 +173,12 @@ export function SettingsInventory() {
         value={(draft['inventory.defaultUnitOfMeasure'] as string) ?? ''}
         onChange={(v) => setDraft('inventory.defaultUnitOfMeasure', v)}
         error={errors['inventory.defaultUnitOfMeasure'] ?? null}
+      />
+      <LocationSettingField
+        def={projectReceiving}
+        value={(draft['inventory.projectReceivingLocationId'] as string) ?? ''}
+        onChange={(v) => setDraft('inventory.projectReceivingLocationId', v)}
+        error={errors['inventory.projectReceivingLocationId'] ?? null}
       />
       <BooleanField def={enableStockAlerts} value={Boolean(draft['inventory.enableStockAlerts'])} onChange={(v) => setDraft('inventory.enableStockAlerts', v)} />
       <SaveBar items={items} onSave={async () => {

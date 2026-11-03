@@ -214,6 +214,16 @@ describe('SettingsService', () => {
     await expect(SettingsService.set('general.companyName', '', 'u-1')).rejects.toThrow(/at least/i);
   });
 
+  // Project Material Through the Store Roadmap, Phase 4: where project deliveries are booked.
+  it('takes a location id or blank for the project receiving location, nothing else', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    expect(await SettingsService.getValue('inventory.projectReceivingLocationId')).toBe('');
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', 'Workshop floor', 'u-1')).rejects.toThrow(/Choose a location/);
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', '11111111-2222-4333-8444-555555555555', 'u-1')).resolves.toBeDefined();
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', '', 'u-1')).resolves.toBeDefined();
+  });
+
   it('rejects non-numeric defaultPageSize', async () => {
     const { SettingsService } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();

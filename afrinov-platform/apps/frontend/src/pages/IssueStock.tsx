@@ -1,7 +1,7 @@
 // Issue stock at the store counter: one recipient, an optional project, and
 // any number of items, booked all-or-nothing (POST /inventory-issues).
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -22,6 +22,7 @@ import { needsProject, sectionOf } from '../lib/categories';
 import { isStoresStock, balanceKey } from '../lib/heldFor';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { issuePrefillOf } from '../lib/issuePrefill';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -109,6 +110,24 @@ export function IssueStock() {
     setPreset(null);
     const best = available.filter((r) => r.materialId === preset).sort((a, b) => Number(b.quantity) - Number(a.quantity))[0];
     if (best) setLines([{ ...emptyLine(), stockKey: stockKey(best) }]);
+  }
+
+  // Issue it now, from Receive stock: a project delivery just booked starts as
+  // this issue, its project set and each line what arrived (no more than is
+  // still held). Once stock and the projects have loaded, as the offer depends
+  // on both (Project Material Through the Store Roadmap, Phase 4).
+  const routeState = useLocation().state;
+  const [prefill, setPrefill] = useState(() => issuePrefillOf(routeState));
+  if (prefill && stock.data && !loading) {
+    setPrefill(null);
+    const filled = prefill.lines.flatMap((l) => {
+      const row = byKey.get(stockKey({ materialId: l.materialId, locationId: l.locationId, heldForProject: prefill.projectNumber }));
+      return row ? [{ ...emptyLine(), stockKey: stockKey(row), quantity: String(Math.min(l.quantity, Number(row.quantity))) }] : [];
+    });
+    if (filled.length > 0) {
+      setProjectNumber(prefill.projectNumber);
+      setLines(filled);
+    }
   }
 
   // Requested per item and location, across lines, to warn before submitting.

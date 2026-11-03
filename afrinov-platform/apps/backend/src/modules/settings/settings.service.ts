@@ -151,6 +151,11 @@ const ENUM = <T extends string>(opts: readonly T[]) => (v: unknown) => {
   return opts.includes(v as T) ? null : 'Selected value is not supported.';
 };
 
+const UUID_OR_BLANK = (v: unknown) => {
+  if (typeof v !== 'string') return 'Must be text.';
+  return v === '' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? null : 'Choose a location.';
+};
+
 const CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP'] as const;
 const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'] as const;
 const TIME_FORMATS = ['24h', '12h'] as const;
@@ -180,6 +185,8 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.toolMaxLoanDays', type: 'number', category: 'inventory', description: 'The longest a tool may be lent for, in days from check-out, extensions included. Only an administrator can set a later due date.', default: 30, validate: POS_INT(1, 365) },
   { key: 'inventory.toolEscalateDays', type: 'number', category: 'inventory', description: 'A tool this many days past its due date needs a decision: check it in, extend the loan or write it off as lost. Flagged on the Tools page and the Dashboard.', default: 14, validate: POS_INT(1, 365) },
   { key: 'inventory.toolOverdueCheckout', type: 'enum', category: 'inventory', description: 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', default: 'warn', enumOptions: TOOL_OVERDUE_CHECKOUT, validate: ENUM(TOOL_OVERDUE_CHECKOUT) },
+  // Project material isn't shelved: it is received and issued straight to the workshop (Project Material Through the Store Roadmap, Phase 4).
+  { key: 'inventory.projectReceivingLocationId', type: 'string', category: 'inventory', description: 'Where project deliveries are booked on Receive stock, such as the workshop floor: project material is not shelved, it is issued from there. Leave blank to choose a location on each delivery.', default: '', validate: UUID_OR_BLANK },
   { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.', default: true },
 
   // ── Purchase Orders ─────────────────────────────────────────────────────

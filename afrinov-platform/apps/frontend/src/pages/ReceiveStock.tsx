@@ -42,6 +42,7 @@ import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
 import { todayInSouthAfrica } from '../lib/rfq';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { PROJECT_RECEIVING_LOCATION, type IssuePrefill } from '../lib/issuePrefill';
 
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
@@ -51,7 +52,11 @@ interface OpenOrder extends OrderForReceipt {
   supplier?: { name: string } | null; project?: { name: string | null } | null;
 }
 /** The delivery just booked against an order, for the confirmation above the form. */
-interface Booked { receipt: string; order: { id: string; number: string; projectNumber: string | null }; status: string | null }
+interface Booked {
+  receipt: string; order: { id: string; number: string; projectNumber: string | null }; status: string | null;
+  /** A project delivery, for Issue it now: project material goes to the workshop as it arrives. */
+  issue?: IssuePrefill;
+}
 
 interface Line { key: number; materialId: string; locationId: string; quantity: string }
 
@@ -106,6 +111,9 @@ function ReceiveAgainstOrder() {
   const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
   // Every order this user receives: the store's own, and projects' (a receiving view, no prices).
   const orders = useApi<OpenOrder[]>('/purchase-orders/receivable');
+  // Where project deliveries are booked, such as the workshop floor: project
+  // material isn't shelved (Project Material Through the Store Roadmap, Phase 4).
+  const settings = useApi<Record<string, unknown>>(`/settings/values?keys=${PROJECT_RECEIVING_LOCATION}`);
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
   const [params] = useSearchParams();
@@ -144,13 +152,24 @@ function ReceiveAgainstOrder() {
     return home && activeLocations.some((l) => l.id === home) ? home : '';
   }
 
-  /** Chooses the order the delivery is against, filling in its outstanding lines, each going where that item is kept. */
+  // The project receiving location, while it is still in use.
+  const projectHome = (() => {
+    const id = settings.data?.[PROJECT_RECEIVING_LOCATION];
+    return typeof id === 'string' && activeLocations.some((l) => l.id === id) ? id : '';
+  })();
+
+  /**
+   * Chooses the order the delivery is against, filling in its outstanding
+   * lines: a project order's into the project receiving location when one is
+   * set, any other line where that item is kept.
+   */
   function chooseOrder(id: string, order = openOrders.find((o) => o.id === id)) {
     setOrderId(id);
     setCloseShort(false);
     setCloseReason('');
     setError(null);
-    setOrderLines(order ? receiptLinesFromOrder(order).map((l) => ({ ...l, locationId: homeOf(l.materialId) })) : []);
+    const into = (materialId: string) => (order?.projectNumber && projectHome) || homeOf(materialId);
+    setOrderLines(order ? receiptLinesFromOrder(order).map((l) => ({ ...l, locationId: into(l.materialId) })) : []);
   }
 
   // The order's page and Order stock link here with ?order=: once the orders,
@@ -159,7 +178,7 @@ function ReceiveAgainstOrder() {
   // order has nothing left to receive. An item's link chooses the order when
   // only one is owed that item.
   const [orderPreset, setOrderPreset] = useState(() => params.get('order') ?? (itemId ? ITEM_LINK : null));
-  if (orderPreset && orders.data && locations.data && (stock.data || stock.error)) {
+  if (orderPreset && orders.data && locations.data && (stock.data || stock.error) && (settings.data || settings.error)) {
     setOrderPreset(null);
     if (orderPreset === ITEM_LINK) {
       if (listed.length === 1) chooseOrder(listed[0]!.id, listed[0]);
@@ -206,7 +225,11 @@ function ReceiveAgainstOrder() {
     // A project order is Procurement's: the store receives it, but neither
     // opens nor closes it, so there is nothing more to read.
     if (order.projectNumber) {
-      setBooked({ receipt: receipt.number, order: { id: order.id, number: order.number, projectNumber: order.projectNumber }, status });
+      const issue: IssuePrefill = {
+        projectNumber: order.projectNumber,
+        lines: checked.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity) })),
+      };
+      setBooked({ receipt: receipt.number, order: { id: order.id, number: order.number, projectNumber: order.projectNumber }, status, issue });
       setBusy(false);
       return;
     }
@@ -277,6 +300,9 @@ function ReceiveAgainstOrder() {
             <div className="flex flex-wrap gap-2">
               {booked.status === 'RECEIVED' && (
                 <Button size="sm" variant="primary" onClick={() => void closeBookedOrder()} loading={closing}>Close {booked.order.number}</Button>
+              )}
+              {booked.issue && (
+                <Link to="/stock/issue" state={{ issuePrefill: booked.issue }} className="btn-primary btn-sm">Issue it now</Link>
               )}
               {!booked.order.projectNumber && <Link to={orderPath(booked.order)} className="btn-secondary btn-sm">Open {booked.order.number}</Link>}
               <Button size="sm" variant="ghost" onClick={() => setBooked(null)}>Dismiss</Button>
