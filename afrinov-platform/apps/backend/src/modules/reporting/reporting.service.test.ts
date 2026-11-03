@@ -39,6 +39,7 @@ const db = {
     order: { id: string; number: string; status: string; projectNumber: string | null; expectedDeliveryDate: Date | null };
   }>,
   settings: new Map<string, { value: unknown }>(),
+  projects: [] as Array<{ projectNumber: string; name: string | null; status: string }>,
 };
 
 const DEC = (n: number) => new Prisma.Decimal(n);
@@ -55,6 +56,9 @@ vi.mock('../../shared/db.js', () => ({
 
 function makePrisma(): unknown {
   return {
+    project: {
+      findMany: async ({ where }: { where: { projectNumber: { in: string[] } } }) => db.projects.filter((p) => where.projectNumber.in.includes(p.projectNumber)),
+    },
     inventoryBalance: {
       findMany: async ({ where, include }: { where?: { locationId?: string; materialId?: string | { in: string[] } }; include?: unknown } = {}) => {
         let list = db.balances.map((b) => ({ heldForProject: '', ...b }));
@@ -423,6 +427,35 @@ describe('ReportingService', () => {
         { projectNumber: null, name: null, status: null, items: 1, itemsInStock: 0, value: 0, unpriced: 0 },
       ]);
       // Projects material is never urgent or "out of stock": the three Stores items only.
+      expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
+    });
+
+    // Project Material Through the Store Roadmap, Phase 2: stock received for a
+    // project is that project's; its value counts under it (Qodo, PR #143).
+    it('counts the value of stock held for a project under that project, and no status for it', async () => {
+      seedMaterials();
+      db.materials.push({ id: 'p-1', sku: '1369-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', requiredStock: DEC(0), unitCost: DEC(100), active: true, projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
+      db.projects = [{ projectNumber: '1402', name: 'Door rails', status: 'ACTIVE' }];
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(4), updatedAt: new Date() },                            // Stores: 4 × 5 = 20
+        { materialId: 'm-2', locationId: 'l-1', quantity: DEC(3), updatedAt: new Date(), heldForProject: '1402' },   // a Stores item bought for 1402: 30
+        { materialId: 'p-1', locationId: 'l-1', quantity: DEC(1), updatedAt: new Date() },                            // leftover of 1369: 100
+        { materialId: 'p-1', locationId: 'l-1', quantity: DEC(2), updatedAt: new Date(), heldForProject: '1369' },   // 200
+        { materialId: 'p-1', locationId: 'l-2', quantity: DEC(4), updatedAt: new Date(), heldForProject: '1402' },   // 400
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const v = await ReportingService.stockValue();
+      // Every item in the store is in the total, held stock included, as the Inventory report counts it.
+      expect(v.total).toEqual({ items: 4, itemsInStock: 3, value: 750, unpriced: 0 });
+      expect(v.sections).toEqual({
+        STORES: { items: 3, itemsInStock: 2, value: 50, unpriced: 0 },
+        PROJECTS: { items: 1, itemsInStock: 1, value: 700, unpriced: 0 },
+      });
+      expect(v.projects).toEqual([
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0 },
+        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0 },
+      ]);
+      // The cable's 3 are held for 1402, not the store's: still urgent and out of stock.
       expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });
     });
 

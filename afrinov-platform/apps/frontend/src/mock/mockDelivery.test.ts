@@ -79,4 +79,17 @@ describe('mock: delivery of a project order', () => {
       .toMatch(/has stock in the store held for project AFRI-1325, so it stays project material/);
     expect((await api.get<{ category: string }>('/materials/mat-9')).category).toBe('PROJECT_MATERIAL');
   });
+  // Qodo, PR #143: as the server values it, under the project it is held for.
+  it('counts its value on the Dashboard under the project, with no stock status', async () => {
+    type Value = { total: { value: number }; projects: Array<{ projectNumber: string | null; value: number }>; status: Record<string, number> };
+    const before = await api.get<Value>('/reports/stock-value');
+    const po = await approvedProjectOrder();
+    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    const after = await api.get<Value>('/reports/stock-value');
+    const project = (v: Value) => v.projects.find((p) => p.projectNumber === 'AFRI-1325')?.value ?? 0;
+    const added = after.total.value - before.total.value;
+    expect(added).toBeGreaterThan(0);
+    expect(project(after) - project(before)).toBeCloseTo(added);
+    expect(after.status).toEqual(before.status);
+  });
 });
