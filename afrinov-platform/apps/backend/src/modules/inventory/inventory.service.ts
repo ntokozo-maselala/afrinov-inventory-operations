@@ -536,6 +536,9 @@ export const InventoryService = {
       reasonCode: t.reasonCode,
       reasonNote: t.reasonNote,
       projectNumber: t.projectNumber,
+      // Whose stock moved: the project it is held for, or null for Stores stock.
+      // Not projectNumber, which says who the stock was used for.
+      heldForProject: t.heldForProject,
       referenceType: t.referenceType,
       referenceId: t.referenceId,
       reversesId: t.reversesId,
@@ -881,12 +884,12 @@ export const InventoryService = {
       const alertsOn = await SettingsService.getValue<boolean>('inventory.enableStockAlerts', tx);
       for (const t of totals.values()) await recomputeBalance(t, tx);
       if (alertsOn) {
-        // The item's status from its total across locations, as the stock status report shows it.
+        // The item's status from its Stores total across locations, as the stock status report shows it.
         const bands = await getStatusBands(tx);
         for (const materialId of new Set([...totals.values()].map((t) => t.materialId))) {
           const material = materials.get(materialId);
           if (!material) continue;
-          const all = await tx.inventoryBalance.aggregate({ where: { materialId }, _sum: { quantity: true } });
+          const all = await tx.inventoryBalance.aggregate({ where: { materialId, heldForProject: '' }, _sum: { quantity: true } });
           if (needsAttention(classifyItem(Number(all._sum.quantity ?? 0), Number(material.requiredStock), bands).status)) {
             events.push({ type: 'StockThresholdReached', materialId });
           }

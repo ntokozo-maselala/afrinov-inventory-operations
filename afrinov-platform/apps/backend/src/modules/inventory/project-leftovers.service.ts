@@ -55,11 +55,16 @@ async function findProject(projectNumber: string, db: Prisma.TransactionClient |
   return project;
 }
 
-/** Projects material still in stock for a project, or with no project (null), by SKU. */
+/**
+ * Projects material still in stock for a project, or with no project (null),
+ * by SKU. Leftovers are stock from before the stock carried its project: the
+ * Stores balance (''), whose project is the item's. Stock held for a project
+ * is that project's, not a leftover (Project Material Through the Store Roadmap).
+ */
 async function leftoverItems(projectNumber: string | null): Promise<LeftoverItem[]> {
   const materials = await prisma.material.findMany({
     where: { category: PROJECTS_CATEGORY, projectNumber },
-    include: { inventoryBalances: { where: { quantity: { gt: 0 } }, include: { location: { select: { name: true, active: true } } } } },
+    include: { inventoryBalances: { where: { quantity: { gt: 0 }, heldForProject: '' }, include: { location: { select: { name: true, active: true } } } } },
     orderBy: { sku: 'asc' },
   });
   return materials.flatMap((m) => {
@@ -128,6 +133,17 @@ export const ProjectLeftoversService = {
       });
       if (onRfq) {
         throw Errors.validation(`${onRfq.material.sku} is on ${onRfq.rfq.number}, which is still open, so it stays project material. Move it once that request is cancelled, or the order it is awarded as is finished.`);
+      }
+      // Moving the item would strand stock held for a project under that
+      // project, out of reach of Stores issues (Qodo, PR #142). Moving that
+      // stock itself to Stores comes later (Project Material Through the Store
+      // Roadmap, Phase 5); until then the item stays project material.
+      const held = await tx.inventoryBalance.findFirst({
+        where: { materialId: { in: ids }, heldForProject: { not: '' }, quantity: { not: 0 } },
+        select: { heldForProject: true, material: { select: { sku: true } } },
+      });
+      if (held) {
+        throw Errors.validation(`${held.material.sku} has stock in the store held for project ${held.heldForProject}, so it stays project material until that stock is used or moved.`);
       }
       for (const item of items) {
         const before = await tx.material.findUnique({ where: { id: item.materialId } });
