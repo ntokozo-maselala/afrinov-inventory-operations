@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
-import { createMockApi, resetMockState } from './mockApi';
+import { createMockApi, resetMockState, mockOrderRaisedBy } from './mockApi';
 import { isApiError } from '../api/client';
 import type { ApiError } from '../api/client';
 import type { MockPurchaseOrder, MockSupplier } from './types';
@@ -121,6 +121,7 @@ describe('mock API mutation flows', () => {
       await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'FOB' });
       expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(0);
       await api.post(`/purchase-orders/${po.id}/submit`, {});
+      mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
       await api.post(`/purchase-orders/${po.id}/approve`, {});
       await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'FOB' });
       expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(0);
@@ -133,8 +134,19 @@ describe('mock API mutation flows', () => {
     async function submitted(lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>) {
       const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines });
       await api.post(`/purchase-orders/${po.id}/submit`, {});
+      mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
       return po.id;
     }
+
+    // As the server (Qodo, PR #151): the demo user never approves an order they raised.
+    it('refuses to let the demo user approve an order they raised, and leaves it off their list', async () => {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] });
+      await api.post(`/purchase-orders/${po.id}/submit`, {});
+      expect(await api.get(`/purchase-orders/${po.id}/approval`)).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must approve it.' });
+      const e = await api.post(`/purchase-orders/${po.id}/approve`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError)).toMatchObject({ code: 'FORBIDDEN', message: 'You raised this order, so someone else must approve it.' });
+      expect((await api.get<Array<{ id: string }>>('/purchase-orders?awaitingMyApproval=true')).map((o) => o.id)).not.toContain(po.id);
+    });
 
     it('refuses to approve while a line has no price', async () => {
       const id = await submitted([{ materialId: 'mat-1', orderedQty: 1 }]);
@@ -468,6 +480,7 @@ describe('mock API mutation flows', () => {
     async function approvedPO() {
       const draft = await makeDraftPO();
       await api.post(`/purchase-orders/${draft.id}/submit`, {});
+      mockOrderRaisedBy(draft.id, 'user-2'); // raised by someone else: nobody approves their own
       await api.post(`/purchase-orders/${draft.id}/approve`, {});
       return draft;
     }

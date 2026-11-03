@@ -18,6 +18,8 @@ export interface AuthUser {
   email: string;
   name: string;
   roles: string[];
+  /** What the server grants this user, as it checks it (sign-in and /auth/me); absent from older sessions. */
+  permissions?: string[];
 }
 
 export interface LoginResult {

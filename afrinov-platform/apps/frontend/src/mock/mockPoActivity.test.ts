@@ -1,7 +1,7 @@
 // The mock API keeps an order's Activity as the server does: an entry when it
 // is created, and each entry named after the user it is by.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createMockApi, resetMockState } from './mockApi';
+import { createMockApi, resetMockState, mockOrderRaisedBy } from './mockApi';
 
 const api = createMockApi();
 
@@ -13,6 +13,7 @@ describe('mock: purchase order Activity', () => {
       supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }],
     });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     await api.post(`/purchase-orders/${po.id}/approve`, {});
 
     const history = await api.get<Array<{ action: string; actorId: string | null; actorName: string | null; after: Record<string, unknown> | null }>>(`/purchase-orders/${po.id}/history`);
@@ -37,6 +38,7 @@ describe('mock: small print kept on approval', () => {
   it('keeps it when an approver approves the order', async () => {
     const po = await draft();
     expect((await api.post<Order>(`/purchase-orders/${po.id}/submit`, {})).printedTerms ?? null).toBeNull();
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     const approved = await api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
     expect(approved.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za', terms: expect.stringContaining('Purchase Order delivery date') });
   });

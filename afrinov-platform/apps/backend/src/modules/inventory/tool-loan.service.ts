@@ -24,6 +24,8 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
+import { checkWriteOff } from './write-off-limit.js';
+import { requestAdjustment } from './write-off-approval.service.js';
 import {
   addDays, currentDueOn, dayOf, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState, overdueBlocksCheckout,
   type LoanState, type LoanTerms,
@@ -382,8 +384,13 @@ export const ToolLoanService = {
     });
   },
 
-  /** Take tools back, each against its loan: in good order, damaged, or lost (written off). */
-  async checkIn(input: CheckInInput): Promise<{ returnIds: string[]; writeOffIds: string[] }> {
+  /**
+   * Take tools back, each against its loan: in good order, damaged, or lost
+   * (written off). A lost tool worth more than the write-off limit, or with no
+   * unit cost, is written off only once someone else approves it (ADR-028):
+   * its loan is closed and the write-off waits as a request (writeOffRequestIds).
+   */
+  async checkIn(input: CheckInInput): Promise<{ returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[] }> {
     if (input.lines.length === 0) throw Errors.validation('Add at least one tool to check in');
     const lines = input.lines.map((l) => ({ ...l, qty: toDecimal(l.quantity), note: l.note?.trim() || null }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Check-in quantity must be positive');
@@ -393,7 +400,7 @@ export const ToolLoanService = {
       const loanIds = [...new Set(lines.map((l) => l.loanId))];
       const loans = await tx.inventoryTransaction.findMany({
         where: { id: { in: loanIds } },
-        include: { recipient: { select: { name: true } }, material: { select: { sku: true } } },
+        include: { recipient: { select: { name: true } }, material: { select: { sku: true, unitCost: true } } },
       });
       const byId = new Map(loans.map((l) => [l.id, l]));
       for (const id of loanIds) {
@@ -420,6 +427,7 @@ export const ToolLoanService = {
       const postedAt = new Date();
       const returnIds: string[] = [];
       const writeOffIds: string[] = [];
+      const writeOffRequestIds: string[] = [];
       for (const l of lines) {
         const loan = byId.get(l.loanId)!;
         const back = await tx.inventoryTransaction.create({
@@ -440,6 +448,16 @@ export const ToolLoanService = {
         });
         returnIds.push(back.id);
         if (l.condition === 'LOST') {
+          const reasonNote = `Lost while checked out to ${loan.recipient?.name ?? 'an unknown recipient'}: ${l.note}`;
+          const check = await checkWriteOff(l.qty, loan.material.unitCost, tx);
+          if (check.needsApproval) {
+            const { requestId } = await requestAdjustment({
+              materialId: loan.materialId, locationId: loan.locationId, quantity: l.qty.negated(), reasonCode: 'LOSS',
+              reasonNote, recipientId: loan.recipientId, actorId: input.actorId,
+            }, check, tx);
+            writeOffRequestIds.push(requestId);
+            continue;
+          }
           const writeOff = await tx.inventoryTransaction.create({
             data: {
               postedAt,
@@ -451,7 +469,7 @@ export const ToolLoanService = {
               recipientId: loan.recipientId,
               projectNumber: loan.projectNumber,
               reasonCode: AdjustmentReasonCode.LOSS,
-              reasonNote: `Lost while checked out to ${loan.recipient?.name ?? 'an unknown recipient'}: ${l.note}`,
+              reasonNote,
               referenceType: TOOL_LOAN_REFERENCE,
               referenceId: loan.id,
             },
@@ -470,10 +488,10 @@ export const ToolLoanService = {
           action: 'TOOL_CHECK_IN',
           entityType: 'ToolLoan',
           entityId: loanIds[0]!,
-          after: { lines: lines.map((l) => ({ loanId: l.loanId, quantity: l.qty.toString(), condition: l.condition })), returnIds, writeOffIds } as Prisma.InputJsonValue,
+          after: { lines: lines.map((l) => ({ loanId: l.loanId, quantity: l.qty.toString(), condition: l.condition })), returnIds, writeOffIds, writeOffRequestIds } as Prisma.InputJsonValue,
         },
       });
-      return { returnIds, writeOffIds };
+      return { returnIds, writeOffIds, writeOffRequestIds };
     });
   },
 

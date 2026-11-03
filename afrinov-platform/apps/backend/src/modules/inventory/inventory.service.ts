@@ -21,6 +21,7 @@ import { MOVE_TO_STORES_REFERENCE } from './project-leftovers.service.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
+import { checkWriteOff, writeOffRule } from './write-off-limit.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -744,6 +745,7 @@ export const InventoryService = {
       select: { id: true, location: { select: { name: true } } },
     });
     const partnerLocation = new Map(partners.map((p) => [p.id, p.location.name]));
+    const writeOff = await writeOffRule();
     const movements = new Map(rows.map((t) => [t.id, {
       id: t.id,
       cursor: historyCursor(t),
@@ -773,6 +775,8 @@ export const InventoryService = {
       referenceId: t.referenceId,
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
+      // An adjustment over the write-off limit isn't reversed directly: it is put right by one the other way, for approval.
+      reversalNeedsApproval: t.type === InventoryTransactionType.ADJUSTMENT && writeOff(t.quantity, t.material.unitCost).needsApproval,
       returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
       // Issues: marked used up or broken so far. Returns: marked in the same
       // counter visit. trackUse says whether the item asks for it.
@@ -975,6 +979,15 @@ export const InventoryService = {
           const gr = await tx.goodsReceipt.findUnique({ where: { id: original.referenceId } });
           if (gr?.purchaseOrderId) {
             throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
+          }
+        }
+        // An adjustment over the write-off limit takes someone else's approval,
+        // so undoing one does too: it is put right by an adjustment the other
+        // way, which waits for approval (ADR-028; Qodo, PR #151).
+        if (original.type === InventoryTransactionType.ADJUSTMENT) {
+          const material = await tx.material.findUnique({ where: { id: original.materialId }, select: { unitCost: true } });
+          if ((await checkWriteOff(original.quantity, material?.unitCost ?? null, tx)).needsApproval) {
+            throw Errors.invalidState("This adjustment is over the write-off limit, or its item has no unit cost, so it isn't reversed directly. Post an adjustment the other way instead: it waits for someone else to approve it.");
           }
         }
 

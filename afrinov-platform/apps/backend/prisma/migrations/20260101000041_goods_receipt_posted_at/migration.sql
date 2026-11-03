@@ -20,5 +20,9 @@ WHERE gr."id" = t."reference_id" AND gr."status" = 'POSTED';
 
 UPDATE "goods_receipts" SET "posted_at" = "created_at" WHERE "status" = 'POSTED' AND "posted_at" IS NULL;
 
+-- A posted delivery always says when it was booked, or the report would leave it out.
+ALTER TABLE "goods_receipts" ADD CONSTRAINT "goods_receipts_posted_has_posted_at"
+  CHECK ("status" <> 'POSTED' OR "posted_at" IS NOT NULL);
+
 -- CreateIndex
 CREATE INDEX "goods_receipts_status_posted_at_idx" ON "goods_receipts"("status", "posted_at");

@@ -157,4 +157,68 @@ describe('write-off approval over real HTTP', () => {
     expect((await technician('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'GOOD' }] })).status).toBe(201);
     expect((await storeman('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST', note: 'Left on site' }] })).status).toBe(201);
   });
+
+  // Qodo, PR #151: the value is compared exactly, not rounded to cents first.
+  it('holds an adjustment worth a fraction of a cent over the limit', async () => {
+    const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-EDGE-${run}`, name: `Edge ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 1000.004 });
+    const res = await adjust(storeman, { materialId: m.body.id, quantity: 1, reasonCode: 'OTHER', reasonNote: 'Found' });
+    expect([res.status, res.body.value]).toEqual([202, '1000.00']);
+  });
+
+  // Qodo, PR #151: "0: every adjustment waits", an item that costs nothing included.
+  it('holds every adjustment when the limit is 0', async () => {
+    const free = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-FREE-${run}`, name: `Free sample ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 0 });
+    await setting('inventory.writeOffApprovalAbove', 0);
+    try {
+      expect((await adjust(storeman, { materialId: free.body.id, quantity: 1, reasonCode: 'OTHER', reasonNote: 'Sample' })).status).toBe(202);
+    } finally {
+      await setting('inventory.writeOffApprovalAbove', 1000);
+    }
+  });
+
+  // Qodo, PR #151: undoing an approved write-off would add the stock back on one person's say-so.
+  it('refuses to reverse an adjustment over the limit, and reverses one within it', async () => {
+    const asked = await adjust(storeman, { quantity: 5, reasonCode: 'OTHER', reasonNote: 'Returned by a supplier' }); // R 1 250
+    const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${asked.body.requestId}/approve`);
+    const before = await onHand();
+    const refused = await storeman<{ error: { code: string; message: string } }>('POST', `/inventory-transactions/${approved.body.transactionId}/reversal`, { reason: 'Booked twice' });
+    expect([refused.status, refused.body.error.code]).toEqual([409, 'INVALID_STATE']);
+    expect(refused.body.error.message).toMatch(/over the write-off limit/);
+    expect(await onHand()).toBe(before);
+    const row = (await storeman<Array<{ id: string; reversalNeedsApproval: boolean }>>('GET', `/inventory-transactions?materialId=${materialId}`)).body
+      .find((r) => r.id === approved.body.transactionId);
+    expect(row?.reversalNeedsApproval).toBe(true);
+
+    const small = await adjust(storeman, { quantity: 1, reasonCode: 'OTHER', reasonNote: 'Miscount' }); // R 250
+    expect((await storeman('POST', `/inventory-transactions/${small.body.transactionId}/reversal`, { reason: 'Miscount' })).status).toBe(201);
+  });
+
+  // Qodo, PR #151: a lost tool over the limit, or with no cost, is written off only once someone else approves.
+  it('holds the write-off of a costly lost tool for approval: approved it is written off, rejected it stays', async () => {
+    const grinder = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-GRIND-${run}`, name: `Angle grinder ${run}`, category: 'TOOLS', unitOfMeasure: 'each', unitCost: 2400 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: grinder.body.id, quantity: 2, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT WO welder ${run}`, type: 'WORKER' });
+    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: grinder.body.id, locationId, quantity: 2 }] });
+    const [loanId] = out.body.loanIds;
+
+    const lost = await storeman<{ writeOffIds: string[]; writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [
+      { loanId, quantity: 1, condition: 'LOST', note: 'Fell off the scaffold' },
+      { loanId, quantity: 1, condition: 'LOST', note: 'Stolen from the van' },
+    ] });
+    expect(lost.status).toBe(201);
+    expect(lost.body.writeOffIds).toEqual([]);
+    expect(lost.body.writeOffRequestIds).toHaveLength(2);
+    // Both back from the loan, nothing written off yet.
+    expect(await onHand(grinder.body.id)).toBe('2');
+
+    const [first, second] = lost.body.writeOffRequestIds;
+    expect((await storeman('POST', `/adjustment-requests/${first}/approve`)).status).toBe(403);
+    expect((await api('POST', `/adjustment-requests/${first}/approve`)).status).toBe(201);
+    expect((await api('POST', `/adjustment-requests/${second}/reject`, { reason: 'Found in the van' })).status).toBe(200);
+    expect(await onHand(grinder.body.id)).toBe('1');
+    const request = await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: first! } });
+    expect(request).toMatchObject({ reasonCode: 'LOSS', reasonNote: expect.stringMatching(/^Lost while checked out to IT WO welder .*: Fell off the scaffold$/) });
+  });
 });

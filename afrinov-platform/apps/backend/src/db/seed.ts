@@ -425,6 +425,8 @@ async function ensureGoodsReceipt(
       supplierId,
       deliveryRef: 'Tax Invoice - E127076',
       status: 'POSTED',
+      // The received-stock report counts a delivery on the day it was booked.
+      postedAt: new Date(),
       receivedById: adminId,
       lines: {
         create: [

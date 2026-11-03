@@ -109,6 +109,12 @@ function freshState(): State {
   };
 }
 
+/** For tests: an order raised by someone other than the demo user, so the demo user may approve it, as on the server. */
+export function mockOrderRaisedBy(orderId: string, userId: string): void {
+  const po = state.purchaseOrders.find((x) => x.id === orderId);
+  if (po) po.createdById = userId;
+}
+
 // Reset (useful if we ever want a "reset mocks" button).
 export function resetMockState(): void {
   state = freshState();
@@ -314,10 +320,11 @@ function mockPrintedTerms(): NonNullable<MockPurchaseOrder['printedTerms']> {
 }
 
 const MOCK_STEP_LABEL: Record<string, string> = { MANAGER: 'Procurement Manager', DIRECTOR: 'Director' };
+const MOCK_OWN_ORDER = 'You raised this order, so someone else must sign it.';
 
 // Who signs as the server works it out (po-approval.ts). The mock has one
-// signed-in user, so it signs every step of the demo; the server refuses one
-// person signing an order twice.
+// signed-in user, so it signs every step of the demo, except of an order it
+// raised: as the server, nobody signs an order they raised (ADR-028), or one twice.
 function mockApproval(po: MockPurchaseOrder) {
   const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
   const currency = po.currency ?? 'ZAR';
@@ -330,14 +337,16 @@ function mockApproval(po: MockPurchaseOrder) {
   const stepNames = unpriced || noRate ? [] : po.projectNumber && value >= threshold ? ['MANAGER', 'DIRECTOR'] : ['MANAGER'];
   const signatures = po.signatures ?? [];
   const nextStep = stepNames.find((s) => !signatures.some((x) => x.step === s)) ?? null;
+  const own = po.createdById === 'user-1';
   const reason = unpriced
     ? `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.`
-    : noRate ? `This order is in ${currency}, and there is no exchange rate for ${currency} yet.` : null;
+    : noRate ? `This order is in ${currency}, and there is no exchange rate for ${currency} yet.`
+      : own ? MOCK_OWN_ORDER : null;
   return {
     ...totals, currency, reason, noRate,
     exchangeRate: rate === null ? null : String(rate),
     randValue: unpriced || noRate ? null : value.toFixed(2),
-    canApprove: po.status === 'PENDING_APPROVAL' && !unpriced && !noRate,
+    canApprove: po.status === 'PENDING_APPROVAL' && !unpriced && !noRate && !own,
     steps: stepNames.map((step) => {
       const s = signatures.find((x) => x.step === step);
       return { step, label: MOCK_STEP_LABEL[step]!, signature: s ? { name: s.signedBy?.name ?? 'You (admin)', signedAt: s.signedAt, standIn: !!s.standIn } : null };
@@ -345,7 +354,7 @@ function mockApproval(po: MockPurchaseOrder) {
     next: nextStep ? { step: nextStep, label: MOCK_STEP_LABEL[nextStep]! } : null,
     nextStep,
     lastStep: stepNames[stepNames.length - 1] ?? null,
-    approvers: nextStep ? [{ id: 'user-1', name: 'You (admin)', standIn: false }] : [],
+    approvers: nextStep && !own ? [{ id: 'user-1', name: 'You (admin)', standIn: false }] : [],
   };
 }
 
@@ -1276,6 +1285,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       notes: b.notes,
       expectedDeliveryDate: b.expectedDeliveryDate ?? null,
       createdAt: new Date().toISOString(),
+      createdById: 'user-1',
       currency: supplier.currency ?? 'ZAR',
       vatRate: String(b.vatRate ?? ((supplier.currency ?? 'ZAR') === 'ZAR' ? Number(MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15) : 0)),
       history: [],
@@ -1324,6 +1334,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
+    // As the server: whoever raised it never approves it, before any other check.
+    if (po.createdById === 'user-1') throw err('FORBIDDEN', MOCK_OWN_ORDER);
     const check = mockApproval(po);
     if (check.unpricedLines > 0) throw err('VALIDATION_ERROR', check.reason!);
     if (check.noRate) throw err('VALIDATION_ERROR', check.reason!);

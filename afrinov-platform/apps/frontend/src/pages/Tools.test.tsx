@@ -213,6 +213,19 @@ describe('Tools page', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tools/check-in', { lines: [{ loanId: 't-1', quantity: 1, condition: 'LOST', note: 'Left on site' }] }));
   });
 
+  // ADR-028: a lost tool over the write-off limit waits for someone else's approval.
+  it('says when writing off a lost tool waits for approval', async () => {
+    mockPost.mockResolvedValue({ returnIds: ['t-9'], writeOffIds: [], writeOffRequestIds: ['req-1'] });
+    renderPage();
+    await screen.findByText('Makita Hand Drill');
+    fireEvent.click(within(row('Makita Hand Drill')).getByRole('button', { name: 'Check in' }));
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.change(within(drawer).getByLabelText('Condition'), { target: { value: 'LOST' } });
+    fireEvent.change(within(drawer).getByLabelText('What happened', { exact: false }), { target: { value: 'Left on site' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
+    expect(await screen.findByText(/Writing off the lost one waits for someone else to approve it under Write-offs to approve/)).toBeInTheDocument();
+  });
+
   // Lost writes the tool off: the store's to do, not a borrower's (adjust:inventory).
   it('offers Lost only to those who may write stock off', async () => {
     perms.adjust = false;

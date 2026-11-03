@@ -156,6 +156,8 @@ export interface MovementRow {
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
   /** A receipt against a purchase order: it cannot be reversed from the movement, only on the order. */
   fromPurchaseOrder?: boolean;
+  /** An ADJUSTMENT over the write-off limit: not reversed directly, but put right by one the other way, for approval. */
+  reversalNeedsApproval?: boolean;
   /** A transfer's other leg: where the stock went to (or came from). */
   otherLocationName?: string | null;
   /** Tool loans. Check-out: the date agreed. Check-in: the date as it stood then. Due date change: the new date. */

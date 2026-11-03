@@ -154,10 +154,14 @@ export const OPERATIONS: Operation[] = [
   // Auth
   {
     method: 'post', path: '/auth/login', tag: 'Auth', summary: 'Log in and receive a bearer token', public: true,
-    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute).',
+    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute). '
+      + 'The user carries their roles and the permission codes those roles grant.',
     body: loginSchema, errors: [401, 429],
   },
-  { method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user' },
+  {
+    method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user',
+    description: 'Their id, email, name, roles (from the token) and permissions, read from the database on each call.',
+  },
 
   // Users
   { method: 'get', path: '/users', tag: 'Users', summary: 'List users', permissions: [P.ManageUsers] },
@@ -297,7 +301,9 @@ export const OPERATIONS: Operation[] = [
     description: 'Each line is against a loan, at most what is still out on it, and comes back to the location it left. '
       + 'GOOD or DAMAGED puts it back in store (LOAN_RETURN); LOST needs a note and writes it off at once '
       + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned. Writing a tool off as LOST also '
-      + 'needs adjust:inventory (403 otherwise): a borrower does not write off what they borrowed.',
+      + 'needs adjust:inventory (403 otherwise): a borrower does not write off what they borrowed. A lost tool worth more '
+      + 'than inventory.writeOffApprovalAbove, or with no unit cost, is checked in but its write-off waits for '
+      + 'approval by someone else: writeOffRequestIds lists those requests, and writeOffIds the write-offs posted at once.',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },
   {
@@ -438,7 +444,9 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',
     summary: 'Reverse a movement',
     description: 'Posts an opposite entry linked to the original; the ledger is never edited. Both legs of a transfer are reversed together. '
-      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal or a goods-receipt receipt, and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
+      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal, a receipt against a purchase order, '
+      + 'or an adjustment over the write-off limit (put right by an adjustment the other way, for approval), '
+      + 'and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
     permissions: [P.ReverseInventoryTransaction], body: reversalSchema, success: 201, errors: [404, 409, 422],
   },
   {

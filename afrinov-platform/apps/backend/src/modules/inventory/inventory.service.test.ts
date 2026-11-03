@@ -217,6 +217,8 @@ const fakeTx = {
   },
   setting: {
     findUnique: async ({ where }: { where: { key: string } }) => mockSettings.get(where.key) ?? null,
+    findMany: async ({ where }: { where: { key: { in: string[] } } }) =>
+      where.key.in.filter((key) => mockSettings.has(key)).map((key) => ({ key, value: mockSettings.get(key)!.value })),
   },
   goodsReceipt: {
     findUnique: async ({ where, include }: { where: { id: string }; include?: { lines?: boolean } }) => {
@@ -334,6 +336,9 @@ describe('InventoryService — ADR-002 invariants', () => {
     trxRows = [];
     balances = new Map();
     clearMockSettings();
+    // These items have no unit cost; reversing an adjustment of one waits for
+    // approval when approval is on, which its own test below switches on.
+    setMockSetting('inventory.requireWriteOffApproval', false);
     idSeq = 0;
     auditLog.length = 0;
     rowLocks.length = 0;
@@ -1103,6 +1108,19 @@ describe('InventoryService — ADR-002 invariants', () => {
 
     // Receiving a whole order at once books against the order itself; reversing
     // it would leave the order RECEIVED with the stock gone.
+    // ADR-028; Qodo, PR #151: undoing a write-off over the limit would take
+    // stock back, or away, on one person's say-so.
+    it('refuses to reverse an adjustment over the write-off limit, or with no unit cost', async () => {
+      setMockSetting('inventory.requireWriteOffApproval', true);
+      trxRows.push({
+        id: 'big-loss', materialId: 'mat-1', locationId: 'loc-1', type: 'ADJUSTMENT', quantity: new Prisma.Decimal(-8),
+        actorId: 'u', postedAt: new Date(), reasonCode: 'LOSS',
+      });
+      await expect(InventoryService.reverse({ transactionId: 'big-loss', reason: 'Found it', actorId: 'u' }))
+        .rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/over the write-off limit, or its item has no unit cost/) });
+      expect(trxRows.some((r) => r.reversesId === 'big-loss')).toBe(false);
+    });
+
     it('refuses to reverse stock received by receiving the whole order at once', async () => {
       trxRows.push({
         id: 'po-trx', materialId: 'mat-1', locationId: 'loc-1', type: 'RECEIPT', quantity: new Prisma.Decimal(10),

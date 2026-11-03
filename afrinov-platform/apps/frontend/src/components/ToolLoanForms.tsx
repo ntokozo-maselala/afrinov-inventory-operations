@@ -237,14 +237,18 @@ export function CheckInForm({ tool, onCancel, onDone }: {
     if (lines.some((l) => back[l.loanId]!.condition === 'LOST' && !back[l.loanId]!.note.trim())) { setError('Say what happened to a lost tool.'); return; }
     setBusy(true);
     try {
-      await api.post('/tools/check-in', {
+      const result = await api.post<{ writeOffRequestIds?: string[] }>('/tools/check-in', {
         lines: lines.map((l) => {
           const b = back[l.loanId]!;
           return { loanId: l.loanId, quantity: Number(b.quantity), condition: b.condition, note: b.note.trim() || undefined };
         }),
       });
       const count = lines.reduce((n, l) => n + Number(back[l.loanId]!.quantity), 0);
-      onDone(`Checked in ${formatNumber(count)} × ${tool.name}`);
+      // A lost tool over the write-off limit is written off once someone else approves it (ADR-028).
+      const waiting = result?.writeOffRequestIds?.length ?? 0;
+      onDone(`Checked in ${formatNumber(count)} × ${tool.name}${waiting > 0
+        ? `. Writing off the lost ${waiting === 1 ? 'one' : waiting} waits for someone else to approve it under Write-offs to approve.`
+        : ''}`);
     } catch (err) {
       setError((err as ApiError).message);
     } finally {

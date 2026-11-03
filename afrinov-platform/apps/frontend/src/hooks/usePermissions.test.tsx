@@ -16,7 +16,7 @@ vi.mock('../auth', () => ({
   useAuth: mockUseAuth,
 }));
 
-function renderWithUser<T>(hook: () => T, user: { roles: string[] } | null) {
+function renderWithUser<T>(hook: () => T, user: { roles: string[]; permissions?: string[] } | null) {
   mockUseAuth.mockReturnValue({
     user: user,
     loading: false,
@@ -186,7 +186,7 @@ describe('usePermissions — the role check sheet', () => {
       // A later due date for a tool loan is the store's decision.
       'tools:extend',
       // Another store controller's write-offs over the limit, never their own.
-      'writeoffs:approve',
+      'writeoffs:approve', 'writeoffs:view',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
     PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
@@ -216,6 +216,17 @@ describe('usePermissions — the role check sheet', () => {
     expect(result.current.hasPermission('inventory:issue')).toBe(true);
     expect(result.current.hasPermission('suppliers:manage')).toBe(true);
     expect(result.current.hasPermission('inventory:transfer')).toBe(false);
+  });
+
+  // Qodo, PR #151: a role granted approve:write_off in the database sees the
+  // approvals it may make, though the role table doesn't list it.
+  it('admits a write-off approver the server grants, by permission rather than role', () => {
+    const { result } = renderWithUser(usePermissions, { roles: ['APPROVER'], permissions: ['approve:write_off', 'view:reports'] });
+    expect(result.current.hasPermission('writeoffs:approve')).toBe(true);
+    expect(result.current.hasPermission('writeoffs:view')).toBe(true);
+    expect(result.current.hasPermission('inventory:adjust')).toBe(false);
+    const { result: without } = renderWithUser(usePermissions, { roles: ['APPROVER'], permissions: ['view:reports'] });
+    expect(without.current.hasPermission('writeoffs:approve')).toBe(false);
   });
 
   it('refuses a permission it does not know, even to a store controller', () => {

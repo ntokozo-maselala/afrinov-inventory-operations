@@ -98,7 +98,15 @@ jobs:
       # it, so the tree is checked as well.
       - name: Refuse committed spreadsheets
         run: |
-          found=$(git ls-files -- '*.xls' '*.xlsx' '*.xlsm' '*.xlsb' '*.ods' '*.csv')
+          # Every tracked path, its extension matched whatever its case: Excel
+          # workbooks and templates (.xls, .xlsx, .xlsm, .xlsb, .xlt, .xltx, .xltm,
+          # .xla, .xlam), OpenDocument (.ods, .ots, .fods), Numbers and CSV.
+          found=$(git ls-files | grep -iE '\.(xl[st][xmb]?|xlam?|f?ods|ots|numbers|csv)$' || true)
+          if [ -n "$found" ]; then
+            echo "::error::Spreadsheets must not be committed to this public repository:"
+            echo "$found"
+            exit 1
+          fi
           if [ -n "$found" ]; then
             echo "::error::Spreadsheets must not be committed to this public repository:"
             echo "$found"

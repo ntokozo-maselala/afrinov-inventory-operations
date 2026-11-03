@@ -1,9 +1,8 @@
 // Write-offs and other adjustments over a value limit wait for someone else's
 // approval (segregation of duties): one person posting a large loss, or stock
-// out of nowhere, unchecked is how stock losses are hidden. The limit is
-// inventory.writeOffApprovalAbove, in rand, at the item's unit cost; an item
-// with no cost always waits, as its value can't be checked. Below the limit an
-// adjustment posts at once, as before.
+// out of nowhere, unchecked is how stock losses are hidden. When one needs
+// approval is decided in write-off-limit.ts. Below the limit an adjustment
+// posts at once, as before.
 //
 // Nothing moves while a request waits. Approving posts the ADJUSTMENT, booked
 // to whoever asked for it, with the approver on the request and in the audit
@@ -12,11 +11,8 @@ import { Prisma, AdjustmentRequestStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
-import { SettingsService } from '../settings/settings.service.js';
 import { InventoryService, checkAdjustment, type AdjustmentInput } from './inventory.service.js';
-
-export const WRITE_OFF_APPROVAL = 'inventory.requireWriteOffApproval';
-export const WRITE_OFF_LIMIT = 'inventory.writeOffApprovalAbove';
+import { checkWriteOff, type WriteOffCheck } from './write-off-limit.js';
 
 export type AdjustOutcome =
   | { status: 'POSTED'; transactionId: string }
@@ -24,9 +20,32 @@ export type AdjustOutcome =
 
 const OWN_REQUEST = 'You asked for this adjustment, so someone else must approve it.';
 
-/** Its value in rand at the item's unit cost, or null when the item has none. */
-function valueOf(quantity: Prisma.Decimal, unitCost: Prisma.Decimal | null): Prisma.Decimal | null {
-  return unitCost === null ? null : quantity.abs().times(unitCost).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+/**
+ * Records an adjustment for someone else to approve, posting nothing. Used by
+ * adjustOrRequest and by a tool checked in as lost (tool-loan.service.ts).
+ */
+export async function requestAdjustment(input: AdjustmentInput, check: WriteOffCheck, tx: Prisma.TransactionClient): Promise<{ requestId: string }> {
+  const quantity = new Prisma.Decimal(input.quantity);
+  const request = await tx.adjustmentRequest.create({
+    data: {
+      materialId: input.materialId,
+      locationId: input.locationId,
+      heldForProject: input.heldForProject ?? null,
+      quantity,
+      reasonCode: input.reasonCode,
+      reasonNote: input.reasonNote?.trim() || null,
+      recipientId: input.recipientId ?? null,
+      value: check.value,
+      requestedById: input.actorId,
+    },
+  });
+  await tx.auditLogEntry.create({
+    data: {
+      actorId: input.actorId, action: 'WRITE_OFF_REQUEST', entityType: 'AdjustmentRequest', entityId: request.id,
+      after: { quantity: quantity.toString(), reasonCode: input.reasonCode, value: check.value?.toString() ?? null, limit: check.limit.toString() },
+    },
+  });
+  return { requestId: request.id };
 }
 
 async function lockRequest(id: string, tx: Prisma.TransactionClient) {
@@ -58,33 +77,13 @@ export const WriteOffApprovalService = {
       const material = await tx.material.findUnique({ where: { id: input.materialId }, select: { unitCost: true } });
       if (!material) throw Errors.notFound('Material');
       const qty = await checkAdjustment(input, tx);
-      const settings = await SettingsService.getValues([WRITE_OFF_APPROVAL, WRITE_OFF_LIMIT], tx);
-      const limit = new Prisma.Decimal(Number(settings[WRITE_OFF_LIMIT]) || 0);
-      const value = valueOf(qty, material.unitCost);
-      if (settings[WRITE_OFF_APPROVAL] === false || (value !== null && value.lte(limit))) {
+      const check = await checkWriteOff(qty, material.unitCost, tx);
+      if (!check.needsApproval) {
         const { transactionId } = await InventoryService.adjust(input, tx);
         return { status: 'POSTED', transactionId };
       }
-      const request = await tx.adjustmentRequest.create({
-        data: {
-          materialId: input.materialId,
-          locationId: input.locationId,
-          heldForProject: input.heldForProject ?? null,
-          quantity: qty,
-          reasonCode: input.reasonCode,
-          reasonNote: input.reasonNote?.trim() || null,
-          recipientId: input.recipientId ?? null,
-          value,
-          requestedById: input.actorId,
-        },
-      });
-      await tx.auditLogEntry.create({
-        data: {
-          actorId: input.actorId, action: 'WRITE_OFF_REQUEST', entityType: 'AdjustmentRequest', entityId: request.id,
-          after: { quantity: qty.toString(), reasonCode: input.reasonCode, value: value?.toString() ?? null, limit: limit.toString() },
-        },
-      });
-      return { status: 'PENDING_APPROVAL', requestId: request.id, value: value?.toFixed(2) ?? null, limit: limit.toFixed(2) };
+      const { requestId } = await requestAdjustment({ ...input, quantity: qty }, check, tx);
+      return { status: 'PENDING_APPROVAL', requestId, value: check.value?.toFixed(2) ?? null, limit: check.limit.toFixed(2) };
     });
   },
 

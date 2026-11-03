@@ -74,9 +74,12 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   const isMark = transaction.referenceType === 'ConsumableOutcome';
   const loanId = loanOf(transaction);
   // A receipt against a purchase order also moved the order's received
-  // quantities, so the server only lets it be put right on the order. A
-  // counter receipt (Receive stock) is reversed like any other movement.
-  const fromPurchaseOrder = transaction.referenceType === 'GoodsReceipt' && !!transaction.fromPurchaseOrder;
+  // quantities, so the server only lets it be put right on the order: a goods
+  // receipt against one, or the whole order received at once (Qodo, PR #151).
+  // A counter receipt (Receive stock) is reversed like any other movement.
+  const fromPurchaseOrder = !!transaction.fromPurchaseOrder;
+  // Undoing an adjustment over the write-off limit takes approval too (ADR-028).
+  const needsApproval = transaction.type === 'ADJUSTMENT' && !!transaction.reversalNeedsApproval;
   const issued = transaction.type === 'ISSUE' ? -Number(transaction.quantity) : 0;
   const returned = Number(transaction.returnedQuantity ?? 0);
   const hasReturns = transaction.type === 'ISSUE' && returned > 0;
@@ -101,6 +104,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !transaction.reversesId
     && !transaction.reversedById
     && !fromPurchaseOrder
+    && !needsApproval
     && !isMark
     // Tool loans are put right by checking the tool in or out again.
     && transaction.type !== 'LOAN' && transaction.type !== 'LOAN_RETURN' && transaction.referenceType !== 'ToolLoan'
@@ -254,6 +258,11 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
       {fromPurchaseOrder && !transaction.reversedById && hasPermission('inventory:reverse') && (
         <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
           This stock was received against a purchase order{transaction.receiptNumber ? ` (${transaction.receiptNumber})` : ''}, so it cannot be reversed here: correct it on the order.
+        </p>
+      )}
+      {needsApproval && !transaction.reversesId && !transaction.reversedById && hasPermission('inventory:reverse') && (
+        <p className="text-sm text-surface-600 border-t border-surface-200 pt-4">
+          This adjustment is over the write-off limit, or its item has no unit cost, so it isn&apos;t reversed here. Post an adjustment the other way from Stock: it waits for someone else to approve it.
         </p>
       )}
 

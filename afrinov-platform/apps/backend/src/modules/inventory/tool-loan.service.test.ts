@@ -19,9 +19,10 @@ const db = vi.hoisted(() => ({
   locks: [] as string[],
   audit: [] as Array<{ action: string; before?: unknown; after?: unknown }>,
   settings: {} as Record<string, unknown>,
+  requests: [] as Array<Record<string, unknown>>,
   projectEnd: null as string | null,
   materials: [
-    { id: 'm-drill', sku: 'TL-0001', name: 'Makita Hand Drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: '34322', active: true },
+    { id: 'm-drill', sku: 'TL-0001', name: 'Makita Hand Drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: '34322', active: true, unitCost: 1800 },
     { id: 'm-scraper', sku: 'TL-0002', name: 'Scraper', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: null, active: true },
     { id: 'm-disc', sku: 'CON-0001', name: 'Grinding disc', category: 'CONSUMABLES', unitOfMeasure: 'each', serialNumber: null, active: true },
   ],
@@ -49,7 +50,7 @@ const withRelations = (r: Row) => ({
   recipient: r.recipientId ? { name: names[r.recipientId] } : null,
   location: { name: names[r.locationId] },
   actor: { name: names[r.actorId] },
-  material: { sku: db.materials.find((m) => m.id === r.materialId)!.sku, name: db.materials.find((m) => m.id === r.materialId)!.name },
+  material: { sku: db.materials.find((m) => m.id === r.materialId)!.sku, name: db.materials.find((m) => m.id === r.materialId)!.name, unitCost: ((c) => (c === undefined ? null : D(c)))((db.materials.find((m) => m.id === r.materialId) as { unitCost?: number }).unitCost) },
   project: r.projectNumber ? project() : null,
   loanExtensions: db.extensions.filter((e) => e.loanId === r.id).map((e) => ({ ...e, actor: { name: names[e.actorId] } })),
 });
@@ -94,6 +95,7 @@ const client = {
     },
   },
   auditLogEntry: { create: async ({ data }: { data: { action: string } }) => { db.audit.push(data); return data; } },
+  adjustmentRequest: { create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, ...data }; db.requests.push(row); return row; } },
 };
 
 vi.mock('../../shared/db.js', () => ({ prisma: { ...client, $transaction: async (fn: (t: typeof client) => unknown) => fn(client) } }));
@@ -130,7 +132,9 @@ beforeEach(() => {
   db.extensions.length = 0;
   db.locks.length = 0;
   db.audit.length = 0;
-  db.settings = {};
+  // A lost tool posts its write-off at once unless a test switches write-off approval on.
+  db.settings = { 'inventory.requireWriteOffApproval': false };
+  db.requests.length = 0;
   db.projectEnd = null;
   seq = 0;
   receive('m-drill', 1);
@@ -197,6 +201,22 @@ describe('ToolLoanService', () => {
     expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.reasonNote]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'Lost while checked out to Sabelo: Left on site']);
     const drill = await tool('m-drill');
     expect([drill.inStore, drill.onLoan, drill.owned]).toEqual(['0', '0', '0']);
+  });
+
+  // ADR-028; Qodo, PR #151: a lost tool over the write-off limit is written
+  // off only once someone else approves it; its loan is closed meanwhile.
+  it('holds the write-off of a lost tool over the limit for approval, closing its loan', async () => {
+    db.settings = { 'inventory.requireWriteOffApproval': true, 'inventory.writeOffApprovalAbove': 1000 };
+    const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] });
+    const { writeOffIds, writeOffRequestIds } = await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'LOST', note: 'Left on site' }] });
+    expect(writeOffIds).toEqual([]);
+    expect(writeOffRequestIds).toHaveLength(1);
+    expect(db.requests[0]).toMatchObject({ materialId: 'm-drill', reasonCode: 'LOSS', reasonNote: 'Lost while checked out to Sabelo: Left on site', requestedById: 'u-1' });
+    expect(String(db.requests[0]!.quantity)).toBe('-1');
+    expect(String(db.requests[0]!.value)).toBe('1800');
+    expect(db.ledger.some((r) => r.type === 'ADJUSTMENT')).toBe(false);
+    const drill = await tool('m-drill');
+    expect([drill.inStore, drill.onLoan]).toEqual(['1', '0']);
   });
 
   it('says how long each loan has been out, and that it is overdue after the days set (7)', async () => {
