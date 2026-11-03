@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
@@ -24,11 +24,14 @@ const STOCK = [{ materialId: 'm-1', materialSku: 'DISC-115', materialName: 'Cutt
 
 let material: Record<string, unknown>;
 let stock: unknown[];
+// The active projects, which say whether stock held for one can still be issued.
+let projects: unknown[] = [{ projectNumber: 'AFRI-1325', status: 'ACTIVE' }];
 
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/materials/')) return material;
     if (path.startsWith('/reports/current-stock')) return stock;
+    if (path.startsWith('/projects')) return projects;
     if (path.startsWith('/settings/values')) return {};
     return [];
   });
@@ -218,9 +221,27 @@ describe('MaterialDetail Projects item received for a project', () => {
   it('offers Issue for stock held for a project, and says the store holds it', async () => {
     renderPage();
     await screen.findByRole('table', { name: 'In the store for projects' });
-    expect(screen.getByRole('link', { name: 'Issue' })).toHaveAttribute('href', '/stock/issue?materialId=m-1');
+    expect(await screen.findByRole('link', { name: 'Issue' })).toHaveAttribute('href', '/stock/issue?materialId=m-1');
     expect(screen.getByText(/The store receives it against that order and holds it for that project./)).toBeInTheDocument();
     expect(screen.queryByText(/was received before/)).not.toBeInTheDocument();
+  });
+
+  // Qodo, PR #145: Issue only for stock Issue stock can offer.
+  it('offers no Issue for held stock at an inactive location, or held for a project that takes no more issues', async () => {
+    stock = [{ ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '6', heldForProject: 'AFRI-1325', locationActive: false }];
+    renderPage();
+    await screen.findByRole('table', { name: 'In the store for projects' });
+    await waitFor(() => expect(gets('/projects')).toBeGreaterThan(0));
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+  });
+
+  it('offers no Issue for stock held for a completed project', async () => {
+    projects = [{ projectNumber: 'AFRI-1325', status: 'COMPLETED' }];
+    onTestFinished(() => { projects = [{ projectNumber: 'AFRI-1325', status: 'ACTIVE' }]; });
+    renderPage();
+    await screen.findByRole('table', { name: 'In the store for projects' });
+    await waitFor(() => expect(gets('/projects')).toBeGreaterThan(0));
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
   });
 
   it('offers Issue for a leftover, and says it was received before', async () => {

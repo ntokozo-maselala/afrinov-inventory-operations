@@ -285,7 +285,9 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
     // NULL <> 'StockCount' is not true in SQL, so a plain `not` would drop unreferenced rows.
     and.push({ OR: [{ referenceType: null }, { referenceType: { not: 'StockCount' } }] });
   }
-  if (filter.projectNumber) where.projectNumber = filter.projectNumber;
+  // A project's movements: stock used for it, and its own stock received,
+  // moved or adjusted (held for it), which names no project it was used for (Qodo, PR #145).
+  if (filter.projectNumber) and.push({ OR: [{ projectNumber: filter.projectNumber }, { heldForProject: filter.projectNumber }] });
   // A room and its racks (inside=true), else the one location.
   if (filter.locationIds) where.locationId = { in: filter.locationIds };
   else if (filter.locationId) where.locationId = filter.locationId;
@@ -305,6 +307,7 @@ export function historyWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): P
         { material: { name: contains } },
         { location: { name: contains } },
         { projectNumber: contains },
+        { heldForProject: contains },
         { recipient: { name: contains } },
       ],
     });

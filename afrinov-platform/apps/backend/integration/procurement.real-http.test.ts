@@ -1056,6 +1056,11 @@ describe('receiving stock over real HTTP', () => {
           const legs = await prisma.inventoryTransaction.findMany({ where: { id: { in: [moved.body.outTransactionId, moved.body.inTransactionId] } } });
           expect(legs.map((l) => l.heldForProject)).toEqual([projectNumber, projectNumber]);
           expect((await ledgerAndBalance(looseId, spare.body.id, projectNumber)).balance).toBe('2');
+          // The project's history finds its own stock moving, by filter and by search (Qodo, PR #145).
+          const ofProject = (await api<Array<{ id: string; heldForProject: string | null }>>('GET', `/inventory-transactions?projectNumber=${projectNumber}&materialId=${looseId}`)).body;
+          expect(ofProject.find((r) => r.id === moved.body.outTransactionId)?.heldForProject).toBe(projectNumber);
+          const found = (await api<Array<{ id: string }>>('GET', `/inventory-transactions?q=${projectNumber}&materialId=${looseId}`)).body;
+          expect(found.map((r) => r.id)).toContain(moved.body.outTransactionId);
 
           const adjusted = await storeman('POST', '/inventory-adjustments', {
             materialId: looseId, locationId: spare.body.id, quantity: -0.5, reasonCode: 'DAMAGE', reasonNote: 'Bent in the rack', heldForProject: projectNumber,

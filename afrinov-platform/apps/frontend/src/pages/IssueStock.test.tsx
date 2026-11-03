@@ -271,6 +271,20 @@ describe('IssueStock with project material', () => {
     expect(screen.getByRole('option', { name: /PIPE-42/ })).toBeInTheDocument();
   });
 
+  // Qodo, PR #145: the server refuses an issue to a closed project, so its held
+  // stock isn't offered either; the item's own project doesn't decide it.
+  it('offers no stock held for a completed project', async () => {
+    const heldForDone = { ...pipe('9', 'HELD-DONE', 'AFRI-1325'), heldForProject: 'DONE-1' };
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [...stock, heldForDone]
+      : path.startsWith('/projects') ? [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE' }, { projectNumber: 'DONE-1', name: 'Old job', status: 'COMPLETED' }]
+        : respond(path)));
+    renderPage();
+    await ready();
+    fireEvent.focus(screen.getByLabelText('Item 1'));
+    expect(screen.getByRole('option', { name: /PIPE-1325/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /HELD-DONE/ })).not.toBeInTheDocument();
+  });
+
   it('sets the project from its material, locks it, and offers nothing else', async () => {
     renderPage();
     await ready();

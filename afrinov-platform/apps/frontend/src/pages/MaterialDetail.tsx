@@ -79,9 +79,15 @@ export function MaterialDetail() {
   const heldRows = (stock.data ?? []).filter((r) => !isStoresStock(r) && Number(r.quantity) > 0);
   // Check out lends Stores stock only (Qodo, PR #143). Issue takes Stores stock
   // or stock held for a project, which goes to that project (Project Material
-  // Through the Store Roadmap, Phase 3).
-  const storesTotal = (stock.data ?? []).filter(isStoresStock).reduce((acc, r) => acc + Number(r.quantity), 0);
-  const issuable = !!material.data && ((storesTotal > 0 && !needsProject(material.data)) || heldRows.length > 0);
+  // Through the Store Roadmap, Phase 3). Both only from active locations, and
+  // held stock only of a project that still takes issues, as Issue stock offers
+  // them (Qodo, PR #145).
+  const openProjects = useApi<Array<{ projectNumber: string; status?: string }>>(heldRows.length > 0 ? '/projects?active=true' : null);
+  const takesIssues = new Set((openProjects.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED').map((p) => p.projectNumber));
+  const usable = (r: { quantity: string; locationActive?: boolean }) => Number(r.quantity) > 0 && r.locationActive !== false;
+  const storesTotal = (stock.data ?? []).filter((r) => isStoresStock(r) && usable(r)).reduce((acc, r) => acc + Number(r.quantity), 0);
+  const issuable = !!material.data && ((storesTotal > 0 && !needsProject(material.data))
+    || heldRows.some((r) => usable(r) && takesIssues.has(r.heldForProject!)));
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;

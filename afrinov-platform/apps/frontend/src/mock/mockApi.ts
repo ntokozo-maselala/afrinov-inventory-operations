@@ -1767,7 +1767,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     let list = state.transactions.slice().sort((a, b) => b.postedAt.localeCompare(a.postedAt));
     if (qs.materialId) list = list.filter((t) => t.materialId === qs.materialId);
     if (qs.type) list = list.filter((t) => t.type === qs.type);
-    if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber);
+    if (qs.projectNumber) list = list.filter((t) => t.projectNumber === qs.projectNumber || t.heldForProject === qs.projectNumber);
     return list.slice(0, limit).map((t) => enrichMovement(t));
   }
   if (method === 'GET' && p === '/reports/month-end') {
@@ -3185,7 +3185,8 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (qs.report === 'loans' && t.type !== 'LOAN' && t.type !== 'LOAN_RETURN') return false;
       if (qs.report === 'returned' && t.type !== 'RETURN') return false;
       if (qs.report === 'writeoffs' && (t.type !== 'ADJUSTMENT' || t.referenceType === 'StockCount')) return false;
-      if (qs.projectNumber && t.projectNumber !== qs.projectNumber) return false;
+      // As the server: stock used for the project, and its own stock (held for it).
+      if (qs.projectNumber && t.projectNumber !== qs.projectNumber && t.heldForProject !== qs.projectNumber) return false;
       if (scope ? !scope.includes(t.locationId) : qs.locationId && t.locationId !== qs.locationId) return false;
       if (qs.actorId && t.actorId !== qs.actorId) return false;
       if (qs.recipientId && (qs.recipientId === '__none__' ? !!t.recipientId : t.recipientId !== qs.recipientId)) return false;
@@ -3194,7 +3195,7 @@ function filterHistory(qs: Record<string, string>): MockInventoryTransaction[] {
       if (!inRange(t.postedAt)) return false;
       if (needle) {
         const m = findMaterial(t.materialId);
-        const hay = [m?.sku, m?.name, findLocation(t.locationId)?.name, t.projectNumber, state.recipients.find((r) => r.id === t.recipientId)?.name]
+        const hay = [m?.sku, m?.name, findLocation(t.locationId)?.name, t.projectNumber, t.heldForProject, state.recipients.find((r) => r.id === t.recipientId)?.name]
           .filter(Boolean).join(' ').toLowerCase();
         if (!hay.includes(needle)) return false;
       }
@@ -3354,6 +3355,8 @@ function enrichMovement(t: MockInventoryTransaction): MockMovementRow {
     reasonCode: t.reasonCode,
     reasonNote: t.reasonNote,
     projectNumber: t.projectNumber,
+    // As the server: whose stock moved, the project it is held for or null for Stores stock (Qodo, PR #145).
+    heldForProject: t.heldForProject ?? null,
     referenceType: t.referenceType,
     referenceId: t.referenceId,
     reversesId: t.reversesId,

@@ -65,13 +65,18 @@ export function IssueStock() {
   // instead. Nor from a deactivated item or location, which the server refuses
   // (Qodo, PR #132). Stores stock follows its item: a closed project's leftovers
   // wait to move to Stores, and a Projects item with no project isn't issued.
-  // Stock held for a project is that project's, whatever its item says.
+  // Stock held for a project is that project's, whatever its item says, and is
+  // offered while that project takes issues: active, and neither completed nor
+  // cancelled (Qodo, PR #145).
+  const takesIssues = useMemo(() => new Set(projects.filter((p) => !isClosed(p.status)).map((p) => p.projectNumber)), [projects]);
   const available = useMemo(
     () => (stock.data ?? []).filter((r) => Number(r.quantity) > 0 && r.category !== 'TOOLS'
       && r.materialActive !== false && r.locationActive !== false
-      && (!isStoresStock(r) || (!needsProject(r) && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status)))))
+      && (isStoresStock(r)
+        ? !needsProject(r) && !(sectionOf(r.category) === 'PROJECTS' && isClosed(r.project?.status))
+        : takesIssues.has(r.heldForProject!)))
       .sort((a, b) => a.materialName.localeCompare(b.materialName) || a.locationName.localeCompare(b.locationName)),
-    [stock.data],
+    [stock.data, takesIssues],
   );
   const byKey = useMemo(() => new Map(available.map((r) => [stockKey(r), r])), [available]);
 

@@ -110,5 +110,9 @@ describe('mock: delivery of a project order', () => {
     // A transfer keeps the project; Stores stock is untouched.
     await api.post('/inventory-transfers', { materialId: 'mat-9', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 1, heldForProject: 'AFRI-1325' });
     expect(await heldFor('AFRI-1325')).toBe(before - 1);
+    // Its movements say whose stock moved, and the project's history finds the transfer (Qodo, PR #145).
+    const rows = await api.get<Array<{ type: string; heldForProject: string | null }>>('/inventory-transactions?projectNumber=AFRI-1325');
+    expect(rows.find((r) => r.type === 'TRANSFER_OUT')?.heldForProject).toBe('AFRI-1325');
+    expect(rows.find((r) => r.type === 'RECEIPT')?.heldForProject).toBe('AFRI-1325');
   });
 });
