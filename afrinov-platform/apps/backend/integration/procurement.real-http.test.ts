@@ -402,6 +402,13 @@ describe('receiving stock over real HTTP', () => {
       expect((await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body.totals).toMatchObject({ subtotal: '5700.00', discount: '0.00' });
     });
 
+    it('refuses the same line discounted twice in one change', async () => {
+      const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: 10 }] });
+      const lineId = (await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body.lines[0]!.id;
+      const res = await api('PATCH', `/purchase-orders/${created.body.id}`, { lineDiscounts: [{ lineId, discountPercent: 15 }, { lineId, discountPercent: 0 }] });
+      expect(res.status).toBe(400);
+    });
+
     it('refuses a discount over 100% or with more than 2 decimals', async () => {
       for (const discountPercent of [101, -1, 10.005]) {
         const res = await api('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: 1, discountPercent }] });

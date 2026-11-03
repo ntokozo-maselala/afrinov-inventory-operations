@@ -13,7 +13,7 @@ import type { jsPDF } from 'jspdf';
 import { triggerDownload } from '../api/exportReport';
 import { drawLogo, pdfText } from './pdf';
 import { formatDate, formatNumber } from './format';
-import { discountedUnitPrice, formatMoney, formatRate, type PoTotals } from './poMoney';
+import { discountedUnitPrice, formatMoney, formatRate, formatUnitPrice, type PoTotals } from './poMoney';
 
 export interface PoDocumentLine {
   material: { sku: string; name: string; unitOfMeasure: string };
@@ -209,8 +209,9 @@ export function documentLines(po: PoDocumentOrder): string[][] {
     String(i + 1),
     l.material.unitOfMeasure,
     `${l.material.sku}  ${l.material.name}`,
-    // The template has no discount column: the price the supplier is paid.
-    money(discountedUnitPrice(l)),
+    // The template has no discount column: the price the supplier is paid,
+    // to as many places as it has (up to 4), so it times the quantity gives the subtotal.
+    l.unitPrice === null || l.unitPrice === undefined ? dash : formatUnitPrice(discountedUnitPrice(l), currency),
     formatNumber(Number(l.orderedQty)),
     l.deliveryDate ?? po.expectedDeliveryDate ? formatDate((l.deliveryDate ?? po.expectedDeliveryDate)!) : dash,
     money(l.subtotal),

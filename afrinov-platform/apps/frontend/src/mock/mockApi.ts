@@ -1441,7 +1441,18 @@ function route(method: string, path: string, body?: unknown): unknown {
       line.deliveryDate = ld.deliveryDate;
     }
     Object.assign(po, poDetails(b));
-    if (po.status === 'APPROVED' && snapshot(po) !== before) po.revision = (po.revision ?? 0) + 1;
+    if (po.status === 'APPROVED' && snapshot(po) !== before) {
+      po.revision = (po.revision ?? 0) + 1;
+      // As the server: a new price, discount or VAT rate that takes the order past
+      // its approver's limit (or leaves a line unpriced) sends it back for approval,
+      // without the approved small print. The mock's approver is the signed-in user.
+      if (b.linePrices?.length || b.lineDiscounts?.length || b.vatRate !== undefined) {
+        const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
+        const limit = mockUsers.find((u) => u.id === 'user-1')?.approvalLimit ?? null;
+        const within = limit == null || ((po.currency ?? 'ZAR') === 'ZAR' && Number(totals.net) <= Number(limit));
+        if (totals.unpricedLines > 0 || !within) Object.assign(po, { status: 'PENDING_APPROVAL', approvedAt: null, approvedBy: null, printedTerms: null });
+      }
+    }
     po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'UPDATE', actorId: 'u-admin', before: null, after: b as Record<string, unknown>, createdAt: new Date().toISOString() });
     return po;

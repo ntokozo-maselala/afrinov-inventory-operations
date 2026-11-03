@@ -64,8 +64,8 @@ interface DraftLine { key: number; materialId: string; orderedQty: string; unitP
 let nextLineKey = 1;
 const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', orderedQty: '', unitPrice: '', discountPercent: '', deliveryDate: '' });
 
-/** A discount is blank (none) or 0–100%, to 2 places. */
-const badDiscount = (v: string) => v.trim() !== '' && !(Number(v) >= 0 && Number(v) <= 100 && Math.round(Number(v) * 100) === Number(v) * 100);
+/** A discount is blank (none) or 0–100%, to 2 places, read from the digits typed. */
+const badDiscount = (v: string) => v.trim() !== '' && !(/^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) <= 100);
 
 /** One opening of the new-item drawer: the line it is for, and which opening it is. */
 interface NewItemSession { key: number; session: number }

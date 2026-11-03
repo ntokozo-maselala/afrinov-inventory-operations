@@ -124,6 +124,12 @@ describe('documentLines', () => {
     expect(line![3]).toMatch(/^R\s10,00$/);
     expect(line![8]).toMatch(/^R\s115,00$/);
   });
+
+  it('keeps the places of a discounted price, so it agrees with the subtotal', () => {
+    // 12.50 less 12.5% = 10.9375; at 10.94, three would be 32.82, not the 32.81 charged.
+    const [line] = documentLines(order({ lines: [{ ...order().lines[0]!, orderedQty: '3', discountPercent: '12.5', subtotal: '32.81', vat: '4.92', net: '37.73' }] }));
+    expect(line![3]).toMatch(/^R\s10,9375$/);
+  });
 });
 
 describe('buildPoDocument', () => {

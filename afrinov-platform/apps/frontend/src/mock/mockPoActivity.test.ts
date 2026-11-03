@@ -54,3 +54,30 @@ describe('mock: small print kept on approval', () => {
     }
   });
 });
+
+// As the server: a change to the money on an approved order that takes it past
+// its approver's limit sends it back for approval.
+describe('mock: discount changes on an approved order', () => {
+  type Order = { id: string; status: string; revision?: number; approvedBy?: unknown; printedTerms?: unknown; lines: Array<{ id: string }> };
+
+  async function approvedAt(limit: number, discountPercent: number) {
+    await api.patch('/users/user-1', { approvalLimit: limit });
+    const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', vatRate: 0, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 10, discountPercent }] });
+    await api.post(`/purchase-orders/${po.id}/submit`, {});
+    return api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
+  }
+
+  it('goes back for approval when a smaller discount takes it over the limit', async () => {
+    const po = await approvedAt(95, 10); // 90.00, within 95
+    const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 0 }] });
+    expect(after).toMatchObject({ status: 'PENDING_APPROVAL', approvedBy: null, printedTerms: null });
+  });
+
+  it('stays approved, at a new revision, when the change keeps it within the limit', async () => {
+    const po = await approvedAt(95, 10);
+    const revision = po.revision ?? 0;
+    const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 20 }] });
+    expect(after.status).toBe('APPROVED');
+    expect(after.revision).toBe(revision + 1);
+  });
+});

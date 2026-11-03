@@ -169,6 +169,28 @@ describe('line discounts', () => {
     })));
   });
 
+  it('takes a two-place discount that floating point gets wrong, such as 4.35%', async () => {
+    appAt('/purchase-orders/new');
+    await screen.findByRole('heading', { name: 'New purchase order' });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '4.35' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
+      lines: [expect.objectContaining({ discountPercent: 4.35 })],
+    })));
+  });
+
+  it('takes 0.29% on Edit', async () => {
+    appAt('/purchase-orders/po-1/edit');
+    fireEvent.change(await screen.findByLabelText('DISC-115 discount percent'), { target: { value: '0.29' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
+    expect((mockPatch.mock.calls[0]![1] as Record<string, unknown>).lineDiscounts).toEqual([{ lineId: 'l-1', discountPercent: 0.29 }]);
+  });
+
   it('refuses a discount over 100%', async () => {
     appAt('/purchase-orders/new');
     await screen.findByRole('heading', { name: 'New purchase order' });
