@@ -110,10 +110,11 @@ export function computeMonthEnd(
   const consumption = data.consumption(from, to);
   const skuToId = new Map(data.materials.map((x) => [x.sku, x.id]));
 
-  const itemOf = (x: MockMaterial, holders: string[], project: string | null): MonthEndItem => {
+  // A project's line has no Required Stock, as the server reports it.
+  const itemOf = (x: MockMaterial, holders: string[], project: string | null, forProject = false): MonthEndItem => {
     const rows = held(x.id, holders);
     const current = round4(rows.reduce((a, r) => a + r.quantity, 0));
-    const required = Number(x.requiredStock);
+    const required = forProject ? 0 : Number(x.requiredStock);
     const unitCost = x.unitCost === undefined || x.unitCost === null ? null : Number(x.unitCost);
     const owned = round4(current + (holders.includes('') ? onLoan(x.id) : 0));
     const s = classifyItem(owned, required, data.bands);
@@ -147,7 +148,7 @@ export function computeMonthEnd(
           byProject.set(project, [...(byProject.get(project) ?? []), h]);
         }
         if (byProject.size === 0 && x.category === 'PROJECT_MATERIAL' && x.active) byProject.set(x.projectNumber ?? '', ['']);
-        for (const [project, holders] of byProject) items.push(itemOf(x, holders, project || null));
+        for (const [project, holders] of byProject) items.push(itemOf(x, holders, project || null, true));
       }
       items.sort((a, b) => (a.project ?? '\uffff').localeCompare(b.project ?? '\uffff')
         || a.sku.localeCompare(b.sku, undefined, { numeric: true }));

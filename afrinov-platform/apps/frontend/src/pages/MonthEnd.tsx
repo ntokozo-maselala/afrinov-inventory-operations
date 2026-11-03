@@ -27,11 +27,14 @@ export function lastMonth(today = new Date()): { from: string; to: string } {
 
 /** Show the chosen period's category overview and export action; the dates live in the address, as on Movements. */
 /** A project's status as the by-project table shows it. */
-/** How many closed projects still held stock: a completed or cancelled project's leftovers move to Stores. */
+/**
+ * How many closed projects still held stock. Only leftovers move to Stores;
+ * stock held for a project is used or moved first (Qodo, PR #143).
+ */
 function leftoverNote(projects: Array<{ projectNumber: string | null; status: string | null; itemsInStock: number }>): string {
   const waiting = projects.filter((p) => p.projectNumber && (p.status === 'COMPLETED' || p.status === 'CANCELLED') && p.itemsInStock > 0).length;
   if (waiting === 0) return "A completed or cancelled project's leftovers move to Stores.";
-  return `${waiting} completed or cancelled project${waiting === 1 ? ' still holds' : 's still hold'} leftovers, to move to Stores.`;
+  return `${waiting} completed or cancelled project${waiting === 1 ? ' still holds' : 's still hold'} stock in the store: leftovers move to Stores from Project leftovers.`;
 }
 
 const PROJECT_STATUS: Record<string, string> = {
@@ -134,11 +137,11 @@ export function MonthEnd() {
           </table>
         </section>
       )}
-      {/* Project material goes straight to site: only projects with some still in the store, received before, are listed. */}
+      {/* Only projects with some material in the store are listed: received against their orders, or left from before. */}
       {r && heldProjects.length > 0 && (
         <section aria-labelledby="month-end-projects" className="surface-card overflow-x-auto mt-4">
           <h2 id="month-end-projects" className="text-h3 text-surface-900 px-4 pt-3">Project material still in the store</h2>
-          <p className="text-meta px-4">At the end of the period: received before project material went straight to site. {leftoverNote(heldProjects)}</p>
+          <p className="text-meta px-4">At the end of the period: received against each project&rsquo;s orders and held for it, or left in the store from before. {leftoverNote(heldProjects)}</p>
           <table className="table">
             <thead>
               <tr>

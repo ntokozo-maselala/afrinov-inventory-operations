@@ -76,21 +76,37 @@ describe('a project order’s delivery', () => {
   });
 
   // Qodo, PR #143: a confirmed delivery went to site, not into the store.
-  it('dates an order finished by Confirm delivery as delivered to site, and a received one as received', async () => {
+  describe('the date it was delivered', () => {
     const delivered = { ...ORDER, status: 'RECEIVED', deliveredAt: '2026-10-28T09:00:00Z', deliveredBy: { name: 'Thandi Buyer' } };
-    mockGet.mockImplementation(async (path: string) => {
+    const withHistory = (history: unknown[]) => mockGet.mockImplementation(async (path: string) => {
       if (path === '/purchase-orders/po-1') return delivered;
-      if (path === '/purchase-orders/po-1/history') return [CONFIRMED_BEFORE];
+      if (path === '/purchase-orders/po-1/history') return history;
       return [];
     });
-    const first = page();
-    expect(await screen.findByText('Delivered to site')).toBeInTheDocument();
-    first.unmount();
-
-    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/po-1' ? delivered : []));
-    page();
     // The status reads Received too; this is the date's label.
-    expect((await screen.findAllByText('Received')).some((e) => e.tagName === 'DT')).toBe(true);
-    expect(screen.queryByText('Delivered to site')).not.toBeInTheDocument();
+    const dateLabel = async () => {
+      await screen.findByText('Door rail');
+      return screen.getAllByText(/^(Received|Delivered to site)$/).find((e) => e.tagName === 'DT')?.textContent;
+    };
+
+    it('reads delivered to site when Confirm delivery finished the order', async () => {
+      withHistory([{ ...CONFIRMED_BEFORE, after: { status: 'RECEIVED' } }]);
+      page();
+      await waitFor(async () => expect(await dateLabel()).toBe('Delivered to site'));
+    });
+
+    // Qodo, PR #143: the store's receipt set the date, not the earlier confirmation.
+    it('reads received when a delivery partly confirmed on site was finished by a receipt', async () => {
+      withHistory([CONFIRMED_BEFORE]);
+      page();
+      await screen.findByText(/Delivery confirmed on site/);
+      expect(await dateLabel()).toBe('Received');
+    });
+
+    it('reads received for an order the store received', async () => {
+      withHistory([]);
+      page();
+      expect(await dateLabel()).toBe('Received');
+    });
   });
 });

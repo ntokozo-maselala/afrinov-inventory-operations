@@ -148,7 +148,7 @@ describe('MonthEndService.report', () => {
       { ...material('BEAM', { category: 'PROJECT_MATERIAL', requiredStock: new Prisma.Decimal(0) }), sku: 'PRJ-BEAM', projectNumber: 'AFRI-1325', project: { name: 'Plant upgrade', status: 'ACTIVE' } },
     ]);
     mocks.balances.mockResolvedValue([
-      balance('1', 2), balance('1', 50, 'b', 'AFRI-1402'),
+      balance('1', 2), balance('1', 2, 'b', 'AFRI-1402'),
       balance('BEAM', 3), balance('BEAM', 4, 'a', 'AFRI-1325'), balance('BEAM', 6, 'b', 'AFRI-1402'),
     ]);
     mocks.projects.mockResolvedValue([{ projectNumber: 'AFRI-1402', name: 'Door rails', status: 'ACTIVE' }]);
@@ -160,13 +160,17 @@ describe('MonthEndService.report', () => {
     // the Stores item bought for AFRI-1402 is that project's material.
     expect(report.categories[1]!.items.map((i) => [i.sku, i.project, i.location, i.currentStock])).toEqual([
       ['PRJ-BEAM', 'AFRI-1325', 'A-1', 7],
-      ['CON-1', 'AFRI-1402', 'B-2', 50],
+      ['CON-1', 'AFRI-1402', 'B-2', 2],
       ['PRJ-BEAM', 'AFRI-1402', 'B-2', 6],
     ]);
     expect(report.projects).toEqual([
       { projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 14 },
-      { projectNumber: 'AFRI-1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 112 },
+      { projectNumber: 'AFRI-1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 16 },
     ]);
+    // Required Stock is the store's measure: 2 of the Stores item's 10, held for a
+    // project, raises no status or re-order (Qodo, PR #143).
+    expect(report.categories[1]!.items.find((i) => i.sku === 'CON-1')).toMatchObject({ requiredStock: 0, status: 'NOT_SET', percentOfRequired: null, reorderQuantity: null });
+    expect(report.categories[1]).toMatchObject({ urgent: 0, warning: 0 });
     expect(mocks.projects).toHaveBeenCalledWith(expect.objectContaining({ where: { projectNumber: { in: ['AFRI-1402'] } } }));
   });
 

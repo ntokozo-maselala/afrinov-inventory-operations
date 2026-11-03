@@ -191,11 +191,15 @@ export const MonthEndService = {
     const skuToId = new Map(materials.map((m) => [m.sku, m.id]));
     type Mat = (typeof materials)[number];
 
-    /** One report line: the item's stock with the given holders, for the given project. */
-    const itemOf = (m: Mat, holders: string[], project: string | null): MonthEndItem => {
+    /**
+     * One report line: the item's stock with the given holders, for the given
+     * project. A project's line has no Required Stock: that is the store's
+     * measure, so its stock raises no status or re-order (Qodo, PR #143).
+     */
+    const itemOf = (m: Mat, holders: string[], project: string | null, forProject = false): MonthEndItem => {
       const places = placesOf(held.get(m.id), holders);
       const current = round4(places.reduce((a, r) => a + r.quantity, 0));
-      const required = Number(m.requiredStock);
+      const required = forProject ? 0 : Number(m.requiredStock);
       const unitCost = m.unitCost === null ? null : Number(m.unitCost);
       // Current Stock is what is on the shelf; a tool out on loan (Stores stock) still counts as owned.
       const owned = round4(current + (holders.includes(STORES) ? Number(onLoan.get(m.id) ?? 0) : 0));
@@ -240,7 +244,7 @@ export const MonthEndService = {
             byProject.set(project, [...(byProject.get(project) ?? []), h]);
           }
           if (byProject.size === 0 && m.category === 'PROJECT_MATERIAL' && m.active) byProject.set(m.projectNumber ?? '', [STORES]);
-          for (const [project, holders] of byProject) items.push(itemOf(m, holders, project || null));
+          for (const [project, holders] of byProject) items.push(itemOf(m, holders, project || null, true));
         }
         // Project by project, those with no project last.
         items.sort((a, b) => (a.project ?? '￿').localeCompare(b.project ?? '￿')
