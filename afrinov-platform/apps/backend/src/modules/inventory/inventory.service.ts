@@ -13,7 +13,7 @@ import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
-import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
+import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
@@ -26,6 +26,8 @@ export interface IssueLine {
   materialId: string;
   locationId: string;
   quantity: number | string | Decimal;
+  /** The stock it takes: held for the issue's project, or Stores stock (null or left out). */
+  heldForProject?: string | null;
 }
 
 // One entry at the store counter: one recipient, optionally one project, and
@@ -42,6 +44,8 @@ export interface TransferInput {
   fromLocationId: string;
   toLocationId: string;
   quantity: number | string | Decimal;
+  /** Whose stock moves: a project's, kept at both ends, or Stores stock (null or left out). */
+  heldForProject?: string | null;
   actorId: string;
 }
 
@@ -53,6 +57,8 @@ export interface AdjustmentInput {
   reasonNote?: string;
   /** Who was responsible (damage, loss or scrap only); naming someone needs a note saying what happened. */
   recipientId?: string | null;
+  /** Whose stock is adjusted: a project's, or Stores stock (null or left out). */
+  heldForProject?: string | null;
   actorId: string;
 }
 
@@ -122,6 +128,11 @@ async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.Transac
   if (p.status === 'COMPLETED' || p.status === 'CANCELLED') {
     throw Errors.validation(`Project ${projectNumber} is ${p.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
   }
+}
+
+/** Stock can be held only for a project that exists (the ledger's foreign key, said plainly). */
+async function checkProjectExists(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+  if (!(await tx.project.findUnique({ where: { projectNumber }, select: { projectNumber: true } }))) throw Errors.notFound('Project');
 }
 
 
@@ -809,19 +820,19 @@ export const InventoryService = {
   async issue(input: IssueInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[] }> {
     if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
-    const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, qty: toDecimal(l.quantity) }));
+    const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, heldForProject: l.heldForProject ?? null, qty: toDecimal(l.quantity) }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Issue quantity must be positive');
 
-    // The same item from the same location on two lines is checked as one total.
-    // Issues take Stores stock: leftovers are still Stores stock with a project
-    // on the item, and taking a project's own stock comes with receiving it
-    // (Project Material Through the Store Roadmap, Phase 3).
-    const totals = new Map<string, { materialId: string; locationId: string; heldForProject: null; qty: Decimal }>();
+    // Each line takes the stock it names: Stores stock, or the stock held for
+    // the issue's project (Project Material Through the Store Roadmap, Phase 3).
+    // Leftovers are Stores stock with their project on the item. The same stock
+    // on two lines is checked as one total.
+    const totals = new Map<string, { materialId: string; locationId: string; heldForProject: string | null; qty: Decimal }>();
     for (const l of lines) {
-      const key = `${l.materialId}|${l.locationId}`;
+      const key = `${l.materialId}|${l.locationId}|${l.heldForProject ?? ''}`;
       const t = totals.get(key);
       if (t) t.qty = t.qty.plus(l.qty);
-      else totals.set(key, { materialId: l.materialId, locationId: l.locationId, heldForProject: null, qty: l.qty });
+      else totals.set(key, { materialId: l.materialId, locationId: l.locationId, heldForProject: l.heldForProject, qty: l.qty });
     }
 
     return inTx(within, async (tx) => {
@@ -834,10 +845,23 @@ export const InventoryService = {
         if (materials.has(t.materialId)) continue;
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
-        refuseUnassigned(material);
         materials.set(t.materialId, material);
       }
-      checkProjectMaterial(input.projectNumber, [...materials.values()]);
+      // A project's own stock goes to that project only.
+      for (const t of totals.values()) {
+        if (t.heldForProject && t.heldForProject !== (input.projectNumber ?? null)) {
+          const sku = materials.get(t.materialId)!.sku;
+          throw Errors.validation(input.projectNumber
+            ? `${sku} at this location is held for project ${t.heldForProject}, so it can't be issued to project ${input.projectNumber}.`
+            : `${sku} at this location is held for project ${t.heldForProject}: issue it to that project.`);
+        }
+      }
+      // Stores stock follows the item's rules: a leftover goes to its item's
+      // project, and a Projects item with no project isn't issued. Stock held
+      // for a project is that project's, whatever the item says.
+      const fromStores = [...new Set([...totals.values()].filter((t) => !t.heldForProject).map((t) => t.materialId))].map((id) => materials.get(id)!);
+      for (const material of fromStores) refuseUnassigned(material);
+      checkProjectMaterial(input.projectNumber, fromStores);
 
       for (const t of totals.values()) {
         const material = materials.get(t.materialId)!;
@@ -865,6 +889,7 @@ export const InventoryService = {
             postedAt,
             materialId: l.materialId,
             locationId: l.locationId,
+            heldForProject: l.heldForProject,
             type: InventoryTransactionType.ISSUE,
             quantity: l.qty.negated(),
             actorId: input.actorId,
@@ -1004,12 +1029,15 @@ export const InventoryService = {
       throw Errors.validation('Source and destination locations must differ');
     }
 
-    // Stores stock moves between locations; a project's moves with Phase 3.
-    const from = storesStock(input.materialId, input.fromLocationId);
-    const to = storesStock(input.materialId, input.toLocationId);
+    // The stock keeps its project as it moves: Stores stock stays Stores stock,
+    // a project's stays that project's (Project Material Through the Store Roadmap, Phase 3).
+    const heldForProject = input.heldForProject ?? null;
+    const from = { materialId: input.materialId, locationId: input.fromLocationId, heldForProject };
+    const to = { materialId: input.materialId, locationId: input.toLocationId, heldForProject };
     return inTx(within, async (tx) => {
       await lockInventoryBalances([from, to], tx);
       await checkMaterialActive(input.materialId, tx);
+      if (heldForProject) await checkProjectExists(heldForProject, tx);
       await checkLocationActive(input.fromLocationId, tx);
       await checkLocationActive(input.toLocationId, tx);
 
@@ -1025,6 +1053,7 @@ export const InventoryService = {
         data: {
           materialId: input.materialId,
           locationId: input.fromLocationId,
+          heldForProject,
           type: InventoryTransactionType.TRANSFER_OUT,
           quantity: qty.negated(),
           actorId: input.actorId,
@@ -1035,6 +1064,7 @@ export const InventoryService = {
         data: {
           materialId: input.materialId,
           locationId: input.toLocationId,
+          heldForProject,
           type: InventoryTransactionType.TRANSFER_IN,
           quantity: qty,
           actorId: input.actorId,
@@ -1072,11 +1102,14 @@ export const InventoryService = {
       if (!input.reasonNote?.trim()) throw Errors.validation('Say what happened when naming who was responsible.');
     }
 
-    const stock = storesStock(input.materialId, input.locationId);
+    // Stores stock, or a project's own (Project Material Through the Store Roadmap, Phase 3).
+    const heldForProject = input.heldForProject ?? null;
+    const stock = { materialId: input.materialId, locationId: input.locationId, heldForProject };
     return inTx(within, async (tx) => {
       await lockInventoryBalances([stock], tx);
       await checkMaterialActive(input.materialId, tx);
       await checkLocationActive(input.locationId, tx);
+      if (heldForProject) await checkProjectExists(heldForProject, tx);
       if (input.recipientId) await checkRecipientActive(input.recipientId, tx);
 
       // See issue(): stock can never go below zero.
@@ -1094,6 +1127,7 @@ export const InventoryService = {
         data: {
           materialId: input.materialId,
           locationId: input.locationId,
+          heldForProject,
           type: InventoryTransactionType.ADJUSTMENT,
           quantity: qty,
           reasonCode: input.reasonCode,

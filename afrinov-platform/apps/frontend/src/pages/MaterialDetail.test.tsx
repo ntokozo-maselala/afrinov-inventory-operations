@@ -212,13 +212,13 @@ describe('MaterialDetail Projects item received for a project', () => {
     expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
   });
 
-  // Qodo, PR #143: Issue and Check out act on Stores stock, and the page says
-  // the store holds project material.
-  it('offers no Issue for stock held for a project only, and says the store holds it', async () => {
-    material = { ...material, projectNumber: 'AFRI-1325' };
+  // Project Material Through the Store Roadmap, Phase 3: stock held for a
+  // project is issued to it, even when the item has no project of its own; the
+  // page says the store holds project material (Qodo, PR #143).
+  it('offers Issue for stock held for a project, and says the store holds it', async () => {
     renderPage();
     await screen.findByRole('table', { name: 'In the store for projects' });
-    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Issue' })).toHaveAttribute('href', '/stock/issue?materialId=m-1');
     expect(screen.getByText(/The store receives it against that order and holds it for that project./)).toBeInTheDocument();
     expect(screen.queryByText(/was received before/)).not.toBeInTheDocument();
   });

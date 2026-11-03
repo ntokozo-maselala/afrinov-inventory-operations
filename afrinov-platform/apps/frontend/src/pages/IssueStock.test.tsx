@@ -78,8 +78,8 @@ describe('IssueStock page', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/inventory-issues', {
       recipientId: 'r-1',
       lines: [
-        { materialId: 'm-1', locationId: 'l-1', quantity: 3 },
-        { materialId: 'm-2', locationId: 'l-1', quantity: 2 },
+        { materialId: 'm-1', locationId: 'l-1', quantity: 3, heldForProject: null },
+        { materialId: 'm-2', locationId: 'l-1', quantity: 2, heldForProject: null },
       ],
     }, expect.any(Object)));
 
@@ -156,18 +156,33 @@ describe('IssueStock page', () => {
     expect(screen.getByLabelText('Item 2')).toHaveFocus();
   });
 
-  // Qodo, PR #142: issues take Stores stock, so a balance held for a project at
-  // the same item and location is neither offered nor counted as available.
-  it('offers only Stores stock, not stock held for a project at the same place', async () => {
+  // Project Material Through the Store Roadmap, Phase 3 (and Qodo, PR #142): a
+  // balance held for a project at the same item and location is its own line,
+  // with its own quantity, and goes to that project.
+  it('offers stock held for a project apart from Stores stock at the same place, and issues it to that project', async () => {
     mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock')
       ? [...STOCK, { ...STOCK[0]!, heldForProject: 'AFRI-1325', quantity: '50' }]
       : respond(path)));
+    mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1'] });
     renderPage();
     await ready();
+    fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
     fireEvent.focus(screen.getByLabelText('Item 1'));
     const discs = screen.getAllByRole('option', { name: /DISC-115/ });
-    expect(discs).toHaveLength(1);
-    expect(discs[0]).toHaveTextContent('10 each on hand');
+    expect(discs.map((o) => o.textContent)).toEqual([expect.stringContaining('10 each on hand'), expect.stringContaining('50 each on hand')]);
+    expect(discs[1]).toHaveTextContent('A-1 · held for AFRI-1325');
+
+    fireEvent.mouseDown(discs[1]!);
+    expect(screen.getByLabelText(/Project/)).toHaveValue('AFRI-1325');
+    expect(screen.getByLabelText(/Project/)).toBeDisabled();
+    expect(screen.getByText('Held for AFRI-1325 at A-1: 50 each')).toBeInTheDocument();
+    fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/inventory-issues', {
+      recipientId: 'r-1',
+      projectNumber: 'AFRI-1325',
+      lines: [{ materialId: 'm-1', locationId: 'l-1', quantity: 20, heldForProject: 'AFRI-1325' }],
+    }, expect.any(Object)));
   });
 
   it('says when recipients cannot be loaded instead of showing an empty list', async () => {
@@ -277,8 +292,31 @@ describe('IssueStock with project material', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/inventory-issues', {
       recipientId: 'r-1',
       projectNumber: 'AFRI-1325',
-      lines: [{ materialId: 'p-1', locationId: 'l-1', quantity: 2 }],
+      lines: [{ materialId: 'p-1', locationId: 'l-1', quantity: 2, heldForProject: null }],
     }, expect.any(Object)));
+  });
+
+  // Project Material Through the Store Roadmap, Phase 3: what was received for
+  // the project, beside its leftovers; never another project's stock.
+  it('offers the chosen project\'s held stock beside its leftovers, and not another project\'s', async () => {
+    const held = (n: string, holder: string, quantity: string) => ({ ...pipe(n, `HELD-${n}`, ''), projectNumber: null, project: null, heldForProject: holder, quantity });
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock')
+      ? [...stock, held('4', 'AFRI-1325', '8'), held('5', 'P-42', '3')]
+      : path.startsWith('/projects') ? [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE' }, { projectNumber: 'P-42', name: 'Boiler', status: 'PLANNING' }]
+        : respond(path)));
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'AFRI-1325' } });
+    fireEvent.focus(screen.getByLabelText('Item 1'));
+    expect(screen.getAllByRole('option', { name: /on hand/ }).map((o) => o.textContent)).toEqual([
+      expect.stringContaining('PIPE-1325'),
+      expect.stringContaining('HELD-4'),
+    ]);
+    expect(screen.queryByRole('option', { name: /HELD-5/ })).not.toBeInTheDocument();
+    // More than is held for the project is flagged before sending.
+    choose('Item 1', 'HELD-4');
+    fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '9' } });
+    expect(screen.getByText('More than on hand')).toBeInTheDocument();
   });
 
   it('frees the project again once its material is removed', async () => {

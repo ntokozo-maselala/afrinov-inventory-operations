@@ -1,7 +1,7 @@
 // Whose stock a current-stock row is: the store's own (Stores stock), or held
-// for a project (Project Material Through the Store Roadmap, Phase 1). Issuing,
-// counting, transferring and adjusting take Stores stock only until the
-// project's own stock can be moved, so those screens list Stores stock alone.
+// for a project (Project Material Through the Store Roadmap, Phase 1). Issue
+// stock offers a project's own stock to that project (Phase 3); counting,
+// transferring and adjusting on screen take Stores stock only until Phase 4.
 import type { CurrentStockRow } from '../api/types';
 
 /** The store's own stock: held for no project. */

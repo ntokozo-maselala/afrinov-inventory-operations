@@ -77,8 +77,11 @@ export function MaterialDetail() {
   // material came through the store) apart from stock held for a project.
   const leftoverRows = (stock.data ?? []).filter((r) => isStoresStock(r) && Number(r.quantity) > 0);
   const heldRows = (stock.data ?? []).filter((r) => !isStoresStock(r) && Number(r.quantity) > 0);
-  // Issue and Check out act on Stores stock only, so only it offers them (Qodo, PR #143).
+  // Check out lends Stores stock only (Qodo, PR #143). Issue takes Stores stock
+  // or stock held for a project, which goes to that project (Project Material
+  // Through the Store Roadmap, Phase 3).
   const storesTotal = (stock.data ?? []).filter(isStoresStock).reduce((acc, r) => acc + Number(r.quantity), 0);
+  const issuable = !!material.data && ((storesTotal > 0 && !needsProject(material.data)) || heldRows.length > 0);
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;
@@ -127,7 +130,7 @@ export function MaterialDetail() {
             {/* Any active item: a Projects item's project is chosen on the order (Project on the Order Roadmap, Phase 2). */}
             {active && canOrder && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
             {active && storesTotal > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
-            {active && storesTotal > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
+            {active && issuable && !isTool && canIssue && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
               ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
               : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}

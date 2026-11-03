@@ -1597,7 +1597,8 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
 
   if (method === 'POST' && p === '/inventory-issues') {
-    for (const l of (body as IssueBody)?.lines ?? []) refuseUnassigned(l.materialId);
+    // As the server: a Projects item with no project isn't issued from Stores stock.
+    for (const l of (body as IssueBody)?.lines ?? []) if (!l.heldForProject) refuseUnassigned(l.materialId);
     return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'GET' && p === '/tools') return listTools();
@@ -1608,7 +1609,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   const loanHistoryMatch = p.match(/^\/tools\/loans\/([^/]+)\/history$/);
   if (method === 'GET' && loanHistoryMatch) return loanHistory(decodeURIComponent(loanHistoryMatch[1]!));
   if (method === 'POST' && p === '/inventory-transfers') {
-    const b = body as { materialId: string; fromLocationId: string; toLocationId: string; quantity: number };
+    const b = body as Parameters<typeof handleTransfer>[0];
     return handleTransfer(b);
   }
   if (method === 'GET' && p === '/inventory-issues') return listIssueSlips(qs);
@@ -2123,7 +2124,8 @@ function handleStockItemCreate(b: {
 interface IssueBody {
   recipientId?: string;
   projectNumber?: string;
-  lines?: Array<{ materialId: string; locationId: string; quantity: number }>;
+  /** Each line takes Stores stock, or the stock held for the issue's project. */
+  lines?: Array<{ materialId: string; locationId: string; quantity: number; heldForProject?: string | null }>;
 }
 /** Posts a goods receipt into stock and credits its order's lines. */
 function handleReceiptPost(gr: MockGoodsReceipt): void {
@@ -2188,20 +2190,30 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
       throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
     }
   }
-  checkProjectMaterial(b.projectNumber, lines.map((l) => l.materialId));
-  const totals = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+  // As the server: a project's own stock goes to that project only; Stores
+  // stock follows the item's rules (Project Material Through the Store Roadmap, Phase 3).
   for (const l of lines) {
-    const key = `${l.materialId}|${l.locationId}`;
+    if (l.heldForProject && l.heldForProject !== (b.projectNumber ?? null)) {
+      const sku = findMaterial(l.materialId)?.sku;
+      throw err('VALIDATION_ERROR', b.projectNumber
+        ? `${sku} at this location is held for project ${l.heldForProject}, so it can't be issued to project ${b.projectNumber}.`
+        : `${sku} at this location is held for project ${l.heldForProject}: issue it to that project.`);
+    }
+  }
+  checkProjectMaterial(b.projectNumber, lines.filter((l) => !l.heldForProject).map((l) => l.materialId));
+  const totals = new Map<string, { materialId: string; locationId: string; heldForProject: string | null; quantity: number }>();
+  for (const l of lines) {
+    const key = `${l.materialId}|${l.locationId}|${l.heldForProject ?? ''}`;
     const t = totals.get(key);
     if (t) t.quantity += l.quantity;
-    else totals.set(key, { ...l });
+    else totals.set(key, { ...l, heldForProject: l.heldForProject ?? null });
   }
   for (const t of totals.values()) {
     const material = findMaterial(t.materialId);
     if (!material) throw err('NOT_FOUND', 'Material not found');
     if (material.category === 'TOOLS') throw err('VALIDATION_ERROR', `${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
     if (!findLocation(t.locationId)) throw err('NOT_FOUND', 'Location not found');
-    const balance = getBalance(t.materialId, t.locationId);
+    const balance = getBalance(t.materialId, t.locationId, t.heldForProject);
     if (balance < t.quantity) {
       throw err('INSUFFICIENT_BALANCE', `Cannot issue ${t.quantity} × ${material.sku}: only ${balance} available.`, {
         requested: t.quantity,
@@ -2222,6 +2234,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
         type: 'ISSUE',
         materialId: l.materialId,
         locationId: l.locationId,
+        heldForProject: l.heldForProject ?? undefined,
         quantity: String(-l.quantity),
         actorId: 'user-1',
         recipientId: b.recipientId,
@@ -2500,13 +2513,16 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
   return { returnIds, writeOffIds };
 }
 
-function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number }): { outTransactionId: string; inTransactionId: string } {
+function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number; heldForProject?: string | null }): { outTransactionId: string; inTransactionId: string } {
   if (!b.materialId || !b.fromLocationId || !b.toLocationId || !(b.quantity > 0)) {
     throw err('VALIDATION_ERROR', 'Invalid transfer payload');
   }
   if (b.fromLocationId === b.toLocationId) throw err('VALIDATION_ERROR', 'Source and destination must differ');
   if (!findMaterial(b.materialId)) throw err('NOT_FOUND', 'Material not found');
-  const balance = getBalance(b.materialId, b.fromLocationId);
+  // As the server: the stock keeps its project as it moves.
+  const heldForProject = b.heldForProject ?? null;
+  if (heldForProject && !state.projects.some((x) => x.projectNumber === heldForProject)) throw err('NOT_FOUND', 'Project not found');
+  const balance = getBalance(b.materialId, b.fromLocationId, heldForProject);
   if (balance < b.quantity) {
     throw err('INSUFFICIENT_BALANCE', `Cannot transfer ${b.quantity} units: only ${balance} available.`);
   }
@@ -2514,10 +2530,10 @@ function handleTransfer(b: { materialId: string; fromLocationId: string; toLocat
   const inId = nextId('t');
   const postedAt = new Date().toISOString();
   state.transactions.push({
-    id: outId, postedAt, type: 'TRANSFER_OUT', materialId: b.materialId, locationId: b.fromLocationId, quantity: String(-b.quantity), actorId: 'user-1', pairedWithId: inId,
+    id: outId, postedAt, type: 'TRANSFER_OUT', materialId: b.materialId, locationId: b.fromLocationId, heldForProject: heldForProject ?? undefined, quantity: String(-b.quantity), actorId: 'user-1', pairedWithId: inId,
   });
   state.transactions.push({
-    id: inId, postedAt, type: 'TRANSFER_IN', materialId: b.materialId, locationId: b.toLocationId, quantity: String(b.quantity), actorId: 'user-1', pairedWithId: outId,
+    id: inId, postedAt, type: 'TRANSFER_IN', materialId: b.materialId, locationId: b.toLocationId, heldForProject: heldForProject ?? undefined, quantity: String(b.quantity), actorId: 'user-1', pairedWithId: outId,
   });
   return { outTransactionId: outId, inTransactionId: inId };
 }
@@ -2645,7 +2661,7 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
 const RESPONSIBLE_REASONS = new Set<string>(['DAMAGE', 'LOSS', 'SCRAP']);
 
 // Mirrors InventoryService.adjust, with who was responsible for damage, loss or scrap.
-function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string; recipientId?: string | null }): { transactionId: string } {
+function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string; recipientId?: string | null; heldForProject?: string | null }): { transactionId: string } {
   if (!b.materialId || !b.locationId || !b.reasonCode) throw err('VALIDATION_ERROR', 'Invalid adjustment payload');
   if (b.quantity === 0) throw err('VALIDATION_ERROR', 'Quantity must be non-zero');
   if (b.recipientId) {
@@ -2655,7 +2671,10 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
     if (!r) throw err('NOT_FOUND', 'Recipient not found');
     if (!r.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
   }
-  const balance = getBalance(b.materialId, b.locationId);
+  // As the server: Stores stock, or a project's own.
+  const heldForProject = b.heldForProject ?? null;
+  if (heldForProject && !state.projects.some((x) => x.projectNumber === heldForProject)) throw err('NOT_FOUND', 'Project not found');
+  const balance = getBalance(b.materialId, b.locationId, heldForProject);
   if (b.quantity < 0 && balance < -b.quantity) {
     throw err('INSUFFICIENT_BALANCE', `Cannot adjust ${b.quantity} units: only ${balance} available.`);
   }
@@ -2666,6 +2685,7 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
     type: 'ADJUSTMENT',
     materialId: b.materialId,
     locationId: b.locationId,
+    heldForProject: heldForProject ?? undefined,
     quantity: String(b.quantity),
     actorId: 'user-1',
     reasonCode: b.reasonCode,

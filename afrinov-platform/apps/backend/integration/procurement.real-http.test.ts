@@ -980,6 +980,96 @@ describe('receiving stock over real HTTP', () => {
         expect((await api<Lined>('GET', `/purchase-orders/${order.id}`)).body.status).toBe('PARTIALLY_RECEIVED');
       });
 
+      // Project Material Through the Store Roadmap, Phase 3: a project's own
+      // stock goes to that project only, from the stock each line names.
+      describe("issuing and moving a project's own stock", () => {
+        let recipientId: string;
+        let looseId: string;
+        const other = `IT-SO-OTHER-${run}`;
+
+        beforeAll(async () => {
+          const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT project fitter ${run}`, type: 'WORKER' });
+          expect(rcp.status).toBe(201);
+          recipientId = rcp.body.id;
+          expect((await api('POST', '/projects', { projectNumber: other, name: `IT other project ${run}` })).status).toBe(201);
+          // A Projects item with no project of its own: the order says whose it is.
+          const loose = await api<{ id: string }>('POST', '/materials', {
+            sku: `IT-SO-LOOSE-${run}`, name: `Integration loose plate ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'M',
+          });
+          expect(loose.status).toBe(200);
+          looseId = loose.body.id;
+        });
+
+        /** Receives 4 of an item for the project into stock held for it. */
+        async function receivedForProject(itemId: string) {
+          const created = await buyer<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber, lines: [{ materialId: itemId, orderedQty: 4, unitPrice: 40 }] });
+          expect(created.status).toBe(201);
+          const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${created.body.id}/submit`);
+          if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${created.body.id}/approve`)).status).toBe(200);
+          expect((await storeman('POST', `/purchase-orders/${created.body.id}/receive`, { locationId })).status).toBe(200);
+        }
+        const issue = (projectFor: string | undefined, heldForProject: string | null, quantity: number) =>
+          storeman<{ transactionIds: string[]; error?: { message: string } }>('POST', '/inventory-issues', {
+            recipientId, projectNumber: projectFor, lines: [{ materialId: looseId, locationId, quantity, heldForProject }],
+          });
+
+        it('issues it to its project only, and a return puts it back', async () => {
+          await receivedForProject(looseId);
+          const before = await ledgerAndBalance(looseId, locationId, projectNumber);
+
+          // Not to another project, nor to none.
+          const toOther = await issue(other, projectNumber, 1);
+          expect(toOther.status).toBe(400);
+          expect(toOther.body.error!.message).toMatch(new RegExp(`held for project ${projectNumber}, so it can't be issued to project ${other}`));
+          expect((await issue(undefined, projectNumber, 1)).status).toBe(400);
+          // Nor taken as Stores stock: an item with no project isn't issued from there.
+          expect((await issue(projectNumber, null, 1)).status).toBe(400);
+          expect(await ledgerAndBalance(looseId, locationId, projectNumber)).toEqual(before);
+
+          // To its project, from its stock, though the item itself has no project.
+          const issued = await issue(projectNumber, projectNumber, 1.5);
+          expect(issued.status).toBe(201);
+          const [movement] = await prisma.inventoryTransaction.findMany({ where: { id: { in: issued.body.transactionIds } } });
+          expect([movement!.heldForProject, movement!.projectNumber, movement!.quantity.toString()]).toEqual([projectNumber, projectNumber, '-1.5']);
+          const after = await ledgerAndBalance(looseId, locationId, projectNumber);
+          expect(Number(before.ledger) - Number(after.ledger)).toBe(1.5);
+          expect(after.balance).toBe(after.ledger);
+          // No more than it holds.
+          expect((await issue(projectNumber, projectNumber, 100)).status).toBe(422);
+
+          // A return goes back to the project's stock.
+          const returned = await storeman('POST', `/inventory-transactions/${issued.body.transactionIds[0]}/returns`, { quantity: 1 });
+          expect(returned.status).toBe(201);
+          expect(Number((await ledgerAndBalance(looseId, locationId, projectNumber)).ledger)).toBe(Number(after.ledger) + 1);
+        });
+
+        it('moves and adjusts it between locations, keeping its project', async () => {
+          await receivedForProject(looseId);
+          const spare = await api<{ id: string }>('POST', '/locations', { name: `IT project shelf ${run}`, type: 'STOREROOM' });
+          expect(spare.status).toBe(201);
+          const stores = await ledgerAndBalance(looseId, locationId);
+
+          const moved = await storeman<{ outTransactionId: string; inTransactionId: string }>('POST', '/inventory-transfers', {
+            materialId: looseId, fromLocationId: locationId, toLocationId: spare.body.id, quantity: 2, heldForProject: projectNumber,
+          });
+          expect(moved.status).toBe(201);
+          const legs = await prisma.inventoryTransaction.findMany({ where: { id: { in: [moved.body.outTransactionId, moved.body.inTransactionId] } } });
+          expect(legs.map((l) => l.heldForProject)).toEqual([projectNumber, projectNumber]);
+          expect((await ledgerAndBalance(looseId, spare.body.id, projectNumber)).balance).toBe('2');
+
+          const adjusted = await storeman('POST', '/inventory-adjustments', {
+            materialId: looseId, locationId: spare.body.id, quantity: -0.5, reasonCode: 'DAMAGE', reasonNote: 'Bent in the rack', heldForProject: projectNumber,
+          });
+          expect(adjusted.status).toBe(201);
+          expect((await ledgerAndBalance(looseId, spare.body.id, projectNumber)).balance).toBe('1.5');
+          // Stores stock never moved, and a project that doesn't exist holds nothing.
+          expect(await ledgerAndBalance(looseId, locationId)).toEqual(stores);
+          expect((await storeman('POST', '/inventory-adjustments', {
+            materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', heldForProject: `IT-NOPE-${run}`,
+          })).status).toBe(404);
+        });
+      });
+
       it("keeps a saved receipt for the store's order from a buyer: not listed, not found, not posted", async () => {
         const store = await approvedOrder(2);
         const saved = await storeman<{ id: string }>('POST', '/goods-receipts', {
