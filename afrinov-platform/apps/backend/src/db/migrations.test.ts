@@ -11,9 +11,14 @@
 // files from disk and greps for the expected DDL. The actual migration
 // runner (`prisma migrate deploy`) is exercised by the integration
 // pipeline against a real Postgres.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+// The settings catalog is read, never the database.
+vi.mock('../shared/db.js', () => ({ prisma: {} }));
+const { SETTING_CATALOG } = await import('../modules/settings/settings.service.js');
+
 
 const MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'migrations');
 
@@ -194,5 +199,25 @@ describe('stock held for a project (project material through the store roadmap, 
     expect(sql).not.toMatch(/^\s*UPDATE\b/im);
     // A project with stock held for it can't be deleted or renumbered under its balances.
     expect(sql).toContain('REFERENCES "projects"("project_number") ON DELETE RESTRICT ON UPDATE RESTRICT');
+  });
+});
+
+// A new setting needs its row on databases that already exist: the seed adds
+// rows only where it runs, and Settings can neither show nor save a setting
+// without one (Project Material Through the Store Roadmap, Phase 4).
+describe('settings rows', () => {
+  // The settings the first seed created, before each new one came with a migration.
+  const SEEDED_FIRST = new Set([
+    'general.companyName', 'general.systemDescription', 'general.defaultCurrency', 'general.dateFormat', 'general.timeFormat',
+    'general.defaultPageSize', 'general.defaultLandingPage',
+    'inventory.defaultUnitOfMeasure', 'inventory.enableStockAlerts', 'purchaseOrders.requireApprovalBeforeProcessing',
+    'purchaseOrders.allowCancellation', 'purchaseOrders.allowEditAfterApproval', 'notifications.enableInAppNotifications',
+    'notifications.enablePurchaseOrderNotifications', 'appearance.theme', 'appearance.density', 'security.sessionTimeoutMinutes',
+  ]);
+
+  it('inserts every setting added since the first seed in a migration', () => {
+    const sql = listMigrations().map(readMigration).join('\n');
+    const missing = SETTING_CATALOG.map((d) => d.key).filter((k) => !SEEDED_FIRST.has(k) && !sql.includes(`'${k}'`));
+    expect(missing).toEqual([]);
   });
 });
