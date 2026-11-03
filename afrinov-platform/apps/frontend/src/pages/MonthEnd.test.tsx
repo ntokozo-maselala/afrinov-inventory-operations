@@ -59,6 +59,17 @@ describe('Stock report page', () => {
     await waitFor(() => expect(mockPdf).toHaveBeenCalledWith({ from: '2026-09-01', to: '2026-09-30' }));
   });
 
+  // Project Material Through the Store Roadmap, Phase 2: a project's material in
+  // the store is held for it or left from before; only leftovers move (Qodo, PR #143).
+  it('says a closed project still holds stock in the store, and that its leftovers move to Stores', async () => {
+    mockGet.mockResolvedValue({ ...REPORT, projects: [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'COMPLETED', items: 1, itemsInStock: 1, value: 40 }] });
+    renderPage();
+    const section = within(await screen.findByRole('region', { name: 'Project material still in the store' }));
+    expect(section.getByText(/received against each project’s orders and held for it, or left in the store from before./)).toBeInTheDocument();
+    expect(section.getByText(/1 completed or cancelled project still holds stock in the store: leftovers move to Stores from Project leftovers./)).toBeInTheDocument();
+    expect(section.queryByText(/went straight to site/)).not.toBeInTheDocument();
+  });
+
   it('opens on the dates in the address, and says when stock is as it stands now', async () => {
     renderPage('/reports/stock-report?from=2026-10-05&to=2026-10-11');
     await screen.findByLabelText('Stock report overview');

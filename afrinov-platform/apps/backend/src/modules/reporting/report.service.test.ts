@@ -60,7 +60,7 @@ interface FakeDecimal { toNumber(): number; toString(): string }
 const dec = (n: number): FakeDecimal => ({ toNumber: () => n, toString: () => String(n) });
 
 interface Mat { id: string; sku: string; name: string; description: string | null; category: Category; unitOfMeasure: string; unitCost: FakeDecimal | null; requiredStock: FakeDecimal; active: boolean; updatedAt: Date }
-interface Bal { materialId: string; locationId: string; quantity: FakeDecimal; updatedAt: Date }
+interface Bal { materialId: string; locationId: string; quantity: FakeDecimal; updatedAt: Date; heldForProject?: string }
 interface Loc { id: string; name: string; type: string; active: boolean }
 interface Sup { id: string; name: string; active: boolean }
 interface PO { id: string; number: string; supplierId: string; status: string; createdById: string; createdAt: Date; updatedAt: Date; notes?: string | null }
@@ -76,10 +76,14 @@ interface State {
   purchaseOrderLines: POL[];
   transactions: Tx[];
   users: { id: string; name: string; email: string }[];
+  projects?: Array<{ projectNumber: string; name: string | null; status: string }>;
 }
 
 function makePrismaStub(s: State) {
   return {
+    project: {
+      findMany: async ({ where }: { where: { projectNumber: { in: string[] } } }) => (s.projects ?? []).filter((p) => where.projectNumber.in.includes(p.projectNumber)),
+    },
     material: {
       findMany: async ({ where }: { where?: MatWhere } = {}) => {
         let list = s.materials.slice();
@@ -365,6 +369,30 @@ describe('ReportService.inventory', () => {
     expect(inStock.byProject).toEqual([]);
     expect(inStock.byCategory.map((c) => [c.category, c.skuCount])).toEqual([['CONSUMABLES', 1]]);
     expect(inStock.kpis.categoryCount).toBe(1);
+  });
+
+  // Project Material Through the Store Roadmap, Phase 2: stock received against
+  // a project order is that project's, whatever the item is tagged to.
+  it('totals stock held for a project under that project, not the item\'s', async () => {
+    const beam = { ...makeMat('p-1', '1325-BEAM', 'Beam', 0, 10, 'PROJECT_MATERIAL'), projectNumber: '1325', project: { name: 'Plant upgrade', status: 'ACTIVE' } };
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 100, 'CONSUMABLES'), beam],
+      balances: [
+        makeBal('m-1', 'l-1', 1), { ...makeBal('m-1', 'l-1', 2), heldForProject: '1402' },
+        makeBal('p-1', 'l-1', 3), { ...makeBal('p-1', 'l-1', 4), heldForProject: '1325' }, { ...makeBal('p-1', 'l-1', 6), heldForProject: '1402' },
+      ],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [], purchaseOrders: [], purchaseOrderLines: [], transactions: [], users: [],
+      projects: [{ projectNumber: '1402', name: 'Door rails', status: 'ACTIVE' }],
+    };
+    const r = await ReportService.inventory(baseQuery);
+    const total = 300 + 130;
+    expect(r.byProject).toEqual([
+      // The leftover (3) and what was received for 1325 (4).
+      { projectNumber: '1325', name: 'Plant upgrade', status: 'ACTIVE', skuCount: 1, quantity: 7, inventoryValue: 70, share: 70 / total },
+      // The beam bought for 1402, and a Stores item an older RFQ bought for it.
+      { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', skuCount: 2, quantity: 8, inventoryValue: 260, share: 260 / total },
+    ]);
   });
 
   it('groups by category with value share', async () => {

@@ -192,3 +192,51 @@ describe('MaterialDetail stock held for a project', () => {
     expect(within(table).getByText('A-1 · held for AFRI-1325')).toBeInTheDocument();
   });
 });
+
+// Project Material Through the Store Roadmap, Phase 2: a Projects item's stock
+// received against a project order is that project's, not a leftover.
+describe('MaterialDetail Projects item received for a project', () => {
+  beforeEach(() => {
+    perms.manage = true;
+    material = { ...DISC, id: 'm-1', category: 'PROJECT_MATERIAL', projectNumber: null, requiredStock: '0' };
+    stock = [{ ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '6', heldForProject: 'AFRI-1325' }];
+    mockGet.mockReset();
+    mockPatch.mockReset();
+  });
+
+  it('lists it as held for the project, and offers no move to Stores', async () => {
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'In the store for projects' });
+    expect(within(table).getByText('AFRI-1325')).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Left in the store' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Move to Stores' })).not.toBeInTheDocument();
+  });
+
+  // Qodo, PR #143: Issue and Check out act on Stores stock, and the page says
+  // the store holds project material.
+  it('offers no Issue for stock held for a project only, and says the store holds it', async () => {
+    material = { ...material, projectNumber: 'AFRI-1325' };
+    renderPage();
+    await screen.findByRole('table', { name: 'In the store for projects' });
+    expect(screen.queryByRole('link', { name: 'Issue' })).not.toBeInTheDocument();
+    expect(screen.getByText(/The store receives it against that order and holds it for that project./)).toBeInTheDocument();
+    expect(screen.queryByText(/was received before/)).not.toBeInTheDocument();
+  });
+
+  it('offers Issue for a leftover, and says it was received before', async () => {
+    material = { ...material, projectNumber: 'AFRI-1325' };
+    stock = [...stock, { ...STOCK[0]!, category: 'PROJECT_MATERIAL', quantity: '2', heldForProject: null }];
+    renderPage();
+    await screen.findByRole('table', { name: 'Left in the store' });
+    expect(screen.getByRole('link', { name: 'Issue' })).toBeInTheDocument();
+    expect(screen.getByText(/was received before project material came through the store/)).toBeInTheDocument();
+  });
+
+  it('offers no Check out for a tool whose only stock is held for a project', async () => {
+    material = { ...DISC, category: 'TOOLS' };
+    stock = [{ ...STOCK[0]!, quantity: '1', heldForProject: 'AFRI-1325' }];
+    renderPage();
+    await screen.findByRole('table', { name: 'Stock by location' });
+    expect(screen.queryByRole('link', { name: 'Check out' })).not.toBeInTheDocument();
+  });
+});

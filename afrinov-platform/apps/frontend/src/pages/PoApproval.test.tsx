@@ -147,11 +147,13 @@ describe('only the actions each role may take', () => {
   });
 
   // Stores and Procurement Separation Roadmap, Phase 3: project material goes to site.
-  it('a store controller neither receives nor edits a project order', async () => {
+  // Project Material Through the Store Roadmap, Phase 2: the store receives a
+  // project order (on Receive stock), but it stays Procurement's to change.
+  it('a store controller may receive a project order, but not edit it', async () => {
     current.po = order('APPROVED');
     page(['STORE_CONTROLLER']);
     await screen.findByText('Hydraulic pump');
-    expect(button('Receive delivery')).not.toBeInTheDocument();
+    expect(button('Receive delivery')).toBeInTheDocument();
     expect(button('Edit')).not.toBeInTheDocument();
   });
 

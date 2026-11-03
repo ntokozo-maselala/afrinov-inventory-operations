@@ -77,6 +77,23 @@ const CATEGORY_ORDER: MaterialCategory[] = ['CONSUMABLES', 'FASTENERS_SLUGS_INSU
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
+/** The holder of Stores stock: no project. */
+const STORES = '';
+interface Place { location: string; quantity: number }
+
+/** An item's places for the given holders, one per location, most first. */
+function placesOf(byHolder: Map<string, Place[]> | undefined, holders: string[]): Place[] {
+  const at = new Map<string, number>();
+  for (const h of holders) for (const p of byHolder?.get(h) ?? []) at.set(p.location, (at.get(p.location) ?? 0) + p.quantity);
+  return [...at].map(([location, quantity]) => ({ location, quantity })).filter((p) => p.quantity !== 0).sort((a, b) => b.quantity - a.quantity);
+}
+
+/** Where it was kept, e.g. "A-1" or "A-1 (8), B-2 (3)"; '' when nowhere. */
+function whereKept(places: Place[]): string {
+  if (places.length === 0) return '';
+  return places.length === 1 ? places[0]!.location : places.map((r) => `${r.location} (${round4(r.quantity)})`).join(', ');
+}
+
 /**
  * Return inclusive YYYY-MM-DD bounds and the exclusive UTC midnight after a month.
  * The current month is allowed and still returns the full month's bounds.
@@ -146,7 +163,7 @@ export const MonthEndService = {
   async report(q: StockReportQuery): Promise<MonthEndReport> {
     const { month, from, to, end } = reportRange(q);
     const [balances, materials, bands, currency, consumption] = await Promise.all([
-      prisma.inventoryTransaction.groupBy({ by: ['materialId', 'locationId'], where: { postedAt: { lt: end } }, _sum: { quantity: true } }),
+      prisma.inventoryTransaction.groupBy({ by: ['materialId', 'locationId', 'heldForProject'], where: { postedAt: { lt: end } }, _sum: { quantity: true } }),
       prisma.material.findMany({ select: { id: true, sku: true, name: true, category: true, requiredStock: true, unitCost: true, active: true, projectNumber: true, project: { select: { name: true, status: true } } } }),
       getStatusBands(),
       SettingsService.getValue<string>('general.defaultCurrency'),
@@ -159,51 +176,86 @@ export const MonthEndService = {
         .map((l) => [l.id, l.name]),
     );
 
-    const held = new Map<string, Array<{ location: string; quantity: number }>>();
+    // Stock at the end per item, then per holder: '' for Stores, else the
+    // project it is held for (Project Material Through the Store Roadmap).
+    const held = new Map<string, Map<string, Place[]>>();
     for (const b of balances) {
       const q = Number(b._sum.quantity ?? 0);
       if (q === 0) continue;
-      held.set(b.materialId, [...(held.get(b.materialId) ?? []), { location: locationNames.get(b.locationId) ?? '—', quantity: q }]);
+      const holders = held.get(b.materialId) ?? new Map<string, Place[]>();
+      const holder = b.heldForProject ?? STORES;
+      holders.set(holder, [...(holders.get(holder) ?? []), { location: locationNames.get(b.locationId) ?? '—', quantity: q }]);
+      held.set(b.materialId, holders);
     }
-    const whereKept = (materialId: string) => {
-      const rows = (held.get(materialId) ?? []).sort((a, b) => b.quantity - a.quantity);
-      if (rows.length === 0) return '';
-      return rows.length === 1 ? rows[0]!.location : rows.map((r) => `${r.location} (${round4(r.quantity)})`).join(', ');
-    };
+    const holdersOf = (materialId: string) => [...(held.get(materialId)?.keys() ?? [])];
     const skuToId = new Map(materials.map((m) => [m.sku, m.id]));
+    type Mat = (typeof materials)[number];
+
+    /**
+     * One report line: the item's stock with the given holders, for the given
+     * project. A project's line has no Required Stock: that is the store's
+     * measure, so its stock raises no status or re-order (Qodo, PR #143).
+     */
+    const itemOf = (m: Mat, holders: string[], project: string | null, forProject = false): MonthEndItem => {
+      const places = placesOf(held.get(m.id), holders);
+      const current = round4(places.reduce((a, r) => a + r.quantity, 0));
+      const required = forProject ? 0 : Number(m.requiredStock);
+      const unitCost = m.unitCost === null ? null : Number(m.unitCost);
+      // Current Stock is what is on the shelf; a tool out on loan (Stores stock) still counts as owned.
+      const owned = round4(current + (holders.includes(STORES) ? Number(onLoan.get(m.id) ?? 0) : 0));
+      const s = classifyItem(owned, required, bands);
+      return {
+        sku: m.sku,
+        name: m.name,
+        location: whereKept(places),
+        requiredStock: required,
+        currentStock: current,
+        unitCost,
+        value: unitCost === null ? null : round2(current * unitCost),
+        percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
+        reorderQuantity: required > 0 ? round4(required - owned) : null,
+        status: s.status,
+        project,
+      };
+    };
 
     const categories: MonthEndCategory[] = [];
     for (const category of CATEGORY_ORDER) {
-      // Active items, and any inactive one that still had stock at the end.
-      const mine = materials
-        .filter((m) => m.category === category && (m.active || held.has(m.id)))
-        // Projects material reads project by project, those with no project last.
-        .sort((a, b) => (a.projectNumber ?? '\uffff').localeCompare(b.projectNumber ?? '\uffff')
+      let items: MonthEndItem[];
+      if (category !== 'PROJECT_MATERIAL') {
+        // Stores stock only: stock held for a project is not the store's to
+        // issue, so it stays out of status and re-order. Active items, and any
+        // inactive one that still had Stores stock at the end.
+        items = materials
+          .filter((m) => m.category === category && (m.active || holdersOf(m.id).includes(STORES)))
+          .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }))
+          .map((m) => itemOf(m, [STORES], m.projectNumber));
+      } else {
+        // What each project holds: a line per item and project. Stock held for
+        // a project is that project's, whatever the item is tagged to (and an
+        // older RFQ may have bought a Stores item for one); stock left in the
+        // store before keeps the item's own project.
+        items = [];
+        for (const m of materials) {
+          const byProject = new Map<string, string[]>();
+          for (const h of holdersOf(m.id)) {
+            if (h === STORES && m.category !== 'PROJECT_MATERIAL') continue;
+            const project = h || (m.projectNumber ?? '');
+            byProject.set(project, [...(byProject.get(project) ?? []), h]);
+          }
+          if (byProject.size === 0 && m.category === 'PROJECT_MATERIAL' && m.active) byProject.set(m.projectNumber ?? '', [STORES]);
+          for (const [project, holders] of byProject) items.push(itemOf(m, holders, project || null, true));
+        }
+        // Project by project, those with no project last.
+        items.sort((a, b) => (a.project ?? '￿').localeCompare(b.project ?? '￿')
           || a.sku.localeCompare(b.sku, undefined, { numeric: true }));
-      const items: MonthEndItem[] = mine.map((m) => {
-        const current = round4((held.get(m.id) ?? []).reduce((a, r) => a + r.quantity, 0));
-        const required = Number(m.requiredStock);
-        const unitCost = m.unitCost === null ? null : Number(m.unitCost);
-        // Current Stock is what is on the shelf; a tool out on loan still counts as owned.
-        const owned = round4(current + Number(onLoan.get(m.id) ?? 0));
-        const s = classifyItem(owned, required, bands);
-        return {
-          sku: m.sku,
-          name: m.name,
-          location: whereKept(m.id),
-          requiredStock: required,
-          currentStock: current,
-          unitCost,
-          value: unitCost === null ? null : round2(current * unitCost),
-          percentOfRequired: s.percentOfRequired === null ? null : round4(owned / required),
-          reorderQuantity: required > 0 ? round4(required - owned) : null,
-          status: s.status,
-          project: m.projectNumber,
-        };
-      });
+      }
       const used = consumption.items
         .filter((i) => i.category === category)
-        .map((i) => ({ sku: i.sku, name: i.name, location: whereKept(skuToId.get(i.sku) ?? ''), used: i.used, value: i.value }))
+        .map((i) => {
+          const id = skuToId.get(i.sku) ?? '';
+          return { sku: i.sku, name: i.name, location: whereKept(placesOf(held.get(id), holdersOf(id))), used: i.used, value: i.value };
+        })
         .sort((a, b) => a.sku.localeCompare(b.sku, undefined, { numeric: true }));
       if (items.length === 0 && used.length === 0) continue;
       categories.push({
@@ -218,13 +270,23 @@ export const MonthEndService = {
       });
     }
 
-    // Projects material per project, from the Project Material items.
+    // Projects material per project, from the Project Material lines.
     const projects = new Map<string, MonthEndProject>();
     const projectItems = categories.find((c) => c.category === 'PROJECT_MATERIAL')?.items ?? [];
+    // Names from the items' own projects; a project stock is held for that no
+    // item is tagged to is looked up.
+    const projectInfo = new Map<string, { name: string | null; status: string }>();
+    for (const m of materials) if (m.projectNumber && m.project) projectInfo.set(m.projectNumber, m.project);
+    const unnamed = [...new Set(projectItems.flatMap((i) => (i.project && !projectInfo.has(i.project) ? [i.project] : [])))];
+    if (unnamed.length > 0) {
+      for (const p of await prisma.project.findMany({ where: { projectNumber: { in: unnamed } }, select: { projectNumber: true, name: true, status: true } })) {
+        projectInfo.set(p.projectNumber, p);
+      }
+    }
     for (const i of projectItems) {
-      const m = materials.find((x) => x.sku === i.sku);
       const key = i.project ?? '';
-      const p = projects.get(key) ?? { projectNumber: i.project, name: m?.project?.name ?? null, status: m?.project?.status ?? null, items: 0, itemsInStock: 0, value: 0 };
+      const info = i.project ? projectInfo.get(i.project) : undefined;
+      const p = projects.get(key) ?? { projectNumber: i.project, name: info?.name ?? null, status: info?.status ?? null, items: 0, itemsInStock: 0, value: 0 };
       p.items++;
       if (i.currentStock > 0) p.itemsInStock++;
       p.value = round2(p.value + (i.value ?? 0));

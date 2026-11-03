@@ -44,6 +44,12 @@ export interface ProjectStockValue {
   itemsInStock: number;
   value: number;
   unpriced: number;
+  /**
+   * Items it holds as Stores stock, left from before project material came
+   * through the store: the only stock Move to Stores takes. Stock held for
+   * the project is used or moved first (Qodo, PR #143).
+   */
+  leftovers: number;
 }
 
 export interface StockValueReport {
@@ -347,53 +353,88 @@ export const ReportingService = {
    */
   async stockValue(): Promise<StockValueReport> {
     const [rows, currency] = await Promise.all([this.stockStatus({ section: 'ALL' }), SettingsService.getValue<string>('general.defaultCurrency')]);
-    const blank = () => ({ items: 0, itemsInStock: 0, value: 0, unpriced: 0 });
-    const cats = new Map<string, ReturnType<typeof blank>>();
-    const sections = { STORES: blank(), PROJECTS: blank() };
-    const projects = new Map<string, ProjectStockValue>();
+    // Stock held for a project is that project's, not the store's, so the
+    // status rows leave it out; its value still counts, under that project
+    // (Qodo, PR #143), as the Inventory report and month-end count it.
+    const ids = rows.map((r) => r.materialId);
+    const held = ids.length
+      ? (await prisma.inventoryBalance.findMany({ where: { materialId: { in: ids } }, select: { materialId: true, heldForProject: true, quantity: true } }))
+        .filter((b) => b.heldForProject !== '' && !b.quantity.isZero())
+      : [];
+
+    // Each total is the items in it, with what each has on hand.
+    type Bucket = Map<string, number>;
+    const add = (bucket: Bucket, materialId: string, quantity: number) => bucket.set(materialId, (bucket.get(materialId) ?? 0) + quantity);
+    const cats = new Map<string, Bucket>();
+    const sections: Record<MaterialSection, Bucket> = { STORES: new Map(), PROJECTS: new Map() };
+    const projects = new Map<string, Bucket>();
+    const leftovers = new Map<string, Set<string>>();
+    const projectInfo = new Map<string, { name: string | null; status: string }>();
+    const bucketOf = <K>(map: Map<K, Bucket>, key: K) => map.get(key) ?? map.set(key, new Map()).get(key)!;
     const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
+    const byId = new Map(rows.map((r) => [r.materialId, r]));
     for (const r of rows) {
       const onHand = Number(r.onHand);
       const section = sectionOf(r.category);
-      if (!cats.has(r.category)) cats.set(r.category, blank());
       // Each item counts in its category and its section and, for Projects material, its project.
-      const totals = [cats.get(r.category)!, sections[section]];
+      add(bucketOf(cats, r.category), r.materialId, onHand);
+      add(sections[section], r.materialId, onHand);
       if (section === 'PROJECTS') {
-        const key = r.projectNumber ?? '';
-        if (!projects.has(key)) projects.set(key, { projectNumber: r.projectNumber, name: r.project?.name ?? null, status: r.project?.status ?? null, ...blank() });
-        totals.push(projects.get(key)!);
+        add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
+        if (onHand > 0) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
       }
-      for (const c of totals) {
-        c.items++;
-        if (onHand > 0) {
-          c.itemsInStock++;
-          if (r.unitCost === null) c.unpriced++;
-          else c.value += onHand * Number(r.unitCost);
-        }
-      }
+      if (r.projectNumber && r.project) projectInfo.set(r.projectNumber, r.project);
       if (section === 'STORES') {
         // The counts the Dashboard cards show: Stores only.
         if (onHand <= 0) status.outOfStock++;
         status[r.status]++;
       }
     }
-    const total = [...cats.values()].reduce(
-      (a, c) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
+    for (const b of held) {
+      const r = byId.get(b.materialId)!;
+      const quantity = Number(b.quantity);
+      add(bucketOf(cats, r.category), r.materialId, quantity);
+      add(sections[sectionOf(r.category)], r.materialId, quantity);
+      add(bucketOf(projects, b.heldForProject), r.materialId, quantity);
+    }
+    const unnamed = [...projects.keys()].filter((k) => k !== '' && !projectInfo.has(k));
+    if (unnamed.length > 0) {
+      for (const p of await prisma.project.findMany({ where: { projectNumber: { in: unnamed } }, select: { projectNumber: true, name: true, status: true } })) {
+        projectInfo.set(p.projectNumber, p);
+      }
+    }
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    // Value is on hand × unit price, for items with stock; an item in stock with no price is unpriced.
+    const sum = (bucket: Bucket) => {
+      const t = { items: bucket.size, itemsInStock: 0, value: 0, unpriced: 0 };
+      for (const [materialId, onHand] of bucket) {
+        if (onHand <= 0) continue;
+        t.itemsInStock++;
+        const unitCost = byId.get(materialId)!.unitCost;
+        if (unitCost === null) t.unpriced++;
+        else t.value += onHand * Number(unitCost);
+      }
+      return t;
+    };
+    const catTotals = [...cats].map(([category, bucket]) => [category, sum(bucket)] as const);
+    const total = catTotals.reduce(
+      (a, [, c]) => ({ items: a.items + c.items, itemsInStock: a.itemsInStock + c.itemsInStock, value: a.value + c.value, unpriced: a.unpriced + c.unpriced }),
       { items: 0, itemsInStock: 0, value: 0, unpriced: 0 },
     );
-    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const rounded = (t: ReturnType<typeof sum>) => ({ ...t, value: round2(t.value) });
     return {
       currency,
-      categories: [...cats]
+      categories: catTotals
         .sort(([a], [b]) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99))
         .map(([category, c]) => ({ category, ...c, value: round2(c.value), share: total.value > 0 ? Math.round((c.value / total.value) * 1000) / 1000 : 0 })),
-      total: { ...total, value: round2(total.value) },
-      sections: {
-        STORES: { ...sections.STORES, value: round2(sections.STORES.value) },
-        PROJECTS: { ...sections.PROJECTS, value: round2(sections.PROJECTS.value) },
-      },
-      projects: [...projects.values()]
-        .map((p) => ({ ...p, value: round2(p.value) }))
+      total: rounded(total),
+      sections: { STORES: rounded(sum(sections.STORES)), PROJECTS: rounded(sum(sections.PROJECTS)) },
+      projects: [...projects]
+        .map(([key, bucket]): ProjectStockValue => ({
+          projectNumber: key || null, name: projectInfo.get(key)?.name ?? null, status: projectInfo.get(key)?.status ?? null, ...rounded(sum(bucket)),
+          leftovers: leftovers.get(key)?.size ?? 0,
+        }))
         .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber))),
       status,
     };

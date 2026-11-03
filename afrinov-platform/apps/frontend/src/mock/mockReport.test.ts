@@ -74,3 +74,30 @@ describe('report reversal accounting', () => {
     expect(result.movementSummary.total).toEqual({ count: 1, quantity: 10 });
   });
 });
+
+// Project Material Through the Store Roadmap, Phase 2, as the server reports it.
+describe('stock held for a project', () => {
+  it('names its holder on the line and totals it under that project, not the item\'s', () => {
+    const result = buildReport(query, {
+      materials: [
+        { id: 'm-1', sku: 'A-1', name: 'Bolts', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '0', unitCost: '2', active: true },
+        { id: 'p-1', sku: '1325-BEAM', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: '10', active: true, projectNumber: '1325' },
+      ],
+      locations: [{ id: 'l-1', name: 'Main', type: 'STOREROOM', active: true }],
+      suppliers: [], purchaseOrders: [],
+      projects: [{ projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', active: true, createdAt: '2026-09-01T08:00:00Z', updatedAt: '2026-09-01T08:00:00Z' }],
+      transactions: [
+        movement('a', '1', { type: 'RECEIPT' }),
+        movement('b', '2', { type: 'RECEIPT', heldForProject: '1402' }),
+        movement('c', '3', { type: 'RECEIPT', materialId: 'p-1' }),
+        movement('d', '4', { type: 'RECEIPT', materialId: 'p-1', heldForProject: '1325' }),
+        movement('e', '6', { type: 'RECEIPT', materialId: 'p-1', heldForProject: '1402' }),
+      ],
+    });
+    expect(result.inventory.filter((l) => l.sku === 'A-1').map((l) => [l.quantity, l.heldForProject])).toEqual([[1, null], [2, '1402']]);
+    expect((result.byProject ?? []).map((p) => [p.projectNumber, p.name, p.skuCount, p.quantity, p.inventoryValue])).toEqual([
+      ['1325', null, 1, 7, 70],
+      ['1402', 'Door rails', 2, 8, 64],
+    ]);
+  });
+});

@@ -643,20 +643,39 @@ export const ReportService = {
     const bySupplier = Array.from(bySupplierMap.values()).sort((a, b) => b.inventoryValue - a.inventoryValue);
 
     // Projects material per project: what each job holds and what it is worth.
-    const byProjectMap = new Map<string, ReportProjectRow>();
+    // Stock held for a project is that project's, whatever the item is tagged
+    // to (an older RFQ may even have bought a Stores item for one); stock left
+    // in the store before keeps the item's own project (Project Material
+    // Through the Store Roadmap, Phase 2).
+    const projectInfo = new Map<string, { name: string | null; status: string }>();
+    for (const m of materials) if (m.projectNumber && m.project) projectInfo.set(m.projectNumber, m.project);
+    const linesByProject = new Map<string, Map<string, ReportInventoryLine[]>>();
     for (const m of materials) {
-      if (sectionOf(m.category) !== 'PROJECTS') continue;
-      if (!linesByMaterial.has(m.id)) continue; // not in the report (see the categories above)
-      const key = m.projectNumber ?? '';
-      const row = byProjectMap.get(key) ?? {
-        projectNumber: m.projectNumber, name: m.project?.name ?? null, status: m.project?.status ?? null,
-        skuCount: 0, quantity: 0, inventoryValue: 0, share: 0,
-      };
-      const lines = linesByMaterial.get(m.id) ?? [];
-      row.skuCount += 1;
-      row.quantity += lines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0);
-      row.inventoryValue += lines.reduce((acc, l) => acc + lineValueOrZero(l), 0);
-      byProjectMap.set(key, row);
+      const projectsItem = sectionOf(m.category) === 'PROJECTS';
+      for (const l of linesByMaterial.get(m.id) ?? []) { // only items in the report (see the categories above)
+        if (!projectsItem && l.heldForProject === null) continue;
+        const key = l.heldForProject ?? m.projectNumber ?? '';
+        const perItem = linesByProject.get(key) ?? new Map<string, ReportInventoryLine[]>();
+        perItem.set(m.id, [...(perItem.get(m.id) ?? []), l]);
+        linesByProject.set(key, perItem);
+      }
+    }
+    const unnamed = [...linesByProject.keys()].filter((k) => k !== '' && !projectInfo.has(k));
+    if (unnamed.length > 0) {
+      for (const p of await prisma.project.findMany({ where: { projectNumber: { in: unnamed } }, select: { projectNumber: true, name: true, status: true } })) {
+        projectInfo.set(p.projectNumber, p);
+      }
+    }
+    const byProjectMap = new Map<string, ReportProjectRow>();
+    for (const [key, perItem] of linesByProject) {
+      const lines = [...perItem.values()].flat();
+      byProjectMap.set(key, {
+        projectNumber: key || null, name: projectInfo.get(key)?.name ?? null, status: projectInfo.get(key)?.status ?? null,
+        skuCount: perItem.size,
+        quantity: lines.reduce((acc, l) => acc + Math.max(0, l.quantity), 0),
+        inventoryValue: lines.reduce((acc, l) => acc + lineValueOrZero(l), 0),
+        share: 0,
+      });
     }
     const byProject = Array.from(byProjectMap.values())
       .map((r) => ({ ...r, share: inventoryValue > 0 ? r.inventoryValue / inventoryValue : 0 }))

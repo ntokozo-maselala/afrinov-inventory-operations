@@ -74,8 +74,8 @@ export async function buildMonthEndXlsx(r: MonthEndReport): Promise<Buffer> {
   const ot = ov.addRow(['Total', r.total.items, r.total.itemsInStock, r.total.value, r.total.urgent, r.total.warning, r.total.usedValue]);
   ot.font = { bold: true };
   ot.getCell(4).numFmt = MONEY;
-  // Project material still in the store at the end of the period, received
-  // before it went straight to site: as the report page lists it (Qodo, PR #126).
+  // Project material still in the store at the end of the period, held for a
+  // project or left from before: as the report page lists it (Qodo, PR #126).
   const held = r.projects.filter((p) => p.itemsInStock > 0);
   if (held.length > 0) {
     ov.addRow([]);
