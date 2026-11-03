@@ -194,6 +194,51 @@ describe('Receive stock against an approved order', () => {
       });
     });
 
+    // Qodo, PR #146: no guessing where a project delivery goes.
+    it('waits for the receiving location before an order can be chosen', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation((path: string) => (path.startsWith('/settings/values') ? new Promise(() => {}) : base(path)));
+      receiveStock();
+      await screen.findByRole('option', { name: /AFRI-0430/ });
+      expect(screen.getByLabelText(/^Order/)).toBeDisabled();
+    });
+
+    it('warns, and leaves each line to choose, when the receiving location is no longer in use', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+        ? { 'inventory.projectReceivingLocationId': 'loc-gone' } : base(path)));
+      receiveStock();
+      await chooseOrder('po-5');
+      expect(screen.getByText('The project receiving location is no longer in use')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/Delivery note/), { target: { value: 'DN-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+      expect(await screen.findByText('Choose where each line is going.')).toBeInTheDocument();
+      expect(mockPost).not.toHaveBeenCalledWith('/goods-receipts', expect.anything(), expect.anything());
+    });
+
+    it('issues two lines for the same item and place as one, so they are capped together', async () => {
+      const twice = { ...PROJECT_ORDER, lines: [ORDER.lines[0]!, { ...ORDER.lines[0]!, id: 'pol-3', orderedQty: '3', receivedQty: '0' }] };
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/receivable' ? [ORDER, twice] : base(path)));
+      function IssuePage() { const l = useLocation(); return <p data-testid="issue">{JSON.stringify(l.state)}</p>; }
+      render(
+        <MemoryRouter initialEntries={['/stock/receive']}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/stock/receive" element={<ReceiveStock />} />
+              <Route path="/stock/issue" element={<IssuePage />} />
+            </Routes>
+          </ToastProvider>
+        </MemoryRouter>,
+      );
+      await chooseOrder('po-5');
+      await fillAndReceive('DN-10');
+      fireEvent.click(await screen.findByRole('link', { name: 'Issue it now' }));
+      expect(JSON.parse((await screen.findByTestId('issue')).textContent!)).toEqual({
+        issuePrefill: { projectNumber: 'AFRI-1325', lines: [{ materialId: 'm-1', locationId: 'loc-2', quantity: 9 }] },
+      });
+    });
+
     it('offers no Issue it now for the store\u2019s own order', async () => {
       receiveStock();
       await chooseOrder('po-1');

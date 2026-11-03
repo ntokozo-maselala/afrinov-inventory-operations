@@ -118,6 +118,8 @@ export function IssueStock() {
   // on both (Project Material Through the Store Roadmap, Phase 4).
   const routeState = useLocation().state;
   const [prefill, setPrefill] = useState(() => issuePrefillOf(routeState));
+  // Lines of that delivery that can't be issued here any more (Qodo, PR #146).
+  const [notFilled, setNotFilled] = useState(0);
   if (prefill && stock.data && !loading) {
     setPrefill(null);
     const filled = prefill.lines.flatMap((l) => {
@@ -128,6 +130,7 @@ export function IssueStock() {
       setProjectNumber(prefill.projectNumber);
       setLines(filled);
     }
+    setNotFilled(prefill.lines.length - filled.length);
   }
 
   // Requested per item and location, across lines, to warn before submitting.
@@ -178,6 +181,7 @@ export function IssueStock() {
       setLast({ who, recipientId, count: filled.length });
       setLines([emptyLine()]);
       setProjectNumber('');
+      setNotFilled(0);
       // The submission succeeded: the next one is a new operation, so it gets a
       // fresh key rather than replaying this one.
       idem.confirm();
@@ -215,6 +219,12 @@ export function IssueStock() {
             See the issue slip in Movements
           </Link>
           {' '}to check or print it. The form below is ready for the next issue.
+        </Alert>
+      )}
+
+      {notFilled > 0 && (
+        <Alert tone="warning" title={`${notFilled} line${notFilled === 1 ? '' : 's'} of that delivery can’t be issued here`} className="mb-4 max-w-4xl">
+          It may have been issued already, or its item, location or project is no longer in use.
         </Alert>
       )}
 

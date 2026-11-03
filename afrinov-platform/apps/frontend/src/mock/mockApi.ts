@@ -1998,6 +1998,10 @@ function validateMockSetting(key: string, raw: unknown): { value?: unknown; erro
       if (typeof raw !== 'string') return { error: 'Must be text' };
       const v = raw.trim();
       if (key === 'general.companyName' && v.length < 1) return { error: 'Company name is required' };
+      // As the server: the project receiving location must be an active location (Qodo, PR #146).
+      if (key === 'inventory.projectReceivingLocationId' && v !== '' && !state.locations.some((l) => l.id === v && l.active)) {
+        return { error: 'Choose an active location for project deliveries.' };
+      }
       if (v.length > 500) return { error: 'Must be at most 500 characters' };
       return { value: v };
     }

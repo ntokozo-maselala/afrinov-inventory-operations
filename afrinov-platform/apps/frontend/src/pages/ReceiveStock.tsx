@@ -152,10 +152,16 @@ function ReceiveAgainstOrder() {
     return home && activeLocations.some((l) => l.id === home) ? home : '';
   }
 
-  // The project receiving location, while it is still in use.
+  // The project receiving location: in use, none set, set but no longer in
+  // use, or unknown because the setting couldn't be read. Only "none" lets a
+  // project line fall back to where its item is kept; otherwise the storeman
+  // chooses, rather than the delivery going somewhere unsaid (Qodo, PR #146).
+  const settingsReady = !!settings.data || !!settings.error;
   const projectHome = (() => {
-    const id = settings.data?.[PROJECT_RECEIVING_LOCATION];
-    return typeof id === 'string' && activeLocations.some((l) => l.id === id) ? id : '';
+    if (!settings.data) return { state: 'unknown' as const, id: '' };
+    const id = settings.data[PROJECT_RECEIVING_LOCATION];
+    if (typeof id !== 'string' || id === '') return { state: 'none' as const, id: '' };
+    return activeLocations.some((l) => l.id === id) ? { state: 'set' as const, id } : { state: 'unusable' as const, id: '' };
   })();
 
   /**
@@ -168,7 +174,7 @@ function ReceiveAgainstOrder() {
     setCloseShort(false);
     setCloseReason('');
     setError(null);
-    const into = (materialId: string) => (order?.projectNumber && projectHome) || homeOf(materialId);
+    const into = (materialId: string) => (!order?.projectNumber || projectHome.state === 'none' ? homeOf(materialId) : projectHome.id);
     setOrderLines(order ? receiptLinesFromOrder(order).map((l) => ({ ...l, locationId: into(l.materialId) })) : []);
   }
 
@@ -225,10 +231,16 @@ function ReceiveAgainstOrder() {
     // A project order is Procurement's: the store receives it, but neither
     // opens nor closes it, so there is nothing more to read.
     if (order.projectNumber) {
-      const issue: IssuePrefill = {
-        projectNumber: order.projectNumber,
-        lines: checked.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity) })),
-      };
+      // One line per item and location, so two receipt lines for the same
+      // stock are capped together against what is held (Qodo, PR #146).
+      const arrived = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+      for (const l of checked.lines) {
+        const key = `${l.materialId}|${l.locationId}`;
+        const a = arrived.get(key) ?? { materialId: l.materialId, locationId: l.locationId, quantity: 0 };
+        a.quantity += Number(l.quantity);
+        arrived.set(key, a);
+      }
+      const issue: IssuePrefill = { projectNumber: order.projectNumber, lines: [...arrived.values()] };
       setBooked({ receipt: receipt.number, order: { id: order.id, number: order.number, projectNumber: order.projectNumber }, status, issue });
       setBusy(false);
       return;
@@ -263,7 +275,8 @@ function ReceiveAgainstOrder() {
     }
   }
 
-  const loading = orders.loading || locations.loading;
+  // The order waits for the receiving location too, so a project order's lines start in the right place.
+  const loading = orders.loading || locations.loading || !settingsReady;
   const nothingToReceive = !!orders.data && openOrders.length === 0;
   // Without the orders, or the locations, there is nothing the form could book (Qodo, PR #125).
   const blocked = (!!locations.error && !locations.data) || (!!orders.error && !orders.data);
@@ -363,6 +376,16 @@ function ReceiveAgainstOrder() {
                 <EveryLineInto locations={activeLocations} onChoose={(locationId) => setOrderLines((ls) => ls.map((l) => ({ ...l, locationId })))} />
               </div>
               <p className="text-meta">Each line starts at what is still outstanding. Lines left at 0 stay outstanding.</p>
+              {chosenOrder.projectNumber && projectHome.state === 'unusable' && (
+                <Alert tone="warning" title="The project receiving location is no longer in use">
+                  Choose where each line goes. An administrator can set another under Settings → Inventory.
+                </Alert>
+              )}
+              {chosenOrder.projectNumber && projectHome.state === 'unknown' && (
+                <Alert tone="warning" title="The project receiving location couldn’t be loaded">
+                  Choose where each line goes. <button type="button" className="btn-link" onClick={() => settings.reload()}>Try again</button>
+                </Alert>
+              )}
               <div className="space-y-2">
                 {orderLines.map((l, i) => (
                   <OrderReceiptRow

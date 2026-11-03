@@ -156,6 +156,17 @@ const UUID_OR_BLANK = (v: unknown) => {
   return v === '' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? null : 'Choose a location.';
 };
 
+/**
+ * Checks a setting that names a record which must exist: the project receiving
+ * location has to be an active location, or Receive stock would book project
+ * deliveries somewhere else without saying so (Qodo, PR #146).
+ */
+async function checkReference(key: string, value: unknown, db: Prisma.TransactionClient | typeof prisma): Promise<void> {
+  if (key !== 'inventory.projectReceivingLocationId' || value === '') return;
+  const location = await db.location.findUnique({ where: { id: String(value) }, select: { active: true } });
+  if (!location?.active) throw Errors.validation('Choose an active location for project deliveries.');
+}
+
 const CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP'] as const;
 const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'] as const;
 const TIME_FORMATS = ['24h', '12h'] as const;
@@ -354,6 +365,7 @@ export const SettingsService = {
     if (!def) throw Errors.notFound('Setting');
     if (def.isEditable === false) throw Errors.forbidden(`Setting "${key}" is not editable`);
     const coerced = coerceAndValidate(def, rawValue);
+    await checkReference(key, coerced, prisma);
     const before = await prisma.setting.findUnique({ where: { key } });
     if (!before) throw Errors.notFound('Setting');
     // The setting row and its audit record commit together, so a configuration
@@ -388,6 +400,7 @@ export const SettingsService = {
         if (!def) throw Errors.notFound(`Setting: ${key}`);
         if (def.isEditable === false) throw Errors.forbidden(`Setting "${key}" is not editable`);
         const coerced = coerceAndValidate(def, raw);
+        await checkReference(key, coerced, tx);
         const before = await tx.setting.findUnique({ where: { key } });
         if (!before) throw Errors.notFound(`Setting: ${key}`);
         const updated = await tx.setting.update({

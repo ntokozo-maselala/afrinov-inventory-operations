@@ -263,6 +263,12 @@ export function Projects() {
       />
 
       <ReceivedNotIssuedNotice rows={stock.data ?? []} className="mb-4" />
+      {stock.error && !stock.data && (
+        // Without the stock, an empty list would read as nothing waiting (Qodo, PR #146).
+        <Alert tone="warning" title="Project material received and not yet issued couldn’t be loaded" className="mb-4">
+          <button type="button" className="btn-link" onClick={() => stock.reload()}>Try again</button>
+        </Alert>
+      )}
       <LeftoversNotice className="mb-4" />
       <ClosedProjectToolsNotice projects={projects.data ?? []} className="mb-4" />
 
