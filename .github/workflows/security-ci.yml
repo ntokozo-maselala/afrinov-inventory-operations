@@ -85,3 +85,22 @@ jobs:
             --config .gitleaks.toml \
             --baseline-path .gitleaks-baseline.json \
             --exit-code 1
+
+  no-workbooks:
+    name: No spreadsheets in the tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The repository is public, and Afrinov's and its customers' workbooks
+      # hold their stock, prices and project figures. .gitignore keeps them out
+      # of local commits, but a file uploaded through GitHub's web page skips
+      # it, so the tree is checked as well.
+      - name: Refuse committed spreadsheets
+        run: |
+          found=$(git ls-files -- '*.xls' '*.xlsx' '*.xlsm' '*.xlsb' '*.ods' '*.csv')
+          if [ -n "$found" ]; then
+            echo "::error::Spreadsheets must not be committed to this public repository:"
+            echo "$found"
+            exit 1
+          fi
