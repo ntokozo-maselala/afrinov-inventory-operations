@@ -63,8 +63,10 @@ export function EveryLineInto({ locations, onChoose }: { locations: LocationOpt[
 }
 
 /** One row for an order line: the item and what is outstanding, where it goes, how many came. */
-export function OrderReceiptRow({ line, index, locations, onChange }: {
+export function OrderReceiptRow({ line, index, locations, onChange, fixedLocation = false }: {
   line: ReceiptLineDraft; index: number; locations: LocationOpt[]; onChange: (patch: Partial<ReceiptLineDraft>) => void;
+  /** The location is set for every line (a project delivery's receiving location): no picker. */
+  fixedLocation?: boolean;
 }) {
   return (
     <div className="grid grid-cols-12 gap-2 items-start">
@@ -73,10 +75,12 @@ export function OrderReceiptRow({ line, index, locations, onChange }: {
         <div className="text-meta">{formatNumber(line.outstanding!)} {line.unit} outstanding</div>
       </div>
       <div className="col-span-7 sm:col-span-3">
-        <Select value={line.locationId} onChange={(e) => onChange({ locationId: e.target.value })} aria-label={`Line ${index + 1} location`}>
-          <option value="">Location…</option>
-          {locations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}</option>)}
-        </Select>
+        {!fixedLocation && (
+          <Select value={line.locationId} onChange={(e) => onChange({ locationId: e.target.value })} aria-label={`Line ${index + 1} location`}>
+            <option value="">Location…</option>
+            {locations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}</option>)}
+          </Select>
+        )}
       </div>
       <div className="col-span-5 sm:col-span-2">
         <Input type="number" min="0" max={line.outstanding} step="0.0001" placeholder="Qty" value={line.quantity} onChange={(e) => onChange({ quantity: e.target.value })} aria-label={`Line ${index + 1} quantity`} />

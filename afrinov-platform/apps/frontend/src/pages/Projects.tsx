@@ -17,7 +17,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
-import { LeftoversNotice } from '../components/LeftoversNotice';
+import { LeftoversNotice, ReceivedNotIssuedNotice } from '../components/LeftoversNotice';
+import type { CurrentStockRow } from '../api/types';
 import { ClosedProjectToolsNotice, ClosingProjectTools } from '../components/ProjectToolsNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
@@ -204,6 +205,8 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
 
 export function Projects() {
   const projects = useApi<Project[]>('/projects');
+  // Project material received and not yet issued (Project Material Through the Store Roadmap, Phase 4).
+  const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [activeOnly, setActiveOnly] = useState(true);
@@ -259,6 +262,13 @@ export function Projects() {
         )}
       />
 
+      <ReceivedNotIssuedNotice rows={stock.data ?? []} className="mb-4" />
+      {stock.error && !stock.data && (
+        // Without the stock, an empty list would read as nothing waiting (Qodo, PR #146).
+        <Alert tone="warning" title="Project material received and not yet issued couldn’t be loaded" className="mb-4">
+          <button type="button" className="btn-link" onClick={() => stock.reload()}>Try again</button>
+        </Alert>
+      )}
       <LeftoversNotice className="mb-4" />
       <ClosedProjectToolsNotice projects={projects.data ?? []} className="mb-4" />
 

@@ -1951,6 +1951,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.toolOverdueCheckout': row('inventory.toolOverdueCheckout', 'warn', 'enum', 'inventory', 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', ['warn', 'block-contractors', 'block']),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
+    'inventory.projectReceivingLocationId': row('inventory.projectReceivingLocationId', '', 'string', 'inventory', 'Where project deliveries are booked on Receive stock, such as the workshop floor: project material is not shelved, it is issued from there. Leave blank to choose a location on each delivery.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
 
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
@@ -1997,6 +1998,10 @@ function validateMockSetting(key: string, raw: unknown): { value?: unknown; erro
       if (typeof raw !== 'string') return { error: 'Must be text' };
       const v = raw.trim();
       if (key === 'general.companyName' && v.length < 1) return { error: 'Company name is required' };
+      // As the server: the project receiving location must be an active location (Qodo, PR #146).
+      if (key === 'inventory.projectReceivingLocationId' && v !== '' && !state.locations.some((l) => l.id === v && l.active)) {
+        return { error: 'Choose an active location for project deliveries.' };
+      }
       if (v.length > 500) return { error: 'Must be at most 500 characters' };
       return { value: v };
     }

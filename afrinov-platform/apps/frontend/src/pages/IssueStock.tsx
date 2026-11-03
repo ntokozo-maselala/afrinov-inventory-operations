@@ -1,7 +1,7 @@
 // Issue stock at the store counter: one recipient, an optional project, and
 // any number of items, booked all-or-nothing (POST /inventory-issues).
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -22,6 +22,7 @@ import { needsProject, sectionOf } from '../lib/categories';
 import { isStoresStock, balanceKey } from '../lib/heldFor';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { issuePrefillOf } from '../lib/issuePrefill';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -111,6 +112,27 @@ export function IssueStock() {
     if (best) setLines([{ ...emptyLine(), stockKey: stockKey(best) }]);
   }
 
+  // Issue it now, from Receive stock: a project delivery just booked starts as
+  // this issue, its project set and each line what arrived (no more than is
+  // still held). Once stock and the projects have loaded, as the offer depends
+  // on both (Project Material Through the Store Roadmap, Phase 4).
+  const routeState = useLocation().state;
+  const [prefill, setPrefill] = useState(() => issuePrefillOf(routeState));
+  // Lines of that delivery that can't be issued here any more (Qodo, PR #146).
+  const [notFilled, setNotFilled] = useState(0);
+  if (prefill && stock.data && !loading) {
+    setPrefill(null);
+    const filled = prefill.lines.flatMap((l) => {
+      const row = byKey.get(stockKey({ materialId: l.materialId, locationId: l.locationId, heldForProject: prefill.projectNumber }));
+      return row ? [{ ...emptyLine(), stockKey: stockKey(row), quantity: String(Math.min(l.quantity, Number(row.quantity))) }] : [];
+    });
+    if (filled.length > 0) {
+      setProjectNumber(prefill.projectNumber);
+      setLines(filled);
+    }
+    setNotFilled(prefill.lines.length - filled.length);
+  }
+
   // Requested per item and location, across lines, to warn before submitting.
   const requested = new Map<string, number>();
   for (const l of lines) {
@@ -159,6 +181,7 @@ export function IssueStock() {
       setLast({ who, recipientId, count: filled.length });
       setLines([emptyLine()]);
       setProjectNumber('');
+      setNotFilled(0);
       // The submission succeeded: the next one is a new operation, so it gets a
       // fresh key rather than replaying this one.
       idem.confirm();
@@ -196,6 +219,12 @@ export function IssueStock() {
             See the issue slip in Movements
           </Link>
           {' '}to check or print it. The form below is ready for the next issue.
+        </Alert>
+      )}
+
+      {notFilled > 0 && (
+        <Alert tone="warning" title={`${notFilled} line${notFilled === 1 ? '' : 's'} of that delivery can’t be issued here`} className="mb-4 max-w-4xl">
+          It may have been issued already, or its item, location or project is no longer in use.
         </Alert>
       )}
 

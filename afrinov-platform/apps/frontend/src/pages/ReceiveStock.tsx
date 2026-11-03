@@ -42,6 +42,7 @@ import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
 import { todayInSouthAfrica } from '../lib/rfq';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { PROJECT_RECEIVING_LOCATION, type IssuePrefill } from '../lib/issuePrefill';
 
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
@@ -51,7 +52,11 @@ interface OpenOrder extends OrderForReceipt {
   supplier?: { name: string } | null; project?: { name: string | null } | null;
 }
 /** The delivery just booked against an order, for the confirmation above the form. */
-interface Booked { receipt: string; order: { id: string; number: string; projectNumber: string | null }; status: string | null }
+interface Booked {
+  receipt: string; order: { id: string; number: string; projectNumber: string | null }; status: string | null;
+  /** A project delivery, for Issue it now: project material goes to the workshop as it arrives. */
+  issue?: IssuePrefill;
+}
 
 interface Line { key: number; materialId: string; locationId: string; quantity: string }
 
@@ -106,6 +111,9 @@ function ReceiveAgainstOrder() {
   const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
   // Every order this user receives: the store's own, and projects' (a receiving view, no prices).
   const orders = useApi<OpenOrder[]>('/purchase-orders/receivable');
+  // Where project deliveries are booked, such as the workshop floor: project
+  // material isn't shelved (Project Material Through the Store Roadmap, Phase 4).
+  const settings = useApi<Record<string, unknown>>(`/settings/values?keys=${PROJECT_RECEIVING_LOCATION}`);
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
   const [params] = useSearchParams();
@@ -144,13 +152,30 @@ function ReceiveAgainstOrder() {
     return home && activeLocations.some((l) => l.id === home) ? home : '';
   }
 
-  /** Chooses the order the delivery is against, filling in its outstanding lines, each going where that item is kept. */
+  // The project receiving location: in use, none set, set but no longer in
+  // use, or unknown because the setting couldn't be read. Only "none" lets a
+  // project line fall back to where its item is kept; otherwise the storeman
+  // chooses, rather than the delivery going somewhere unsaid (Qodo, PR #146).
+  const settingsReady = !!settings.data || !!settings.error;
+  const projectHome = (() => {
+    if (!settings.data) return { state: 'unknown' as const, id: '' };
+    const id = settings.data[PROJECT_RECEIVING_LOCATION];
+    if (typeof id !== 'string' || id === '') return { state: 'none' as const, id: '' };
+    return activeLocations.some((l) => l.id === id) ? { state: 'set' as const, id } : { state: 'unusable' as const, id: '' };
+  })();
+
+  /**
+   * Chooses the order the delivery is against, filling in its outstanding
+   * lines: a project order's into the project receiving location when one is
+   * set, any other line where that item is kept.
+   */
   function chooseOrder(id: string, order = openOrders.find((o) => o.id === id)) {
     setOrderId(id);
     setCloseShort(false);
     setCloseReason('');
     setError(null);
-    setOrderLines(order ? receiptLinesFromOrder(order).map((l) => ({ ...l, locationId: homeOf(l.materialId) })) : []);
+    const into = (materialId: string) => (!order?.projectNumber || projectHome.state === 'none' ? homeOf(materialId) : projectHome.id);
+    setOrderLines(order ? receiptLinesFromOrder(order).map((l) => ({ ...l, locationId: into(l.materialId) })) : []);
   }
 
   // The order's page and Order stock link here with ?order=: once the orders,
@@ -159,7 +184,7 @@ function ReceiveAgainstOrder() {
   // order has nothing left to receive. An item's link chooses the order when
   // only one is owed that item.
   const [orderPreset, setOrderPreset] = useState(() => params.get('order') ?? (itemId ? ITEM_LINK : null));
-  if (orderPreset && orders.data && locations.data && (stock.data || stock.error)) {
+  if (orderPreset && orders.data && locations.data && (stock.data || stock.error) && (settings.data || settings.error)) {
     setOrderPreset(null);
     if (orderPreset === ITEM_LINK) {
       if (listed.length === 1) chooseOrder(listed[0]!.id, listed[0]);
@@ -206,7 +231,17 @@ function ReceiveAgainstOrder() {
     // A project order is Procurement's: the store receives it, but neither
     // opens nor closes it, so there is nothing more to read.
     if (order.projectNumber) {
-      setBooked({ receipt: receipt.number, order: { id: order.id, number: order.number, projectNumber: order.projectNumber }, status });
+      // One line per item and location, so two receipt lines for the same
+      // stock are capped together against what is held (Qodo, PR #146).
+      const arrived = new Map<string, { materialId: string; locationId: string; quantity: number }>();
+      for (const l of checked.lines) {
+        const key = `${l.materialId}|${l.locationId}`;
+        const a = arrived.get(key) ?? { materialId: l.materialId, locationId: l.locationId, quantity: 0 };
+        a.quantity += Number(l.quantity);
+        arrived.set(key, a);
+      }
+      const issue: IssuePrefill = { projectNumber: order.projectNumber, lines: [...arrived.values()] };
+      setBooked({ receipt: receipt.number, order: { id: order.id, number: order.number, projectNumber: order.projectNumber }, status, issue });
       setBusy(false);
       return;
     }
@@ -240,7 +275,12 @@ function ReceiveAgainstOrder() {
     }
   }
 
-  const loading = orders.loading || locations.loading;
+  // Project material isn't shelved: with a receiving location in use, a project
+  // order's lines all go there, so there is no location to choose.
+  const fixedHome = !!chosenOrder?.projectNumber && projectHome.state === 'set';
+  const fixedHomeName = fixedHome ? activeLocations.find((l) => l.id === projectHome.id)?.name : undefined;
+  // The order waits for the receiving location too, so a project order's lines start in the right place.
+  const loading = orders.loading || locations.loading || !settingsReady;
   const nothingToReceive = !!orders.data && openOrders.length === 0;
   // Without the orders, or the locations, there is nothing the form could book (Qodo, PR #125).
   const blocked = (!!locations.error && !locations.data) || (!!orders.error && !orders.data);
@@ -277,6 +317,9 @@ function ReceiveAgainstOrder() {
             <div className="flex flex-wrap gap-2">
               {booked.status === 'RECEIVED' && (
                 <Button size="sm" variant="primary" onClick={() => void closeBookedOrder()} loading={closing}>Close {booked.order.number}</Button>
+              )}
+              {booked.issue && (
+                <Link to="/stock/issue" state={{ issuePrefill: booked.issue }} className="btn-primary btn-sm">Issue it now</Link>
               )}
               {!booked.order.projectNumber && <Link to={orderPath(booked.order)} className="btn-secondary btn-sm">Open {booked.order.number}</Link>}
               <Button size="sm" variant="ghost" onClick={() => setBooked(null)}>Dismiss</Button>
@@ -334,13 +377,26 @@ function ReceiveAgainstOrder() {
             <fieldset className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <legend className="text-h3 text-surface-900">What arrived against {chosenOrder.number}</legend>
-                <EveryLineInto locations={activeLocations} onChoose={(locationId) => setOrderLines((ls) => ls.map((l) => ({ ...l, locationId })))} />
+                {!fixedHome && <EveryLineInto locations={activeLocations} onChoose={(locationId) => setOrderLines((ls) => ls.map((l) => ({ ...l, locationId })))} />}
               </div>
-              <p className="text-meta">Each line starts at what is still outstanding. Lines left at 0 stay outstanding.</p>
+              <p className="text-meta">
+                Each line starts at what is still outstanding. Lines left at 0 stay outstanding.
+                {fixedHome && ` Booked to ${fixedHomeName}, the project receiving location.`}
+              </p>
+              {chosenOrder.projectNumber && projectHome.state === 'unusable' && (
+                <Alert tone="warning" title="The project receiving location is no longer in use">
+                  Choose where each line goes. An administrator can set another under Settings → Inventory.
+                </Alert>
+              )}
+              {chosenOrder.projectNumber && projectHome.state === 'unknown' && (
+                <Alert tone="warning" title="The project receiving location couldn’t be loaded">
+                  Choose where each line goes. <button type="button" className="btn-link" onClick={() => settings.reload()}>Try again</button>
+                </Alert>
+              )}
               <div className="space-y-2">
                 {orderLines.map((l, i) => (
                   <OrderReceiptRow
-                    key={l.purchaseOrderLineId} line={l} index={i} locations={activeLocations}
+                    key={l.purchaseOrderLineId} line={l} index={i} locations={activeLocations} fixedLocation={fixedHome}
                     onChange={(patch) => setOrderLines((ls) => ls.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))}
                   />
                 ))}

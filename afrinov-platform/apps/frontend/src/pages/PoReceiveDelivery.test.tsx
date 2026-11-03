@@ -155,6 +155,110 @@ describe('Receive stock against an approved order', () => {
       expect(mockPost).not.toHaveBeenCalledWith('/purchase-orders/po-5/close', expect.anything());
       expect(screen.queryByRole('link', { name: 'Open AFRI-0430' })).not.toBeInTheDocument();
     });
+
+    // Project Material Through the Store Roadmap, Phase 4: project material isn't
+    // shelved; it is booked to one place and issued to the workshop straight away.
+    it('books its lines into the project receiving location, when one is set, with no location to choose', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+        ? { 'inventory.projectReceivingLocationId': 'loc-2' } : base(path)));
+      receiveStock();
+      await chooseOrder('po-5');
+      expect(screen.getByText(/Booked to Yard, the project receiving location\./)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Line 1 location')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Receive every line into')).not.toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/Delivery note/), { target: { value: 'DN-6' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+      await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/goods-receipts', expect.objectContaining({
+        purchaseOrderId: 'po-5',
+        lines: [expect.objectContaining({ materialId: 'm-1', locationId: 'loc-2', quantity: 6 }), expect.objectContaining({ materialId: 'm-2', locationId: 'loc-2', quantity: 5 })],
+      }), withKey));
+    });
+
+    it('offers Issue it now, which opens Issue stock with the project and what arrived', async () => {
+      function IssuePage() { const l = useLocation(); return <p data-testid="issue">{l.pathname} {JSON.stringify(l.state)}</p>; }
+      render(
+        <MemoryRouter initialEntries={['/stock/receive']}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/stock/receive" element={<ReceiveStock />} />
+              <Route path="/stock/issue" element={<IssuePage />} />
+            </Routes>
+          </ToastProvider>
+        </MemoryRouter>,
+      );
+      await chooseOrder('po-5');
+      await fillAndReceive('DN-7');
+      fireEvent.click(await screen.findByRole('link', { name: 'Issue it now' }));
+      const issue = await screen.findByTestId('issue');
+      expect(issue.textContent).toContain('/stock/issue');
+      expect(JSON.parse(issue.textContent!.slice('/stock/issue '.length))).toEqual({
+        issuePrefill: { projectNumber: 'AFRI-1325', lines: [{ materialId: 'm-1', locationId: 'loc-2', quantity: 6 }, { materialId: 'm-2', locationId: 'loc-2', quantity: 5 }] },
+      });
+    });
+
+    // Qodo, PR #146: no guessing where a project delivery goes.
+    it('waits for the receiving location before an order can be chosen', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation((path: string) => (path.startsWith('/settings/values') ? new Promise(() => {}) : base(path)));
+      receiveStock();
+      await screen.findByRole('option', { name: /AFRI-0430/ });
+      expect(screen.getByLabelText(/^Order/)).toBeDisabled();
+    });
+
+    it('warns, and leaves each line to choose, when the receiving location is no longer in use', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+        ? { 'inventory.projectReceivingLocationId': 'loc-gone' } : base(path)));
+      receiveStock();
+      await chooseOrder('po-5');
+      expect(screen.getByText('The project receiving location is no longer in use')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText(/Delivery note/), { target: { value: 'DN-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+      expect(await screen.findByText('Choose where each line is going.')).toBeInTheDocument();
+      expect(mockPost).not.toHaveBeenCalledWith('/goods-receipts', expect.anything(), expect.anything());
+    });
+
+    it('issues two lines for the same item and place as one, so they are capped together', async () => {
+      const twice = { ...PROJECT_ORDER, lines: [ORDER.lines[0]!, { ...ORDER.lines[0]!, id: 'pol-3', orderedQty: '3', receivedQty: '0' }] };
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/receivable' ? [ORDER, twice] : base(path)));
+      function IssuePage() { const l = useLocation(); return <p data-testid="issue">{JSON.stringify(l.state)}</p>; }
+      render(
+        <MemoryRouter initialEntries={['/stock/receive']}>
+          <ToastProvider>
+            <Routes>
+              <Route path="/stock/receive" element={<ReceiveStock />} />
+              <Route path="/stock/issue" element={<IssuePage />} />
+            </Routes>
+          </ToastProvider>
+        </MemoryRouter>,
+      );
+      await chooseOrder('po-5');
+      await fillAndReceive('DN-10');
+      fireEvent.click(await screen.findByRole('link', { name: 'Issue it now' }));
+      expect(JSON.parse((await screen.findByTestId('issue')).textContent!)).toEqual({
+        issuePrefill: { projectNumber: 'AFRI-1325', lines: [{ materialId: 'm-1', locationId: 'loc-2', quantity: 9 }] },
+      });
+    });
+
+    it('still has the store\u2019s own order choose a location per line', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+        ? { 'inventory.projectReceivingLocationId': 'loc-2' } : base(path)));
+      receiveStock();
+      await chooseOrder('po-1');
+      expect(screen.getByLabelText('Line 1 location')).toBeInTheDocument();
+      expect(screen.queryByText(/the project receiving location/)).not.toBeInTheDocument();
+    });
+
+    it('offers no Issue it now for the store\u2019s own order', async () => {
+      receiveStock();
+      await chooseOrder('po-1');
+      await fillAndReceive('DN-8');
+      await screen.findByText(/Received on GR-2026-0009/);
+      expect(screen.queryByRole('link', { name: 'Issue it now' })).not.toBeInTheDocument();
+    });
   });
 
   it('offers the approved orders still to come, with supplier and what each owes', async () => {

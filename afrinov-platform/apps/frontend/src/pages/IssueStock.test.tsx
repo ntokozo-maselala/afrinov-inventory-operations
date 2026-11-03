@@ -246,6 +246,9 @@ describe('IssueStock with project material', () => {
     project: { name: `Job ${projectNumber}`, status }, locationId: 'l-1', locationName: 'A-1', unitOfMeasure: 'm', quantity: '6',
   });
   const stock = [...STOCK, pipe('1', 'PIPE-1325', 'AFRI-1325'), pipe('2', 'PIPE-42', 'P-42'), pipe('3', 'PIPE-DONE', 'DONE-1', 'COMPLETED')];
+  const respondProjects = async (path: string) => (path.startsWith('/projects')
+    ? [{ projectNumber: 'AFRI-1325', name: 'Plant upgrade', status: 'ACTIVE' }, { projectNumber: 'P-42', name: 'Boiler', status: 'PLANNING' }]
+    : respond(path));
 
   beforeEach(() => {
     mockGet.mockReset().mockImplementation(async (path: string) => {
@@ -260,6 +263,22 @@ describe('IssueStock with project material', () => {
       return respond(path);
     });
     mockPost.mockReset().mockResolvedValue({ transactionIds: ['t-1', 't-2'] });
+  });
+
+  // Project Material Through the Store Roadmap, Phase 4: Issue it now, from
+  // Receive stock, starts the issue with the delivery just booked.
+  it('starts with a project delivery just received: its project and what arrived, no more than is held', async () => {
+    const held = { ...pipe('7', 'HELD-7', ''), projectNumber: null, project: null, heldForProject: 'AFRI-1325', quantity: '6' };
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [...stock, held] : (await respondProjects(path))));
+    const issuePrefill = { projectNumber: 'AFRI-1325', lines: [{ materialId: 'p-7', locationId: 'l-1', quantity: 4 }, { materialId: 'gone', locationId: 'l-1', quantity: 1 }] };
+    render(<MemoryRouter initialEntries={[{ pathname: '/stock/issue', state: { issuePrefill } }]}><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByLabelText(/Project/)).toHaveValue('AFRI-1325'));
+    expect(screen.getByLabelText(/Project/)).toBeDisabled();
+    expect(screen.getByLabelText('Item 1')).toHaveValue('Pipe 7 (HELD-7) · A-1 · held for AFRI-1325');
+    expect(screen.getAllByLabelText('Quantity')[0]).toHaveValue(4);
+    // A line no longer held isn't added, and the page says so (Qodo, PR #146).
+    expect(screen.queryByLabelText('Item 2')).not.toBeInTheDocument();
+    expect(screen.getByText('1 line of that delivery can\u2019t be issued here')).toBeInTheDocument();
   });
 
   it('offers neither a closed project nor its material', async () => {

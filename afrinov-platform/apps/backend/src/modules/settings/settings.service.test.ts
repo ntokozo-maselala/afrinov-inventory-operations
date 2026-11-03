@@ -37,6 +37,8 @@ interface AuditRow {
 const db = {
   settings: new Map<string, SettingRow>(),
   audit: [] as AuditRow[],
+  // Locations a setting may name, by id.
+  locations: new Map<string, { active: boolean }>(),
 };
 let auditCounter = 0;
 function nextAuditId(): string { auditCounter += 1; return `audit-${auditCounter}`; }
@@ -47,6 +49,9 @@ function makePrisma(): unknown {
   // Snapshot of all settings/audit; used to roll back on $transaction failure.
   let snapshot: { settings: Map<string, SettingRow>; audit: AuditRow[] } | null = null;
   return {
+    location: {
+      findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null,
+    },
     setting: {
       findUnique: async ({ where }: { where: { key: string } }) => db.settings.get(where.key) ?? null,
       findMany: async ({ where }: { where?: { key?: { in: string[] }; category?: string } } = {}) => {
@@ -212,6 +217,24 @@ describe('SettingsService', () => {
     const { SettingsService } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();
     await expect(SettingsService.set('general.companyName', '', 'u-1')).rejects.toThrow(/at least/i);
+  });
+
+  // Project Material Through the Store Roadmap, Phase 4: where project deliveries are booked.
+  it('takes an active location or blank for the project receiving location, nothing else', async () => {
+    const { SettingsService } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    const floor = '11111111-2222-4333-8444-555555555555';
+    const shed = '11111111-2222-4333-8444-666666666666';
+    db.locations.set(floor, { active: true });
+    db.locations.set(shed, { active: false });
+    expect(await SettingsService.getValue('inventory.projectReceivingLocationId')).toBe('');
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', 'Workshop floor', 'u-1')).rejects.toThrow(/Choose a location/);
+    // Qodo, PR #146: a location that doesn't exist, or is no longer in use, is refused.
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', shed, 'u-1')).rejects.toThrow(/Choose an active location/);
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', '11111111-2222-4333-8444-777777777777', 'u-1')).rejects.toThrow(/Choose an active location/);
+    await expect(SettingsService.setMany({ 'inventory.projectReceivingLocationId': shed }, 'u-1')).rejects.toThrow(/Choose an active location/);
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', floor, 'u-1')).resolves.toBeDefined();
+    await expect(SettingsService.set('inventory.projectReceivingLocationId', '', 'u-1')).resolves.toBeDefined();
   });
 
   it('rejects non-numeric defaultPageSize', async () => {

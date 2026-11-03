@@ -9,6 +9,8 @@ import type { CurrentStockRow } from '../api/types';
 import { sectionOf } from '../lib/categories';
 import { isStoresStock } from '../lib/heldFor';
 import { formatNumber } from '../lib/format';
+import { usePermissions } from '../hooks/usePermissions';
+import type { IssuePrefill } from '../lib/issuePrefill';
 
 export interface ProjectLeftoverCount { projectNumber: string; name: string | null; status: string; items: number }
 
@@ -63,9 +65,8 @@ const itemsText = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
  * and any with no project yet as needing one first. Built from the Stock
  * page's own rows (inactive items included), so it shows whenever the table
  * can, and the page's load error covers both (Qodo, PR #126).
- * Stock received against a project's orders, held for it, is listed by
- * project too, each item linking to its page, until project stock gets its
- * own views (Project Material Through the Store Roadmap, Phase 4; Qodo, PR #143).
+ * Stock received for a project and not yet issued is listed first
+ * (ReceivedNotIssuedNotice).
  */
 export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[]; className?: string }) {
   const byProject = new Map<string, HeldForProject & { ids: Set<string> }>();
@@ -84,37 +85,9 @@ export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[
   const open = projects.filter((p) => !isClosedStatus(p.status));
   const unassigned = byProject.get('');
   const name = (p: HeldForProject) => `Project ${p.projectNumber}${p.name ? ` · ${p.name}` : ''}`;
-  // Stock held for a project, per project, then per item across its locations.
-  const heldFor = new Map<string, Map<string, { materialId: string; name: string; unit: string; quantity: number }>>();
-  for (const r of rows) {
-    if (isStoresStock(r) || Number(r.quantity) <= 0) continue;
-    const items = heldFor.get(r.heldForProject!) ?? new Map();
-    const item = items.get(r.materialId) ?? { materialId: r.materialId, name: r.materialName, unit: r.unitOfMeasure, quantity: 0 };
-    item.quantity += Number(r.quantity);
-    items.set(r.materialId, item);
-    heldFor.set(r.heldForProject!, items);
-  }
-  const heldProjects = [...heldFor].sort(([a], [b]) => a.localeCompare(b));
   return (
     <>
-      {heldProjects.length > 0 && (
-        <Alert tone="info" title="Held for projects" className={className}>
-          <p>Received against each project&rsquo;s orders and held for it: issued to that project on Issue stock. Each item&rsquo;s page shows where it is kept.</p>
-          <ul className="mt-1 space-y-0.5">
-            {heldProjects.map(([projectNumber, items]) => (
-              <li key={projectNumber}>
-                Project {projectNumber}:{' '}
-                {[...items.values()].sort((a, b) => a.name.localeCompare(b.name)).map((i, n) => (
-                  <span key={i.materialId}>
-                    {n > 0 && ', '}
-                    <Link to={`/materials/${i.materialId}`} className="btn-link">{i.name}</Link> ({formatNumber(i.quantity)} {i.unit})
-                  </span>
-                ))}
-              </li>
-            ))}
-          </ul>
-        </Alert>
-      )}
+      <ReceivedNotIssuedNotice rows={rows} className={className} />
       {closed.length > 0 && (
         <Alert tone="warning" title="Leftovers to move to Stores" className={className}>
           <ul className="space-y-0.5">
@@ -151,5 +124,96 @@ export function ProjectStockNotice({ rows, className }: { rows: CurrentStockRow[
         </Alert>
       )}
     </>
+  );
+}
+
+/**
+ * Project material received and not yet issued. It isn't shelved: it goes to
+ * the workshop as it arrives, so anything listed here is waiting to be issued
+ * (Project Material Through the Store Roadmap, Phase 4). Per project, each item
+ * with what is held, linking to its page, and Issue opening Issue stock with the
+ * project and its lines filled in. Built from current-stock rows.
+ */
+export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStockRow[]; className?: string }) {
+  const canIssue = usePermissions().hasPermission('inventory:issue');
+  const byProject = new Map<string, CurrentStockRow[]>();
+  for (const r of rows) {
+    if (isStoresStock(r) || Number(r.quantity) <= 0) continue;
+    byProject.set(r.heldForProject!, [...(byProject.get(r.heldForProject!) ?? []), r]);
+  }
+  const projects = [...byProject].sort(([a], [b]) => a.localeCompare(b));
+  // Whether each project still takes issues, as Issue stock decides: active,
+  // and neither completed nor cancelled (Qodo, PR #146).
+  const active = useApi<Array<{ projectNumber: string; status?: string }>>(projects.length > 0 && canIssue ? '/projects?active=true' : null);
+  if (projects.length === 0) return null;
+  // Unknown when the projects couldn't be read: Issue isn't offered then, and
+  // the notice says so with a retry (Qodo, PR #146).
+  const projectsUnknown = canIssue && !!active.error && !active.data;
+  const whyNot = (project: string): string | null => {
+    if (!active.data) return 'unknown';
+    const p = active.data.find((x) => x.projectNumber === project);
+    if (!p) return 'project not active';
+    return p.status === 'COMPLETED' ? 'project completed' : p.status === 'CANCELLED' ? 'project cancelled' : null;
+  };
+  /** Why Issue stock wouldn't offer a balance, or null when it would. */
+  const whyNotRow = (r: CurrentStockRow): string | null => {
+    if (r.category === 'TOOLS') return 'a tool, lent on Tools';
+    if (r.materialActive === false) return 'item not in use';
+    if (r.locationActive === false) return 'location not in use';
+    return null;
+  };
+  return (
+    <Alert tone="info" title="Received for projects, not yet issued" className={className}>
+      <p>Project material goes to the workshop as it arrives: issue it to its project.</p>
+      {projectsUnknown && (
+        <p className="mt-1">
+          The projects couldn&rsquo;t be checked, so Issue isn&rsquo;t offered.{' '}
+          <button type="button" className="btn-link" onClick={() => active.reload()}>Try again</button>
+        </p>
+      )}
+      <ul className="mt-1 space-y-1">
+        {projects.map(([project, held]) => {
+          // One entry per item, across its locations, saying how much of it
+          // Issue won't take and why; the issue keeps each location's line.
+          const items = new Map<string, { materialId: string; name: string; unit: string; quantity: number; notIssued: number; reasons: Set<string> }>();
+          for (const r of held) {
+            const i = items.get(r.materialId) ?? { materialId: r.materialId, name: r.materialName, unit: r.unitOfMeasure, quantity: 0, notIssued: 0, reasons: new Set<string>() };
+            i.quantity += Number(r.quantity);
+            const why = whyNotRow(r);
+            if (why) { i.notIssued += Number(r.quantity); i.reasons.add(why); }
+            items.set(r.materialId, i);
+          }
+          // Only what Issue stock offers: an active item and location, and no tools.
+          const prefill: IssuePrefill = {
+            projectNumber: project,
+            lines: held.filter((r) => !whyNotRow(r)).map((r) => ({ materialId: r.materialId, locationId: r.locationId, quantity: Number(r.quantity) })),
+          };
+          const reason = canIssue ? whyNot(project) : null;
+          return (
+            <li key={project}>
+              Project {project}:{' '}
+              {[...items.values()].sort((a, b) => a.name.localeCompare(b.name)).map((i, n) => (
+                <span key={i.materialId}>
+                  {n > 0 && ', '}
+                  <Link to={`/materials/${i.materialId}`} className="btn-link">{i.name}</Link> ({formatNumber(i.quantity)} {i.unit}
+                  {canIssue && !reason && i.notIssued > 0 && (
+                    <span className="text-meta">
+                      {'; '}{i.notIssued < i.quantity ? `${formatNumber(i.notIssued)} ${i.unit} ` : ''}not issued: {[...i.reasons].join(', ')}
+                    </span>
+                  )})
+                </span>
+              ))}
+              {canIssue && prefill.lines.length > 0 && !reason && (
+                <>
+                  {' · '}
+                  <Link to="/stock/issue" state={{ issuePrefill: prefill }} className="btn-link" aria-label={`Issue project ${project}'s material`}>Issue</Link>
+                </>
+              )}
+              {canIssue && reason && reason !== 'unknown' && <span className="text-meta"> · not issued: {reason}</span>}
+            </li>
+          );
+        })}
+      </ul>
+    </Alert>
   );
 }
