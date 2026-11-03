@@ -101,6 +101,23 @@ describe('computeMonthEnd boundaries and totals', () => {
     expect(r.total.usedValue).toBe(4);
   });
 
+  // Project Material Through the Store Roadmap, Phase 2, as the server reports it.
+  it('keeps stock held for a project out of Stores figures and lists it under that project', () => {
+    const r = calculate([item('1'), item('2', { category: 'PROJECT_MATERIAL', sku: 'PRJ-2', projectNumber: 'AFRI-1325' })], [
+      movement('1', 2, '2026-08-01T00:00:00.000Z'),
+      { ...movement('1', 50, '2026-08-02T00:00:00.000Z', 'RECEIPT', 'l-2'), heldForProject: 'AFRI-1402' },
+      movement('2', 3, '2026-08-01T00:00:00.000Z'),
+      { ...movement('2', 6, '2026-08-02T00:00:00.000Z', 'RECEIPT', 'l-2'), heldForProject: 'AFRI-1402' },
+    ]);
+    expect(r.categories[0]!.items).toEqual([expect.objectContaining({ sku: 'CON-1', location: 'A-1', currentStock: 2, reorderQuantity: 8 })]);
+    expect(r.categories[1]!.items.map((i) => [i.sku, i.project, i.location, i.currentStock])).toEqual([
+      ['PRJ-2', 'AFRI-1325', 'A-1', 3],
+      ['CON-1', 'AFRI-1402', 'B-2', 50],
+      ['PRJ-2', 'AFRI-1402', 'B-2', 6],
+    ]);
+    expect((r.projects ?? []).map((p) => [p.projectNumber, p.items, p.value])).toEqual([['AFRI-1325', 1, 6], ['AFRI-1402', 2, 112]]);
+  });
+
   it('retains consumed inactive items in usage after their last stock is issued', () => {
     const r = calculate([item('1', { active: false, category: 'TOOLS' })], [
       movement('1', 3, '2026-08-01T00:00:00.000Z'),

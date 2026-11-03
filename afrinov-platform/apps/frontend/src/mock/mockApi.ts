@@ -2776,6 +2776,11 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
     const sku = findMaterial(rfq.lines.find((l) => ids.has(l.materialId))!.materialId)?.sku;
     throw err('VALIDATION_ERROR', `${sku} is on ${rfq.number}, which is still open, so it stays project material. Move it once that request is cancelled, or the order it is awarded as is finished.`);
   }
+  // As the server: an item with stock held for a project stays project material.
+  const held = computeBalances().find((b) => ids.has(b.materialId) && b.heldForProject && b.quantity !== 0);
+  if (held) {
+    throw err('VALIDATION_ERROR', `${findMaterial(held.materialId)?.sku} has stock in the store held for project ${held.heldForProject}, so it stays project material until that stock is used or moved.`);
+  }
   for (const item of items) {
     const m = findMaterial(item.materialId);
     if (!m) throw err('NOT_FOUND', 'Material not found');

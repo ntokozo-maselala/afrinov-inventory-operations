@@ -114,10 +114,10 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
     materials = materials.filter((m) => m.sku.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle));
   }
 
-  // Build balance map
+  // Build balance map: per item, location and holder ('' for Stores, else the project it is held for).
   const balanceMap = new Map<string, number>();
   for (const t of input.transactions) {
-    const key = `${t.materialId}|${t.locationId}`;
+    const key = `${t.materialId}|${t.locationId}|${t.heldForProject ?? ''}`;
     balanceMap.set(key, (balanceMap.get(key) ?? 0) + Number(t.quantity));
   }
 
@@ -131,8 +131,9 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   const locMap = new Map(input.locations.map((l) => [l.id, l]));
   const totalByMaterial = new Map<string, number>();
   for (const [k, qty] of balanceMap) {
-    const id = k.split('|')[0]!;
-    totalByMaterial.set(id, (totalByMaterial.get(id) ?? 0) + qty);
+    const [id, , holder] = k.split('|') as [string, string, string];
+    // Status is a Stores measure, as the server counts it.
+    if (holder === '') totalByMaterial.set(id, (totalByMaterial.get(id) ?? 0) + qty);
   }
   // Tools out on loan are still owned.
   for (const t of input.transactions) {
@@ -151,8 +152,8 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
     const myBals = Array.from(balanceMap.entries())
       .filter(([k]) => k.startsWith(`${m.id}|`))
       .map(([k, qty]) => {
-        const locId = k.split('|')[1]!;
-        return { locId, qty };
+        const [, locId, holder] = k.split('|') as [string, string, string];
+        return { locId, qty, heldForProject: holder || null };
       });
     if (myBals.length === 0) {
       const line: ReportInventoryLine = {
@@ -177,7 +178,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
       if (q.stockStatus === 'ALL' || line.status === q.stockStatus) allLines.push(line);
       continue;
     }
-    for (const { locId, qty } of myBals) {
+    for (const { locId, qty, heldForProject } of myBals) {
       if (q.locationId.length > 0 && !q.locationId.includes(locId)) continue;
       const loc = locMap.get(locId);
       const required = Number(m.requiredStock);
@@ -201,6 +202,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
         status: classifyStatus(qty, itemNeedsReorder(m)),
         lastUpdated: lastUpdate.get(m.id) ?? null,
         projectNumber: m.projectNumber ?? null,
+        heldForProject,
       };
       if (q.stockStatus !== 'ALL' && line.status !== q.stockStatus) continue;
       allLines.push(line);
@@ -375,22 +377,22 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   }
   const bySupplier = Array.from(bySupplierMap.values()).sort((a, b) => b.inventoryValue - a.inventoryValue);
 
-  // Projects material per project.
-  const byProjectMap = new Map<string, ReportProjectRow>();
-  for (const m of materials) {
-    if (m.category !== 'PROJECT_MATERIAL') continue;
-    if (!allLines.some((l) => l.materialId === m.id)) continue; // not in the report
-    const key = m.projectNumber ?? '';
-    const p = input.projects?.find((x) => x.projectNumber === m.projectNumber);
-    const row = byProjectMap.get(key) ?? { projectNumber: m.projectNumber ?? null, name: p?.name ?? null, status: p?.status ?? null, skuCount: 0, quantity: 0, inventoryValue: 0, share: 0 };
-    const lines = allLines.filter((l) => l.materialId === m.id);
-    row.skuCount += 1;
-    row.quantity += lines.reduce((a, l) => a + Math.max(0, l.quantity), 0);
-    row.inventoryValue += lines.reduce((a, l) => a + (l.unitCost === null ? 0 : l.inventoryValue), 0);
+  // Projects material per project, as the server adds it up: stock held for a
+  // project is that project's; stock left in the store keeps the item's project.
+  const byProjectMap = new Map<string, ReportProjectRow & { items: Set<string> }>();
+  for (const l of allLines) { // only items in the report
+    if (l.category !== 'PROJECT_MATERIAL' && !l.heldForProject) continue;
+    const key = l.heldForProject ?? l.projectNumber ?? '';
+    const p = input.projects?.find((x) => x.projectNumber === key);
+    const row = byProjectMap.get(key) ?? { projectNumber: key || null, name: p?.name ?? null, status: p?.status ?? null, skuCount: 0, quantity: 0, inventoryValue: 0, share: 0, items: new Set<string>() };
+    row.items.add(l.materialId);
+    row.skuCount = row.items.size;
+    row.quantity += Math.max(0, l.quantity);
+    row.inventoryValue += l.unitCost === null ? 0 : l.inventoryValue;
     byProjectMap.set(key, row);
   }
   const byProject = Array.from(byProjectMap.values())
-    .map((r) => ({ ...r, share: inventoryValue > 0 ? r.inventoryValue / inventoryValue : 0 }))
+    .map(({ items: _items, ...r }) => ({ ...r, share: inventoryValue > 0 ? r.inventoryValue / inventoryValue : 0 }))
     .sort((a, b) => (a.projectNumber === null ? 1 : b.projectNumber === null ? -1 : a.projectNumber.localeCompare(b.projectNumber)));
 
   // Exceptions (Stores only)

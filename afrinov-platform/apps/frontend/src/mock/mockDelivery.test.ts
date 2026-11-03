@@ -70,4 +70,13 @@ describe('mock: delivery of a project order', () => {
     const stores = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 2, unitPrice: 5 }] });
     expect(await messageOf(api.post(`/purchase-orders/${stores.id}/confirm-delivery`, { lines: [{ lineId: stores.lines[0]!.id, quantity: 1 }] }))).toMatch(/received into stock now/);
   });
+  // Qodo, PR #143: as the server refuses it.
+  it('keeps an item with stock held for a project from moving to Stores', async () => {
+    const po = await approvedProjectOrder();
+    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
+    expect(await messageOf(api.post('/projects/AFRI-1325/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] })))
+      .toMatch(/has stock in the store held for project AFRI-1325, so it stays project material/);
+    expect((await api.get<{ category: string }>('/materials/mat-9')).category).toBe('PROJECT_MATERIAL');
+  });
 });

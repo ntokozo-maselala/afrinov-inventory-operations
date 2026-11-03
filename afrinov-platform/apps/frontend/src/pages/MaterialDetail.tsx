@@ -77,6 +77,8 @@ export function MaterialDetail() {
   // material came through the store) apart from stock held for a project.
   const leftoverRows = (stock.data ?? []).filter((r) => isStoresStock(r) && Number(r.quantity) > 0);
   const heldRows = (stock.data ?? []).filter((r) => !isStoresStock(r) && Number(r.quantity) > 0);
+  // Issue and Check out act on Stores stock only, so only it offers them (Qodo, PR #143).
+  const storesTotal = (stock.data ?? []).filter(isStoresStock).reduce((acc, r) => acc + Number(r.quantity), 0);
   // Every row carries the item's status; take it from the first.
   const itemStatus = stock.data?.[0];
   const unitCost = material.data?.unitCost;
@@ -124,8 +126,8 @@ export function MaterialDetail() {
             {active && canReceive && <Link to={receiveLink} className="btn-secondary btn-sm">Receive</Link>}
             {/* Any active item: a Projects item's project is chosen on the order (Project on the Order Roadmap, Phase 2). */}
             {active && canOrder && <Link to={`${orderForm}?materialIds=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Order</Link>}
-            {active && total > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
-            {active && total > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
+            {active && storesTotal > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
+            {active && storesTotal > 0 && !isTool && canIssue && !needsProject(material.data) && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
               ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
               : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
@@ -163,14 +165,15 @@ export function MaterialDetail() {
               </dl>
             </section>
             {!storesItem ? (
-              // Project material goes from the supplier straight to site: it has no
-              // stock status, and no project of its own: the order it is bought on
-              // says which (Project on the Order Roadmap, Phase 3).
+              // Project material comes through the store, held for the project its
+              // order is for: it has no stock status, and no project of its own
+              // (Project on the Order Roadmap, Phase 3; Project Material Through
+              // the Store Roadmap, Phase 2).
               <section className="surface-card p-4 space-y-2">
                 <h2 className="text-h3 text-surface-900">Ordering</h2>
                 <p className="text-meta">
-                  Bought for a project on its purchase order, which says which project it is for. Project material goes from the supplier straight to site, so it isn&rsquo;t held in the store.
-                  {total > 0 && ' What is shown as left in the store was received before.'}
+                  Bought for a project on its purchase order, which says which project it is for. The store receives it against that order and holds it for that project.
+                  {leftoverRows.length > 0 && ' What is shown as left in the store was received before project material came through the store.'}
                 </p>
               </section>
             ) : (

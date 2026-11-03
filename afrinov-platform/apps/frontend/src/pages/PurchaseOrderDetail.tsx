@@ -268,7 +268,8 @@ export function PurchaseOrderDetail() {
                   <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {fresh.approvedBy?.name ?? '—'}</span></dd></>
                 )}
                 {fresh.deliveredAt && (
-                  <><dt className="text-surface-500">Received</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
+                  // An order finished by the retired Confirm delivery went to site, not into the store (Qodo, PR #143).
+                  <><dt className="text-surface-500">{(history.data ?? []).some((h) => h.action === 'PO_DELIVERY_CONFIRMED') ? 'Delivered to site' : 'Received'}</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.deliveredAt)}<br /><span className="text-surface-400">by {fresh.deliveredBy?.name ?? '—'}</span></dd></>
                 )}
                 {fresh.closedAt && (
                   <><dt className="text-surface-500">Closed</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.closedAt)}<br /><span className="text-surface-400">{fresh.closeReason ?? `by ${fresh.closedBy?.name ?? '—'}`}</span></dd></>

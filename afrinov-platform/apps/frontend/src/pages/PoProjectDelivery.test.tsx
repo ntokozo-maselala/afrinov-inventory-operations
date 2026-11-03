@@ -74,4 +74,23 @@ describe('a project order’s delivery', () => {
     page();
     expect(await screen.findByText(/Delivery confirmed on site/)).toBeInTheDocument();
   });
+
+  // Qodo, PR #143: a confirmed delivery went to site, not into the store.
+  it('dates an order finished by Confirm delivery as delivered to site, and a received one as received', async () => {
+    const delivered = { ...ORDER, status: 'RECEIVED', deliveredAt: '2026-10-28T09:00:00Z', deliveredBy: { name: 'Thandi Buyer' } };
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders/po-1') return delivered;
+      if (path === '/purchase-orders/po-1/history') return [CONFIRMED_BEFORE];
+      return [];
+    });
+    const first = page();
+    expect(await screen.findByText('Delivered to site')).toBeInTheDocument();
+    first.unmount();
+
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/po-1' ? delivered : []));
+    page();
+    // The status reads Received too; this is the date's label.
+    expect((await screen.findAllByText('Received')).some((e) => e.tagName === 'DT')).toBe(true);
+    expect(screen.queryByText('Delivered to site')).not.toBeInTheDocument();
+  });
 });
