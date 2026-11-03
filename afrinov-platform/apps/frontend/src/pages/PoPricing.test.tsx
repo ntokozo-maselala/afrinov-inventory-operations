@@ -183,6 +183,23 @@ describe('line discounts', () => {
     })));
   });
 
+  it('takes a discount typed without a leading 0, and refuses one with 3 places', async () => {
+    appAt('/purchase-orders/new');
+    await screen.findByRole('heading', { name: 'New purchase order' });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '10.005' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
+    expect(await screen.findByText(/A discount must be between 0% and 100%/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
+      lines: [expect.objectContaining({ discountPercent: 0.5 })],
+    })));
+  });
+
   it('takes 0.29% on Edit', async () => {
     appAt('/purchase-orders/po-1/edit');
     fireEvent.change(await screen.findByLabelText('DISC-115 discount percent'), { target: { value: '0.29' } });

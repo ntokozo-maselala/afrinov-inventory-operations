@@ -1417,6 +1417,9 @@ function route(method: string, path: string, body?: unknown): unknown {
     // To tell whether anything changed: an approved order changed gets a new revision.
     const snapshot = (x: MockPurchaseOrder) => JSON.stringify({ ...x, history: undefined, notes: x.notes || undefined });
     const before = snapshot(po);
+    // And whether its money did, by value: a price, discount or VAT rate sent unchanged is no change.
+    const money = (x: MockPurchaseOrder) => JSON.stringify([Number(x.vatRate ?? 15), x.lines.map((l) => [l.unitPrice == null ? null : Number(l.unitPrice), Number(l.discountPercent ?? 0)])]);
+    const moneyBefore = money(po);
     const nextProject = b.projectNumber === undefined ? undefined : (b.projectNumber?.trim() || null);
     if (nextProject !== undefined && nextProject !== (po.projectNumber ?? null)) {
       // As the server: neither kind of order becomes the other.
@@ -1445,8 +1448,9 @@ function route(method: string, path: string, body?: unknown): unknown {
       po.revision = (po.revision ?? 0) + 1;
       // As the server: a new price, discount or VAT rate that takes the order past
       // its approver's limit (or leaves a line unpriced) sends it back for approval,
-      // without the approved small print. The mock's approver is the signed-in user.
-      if (b.linePrices?.length || b.lineDiscounts?.length || b.vatRate !== undefined) {
+      // without the approved small print. The mock's approver is the signed-in user;
+      // an order with no approver on record (as seeded) is left as it is.
+      if (po.approvedBy && money(po) !== moneyBefore) {
         const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
         const limit = mockUsers.find((u) => u.id === 'user-1')?.approvalLimit ?? null;
         const within = limit == null || ((po.currency ?? 'ZAR') === 'ZAR' && Number(totals.net) <= Number(limit));
