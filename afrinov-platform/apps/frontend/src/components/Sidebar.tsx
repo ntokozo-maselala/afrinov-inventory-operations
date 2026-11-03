@@ -7,6 +7,8 @@ import { Icon } from './Icon';
 import { useAppShell } from '../hooks/useAppShell';
 import { cn } from '../lib/cn';
 import { isNavItemActive } from '../hooks/useNavGroups';
+import { isFoldable, useFoldedSections } from '../hooks/useFoldedSections';
+import { NavSectionHeader, navSectionId } from './NavSectionHeader';
 
 interface NavItem {
   to: string;
@@ -186,6 +188,9 @@ function NavItemComponent({
 export function Sidebar({ groups, onNavigate, isMobile = false }: SidebarProps) {
   const { sidebarMode, prefersReducedMotion } = useAppShell();
   const isCollapsed = sidebarMode === 'collapsed';
+  // Sections fold from their headers; the narrow, icons-only menu has none, so shows every entry.
+  const sections = useFoldedSections(groups);
+  const menu = isMobile ? 'mobile-sidebar' : 'sidebar';
 
   return (
     <nav
@@ -215,20 +220,30 @@ export function Sidebar({ groups, onNavigate, isMobile = false }: SidebarProps) 
         )}
       </div>
       <div className="flex-1 overflow-y-auto py-3" style={{ minHeight: 0 }}>
-        {groups.map((g) => (
-          <div key={g.title} className="mb-4">
-            {!isCollapsed && (
-              <div className="px-4 mb-1.5 text-eyebrow">{g.title}</div>
-            )}
-            <ul className={cn('space-y-0.5', isCollapsed ? 'mx-1.5' : 'mx-2')} role="list">
-              {g.items.map((it) => (
-                <li key={it.to}>
-                  <NavItemComponent item={it} isCollapsed={isCollapsed} onNavigate={onNavigate} prefersReducedMotion={prefersReducedMotion} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {groups.map((g) => {
+          const open = isCollapsed || sections.isOpen(g);
+          return (
+            <div key={g.title} className="mb-4">
+              {!isCollapsed && (
+                <NavSectionHeader
+                  title={g.title}
+                  foldable={isFoldable(g)}
+                  open={open}
+                  onToggle={() => sections.toggle(g.title)}
+                  controls={navSectionId(menu, g.title)}
+                  className="mb-1.5"
+                />
+              )}
+              <ul id={navSectionId(menu, g.title)} hidden={!open} className={cn('space-y-0.5', isCollapsed ? 'mx-1.5' : 'mx-2')} role="list">
+                {g.items.map((it) => (
+                  <li key={it.to}>
+                    <NavItemComponent item={it} isCollapsed={isCollapsed} onNavigate={onNavigate} prefersReducedMotion={prefersReducedMotion} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
       </div>
     </nav>
   );

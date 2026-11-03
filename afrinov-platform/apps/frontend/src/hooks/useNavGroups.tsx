@@ -27,6 +27,8 @@ export interface NavGroup {
   title: string;
   items: NavItem[];
   permissions?: string[];
+  /** Shown as a header with no entries yet: kept although its list is empty. */
+  placeholder?: boolean;
 }
 
 export function useNavGroups(): NavGroup[] {
@@ -73,19 +75,32 @@ export function useNavGroups(): NavGroup[] {
       items: [
         { to: '/materials', label: 'Materials', icon: <Icon.Layers /> },
         { to: '/locations', label: 'Locations', icon: <Icon.Map /> },
-        { to: '/projects', label: 'Projects', icon: <Icon.Tag /> },
         { to: '/recipients', label: 'Recipients', icon: <Icon.Users /> },
         { to: '/suppliers', label: 'Suppliers', icon: <Icon.Truck /> },
       ],
     },
+    {
+      // The jobs the business wins and works on for its clients.
+      title: 'Sales',
+      items: [
+        { to: '/projects', label: 'Projects', icon: <Icon.Tag /> },
+      ],
+    },
+    {
+      // A header for now: its pages come later.
+      title: 'Production',
+      items: [],
+      placeholder: true,
+    },
     ...(PROCUREMENT_ENABLED ? [{
       title: 'Procurement',
+      // In the order the work goes: ask for prices, raise the order, then follow it.
       items: [
-        // Highlighted on an order's page too, but not on the new-order page, which has its own entry.
-        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new'] },
-        { to: '/purchase-orders/new', label: 'New purchase order', icon: <Icon.Plus />, permissions: ['procurement:manage'] },
         // Buyers ask suppliers for prices before ordering; approvers and the store don't.
         { to: '/rfqs', label: 'RFQ', icon: <Icon.Doc />, permissions: ['procurement:manage'] },
+        { to: '/purchase-orders/new', label: 'New purchase order', icon: <Icon.Plus />, permissions: ['procurement:manage'] },
+        // Highlighted on an order's page too, but not on the new-order page, which has its own entry.
+        { to: '/purchase-orders', label: 'Purchase orders', icon: <Icon.Cart />, permissions: ['orders:view'], excludes: ['/purchase-orders/new'] },
       ],
     }] : []),
     {
@@ -122,7 +137,8 @@ export function useNavGroups(): NavGroup[] {
         ...group,
         items: filterItems(group.items),
       }))
-      .filter((group) => group.items.length > 0);
+      // A section whose entries the user may not use is left out; a placeholder stays.
+      .filter((group) => group.items.length > 0 || group.placeholder);
   }
 
   return filterGroups(allGroups);
