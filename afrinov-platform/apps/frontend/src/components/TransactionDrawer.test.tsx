@@ -43,6 +43,12 @@ describe('TransactionDrawer', () => {
   });
 
   // Qodo, PR #145: whose stock moved, apart from who it was used for.
+  // Qodo, PR #149: the item changed with it, so the pair isn't reversed on its own.
+  it('offers no Reverse for a closed project\'s stock moved to Stores', () => {
+    render(<TransactionDrawer transaction={{ ...issue, type: 'TRANSFER_OUT', quantity: '-4', heldForProject: 'AFRI-1325', referenceType: 'MoveToStores', referenceId: 'AFRI-1325' }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+  });
+
   it('names the project the stock is held for, apart from the project it was used for', () => {
     render(<TransactionDrawer transaction={{ ...issue, type: 'TRANSFER_OUT', quantity: '-2', projectNumber: null, heldForProject: 'AFRI-1325' }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
     expect(screen.getByText('Held for').nextElementSibling).toHaveTextContent('AFRI-1325');

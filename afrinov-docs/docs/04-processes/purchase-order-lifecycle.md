@@ -21,12 +21,12 @@ redirects to Purchase orders.
 |---|---|---|
 | Lives in | Procurement (`/purchase-orders/:id`) | Store → Order stock (`/stock/orders/:id`) |
 | Raised by | Procurement, on New purchase order | The store controller, on Order stock |
-| Seen by | Procurement, approvers and Admin (`view:purchase_order`) | The store controller and Admin (`order:stores_stock`) |
+| Seen by | Procurement, approvers and Admin (`view:purchase_order`); the store controller only through Receive stock's receiving view, with no prices (ADR-027) | The store controller and Admin (`order:stores_stock`) |
 | Project | Required | None |
 | Lines | Projects items, any of them: the order says which project they are for (ADR-023) | Stores items from the catalogue only |
 | Raise, edit, submit, cancel, close | `create`/`submit`/`cancel`/`close:purchase_order` | `order:stores_stock` |
 | Approved by | Approvers, by value | The storeman, by value, against his own limit |
-| Delivery | Straight to site: Procurement **confirms delivery** on the order (`POST /:id/confirm-delivery`); no stock is added | Into stock: on Receive stock, against the order |
+| Delivery | Into stock held for the order's project: the store books it on Receive stock, against the order, and issues it to the project (ADR-027). Confirm delivery is retired | Into stock: on Receive stock, against the order |
 | RFQ first | Possible | No: Stores stock is ordered at known prices |
 
 The numbering, the order document and the statuses are the same for both.
@@ -174,7 +174,7 @@ the one place to receive, and only against an approved Stores order
   from an order or RFQ line gets no project of its own. The one exception:
   an order awarded from an RFQ sent before project orders were limited to
   Projects items (Stores ordering roadmap) keeps the Stores items it was
-  quoted for; their delivery is confirmed with the rest, so no stock is added.
+  quoted for; they are received with the rest, held for the order's project.
 - Each transition and each edit is written to the audit log, with only the
   fields that changed, and shown as the order's history (`GET /:id/history`).
 

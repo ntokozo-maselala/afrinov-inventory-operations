@@ -49,9 +49,13 @@ export const listMaterialsQuerySchema = z.object({
   projectNumber: z.string().max(64).optional(),
 });
 
-/** A closed project's leftovers to move to Stores, each with its Stores category (Phase 7). */
+/**
+ * A closed project's leftovers to move to Stores (Phase 7), each with the Stores
+ * category it becomes. Left out for an item that keeps its category (a Stores
+ * item, or another project's item) whose held stock alone moves (Qodo, PR #149).
+ */
 export const moveLeftoversSchema = z.object({
-  items: z.array(z.object({ materialId: z.string().min(1), category: z.enum(LEFTOVER_CATEGORIES) })).min(1).max(500),
+  items: z.array(z.object({ materialId: z.string().min(1), category: z.enum(LEFTOVER_CATEGORIES).optional() })).min(1).max(500),
 });
 
 export async function materialRoutes(app: FastifyInstance): Promise<void> {

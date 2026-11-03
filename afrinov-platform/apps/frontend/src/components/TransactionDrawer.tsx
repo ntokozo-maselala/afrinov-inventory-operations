@@ -103,7 +103,9 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !fromPurchaseOrder
     && !isMark
     // Tool loans are put right by checking the tool in or out again.
-    && transaction.type !== 'LOAN' && transaction.type !== 'LOAN_RETURN' && transaction.referenceType !== 'ToolLoan';
+    && transaction.type !== 'LOAN' && transaction.type !== 'LOAN_RETURN' && transaction.referenceType !== 'ToolLoan'
+    // A closed project's stock moved to Stores changed its item too (Qodo, PR #149).
+    && transaction.referenceType !== 'MoveToStores';
 
   function handleCancel() {
     setReversing(false);

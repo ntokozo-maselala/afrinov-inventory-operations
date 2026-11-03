@@ -76,13 +76,20 @@ database; CI runs them on every backend pull request.
   `VITE_PROCUREMENT_ENABLED=false` (frontend) switch it off (ADR-019).
 - **Stores and Projects are kept apart** (ADR-020, ADR-021). An order with a
   project is Procurement's: raised on New purchase order, seen with
-  `view:purchase_order`, approved by approvers, and its delivery to site
-  confirmed on the order (no stock added). An order without a project is a
+  `view:purchase_order`, approved by approvers; its delivery is received by
+  the store into stock held for its project (ADR-027), through a receiving
+  view with no prices. An order without a project is a
   Stores order: raised, seen, approved (within the storeman's limit) and
   received into stock by the store controller with `order:stores_stock`, in
   Store → Order stock. Each side's orders are not found to the other. The
   server enforces it (`kindsSeen`, `requireForOrder` in
   `procurement.routes.ts`); the screens follow `lib/orderKind.ts`.
+- **Stock carries its project** (ADR-027). Each movement says whose stock it
+  is (`held_for_project`, null for Stores stock), and balances are per item,
+  location and project. A project's own stock is issued only to that project;
+  Stores measures (status, re-order, alerts) count Stores stock only. Leftovers
+  from before keep their project on the item. See
+  `afrinov-docs/docs/13-project-management/roadmaps/project-material-through-the-store-roadmap.md`.
 - **Requests for quotation** go DRAFT → SENT → AWARDED, or CANCELLED from
   DRAFT or SENT (`rfq.service.ts`). Quotes are recorded while SENT; the
   award raises a draft purchase order in the same transaction. They are for

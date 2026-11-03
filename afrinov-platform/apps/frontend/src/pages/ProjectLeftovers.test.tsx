@@ -19,7 +19,7 @@ const ITEMS = [
   { materialId: 'p-1', sku: '1369-PIPE', name: 'Pipe 150NB', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)' },
   { materialId: 'p-2', sku: '1369-FLANGE', name: 'Flange', unitOfMeasure: 'each', onHand: '3', value: null, locations: 'A-1 (3)' },
 ];
-const leftovers = (status: string, items = ITEMS) => ({
+const leftovers = (status: string, items: Array<Record<string, unknown>> = ITEMS) => ({
   project: { projectNumber: '1369', name: 'Plant upgrade', status, closed: status === 'COMPLETED' || status === 'CANCELLED' }, items,
 });
 
@@ -61,6 +61,41 @@ describe('ProjectLeftovers page', () => {
     expect(await screen.findByRole('link', { name: 'Stores tab of Materials' })).toHaveAttribute('href', '/materials');
   });
 
+  // Project Material Through the Store Roadmap, Phase 5: stock held for the
+  // closed project moves to Stores with its item; a Stores item keeps its category.
+  it('says what is held for the project, and moves a Stores item\x27s stock in its own category', async () => {
+    mockGet.mockResolvedValue(leftovers('COMPLETED', [
+      { ...ITEMS[0]!, onHand: '10', held: '4', category: 'PROJECT_MATERIAL', locations: 'A-1 (6), C-3 (4, held for the project)' },
+      { materialId: 's-1', sku: 'BOLT-M16', name: 'Hex bolt', unitOfMeasure: 'each', onHand: '5', value: 10, locations: 'C-3 (5, held for the project)', held: '5', category: 'CONSUMABLES' },
+    ]));
+    renderPage();
+    await screen.findByText('Pipe 150NB');
+    expect(screen.getByText('4 held for the project')).toBeInTheDocument();
+    expect(screen.getByText('held for the project')).toBeInTheDocument();
+    // The bolt is already a Stores item: no category to choose, only whether to move its stock.
+    const bolt = screen.getByLabelText('Move BOLT-M16');
+    expect(within(bolt).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', 'Move its stock (Consumables)']);
+    fireEvent.change(bolt, { target: { value: 'KEEP' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 's-1' }] }));
+    // Sent with no category: it keeps its own (Qodo, PR #149).
+  });
+
+  // Qodo, PR #149: another project's item held for this one keeps what it is;
+  // only this project's stock of it moves, sent with no category.
+  it('moves the stock of another project\'s item without changing the item', async () => {
+    mockGet.mockResolvedValue(leftovers('COMPLETED', [
+      { materialId: 'x-1', sku: '1402-BAR', name: 'Round bar', unitOfMeasure: 'm', onHand: '3', value: 30, locations: 'C-3 (3, held for the project)', held: '3', category: 'PROJECT_MATERIAL', itemProject: '1402' },
+    ]));
+    renderPage();
+    await screen.findByText('Round bar');
+    const bar = screen.getByLabelText('Move 1402-BAR');
+    expect(within(bar).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', "Move its stock (stays 1402's material)"]);
+    fireEvent.change(bar, { target: { value: 'KEEP' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'x-1' }] }));
+  });
+
   it('shows why a move was refused', async () => {
     mockPost.mockRejectedValue({ code: 'CONFLICT', message: '1369-PIPE has just been moved by someone else. Refresh the page.' });
     renderPage();
@@ -85,7 +120,7 @@ describe('ProjectLeftovers page', () => {
     renderPage();
     await screen.findByText('Pipe 150NB');
     expect(screen.getByRole('link', { name: /1369-PIPE Pipe 150NB/ })).toHaveAttribute('href', '/materials/p-1');
-    expect(screen.getByRole('link', { name: 'Issue 1369-PIPE' })).toHaveAttribute('href', '/stock/issue?materialId=p-1');
+    expect(screen.getByRole('link', { name: 'Issue 1369-PIPE' })).toHaveAttribute('href', '/stock/issue?materialId=p-1&project=1369');
   });
 
   // Qodo, PR #131: Issue stock refuses a deactivated item or project.

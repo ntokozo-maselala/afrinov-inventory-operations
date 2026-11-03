@@ -71,11 +71,25 @@ describe('mock: delivery of a project order', () => {
     expect(await messageOf(api.post(`/purchase-orders/${stores.id}/confirm-delivery`, { lines: [{ lineId: stores.lines[0]!.id, quantity: 1 }] }))).toMatch(/received into stock now/);
   });
   // Qodo, PR #143: as the server refuses it.
-  it('keeps an item with stock held for a project from moving to Stores', async () => {
+  // Project Material Through the Store Roadmap, Phase 5, as the server moves it.
+  it('moves a closed project\x27s held stock to Stores stock where it is, with its item', async () => {
     const po = await approvedProjectOrder();
     await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    const held = await heldFor('AFRI-1325');
+    expect(held).toBeGreaterThan(0);
     await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
-    expect(await messageOf(api.post('/projects/AFRI-1325/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] })))
+    const listed = await api.get<{ items: Array<{ materialId: string; held: string }> }>('/projects/AFRI-1325/leftovers');
+    expect(Number(listed.items.find((i) => i.materialId === 'mat-9')?.held)).toBe(held);
+    expect(await api.post('/projects/AFRI-1325/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] })).toEqual({ moved: 1 });
+    expect(await heldFor('AFRI-1325')).toBe(0);
+    expect((await api.get<{ category: string; projectNumber: string | null }>('/materials/mat-9'))).toMatchObject({ category: 'CONSUMABLES', projectNumber: null });
+  });
+
+  it('keeps an item held for another project as project material', async () => {
+    const po = await approvedProjectOrder();
+    await api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+    await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
+    expect(await messageOf(api.post('/projects/AFRI-1402/leftovers/move', { items: [{ materialId: 'mat-9', category: 'CONSUMABLES' }] })))
       .toMatch(/has stock in the store held for project AFRI-1325, so it stays project material/);
     expect((await api.get<{ category: string }>('/materials/mat-9')).category).toBe('PROJECT_MATERIAL');
   });
@@ -91,9 +105,9 @@ describe('mock: delivery of a project order', () => {
     expect(added).toBeGreaterThan(0);
     expect(project(after) - project(before)).toBeCloseTo(added);
     expect(after.status).toEqual(before.status);
-    // Held for the project, so not a leftover for Move to Stores.
+    // Held for the project: Move to Stores takes it once the project closes (Phase 5).
     const leftovers = (v: Value) => v.projects.find((p) => p.projectNumber === 'AFRI-1325')?.leftovers ?? 0;
-    expect(leftovers(after)).toBe(leftovers(before));
+    expect(leftovers(after)).toBeGreaterThanOrEqual(1);
   });
   // Project Material Through the Store Roadmap, Phase 3, as the server issues it.
   it('issues the stock to its project only, and moves it keeping its project', async () => {
@@ -114,5 +128,22 @@ describe('mock: delivery of a project order', () => {
     const rows = await api.get<Array<{ type: string; heldForProject: string | null }>>('/inventory-transactions?projectNumber=AFRI-1325');
     expect(rows.find((r) => r.type === 'TRANSFER_OUT')?.heldForProject).toBe('AFRI-1325');
     expect(rows.find((r) => r.type === 'RECEIPT')?.heldForProject).toBe('AFRI-1325');
+  });
+  // Qodo, PR #149, as the server: the move isn't reversed on its own, and
+  // another project's item keeps what it is.
+  it('refuses to reverse a move to Stores, and moves another project\'s item\'s stock without changing the item', async () => {
+    // An item tagged to AFRI-1402, bought on AFRI-1325's order.
+    await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1402' });
+    const created = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', orderedQty: 4, unitPrice: 10 }] });
+    const submitted = await api.post<Order>(`/purchase-orders/${created.id}/submit`, {});
+    if (submitted.status === 'PENDING_APPROVAL') await api.post(`/purchase-orders/${created.id}/approve`, {});
+    await api.post(`/purchase-orders/${created.id}/receive`, { locationId: 'loc-1' });
+    await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
+    expect(await api.post('/projects/AFRI-1325/leftovers/move', { items: [{ materialId: 'mat-9' }] })).toEqual({ moved: 1 });
+    expect(await heldFor('AFRI-1325')).toBe(0);
+    expect(await api.get<{ category: string; projectNumber: string | null }>('/materials/mat-9')).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: 'AFRI-1402' });
+    const rows = await api.get<Array<{ id: string; type: string; referenceType?: string }>>('/inventory-transactions?materialId=mat-9');
+    const out = rows.find((r) => r.type === 'TRANSFER_OUT' && r.referenceType === 'MoveToStores')!;
+    expect(await messageOf(api.post(`/inventory-transactions/${out.id}/reversal`, { reason: 'Moved by mistake' }))).toMatch(/along with its item, so it isn.t reversed/);
   });
 });

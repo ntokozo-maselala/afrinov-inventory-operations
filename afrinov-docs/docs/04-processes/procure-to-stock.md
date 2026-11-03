@@ -15,8 +15,8 @@ all locations, below the configured percentage of its Required Stock
 page lists these and downloads them as a re-order list (Excel or PDF). What
 is already on an approved Stores order is shown as On order and taken off
 the re-order quantity: an item fully covered by orders is listed under
-"Short, on order" (to chase), not "Needs re-ordering". Project orders go
-straight to site and are never counted (ADR-023).
+"Short, on order" (to chase), not "Needs re-ordering". Project orders aren't
+counted: their deliveries are held for the project, not Stores stock (ADR-027).
 
 ## Actors
 Store Controller / Procurement (may be the same person), Supplier

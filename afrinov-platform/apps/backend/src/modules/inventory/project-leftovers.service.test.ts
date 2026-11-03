@@ -22,12 +22,22 @@ const client = {
   material: {
     // A copy, as Prisma returns.
     findUnique: async ({ where }: { where: { id: string } }) => { const m = db.materials.get(where.id); return m ? { ...m } : null; },
-    findMany: async ({ where }: { where: { category: string; projectNumber: string } }) => [...db.materials.values()]
-      .filter((m) => m.category === where.category && m.projectNumber === where.projectNumber)
-      .sort((a, b) => a.sku.localeCompare(b.sku))
-      // Leftovers are the Stores balances, as the service asks.
-      .map((m) => ({ ...m, inventoryBalances: db.balances.filter((b) => b.materialId === m.id && b.quantity.gt(0) && (b.heldForProject ?? '') === '') })),
-    updateMany: async ({ where, data }: { where: { id: string; category: string; projectNumber: string }; data: Partial<Mat> }) => {
+    // A project's items, or any item with stock held for it; each with its balances for the holders asked.
+    findMany: async ({ where, include }: {
+      where: { category?: string; projectNumber?: string | null; OR?: [{ category: string; projectNumber: string }, { inventoryBalances: { some: { heldForProject: string } } }] };
+      include: { inventoryBalances: { where: { heldForProject: { in: string[] } } } };
+    }) => {
+      const own = where.OR ? where.OR[0] : (where as { category: string; projectNumber: string | null });
+      const heldFor = where.OR?.[1].inventoryBalances.some.heldForProject;
+      const holders = include.inventoryBalances.where.heldForProject.in;
+      return [...db.materials.values()]
+        .filter((m) => (m.category === own.category && m.projectNumber === own.projectNumber)
+          || (heldFor !== undefined && db.balances.some((b) => b.materialId === m.id && b.heldForProject === heldFor && b.quantity.gt(0))))
+        .sort((a, b) => a.sku.localeCompare(b.sku))
+        // As the table keys it: '' for Stores stock.
+        .map((m) => ({ ...m, inventoryBalances: db.balances.filter((b) => b.materialId === m.id && b.quantity.gt(0) && holders.includes(b.heldForProject ?? '')).map((b) => ({ heldForProject: '', ...b })) }));
+    },
+    updateMany: async ({ where, data }: { where: { id: string; category: string; projectNumber: string | null }; data: Partial<Mat> }) => {
       const m = db.materials.get(where.id);
       if (!m || m.category !== where.category || m.projectNumber !== where.projectNumber) return { count: 0 };
       Object.assign(m, data);
@@ -44,11 +54,16 @@ const client = {
     },
   },
   inventoryBalance: {
-    // Stock held for a project, other than Stores stock, of any of the items.
-    findFirst: async ({ where }: { where: { materialId: { in: string[] } } }) => {
-      const b = db.balances.find((x) => where.materialId.in.includes(x.materialId) && (x.heldForProject ?? '') !== '' && !x.quantity.isZero());
+    // Stock held for a project other than the ones left out, of any of the items.
+    findFirst: async ({ where }: { where: { materialId: { in: string[] }; heldForProject: { not?: string; notIn?: string[] } } }) => {
+      const out = where.heldForProject.notIn ?? [where.heldForProject.not!];
+      const b = db.balances.find((x) => where.materialId.in.includes(x.materialId) && !out.includes(x.heldForProject ?? '') && !x.quantity.isZero());
       return b ? { heldForProject: b.heldForProject, material: { sku: db.materials.get(b.materialId)!.sku } } : null;
     },
+    // Stock held for the closed project, to move with its item.
+    findMany: async ({ where }: { where: { materialId: { in: string[] }; heldForProject: string } }) => db.balances
+      .filter((x) => where.materialId.in.includes(x.materialId) && x.heldForProject === where.heldForProject && !x.quantity.isZero())
+      .map((x) => ({ materialId: x.materialId, locationId: x.location.name, quantity: x.quantity })),
   },
   rfqLine: {
     findFirst: async ({ where }: { where: { materialId: { in: string[] } } }) => {
@@ -90,8 +105,8 @@ describe('listing a project\'s leftovers', () => {
     expect(project).toEqual({ projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', closed: true, active: true });
     // Each says whether it is active, so a deactivated one isn't offered to issue (Qodo, PR #131).
     expect(items).toEqual([
-      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, hasActiveLocation: true },
-      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, hasActiveLocation: true },
+      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, hasActiveLocation: true, category: 'PROJECT_MATERIAL', held: '0', itemProject: '1369' },
+      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, hasActiveLocation: true, category: 'PROJECT_MATERIAL', held: '0', itemProject: '1369' },
     ]);
   });
 
@@ -101,22 +116,54 @@ describe('listing a project\'s leftovers', () => {
   });
 });
 
-describe('stock held for a project (Project Material Through the Store Roadmap, Phase 2)', () => {
-  // Received against a project order: that project's own stock, not a leftover.
+// Project Material Through the Store Roadmap, Phase 5: stock held for a closed
+// project moves to Stores with its item. (The movements themselves are tested
+// against a real database, in procurement.real-http.test.ts.)
+describe('stock held for a project', () => {
   beforeEach(() => {
     db.balances.push({ materialId: 'p1', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(9), heldForProject: '1369' });
   });
 
-  it('is not listed as a leftover', async () => {
+  it('lists it with the project\'s leftovers, saying how much is held for the project', async () => {
     const { items } = await ProjectLeftoversService.list('1369');
-    expect(items.find((i) => i.materialId === 'p1')).toMatchObject({ onHand: '6', locations: 'A-1 (4), B-2 (2)' });
+    expect(items.find((i) => i.materialId === 'p1')).toMatchObject({ onHand: '15', held: '9', locations: 'A-1 (4), B-2 (2), C-3 (9, held for the project)' });
   });
 
-  // Qodo, PR #142: moving the item would strand that stock under the project.
-  it('keeps the item project material, moving nothing', async () => {
-    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p2', category: 'CONSUMABLES' }, { materialId: 'p1', category: 'CONSUMABLES' }], 'user-1'))
-      .rejects.toThrow('1369-P1 has stock in the store held for project 1369, so it stays project material until that stock is used or moved.');
+  it('lists an item held for the project though it isn\'t the project\'s own, and a Stores item with its category', async () => {
+    db.materials.set('s1', { ...pipe('s1', 'X'), sku: 'BOLT-M16', category: 'CONSUMABLES', projectNumber: null });
+    db.balances.push(
+      { materialId: 's1', location: { active: true, name: 'A-1' }, quantity: new Prisma.Decimal(30) },
+      { materialId: 's1', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(5), heldForProject: '1369' },
+      { materialId: 'p4', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(2), heldForProject: '1369' },
+    );
+    const { items } = await ProjectLeftoversService.list('1369');
+    // Only what is held for the project: the bolt's Stores stock is the store's.
+    expect(items.find((i) => i.materialId === 's1')).toMatchObject({ onHand: '5', held: '5', category: 'CONSUMABLES' });
+    expect(items.find((i) => i.materialId === 'p4')).toMatchObject({ onHand: '2', held: '2' });
+  });
+
+  // Qodo, PR #142: stock held for another project would be stranded under it.
+  it('keeps an item held for another project as project material, moving nothing', async () => {
+    db.balances.push({ materialId: 'p2', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(3), heldForProject: '1402' });
+    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p2', category: 'CONSUMABLES' }], 'user-1'))
+      .rejects.toThrow('1369-P2 has stock in the store held for project 1402, so it stays project material until that stock is used or moved.');
     expect(db.materials.get('p2')).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: '1369' });
+    expect(db.audit).toEqual([]);
+  });
+
+  // Qodo, PR #149: another project's item keeps what it is; only the stock held
+  // for this project moves (tested against a real database). A category for it,
+  // or a new one for a Stores item, is refused; one is needed to change an item.
+  it('keeps another project\'s item and a Stores item in their category, and needs one to change an item', async () => {
+    db.balances.push({ materialId: 'p4', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(2), heldForProject: '1369' });
+    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p4', category: 'CONSUMABLES' }], 'user-1'))
+      .rejects.toMatchObject({ message: '1402-P4 is project 1402\'s material, so it stays project material: only the stock held for project 1369 moves.' });
+    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p2' }], 'user-1'))
+      .rejects.toMatchObject({ message: 'Choose a Stores category for 1369-P2.' });
+    db.materials.set('s1', { ...pipe('s1', 'X'), sku: 'BOLT-M16', category: 'CONSUMABLES', projectNumber: null });
+    db.balances.push({ materialId: 's1', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(5), heldForProject: '1369' });
+    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 's1', category: 'FASTENERS_SLUGS_INSULATION' }], 'user-1'))
+      .rejects.toMatchObject({ message: 'BOLT-M16 is already a Stores item, so it stays in its category.' });
     expect(db.audit).toEqual([]);
   });
 });

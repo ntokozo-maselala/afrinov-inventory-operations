@@ -12,9 +12,9 @@ Five phases that bring project material back into the store. The [Stores and Pro
 
 The third answer decides the design. Since the [Project on the Order Roadmap](project-on-the-order-roadmap.md) (ADR-023), the project lives on the order, not the item, and any Projects item can go on any project order. So the item can't say whose stock is on the shelf: 10 m of `10mm Plate` for AFRI-1325 and 6 m for P-42 are the same item at the same location. **Stock has to carry its project.** After this roadmap every stock movement and balance says which project the stock is *held for* (none for Stores stock), the storeman receives project orders on Receive stock, and Issue stock issues each project's own stock to it.
 
-It amends ADR-021 (straight to site; Procurement confirms delivery) and ADR-023 (only leftovers carry a project, on the item). Recorded as ADR-025 in Phase 5.
+It amends ADR-021 (straight to site; Procurement confirms delivery) and ADR-023 (only leftovers carry a project, on the item). Recorded as ADR-027 in Phase 5 (ADR-025 and ADR-026 went to other decisions in the meantime).
 
-**Status:** Phases 1 to 4 built and merged: #142, #143, #145 and #146, with #147 adding the settings rows Phase 4 needs. Phase 5 proposed.
+**Status:** All five phases built: Phases 1 to 4 merged as #142, #143, #145 and #146, with #147 adding the settings rows Phase 4 needs; Phase 5 on `feature/project-stock-5` (PR #149).
 
 | Phase | What | Size | Status |
 |---|---|---|---|
@@ -22,7 +22,7 @@ It amends ADR-021 (straight to site; Procurement confirms delivery) and ADR-023 
 | 2 | The storeman receives project orders | M | Built |
 | 3 | Issue, return and move by project | M | Built |
 | 4 | Receive and issue straight away | M | Built |
-| 5 | Closing a project, docs and ADR | S–M | Proposed |
+| 5 | Closing a project, docs and ADR | S–M | Built |
 
 Sizes: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
 
@@ -156,10 +156,14 @@ Tests: `PoReceiveDelivery.test.tsx` (the receiving location, no location to choo
 
 Size S–M. Backend, frontend and docs.
 
-- [ ] **5.1 A closed project's stock goes to Stores, not its item.** Closing still moves nothing by itself: the stock held for a Completed or Cancelled project is flagged on Project leftovers, and **Move to Stores** posts a pair of movements that take it off the project and put it on Stores stock, at the same location. The item stays a Projects catalogue item, as other projects may still order it. The per-item move from the Materials Sections Roadmap is retired.
-  Files: `project-leftovers.service.ts`, `pages/ProjectLeftovers.tsx`, `components/LeftoversNotice.tsx`
-- [ ] **5.2 `materials.project_number` is no longer read.** Once the stock carries the project, nothing needs the item's. It stays in the schema until a later clean-up migration. *Since step 3.0 was dropped, leftovers still take their project from the item, so this waits until none are left, or until 5.1 can move them.*
-- [ ] **5.3 Docs.** ADR-025 records that project material comes through the store, held for its project, and amends ADR-021 and ADR-023. Also the change log, the purchase order lifecycle, the role table, the resource model, the menu and page inventory, `task_context.md`, the product roadmap, and notes on the Separation, Project on the Order and Materials Sections roadmaps pointing here.
+*Built on `feature/project-stock-5` (PR #149), with no migration.* One change from the plan, decided on 3 Nov 2026: **the item moves too**. Leftovers still take their project from the item (step 3.0 was dropped), so Move to Stores keeps making the project's own item a Stores item, and takes its held stock with it.
+
+- [x] **5.1 A closed project's stock goes to Stores with its item.** Closing still moves nothing by itself. A Completed or Cancelled project's leftovers page also lists any item with stock held for it, saying how much. **Move to Stores** posts a pair of movements (reference `MoveToStores`) that take that stock off the project onto Stores stock at the same location, then makes the project's own item, or one with no project, a Stores item. A Stores item, or another project's item, keeps what it is: only this project's stock of it moves, and another project's item then holds it as its leftover. Refused while another project holds the item, or it is on an open project order or RFQ. The pair isn't reversed on its own, as the item changed with it. The "received, not yet issued" list and the leftovers notice point closed projects (archived ones too) to it.
+  Files: `project-leftovers.service.ts`, `material.routes.ts`, `inventory.service.ts` (`reverse`), `reporting.service.ts` (`leftovers`), `pages/ProjectLeftovers.tsx`, `pages/IssueStock.tsx`, `components/LeftoversNotice.tsx`, `components/TransactionDrawer.tsx`, `mock/mockApi.ts`
+- [ ] **5.2 `materials.project_number` is no longer read.** Not done, as decided: leftovers still take their project from the item, so it stays read until none are left.
+- [x] **5.3 Docs.** ADR-027 records that project material comes through the store, held for its project, and amends ADR-021 and ADR-023. Updated with it: the change log, the glossary, the business rules, goods receiving, procure-to-stock, the purchase order lifecycle, the authorization table, the resource model, the page inventory, `task_context.md`, the product roadmap, the API description, and notes on the Separation, Project on the Order and Materials Sections roadmaps pointing here.
+
+Tests: `project-leftovers.service.test.ts`, `procurement.real-http.test.ts` (a closed project's held stock moved to Stores stock at the same location as a linked pair, the item a Stores item, the pair not reversed; another project's item keeping what it is), `reporting.service.test.ts`, `ProjectLeftovers.test.tsx`, `IssueStock.test.tsx`, `ProjectsReceived.test.tsx`, `StockSections.test.tsx`, `TransactionDrawer.test.tsx`, `mockDelivery.test.ts`.
 
 *As project material is issued as it arrives, stock still held when a project closes should be rare; 5.1 covers it, and for leftovers Move to Stores already works.*
 
@@ -171,3 +175,4 @@ Size S–M. Backend, frontend and docs.
 - **Phase 2:** no migration; the store controller already has `receive:purchase_order`. Deploy it with Phase 3, since stock received for a project can't be issued until then. Tell Procurement that Confirm delivery is gone and the storeman now books project deliveries.
 - **Phase 3:** no migration.
 - **Phase 4:** run `npx prisma migrate deploy` for migrations 038 and 039 (#147: setting rows only, no schema change). Then create a location such as Workshop floor and choose it under Settings → Inventory → Project receiving location.
+- **Phase 5:** no migration.

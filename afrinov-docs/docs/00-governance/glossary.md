@@ -10,7 +10,8 @@ idea, that's noted — this becomes the AS-IS → TO-BE terminology bridge.
 |---|---|---|
 | Material | Anything trackable as inventory: fastener, consumable, tool, PPE item, project material | Row in a `*Main` sheet |
 | Material Category | One of: Fasteners/Slugs/Insulation, Tooling/PPE/Electrical, Project Material, Consumables, Tools | Sheet family (e.g. "FS&I", "TP&E") |
-| Projects material | A catalogue item in the Projects section (category Project Material): bought by Procurement on a project order, which says which project it is for; goes from the supplier straight to site, so it is never stock. It has no project of its own (ADR-023); only leftovers received before the separation carry one | Project Material sheets |
+| Projects material | A catalogue item in the Projects section (category Project Material): bought by Procurement on a project order, which says which project it is for; received by the store into stock held for that project and issued to it straight away (ADR-027). It has no project of its own (ADR-023); only leftovers received before the separation carry one | Project Material sheets |
+| Stock held for a project | Stock whose movements name a project in `held_for_project`: received against that project's order, issued only to it, and moved to Stores with its item once the project closes (ADR-027). Stock held for no project is Stores stock | — |
 | Location | A physical place stock can sit: a rack, a shop area, a storeroom, a container | `Location`/`Rack` column (free text today) |
 | Inventory Balance | The current on-hand quantity of a material at a location, derived from transactions | `Current Stock` cell |
 | Inventory Transaction | A single, immutable, dated movement of stock (receipt, issue, transfer out/in, adjustment, return) | A row in a `*Issued` sheet |

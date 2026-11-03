@@ -1075,6 +1075,74 @@ describe('receiving stock over real HTTP', () => {
             materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', heldForProject: `IT-NOPE-${run}`,
           })).status).toBe(404);
         });
+
+        // Project Material Through the Store Roadmap, Phase 5: a closed project's
+        // stock moves to Stores with its item.
+        it('moves a closed project\'s held stock to Stores stock where it is, and makes the item a Stores item', async () => {
+          const closing = `IT-SO-CLOSE-${run}`;
+          expect((await api('POST', '/projects', { projectNumber: closing, name: `IT closing project ${run}` })).status).toBe(201);
+          const rod = await api<{ id: string }>('POST', '/materials', { sku: `IT-SO-ROD-${run}`, name: `Integration rod ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'M' });
+          expect(rod.status).toBe(200);
+          const po = await buyer<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber: closing, lines: [{ materialId: rod.body.id, orderedQty: 4, unitPrice: 40 }] });
+          const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${po.body.id}/submit`);
+          if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${po.body.id}/approve`)).status).toBe(200);
+          expect((await storeman('POST', `/purchase-orders/${po.body.id}/receive`, { locationId })).status).toBe(200);
+          expect((await ledgerAndBalance(rod.body.id, locationId, closing)).balance).toBe('4');
+
+          // Not while the project is open; listed with its leftovers once it is closed.
+          const move = () => api<{ moved: number }>('POST', `/projects/${closing}/leftovers/move`, { items: [{ materialId: rod.body.id, category: 'CONSUMABLES' }] });
+          expect((await move()).status).toBe(400);
+          expect((await api('PATCH', `/projects/${closing}`, { status: 'COMPLETED' })).status).toBe(200);
+          const listed = (await api<{ items: Array<{ materialId: string; onHand: string; held: string }> }>('GET', `/projects/${closing}/leftovers`)).body.items;
+          expect(listed.find((i) => i.materialId === rod.body.id)).toMatchObject({ onHand: '4', held: '4' });
+
+          const moved = await move();
+          expect(moved.status).toBe(200);
+          expect(moved.body.moved).toBe(1);
+          // Off the project, onto Stores stock, at the same location, as a linked pair.
+          expect((await ledgerAndBalance(rod.body.id, locationId, closing)).balance).toBe('0');
+          const stores = await ledgerAndBalance(rod.body.id, locationId);
+          expect(stores.balance).toBe('4');
+          expect(stores.ledger).toBe(stores.balance);
+          const pair = await prisma.inventoryTransaction.findMany({ where: { materialId: rod.body.id, referenceType: 'MoveToStores', referenceId: closing }, orderBy: { type: 'asc' } });
+          expect(pair.map((t) => [t.type, t.quantity.toString(), t.heldForProject])).toEqual([['TRANSFER_OUT', '-4', closing], ['TRANSFER_IN', '4', null]]);
+          expect(pair[0]!.pairedWithId).toBe(pair[1]!.id);
+          expect(await prisma.material.findUniqueOrThrow({ where: { id: rod.body.id } })).toMatchObject({ category: 'CONSUMABLES', projectNumber: null });
+          expect((await api<{ items: unknown[] }>('GET', `/projects/${closing}/leftovers`)).body.items).toEqual([]);
+
+          // Qodo, PR #149: the item changed with it, so the pair isn't reversed on its own.
+          const reversal = await api<{ error: { message: string } }>('POST', `/inventory-transactions/${pair[0]!.id}/reversal`, { reason: 'Moved by mistake' });
+          expect(reversal.status).toBe(409);
+          expect(reversal.body.error.message).toMatch(/along with its item, so it isn.t reversed/);
+          expect((await ledgerAndBalance(rod.body.id, locationId)).balance).toBe('4');
+        });
+
+        // Qodo, PR #149: an item tagged to another project but bought on this one's
+        // order: this project's stock of it moves; the item stays the other's.
+        it('moves a closed project\x27s stock of another project\x27s item, leaving the item that project\x27s', async () => {
+          const owner = `IT-SO-OWNER-${run}`;
+          const closing = `IT-SO-CLOSE2-${run}`;
+          for (const p of [owner, closing]) expect((await api('POST', '/projects', { projectNumber: p, name: `IT ${p}` })).status).toBe(201);
+          const bar = await api<{ id: string }>('POST', '/materials', { sku: `IT-SO-BAR-${run}`, name: `Integration bar ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'M' });
+          expect(bar.status).toBe(200);
+          // An old leftover item: tagged to the owner project.
+          await prisma.material.update({ where: { id: bar.body.id }, data: { projectNumber: owner } });
+          const po = await buyer<{ id: string }>('POST', '/purchase-orders', { supplierId, projectNumber: closing, lines: [{ materialId: bar.body.id, orderedQty: 3, unitPrice: 10 }] });
+          const submitted = await buyer<{ status: string }>('POST', `/purchase-orders/${po.body.id}/submit`);
+          if (submitted.body.status === 'PENDING_APPROVAL') expect((await api('POST', `/purchase-orders/${po.body.id}/approve`)).status).toBe(200);
+          expect((await storeman('POST', `/purchase-orders/${po.body.id}/receive`, { locationId })).status).toBe(200);
+          expect((await api('PATCH', `/projects/${closing}`, { status: 'COMPLETED' })).status).toBe(200);
+
+          // Moved with no category: the item keeps what it is.
+          const moved = await api('POST', `/projects/${closing}/leftovers/move`, { items: [{ materialId: bar.body.id }] });
+          expect(moved.status).toBe(200);
+          expect((await ledgerAndBalance(bar.body.id, locationId, closing)).balance).toBe('0');
+          expect((await ledgerAndBalance(bar.body.id, locationId)).balance).toBe('3');
+          expect(await prisma.material.findUniqueOrThrow({ where: { id: bar.body.id } })).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: owner });
+          // Now the owner project's leftover.
+          const theirs = (await api<{ items: Array<{ materialId: string; onHand: string }> }>('GET', `/projects/${owner}/leftovers`)).body.items;
+          expect(theirs.find((i) => i.materialId === bar.body.id)?.onHand).toBe('3');
+        });
       });
 
       it("keeps a saved receipt for the store's order from a buyer: not listed, not found, not posted", async () => {

@@ -56,12 +56,27 @@ describe('Projects: received for projects, not yet issued', () => {
         materialId: 'm-1', materialSku: 'BEAM', materialName: 'Beam', category: 'PROJECT_MATERIAL', locationId: 'l-1', locationName: 'Workshop floor',
         unitOfMeasure: 'each', quantity: '4', heldForProject: 'AFRI-1402',
       }];
-      if (path.startsWith('/projects?active=true')) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
-      if (path.startsWith('/projects')) return [PROJECT];
+      // The notice reads every project, archived ones too (Qodo, PR #149).
+      if (path.startsWith('/projects')) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
       return [];
     });
     page();
     expect(await screen.findByText(/The projects couldn.t be checked, so Issue isn.t offered/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: "Issue project AFRI-1402's material" })).not.toBeInTheDocument();
+  });
+
+  // Qodo, PR #149: a completed project's stock moves to Stores even once the project is archived.
+  it('links an archived completed project\'s stock to Move to Stores', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/reports/current-stock')) return [{
+        materialId: 'm-1', materialSku: 'BEAM', materialName: 'Beam', category: 'PROJECT_MATERIAL', locationId: 'l-1', locationName: 'Workshop floor',
+        unitOfMeasure: 'each', quantity: '4', heldForProject: 'AFRI-1402',
+      }];
+      if (path.startsWith('/projects')) return [{ ...PROJECT, status: 'COMPLETED', active: false }];
+      return [];
+    });
+    page();
+    expect(await screen.findByRole('link', { name: 'move to Stores' })).toHaveAttribute('href', '/projects/AFRI-1402/leftovers');
     expect(screen.queryByRole('link', { name: "Issue project AFRI-1402's material" })).not.toBeInTheDocument();
   });
 
