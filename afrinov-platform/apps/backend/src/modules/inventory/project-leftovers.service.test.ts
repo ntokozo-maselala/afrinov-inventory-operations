@@ -105,8 +105,8 @@ describe('listing a project\'s leftovers', () => {
     expect(project).toEqual({ projectNumber: '1369', name: 'Plant upgrade', status: 'COMPLETED', closed: true, active: true });
     // Each says whether it is active, so a deactivated one isn't offered to issue (Qodo, PR #131).
     expect(items).toEqual([
-      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, hasActiveLocation: true, category: 'PROJECT_MATERIAL', held: '0' },
-      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, hasActiveLocation: true, category: 'PROJECT_MATERIAL', held: '0' },
+      { materialId: 'p1', sku: '1369-P1', name: 'Pipe p1', unitOfMeasure: 'm', onHand: '6', value: 600, locations: 'A-1 (4), B-2 (2)', active: true, hasActiveLocation: true, category: 'PROJECT_MATERIAL', held: '0', itemProject: '1369' },
+      { materialId: 'p2', sku: '1369-P2', name: 'Pipe p2', unitOfMeasure: 'm', onHand: '1.5', value: null, locations: 'A-1 (1.5)', active: true, hasActiveLocation: true, category: 'PROJECT_MATERIAL', held: '0', itemProject: '1369' },
     ]);
   });
 
@@ -151,10 +151,15 @@ describe('stock held for a project', () => {
     expect(db.audit).toEqual([]);
   });
 
-  it('refuses another project\'s item, whose leftovers would go with it, and changing a Stores item\'s category', async () => {
+  // Qodo, PR #149: another project's item keeps what it is; only the stock held
+  // for this project moves (tested against a real database). A category for it,
+  // or a new one for a Stores item, is refused; one is needed to change an item.
+  it('keeps another project\'s item and a Stores item in their category, and needs one to change an item', async () => {
     db.balances.push({ materialId: 'p4', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(2), heldForProject: '1369' });
     await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p4', category: 'CONSUMABLES' }], 'user-1'))
-      .rejects.toMatchObject({ message: '1402-P4 is not material of project 1369, so it isn\'t moved from it.' });
+      .rejects.toMatchObject({ message: '1402-P4 is project 1402\'s material, so it stays project material: only the stock held for project 1369 moves.' });
+    await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 'p2' }], 'user-1'))
+      .rejects.toMatchObject({ message: 'Choose a Stores category for 1369-P2.' });
     db.materials.set('s1', { ...pipe('s1', 'X'), sku: 'BOLT-M16', category: 'CONSUMABLES', projectNumber: null });
     db.balances.push({ materialId: 's1', location: { active: true, name: 'C-3' }, quantity: new Prisma.Decimal(5), heldForProject: '1369' });
     await expect(ProjectLeftoversService.moveToStores('1369', [{ materialId: 's1', category: 'FASTENERS_SLUGS_INSULATION' }], 'user-1'))

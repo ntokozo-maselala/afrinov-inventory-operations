@@ -75,9 +75,25 @@ describe('ProjectLeftovers page', () => {
     // The bolt is already a Stores item: no category to choose, only whether to move its stock.
     const bolt = screen.getByLabelText('Move BOLT-M16');
     expect(within(bolt).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', 'Move its stock (Consumables)']);
-    fireEvent.change(bolt, { target: { value: 'CONSUMABLES' } });
+    fireEvent.change(bolt, { target: { value: 'KEEP' } });
     fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 's-1', category: 'CONSUMABLES' }] }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 's-1' }] }));
+    // Sent with no category: it keeps its own (Qodo, PR #149).
+  });
+
+  // Qodo, PR #149: another project's item held for this one keeps what it is;
+  // only this project's stock of it moves, sent with no category.
+  it('moves the stock of another project\'s item without changing the item', async () => {
+    mockGet.mockResolvedValue(leftovers('COMPLETED', [
+      { materialId: 'x-1', sku: '1402-BAR', name: 'Round bar', unitOfMeasure: 'm', onHand: '3', value: 30, locations: 'C-3 (3, held for the project)', held: '3', category: 'PROJECT_MATERIAL', itemProject: '1402' },
+    ]));
+    renderPage();
+    await screen.findByText('Round bar');
+    const bar = screen.getByLabelText('Move 1402-BAR');
+    expect(within(bar).getAllByRole('option').map((o) => o.textContent)).toEqual(['Leave for now', "Move its stock (stays 1402's material)"]);
+    fireEvent.change(bar, { target: { value: 'KEEP' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'x-1' }] }));
   });
 
   it('shows why a move was refused', async () => {
@@ -104,7 +120,7 @@ describe('ProjectLeftovers page', () => {
     renderPage();
     await screen.findByText('Pipe 150NB');
     expect(screen.getByRole('link', { name: /1369-PIPE Pipe 150NB/ })).toHaveAttribute('href', '/materials/p-1');
-    expect(screen.getByRole('link', { name: 'Issue 1369-PIPE' })).toHaveAttribute('href', '/stock/issue?materialId=p-1');
+    expect(screen.getByRole('link', { name: 'Issue 1369-PIPE' })).toHaveAttribute('href', '/stock/issue?materialId=p-1&project=1369');
   });
 
   // Qodo, PR #131: Issue stock refuses a deactivated item or project.

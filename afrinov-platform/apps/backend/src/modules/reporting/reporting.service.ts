@@ -371,6 +371,10 @@ export const ReportingService = {
     const sections: Record<MaterialSection, Bucket> = { STORES: new Map(), PROJECTS: new Map() };
     const projects = new Map<string, Bucket>();
     const leftovers = new Map<string, Set<string>>();
+    // Projects holding each item, as Move to Stores refuses an item held for another (Qodo, PR #149).
+    const holdersOf = new Map<string, Set<string>>();
+    for (const b of held) if (Number(b.quantity) > 0) holdersOf.set(b.materialId, (holdersOf.get(b.materialId) ?? new Set()).add(b.heldForProject));
+    const movableFor = (project: string, materialId: string) => [...(holdersOf.get(materialId) ?? [])].every((h) => h === project);
     const projectInfo = new Map<string, { name: string | null; status: string }>();
     const bucketOf = <K>(map: Map<K, Bucket>, key: K) => map.get(key) ?? map.set(key, new Map()).get(key)!;
     const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
@@ -383,7 +387,7 @@ export const ReportingService = {
       add(sections[section], r.materialId, onHand);
       if (section === 'PROJECTS') {
         add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
-        if (onHand > 0) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
+        if (onHand > 0 && movableFor(r.projectNumber ?? '', r.materialId)) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
       }
       if (r.projectNumber && r.project) projectInfo.set(r.projectNumber, r.project);
       if (section === 'STORES') {
@@ -398,7 +402,7 @@ export const ReportingService = {
       add(bucketOf(cats, r.category), r.materialId, quantity);
       add(sections[sectionOf(r.category)], r.materialId, quantity);
       add(bucketOf(projects, b.heldForProject), r.materialId, quantity);
-      if (quantity > 0) leftovers.set(b.heldForProject, (leftovers.get(b.heldForProject) ?? new Set()).add(r.materialId));
+      if (quantity > 0 && movableFor(b.heldForProject, r.materialId)) leftovers.set(b.heldForProject, (leftovers.get(b.heldForProject) ?? new Set()).add(r.materialId));
     }
     const unnamed = [...projects.keys()].filter((k) => k !== '' && !projectInfo.has(k));
     if (unnamed.length > 0) {

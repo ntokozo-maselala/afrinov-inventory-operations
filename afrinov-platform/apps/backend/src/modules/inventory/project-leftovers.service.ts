@@ -18,6 +18,13 @@ import { Errors } from '../../shared/errors.js';
 import { PROJECTS_CATEGORY } from './material-section.js';
 import { lockInventoryBalances, recomputeBalance } from '../../shared/inventory/balances.js';
 
+/**
+ * The reference on the pair of movements that takes a closed project's held
+ * stock onto Stores stock. They aren't reversed: the item's category changed
+ * with them (Qodo, PR #149).
+ */
+export const MOVE_TO_STORES_REFERENCE = 'MoveToStores';
+
 /** The Stores categories leftovers can move to. Not Tools: a tool is lent one by one, not issued. */
 export const LEFTOVER_CATEGORIES = ['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'] as const;
 export type LeftoverCategory = (typeof LEFTOVER_CATEGORIES)[number];
@@ -41,6 +48,8 @@ export interface LeftoverItem {
   category: string;
   /** Decimal string: how much of onHand is held for the project ('0' for leftovers only). */
   held: string;
+  /** The item's own project: another project's item keeps it when its held stock moves. */
+  itemProject: string | null;
 }
 
 export interface ProjectLeftovers {
@@ -100,6 +109,7 @@ async function leftoverItems(projectNumber: string | null): Promise<LeftoverItem
         hasActiveLocation: mine.some((b) => b.location.active),
         category: m.category,
         held: held.toString(),
+        itemProject: m.projectNumber,
       }];
   });
 }
@@ -124,7 +134,7 @@ export const ProjectLeftoversService = {
    * movements at each location takes it off the project onto Stores stock. A
    * Stores item held for the project keeps its category; only its stock moves.
    */
-  async moveToStores(projectNumber: string | null, items: Array<{ materialId: string; category: LeftoverCategory }>, actorId: string): Promise<{ moved: number }> {
+  async moveToStores(projectNumber: string | null, items: Array<{ materialId: string; category?: LeftoverCategory }>, actorId: string): Promise<{ moved: number }> {
     if (items.length === 0) throw Errors.validation('Choose at least one item to move to Stores');
     if (new Set(items.map((i) => i.materialId)).size !== items.length) throw Errors.validation('An item is listed twice');
     return prisma.$transaction(async (tx) => {
@@ -174,11 +184,9 @@ export const ProjectLeftoversService = {
         const before = await tx.material.findUnique({ where: { id: item.materialId } });
         if (!before) throw Errors.notFound('Material');
         const heldHere = ownHeld.filter((b) => b.materialId === item.materialId);
-        // The project's leftover item, or any item with stock held for it; not
-        // another project's item, whose leftovers would go with it.
+        // The project's leftover item, or any item with stock held for it.
         const ownItem = before.category === PROJECTS_CATEGORY && before.projectNumber === projectNumber;
-        const heldItem = heldHere.length > 0 && (before.category !== PROJECTS_CATEGORY || before.projectNumber === null || before.projectNumber === projectNumber);
-        if (!ownItem && !heldItem) {
+        if (!ownItem && heldHere.length === 0) {
           throw Errors.validation(projectNumber === null
             ? `${before.sku} is not a Projects item with no project, so it isn't moved from here.`
             : `${before.sku} is not material of project ${projectNumber}, so it isn't moved from it.`);
@@ -186,9 +194,16 @@ export const ProjectLeftoversService = {
         if (heldHere.some((b) => b.quantity.isNegative())) {
           throw Errors.validation(`${before.sku} shows less than nothing held for project ${projectNumber}. Correct its stock before moving it.`);
         }
-        // A Stores item keeps its category: only the stock it holds for the project moves.
-        if (before.category !== PROJECTS_CATEGORY && item.category !== before.category) {
-          throw Errors.validation(`${before.sku} is already a Stores item, so it stays in its category.`);
+        // The item becomes a Stores item only if it is this project's, or has no
+        // project. A Stores item, or another project's item, keeps what it is:
+        // only the stock held for this project moves, so the other project's
+        // becomes a leftover of its own (Qodo, PR #149).
+        const changesItem = before.category === PROJECTS_CATEGORY && (before.projectNumber === null || before.projectNumber === projectNumber);
+        if (changesItem && !item.category) throw Errors.validation(`Choose a Stores category for ${before.sku}.`);
+        if (!changesItem && item.category && item.category !== before.category) {
+          throw Errors.validation(before.category === PROJECTS_CATEGORY
+            ? `${before.sku} is project ${before.projectNumber}'s material, so it stays project material: only the stock held for project ${projectNumber} moves.`
+            : `${before.sku} is already a Stores item, so it stays in its category.`);
         }
 
         // The project's held stock to Stores stock, at each location, as a linked pair.
@@ -209,13 +224,13 @@ export const ProjectLeftoversService = {
           const out = await tx.inventoryTransaction.create({
             data: {
               materialId: b.materialId, locationId: b.locationId, heldForProject: projectNumber, type: InventoryTransactionType.TRANSFER_OUT,
-              quantity: qty.negated(), actorId, reasonNote: note, referenceType: 'Project', referenceId: projectNumber,
+              quantity: qty.negated(), actorId, reasonNote: note, referenceType: MOVE_TO_STORES_REFERENCE, referenceId: projectNumber,
             },
           });
           const inn = await tx.inventoryTransaction.create({
             data: {
               materialId: b.materialId, locationId: b.locationId, heldForProject: null, type: InventoryTransactionType.TRANSFER_IN,
-              quantity: qty, actorId, reasonNote: note, referenceType: 'Project', referenceId: projectNumber, pairedWithId: out.id,
+              quantity: qty, actorId, reasonNote: note, referenceType: MOVE_TO_STORES_REFERENCE, referenceId: projectNumber, pairedWithId: out.id,
             },
           });
           await tx.inventoryTransaction.update({ where: { id: out.id }, data: { pairedWithId: inn.id } });
@@ -224,7 +239,7 @@ export const ProjectLeftoversService = {
           movedQty = movedQty.plus(qty);
         }
 
-        if (before.category === PROJECTS_CATEGORY) {
+        if (changesItem) {
           // Only if it is unchanged: two people moving it at once can't both succeed.
           const done = await tx.material.updateMany({
             where: { id: item.materialId, category: PROJECTS_CATEGORY, projectNumber: before.projectNumber },
@@ -239,7 +254,7 @@ export const ProjectLeftoversService = {
             entityType: 'Material',
             entityId: item.materialId,
             before: { category: before.category, projectNumber: before.projectNumber },
-            after: { category: before.category === PROJECTS_CATEGORY ? item.category : before.category, projectNumber: null, ...(movedQty.gt(0) ? { heldMoved: movedQty.toString(), fromProject: projectNumber } : {}) },
+            after: { category: changesItem ? item.category : before.category, projectNumber: changesItem ? null : before.projectNumber, ...(movedQty.gt(0) ? { heldMoved: movedQty.toString(), fromProject: projectNumber } : {}) },
           },
         });
       }

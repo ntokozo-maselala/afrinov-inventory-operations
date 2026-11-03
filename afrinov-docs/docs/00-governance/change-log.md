@@ -158,6 +158,7 @@
 | 2026-11-03 | `00-governance/decision-log.md` | Added ADR-027: project material comes through the store, held for its project (amends ADR-021 and ADR-023) | Engineering |
 | 2026-11-03 | `00-governance/glossary.md`, `02-business-analysis/business-rules.md`, `04-processes/goods-receiving.md`, `04-processes/procure-to-stock.md`, `04-processes/purchase-order-lifecycle.md`, `08-api/authorization.md`, `08-api/resource-model.md`, `09-frontend/page-inventory.md`, `01-product/product-roadmap.md` | Updated for ADR-027: project orders received into stock held for the project, Confirm delivery retired, project stock issued only to its project, a closed project's stock moved to Stores with its item | Engineering |
 | 2026-11-03 | `13-project-management/roadmaps/stores-procurement-separation-roadmap.md`, `project-on-the-order-roadmap.md`, `materials-sections-roadmap.md`, `task_context.md` | Notes pointing to ADR-027 and the Project Material Through the Store Roadmap | Engineering |
+| 2026-11-03 | `13-project-management/roadmaps/project-material-through-the-store-roadmap.md` | Phase 5 recorded as built; its ADR is ADR-027, not ADR-025 | Engineering |
 
 Add one row per meaningful revision (not typo fixes). For architecture-level
 changes, also add an ADR in `decision-log.md` and reference its ID here.

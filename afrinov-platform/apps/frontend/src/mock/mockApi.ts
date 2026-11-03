@@ -2757,6 +2757,10 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
   if (original.type === 'LOAN' || original.type === 'LOAN_RETURN' || original.referenceType === 'ToolLoan') {
     throw err('INVALID_STATE', 'Tool check-outs and check-ins are not reversed: check the tool in, or out, again instead.');
   }
+  // As the server: the item changed with it, so the pair isn't reversed on its own.
+  if (original.referenceType === 'MoveToStores') {
+    throw err('INVALID_STATE', 'This moved a closed project\'s stock to Stores along with its item, so it isn\'t reversed. Issue or adjust the Stores stock instead.');
+  }
   if (original.type === 'ISSUE' && returnedAgainst(original.id) > 0) {
     throw err('INVALID_STATE', 'Part of this issue has been returned. Reverse the returns first.');
   }
@@ -2923,13 +2927,13 @@ function mockLeftoverItems(projectNumber: string | null) {
         hasActiveLocation: mine.some((b) => findLocation(b.locationId)?.active !== false),
         value: m.unitCost ? Math.round(onHand * Number(m.unitCost) * 100) / 100 : null,
         locations: mine.map((b) => `${findLocation(b.locationId)?.name ?? b.locationId} (${b.quantity}${b.heldForProject ? ', held for the project' : ''})`).join(', '),
-        category: m.category, held: String(held),
+        category: m.category, held: String(held), itemProject: m.projectNumber ?? null,
       }];
     });
 }
 
 /** Moves a closed project's leftovers, or items with no project (null), to Stores, all or none. */
-function mockMoveLeftovers(projectNumber: string | null, items: Array<{ materialId: string; category: string }>) {
+function mockMoveLeftovers(projectNumber: string | null, items: Array<{ materialId: string; category?: string }>) {
   if (items.length === 0) throw err('VALIDATION_ERROR', 'Choose at least one item to move to Stores');
   if (new Set(items.map((i) => i.materialId)).size !== items.length) throw err('VALIDATION_ERROR', 'An item is listed twice');
   // As the server: project material on an open project order or RFQ stays project material.
@@ -2958,14 +2962,20 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
     if (!m) throw err('NOT_FOUND', 'Material not found');
     const heldHere = ownHeld.filter((b) => b.materialId === m.id);
     const ownItem = m.category === 'PROJECT_MATERIAL' && (m.projectNumber ?? null) === projectNumber;
-    const heldItem = heldHere.length > 0 && (m.category !== 'PROJECT_MATERIAL' || !m.projectNumber || m.projectNumber === projectNumber);
-    if (!ownItem && !heldItem) {
+    if (!ownItem && heldHere.length === 0) {
       throw err('VALIDATION_ERROR', projectNumber === null
         ? `${m.sku} is not a Projects item with no project, so it isn't moved from here.`
         : `${m.sku} is not material of project ${projectNumber}, so it isn't moved from it.`);
     }
-    if (m.category !== 'PROJECT_MATERIAL' && item.category !== m.category) throw err('VALIDATION_ERROR', `${m.sku} is already a Stores item, so it stays in its category.`);
-    if (!['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
+    // As the server: only this project's own item, or one with no project, becomes a Stores item.
+    const changesItem = m.category === 'PROJECT_MATERIAL' && (!m.projectNumber || m.projectNumber === projectNumber);
+    if (changesItem && !item.category) throw err('VALIDATION_ERROR', `Choose a Stores category for ${m.sku}.`);
+    if (!changesItem && item.category && item.category !== m.category) {
+      throw err('VALIDATION_ERROR', m.category === 'PROJECT_MATERIAL'
+        ? `${m.sku} is project ${m.projectNumber}'s material, so it stays project material: only the stock held for project ${projectNumber} moves.`
+        : `${m.sku} is already a Stores item, so it stays in its category.`);
+    }
+    if (item.category && !['CONSUMABLES', 'FASTENERS_SLUGS_INSULATION', 'TOOLING_PPE_ELECTRICAL'].includes(item.category)) throw err('VALIDATION_ERROR', 'Invalid move payload');
   }
   const at = new Date().toISOString();
   for (const item of items) {
@@ -2977,19 +2987,20 @@ function mockMoveLeftovers(projectNumber: string | null, items: Array<{ material
       const inId = nextId('t');
       const note = `Moved to Stores: project ${projectNumber} is closed`;
       state.transactions.push(
-        { id: outId, postedAt: at, type: 'TRANSFER_OUT', materialId: m.id, locationId: b.locationId, heldForProject: projectNumber!, quantity: String(-b.quantity), actorId: 'user-1', reasonNote: note, referenceType: 'Project', referenceId: projectNumber!, pairedWithId: inId },
-        { id: inId, postedAt: at, type: 'TRANSFER_IN', materialId: m.id, locationId: b.locationId, quantity: String(b.quantity), actorId: 'user-1', reasonNote: note, referenceType: 'Project', referenceId: projectNumber!, pairedWithId: outId },
+        { id: outId, postedAt: at, type: 'TRANSFER_OUT', materialId: m.id, locationId: b.locationId, heldForProject: projectNumber!, quantity: String(-b.quantity), actorId: 'user-1', reasonNote: note, referenceType: 'MoveToStores', referenceId: projectNumber!, pairedWithId: inId },
+        { id: inId, postedAt: at, type: 'TRANSFER_IN', materialId: m.id, locationId: b.locationId, quantity: String(b.quantity), actorId: 'user-1', reasonNote: note, referenceType: 'MoveToStores', referenceId: projectNumber!, pairedWithId: outId },
       );
       heldMoved += b.quantity;
     }
-    const toCategory = m.category === 'PROJECT_MATERIAL' ? item.category : m.category;
+    const changesItem = m.category === 'PROJECT_MATERIAL' && (!m.projectNumber || m.projectNumber === projectNumber);
+    const toCategory = changesItem ? item.category! : m.category;
     // As the server, each move is in the Activity.
     MOCK_AUDIT.unshift({
       id: nextId('audit'), action: 'MOVE_TO_STORES', entityType: 'Material', entityId: m.id,
       before: { category: m.category, projectNumber: m.projectNumber ?? null },
-      after: { category: toCategory, projectNumber: null, ...(heldMoved > 0 ? { heldMoved: String(heldMoved), fromProject: projectNumber } : {}) }, createdAt: at, actorId: 'user-1',
+      after: { category: toCategory, projectNumber: changesItem ? null : m.projectNumber ?? null, ...(heldMoved > 0 ? { heldMoved: String(heldMoved), fromProject: projectNumber } : {}) }, createdAt: at, actorId: 'user-1',
     });
-    if (m.category === 'PROJECT_MATERIAL') Object.assign(m, { category: item.category, projectNumber: null, requiredStock: '0' });
+    if (changesItem) Object.assign(m, { category: item.category, projectNumber: null, requiredStock: '0' });
   }
   return { moved: items.length };
 }
@@ -3202,6 +3213,10 @@ function computeStockValue() {
   const leftovers = new Map<string, Set<string>>();
   const status = { URGENT: 0, WARNING: 0, OK: 0, NOT_SET: 0, outOfStock: 0 };
   const rows = computeStockStatus({ section: 'ALL' });
+  // As the server: Move to Stores refuses an item held for another project.
+  const holdersOf = new Map<string, Set<string>>();
+  for (const b of computeBalances()) if (b.heldForProject && b.quantity > 0) holdersOf.set(b.materialId, (holdersOf.get(b.materialId) ?? new Set()).add(b.heldForProject));
+  const movableFor = (project: string, materialId: string) => [...(holdersOf.get(materialId) ?? [])].every((h) => h === project);
   const byId = new Map(rows.map((r) => [r.materialId, r]));
   const sectionOfRow = (category: string) => (category === 'PROJECT_MATERIAL' ? 'PROJECTS' : 'STORES');
   for (const r of rows) {
@@ -3211,7 +3226,7 @@ function computeStockValue() {
     add(sections[section], r.materialId, onHand);
     if (section === 'PROJECTS') {
       add(bucketOf(projects, r.projectNumber ?? ''), r.materialId, onHand);
-      if (onHand > 0) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
+      if (onHand > 0 && movableFor(r.projectNumber ?? '', r.materialId)) leftovers.set(r.projectNumber ?? '', (leftovers.get(r.projectNumber ?? '') ?? new Set()).add(r.materialId));
     }
     if (section === 'STORES') {
       if (onHand <= 0) status.outOfStock++;
@@ -3225,7 +3240,7 @@ function computeStockValue() {
     add(sections[sectionOfRow(r.category)], r.materialId, b.quantity);
     add(bucketOf(projects, b.heldForProject), r.materialId, b.quantity);
     // As the server: held stock is moved to Stores with its item once the project closes.
-    if (b.quantity > 0) leftovers.set(b.heldForProject, (leftovers.get(b.heldForProject) ?? new Set()).add(r.materialId));
+    if (b.quantity > 0 && movableFor(b.heldForProject, r.materialId)) leftovers.set(b.heldForProject, (leftovers.get(b.heldForProject) ?? new Set()).add(r.materialId));
   }
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const sum = (bucket: Bucket) => {

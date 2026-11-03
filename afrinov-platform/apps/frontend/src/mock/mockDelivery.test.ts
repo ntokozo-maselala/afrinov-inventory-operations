@@ -129,4 +129,21 @@ describe('mock: delivery of a project order', () => {
     expect(rows.find((r) => r.type === 'TRANSFER_OUT')?.heldForProject).toBe('AFRI-1325');
     expect(rows.find((r) => r.type === 'RECEIPT')?.heldForProject).toBe('AFRI-1325');
   });
+  // Qodo, PR #149, as the server: the move isn't reversed on its own, and
+  // another project's item keeps what it is.
+  it('refuses to reverse a move to Stores, and moves another project\'s item\'s stock without changing the item', async () => {
+    // An item tagged to AFRI-1402, bought on AFRI-1325's order.
+    await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1402' });
+    const created = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', orderedQty: 4, unitPrice: 10 }] });
+    const submitted = await api.post<Order>(`/purchase-orders/${created.id}/submit`, {});
+    if (submitted.status === 'PENDING_APPROVAL') await api.post(`/purchase-orders/${created.id}/approve`, {});
+    await api.post(`/purchase-orders/${created.id}/receive`, { locationId: 'loc-1' });
+    await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
+    expect(await api.post('/projects/AFRI-1325/leftovers/move', { items: [{ materialId: 'mat-9' }] })).toEqual({ moved: 1 });
+    expect(await heldFor('AFRI-1325')).toBe(0);
+    expect(await api.get<{ category: string; projectNumber: string | null }>('/materials/mat-9')).toMatchObject({ category: 'PROJECT_MATERIAL', projectNumber: 'AFRI-1402' });
+    const rows = await api.get<Array<{ id: string; type: string; referenceType?: string }>>('/inventory-transactions?materialId=mat-9');
+    const out = rows.find((r) => r.type === 'TRANSFER_OUT' && r.referenceType === 'MoveToStores')!;
+    expect(await messageOf(api.post(`/inventory-transactions/${out.id}/reversal`, { reason: 'Moved by mistake' }))).toMatch(/along with its item, so it isn.t reversed/);
+  });
 });

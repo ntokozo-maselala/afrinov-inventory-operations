@@ -292,6 +292,17 @@ describe('IssueStock with project material', () => {
 
   // Qodo, PR #145: the server refuses an issue to a closed project, so its held
   // stock isn't offered either; the item's own project doesn't decide it.
+  // Qodo, PR #149: from a project's leftovers page, Issue starts on that
+  // project's stock of the item, not another project's larger balance.
+  it('starts on the given project\'s stock of an item linked with ?project=', async () => {
+    const mine = { ...pipe('8', 'BAR-8', ''), projectNumber: null, project: null, heldForProject: 'AFRI-1325', quantity: '2' };
+    const theirs = { ...mine, heldForProject: 'P-42', quantity: '9' };
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [...stock, mine, theirs] : respondProjects(path)));
+    render(<MemoryRouter initialEntries={['/stock/issue?materialId=p-8&project=AFRI-1325']}><ToastProvider><IssueStock /></ToastProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByLabelText(/Project/)).toHaveValue('AFRI-1325'));
+    expect(screen.getByLabelText('Item 1')).toHaveValue('Pipe 8 (BAR-8) · A-1 · held for AFRI-1325');
+  });
+
   it('offers no stock held for a completed project', async () => {
     const heldForDone = { ...pipe('9', 'HELD-DONE', 'AFRI-1325'), heldForProject: 'DONE-1' };
     mockGet.mockImplementation(async (path: string) => (path.startsWith('/reports/current-stock') ? [...stock, heldForDone]

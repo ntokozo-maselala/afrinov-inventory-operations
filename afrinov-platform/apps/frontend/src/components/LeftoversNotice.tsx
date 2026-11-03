@@ -144,7 +144,9 @@ export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStoc
   const projects = [...byProject].sort(([a], [b]) => a.localeCompare(b));
   // Whether each project still takes issues, as Issue stock decides: active,
   // and neither completed nor cancelled (Qodo, PR #146).
-  const active = useApi<Array<{ projectNumber: string; status?: string }>>(projects.length > 0 && canIssue ? '/projects?active=true' : null);
+  // Every project, archived ones too: a closed project's stock moves to Stores
+  // even once it is archived (Qodo, PR #149); Issue still needs an active one.
+  const active = useApi<Array<{ projectNumber: string; status?: string; active?: boolean }>>(projects.length > 0 && canIssue ? '/projects' : null);
   if (projects.length === 0) return null;
   // Unknown when the projects couldn't be read: Issue isn't offered then, and
   // the notice says so with a retry (Qodo, PR #146).
@@ -152,8 +154,9 @@ export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStoc
   const whyNot = (project: string): string | null => {
     if (!active.data) return 'unknown';
     const p = active.data.find((x) => x.projectNumber === project);
-    if (!p) return 'project not active';
-    return p.status === 'COMPLETED' ? 'project completed' : p.status === 'CANCELLED' ? 'project cancelled' : null;
+    if (p?.status === 'COMPLETED') return 'project completed';
+    if (p?.status === 'CANCELLED') return 'project cancelled';
+    return !p || p.active === false ? 'project not active' : null;
   };
   /** Why Issue stock wouldn't offer a balance, or null when it would. */
   const whyNotRow = (r: CurrentStockRow): string | null => {

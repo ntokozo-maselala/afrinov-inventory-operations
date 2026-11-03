@@ -454,9 +454,10 @@ describe('ReportingService', () => {
         PROJECTS: { items: 1, itemsInStock: 1, value: 700, unpriced: 0 },
       });
       expect(v.projects).toEqual([
-        { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0, leftovers: 1 },
-        // Everything 1402 holds is held for it: once 1402 closes, Move to Stores takes both items (Phase 5).
-        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0, leftovers: 2 },
+        // The pipe is held for both projects, so Move to Stores takes it for neither
+        // (Qodo, PR #149); 1402's cable is its alone (Phase 5).
+        { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', items: 1, itemsInStock: 1, value: 300, unpriced: 0, leftovers: 0 },
+        { projectNumber: '1402', name: 'Door rails', status: 'ACTIVE', items: 2, itemsInStock: 2, value: 430, unpriced: 0, leftovers: 1 },
       ]);
       // The cable's 3 are held for 1402, not the store's: still urgent and out of stock.
       expect(v.status).toEqual({ URGENT: 2, WARNING: 0, OK: 1, NOT_SET: 0, outOfStock: 2 });

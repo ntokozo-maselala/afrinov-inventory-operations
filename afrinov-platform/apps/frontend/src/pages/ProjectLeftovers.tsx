@@ -26,7 +26,12 @@ interface LeftoverItem {
   category?: string;
   /** How much of onHand is held for the project: moved off it onto Stores stock. */
   held?: string;
+  /** The item's own project; another project's item keeps it when its held stock moves. */
+  itemProject?: string | null;
 }
+
+/** Chosen for an item that keeps what it is: only its held stock moves, with no category sent. */
+const KEEP = 'KEEP';
 interface Leftovers { project: { projectNumber: string; name: string | null; status: string; closed: boolean; active?: boolean } | null; items: LeftoverItem[] }
 
 /** Leftovers move to a Stores category other than Tools: a tool is lent one by one, not issued. */
@@ -55,7 +60,7 @@ export function ProjectLeftovers() {
     setBusy(true);
     try {
       const { moved: count } = await api.post<{ moved: number }>(`${path}/move`, {
-        items: chosen.map((i) => ({ materialId: i.materialId, category: categories[i.materialId] })),
+        items: chosen.map((i) => (categories[i.materialId] === KEEP ? { materialId: i.materialId } : { materialId: i.materialId, category: categories[i.materialId] })),
       });
       toast.success(`Moved ${count} item${count === 1 ? '' : 's'} to Stores`);
       setMoved(count);
@@ -76,6 +81,8 @@ export function ProjectLeftovers() {
   if (!data) return <><PageHeader title={title} breadcrumb={breadcrumb} /><div className="surface-card p-6"><Skeleton h={160} /></div></>;
 
   const { project, items } = data;
+  // An item that isn't changed by the move: a Stores item, or another project's item held for this one.
+  const keepsItem = (i: LeftoverItem) => (!!i.category && i.category !== 'PROJECT_MATERIAL') || (!!i.itemProject && i.itemProject !== projectNumber);
   // Items with no project always move; a project's, once it is closed.
   const movable = !project || project.closed;
   return (
@@ -128,20 +135,20 @@ export function ProjectLeftovers() {
                   </td>
                   <td className="text-meta">{i.locations}</td>
                   <td className="text-right font-mono">{i.value === null ? <span className="text-surface-300">No unit cost</span> : formatCurrency(i.value, 'ZAR')}</td>
-                  {movable && canMove && i.category && i.category !== 'PROJECT_MATERIAL' && (
+                  {movable && canMove && keepsItem(i) && (
                     <td>
-                      {/* A Stores item keeps its category: only the stock it holds for the project moves. */}
+                      {/* A Stores item, or another project's item, keeps what it is: only the stock it holds for the project moves. */}
                       <Select
                         aria-label={`Move ${i.sku}`}
                         value={categories[i.materialId] ?? ''}
                         onChange={(e) => setCategories((c) => ({ ...c, [i.materialId]: e.target.value }))}
                       >
                         <option value="">Leave for now</option>
-                        <option value={i.category}>Move its stock ({categoryLabel(i.category)})</option>
+                        <option value={KEEP}>{i.category && i.category !== 'PROJECT_MATERIAL' ? `Move its stock (${categoryLabel(i.category)})` : `Move its stock (stays ${i.itemProject}'s material)`}</option>
                       </Select>
                     </td>
                   )}
-                  {movable && canMove && (!i.category || i.category === 'PROJECT_MATERIAL') && (
+                  {movable && canMove && !keepsItem(i) && (
                     <td>
                       <Select
                         aria-label={`Stores category for ${i.sku}`}
@@ -158,7 +165,8 @@ export function ProjectLeftovers() {
                       {/* Issue stock refuses a deactivated item or project, so neither is offered (Qodo, PR #131). */}
                       {/* Nor when all of it is in deactivated locations (Qodo, PR #132). */}
                       {i.active !== false && project?.active !== false && i.hasActiveLocation !== false
-                        ? <Link to={`/stock/issue?materialId=${encodeURIComponent(i.materialId)}`} className="btn-secondary btn-sm" aria-label={`Issue ${i.sku}`}>Issue</Link>
+                        // To this project's stock of the item, not another's (Qodo, PR #149).
+                        ? <Link to={`/stock/issue?materialId=${encodeURIComponent(i.materialId)}&project=${encodeURIComponent(projectNumber)}`} className="btn-secondary btn-sm" aria-label={`Issue ${i.sku}`}>Issue</Link>
                         : <span className="text-meta">{i.active === false ? 'Item inactive' : project?.active === false ? 'Project inactive' : 'Only in inactive locations'}</span>}
                     </td>
                   )}

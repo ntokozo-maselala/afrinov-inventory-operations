@@ -690,10 +690,13 @@ say whose stock is on the shelf.
   read for them.
 - When a project is completed or cancelled, Move to Stores takes its held
   stock off the project onto Stores stock at the same location (a linked
-  TRANSFER_OUT and TRANSFER_IN, reversible), then makes the item a Stores
-  item. It is refused while another project holds the item, the item is
-  another project's material, or it is on an open project order or RFQ. A
-  Stores item held for the project keeps its category; only its stock moves.
+  TRANSFER_OUT and TRANSFER_IN, reference `MoveToStores`), then makes the
+  item a Stores item if it is the project's own or has no project. A Stores
+  item, or another project's item, keeps what it is: only the stock held for
+  this project moves, and another project's item then holds it as that
+  project's leftover. It is refused while another project holds the item, or
+  it is on an open project order or RFQ. The pair isn't reversed on its own,
+  as the item changed with it.
 
 **Consequences:** Migration `20260101000035` changes the
 `inventory_balances` primary key (every existing balance kept as Stores

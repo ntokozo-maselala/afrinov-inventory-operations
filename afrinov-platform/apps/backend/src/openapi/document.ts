@@ -468,14 +468,16 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/projects/:projectNumber/leftovers', tag: 'Projects', summary: 'List the project material still in stock',
-    description: 'Its leftovers (Stores stock of its own items) and any item with stock held for it, each with `held`, how much is held for the project. '
+    description: 'Its leftovers (Stores stock of its own items) and any item with stock held for it, each with `held`, how much is held for the project, and `itemProject`, the item\'s own. '
       + 'Once the project is completed or cancelled (closed: true), these move to Stores.',
     errors: [404],
   },
   {
     method: 'post', path: '/projects/:projectNumber/leftovers/move', tag: 'Projects', summary: 'Move the leftovers of a closed project to Stores',
-    description: 'All or none. Stock held for the project first becomes Stores stock where it is (a linked TRANSFER_OUT and TRANSFER_IN). Each item then becomes a Stores item in its chosen category, keeping its SKU, stock and history, with no project and no Required Stock; a Stores item keeps its category. '
-      + 'Refused (400) for an item still on an open project order or request for quotation, held for another project, or another project\x27s material: it stays project material until that is finished.',
+    description: 'All or none. Stock held for the project first becomes Stores stock where it is (a linked TRANSFER_OUT and TRANSFER_IN, reference MoveToStores, not reversed on its own). '
+      + 'The project\'s own item, or one with no project, then becomes a Stores item in its chosen `category`, keeping its SKU, stock and history, with no project and no Required Stock. '
+      + 'A Stores item, or another project\'s item, is sent with no category: it keeps what it is, and only the stock held for this project moves. '
+      + 'Refused (400) for an item still on an open project order or request for quotation, or held for another project: it stays project material until that is finished.',
     permissions: [P.EditMaterial], body: moveLeftoversSchema, errors: [404, 409],
   },
   {

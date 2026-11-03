@@ -17,6 +17,7 @@ import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../.
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
+import { MOVE_TO_STORES_REFERENCE } from './project-leftovers.service.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
@@ -921,6 +922,11 @@ export const InventoryService = {
         if (!original) throw Errors.notFound('InventoryTransaction');
         if (original.reversesId) {
           throw Errors.invalidState('A reversal cannot itself be reversed. Record the movement again instead.');
+        }
+        // Moving a closed project's stock to Stores changed its item too, so the
+        // pair isn't reversed on its own (Qodo, PR #149).
+        if (original.referenceType === MOVE_TO_STORES_REFERENCE) {
+          throw Errors.invalidState('This moved a closed project\'s stock to Stores along with its item, so it isn\'t reversed. Issue or adjust the Stores stock instead.');
         }
         // Tool loans are put right by checking the tool in or out again, which keeps the loan's story whole.
         if (original.type === InventoryTransactionType.LOAN || original.type === InventoryTransactionType.LOAN_RETURN || original.referenceType === 'ToolLoan') {

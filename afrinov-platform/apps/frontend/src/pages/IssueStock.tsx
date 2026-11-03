@@ -105,10 +105,14 @@ export function IssueStock() {
   // An item's page links here with ?materialId=: once stock has loaded, the
   // first line starts on that item, at the location that holds the most.
   const [params] = useSearchParams();
+  // With ?project=, only that project's stock of it (held, or its leftover), not
+  // another project's larger balance (Qodo, PR #149). That waits for the projects too.
   const [preset, setPreset] = useState(() => params.get('materialId'));
-  if (preset && stock.data) {
+  const presetProject = params.get('project');
+  if (preset && stock.data && (!presetProject || !loading)) {
     setPreset(null);
-    const best = available.filter((r) => r.materialId === preset).sort((a, b) => Number(b.quantity) - Number(a.quantity))[0];
+    const best = available.filter((r) => r.materialId === preset && (!presetProject || projectOf(r) === presetProject))
+      .sort((a, b) => Number(b.quantity) - Number(a.quantity))[0];
     if (best) setLines([{ ...emptyLine(), stockKey: stockKey(best) }]);
   }
 
