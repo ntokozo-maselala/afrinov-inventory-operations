@@ -30,7 +30,8 @@ describe('useNavGroups', () => {
       expect(group).toHaveProperty('title');
       expect(group).toHaveProperty('items');
       expect(Array.isArray(group.items)).toBe(true);
-      expect(group.items.length).toBeGreaterThan(0);
+      // Only a placeholder header (Production, for now) has no entries.
+      if (!group.placeholder) expect(group.items.length).toBeGreaterThan(0);
       
       group.items.forEach(item => {
         expect(item).toHaveProperty('to');
@@ -42,7 +43,7 @@ describe('useNavGroups', () => {
 
   it('groups the menu in the order the work happens', () => {
     features.procurement = false;
-    expect(useNavGroups().map((g) => g.title)).toEqual(['Overview', 'Store', 'Reports', 'Operations', 'Account']);
+    expect(useNavGroups().map((g) => g.title)).toEqual(['Overview', 'Store', 'Reports', 'Operations', 'Sales', 'Production', 'Account']);
   });
 
   it('puts the counter actions in Store, after Stock', () => {
@@ -59,7 +60,24 @@ describe('useNavGroups', () => {
   });
 
   it('puts the lists the counter draws on in Operations', () => {
-    expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Projects', 'Recipients', 'Suppliers']);
+    expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Recipients', 'Suppliers']);
+  });
+
+  it.each(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])(
+    'shows %s a Production header after Sales, with nothing under it yet',
+    (role) => {
+      signedIn.roles = [role];
+      const groups = useNavGroups();
+      const titles = groups.map((g) => g.title);
+      expect(titles.indexOf('Production')).toBe(titles.indexOf('Sales') + 1);
+      expect(groups.find((g) => g.title === 'Production')?.items).toEqual([]);
+    },
+  );
+
+  it('puts Projects under Sales, after Operations', () => {
+    expect(useLabelsIn('Sales')).toEqual(['Projects']);
+    const titles = useNavGroups().map((g) => g.title);
+    expect(titles.indexOf('Sales')).toBe(titles.indexOf('Operations') + 1);
   });
 
   it('marks Stock as an exact match, so it is not lit on /stock/issue', () => {
@@ -344,7 +362,7 @@ describe('New purchase order in the menu', () => {
 
   it.each([
     // Requests for quotation are the buyer's: approvers and the store don't ask for prices.
-    ['PROCUREMENT', ['Purchase orders', 'New purchase order', 'RFQ']],
+    ['PROCUREMENT', ['RFQ', 'New purchase order', 'Purchase orders']],
     ['APPROVER', ['Purchase orders']],
     // Procurement is the projects side: the store has none of it (Stores and Procurement Separation Roadmap).
     ['STORE_CONTROLLER', []],
@@ -365,11 +383,11 @@ describe('New purchase order in the menu', () => {
   // Stores ordering roadmap, Phase 4: each role sees only its own ordering.
   it.each([
     ['STORE_CONTROLLER', ['Order stock']],
-    ['PROCUREMENT', ['New purchase order', 'RFQ']],
+    ['PROCUREMENT', ['RFQ', 'New purchase order']],
     ['APPROVER', []],
     ['TECHNICIAN', []],
     ['VIEWER', []],
-    ['ADMIN', ['Order stock', 'New purchase order', 'RFQ']],
+    ['ADMIN', ['Order stock', 'RFQ', 'New purchase order']],
   ])('offers a %s only the ordering it does', (role, expected) => {
     signedIn.roles = [role];
     const ordering = ['Order stock', 'New purchase order', 'RFQ'];

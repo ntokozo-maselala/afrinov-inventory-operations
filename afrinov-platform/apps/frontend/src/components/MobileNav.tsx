@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { useAppShell } from '../hooks/useAppShell';
 import { Icon } from './Icon';
 import { isNavItemActive } from '../hooks/useNavGroups';
+import { isFoldable, useFoldedSections } from '../hooks/useFoldedSections';
+import { NavSectionHeader, navSectionId } from './NavSectionHeader';
 
 interface MobileNavItemProps {
   item: {
@@ -126,21 +128,33 @@ interface MobileNavProps {
 
 export function MobileNav({ groups, onNavigate }: MobileNavProps) {
   const { prefersReducedMotion } = useAppShell();
+  // As the sidebar: sections fold from their headers, remembered in this browser.
+  const sections = useFoldedSections(groups);
 
   return (
     <nav aria-label="Mobile navigation" className="flex-1 overflow-y-auto py-3 pb-safe">
-      {groups.map((g) => (
-        <div key={g.title} className="mb-4">
-          <div className="px-4 mb-2 text-eyebrow">{g.title}</div>
-          <div className="space-y-0.5 px-2" role="list">
-            {g.items.map((it) => (
-              <div key={it.to} role="listitem">
-                <MobileNavItem item={it} onNavigate={onNavigate} prefersReducedMotion={prefersReducedMotion} />
-              </div>
-            ))}
+      {groups.map((g) => {
+        const open = sections.isOpen(g);
+        return (
+          <div key={g.title} className="mb-4">
+            <NavSectionHeader
+              title={g.title}
+              foldable={isFoldable(g)}
+              open={open}
+              onToggle={() => sections.toggle(g.title)}
+              controls={navSectionId('mobile-nav', g.title)}
+              className="mb-2"
+            />
+            <div id={navSectionId('mobile-nav', g.title)} hidden={!open} className="space-y-0.5 px-2" role="list">
+              {g.items.map((it) => (
+                <div key={it.to} role="listitem">
+                  <MobileNavItem item={it} onNavigate={onNavigate} prefersReducedMotion={prefersReducedMotion} />
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }
