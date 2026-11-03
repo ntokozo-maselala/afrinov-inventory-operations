@@ -158,12 +158,15 @@ describe('Receive stock against an approved order', () => {
 
     // Project Material Through the Store Roadmap, Phase 4: project material isn't
     // shelved; it is booked to one place and issued to the workshop straight away.
-    it('books its lines into the project receiving location, when one is set', async () => {
+    it('books its lines into the project receiving location, when one is set, with no location to choose', async () => {
       const base = mockGet.getMockImplementation()!;
       mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
         ? { 'inventory.projectReceivingLocationId': 'loc-2' } : base(path)));
       receiveStock();
       await chooseOrder('po-5');
+      expect(screen.getByText(/Booked to Yard, the project receiving location\./)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Line 1 location')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Receive every line into')).not.toBeInTheDocument();
       fireEvent.change(screen.getByLabelText(/Delivery note/), { target: { value: 'DN-6' } });
       fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
       await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/goods-receipts', expect.objectContaining({
@@ -237,6 +240,16 @@ describe('Receive stock against an approved order', () => {
       expect(JSON.parse((await screen.findByTestId('issue')).textContent!)).toEqual({
         issuePrefill: { projectNumber: 'AFRI-1325', lines: [{ materialId: 'm-1', locationId: 'loc-2', quantity: 9 }] },
       });
+    });
+
+    it('still has the store\u2019s own order choose a location per line', async () => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values')
+        ? { 'inventory.projectReceivingLocationId': 'loc-2' } : base(path)));
+      receiveStock();
+      await chooseOrder('po-1');
+      expect(screen.getByLabelText('Line 1 location')).toBeInTheDocument();
+      expect(screen.queryByText(/the project receiving location/)).not.toBeInTheDocument();
     });
 
     it('offers no Issue it now for the store\u2019s own order', async () => {

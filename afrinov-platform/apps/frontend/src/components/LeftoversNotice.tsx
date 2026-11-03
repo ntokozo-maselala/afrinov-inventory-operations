@@ -146,29 +146,47 @@ export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStoc
   // and neither completed nor cancelled (Qodo, PR #146).
   const active = useApi<Array<{ projectNumber: string; status?: string }>>(projects.length > 0 && canIssue ? '/projects?active=true' : null);
   if (projects.length === 0) return null;
+  // Unknown when the projects couldn't be read: Issue isn't offered then, and
+  // the notice says so with a retry (Qodo, PR #146).
+  const projectsUnknown = canIssue && !!active.error && !active.data;
   const whyNot = (project: string): string | null => {
-    if (!active.data) return 'loading';
+    if (!active.data) return 'unknown';
     const p = active.data.find((x) => x.projectNumber === project);
     if (!p) return 'project not active';
     return p.status === 'COMPLETED' ? 'project completed' : p.status === 'CANCELLED' ? 'project cancelled' : null;
   };
+  /** Why Issue stock wouldn't offer a balance, or null when it would. */
+  const whyNotRow = (r: CurrentStockRow): string | null => {
+    if (r.category === 'TOOLS') return 'a tool, lent on Tools';
+    if (r.materialActive === false) return 'item not in use';
+    if (r.locationActive === false) return 'location not in use';
+    return null;
+  };
   return (
     <Alert tone="info" title="Received for projects, not yet issued" className={className}>
       <p>Project material goes to the workshop as it arrives: issue it to its project.</p>
+      {projectsUnknown && (
+        <p className="mt-1">
+          The projects couldn&rsquo;t be checked, so Issue isn&rsquo;t offered.{' '}
+          <button type="button" className="btn-link" onClick={() => active.reload()}>Try again</button>
+        </p>
+      )}
       <ul className="mt-1 space-y-1">
         {projects.map(([project, held]) => {
-          // One entry per item, across its locations; the issue keeps each location's line.
-          const items = new Map<string, { materialId: string; name: string; unit: string; quantity: number }>();
+          // One entry per item, across its locations, saying how much of it
+          // Issue won't take and why; the issue keeps each location's line.
+          const items = new Map<string, { materialId: string; name: string; unit: string; quantity: number; notIssued: number; reasons: Set<string> }>();
           for (const r of held) {
-            const i = items.get(r.materialId) ?? { materialId: r.materialId, name: r.materialName, unit: r.unitOfMeasure, quantity: 0 };
+            const i = items.get(r.materialId) ?? { materialId: r.materialId, name: r.materialName, unit: r.unitOfMeasure, quantity: 0, notIssued: 0, reasons: new Set<string>() };
             i.quantity += Number(r.quantity);
+            const why = whyNotRow(r);
+            if (why) { i.notIssued += Number(r.quantity); i.reasons.add(why); }
             items.set(r.materialId, i);
           }
-          // Only what Issue stock offers: an active item and location, and no tools (lent, not issued).
+          // Only what Issue stock offers: an active item and location, and no tools.
           const prefill: IssuePrefill = {
             projectNumber: project,
-            lines: held.filter((r) => r.materialActive !== false && r.locationActive !== false && r.category !== 'TOOLS')
-              .map((r) => ({ materialId: r.materialId, locationId: r.locationId, quantity: Number(r.quantity) })),
+            lines: held.filter((r) => !whyNotRow(r)).map((r) => ({ materialId: r.materialId, locationId: r.locationId, quantity: Number(r.quantity) })),
           };
           const reason = canIssue ? whyNot(project) : null;
           return (
@@ -177,7 +195,12 @@ export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStoc
               {[...items.values()].sort((a, b) => a.name.localeCompare(b.name)).map((i, n) => (
                 <span key={i.materialId}>
                   {n > 0 && ', '}
-                  <Link to={`/materials/${i.materialId}`} className="btn-link">{i.name}</Link> ({formatNumber(i.quantity)} {i.unit})
+                  <Link to={`/materials/${i.materialId}`} className="btn-link">{i.name}</Link> ({formatNumber(i.quantity)} {i.unit}
+                  {canIssue && !reason && i.notIssued > 0 && (
+                    <span className="text-meta">
+                      {'; '}{i.notIssued < i.quantity ? `${formatNumber(i.notIssued)} ${i.unit} ` : ''}not issued: {[...i.reasons].join(', ')}
+                    </span>
+                  )})
                 </span>
               ))}
               {canIssue && prefill.lines.length > 0 && !reason && (
@@ -186,8 +209,7 @@ export function ReceivedNotIssuedNotice({ rows, className }: { rows: CurrentStoc
                   <Link to="/stock/issue" state={{ issuePrefill: prefill }} className="btn-link" aria-label={`Issue project ${project}'s material`}>Issue</Link>
                 </>
               )}
-              {canIssue && reason && reason !== 'loading' && <span className="text-meta"> · not issued: {reason}</span>}
-              {canIssue && !reason && prefill.lines.length === 0 && <span className="text-meta"> · not issued: item or location not in use</span>}
+              {canIssue && reason && reason !== 'unknown' && <span className="text-meta"> · not issued: {reason}</span>}
             </li>
           );
         })}

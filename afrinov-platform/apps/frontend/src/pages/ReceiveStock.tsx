@@ -275,6 +275,10 @@ function ReceiveAgainstOrder() {
     }
   }
 
+  // Project material isn't shelved: with a receiving location in use, a project
+  // order's lines all go there, so there is no location to choose.
+  const fixedHome = !!chosenOrder?.projectNumber && projectHome.state === 'set';
+  const fixedHomeName = fixedHome ? activeLocations.find((l) => l.id === projectHome.id)?.name : undefined;
   // The order waits for the receiving location too, so a project order's lines start in the right place.
   const loading = orders.loading || locations.loading || !settingsReady;
   const nothingToReceive = !!orders.data && openOrders.length === 0;
@@ -373,9 +377,12 @@ function ReceiveAgainstOrder() {
             <fieldset className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <legend className="text-h3 text-surface-900">What arrived against {chosenOrder.number}</legend>
-                <EveryLineInto locations={activeLocations} onChoose={(locationId) => setOrderLines((ls) => ls.map((l) => ({ ...l, locationId })))} />
+                {!fixedHome && <EveryLineInto locations={activeLocations} onChoose={(locationId) => setOrderLines((ls) => ls.map((l) => ({ ...l, locationId })))} />}
               </div>
-              <p className="text-meta">Each line starts at what is still outstanding. Lines left at 0 stay outstanding.</p>
+              <p className="text-meta">
+                Each line starts at what is still outstanding. Lines left at 0 stay outstanding.
+                {fixedHome && ` Booked to ${fixedHomeName}, the project receiving location.`}
+              </p>
               {chosenOrder.projectNumber && projectHome.state === 'unusable' && (
                 <Alert tone="warning" title="The project receiving location is no longer in use">
                   Choose where each line goes. An administrator can set another under Settings → Inventory.
@@ -389,7 +396,7 @@ function ReceiveAgainstOrder() {
               <div className="space-y-2">
                 {orderLines.map((l, i) => (
                   <OrderReceiptRow
-                    key={l.purchaseOrderLineId} line={l} index={i} locations={activeLocations}
+                    key={l.purchaseOrderLineId} line={l} index={i} locations={activeLocations} fixedLocation={fixedHome}
                     onChange={(patch) => setOrderLines((ls) => ls.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))}
                   />
                 ))}

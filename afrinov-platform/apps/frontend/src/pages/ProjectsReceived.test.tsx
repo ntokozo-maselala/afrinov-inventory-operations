@@ -33,6 +33,38 @@ describe('Projects: received for projects, not yet issued', () => {
     expect(screen.getByText(/Project AFRI-1402:/)).toHaveTextContent('Beam (4 each)');
   });
 
+  // Qodo, PR #146: each item says why Issue leaves it out, and a failed check
+  // of the projects says Issue isn't offered, with a retry.
+  it('says why Issue leaves an item out, beside what it takes', async () => {
+    const row = (materialId: string, name: string, over: Record<string, unknown> = {}) => ({
+      materialId, materialSku: name, materialName: name, category: 'PROJECT_MATERIAL', locationId: 'l-1', locationName: 'Workshop floor',
+      unitOfMeasure: 'each', quantity: '4', heldForProject: 'AFRI-1402', ...over,
+    });
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/reports/current-stock')) return [row('m-1', 'Beam'), row('m-2', 'Plate', { locationId: 'l-2', quantity: '1', locationActive: false }), row('m-2', 'Plate', { quantity: '2' })];
+      if (path.startsWith('/projects')) return [PROJECT];
+      return [];
+    });
+    page();
+    expect(await screen.findByRole('link', { name: "Issue project AFRI-1402's material" })).toBeInTheDocument();
+    expect(screen.getByText(/Project AFRI-1402:/)).toHaveTextContent('Beam (4 each), Plate (3 each; 1 each not issued: location not in use) · Issue');
+  });
+
+  it('says Issue isn\u2019t offered when the projects couldn\u2019t be checked', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith('/reports/current-stock')) return [{
+        materialId: 'm-1', materialSku: 'BEAM', materialName: 'Beam', category: 'PROJECT_MATERIAL', locationId: 'l-1', locationName: 'Workshop floor',
+        unitOfMeasure: 'each', quantity: '4', heldForProject: 'AFRI-1402',
+      }];
+      if (path.startsWith('/projects?active=true')) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
+      if (path.startsWith('/projects')) return [PROJECT];
+      return [];
+    });
+    page();
+    expect(await screen.findByText(/The projects couldn.t be checked, so Issue isn.t offered/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: "Issue project AFRI-1402's material" })).not.toBeInTheDocument();
+  });
+
   it('says when that list could not be loaded', async () => {
     mockGet.mockReset().mockImplementation(async (path: string) => {
       if (path.startsWith('/reports/current-stock')) throw { code: 'SERVICE_UNAVAILABLE', message: 'Try again shortly' };
