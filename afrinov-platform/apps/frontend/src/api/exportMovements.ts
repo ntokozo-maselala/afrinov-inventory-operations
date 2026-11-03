@@ -7,6 +7,7 @@ import type { MovementRow } from './types';
 import { movementProject } from '../lib/heldFor';
 import { downloadPdf, type PdfAbout, type PdfColumn } from '../lib/pdf';
 import { formatDateTime, formatNumber } from '../lib/format';
+import { movementReason, figureColumns } from '../lib/movementReason';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const LIMIT = 10_000;
@@ -14,6 +15,9 @@ const LIMIT = 10_000;
 const TYPE_LABEL: Record<string, string> = {
   RECEIPT: 'Receipt', ISSUE: 'Issue', TRANSFER_OUT: 'Transfer out', TRANSFER_IN: 'Transfer in', ADJUSTMENT: 'Adjustment', RETURN: 'Return', LOAN: 'Check out', LOAN_RETURN: 'Check in',
   DUE_DATE_CHANGE: 'Due date moved',
+  USED_UP: 'Used up',
+  BROKEN: 'Broken',
+  OUTCOME_WITHDRAWN: 'Withdrawn',
 };
 
 /** When a tool loan is due, as its row tells it, in the backend download's words. */
@@ -74,7 +78,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
   const report = new URLSearchParams(query).get('report') ?? '';
   const person = PERSON_HEADER[report] ?? 'Issued to';
   const notKnown = (m: MovementRow) => (report === 'writeoffs' && m.reasonCode && RESPONSIBLE_REASONS.has(m.reasonCode) ? 'Not known' : '');
-  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Due back', 'Reason', 'Note', 'Reference', 'By'];
+  ws.getRow(4).values = ['When', 'Type', 'Code', 'Item', 'Location', 'Quantity', 'Unit', person, 'Project', 'Due back', 'Reason', 'Note', 'Reference', 'By', 'Used up', 'Broken', 'Still out'];
   ws.getRow(4).font = { bold: true };
   for (const m of rows) {
     const type = TYPE_LABEL[m.type] ?? m.type;
@@ -82,9 +86,10 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
       new Date(m.postedAt),
       m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type,
       m.materialSku, m.materialName, m.locationName, m.quantity === null ? null : Number(m.quantity), m.unitOfMeasure ?? '',
-      m.recipientName ?? notKnown(m), movementProject(m) ?? '', dueText(m), m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '', noteText(m),
+      m.recipientName ?? notKnown(m), movementProject(m) ?? '', dueText(m), movementReason(m), noteText(m),
       m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : m.referenceType ?? '',
       m.actorName,
+      ...figureColumns(m),
     ]);
   }
   if (rows.length === 0) ws.addRow(['No movements match these filters.']);
@@ -94,7 +99,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
 /** The most movements one PDF holds; beyond it the page asks for a shorter range. */
 const PDF_LIMIT = 5_000;
 
-const reason = (m: MovementRow) => (m.reasonCode ? m.reasonCode.replace(/_/g, ' ').toLowerCase() : '');
+const reason = (m: MovementRow) => movementReason(m);
 const typeLabel = (m: MovementRow) => {
   const type = TYPE_LABEL[m.type] ?? m.type;
   return m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type;
@@ -155,13 +160,16 @@ const LEDGER: Record<'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned', A
   ],
   returned: [
     { header: 'When', cell: (m) => formatDateTime(m.postedAt) },
+    { header: 'Type', cell: typeLabel },
     { header: 'Code', cell: (m) => m.materialSku },
     { header: 'Item', wrap: true, cell: (m) => m.materialName },
-    { header: 'Quantity', align: 'right', cell: (m) => formatNumber(Math.abs(Number(m.quantity))) },
+    // A used up or broken mark, or its withdrawal, moves no stock: never shown as 0.
+    { header: 'Back on the shelf', align: 'right', cell: (m) => (m.quantity === null ? 'No stock moved' : formatNumber(Math.abs(Number(m.quantity)))) },
     { header: 'Unit', cell: (m) => m.unitOfMeasure ?? '' },
+    { header: 'Used up / broken', wrap: true, cell: (m) => movementReason({ ...m, quantity: null, type: m.type === 'RETURN' ? 'USED_UP' : m.type }) },
     { header: 'Returned by', wrap: true, cell: (m) => m.recipientName ?? '' },
     { header: 'Project', cell: (m) => movementProject(m) ?? '' },
-    { header: 'Back into', wrap: true, cell: (m) => m.locationName },
+    { header: 'Back into', wrap: true, cell: (m) => (m.quantity === null ? '' : m.locationName) },
     { header: 'From the issue of', wrap: true, cell: (m) => (m.returnOf ? `${formatDateTime(m.returnOf.postedAt)}, ${m.returnOf.locationName}` : '') },
     { header: 'Note', wrap: true, cell: (m) => m.reasonNote ?? '' },
     { header: 'By', cell: (m) => m.actorName },

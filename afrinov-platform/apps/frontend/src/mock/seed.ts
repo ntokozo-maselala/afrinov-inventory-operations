@@ -32,7 +32,7 @@ export const SEED_MATERIALS: MockMaterial[] = [
   { id: 'mat-2', sku: 'M12-NUT-88', name: 'M12 8.8 HEX NUT', category: 'FASTENERS_SLUGS_INSULATION', unitOfMeasure: 'each', requiredStock: '100', unitCost: '1.20', active: true },
   { id: 'mat-3', sku: 'WASH-M16-FLAT', name: 'M16 FLAT WASHER', category: 'FASTENERS_SLUGS_INSULATION', unitOfMeasure: 'each', requiredStock: '200', unitCost: '0.85', active: true },
   { id: 'mat-4', sku: 'WELD-ROD-3.2', name: 'Welding Rod 3.2mm E6013', category: 'CONSUMABLES', unitOfMeasure: 'kg', requiredStock: '20', unitCost: '78.00', active: true },
-  { id: 'mat-5', sku: 'GRIND-DISC-125', name: 'Grinding Disc 125 x 6mm', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '30', unitCost: '32.00', active: true },
+  { id: 'mat-5', sku: 'GRIND-DISC-125', name: 'Grinding Disc 125 x 6mm', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '30', unitCost: '32.00', active: true, trackUse: true },
   { id: 'mat-6', sku: 'CUT-DISC-115', name: 'Cut-off Disc 115 x 3mm', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: '30', unitCost: '18.00', active: true },
   { id: 'mat-7', sku: 'GLOVES-WELD-L', name: 'Welding Gloves — Size L', category: 'TOOLING_PPE_ELECTRICAL', unitOfMeasure: 'pair', requiredStock: '5', unitCost: '95.00', active: true },
   { id: 'mat-8', sku: 'GLASSES-CLR', name: 'Safety Glasses — Clear', category: 'TOOLING_PPE_ELECTRICAL', unitOfMeasure: 'each', requiredStock: '10', unitCost: '38.00', active: true },

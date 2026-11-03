@@ -1,0 +1,16 @@
+{
+  "about": "The Reason text of the Movements downloads (ADR-026). The server's Excel (movements-export.ts reasonText) and the browser's Excel and PDF (frontend lib/movementReason.ts movementReason) must both turn each row into exactly this text; both test suites read this file.",
+  "cases": [
+    { "name": "issue of an item that tracks use, nothing back yet", "row": { "type": "ISSUE", "quantity": "-10", "returnedQuantity": "0", "usedUpQuantity": "0", "brokenQuantity": "0", "trackUse": true, "reasonCode": null, "reversesId": null }, "text": "still out 10" },
+    { "name": "issue closed off with fractional quantities leaves nothing, not floating-point dust", "row": { "type": "ISSUE", "quantity": "-1.1", "returnedQuantity": "1", "usedUpQuantity": "0.1", "brokenQuantity": "0", "trackUse": true, "reasonCode": null, "reversesId": null }, "text": "still out 0" },
+    { "name": "issue marked before its item was switched off", "row": { "type": "ISSUE", "quantity": "-5", "returnedQuantity": "2", "usedUpQuantity": "2", "brokenQuantity": "0", "trackUse": false, "reasonCode": null, "reversesId": null }, "text": "still out 1" },
+    { "name": "issue of an item that does not track use", "row": { "type": "ISSUE", "quantity": "-4", "returnedQuantity": "1", "usedUpQuantity": "0", "brokenQuantity": "0", "trackUse": false, "reasonCode": null, "reversesId": null }, "text": "" },
+    { "name": "return with used up and broken from the same visit", "row": { "type": "RETURN", "quantity": "2", "usedUpQuantity": "6", "brokenQuantity": "1", "reasonCode": null, "reversesId": null }, "text": "back 2, used up 6, broken 1" },
+    { "name": "return of a large fractional quantity, written without grouping", "row": { "type": "RETURN", "quantity": "1234.5", "usedUpQuantity": "0", "brokenQuantity": "0", "reasonCode": null, "reversesId": null }, "text": "back 1234.5" },
+    { "name": "used up booked with nothing back on the shelf", "row": { "type": "USED_UP", "quantity": null, "usedUpQuantity": "3", "brokenQuantity": null, "reasonCode": null, "reversesId": null }, "text": "used up 3" },
+    { "name": "broken booked with nothing back on the shelf", "row": { "type": "BROKEN", "quantity": null, "usedUpQuantity": null, "brokenQuantity": "0.25", "reasonCode": null, "reversesId": null }, "text": "broken 0.25" },
+    { "name": "withdrawal of a broken mark", "row": { "type": "OUTCOME_WITHDRAWN", "quantity": null, "usedUpQuantity": null, "brokenQuantity": "1", "reasonCode": null, "reversesId": null }, "text": "withdrawn: broken 1" },
+    { "name": "reversal of a return says nothing about the visit", "row": { "type": "RETURN", "quantity": "-2", "usedUpQuantity": "0", "brokenQuantity": "0", "reasonCode": null, "reversesId": "ret-1" }, "text": "" },
+    { "name": "adjustment keeps its reason, every word", "row": { "type": "ADJUSTMENT", "quantity": "-5", "reasonCode": "COUNT_VARIANCE", "reversesId": null }, "text": "count variance" }
+  ]
+}

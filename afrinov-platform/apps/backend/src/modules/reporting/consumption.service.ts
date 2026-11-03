@@ -7,10 +7,15 @@
 // with its reversal, so a correction posted in a later month does not show as
 // negative use there. Values use the item's unit price now: the platform keeps
 // one price per item, as the workbook did.
+//
+// Items that track use after issue (discs, blades, bits) also say what became
+// of what was issued: used up, broken, or still out with the person. That is
+// worked out as of now, for the issues in the period, whenever they came back.
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { closedOffAgainst } from '../inventory/consumable-outcomes.js';
 
 export interface ConsumptionQuery {
   /** First day, YYYY-MM-DD. */
@@ -36,6 +41,10 @@ export interface ConsumptionLine {
   quantity: number;
   projectNumber: string | null;
   issuedBy: string;
+  /** Issues of items that track use: marked used up or broken so far, and still out now. Null otherwise. */
+  usedUp: number | null;
+  broken: number | null;
+  stillOut: number | null;
 }
 
 export interface ConsumptionItem {
@@ -59,7 +68,11 @@ export interface ConsumptionReport {
   currency: string;
   items: ConsumptionItem[];
   byProject: Array<{ projectNumber: string | null; projectName: string | null; value: number; items: number }>;
-  byRecipient: Array<{ recipientId: string | null; name: string | null; type: string | null; value: number; items: number; issues: number }>;
+  /** usedUp, broken and stillOut: quantities of items that track use, as of now. */
+  byRecipient: Array<{
+    recipientId: string | null; name: string | null; type: string | null; value: number; items: number; issues: number;
+    usedUp: number; broken: number; stillOut: number;
+  }>;
   /** Each issue and return, newest first; only when one recipient is asked for. */
   lines?: ConsumptionLine[];
   byCategory: Array<{ category: string; value: number; items: number }>;
@@ -112,16 +125,38 @@ export const ConsumptionService = {
       where,
       select: {
         id: true, postedAt: true, type: true, quantity: true, projectNumber: true, materialId: true, recipientId: true,
-        material: { select: { sku: true, name: true, category: true, unitOfMeasure: true, unitCost: true } },
+        material: { select: { sku: true, name: true, category: true, unitOfMeasure: true, unitCost: true, trackUse: true } },
         recipient: { select: { name: true, type: true } },
         actor: { select: { name: true } },
       },
       orderBy: { postedAt: 'desc' },
     });
 
+    // Issues of items that track use, and of items switched off since that were
+    // marked before (those marks still count): what came back, at any time, and
+    // what was closed off.
+    const issueIds = rows.filter((t) => t.type === 'ISSUE').map((t) => t.id);
+    const closed = issueIds.length === 0 ? new Map() : await closedOffAgainst(prisma, issueIds);
+    const tracked = rows.filter((t) => t.type === 'ISSUE' && (t.material.trackUse || closed.has(t.id)));
+    const trackedIds = tracked.map((t) => t.id);
+    const returnedRows = trackedIds.length === 0 ? [] : await prisma.inventoryTransaction.groupBy({
+      by: ['referenceId'],
+      where: { type: 'RETURN', referenceType: 'Return', referenceId: { in: trackedIds } },
+      _sum: { quantity: true },
+    });
+    const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity?.toNumber() ?? 0]));
+    const use = new Map(tracked.map((t) => {
+      const c = closed.get(t.id);
+      const usedUp = c?.usedUp.toNumber() ?? 0;
+      const broken = c?.broken.toNumber() ?? 0;
+      return [t.id, { usedUp, broken, stillOut: round4(-t.quantity.toNumber() - (returnedByIssue.get(t.id) ?? 0) - usedUp - broken) }];
+    }));
+
     const items = new Map<string, ConsumptionItem>();
     const projects = new Map<string | null, { value: number; materials: Set<string> }>();
-    const recipients = new Map<string | null, { name: string | null; type: string | null; value: number; materials: Set<string>; issues: number }>();
+    const recipients = new Map<string | null, {
+      name: string | null; type: string | null; value: number; materials: Set<string>; issues: number; usedUp: number; broken: number; stillOut: number;
+    }>();
     for (const t of rows) {
       const qty = t.quantity.toNumber();
       const item = items.get(t.materialId) ?? {
@@ -145,10 +180,18 @@ export const ConsumptionService = {
       p.materials.add(t.materialId);
       projects.set(t.projectNumber, p);
 
-      const r = recipients.get(t.recipientId) ?? { name: t.recipient?.name ?? null, type: t.recipient?.type ?? null, value: 0, materials: new Set<string>(), issues: 0 };
+      const r = recipients.get(t.recipientId) ?? {
+        name: t.recipient?.name ?? null, type: t.recipient?.type ?? null, value: 0, materials: new Set<string>(), issues: 0, usedUp: 0, broken: 0, stillOut: 0,
+      };
       r.value += -qty * (item.unitCost ?? 0);
       r.materials.add(t.materialId);
       if (t.type === 'ISSUE') r.issues++;
+      const u = use.get(t.id);
+      if (u) {
+        r.usedUp += u.usedUp;
+        r.broken += u.broken;
+        r.stillOut += u.stillOut;
+      }
       recipients.set(t.recipientId, r);
     }
 
@@ -176,7 +219,10 @@ export const ConsumptionService = {
       .sort((a, b) => b.value - a.value);
 
     const byRecipient = [...recipients]
-      .map(([recipientId, r]) => ({ recipientId, name: r.name, type: r.type, value: round2(r.value), items: r.materials.size, issues: r.issues }))
+      .map(([recipientId, r]) => ({
+        recipientId, name: r.name, type: r.type, value: round2(r.value), items: r.materials.size, issues: r.issues,
+        usedUp: round4(r.usedUp), broken: round4(r.broken), stillOut: round4(r.stillOut),
+      }))
       .sort((a, b) => b.value - a.value || (a.name ?? '').localeCompare(b.name ?? ''));
 
     const lines: ConsumptionLine[] | undefined = q.recipientId
@@ -190,6 +236,9 @@ export const ConsumptionService = {
         quantity: round4(-t.quantity.toNumber()),
         projectNumber: t.projectNumber,
         issuedBy: t.actor.name,
+        usedUp: use.get(t.id)?.usedUp ?? null,
+        broken: use.get(t.id)?.broken ?? null,
+        stillOut: use.get(t.id)?.stillOut ?? null,
       }))
       : undefined;
 

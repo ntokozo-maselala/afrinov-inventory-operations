@@ -37,6 +37,9 @@ npm run build          # both workspaces
 Counts are a guide, not a contract; they move with every feature. Run
 `npm test` and read the totals rather than trusting the numbers here.
 
+To check that balances and issued stock add up in a database, run
+`npm run check:issued-stock --workspace=@afrinov/backend` (read-only).
+
 Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`
 for the exact environment (`DATABASE_URL`, `JWT_SECRET`, `SEED_ADMIN_PASSWORD`),

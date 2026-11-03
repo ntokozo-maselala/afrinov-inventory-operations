@@ -41,6 +41,8 @@ export type IdempotencyEndpoint =
   | 'POST /inventory-returns'
   | 'POST /inventory-transactions/:id/returns'
   | 'POST /inventory-transactions/:id/reversal'
+  | 'POST /inventory-transactions/:id/outcomes'
+  | 'POST /consumable-outcomes/:id/withdrawal'
   | 'POST /tools/loans/:id/due-date';
 
 /**

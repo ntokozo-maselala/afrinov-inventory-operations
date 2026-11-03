@@ -10,6 +10,9 @@
 // says what the item will be. A Projects item has no project of its own: the
 // order it is bought on says which (Project on the Order Roadmap, Phase 3),
 // so the form never asks for one, nor changes one an older item was tagged with.
+//
+// Anything but a tool can track use after issue: each issue of it is later
+// marked used up or broken, for costly consumables such as discs and blades.
 import { useState } from 'react';
 import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
@@ -50,6 +53,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
   const [requiredStock, setRequiredStock] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
   const [unitCost, setUnitCost] = useState(asInput(initial?.unitCost));
   const [serialNumber, setSerialNumber] = useState(initial?.serialNumber ?? '');
+  const [trackUse, setTrackUse] = useState(initial?.trackUse ?? false);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const bands = useStatusBands();
@@ -81,13 +85,14 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
           name: name.trim(), unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost ?? null, description: description.trim() || null,
           ...(projects ? {} : { requiredStock: required }),
-          ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : {}),
+          ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : { trackUse }),
         })
         : await api.post<CreatedMaterial>('/materials', {
           sku: sku.trim(), name: name.trim(), category: itemCategory, unitOfMeasure: unitOfMeasure.trim(),
           unitCost: cost, description: description.trim() || undefined,
           ...(projects ? {} : { requiredStock: required }),
           serialNumber: itemCategory === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
+          trackUse: itemCategory === 'TOOLS' ? undefined : trackUse,
         });
       onSaved(saved);
     } catch (err) { onError(err as ApiError); }
@@ -148,6 +153,18 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
         </Field>
       </div>
       {projects && <p className="text-xs text-surface-500">Projects material has no required stock: it is bought for its project, not kept topped up.</p>}
+      {(projects || category !== 'TOOLS') && (
+        <label htmlFor="m-track-use" className="flex items-start gap-2 cursor-pointer">
+          <input id="m-track-use" type="checkbox" checked={trackUse} onChange={(e) => setTrackUse(e.target.checked)} className="mt-1" />
+          <span>
+            <span className="block text-sm font-medium text-surface-900">Track use after issue</span>
+            <span className="block text-xs text-surface-500">
+              Each issue is later marked used up or broken, when the stub or the broken piece comes back, so you can see who still has some.
+              For costly consumables such as cutting discs, blades and bits.
+            </span>
+          </span>
+        </label>
+      )}
       {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
       <div className="flex justify-end gap-2 pt-2 border-t border-surface-200 -mx-5 px-5">
         <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>

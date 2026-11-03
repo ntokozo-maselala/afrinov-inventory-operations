@@ -55,6 +55,16 @@ export interface MockMaterial {
   serialNumber?: string | null;
   /** Project Material only: the project it is bought for (null until assigned). */
   projectNumber?: string | null;
+  /** Each issue is later marked used up or broken. Never on a tool. */
+  trackUse?: boolean;
+}
+
+/** Used up or broken against an issue line, as the backend's consumable_outcomes; withdrawsId marks a withdrawal. */
+export interface MockConsumableOutcome {
+  id: string; issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: number;
+  note: string | null; withdrawsId: string | null; actorId: string; createdAt: string;
+  /** The RETURN booked in the same counter visit; that row shows the mark. */
+  returnTransactionId?: string | null;
 }
 
 export interface MockLocation {
@@ -237,8 +247,12 @@ export interface MockMovementRow {
   /** Paging cursor, as the backend returns it. */
   cursor: string;
   postedAt: string;
-  /** DUE_DATE_CHANGE: a tool loan's due date changed; listed among the movements, no stock moved. */
-  type: InventoryTransactionType | 'DUE_DATE_CHANGE';
+  /**
+   * DUE_DATE_CHANGE: a tool loan's due date changed. USED_UP, BROKEN: a mark
+   * booked with nothing back on the shelf; OUTCOME_WITHDRAWN: a mark withdrawn.
+   * Listed among the movements; no stock moved.
+   */
+  type: InventoryTransactionType | 'DUE_DATE_CHANGE' | 'USED_UP' | 'BROKEN' | 'OUTCOME_WITHDRAWN';
   materialId: string;
   materialSku: string;
   materialName: string;
@@ -269,6 +283,9 @@ export interface MockMovementRow {
   fromPurchaseOrder?: boolean;
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
   returnedQuantity?: string | null;
+  usedUpQuantity?: string | null;
+  brokenQuantity?: string | null;
+  trackUse?: boolean;
   dueOn?: string | null;
   previousDueOn?: string | null;
   currentDueOn?: string | null;

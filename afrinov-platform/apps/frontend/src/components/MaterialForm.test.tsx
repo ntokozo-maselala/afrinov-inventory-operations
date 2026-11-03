@@ -32,6 +32,20 @@ describe('MaterialForm', () => {
     fill('Item name', 'Disc');
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
-    expect(mockPost.mock.calls[0]![1]).toMatchObject({ serialNumber: undefined });
+    expect(mockPost.mock.calls[0]![1]).toMatchObject({ serialNumber: undefined, trackUse: false });
+  });
+
+  it('tracks use after issue when asked, but never offers it for a tool', async () => {
+    mockPost.mockReset().mockResolvedValue({ id: 'm-3', sku: 'CUT-230', name: 'Cutting disc' });
+    render(<MaterialForm onCancel={vi.fn()} onSaved={vi.fn()} onError={vi.fn()} />);
+    fill('SKU / item code', 'CUT-230');
+    fill('Item name', 'Cutting disc 230mm');
+    fireEvent.change(screen.getByLabelText('Category', { exact: false }), { target: { value: 'TOOLS' } });
+    expect(screen.queryByLabelText(/Track use after issue/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Category', { exact: false }), { target: { value: 'CONSUMABLES' } });
+    fireEvent.click(screen.getByLabelText(/Track use after issue/));
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(mockPost.mock.calls[0]![1]).toMatchObject({ category: 'CONSUMABLES', trackUse: true });
   });
 });

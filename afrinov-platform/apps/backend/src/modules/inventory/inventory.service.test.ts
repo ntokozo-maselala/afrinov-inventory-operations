@@ -88,6 +88,9 @@ interface POEntry {
   status: string;
 }
 
+// Used up or broken against issue lines (consumable_outcomes); withdrawsId marks a withdrawal.
+let outcomes: Array<{ id: string; issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: Prisma.Decimal; withdrawsId: string | null }> = [];
+
 const goodsReceipts = new Map<string, GREntry>();
 const purchaseOrderLines = new Map<string, POLineEntry>();
 const purchaseOrders = new Map<string, POEntry>();
@@ -116,6 +119,9 @@ const fakeTx = {
       }
       return row;
     },
+    // The first row matching every field in `where` (a reversal of an issue, say).
+    findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+      trxRows.find((r) => Object.entries(where).every(([k, v]) => (r as unknown as Record<string, unknown>)[k] === v)) ?? null,
     findUnique: async ({ where, include }: { 
       where: { id: string }; 
       include?: {
@@ -137,7 +143,8 @@ const fakeTx = {
         out.actor = u ? { id: u.id, name: u.name } : undefined;
       }
       if (include?.material) {
-        out.material = { sku: 'SKU', name: 'Material' };
+        // An item whose id starts "disc" tracks use after issue.
+        out.material = { sku: 'SKU', name: 'Material', trackUse: row.materialId.startsWith('disc') } as { sku: string; name: string };
       }
       if (include?.location) {
         out.location = { name: 'Location' };
@@ -245,6 +252,29 @@ const fakeTx = {
       return [...purchaseOrderLines.values()].filter((l) => l.purchaseOrderId === where.purchaseOrderId);
     },
   },
+  consumableOutcome: {
+    // Live outcomes only (neither a withdrawal nor withdrawn), summed per issue line and outcome.
+    groupBy: async ({ where }: { where: { issueTransactionId: { in: string[] } } }) => {
+      const live = outcomes.filter((o) => where.issueTransactionId.in.includes(o.issueTransactionId)
+        && !o.withdrawsId && !outcomes.some((w) => w.withdrawsId === o.id));
+      const groups = new Map<string, { issueTransactionId: string; outcome: string; _sum: { quantity: Prisma.Decimal } }>();
+      for (const o of live) {
+        const key = `${o.issueTransactionId}|${o.outcome}`;
+        const g = groups.get(key) ?? { issueTransactionId: o.issueTransactionId, outcome: o.outcome, _sum: { quantity: new Prisma.Decimal(0) } };
+        g._sum.quantity = g._sum.quantity.plus(o.quantity);
+        groups.set(key, g);
+      }
+      return [...groups.values()];
+    },
+    // Live marks booked with a return (reversing that return asks).
+    count: async ({ where }: { where: { returnTransactionId?: string } }) =>
+      outcomes.filter((o) => (o as { returnTransactionId?: string }).returnTransactionId === where.returnTransactionId && !o.withdrawsId && !outcomes.some((w) => w.withdrawsId === o.id)).length,
+    create: async ({ data }: { data: { issueTransactionId: string; outcome: 'USED_UP' | 'BROKEN'; quantity: Prisma.Decimal } }) => {
+      const row = { id: `o-${outcomes.length + 1}`, issueTransactionId: data.issueTransactionId, outcome: data.outcome, quantity: data.quantity, withdrawsId: null };
+      outcomes.push(row);
+      return row;
+    },
+  },
   purchaseOrder: {
     findUnique: async ({ where }: { where: { id: string } }) => purchaseOrders.get(where.id) ?? null,
     update: async ({ where, data }: { where: { id: string }; data: Partial<POEntry> }) => {
@@ -271,6 +301,7 @@ vi.mock('../../shared/db.js', () => ({
     user: fakeTx.user,
     inventoryTransaction: fakeTx.inventoryTransaction,
     auditLogEntry: fakeTx.auditLogEntry,
+    consumableOutcome: fakeTx.consumableOutcome,
   },
 }));
 
@@ -309,6 +340,7 @@ describe('InventoryService — ADR-002 invariants', () => {
     goodsReceipts.clear();
     purchaseOrderLines.clear();
     purchaseOrders.clear();
+    outcomes = [];
   });
 
   it('a positive adjustment increases the balance', async () => {
@@ -725,6 +757,32 @@ describe('InventoryService — ADR-002 invariants', () => {
       await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
       expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
     });
+
+    it('leaves out what was marked used up or broken, which is no longer out', async () => {
+      const issueId = await issued(10);
+      outcomes.push(
+        { id: 'o-1', issueTransactionId: issueId, outcome: 'USED_UP', quantity: new Prisma.Decimal(5), withdrawsId: null },
+        { id: 'o-2', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(2), withdrawsId: null },
+        // Withdrawn, so it counts for nothing.
+        { id: 'o-3', issueTransactionId: issueId, outcome: 'USED_UP', quantity: new Prisma.Decimal(3), withdrawsId: null },
+        { id: 'o-4', issueTransactionId: issueId, outcome: 'USED_UP', quantity: new Prisma.Decimal(3), withdrawsId: 'o-3' },
+      );
+      await expect(InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 4, actorId: 'u' }))
+        .rejects.toThrow(/only 3 of the 10 issued is still out/);
+      const result = await InventoryService.returnToStock({ issueTransactionId: issueId, quantity: 2, actorId: 'u' });
+      expect(result).toMatchObject({ returnedQuantity: '2', returnableQuantity: '1' });
+    });
+
+    it('refuses to reverse an issue marked used up or broken until those are withdrawn', async () => {
+      const issueId = await issued(10);
+      outcomes.push({ id: 'o-1', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(1), withdrawsId: null });
+      await expect(InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' }))
+        .rejects.toThrow(/marked used up or broken. Withdraw those first/);
+
+      outcomes.push({ id: 'o-2', issueTransactionId: issueId, outcome: 'BROKEN', quantity: new Prisma.Decimal(1), withdrawsId: 'o-1' });
+      await InventoryService.reverse({ transactionId: issueId, reason: 'Wrong recipient', actorId: 'u' });
+      expect(getBalance('mat-1', 'loc-1').toString()).toBe('20');
+    });
   });
 
   // ── Several returns at once ───────────────────────────────────────────
@@ -760,13 +818,74 @@ describe('InventoryService — ADR-002 invariants', () => {
       })).rejects.toThrow(/Cannot return 2 × SKU: only 1 of the 4 issued is still out/);
     });
 
-    it('refuses an empty return or a line that is not positive before booking anything', async () => {
+    it('refuses an empty return or a line with nothing coming back before booking anything', async () => {
       const { a } = await twoIssues();
       const before = trxRows.length;
       await expect(InventoryService.returnMany({ lines: [], actorId: 'u' })).rejects.toThrow(/at least one item/);
       await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 1 }, { issueTransactionId: a, quantity: 0 }], actorId: 'u' }))
-        .rejects.toThrow(/must be positive/);
+        .rejects.toThrow(/needs something coming back/);
+      await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 2, usedUp: -1 }], actorId: 'u' }))
+        .rejects.toThrow(/cannot be negative/);
       expect(trxRows).toHaveLength(before);
+    });
+
+    // ADR-026: the counter takes everything that comes back in one booking.
+    describe('used up and broken at the counter', () => {
+      async function discIssue(quantity = 10) {
+        await InventoryService.adjust({ materialId: 'disc-1', locationId: 'loc-1', quantity: 30, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+        return (await issueOne({ materialId: 'disc-1', locationId: 'loc-1', quantity, actorId: 'u' })).transactionId;
+      }
+
+      it('puts some back on the shelf and marks the rest used up and broken, moving stock only for the return', async () => {
+        const id = await discIssue();
+        const { transactionIds, outcomeIds } = await InventoryService.returnMany({
+          lines: [{ issueTransactionId: id, quantity: 2, usedUp: 6, broken: 1 }], reason: 'Disc shattered on the grinder', actorId: 'storeman',
+        });
+        expect(transactionIds).toHaveLength(1);
+        expect(trxRows.find((r) => r.id === transactionIds[0])).toMatchObject({ type: 'RETURN', quantity: new Prisma.Decimal(2), referenceId: id });
+        expect(outcomeIds).toHaveLength(2);
+        expect(outcomes.map((o) => [o.outcome, o.quantity.toString()])).toEqual([['USED_UP', '6'], ['BROKEN', '1']]);
+        // 30 − 10 issued + 2 back; used up and broken left the shelf at the issue.
+        expect(getBalance('disc-1', 'loc-1').toString()).toBe('22');
+        expect(auditLog.filter((a) => a.action === 'CONSUMABLE_OUTCOME')).toHaveLength(2);
+        expect(auditLog.filter((a) => a.action === 'CONSUMABLE_OUTCOME').map((a) => (a.after as { note: string }).note)).toEqual(['Disc shattered on the grinder', 'Disc shattered on the grinder']);
+      });
+
+      it('books a line that is only used up, with no RETURN and no stock change', async () => {
+        const id = await discIssue();
+        const { transactionIds, outcomeIds } = await InventoryService.returnMany({ lines: [{ issueTransactionId: id, usedUp: 10 }], actorId: 'u' });
+        expect(transactionIds).toEqual([]);
+        expect(outcomeIds).toHaveLength(1);
+        expect(trxRows.filter((r) => r.type === 'RETURN')).toHaveLength(0);
+        expect(getBalance('disc-1', 'loc-1').toString()).toBe('20');
+      });
+
+      it('checks the three together against what is still out', async () => {
+        const id = await discIssue();
+        await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, quantity: 4, usedUp: 6, broken: 1 }], actorId: 'u' }))
+          .rejects.toThrow(/Cannot take back 11 × SKU: only 10 of the 10 issued is still out/);
+        // What was marked before counts too.
+        await InventoryService.returnMany({ lines: [{ issueTransactionId: id, usedUp: 7 }], actorId: 'u' });
+        await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, quantity: 4 }], actorId: 'u' }))
+          .rejects.toThrow(/Cannot return 4 × SKU: only 3 of the 10 issued is still out/);
+      });
+
+      it('refuses a quantity finer than the four decimal places it is stored with, on any of the three', async () => {
+        const id = await discIssue();
+        for (const line of [{ quantity: 0.00001 }, { usedUp: 0.00001 }, { quantity: 1, broken: 0.00005 }]) {
+          await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: id, ...line }], actorId: 'u' }))
+            .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Quantities can have at most 4 decimal places' });
+        }
+        expect(outcomes).toHaveLength(0);
+        expect(trxRows.filter((r) => r.type === 'RETURN')).toHaveLength(0);
+      });
+
+      it('refuses used up or broken on an item that does not track use', async () => {
+        const { a } = await twoIssues();
+        await expect(InventoryService.returnMany({ lines: [{ issueTransactionId: a, quantity: 1, broken: 1 }], actorId: 'u' }))
+          .rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/does not track use after issue/) });
+        expect(outcomes).toHaveLength(0);
+      });
     });
   });
 

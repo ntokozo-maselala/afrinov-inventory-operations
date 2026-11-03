@@ -14,6 +14,8 @@ export interface Material {
   /** Projects material: the project it is bought for; null until assigned. */
   projectNumber?: string | null;
   project?: { projectNumber: string; name: string | null; status?: string | null; active?: boolean } | null;
+  /** Each issue is later marked used up or broken (discs, blades, bits). Never on a tool. */
+  trackUse?: boolean;
 }
 
 /** A supplier (GET /suppliers). The vendor fields follow the AFRI-0000_x purchase order template. */
@@ -110,7 +112,10 @@ export interface ReturnableLine {
   materialId: string; sku: string; name: string; unitOfMeasure: string;
   locationId: string; locationName: string; locationActive: boolean;
   projectNumber: string | null;
-  issued: string; returned: string; outstanding: string;
+  /** The item tracks use after issue, so the line also takes used up and broken. */
+  trackUse?: boolean;
+  /** closedOff: marked used up or broken; outstanding already leaves it out. */
+  issued: string; returned: string; closedOff?: string; outstanding: string;
 }
 
 export interface MovementRow {
@@ -122,7 +127,13 @@ export interface MovementRow {
   /** Issues: the slip this line belongs to. */
   issueId?: string | null;
   locationId: string; locationName: string;
-  /** Null on a tool loan due date change (type DUE_DATE_CHANGE): no stock moved. */
+  /**
+   * Null on a row that moved no stock: a tool loan due date change
+   * (DUE_DATE_CHANGE), or a used up or broken mark of its own or its
+   * withdrawal (USED_UP, BROKEN, OUTCOME_WITHDRAWN; usedUpQuantity or
+   * brokenQuantity says how many). On a RETURN, usedUpQuantity and
+   * brokenQuantity are what the same counter visit marked.
+   */
   quantity: string | null; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;
   /** Whose stock moved: the project it is held for, or null for Stores stock (not who it was used for). */
@@ -134,8 +145,14 @@ export interface MovementRow {
   recipientName?: string | null;
   recipientType?: string | null;
   returnedQuantity?: string | null;
+  /** Issues: marked used up or broken so far. trackUse: the item asks for it. */
+  usedUpQuantity?: string | null;
+  brokenQuantity?: string | null;
+  trackUse?: boolean;
   /** A return: the issue it came back from (when, which slip, from where). */
   returnOf?: { id: string; postedAt: string; issueId: string | null; locationName: string } | null;
+  /** A RETURN: whether used up or broken booked with it still counts; it is reversed only once they are withdrawn. */
+  bookedMarksLive?: boolean | null;
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
   /** A receipt against a purchase order: it cannot be reversed from the movement, only on the order. */
   fromPurchaseOrder?: boolean;
@@ -151,6 +168,23 @@ export interface MovementRow {
   daysLate?: number | null;
   /** Check-out: why tools were lent to someone who already had an overdue one. */
   overdueOverrideReason?: string | null;
+}
+
+/**
+ * What became of an issue line of a tracked consumable (GET
+ * /inventory-transactions/:id/outcomes). Quantities are decimal strings;
+ * stillOut is issued less returned, used up and broken.
+ */
+export interface IssueOutcomes {
+  issueTransactionId: string; sku: string; name: string; unitOfMeasure: string;
+  /** Whether the item asks for outcomes now; earlier ones stay listed when it is switched off. */
+  trackUse: boolean;
+  issued: string; returned: string; usedUp: string; broken: string; stillOut: string;
+  /** Oldest first; a withdrawn outcome carries its withdrawal. */
+  outcomes: Array<{
+    id: string; outcome: 'USED_UP' | 'BROKEN'; quantity: string; note: string | null; recordedBy: string; recordedAt: string;
+    withdrawn: { by: string; at: string; reason: string } | null;
+  }>;
 }
 
 /**

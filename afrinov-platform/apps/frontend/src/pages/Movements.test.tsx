@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet, perms, exports } = vi.hoisted(() => ({
@@ -41,6 +41,8 @@ const SLIP = {
     { ...row(2), materialSku: 'GLOVE-L', materialName: 'Welding gloves', quantity: '-2', returnedQuantity: '0', issueId: 'iss-1', reversedById: 'tx-r' },
   ],
 };
+// The slips Issued stock lists; a test that needs items that track use replaces them.
+let issueSlips: unknown[] = [SLIP];
 const COUNTS = [
   { id: 'c-3', cursor: 'c3', at: '2026-09-25T10:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop', countedByName: 'Vusi', counted: 2, adjusted: 1, note: null,
     differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
@@ -79,7 +81,7 @@ function renderAt(url: string, pages: Array<Array<Omit<ReturnType<typeof row>, '
     if (path.startsWith('/activity')) return [{ id: 'a-1', cursor: 'c', at: '2026-10-12T08:00:00.000Z', action: 'CREATE', entityType: 'Material', entityId: 'm-1',
       actorId: 'u-1', actorName: 'Vusi', summary: 'Added item WSHR-16 Flat washer', link: '/materials/m-1' }];
     if (path.startsWith('/stock-receipts')) return [RECEIPT];
-    if (path.startsWith('/inventory-issues')) return [SLIP];
+    if (path.startsWith('/inventory-issues')) return issueSlips;
     if (path.startsWith('/stock-counts')) return COUNTS;
     if (path.startsWith('/inventory-transactions/writeoffs-by-responsible')) return WRITEOFF_TOTALS;
     if (path.startsWith('/inventory-transactions')) return pages[page++] ?? [];
@@ -100,7 +102,7 @@ const todayIso = () => {
 };
 
 describe('Movements page', () => {
-  beforeEach(() => { mockGet.mockReset(); perms.activity = false; });
+  beforeEach(() => { mockGet.mockReset(); perms.activity = false; issueSlips = [SLIP]; });
 
   it('opens on All movements for today, a single day, with no type filter', async () => {
     renderAt('/movements');
@@ -208,6 +210,32 @@ describe('Movements page', () => {
     expect(screen.getByText(/1 issue, 2 lines/)).toBeInTheDocument();
     fireEvent.click(within(disc).getAllByRole('button')[0]!);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('shows what each person still has for items that track use, in the table and on the slip cards', async () => {
+    issueSlips = [{
+      ...SLIP,
+      lines: [
+        // 10 issued, 2 back, 6 used up, 1 broken: 1 still out.
+        { ...row(1), materialSku: 'DISC-115', quantity: '-10', returnedQuantity: '2', usedUpQuantity: '6', brokenQuantity: '1', trackUse: true, issueId: 'iss-1' },
+        { ...row(2), materialSku: 'BLADE-9', quantity: '-4', returnedQuantity: '0', usedUpQuantity: '4', brokenQuantity: '0', trackUse: true, issueId: 'iss-1' },
+        { ...row(3), materialSku: 'GLOVE-L', materialName: 'Welding gloves', quantity: '-2', returnedQuantity: '0', usedUpQuantity: '0', brokenQuantity: '0', trackUse: false, issueId: 'iss-1' },
+      ],
+    }];
+    renderAt('/movements?report=issued&from=2026-09-25');
+    const table = await screen.findByRole('table', { name: 'Issued stock' });
+    expect(within(table).getByRole('columnheader', { name: 'Still out' })).toBeInTheDocument();
+    const out = (sku: string) => cells(within(table).getByText(sku).closest('tr')!).at(-2);
+    expect(out('DISC-115')).toBe('1');
+    expect(out('BLADE-9')).toBe('0');
+    // Gloves do not track use: nothing to say.
+    expect(out('GLOVE-L')).toBe('—');
+
+    cleanup();
+    renderAt('/movements?report=issued&view=cards&from=2026-09-25');
+    const card = await screen.findByRole('region', { name: 'Issue to Sabelo' });
+    expect(within(card).getByRole('columnheader', { name: 'Still out' })).toBeInTheDocument();
+    expect(cells(within(card).getByText('DISC-115').closest('tr')!).at(-2)).toBe('1');
   });
 
   it('shows stock counts as a flat table by default: sheet lines, older differences, and counts with none', async () => {
@@ -363,6 +391,28 @@ describe('Movements page', () => {
     expect(listCalls()[0]).toBe('/inventory-transactions?from=2026-10-05&to=2026-10-05&recipientId=r-1&report=returned&limit=100');
     expect(screen.getByText('Returned by', { selector: 'label' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Boiler Shop/ })).toHaveAttribute('href', '/movements?report=issued&from=2026-09-28&to=2026-09-28&materialId=m-1&recipientId=r-1');
+  });
+
+  // Qodo, PR #144: marks and withdrawals listed here say what they are and move no stock.
+  it('lists used up, broken and withdrawals among returned stock, saying what each recorded and that no stock moved', async () => {
+    const returnOf = { id: 'tx-9', postedAt: '2026-09-28T07:30:00.000Z', issueId: 'slip-9', locationName: 'Boiler Shop' };
+    const base = { ...row(1), recipientId: 'r-1', recipientName: 'Sabelo', locationName: 'Main Storeroom', returnOf, trackUse: true };
+    renderAt('/movements?report=returned&from=2026-10-05', [[
+      { ...base, id: 'w-1', type: 'OUTCOME_WITHDRAWN', quantity: null, brokenQuantity: '1', reasonNote: 'Belonged to Khodani', referenceType: 'ConsumableOutcome' },
+      { ...base, id: 'o-1', type: 'USED_UP', quantity: null, usedUpQuantity: '2', referenceType: 'ConsumableOutcome' },
+      { ...base, id: 'r-9', type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0' },
+      { ...base, id: 'r-8', type: 'RETURN', quantity: '1', usedUpQuantity: '0', brokenQuantity: '0' },
+    ]]);
+    const table = await screen.findByRole('table');
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((r) => within(r).getAllByRole('cell')[1]!.textContent)).toEqual(['Withdrawn', 'Used up', 'Return', 'Return']);
+    // Marks move no stock, so they say so and go back into nowhere.
+    expect(within(rows[0]!).getByText('No stock moved')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('Used up', { selector: 'dt' }).nextElementSibling).toHaveTextContent('2');
+    // A return shows the used up booked with it; a plain return has nothing to add.
+    expect(within(rows[2]!).getByText('Used up', { selector: 'dt' }).nextElementSibling).toHaveTextContent('1');
+    expect(within(rows[3]!).queryByText('Used up', { selector: 'dt' })).not.toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Belonged to Khodani')).toBeInTheDocument();
   });
 
   it('links what came back on an issue to those returns, from the issue to today', async () => {

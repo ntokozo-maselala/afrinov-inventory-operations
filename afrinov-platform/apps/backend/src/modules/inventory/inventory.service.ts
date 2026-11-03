@@ -12,13 +12,14 @@ import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
-import { toDecimal, gtZero } from '../../shared/decimal.js';
+import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
+import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -75,9 +76,19 @@ export interface ReturnInput {
   actorId: string;
 }
 
-/** Several returns at the counter, each against its own issue, booked together. */
+/**
+ * What comes back at the counter, each line against its own issue, booked
+ * together. A line can put stock back on the shelf (quantity) and, for an item
+ * that tracks use, mark some used up or broken; at least one of the three.
+ */
 export interface ReturnManyInput {
-  lines: Array<{ issueTransactionId: string; quantity: number | string | Decimal; locationId?: string }>;
+  lines: Array<{
+    issueTransactionId: string;
+    quantity?: number | string | Decimal;
+    usedUp?: number | string | Decimal;
+    broken?: number | string | Decimal;
+    locationId?: string;
+  }>;
   /** One note for every line. */
   reason?: string;
   actorId: string;
@@ -92,7 +103,10 @@ export interface ReturnableLine {
   materialId: string; sku: string; name: string; unitOfMeasure: string;
   locationId: string; locationName: string; locationActive: boolean;
   projectNumber: string | null;
-  issued: string; returned: string; outstanding: string;
+  /** The item tracks use after issue, so the line also takes used up and broken. */
+  trackUse: boolean;
+  /** closedOff: marked used up or broken (tracked consumables); outstanding already leaves it out. */
+  issued: string; returned: string; closedOff: string; outstanding: string;
 }
 
 /** The most issues the returnable list looks at, newest first. */
@@ -142,7 +156,7 @@ async function lockPurchaseOrderLines(lineIds: string[], tx: Prisma.TransactionC
   }
 }
 
-async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): Promise<Decimal> {
+export async function returnedAgainst(issueId: string, tx: Pick<Prisma.TransactionClient, 'inventoryTransaction'>): Promise<Decimal> {
   const agg = await tx.inventoryTransaction.aggregate({
     where: { type: InventoryTransactionType.RETURN, referenceType: 'Return', referenceId: issueId },
     _sum: { quantity: true },
@@ -151,35 +165,73 @@ async function returnedAgainst(issueId: string, tx: Prisma.TransactionClient): P
 }
 
 /**
- * Book one return against an issue, inside the caller's transaction: checks
- * it is an unreversed issue with at least `qty` still out, posts the RETURN
- * (keeping the issue's recipient and project), updates the balance and audits.
+ * Book what came back against one issue, inside the caller's transaction:
+ * `qty` back on the shelf and, for an item that tracks use, `usedUp` and
+ * `broken` (ADR-026). Checks it is an unreversed issue with at least their
+ * total still out (issued, less what came back and what was marked used up or
+ * broken before), then posts the RETURN (keeping the issue's recipient and
+ * project) and updates the balance, and writes each outcome; each is audited.
+ * Used up and broken move no stock.
  */
 async function bookReturn(tx: Prisma.TransactionClient, input: {
-  issueTransactionId: string; qty: Decimal; locationId?: string; reason?: string; actorId: string; postedAt: Date;
-}): Promise<{ transactionId: string; materialId: string; locationId: string; issued: Decimal; alreadyReturned: Decimal }> {
+  issueTransactionId: string; qty: Decimal; usedUp?: Decimal; broken?: Decimal; locationId?: string; reason?: string; actorId: string; postedAt: Date;
+}): Promise<{ transactionId: string | null; outcomeIds: string[]; materialId: string; locationId: string; issued: Decimal; alreadyReturned: Decimal; closedOff: Decimal }> {
+  const usedUp = input.usedUp ?? toDecimal(0);
+  const broken = input.broken ?? toDecimal(0);
+  // Each is stored to four decimal places; a finer one would be stored rounded, even as zero.
+  if (![input.qty, usedUp, broken].every(fitsQuantityColumn)) throw Errors.validation(QUANTITY_PRECISION_MESSAGE);
+  const marking = gtZero(usedUp) || gtZero(broken);
+  const restocking = gtZero(input.qty);
   const issue = await tx.inventoryTransaction.findUnique({
     where: { id: input.issueTransactionId },
-    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true } } },
+    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true, trackUse: true } } },
   });
   if (!issue) throw Errors.notFound('InventoryTransaction');
   if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
     throw Errors.invalidState('Only an issue can have stock returned against it.');
   }
   if (issue.reversedBy) throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
+  if (marking && !issue.material.trackUse) {
+    throw Errors.invalidState(`${issue.material.sku} does not track use after issue, so it cannot be marked used up or broken. Put it back on the shelf, or switch Track use on for the item first.`);
+  }
 
   const issued = issue.quantity.negated();
   const locationId = input.locationId ?? issue.locationId;
   // It goes back to the stock it came out of: Stores, or the project it was held for.
+  // Returns and outcomes against this issue share what is still out, so both take this lock.
   const back = { materialId: issue.materialId, locationId, heldForProject: issue.heldForProject };
   await lockInventoryBalances([{ ...back, locationId: issue.locationId }, back], tx);
+  // A reversal may have committed while this waited for the lock.
+  if (await tx.inventoryTransaction.findFirst({ where: { reversesId: issue.id }, select: { id: true } })) {
+    throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
+  }
   const alreadyReturned = await returnedAgainst(issue.id, tx);
-  const returnable = issued.minus(alreadyReturned);
-  if (input.qty.gt(returnable)) {
+  const closedOff = closedTotal((await closedOffAgainst(tx, [issue.id])).get(issue.id));
+  const returnable = issued.minus(alreadyReturned).minus(closedOff);
+  const total = input.qty.plus(usedUp).plus(broken);
+  if (total.gt(returnable)) {
+    const what = marking ? `take back ${total.toString()} × ${issue.material.sku}` : `return ${input.qty.toString()} × ${issue.material.sku}`;
     throw Errors.validation(
-      `Cannot return ${input.qty.toString()} × ${issue.material.sku}: only ${returnable.toString()} of the ${issued.toString()} issued is still out.`,
-      { issued: issued.toString(), returned: alreadyReturned.toString(), returnable: returnable.toString() },
+      `Cannot ${what}: only ${returnable.toString()} of the ${issued.toString()} issued is still out.`,
+      { issued: issued.toString(), returned: alreadyReturned.toString(), closedOff: closedOff.toString(), returnable: returnable.toString() },
     );
+  }
+
+  const note = input.reason?.trim() || null;
+  // The marks of this visit, linked to its RETURN when some went back on the
+  // shelf (that row shows them), else each a Movements row of its own.
+  const writeMarks = async (returnTransactionId: string | null) => {
+    const ids: string[] = [];
+    for (const [outcome, quantity] of [['USED_UP', usedUp], ['BROKEN', broken]] as const) {
+      if (gtZero(quantity)) {
+        ids.push(await writeOutcome(tx, { issueTransactionId: issue.id, outcome, quantity, note, actorId: input.actorId, returnTransactionId, createdAt: input.postedAt }));
+      }
+    }
+    return ids;
+  };
+  if (!restocking) {
+    const outcomeIds = await writeMarks(null);
+    return { transactionId: null, outcomeIds, materialId: issue.materialId, locationId, issued, alreadyReturned, closedOff };
   }
 
   await checkLocationActive(locationId, tx);
@@ -195,7 +247,7 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
       recipientId: issue.recipientId,
       projectNumber: issue.projectNumber,
       heldForProject: issue.heldForProject,
-      reasonNote: input.reason?.trim() || null,
+      reasonNote: note,
       referenceType: 'Return',
       referenceId: issue.id,
     },
@@ -211,8 +263,9 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
       after: { returnTransactionId: trx.id, quantity: input.qty.toString(), locationId } as Prisma.InputJsonValue,
     },
   });
+  const outcomeIds = await writeMarks(trx.id);
 
-  return { transactionId: trx.id, materialId: issue.materialId, locationId, issued, alreadyReturned };
+  return { transactionId: trx.id, outcomeIds, materialId: issue.materialId, locationId, issued, alreadyReturned, closedOff };
 }
 
 export async function checkRecipientActive(recipientId: string, tx: Prisma.TransactionClient): Promise<void> {
@@ -356,6 +409,49 @@ export function dueDateChangeWhere(filter: Omit<HistoryFilter, 'before' | 'limit
   return where;
 }
 
+/**
+ * Used up and broken marks that are rows of their own on Movements (ADR-026):
+ * one booked with nothing going back on the shelf, so there is no RETURN row
+ * to show it on, and every withdrawal of a mark. Not movements: no stock
+ * moves, so the quantity is null and they never count in a stock total. Marks
+ * booked with a return are shown on that return's row.
+ */
+export const USED_UP = 'USED_UP' as const;
+export const BROKEN = 'BROKEN' as const;
+export const OUTCOME_WITHDRAWN = 'OUTCOME_WITHDRAWN' as const;
+
+/** The type of a Movements row: a ledger line, or a record that moved no stock. */
+export type HistoryRowType = InventoryTransactionType | typeof DUE_DATE_CHANGE | typeof USED_UP | typeof BROKEN | typeof OUTCOME_WITHDRAWN;
+
+/**
+ * Whether a history filter also lists those marks: all movements and the
+ * returned stock report, unless it asks for one movement type or for the
+ * lines of issue slips.
+ */
+export function listsOutcomeEvents(filter: Omit<HistoryFilter, 'before' | 'limit'>): boolean {
+  return !filter.type && !filter.issueIds && (filter.report === undefined || filter.report === 'returned');
+}
+
+/**
+ * The marks a history filter selects: by when they were booked and who booked
+ * them, and by their issue's item, location, person, project or the search.
+ */
+export function outcomeEventWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): Prisma.ConsumableOutcomeWhereInput {
+  const where: Prisma.ConsumableOutcomeWhereInput = {
+    OR: [{ withdrawsId: { not: null } }, { returnTransactionId: null }],
+    issue: historyWhere({ ...filter, from: undefined, to: undefined, actorId: undefined, type: undefined, report: undefined, issueIds: undefined }),
+  };
+  const createdAt = dayRange(filter.from, filter.to);
+  if (createdAt) where.createdAt = createdAt;
+  if (filter.actorId) where.actorId = filter.actorId;
+  return where;
+}
+
+function outcomesOlderThan(cursor: string): Prisma.ConsumableOutcomeWhereInput {
+  const { at, id } = parseCursor(cursor);
+  return { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] };
+}
+
 function changesOlderThan(cursor: string): Prisma.ToolLoanExtensionWhereInput {
   const { at, id } = parseCursor(cursor);
   return { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] };
@@ -403,7 +499,7 @@ function dueDateChangeRow(
     id: c.id,
     cursor: pageCursor(c.createdAt, c.id),
     postedAt: c.createdAt.toISOString(),
-    type: DUE_DATE_CHANGE as InventoryTransactionType | typeof DUE_DATE_CHANGE,
+    type: DUE_DATE_CHANGE as HistoryRowType,
     materialId: c.loan.materialId,
     materialSku: c.loan.material.sku,
     materialName: c.loan.material.name,
@@ -425,8 +521,12 @@ function dueDateChangeRow(
     reversesId: null,
     reversedById: null,
     returnedQuantity: null,
+    trackUse: c.loan.material.trackUse,
+    usedUpQuantity: null as string | null,
+    brokenQuantity: null as string | null,
+    bookedMarksLive: null as boolean | null,
     otherLocationName: null,
-    returnOf: null,
+    returnOf: null as { id: string; postedAt: string; issueId: string | null; locationName: string } | null,
     receiptNumber: null,
     supplierName: null,
     deliveryRef: null,
@@ -434,6 +534,58 @@ function dueDateChangeRow(
     ...NO_LOAN_FIELDS,
     dueOn: dayOf(c.dueOn),
     previousDueOn: d ? dueOnBefore(d, c.id) : null,
+  };
+}
+
+/**
+ * A used up or broken mark, or its withdrawal, as a Movements row: its issue's
+ * item, place, person and project, with returnOf naming the issue; no quantity.
+ * usedUpQuantity or brokenQuantity says how many.
+ */
+function outcomeEventRow(
+  o: Prisma.ConsumableOutcomeGetPayload<{
+    include: { actor: { select: { name: true } }; issue: { include: { material: true; location: true; recipient: { select: { name: true; type: true } } } } };
+  }>,
+) {
+  const quantity = o.quantity.toString();
+  return {
+    id: o.id,
+    cursor: pageCursor(o.createdAt, o.id),
+    postedAt: o.createdAt.toISOString(),
+    type: (o.withdrawsId ? OUTCOME_WITHDRAWN : o.outcome) as HistoryRowType,
+    materialId: o.issue.materialId,
+    materialSku: o.issue.material.sku,
+    materialName: o.issue.material.name,
+    unitOfMeasure: o.issue.material.unitOfMeasure,
+    issueId: o.issue.issueId,
+    locationId: o.issue.locationId,
+    locationName: o.issue.location.name,
+    quantity: null as string | null,
+    actorId: o.actorId,
+    actorName: o.actor.name,
+    recipientId: o.issue.recipientId,
+    recipientName: o.issue.recipient?.name ?? null,
+    recipientType: o.issue.recipient?.type ?? null,
+    reasonCode: null,
+    // A mark's note, or why it was withdrawn.
+    reasonNote: o.note,
+    projectNumber: o.issue.projectNumber,
+    referenceType: 'ConsumableOutcome',
+    referenceId: o.issueTransactionId,
+    reversesId: null,
+    reversedById: null,
+    returnedQuantity: null,
+    trackUse: o.issue.material.trackUse,
+    usedUpQuantity: o.outcome === 'USED_UP' ? quantity : null,
+    brokenQuantity: o.outcome === 'BROKEN' ? quantity : null,
+    bookedMarksLive: null as boolean | null,
+    otherLocationName: null,
+    returnOf: { id: o.issue.id, postedAt: o.issue.postedAt.toISOString(), issueId: o.issue.issueId, locationName: o.issue.location.name },
+    receiptNumber: null,
+    supplierName: null,
+    deliveryRef: null,
+    fromPurchaseOrder: false,
+    ...NO_LOAN_FIELDS,
   };
 }
 
@@ -466,7 +618,8 @@ export const InventoryService = {
     // Cap the page size to prevent unbounded memory usage from a single request.
     const take = Math.min(filter.limit ?? 200, maxRows);
     const changeWhere = listsDueDateChanges(filter) ? dueDateChangeWhere(filter) : null;
-    const [fetched, changes] = await Promise.all([prisma.inventoryTransaction.findMany({
+    const eventWhere = listsOutcomeEvents(filter) ? outcomeEventWhere(filter) : null;
+    const [fetched, changes, events] = await Promise.all([prisma.inventoryTransaction.findMany({
       where,
       include: {
         material: true,
@@ -485,11 +638,24 @@ export const InventoryService = {
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
+    }), eventWhere === null ? [] : prisma.consumableOutcome.findMany({
+      where: filter.before ? { AND: [eventWhere, outcomesOlderThan(filter.before)] } : eventWhere,
+      include: {
+        actor: { select: { name: true } },
+        issue: { include: { material: true, location: true, recipient: { select: { name: true, type: true } } } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take,
     })]);
-    // One page, newest first, of movements and due date changes together.
-    const page = mergeNewestFirst(fetched, (t) => t.postedAt, changes, (c) => c.createdAt, (x) => x.id, take);
+    // One page, newest first, of movements, due date changes and marks of their own together.
+    const others = mergeNewestFirst(changes, (c) => c.createdAt, events, (e) => e.createdAt, (x) => x.id, take);
+    const page = mergeNewestFirst(
+      fetched, (t) => t.postedAt,
+      others, (o) => ('a' in o ? o.a.createdAt : o.b.createdAt),
+      (x) => ('id' in x ? x.id : 'a' in x ? x.a.id : x.b.id), take,
+    );
     const rows = page.flatMap((p) => ('a' in p ? [p.a] : []));
-    const keptChanges = page.flatMap((p) => ('b' in p ? [p.b] : []));
+    const keptChanges = page.flatMap((p) => ('b' in p && 'a' in p.b ? [p.b.a] : []));
     // A tool loan's due dates: agreed on its check-out, as they stood at a
     // check-in, and before and after each change.
     const loanIds = [
@@ -520,6 +686,24 @@ export const InventoryService = {
       _sum: { quantity: true },
     });
     const returnedByIssue = new Map(returnedRows.map((r) => [r.referenceId, r._sum.quantity]));
+    // Tracked consumables: how much of each issue was marked used up or broken.
+    const closedByIssue = await closedOffAgainst(prisma, issueIds);
+    // And how much each return's counter visit marked used up or broken, as booked then.
+    const returnIds = rows.filter((t) => t.type === InventoryTransactionType.RETURN).map((t) => t.id);
+    const bookedRows = returnIds.length === 0 ? [] : await prisma.consumableOutcome.groupBy({
+      by: ['returnTransactionId', 'outcome'],
+      where: { returnTransactionId: { in: returnIds }, withdrawsId: null },
+      _sum: { quantity: true },
+    });
+    // Whether any of them still counts: then the return is reversed only once they are withdrawn.
+    const liveBookedRows = returnIds.length === 0 ? [] : await prisma.consumableOutcome.groupBy({
+      by: ['returnTransactionId'],
+      where: { returnTransactionId: { in: returnIds }, ...LIVE_OUTCOME },
+      _count: { _all: true },
+    });
+    const liveBooked = new Set(liveBookedRows.map((b) => b.returnTransactionId));
+    const bookedWith = (returnId: string, outcome: 'USED_UP' | 'BROKEN') =>
+      (bookedRows.find((b) => b.returnTransactionId === returnId && b.outcome === outcome)?._sum.quantity ?? toDecimal(0)).toString();
     // A transfer's other leg: where the stock went to (or came from).
     const partnerIds = rows.map((t) => t.pairedWithId).filter((id): id is string => !!id);
     const partners = partnerIds.length === 0 ? [] : await prisma.inventoryTransaction.findMany({
@@ -531,7 +715,7 @@ export const InventoryService = {
       id: t.id,
       cursor: historyCursor(t),
       postedAt: t.postedAt.toISOString(),
-      type: t.type as InventoryTransactionType | typeof DUE_DATE_CHANGE,
+      type: t.type as HistoryRowType,
       materialId: t.materialId,
       materialSku: t.material.sku,
       materialName: t.material.name,
@@ -557,8 +741,18 @@ export const InventoryService = {
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
       returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
+      // Issues: marked used up or broken so far. Returns: marked in the same
+      // counter visit. trackUse says whether the item asks for it.
+      trackUse: t.material.trackUse,
+      usedUpQuantity: t.type === InventoryTransactionType.ISSUE ? (closedByIssue.get(t.id)?.usedUp.toString() ?? '0')
+        : t.type === InventoryTransactionType.RETURN ? bookedWith(t.id, 'USED_UP') : null,
+      brokenQuantity: t.type === InventoryTransactionType.ISSUE ? (closedByIssue.get(t.id)?.broken.toString() ?? '0')
+        : t.type === InventoryTransactionType.RETURN ? bookedWith(t.id, 'BROKEN') : null,
+      // Returns: whether a mark booked with it still counts (not withdrawn). The
+      // quantities above stay as booked, for the record (Qodo, PR #144).
+      bookedMarksLive: t.type === InventoryTransactionType.RETURN ? liveBooked.has(t.id) : null,
       otherLocationName: t.pairedWithId ? partnerLocation.get(t.pairedWithId) ?? null : null,
-      returnOf: (() => {
+      returnOf: ((): { id: string; postedAt: string; issueId: string | null; locationName: string } | null => {
         const i = t.type === InventoryTransactionType.RETURN && t.referenceId ? issueById.get(t.referenceId) : undefined;
         return i ? { id: i.id, postedAt: i.postedAt.toISOString(), issueId: i.issueId, locationName: i.location.name } : null;
       })(),
@@ -569,7 +763,7 @@ export const InventoryService = {
       })(),
       ...loanFields(t, loanDates),
     }]));
-    return page.map((p) => ('a' in p ? movements.get(p.a.id)! : dueDateChangeRow(p.b, loanDates)));
+    return page.map((p) => ('a' in p ? movements.get(p.a.id)! : 'a' in p.b ? dueDateChangeRow(p.b.a, loanDates) : outcomeEventRow(p.b.b)));
   },
 
   /**
@@ -614,34 +808,43 @@ export const InventoryService = {
 
   /**
    * How many rows of each type the filter selects, for the totals above the
-   * list: movements by type, and due date changes as DUE_DATE_CHANGE.
+   * list: movements by type, due date changes as DUE_DATE_CHANGE, and marks
+   * of their own as USED_UP, BROKEN and OUTCOME_WITHDRAWN.
    */
   async historySummary(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<{ total: number; byType: Record<string, number> }> {
-    const [groups, changes] = await Promise.all([
+    const eventWhere = listsOutcomeEvents(filter) ? outcomeEventWhere(filter) : null;
+    const [groups, changes, marks, withdrawals] = await Promise.all([
       prisma.inventoryTransaction.groupBy({ by: ['type'], where: historyWhere(filter), _count: { _all: true } }),
       listsDueDateChanges(filter) ? prisma.toolLoanExtension.count({ where: dueDateChangeWhere(filter) }) : 0,
+      eventWhere ? prisma.consumableOutcome.groupBy({ by: ['outcome'], where: { AND: [eventWhere, { withdrawsId: null }] }, _count: { _all: true } }) : [],
+      eventWhere ? prisma.consumableOutcome.count({ where: { AND: [eventWhere, { withdrawsId: { not: null } }] } }) : 0,
     ]);
     const byType: Record<string, number> = Object.fromEntries(groups.map((g) => [g.type, g._count._all]));
     if (changes > 0) byType[DUE_DATE_CHANGE] = changes;
-    return { total: groups.reduce((n, g) => n + g._count._all, 0) + changes, byType };
+    for (const m of marks) byType[m.outcome] = m._count._all;
+    if (withdrawals > 0) byType[OUTCOME_WITHDRAWN] = withdrawals;
+    const events = marks.reduce((n, m) => n + m._count._all, 0) + withdrawals;
+    return { total: groups.reduce((n, g) => n + g._count._all, 0) + changes + events, byType };
   },
 
-  /** How many rows the filter selects, due date changes included (the export checks this before building). */
+  /** How many rows the filter selects, due date changes and marks of their own included (the export checks this before building). */
   async historyCount(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<number> {
-    const [movements, changes] = await Promise.all([
+    const [movements, changes, events] = await Promise.all([
       prisma.inventoryTransaction.count({ where: historyWhere(filter) }),
       listsDueDateChanges(filter) ? prisma.toolLoanExtension.count({ where: dueDateChangeWhere(filter) }) : 0,
+      listsOutcomeEvents(filter) ? prisma.consumableOutcome.count({ where: outcomeEventWhere(filter) }) : 0,
     ]);
-    return movements + changes;
+    return movements + changes + events;
   },
 
-  /** Everyone who has posted a movement or changed a due date, for the "by" filter. Names only. */
+  /** Everyone who has posted a movement, changed a due date or marked used up or broken, for the "by" filter. Names only. */
   async historyActors(): Promise<Array<{ id: string; name: string }>> {
-    const [posted, changed] = await Promise.all([
+    const [posted, changed, marked] = await Promise.all([
       prisma.inventoryTransaction.findMany({ distinct: ['actorId'], select: { actorId: true } }),
       prisma.toolLoanExtension.findMany({ distinct: ['actorId'], select: { actorId: true } }),
+      prisma.consumableOutcome.findMany({ distinct: ['actorId'], select: { actorId: true } }),
     ]);
-    const ids = [...new Set([...posted, ...changed].map((r) => r.actorId))];
+    const ids = [...new Set([...posted, ...changed, ...marked].map((r) => r.actorId))];
     const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
     return users.sort((a, b) => a.name.localeCompare(b.name));
   },
@@ -733,10 +936,6 @@ export const InventoryService = {
           }
         }
 
-        if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
-          throw Errors.invalidState('Part of this issue has been returned. Reverse the returns first.');
-        }
-
         const legs = [original];
         if (original.pairedWithId) {
           const partner = await tx.inventoryTransaction.findUnique({
@@ -754,6 +953,20 @@ export const InventoryService = {
 
         // A reversal must not take any balance below zero.
         await lockInventoryBalances(legs, tx);
+        // Checked under the lock that returns and used up or broken marks take,
+        // so one booked at the same moment cannot slip past.
+        if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
+          throw Errors.invalidState('Part of this issue has been returned. Reverse the returns first.');
+        }
+        if (original.type === InventoryTransactionType.ISSUE && gtZero(closedTotal((await closedOffAgainst(tx, [original.id])).get(original.id)))) {
+          throw Errors.invalidState('Part of this issue has been marked used up or broken. Withdraw those first.');
+        }
+        // Used up or broken booked in the same counter visit would keep counting
+        // after the return is undone, shown only on a reversed row (Qodo, PR #144).
+        if (original.type === InventoryTransactionType.RETURN
+          && await tx.consumableOutcome.count({ where: { returnTransactionId: original.id, ...LIVE_OUTCOME } }) > 0) {
+          throw Errors.invalidState('Used up or broken was booked with this return. Withdraw those first.');
+        }
         for (const leg of legs) {
           if (!leg.quantity.isPositive()) continue;
           const balance = await getCurrentBalance(leg, tx);
@@ -943,38 +1156,54 @@ export const InventoryService = {
         { type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: qty.toNumber() },
       ]);
       const returned = r.alreadyReturned.plus(qty);
-      return { transactionId: r.transactionId, returnedQuantity: returned.toString(), returnableQuantity: r.issued.minus(returned).toString() };
+      return { transactionId: r.transactionId!, returnedQuantity: returned.toString(), returnableQuantity: r.issued.minus(returned).minus(r.closedOff).toString() };
     });
   },
 
   /**
-   * Stock coming back at the counter, several lines at once, each against its
-   * own issue: booked all-or-nothing, as an issue is. The same issue on two
-   * lines is checked as one total, because each line counts the ones before it.
+   * What comes back at the counter, several lines at once, each against its
+   * own issue: stock back on the shelf and, for items that track use, used up
+   * and broken (ADR-026). Booked all-or-nothing, as an issue is. The same issue
+   * on two lines is checked as one total, because each line counts the ones
+   * before it. transactionIds are the RETURN rows; outcomeIds the marks.
    */
-  async returnMany(input: ReturnManyInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[] }> {
+  async returnMany(input: ReturnManyInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[]; outcomeIds: string[] }> {
     if (input.lines.length === 0) throw Errors.validation('Add at least one item that is coming back');
-    const lines = input.lines.map((l) => ({ ...l, qty: toDecimal(l.quantity) }));
-    if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Return quantity must be positive');
+    const lines = input.lines.map((l) => ({
+      ...l, qty: toDecimal(l.quantity ?? 0), usedUp: toDecimal(l.usedUp ?? 0), broken: toDecimal(l.broken ?? 0),
+    }));
+    if (lines.some((l) => l.qty.isNegative() || l.usedUp.isNegative() || l.broken.isNegative())) {
+      throw Errors.validation('Quantities cannot be negative');
+    }
+    if (lines.some((l) => !gtZero(l.qty.plus(l.usedUp).plus(l.broken)))) {
+      throw Errors.validation('Each line needs something coming back: on the shelf, used up or broken');
+    }
 
     return inTx(within, async (tx) => {
       const postedAt = new Date();
       const transactionIds: string[] = [];
+      const outcomeIds: string[] = [];
       const events: DomainEvent[] = [];
       for (const l of lines) {
-        const r = await bookReturn(tx, { issueTransactionId: l.issueTransactionId, qty: l.qty, locationId: l.locationId, reason: input.reason, actorId: input.actorId, postedAt });
-        transactionIds.push(r.transactionId);
-        events.push({ type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: l.qty.toNumber() });
+        const r = await bookReturn(tx, {
+          issueTransactionId: l.issueTransactionId, qty: l.qty, usedUp: l.usedUp, broken: l.broken,
+          locationId: l.locationId, reason: input.reason, actorId: input.actorId, postedAt,
+        });
+        if (r.transactionId) {
+          transactionIds.push(r.transactionId);
+          events.push({ type: 'InventoryIncreased', materialId: r.materialId, locationId: r.locationId, quantity: l.qty.toNumber() });
+        }
+        outcomeIds.push(...r.outcomeIds);
       }
       await dispatchDomainEvents(events);
-      return { transactionIds };
+      return { transactionIds, outcomeIds };
     });
   },
 
   /**
    * What a recipient can still bring back: their unreversed issues in the
    * period, newest first, with what has come back so far, leaving out those
-   * fully returned. Consumables are mostly used up, so the period matters:
+   * fully returned or marked used up or broken. Consumables are mostly used up, so the period matters:
    * without one this would be every issue they were ever given.
    */
   async returnable(filter: { recipientId: string; from?: string; to?: string }): Promise<ReturnableLine[]> {
@@ -988,7 +1217,7 @@ export const InventoryService = {
       orderBy: [{ postedAt: 'desc' }, { id: 'desc' }],
       take: RETURNABLE_LIMIT,
       include: {
-        material: { select: { sku: true, name: true, unitOfMeasure: true } },
+        material: { select: { sku: true, name: true, unitOfMeasure: true, trackUse: true } },
         location: { select: { name: true, active: true } },
       },
     });
@@ -1000,11 +1229,13 @@ export const InventoryService = {
     });
     const returnedBy = new Map<string, Decimal>();
     for (const r of returns) returnedBy.set(r.referenceId!, (returnedBy.get(r.referenceId!) ?? toDecimal(0)).plus(r.quantity));
+    const closed = await closedOffAgainst(prisma, issues.map((i) => i.id));
 
     return issues.flatMap((i) => {
       const issued = i.quantity.negated();
       const returned = returnedBy.get(i.id) ?? toDecimal(0);
-      const outstanding = issued.minus(returned);
+      const closedOff = closedTotal(closed.get(i.id));
+      const outstanding = issued.minus(returned).minus(closedOff);
       if (!gtZero(outstanding)) return [];
       return [{
         issueTransactionId: i.id,
@@ -1018,8 +1249,10 @@ export const InventoryService = {
         locationName: i.location.name,
         locationActive: i.location.active,
         projectNumber: i.projectNumber,
+        trackUse: i.material.trackUse,
         issued: issued.toString(),
         returned: returned.toString(),
+        closedOff: closedOff.toString(),
         outstanding: outstanding.toString(),
       }];
     });

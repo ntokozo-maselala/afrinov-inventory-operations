@@ -21,7 +21,7 @@ Quantities and money are `DECIMAL(18,4)`.
 ## Master data
 | Table (model) | Key columns | Constraints and notes |
 |---|---|---|
-| `materials` (Material) | id, sku, name, description, category, unit_of_measure, required_stock (default 0), unit_cost (nullable), active | sku unique; indexes on category, active |
+| `materials` (Material) | id, sku, name, description, category, unit_of_measure, required_stock (default 0), unit_cost (nullable), active, track_use (default false, ADR-026) | sku unique; indexes on category, active |
 | `locations` (Location) | id, name, code, type, active, address, description, contact_person, contact_phone, contact_email, notes, created_by_id, updated_by_id | name unique; code unique; indexes on type, active |
 | `racks` (Rack) | id, code, name, description, location_id, project_number, capacity, status, notes | code unique; optional FKs to location and project; indexes on location_id, project_number, status |
 | `suppliers` (Supplier) | id, name, contact_name, contact_email, contact_phone, notes, active | case-insensitive unique name via citext index `suppliers_name_ci_key`; plain index on name |
@@ -56,6 +56,15 @@ RECEIVED, CLOSED, CANCELLED · `GoodsReceiptStatus`: DRAFT, SUBMITTED, POSTED
 `InventoryTransactionType`: RECEIPT, ISSUE, TRANSFER_OUT, TRANSFER_IN,
 ADJUSTMENT, RETURN · `AdjustmentReasonCode`: COUNT_VARIANCE, DAMAGE, LOSS,
 SCRAP, OTHER.
+
+`consumable_outcomes` (ConsumableOutcome, ADR-026): id, issue_transaction_id,
+outcome (`ConsumableOutcomeKind` USED_UP, BROKEN), quantity, note,
+withdraws_id, return_transaction_id, actor_id, created_at. `withdraws_id`
+unique (an outcome is withdrawn once); `return_transaction_id` is the RETURN
+booked in the same counter visit, if any, which shows it on Movements; FKs to
+the issue, the return, the actor and the withdrawn outcome; indexes on
+issue_transaction_id, return_transaction_id and created_at. Added to only; it
+holds no stock.
 
 `reference_type` values written by the code: `GoodsReceipt` (receipts),
 `PurchaseOrder` (receive-all on an order), `Project` (issues with a

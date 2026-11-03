@@ -1,7 +1,8 @@
-// Return stock at the store counter: who is bringing it back, then how much of
-// each item, against the issues it came from (GET /inventory-returns/returnable),
-// booked all-or-nothing (POST /inventory-returns). Consumables are mostly used
-// up, so the list covers a recent period, 30 days unless changed.
+// Return stock at the store counter: who is bringing it back, then for each
+// issue it came from (GET /inventory-returns/returnable) how much goes back on
+// the shelf and, for items that track use, how much was used up or broken
+// (ADR-026), booked all-or-nothing (POST /inventory-returns). Consumables are
+// mostly used up, so the list covers a recent period, 30 days unless changed.
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -15,20 +16,36 @@ import { RecipientSelect, type RecipientOption } from '../components/IssueFields
 import { usePermissions } from '../hooks/usePermissions';
 import { NoAccess } from '../components/NoAccess';
 import { api, type ApiError } from '../api/client';
-import { formatDate } from '../lib/format';
+import { formatDate, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { useIdempotencyKey } from '../lib/idempotency';
 import type { ReturnableLine } from '../api/types';
 import { locationLabel } from '../lib/locations';
+import { round4 } from '../lib/movementReason';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
+
+/** What is typed on one line: back on the shelf, used up, broken. */
+type Entry = { back?: string; usedUp?: string; broken?: string };
+type Amounts = { back: number | null; usedUp: number | null; broken: number | null };
 
 /** The typed quantity, or null when blank; NaN when it is not a usable number. */
 function parseQty(text: string | undefined): number | null {
   if (text === undefined || text.trim() === '') return null;
   const n = Number(text.replace(',', '.'));
   return Number.isFinite(n) ? n : NaN;
+}
+
+const positive = (n: number | null) => (n !== null && n > 0 ? n : 0);
+
+/** "2 back on the shelf, 6 used up, 1 broken": the parts that are there. */
+function describe(t: { back: number; usedUp: number; broken: number }): string {
+  return [
+    t.back > 0 && `${formatNumber(t.back)} back on the shelf`,
+    t.usedUp > 0 && `${formatNumber(t.usedUp)} used up`,
+    t.broken > 0 && `${formatNumber(t.broken)} broken`,
+  ].filter(Boolean).join(', ');
 }
 
 export function ReturnStock() {
@@ -43,39 +60,51 @@ export function ReturnStock() {
   const lines = useApi<ReturnableLine[]>(recipientId && !badSince
     ? `/inventory-returns/returnable?${new URLSearchParams({ recipientId, from: since, to: today() }).toString()}`
     : null);
-  const [qty, setQty] = useState<Record<string, string>>({});
+  const [entry, setEntry] = useState<Record<string, Entry>>({});
   const [into, setInto] = useState<Record<string, string>>({});
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The return just booked, kept on the page (a toast fades) with a way to see it in the report.
-  const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
+  // The booking just made, kept on the page (a toast fades) with a way to see it in the report.
+  const [last, setLast] = useState<{ title: string; recipientId: string; returned: boolean } | null>(null);
   const toast = useToast();
   const idem = useIdempotencyKey('return-stock');
 
   const activeLocations = useMemo(() => (locations.data ?? []).filter((l) => l.active).sort((a, b) => a.name.localeCompare(b.name)), [locations.data]);
   const who = (recipients.data ?? []).find((r) => r.id === recipientId)?.name;
   const rows = lines.data ?? [];
+  // Used up and broken appear only when one of the lines is an item that tracks use.
+  const anyTracked = rows.some((l) => l.trackUse);
 
+  const setField = (id: string, key: keyof Entry, value: string) => setEntry((s) => ({ ...s, [id]: { ...s[id], [key]: value } }));
+  const amounts = (l: ReturnableLine): Amounts => {
+    const e = entry[l.issueTransactionId] ?? {};
+    return { back: parseQty(e.back), usedUp: l.trackUse ? parseQty(e.usedUp) : null, broken: l.trackUse ? parseQty(e.broken) : null };
+  };
+  // At the four decimals quantities are kept to, so 0.1 + 0.2 closes off 0.3 exactly.
+  const total = (a: Amounts) => round4(positive(a.back) + positive(a.usedUp) + positive(a.broken));
   /** Where a line goes back: the choice, else where it was issued from if that is still in use. */
   const target = (l: ReturnableLine) => into[l.issueTransactionId] ?? (l.locationActive ? l.locationId : '');
-  const entered = rows.filter((l) => parseQty(qty[l.issueTransactionId]) !== null);
+  const touched = (l: ReturnableLine) => Object.values(amounts(l)).some((v) => v !== null);
+  const entered = rows.filter(touched);
   const problem = (l: ReturnableLine): string | null => {
-    const q = parseQty(qty[l.issueTransactionId]);
-    if (q === null) return null;
-    if (Number.isNaN(q) || q <= 0) return 'Enter a number above 0';
-    if (q > Number(l.outstanding)) return `At most ${l.outstanding}`;
-    if (!target(l)) return 'Choose where it goes back';
+    const a = amounts(l);
+    const typed = Object.values(a).filter((v): v is number => v !== null);
+    if (typed.length === 0) return null;
+    if (typed.some((v) => Number.isNaN(v) || v < 0)) return 'Enter a number above 0';
+    if (total(a) <= 0) return 'Enter a number above 0';
+    if (total(a) > Number(l.outstanding)) return `At most ${l.outstanding}`;
+    if (positive(a.back) > 0 && !target(l)) return 'Choose where it goes back';
     return null;
   };
 
   function chooseRecipient(id: string) {
-    // A different recipient is a different return, so the draft is cleared and
+    // A different recipient is a different booking, so the draft is cleared and
     // the pending submission key for the previous one is left in place (it may
     // still need reconciling) while the next submit mints its own key from its
     // own payload. Nothing to rotate here: keys are per payload.
     setRecipientId(id);
-    setQty({});
+    setEntry({});
     setInto({});
     setError(null);
   }
@@ -87,20 +116,31 @@ export function ReturnStock() {
     if (entered.length === 0) { setError('Enter how much of at least one item is coming back.'); return; }
     if (entered.some((l) => problem(l))) { setError('Check the highlighted lines.'); return; }
 
+    const sum = { back: 0, usedUp: 0, broken: 0 };
+    const returnBody = {
+      reason: note.trim() || undefined,
+      lines: entered.map((l) => {
+        const a = amounts(l);
+        sum.back += positive(a.back); sum.usedUp += positive(a.usedUp); sum.broken += positive(a.broken);
+        const back = positive(a.back) > 0;
+        return {
+          issueTransactionId: l.issueTransactionId,
+          ...(back ? { quantity: a.back! } : {}),
+          ...(positive(a.usedUp) > 0 ? { usedUp: a.usedUp! } : {}),
+          ...(positive(a.broken) > 0 ? { broken: a.broken! } : {}),
+          locationId: back && target(l) !== l.locationId ? target(l) : undefined,
+        };
+      }),
+    };
     setBusy(true);
     try {
-      const returnBody = {
-        reason: note.trim() || undefined,
-        lines: entered.map((l) => ({
-          issueTransactionId: l.issueTransactionId,
-          quantity: parseQty(qty[l.issueTransactionId])!,
-          locationId: target(l) !== l.locationId ? target(l) : undefined,
-        })),
-      };
       await api.post('/inventory-returns', returnBody, { idempotencyKey: idem.keyFor(returnBody) });
-      toast.success(`Returned ${entered.length} item${entered.length === 1 ? '' : 's'}${who ? ` from ${who}` : ''}`);
-      setLast({ who: who ?? 'them', recipientId, count: entered.length });
-      setQty({});
+      const title = sum.usedUp + sum.broken > 0
+        ? `${who ?? 'Booked'}: ${describe(sum)}`
+        : `Returned ${entered.length} item${entered.length === 1 ? '' : 's'}${who ? ` from ${who}` : ''}`;
+      toast.success(title);
+      setLast({ title, recipientId, returned: sum.back > 0 });
+      setEntry({});
       setInto({});
       setNote('');
       idem.confirm();
@@ -124,11 +164,23 @@ export function ReturnStock() {
   const allowed = usePermissions().hasPermission('inventory:return');
   if (!allowed) return <NoAccess title="Return stock" action="book stock returns" />;
 
+  const qtyBox = (l: ReturnableLine, key: keyof Entry, label: string, bad: boolean) => (
+    <Input
+      aria-label={`${label}: ${l.name}, issued ${formatDate(l.postedAt)}`}
+      className="w-20 ml-auto text-right"
+      type="text"
+      inputMode="decimal"
+      value={entry[l.issueTransactionId]?.[key] ?? ''}
+      onChange={(e) => setField(l.issueTransactionId, key, e.target.value)}
+      invalid={bad}
+    />
+  );
+
   return (
     <div>
       <PageHeader
         title="Return stock"
-        description="Record unused stock coming back from a job: who brought it, and how much of each item. Each line goes back against the issue it came from, so its project's stock used goes down."
+        description="Record what comes back from a job: who brought it, and against each issue how much goes back on the shelf and, for items that track use, how much was used up or broken. What goes back on the shelf lowers its project's stock used."
         breadcrumb={[{ label: 'Stock', to: '/stock' }, { label: 'Return stock' }]}
       />
 
@@ -136,16 +188,21 @@ export function ReturnStock() {
       {loadStale && <StaleDataNotice error={sources.find((s) => s.stale)?.error} onRetry={() => { recipients.reload(); locations.reload(); }} label="Some lists could not be refreshed" />}
 
       {last && (
-        <Alert tone="success" title={`Returned ${last.count} item${last.count === 1 ? '' : 's'} from ${last.who}`} className="mb-4 max-w-5xl">
-          <Link to={`/movements?report=returned&recipientId=${encodeURIComponent(last.recipientId)}&from=${today()}&to=${today()}`} className="btn-link">
-            See it in Returned stock
-          </Link>
-          {' '}under Movements. The list below shows what is still out.
+        <Alert tone="success" title={last.title} className="mb-4 max-w-6xl">
+          {last.returned && (
+            <>
+              <Link to={`/movements?report=returned&recipientId=${encodeURIComponent(last.recipientId)}&from=${today()}&to=${today()}`} className="btn-link">
+                See it in Returned stock
+              </Link>
+              {' '}under Movements.{' '}
+            </>
+          )}
+          The list below shows what is still out.
         </Alert>
       )}
 
       {!loadFailed && (
-        <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-5xl" noValidate>
+        <form onSubmit={submit} className="surface-card p-4 space-y-5 max-w-6xl" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <RecipientSelect
               id="return-recipient"
@@ -168,6 +225,11 @@ export function ReturnStock() {
           {recipientId && !badSince && (!lines.error || lines.stale) && (
             <fieldset className="space-y-3">
               <legend className="text-h3 text-surface-900 mb-2">Still out{who ? ` with ${who}` : ''}</legend>
+              {anyTracked && (
+                <p className="text-sm text-surface-600">
+                  For items that track use, also enter what came back worn out (used up) or broken. Those don&apos;t go back on the shelf: they left it when they were issued.
+                </p>
+              )}
               {lines.loading && <p className="text-sm text-surface-500">Loading…</p>}
               {!lines.loading && rows.length === 0 && (
                 <EmptyState
@@ -184,45 +246,49 @@ export function ReturnStock() {
                         <th scope="col">Item</th>
                         <th scope="col">Project</th>
                         <th scope="col" className="text-right">Still out</th>
-                        <th scope="col" className="text-right">Coming back</th>
+                        <th scope="col" className="text-right">Back on the shelf</th>
+                        {anyTracked && <th scope="col" className="text-right">Used up</th>}
+                        {anyTracked && <th scope="col" className="text-right">Broken</th>}
                         <th scope="col">Back into</th>
+                        <th scope="col" className="text-right">Still out after</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((l) => {
                         const id = l.issueTransactionId;
                         const bad = problem(l);
+                        const a = amounts(l);
+                        const after = round4(Number(l.outstanding) - total(a));
+                        const backing = positive(a.back) > 0;
                         return (
                           <tr key={id}>
                             <td className="whitespace-nowrap text-surface-600">{formatDate(l.postedAt)}</td>
                             <td>
                               <span className="font-mono text-xs">{l.sku}</span> {l.name}
+                              {l.trackUse && <span className="block text-xs text-surface-500">Tracks use after issue</span>}
                               {Number(l.returned) > 0 && <span className="block text-xs text-surface-500">{l.returned} of {l.issued} already back</span>}
+                              {Number(l.closedOff ?? 0) > 0 && <span className="block text-xs text-surface-500">{l.closedOff} of {l.issued} marked used up or broken</span>}
                             </td>
                             <td className="text-surface-600">{l.projectNumber ?? <span className="text-surface-300">—</span>}</td>
                             <td className="text-right tabular-nums whitespace-nowrap">{l.outstanding} <span className="text-meta">{l.unitOfMeasure}</span></td>
-                            <td className="text-right">
-                              <Input
-                                aria-label={`Coming back: ${l.name}, issued ${formatDate(l.postedAt)}`}
-                                className="w-24 ml-auto text-right"
-                                type="text"
-                                inputMode="decimal"
-                                value={qty[id] ?? ''}
-                                onChange={(e) => setQty((s) => ({ ...s, [id]: e.target.value }))}
-                                invalid={!!bad}
-                              />
-                              {bad && <span className="block text-xs text-danger-700 mt-1">{bad}</span>}
-                            </td>
+                            <td className="text-right">{qtyBox(l, 'back', 'Back on the shelf', !!bad && a.back !== null)}</td>
+                            {anyTracked && <td className="text-right">{l.trackUse ? qtyBox(l, 'usedUp', 'Used up', !!bad && a.usedUp !== null) : <span className="text-surface-300" title="This item does not track use after issue">—</span>}</td>}
+                            {anyTracked && <td className="text-right">{l.trackUse ? qtyBox(l, 'broken', 'Broken', !!bad && a.broken !== null) : <span className="text-surface-300" title="This item does not track use after issue">—</span>}</td>}
                             <td>
                               <Select
                                 aria-label={`Back into: ${l.name}, issued ${formatDate(l.postedAt)}`}
+                                className="min-w-48"
                                 value={target(l)}
                                 onChange={(e) => setInto((s) => ({ ...s, [id]: e.target.value }))}
-                                disabled={locations.loading}
+                                disabled={locations.loading || (touched(l) && !backing)}
                               >
                                 <option value="">— choose —</option>
                                 {activeLocations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}{loc.id === l.locationId ? ' (issued from)' : ''}</option>)}
                               </Select>
+                            </td>
+                            <td className="text-right tabular-nums whitespace-nowrap">
+                              {touched(l) && !bad ? formatNumber(after) : <span className="text-surface-300">—</span>}
+                              {bad && <span className="block text-xs text-danger-700 mt-1">{bad}</span>}
                             </td>
                           </tr>
                         );
@@ -235,7 +301,7 @@ export function ReturnStock() {
           )}
 
           {recipientId && rows.length > 0 && (
-            <Field label="Note (optional)" htmlFor="return-note" help="Kept with every line, e.g. why it came back.">
+            <Field label="Note (optional)" htmlFor="return-note" help="Kept with every line, e.g. why it came back or how a disc broke.">
               <Textarea id="return-note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Job finished early" />
             </Field>
           )}
@@ -244,7 +310,9 @@ export function ReturnStock() {
 
           <div className="entry-actions flex justify-end gap-2 py-3 border-t border-surface-200">
             <Link to="/stock"><Button type="button" variant="ghost" disabled={busy}>Back to stock</Button></Link>
-            <Button type="submit" variant="primary" loading={busy} disabled={!recipientId || rows.length === 0}>Return stock</Button>
+            <Button type="submit" variant="primary" loading={busy} disabled={!recipientId || rows.length === 0}>
+              {entered.length > 0 ? `Book ${entered.length} line${entered.length === 1 ? '' : 's'}` : 'Return stock'}
+            </Button>
           </div>
         </form>
       )}

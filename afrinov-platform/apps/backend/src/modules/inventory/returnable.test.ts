@@ -7,6 +7,7 @@ const D = (n: number) => new Prisma.Decimal(n);
 const calls: Array<{ where: Record<string, unknown> }> = [];
 let issues: unknown[] = [];
 let returns: Array<{ referenceId: string; quantity: Prisma.Decimal }> = [];
+let closed: Array<{ issueTransactionId: string; outcome: string; _sum: { quantity: Prisma.Decimal } }> = [];
 
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
@@ -17,6 +18,7 @@ vi.mock('../../shared/db.js', () => ({
           return args.where['type'] === 'ISSUE' ? issues : returns;
         },
       },
+      consumableOutcome: { groupBy: async () => closed },
     };
   },
 }));
@@ -35,6 +37,7 @@ beforeEach(() => {
   calls.length = 0;
   issues = [];
   returns = [];
+  closed = [];
 });
 
 describe('InventoryService.returnable', () => {
@@ -42,9 +45,9 @@ describe('InventoryService.returnable', () => {
     issues = [issue('a', 10), issue('b', 4), issue('c', 2)];
     returns = [{ referenceId: 'a', quantity: D(3) }, { referenceId: 'a', quantity: D(2) }, { referenceId: 'b', quantity: D(4) }];
     const rows = await InventoryService.returnable({ recipientId: 'r-1' });
-    expect(rows.map((r) => [r.issueTransactionId, r.issued, r.returned, r.outstanding])).toEqual([
-      ['a', '10', '5', '5'],
-      ['c', '2', '0', '2'],
+    expect(rows.map((r) => [r.issueTransactionId, r.issued, r.returned, r.closedOff, r.outstanding])).toEqual([
+      ['a', '10', '5', '0', '5'],
+      ['c', '2', '0', '0', '2'],
     ]);
     expect(rows[0]).toMatchObject({ sku: 'SKU-a', name: 'Item a', unitOfMeasure: 'each', locationName: 'A-1', locationActive: true, projectNumber: 'AFRI-1325', issueId: 'slip-a', postedAt: '2026-10-10T08:00:00.000Z' });
   });
@@ -55,6 +58,18 @@ describe('InventoryService.returnable', () => {
     expect(calls[0]!.where).toMatchObject({ type: 'ISSUE', recipientId: 'r-1', reversesId: null, reversedBy: null });
     expect(calls[0]!.where['postedAt']).toEqual({ gte: new Date('2026-09-16T00:00:00.000Z'), lt: new Date('2026-10-17T00:00:00.000Z') });
     expect(calls[1]!.where).toMatchObject({ type: 'RETURN', referenceType: 'Return', referenceId: { in: ['a'] } });
+  });
+
+  it('leaves out what was marked used up or broken, and issues with nothing left out', async () => {
+    issues = [issue('a', 10), issue('b', 3)];
+    returns = [{ referenceId: 'a', quantity: D(2) }];
+    closed = [
+      { issueTransactionId: 'a', outcome: 'USED_UP', _sum: { quantity: D(5) } },
+      { issueTransactionId: 'a', outcome: 'BROKEN', _sum: { quantity: D(1) } },
+      { issueTransactionId: 'b', outcome: 'USED_UP', _sum: { quantity: D(3) } },
+    ];
+    const rows = await InventoryService.returnable({ recipientId: 'r-1' });
+    expect(rows.map((r) => [r.issueTransactionId, r.issued, r.returned, r.closedOff, r.outstanding])).toEqual([['a', '10', '2', '6', '2']]);
   });
 
   it('asks nothing more when there are no issues', async () => {

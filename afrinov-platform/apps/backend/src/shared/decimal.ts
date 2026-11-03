@@ -19,3 +19,14 @@ export function gtZero(d: Prisma.Decimal): boolean {
 export function gteZero(d: Prisma.Decimal): boolean {
   return d.gte(ZERO);
 }
+
+/**
+ * Stock quantities are stored as Decimal(18, 4). A finer quantity would be
+ * rounded on the way in, so 0.00001 would be stored as zero; one too large
+ * would not fit. Both are refused before they are written.
+ */
+export const QUANTITY_DECIMALS = 4;
+export function fitsQuantityColumn(d: Prisma.Decimal): boolean {
+  return d.decimalPlaces() <= QUANTITY_DECIMALS && d.abs().lt('1e14');
+}
+export const QUANTITY_PRECISION_MESSAGE = `Quantities can have at most ${QUANTITY_DECIMALS} decimal places`;

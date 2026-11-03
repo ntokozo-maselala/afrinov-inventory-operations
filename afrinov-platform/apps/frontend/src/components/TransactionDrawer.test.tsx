@@ -210,6 +210,19 @@ describe('TransactionDrawer', () => {
     expect(screen.getByText(/received against a purchase order \(GR-2026-0008\), so it cannot be reversed here: correct it on the order/)).toBeInTheDocument();
   });
 
+  // Qodo, PR #144: undoing the return would leave its used up and broken counting.
+  it('does not offer to reverse a return booked with used up or broken until those are withdrawn, then does', () => {
+    const ret = { ...issue, type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0', bookedMarksLive: true };
+    const { unmount } = render(<TransactionDrawer transaction={ret} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Used up or broken was booked with this return/)).toBeInTheDocument();
+    unmount();
+    // Withdrawn: the booked quantity stays on the row, and the reversal is offered.
+    render(<TransactionDrawer transaction={{ ...ret, bookedMarksLive: false }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Reverse this movement' })).toBeInTheDocument();
+    expect(screen.queryByText(/Used up or broken was booked with this return/)).not.toBeInTheDocument();
+  });
+
   describe('returning stock', () => {
     function renderIssue(overrides: Record<string, unknown> = {}) {
       const onReturned = vi.fn();
@@ -281,6 +294,75 @@ describe('TransactionDrawer', () => {
         expect(screen.queryByRole('button', { name: 'Return to stock' })).not.toBeInTheDocument();
         cleanup();
       }
+    });
+  });
+
+  describe('used up or broken', () => {
+    const detail = (over: Record<string, unknown> = {}) => ({
+      issueTransactionId: 'tx-1', sku: 'SKU-1', name: 'Grinding disc', unitOfMeasure: 'each', trackUse: true,
+      issued: '4', returned: '0', usedUp: '1', broken: '1', stillOut: '2',
+      outcomes: [
+        { id: 'o-1', outcome: 'USED_UP', quantity: '1', note: 'Stub back', recordedBy: 'Vusi', recordedAt: '2026-10-02T08:00:00Z', withdrawn: null },
+        { id: 'o-2', outcome: 'BROKEN', quantity: '1', note: null, recordedBy: 'Vusi', recordedAt: '2026-10-02T09:00:00Z', withdrawn: { by: 'Thandi', at: '2026-10-02T10:00:00Z', reason: 'Wrong issue' } },
+      ],
+      ...over,
+    });
+    const tracked = { ...issue, unitOfMeasure: 'each', trackUse: true, usedUpQuantity: '1', brokenQuantity: '1' };
+
+    function renderTracked(overrides: Record<string, unknown> = {}, d = detail()) {
+      mockGet.mockImplementation(async (path: string) => (path.endsWith('/outcomes') ? d : []));
+      const onOutcomeChanged = vi.fn();
+      const onError = vi.fn();
+      render(<TransactionDrawer transaction={{ ...tracked, ...overrides }} onClose={() => {}} onReversed={vi.fn()} onOutcomeChanged={onOutcomeChanged} onError={onError} />);
+      return { onOutcomeChanged, onError };
+    }
+
+    it('shows what was used up, broken and is still out, with each outcome and its withdrawal', async () => {
+      renderTracked();
+      expect(screen.getByRole('heading', { name: 'Used up or broken' })).toBeInTheDocument();
+      expect(screen.getByText(/Still out 2/)).toBeInTheDocument();
+      expect(await screen.findByText('Stub back')).toBeInTheDocument();
+      expect(screen.getByText(/Withdrawn by Thandi.*Wrong issue/)).toBeInTheDocument();
+      // Only the outcome still standing can be withdrawn.
+      expect(screen.getAllByRole('button', { name: 'Withdraw' })).toHaveLength(1);
+    });
+
+    it('books nothing itself: used up and broken are booked on Return stock', async () => {
+      renderTracked();
+      expect(await screen.findByText('Stub back')).toBeInTheDocument();
+      expect(screen.getByText(/book what was used up or broken on Return stock/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mark used up or broken' })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/What happened/)).not.toBeInTheDocument();
+    });
+
+    it('withdraws an outcome with a reason', async () => {
+      mockPost.mockResolvedValue({ withdrawalId: 'o-3' });
+      const { onOutcomeChanged } = renderTracked();
+      fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+      fireEvent.change(screen.getByLabelText(/Why withdraw it/), { target: { value: 'Wrong worker' } });
+      fireEvent.click(screen.getAllByRole('button', { name: 'Withdraw' }).at(-1)!);
+      await waitFor(() => expect(onOutcomeChanged).toHaveBeenCalledWith('Used up withdrawn'));
+      expect(mockPost).toHaveBeenCalledWith('/consumable-outcomes/o-1/withdrawal', { reason: 'Wrong worker' }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    });
+
+    it('leaves out of a return what is no longer out, and holds reversal until outcomes are withdrawn', () => {
+      renderTracked();
+      expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+      expect(screen.getByText(/withdraw those first/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      fireEvent.change(screen.getByLabelText(/Quantity returned/), { target: { value: '3' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Return to stock' }));
+      expect(screen.getByText('At most 2 can come back.')).toBeInTheDocument();
+    });
+
+    it('is not shown for an item that does not track use, and offers no withdrawal without permission to reverse', async () => {
+      renderTracked({ trackUse: false, usedUpQuantity: '0', brokenQuantity: '0' });
+      expect(screen.queryByRole('heading', { name: 'Used up or broken' })).not.toBeInTheDocument();
+      cleanup();
+      mockHasPermission.mockImplementation((code: string) => code !== 'inventory:reverse');
+      renderTracked();
+      expect(await screen.findByText('Stub back')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
     });
   });
 });

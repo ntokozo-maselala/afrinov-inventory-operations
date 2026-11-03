@@ -36,6 +36,9 @@ registered unless `PROCUREMENT_ENABLED=false`.
 | Receive stock at the counter (no PO) | `POST /stock-receipts` |
 | Issue stock (to a recipient, optional project, several items) | `POST /inventory-issues` |
 | Return unused stock from an issue | `POST /inventory-transactions/:id/returns` |
+| Take back at the counter: back on the shelf and, for items that track use, used up and broken (no stock moves for those), one booking | `POST /inventory-returns` |
+| Mark part of one issue used up or broken (API only) | `POST /inventory-transactions/:id/outcomes` |
+| Withdraw a used up or broken mark | `POST /consumable-outcomes/:id/withdrawal` |
 | Transfer stock (location to location) | `POST /inventory-transfers` |
 | Adjust stock (reason: count variance, damage, loss, scrap, other) | `POST /inventory-adjustments` |
 | Count stock at a location | `POST /stock-counts` |

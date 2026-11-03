@@ -19,6 +19,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
+import { MovementReason } from '../components/MovementReason';
 import { categoryLabel, needsProject, sectionOf } from '../lib/categories';
 import { balanceKey, isStoresStock, locationWithHolder } from '../lib/heldFor';
 import { PROCUREMENT_ENABLED } from '../config/features';
@@ -163,6 +164,7 @@ export function MaterialDetail() {
                 )}
                 <dt className="text-surface-500">Unit</dt><dd className="col-span-2">{material.data.unitOfMeasure}</dd>
                 {material.data.serialNumber && (<><dt className="text-surface-500">Serial number</dt><dd className="col-span-2 text-mono">{material.data.serialNumber}</dd></>)}
+                {material.data.trackUse && (<><dt className="text-surface-500">After issue</dt><dd className="col-span-2">Each issue is marked used up or broken</dd></>)}
                 {sectionOf(material.data.category) === 'STORES' && (<><dt className="text-surface-500">Required stock</dt><dd className="col-span-2 text-num">{formatNumber(Number(material.data.requiredStock))}</dd></>)}
                 <dt className="text-surface-500">Unit cost</dt>
                 <dd className="col-span-2 text-num">
@@ -361,6 +363,11 @@ export function MaterialDetail() {
               moves.reload();
               toast.success('Stock returned');
             }}
+            onOutcomeChanged={(message) => {
+              setSelected(null);
+              moves.reload();
+              toast.success(message);
+            }}
             onError={(err) => toast.error('Reversal failed', err.message)}
           />
         </Drawer>
@@ -375,7 +382,8 @@ function movementColumns({ onSelect }: { onSelect: (m: MovementRow) => void }): 
     { key: 'type', header: 'Type', render: (m) => <MovementBadge type={m.type} /> },
     { key: 'loc', header: 'Location', render: (m) => m.locationName },
     { key: 'qty', header: 'Quantity', align: 'right', className: 'text-num', render: (m) => (m.quantity === null ? <span className="text-meta">No stock moved</span> : <span className="font-mono">{m.quantity}</span>) },
-    { key: 'reason', header: 'Reason', render: (m) => m.reasonCode ? <span className="text-meta">{m.reasonCode.replace('_', ' ').toLowerCase()}</span> : <span className="text-surface-300">—</span> },
+    // No Issued to column here, so the reason says who it went to and what became of it.
+    { key: 'reason', header: 'Reason', render: (m) => <MovementReason movement={m} withWho /> },
     { key: 'proj', header: 'Project', render: (m) => m.projectNumber ? <span className="text-mono text-xs">{m.projectNumber}</span> : <span className="text-surface-300">—</span> },
     { key: 'actor', header: 'By', render: (m) => <span className="text-meta">{m.actorName}</span> },
   ];

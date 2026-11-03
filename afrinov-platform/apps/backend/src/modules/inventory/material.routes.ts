@@ -18,6 +18,8 @@ export const createMaterialSchema = z.object({
   serialNumber: z.string().trim().min(1).max(64).optional(),
   /** Project Material only, and required there: the project it is bought for. */
   projectNumber: z.string().trim().min(1).max(64).optional(),
+  /** Mark each issue used up or broken later (discs, blades, bits). Never on a tool. */
+  trackUse: z.boolean().optional(),
 });
 
 export const updateMaterialSchema = z.object({
@@ -33,6 +35,8 @@ export const updateMaterialSchema = z.object({
   serialNumber: z.string().trim().min(1).max(64).nullable().optional(),
   /** Project Material only: assigns its project. */
   projectNumber: z.string().trim().min(1).max(64).optional(),
+  /** Never on a tool. Switching it off keeps the outcomes already recorded. */
+  trackUse: z.boolean().optional(),
 });
 
 export const listMaterialsQuerySchema = z.object({

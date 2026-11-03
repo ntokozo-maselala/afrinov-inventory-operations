@@ -71,7 +71,7 @@ describe('MaterialDetail editing', () => {
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
     expect(mockPatch).toHaveBeenCalledWith('/materials/m-1', {
-      name: 'Cutting disc', unitOfMeasure: 'each', requiredStock: 40, unitCost: null, description: 'Thin',
+      name: 'Cutting disc', unitOfMeasure: 'each', requiredStock: 40, unitCost: null, description: 'Thin', trackUse: false,
     });
     expect(await screen.findByText('DISC-115 saved')).toBeInTheDocument();
     await waitFor(() => expect(gets('/materials/')).toBeGreaterThan(before.item));
