@@ -193,11 +193,24 @@ describe('line discounts', () => {
     fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '10.005' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     expect(await screen.findByText(/A discount must be between 0% and 100%/)).toBeInTheDocument();
+    // Just off two places, as the server refuses it.
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '4.350000007' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
+    await waitFor(() => expect(screen.getByText(/A discount must be between 0% and 100%/)).toBeInTheDocument());
+    expect(mockPost).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
       lines: [expect.objectContaining({ discountPercent: 0.5 })],
     })));
+  });
+
+  it('refuses on Edit a discount just off two places, as the server does', async () => {
+    appAt('/purchase-orders/po-1/edit');
+    fireEvent.change(await screen.findByLabelText('DISC-115 discount percent'), { target: { value: '4.350000007' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(/Enter a discount between 0% and 100% for DISC-115/)).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
   });
 
   it('takes 0.29% on Edit', async () => {

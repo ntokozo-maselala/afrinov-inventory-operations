@@ -65,13 +65,14 @@ let nextLineKey = 1;
 const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', orderedQty: '', unitPrice: '', discountPercent: '', deliveryDate: '' });
 
 /**
- * A discount is blank (none) or 0–100%, to 2 places. Two places within a
- * hair, as 4.35 x 100 is 434.99999999999994 in floating point.
+ * A discount is blank (none) or 0–100%, to 2 places, by the server's rule
+ * (procurement.routes.ts): x 100 is a whole number to 6 places, as 4.35 x 100
+ * is 434.99999999999994 in floating point.
  */
 const badDiscount = (v: string) => {
   if (v.trim() === '') return false;
   const n = Number(v);
-  return !(Number.isFinite(n) && n >= 0 && n <= 100 && Math.abs(Math.round(n * 100) - n * 100) < 1e-6);
+  return !(Number.isFinite(n) && n >= 0 && n <= 100 && Number.isInteger(Math.round(n * 100 * 1e6) / 1e6));
 };
 
 /** One opening of the new-item drawer: the line it is for, and which opening it is. */
