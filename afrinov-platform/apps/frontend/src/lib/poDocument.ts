@@ -13,12 +13,14 @@ import type { jsPDF } from 'jspdf';
 import { triggerDownload } from '../api/exportReport';
 import { drawLogo, pdfText } from './pdf';
 import { formatDate, formatNumber } from './format';
-import { formatMoney, formatRate, type PoTotals } from './poMoney';
+import { discountedUnitPrice, formatMoney, formatRate, type PoTotals } from './poMoney';
 
 export interface PoDocumentLine {
   material: { sku: string; name: string; unitOfMeasure: string };
   orderedQty: string;
   unitPrice?: string | null;
+  /** Percent off the unit price: printed as the discounted price, as the template has no discount column. */
+  discountPercent?: string | null;
   subtotal?: string | null;
   vat?: string | null;
   net?: string | null;
@@ -207,7 +209,8 @@ export function documentLines(po: PoDocumentOrder): string[][] {
     String(i + 1),
     l.material.unitOfMeasure,
     `${l.material.sku}  ${l.material.name}`,
-    money(l.unitPrice),
+    // The template has no discount column: the price the supplier is paid.
+    money(discountedUnitPrice(l)),
     formatNumber(Number(l.orderedQty)),
     l.deliveryDate ?? po.expectedDeliveryDate ? formatDate((l.deliveryDate ?? po.expectedDeliveryDate)!) : dash,
     money(l.subtotal),

@@ -16,7 +16,7 @@ import { orderTotals } from './po-pricing.js';
 import type { OrderKind } from './procurement.service.js';
 
 type Num = Prisma.Decimal | number | string;
-type Priceable = { orderedQty: Num; unitPrice?: Num | null };
+type Priceable = { orderedQty: Num; unitPrice?: Num | null; discountPercent?: Num | null };
 
 export interface OrderForApproval {
   currency?: string | null;

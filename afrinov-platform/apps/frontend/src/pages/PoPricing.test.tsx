@@ -148,6 +148,76 @@ describe('line Units and Subtotal, as on the template', () => {
   });
 });
 
+// Discounts count toward Procurement's KPIs: kept per line, not folded into the price.
+describe('line discounts', () => {
+  it('takes a discount off the new order\'s line and total, and sends it', async () => {
+    appAt('/purchase-orders/new');
+    await screen.findByRole('heading', { name: 'New purchase order' });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '8' } });
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '10' } });
+    // 8 x 12.50 = 100.00, 10% off = 90.00, VAT 13.50.
+    expect(screen.getByLabelText('Line 1 subtotal')).toHaveTextContent(money('90.00'));
+    const total = screen.getByLabelText('Order total');
+    expect(within(total).getByText('Line discounts')).toBeInTheDocument();
+    expect(within(total).getByText(money('103.50'))).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders', expect.objectContaining({
+      lines: [{ materialId: 'm-1', orderedQty: 8, unitPrice: 12.5, discountPercent: 10 }],
+    })));
+  });
+
+  it('refuses a discount over 100%', async () => {
+    appAt('/purchase-orders/new');
+    await screen.findByRole('heading', { name: 'New purchase order' });
+    fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '120' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create & submit' }));
+    expect(await screen.findByText(/A discount must be between 0% and 100%/)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('changes a discount on Edit, sending only the line that changed', async () => {
+    appAt('/purchase-orders/po-1/edit');
+    fireEvent.change(await screen.findByLabelText('DISC-115 discount percent'), { target: { value: '20' } });
+    // 3 x 12.50 = 37.50, 20% off = 30.00.
+    expect(screen.getByLabelText('DISC-115 subtotal')).toHaveTextContent(money('30.00'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled());
+    const body = mockPatch.mock.calls[0]![1] as Record<string, unknown>;
+    expect(body.lineDiscounts).toEqual([{ lineId: 'l-1', discountPercent: 20 }]);
+    expect(body).not.toHaveProperty('linePrices');
+  });
+
+  it('shows the discount on the order page, and what the discounts saved', async () => {
+    const discounted = {
+      ...PRICED,
+      lines: [{ ...PRICED.lines[0]!, discountPercent: '20', discount: '7.50', subtotal: '30.00', vat: '4.50', net: '34.50' }, PRICED.lines[1]!],
+      totals: { subtotal: '30.00', vat: '4.50', net: '34.50', unpricedLines: 1, discount: '7.50' },
+    };
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/po-1' ? discounted : path.endsWith('/approval') ? { subtotal: '30.00', vat: '4.50', net: '34.50', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] } : []));
+    detailPage();
+    const line = (await screen.findByText('Cutting disc')).closest('tr')!;
+    expect(within(line).getByText('20%')).toBeInTheDocument();
+    const totals = screen.getByLabelText('Order total');
+    expect(within(totals).getByText('Before discounts')).toBeInTheDocument();
+    expect(within(totals).getByText(money('37.50'))).toBeInTheDocument();
+    expect(within(totals).getByText('Line discounts').nextElementSibling).toHaveTextContent(money('7.50'));
+  });
+
+  it('leaves the Discount column and rows off an order without discounts', async () => {
+    detailPage();
+    await screen.findByText('Cutting disc');
+    expect(screen.queryByRole('columnheader', { name: 'Discount' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Before discounts')).not.toBeInTheDocument();
+  });
+});
+
 describe('Purchase order detail', () => {
   it('shows each line price, subtotal, VAT and net, and the order total', async () => {
     detailPage();

@@ -109,6 +109,8 @@ export interface MockPurchaseOrderLine {
   receivedQty: string;
   /** Excluding VAT; null when no price was given. */
   unitPrice?: string | null;
+  /** Percent off the unit price; "0" for none. */
+  discountPercent?: string;
   /** YYYY-MM-DD; null: the order's expected date. */
   deliveryDate?: string | null;
 }

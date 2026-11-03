@@ -117,6 +117,13 @@ describe('documentLines', () => {
     expect(second![5]).toBe(documentLines(order({ lines: [order().lines[1]!] }))[0]![5]);
     expect(second![5]).not.toBe('-');
   });
+
+  // The template has no discount column: the supplier is shown what it is paid.
+  it('prints a discounted line at its discounted unit price', () => {
+    const [line] = documentLines(order({ lines: [{ ...order().lines[0]!, discountPercent: '20', subtotal: '100.00', vat: '15.00', net: '115.00' }] }));
+    expect(line![3]).toMatch(/^R\s10,00$/);
+    expect(line![8]).toMatch(/^R\s115,00$/);
+  });
 });
 
 describe('buildPoDocument', () => {

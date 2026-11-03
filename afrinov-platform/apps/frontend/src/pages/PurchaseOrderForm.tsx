@@ -59,10 +59,13 @@ interface Supplier {
   contactName?: string | null; contactPhone?: string | null; contactEmail?: string | null; address?: string | null;
 }
 /** A line being typed. `key` stays with the line as others are added or removed. */
-interface DraftLine { key: number; materialId: string; orderedQty: string; unitPrice: string; deliveryDate: string }
+interface DraftLine { key: number; materialId: string; orderedQty: string; unitPrice: string; discountPercent: string; deliveryDate: string }
 
 let nextLineKey = 1;
-const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', orderedQty: '', unitPrice: '', deliveryDate: '' });
+const blankLine = (): DraftLine => ({ key: nextLineKey++, materialId: '', orderedQty: '', unitPrice: '', discountPercent: '', deliveryDate: '' });
+
+/** A discount is blank (none) or 0–100%, to 2 places. */
+const badDiscount = (v: string) => v.trim() !== '' && !(Number(v) >= 0 && Number(v) <= 100 && Math.round(Number(v) * 100) === Number(v) * 100);
 
 /** One opening of the new-item drawer: the line it is for, and which opening it is. */
 interface NewItemSession { key: number; session: number }
@@ -104,8 +107,8 @@ export function alignToLatest(dates: string[], expected: string): { dates: strin
 // Manhours and Material workbook: item, units, quantity, unit price, subtotal,
 // then the delivery date. Units comes from the item; the subtotal is unit
 // price x quantity, before VAT.
-const NEW_LINE_GRID = 'grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_4.5rem_6rem_7.5rem_8.5rem_9.5rem_2.5rem] gap-2';
-const EDIT_LINE_GRID = 'grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_4.5rem_5rem_7.5rem_8.5rem_9.5rem] gap-2';
+const NEW_LINE_GRID = 'grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_4.5rem_6rem_7.5rem_5.5rem_8.5rem_9.5rem_2.5rem] gap-2';
+const EDIT_LINE_GRID = 'grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_4.5rem_5rem_7.5rem_5.5rem_8.5rem_9.5rem] gap-2';
 /** A read-only cell beside the inputs: the line's units, quantity or subtotal. */
 function LineValue({ label, children, align = 'left' }: { label: string; children: React.ReactNode; align?: 'left' | 'right' }) {
   return <output aria-label={label} className={`block py-2 text-sm text-surface-700 truncate ${align === 'right' ? 'text-right font-mono' : ''}`}>{children}</output>;
@@ -309,6 +312,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
     const validLines = dated.lines.filter((l) => l.materialId && Number(l.orderedQty) > 0);
     if (validLines.length === 0) { setValidation('Add at least one line with a positive quantity.'); return; }
     if (validLines.some((l) => l.unitPrice.trim() !== '' && !(Number(l.unitPrice) >= 0))) { setValidation('A unit price must be 0 or more, or left blank.'); return; }
+    if (validLines.some((l) => badDiscount(l.discountPercent))) { setValidation('A discount must be between 0% and 100%, to 2 decimals, or left blank.'); return; }
     const problem = checkVat(vatRate) ?? checkDetails(details);
     if (problem) { setValidation(problem); return; }
     setBusy(submit ? 'submit' : 'draft');
@@ -324,6 +328,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
           materialId: l.materialId,
           orderedQty: Number(l.orderedQty),
           ...(l.unitPrice.trim() !== '' ? { unitPrice: Number(l.unitPrice) } : {}),
+          ...(Number(l.discountPercent) > 0 ? { discountPercent: Number(l.discountPercent) } : {}),
           ...(l.deliveryDate ? { deliveryDate: l.deliveryDate } : {}),
         })),
       });
@@ -401,7 +406,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
             <p className="text-meta mb-2">Filled in from what needs ordering: quantities bring each item up to its Required Stock, and prices start from unit cost. Change them to what you are ordering.</p>
           )}
           <div className={`hidden md:grid ${NEW_LINE_GRID} text-meta mb-1`}>
-            <span>Material</span><span>Units</span><span>Quantity</span><span className="text-right">Unit price</span><span className="text-right">Subtotal</span><span>Delivery date</span><span />
+            <span>Material</span><span>Units</span><span>Quantity</span><span className="text-right">Unit price</span><span className="text-right">Discount %</span><span className="text-right">Subtotal</span><span>Delivery date</span><span />
           </div>
           <div className="space-y-2">
             {lines.map((l, i) => (
@@ -422,6 +427,10 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 </div>
                 <div className="col-span-3 md:col-span-1">
                   <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Unit price" value={l.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} aria-label={`Line ${i + 1} unit price`} className="text-right" />
+                </div>
+                <div className="col-span-3 md:col-span-1">
+                  {/* Off the unit price, as the supplier quotes it: the saving counts toward Procurement's KPIs. */}
+                  <Input type="number" min="0" max="100" step="0.01" inputMode="decimal" placeholder="0" value={l.discountPercent} onChange={(e) => updateLine(i, { discountPercent: e.target.value })} aria-label={`Line ${i + 1} discount percent`} className="text-right" />
                 </div>
                 <div className="col-span-3 md:col-span-1">
                   <LineValue label={`Line ${i + 1} subtotal`} align="right">
@@ -445,6 +454,9 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
           </div>
           {lines.length > 0 && (
             <dl className="mt-3 ml-auto text-sm grid grid-cols-2 gap-x-6 gap-y-1 w-full sm:w-72" aria-label="Order total">
+              {Number(preview.totals.discount ?? 0) > 0 && (
+                <><dt className="text-surface-500">Line discounts</dt><dd className="text-right font-mono text-success-700">−{formatMoney(preview.totals.discount, currency)}</dd></>
+              )}
               <dt className="text-surface-500">Subtotal</dt><dd className="text-right font-mono">{formatMoney(preview.totals.subtotal, currency)}</dd>
               <dt className="text-surface-500">VAT {formatRate(Number(vatRate) || 0)}</dt><dd className="text-right font-mono">{formatMoney(preview.totals.vat, currency)}</dd>
               <dt className="font-semibold">Total</dt><dd className="text-right font-mono font-semibold">{formatMoney(preview.totals.net, currency)}</dd>
@@ -503,6 +515,8 @@ interface EditLine {
   material: { sku: string; name: string; unitOfMeasure: string; category?: string; projectNumber?: string | null };
   orderedQty: string;
   unitPrice?: string | null;
+  /** Percent off the unit price; "0" for none. */
+  discountPercent?: string | null;
   deliveryDate?: string | null;
 }
 interface EditableOrder extends OrderDetails {
@@ -567,6 +581,9 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const [prices, setPrices] = useState<Record<string, string>>(
     () => Object.fromEntries(po.lines.map((l) => [l.id, l.unitPrice === null || l.unitPrice === undefined ? '' : String(Number(l.unitPrice))])),
   );
+  const [discounts, setDiscounts] = useState<Record<string, string>>(
+    () => Object.fromEntries(po.lines.map((l) => [l.id, Number(l.discountPercent ?? 0) > 0 ? String(Number(l.discountPercent)) : ''])),
+  );
   const [dates, setDates] = useState<Record<string, string>>(
     () => Object.fromEntries(po.lines.map((l) => [l.id, l.deliveryDate?.slice(0, 10) ?? ''])),
   );
@@ -582,7 +599,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
   const [details, setDetails] = useState<OrderDetailsDraft>(() => draftFromOrder(po));
   const [busy, setBusy] = useState(false);
   // Each line's subtotal at the prices being typed, for its Subtotal column.
-  const editMoney = priceLines(po.lines.map((l) => ({ orderedQty: l.orderedQty, unitPrice: prices[l.id]?.trim() ? prices[l.id] : null })), Number(vatRate) || 0).lines;
+  const editMoney = priceLines(po.lines.map((l) => ({ orderedQty: l.orderedQty, unitPrice: prices[l.id]?.trim() ? prices[l.id] : null, discountPercent: discounts[l.id] || 0 })), Number(vatRate) || 0).lines;
   const [validation, setValidation] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
@@ -590,6 +607,8 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
     setValidation(null);
     const badPrice = po.lines.find((l) => prices[l.id]!.trim() !== '' && !(Number(prices[l.id]) >= 0));
     if (badPrice) { setValidation(`Enter a price of 0 or more for ${badPrice.material.sku}, or leave it blank.`); return; }
+    const badLineDiscount = po.lines.find((l) => badDiscount(discounts[l.id] ?? ''));
+    if (badLineDiscount) { setValidation(`Enter a discount between 0% and 100% for ${badLineDiscount.material.sku}, or leave it blank.`); return; }
     const problem = checkVat(vatRate) ?? checkDetails(details);
     if (problem) { setValidation(problem); return; }
     const rate = Number(vatRate);
@@ -599,6 +618,11 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
       .map((l) => ({ lineId: l.id, before: l.unitPrice === null || l.unitPrice === undefined ? null : Number(l.unitPrice), after: prices[l.id]!.trim() === '' ? null : Number(prices[l.id]) }))
       .filter((p) => p.before !== p.after)
       .map(({ lineId, after }) => ({ lineId, unitPrice: after }));
+    // Only the lines whose discount changed are sent.
+    const lineDiscounts = po.lines
+      .map((l) => ({ lineId: l.id, before: Number(l.discountPercent ?? 0), after: Number(discounts[l.id] || 0) }))
+      .filter((d) => d.before !== d.after)
+      .map(({ lineId, after }) => ({ lineId, discountPercent: after }));
     const lineDeliveryDates = po.lines
       .filter((l) => (l.deliveryDate?.slice(0, 10) ?? '') !== dated.dates[l.id])
       .map((l) => ({ lineId: l.id, deliveryDate: dated.dates[l.id] || null }));
@@ -610,6 +634,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
         ...detailsBody(details, 'edit'),
         ...(rate !== Number(po.vatRate ?? 15) ? { vatRate: rate } : {}),
         ...(linePrices.length > 0 ? { linePrices } : {}),
+        ...(lineDiscounts.length > 0 ? { lineDiscounts } : {}),
         ...(lineDeliveryDates.length > 0 ? { lineDeliveryDates } : {}),
       });
       toast.success(`${po.number} saved`);
@@ -632,7 +657,7 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
         <fieldset className="space-y-2">
           <legend className="text-eyebrow mb-1">Lines</legend>
           <div className={`hidden md:grid ${EDIT_LINE_GRID} text-meta`}>
-            <span>Material</span><span>Units</span><span className="text-right">Quantity</span><span className="text-right">Unit price</span><span className="text-right">Subtotal</span><span>Delivery date</span>
+            <span>Material</span><span>Units</span><span className="text-right">Quantity</span><span className="text-right">Unit price</span><span className="text-right">Discount %</span><span className="text-right">Subtotal</span><span>Delivery date</span>
           </div>
           {po.lines.map((l, i) => (
             <div key={l.id} className={`${EDIT_LINE_GRID} items-center`}>
@@ -643,6 +668,8 @@ function EditPurchaseOrderForm({ po }: { po: EditableOrder }) {
               <div className="col-span-3 md:col-span-1"><LineValue label={`${l.material.sku} quantity`} align="right">{formatNumber(Number(l.orderedQty))}</LineValue></div>
               <Input id={`po-edit-price-${l.id}`} aria-label={`${l.material.sku} unit price`} type="number" min="0" step="0.01" inputMode="decimal" placeholder="No price" value={prices[l.id] ?? ''}
                 onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="text-right col-span-3 md:col-span-1" />
+              <Input id={`po-edit-discount-${l.id}`} aria-label={`${l.material.sku} discount percent`} type="number" min="0" max="100" step="0.01" inputMode="decimal" placeholder="0" value={discounts[l.id] ?? ''}
+                onChange={(e) => setDiscounts((d) => ({ ...d, [l.id]: e.target.value }))} className="text-right col-span-3 md:col-span-1" />
               <div className="col-span-3 md:col-span-1">
                 <LineValue label={`${l.material.sku} subtotal`} align="right">{editMoney[i]?.subtotal ? formatMoney(editMoney[i]!.subtotal, po.currency ?? 'ZAR') : '—'}</LineValue>
               </div>

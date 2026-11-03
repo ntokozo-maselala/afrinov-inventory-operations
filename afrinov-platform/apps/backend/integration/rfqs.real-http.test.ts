@@ -343,7 +343,7 @@ describe('requests for quotation over real HTTP', () => {
       expect(a).toMatchObject({ quoteReference: 'Q-2291', leadTime: '2 weeks', declined: false });
       expect(a.quotedAt?.slice(0, 10)).toBe(todayInSouthAfrica());
       // 4 x 160 = 640, VAT 15% for a rand supplier; the second line has no price.
-      expect(a.totals).toEqual({ subtotal: '640.00', vat: '96.00', net: '736.00', unpricedLines: 1 });
+      expect(a.totals).toEqual({ subtotal: '640.00', vat: '96.00', net: '736.00', unpricedLines: 1, discount: '0.00' });
       expect(res.body.suppliers.find((s) => s.supplierId === supplierB)!.totals).toBeNull();
 
       // Corrected: both lines now priced.

@@ -47,6 +47,8 @@ export const updateSupplierSchema = z.object({
 
 const vatRate = z.number().min(0).max(100);
 const unitPrice = z.number().nonnegative().max(1e12);
+/** Percent off a line's unit price, to 2 places (Procurement KPIs count the saving). */
+const discountPercent = z.number().min(0).max(100).refine((n) => Number.isInteger(Math.round(n * 100 * 1e6) / 1e6), 'At most 2 decimal places');
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD');
 const text = (max: number) => z.string().max(max).nullable().optional();
 /** The longest email address there can be. */
@@ -89,6 +91,7 @@ export const createPOSchema = z.object({
         materialId: z.uuid(),
         orderedQty: z.number().positive(),
         unitPrice: z.number().nonnegative().max(1e12).optional(),
+        discountPercent: discountPercent.optional(),
         deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').optional(),
       }),
     )
@@ -100,6 +103,7 @@ export const updatePOSchema = z.object({
   expectedDeliveryDate: z.string().nullable().optional(),
   vatRate: vatRate.optional(),
   linePrices: z.array(z.object({ lineId: z.uuid(), unitPrice: unitPrice.nullable() })).max(500).optional(),
+  lineDiscounts: z.array(z.object({ lineId: z.uuid(), discountPercent })).max(500).optional(),
   lineDeliveryDates: z.array(z.object({ lineId: z.uuid(), deliveryDate: day.nullable() })).max(500).optional(),
   ...orderDetails,
 });

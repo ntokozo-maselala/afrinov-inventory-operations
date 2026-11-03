@@ -218,8 +218,12 @@ export interface OrderDetailsInput {
 
 export interface CreatePOInput extends OrderDetailsInput {
   supplierId: string;
-  /** unitPrice excludes VAT, in the supplier's currency. deliveryDate defaults to the order's expected date. */
-  lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number; deliveryDate?: string }>;
+  /**
+   * unitPrice excludes VAT, in the supplier's currency: the list price, which
+   * discountPercent (0 when left out) comes off. deliveryDate defaults to the
+   * order's expected date.
+   */
+  lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number; discountPercent?: number; deliveryDate?: string }>;
   notes?: string;
   expectedDeliveryDate?: string;
   /** Percent. Left out: the VAT setting for rand suppliers, 0 for other currencies. */
@@ -233,6 +237,8 @@ export interface UpdatePOInput extends OrderDetailsInput {
   vatRate?: number;
   /** New unit prices by line id; null clears one. */
   linePrices?: Array<{ lineId: string; unitPrice: number | null }>;
+  /** New discounts by line id, in percent. */
+  lineDiscounts?: Array<{ lineId: string; discountPercent: number }>;
   /** New delivery dates by line id; null falls back to the order's expected date. */
   lineDeliveryDates?: Array<{ lineId: string; deliveryDate: string | null }>;
 }
@@ -536,6 +542,7 @@ export const PurchaseOrderService = {
               orderedQty: l.orderedQty,
               receivedQty: 0,
               unitPrice: l.unitPrice ?? null,
+              discountPercent: l.discountPercent ?? 0,
               deliveryDate: l.deliveryDate ? toDateOnly(l.deliveryDate) : null,
             })),
           },
@@ -597,6 +604,14 @@ export const PurchaseOrderService = {
         await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { unitPrice: p.unitPrice } });
         priceChanges.push({ lineId: line.id, before: line.unitPrice?.toString() ?? null, after: p.unitPrice === null ? null : String(p.unitPrice) });
       }
+      // A discount changes what is paid, as a price does (Procurement KPIs count it).
+      const discountChanges: Array<{ lineId: string; before: string; after: string }> = [];
+      for (const d of input.lineDiscounts ?? []) {
+        const line = po.lines.find((l) => l.id === d.lineId);
+        if (!line) throw Errors.validation(`Line ${d.lineId} is not on purchase order ${po.number}`);
+        await tx.purchaseOrderLine.update({ where: { id: line.id }, data: { discountPercent: d.discountPercent } });
+        discountChanges.push({ lineId: line.id, before: new Prisma.Decimal(line.discountPercent ?? 0).toString(), after: String(d.discountPercent) });
+      }
       const dateChanges: Array<{ lineId: string; before: string | null; after: string | null }> = [];
       for (const d of input.lineDeliveryDates ?? []) {
         const line = po.lines.find((l) => l.id === d.lineId);
@@ -612,16 +627,18 @@ export const PurchaseOrderService = {
       }
       const realPrices = priceChanges.filter((c) => c.before === null ? c.after !== null : c.after === null || !new Prisma.Decimal(c.before).equals(c.after));
       const realDates = dateChanges.filter((c) => c.before !== c.after);
+      const realDiscounts = discountChanges.filter((c) => !new Prisma.Decimal(c.before).equals(c.after));
       priceChanges.splice(0, priceChanges.length, ...realPrices);
       dateChanges.splice(0, dateChanges.length, ...realDates);
-      const anyChange = Object.keys(data).length > 0 || priceChanges.length > 0 || dateChanges.length > 0;
+      discountChanges.splice(0, discountChanges.length, ...realDiscounts);
+      const anyChange = Object.keys(data).length > 0 || priceChanges.length > 0 || dateChanges.length > 0 || discountChanges.length > 0;
       // Changing an approved order makes a new revision, as the template's
       // "Rev 01", so the supplier can tell the copies apart.
       if (po.status === 'APPROVED' && anyChange) data.revision = po.revision + 1;
       // An approved order whose new total is past its approver's limit (or has
       // lost a price) goes back for approval; the edit can't raise the amount
       // someone signed off.
-      if (po.status === 'APPROVED' && po.approvedById && (priceChanges.length > 0 || 'vatRate' in data)) {
+      if (po.status === 'APPROVED' && po.approvedById && (priceChanges.length > 0 || discountChanges.length > 0 || 'vatRate' in data)) {
         const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
         const approver = await tx.user.findUnique({ where: { id: po.approvedById }, select: { approvalLimit: true } });
         const vat = input.vatRate ?? po.vatRate;
@@ -645,11 +662,13 @@ export const PurchaseOrderService = {
           before: {
             ...pick(po as unknown as Record<string, unknown>),
             ...(priceChanges.length ? { unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.before })) } : {}),
+            ...(discountChanges.length ? { discounts: discountChanges.map((c) => ({ lineId: c.lineId, discountPercent: c.before })) } : {}),
             ...(dateChanges.length ? { deliveryDates: dateChanges.map((c) => ({ lineId: c.lineId, deliveryDate: c.before })) } : {}),
           } as Prisma.InputJsonValue,
           after: {
             ...pick(after as unknown as Record<string, unknown>),
             ...(priceChanges.length ? { unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.after })) } : {}),
+            ...(discountChanges.length ? { discounts: discountChanges.map((c) => ({ lineId: c.lineId, discountPercent: c.after })) } : {}),
             ...(dateChanges.length ? { deliveryDates: dateChanges.map((c) => ({ lineId: c.lineId, deliveryDate: c.after })) } : {}),
           } as Prisma.InputJsonValue,
         },

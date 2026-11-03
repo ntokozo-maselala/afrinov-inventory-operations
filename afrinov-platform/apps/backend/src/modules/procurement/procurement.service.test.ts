@@ -27,7 +27,7 @@ interface PO {
   closedAt?: Date | null; closedById?: string | null; closeReason?: string | null;
   lines: POL[];
 }
-interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal; unitPrice?: number | null; deliveryDate?: Date | null }
+interface POL { id: string; purchaseOrderId: string; materialId: string; orderedQty: Prisma.Decimal; receivedQty: Prisma.Decimal; unitPrice?: number | null; discountPercent?: number; deliveryDate?: Date | null }
 interface Loc { id: string; name: string; active: boolean }
 interface Sup {
   id: string; name: string; active: boolean; currency?: string; paymentTerms?: string | null;
@@ -114,10 +114,10 @@ function makePrisma(): unknown {
       },
       create: async ({ data, include }: { data: Record<string, unknown>; include?: { lines?: boolean } }) => {
         const id = nextPOId();
-        const createLines = (data.lines as { create?: Array<{ materialId: string; orderedQty: Prisma.Decimal | number; unitPrice?: number | null; deliveryDate?: Date | null }> } | undefined)?.create ?? [];
+        const createLines = (data.lines as { create?: Array<{ materialId: string; orderedQty: Prisma.Decimal | number; unitPrice?: number | null; discountPercent?: number; deliveryDate?: Date | null }> } | undefined)?.create ?? [];
         const lines: POL[] = createLines.map((c) => {
           const lid = nextLineId();
-          const pol: POL = { id: lid, purchaseOrderId: id, materialId: c.materialId, orderedQty: c.orderedQty instanceof Prisma.Decimal ? c.orderedQty : new Prisma.Decimal(c.orderedQty), receivedQty: new Prisma.Decimal(0), unitPrice: c.unitPrice ?? null, deliveryDate: c.deliveryDate ?? null };
+          const pol: POL = { id: lid, purchaseOrderId: id, materialId: c.materialId, orderedQty: c.orderedQty instanceof Prisma.Decimal ? c.orderedQty : new Prisma.Decimal(c.orderedQty), receivedQty: new Prisma.Decimal(0), unitPrice: c.unitPrice ?? null, discountPercent: c.discountPercent ?? 0, deliveryDate: c.deliveryDate ?? null };
           db.lines.set(lid, pol);
           return pol;
         });
@@ -585,7 +585,7 @@ describe('PurchaseOrderService prices and VAT (procurement roadmap Phase 2)', ()
     expect(po).toMatchObject({ currency: 'ZAR', vatRate: 15 });
     const read = await PurchaseOrderService.getById(po.id);
     expect(read.lines[0]).toMatchObject({ subtotal: '37.50', vat: '5.63', net: '43.13' });
-    expect(read.totals).toEqual({ subtotal: '37.50', vat: '5.63', net: '43.13', unpricedLines: 0 });
+    expect(read.totals).toEqual({ subtotal: '37.50', vat: '5.63', net: '43.13', unpricedLines: 0, discount: '0.00' });
   });
 
   it('starts a foreign-currency order at 0% VAT', async () => {
@@ -610,7 +610,7 @@ describe('PurchaseOrderService prices and VAT (procurement roadmap Phase 2)', ()
     }, 'user-1');
     const read = await PurchaseOrderService.getById(po.id);
     expect(read.lines[1]).toMatchObject({ subtotal: null, vat: null, net: null });
-    expect(read.totals).toEqual({ subtotal: '20.00', vat: '3.00', net: '23.00', unpricedLines: 1 });
+    expect(read.totals).toEqual({ subtotal: '20.00', vat: '3.00', net: '23.00', unpricedLines: 1, discount: '0.00' });
   });
 
   it('changes line prices and the VAT rate while the order is editable, and logs both', async () => {
@@ -619,13 +619,34 @@ describe('PurchaseOrderService prices and VAT (procurement roadmap Phase 2)', ()
     const lineId = (await PurchaseOrderService.getById(po.id)).lines[0]!.id;
     await PurchaseOrderService.update({ id: po.id, vatRate: 0, linePrices: [{ lineId, unitPrice: 2.5 }] }, 'user-2');
     const read = await PurchaseOrderService.getById(po.id);
-    expect(read.totals).toEqual({ subtotal: '10.00', vat: '0.00', net: '10.00', unpricedLines: 0 });
+    expect(read.totals).toEqual({ subtotal: '10.00', vat: '0.00', net: '10.00', unpricedLines: 0, discount: '0.00' });
     const entry = db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id).pop()!;
     // The mock keeps the rate as a number; Postgres returns a Decimal, logged as text.
     expect(entry.before).toMatchObject({ unitPrices: [{ lineId, unitPrice: null }] });
     expect(String((entry.before as { vatRate: unknown }).vatRate)).toBe('15');
     expect(entry.after).toMatchObject({ unitPrices: [{ lineId, unitPrice: '2.5' }] });
     expect(String((entry.after as { vatRate: unknown }).vatRate)).toBe('0');
+  });
+
+  // Discounts count toward Procurement's KPIs: kept on the line, not folded into the price.
+  it('keeps a line\'s discount, takes it off the totals, and logs a change to it', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 60, unitPrice: 95, discountPercent: 10 }] }, 'user-1');
+    const read = await PurchaseOrderService.getById(po.id);
+    expect(read.lines[0]).toMatchObject({ subtotal: '5130.00', discount: '570.00' });
+    expect(read.totals).toEqual({ subtotal: '5130.00', vat: '769.50', net: '5899.50', unpricedLines: 0, discount: '570.00' });
+
+    const lineId = read.lines[0]!.id;
+    await PurchaseOrderService.update({ id: po.id, lineDiscounts: [{ lineId, discountPercent: 15 }] }, 'user-2');
+    expect((await PurchaseOrderService.getById(po.id)).totals).toMatchObject({ subtotal: '4845.00', discount: '855.00' });
+    const entry = db.audit.filter((a) => a.action === 'UPDATE' && a.entityId === po.id).pop()!;
+    expect(entry.before).toMatchObject({ discounts: [{ lineId, discountPercent: '10' }] });
+    expect(entry.after).toMatchObject({ discounts: [{ lineId, discountPercent: '15' }] });
+
+    // An unchanged discount isn't a change.
+    const entries = db.audit.length;
+    await PurchaseOrderService.update({ id: po.id, lineDiscounts: [{ lineId, discountPercent: 15 }] }, 'user-2');
+    expect(db.audit.length).toBe(entries);
   });
 
   it('refuses a price for a line on another order', async () => {

@@ -386,7 +386,27 @@ describe('receiving stock over real HTTP', () => {
       const res = await api('PATCH', `/purchase-orders/${created.body.id}`, { vatRate: 0, linePrices: [{ lineId, unitPrice: 2.5 }] });
       expect(res.status).toBe(200);
       const order = (await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body;
-      expect(order.totals).toEqual({ subtotal: '10.00', vat: '0.00', net: '10.00', unpricedLines: 0 });
+      expect(order.totals).toEqual({ subtotal: '10.00', vat: '0.00', net: '10.00', unpricedLines: 0, discount: '0.00' });
+    });
+
+    // Discounts count toward Procurement's KPIs: kept on the line, off the totals.
+    it('keeps a line discount, takes it off the totals, and changes it', async () => {
+      const created = await api<{ id: string }>('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 60, unitPrice: 95, discountPercent: 10 }] });
+      expect(created.status).toBe(201);
+      const order = (await api<Priced & { lines: Array<{ discountPercent: string; discount: string }> }>('GET', `/purchase-orders/${created.body.id}`)).body;
+      expect(Number(order.lines[0]!.discountPercent)).toBe(10);
+      expect(order.totals).toEqual({ subtotal: '5130.00', vat: '769.50', net: '5899.50', unpricedLines: 0, discount: '570.00' });
+
+      const res = await api('PATCH', `/purchase-orders/${created.body.id}`, { lineDiscounts: [{ lineId: order.lines[0]!.id, discountPercent: 0 }] });
+      expect(res.status).toBe(200);
+      expect((await api<Priced>('GET', `/purchase-orders/${created.body.id}`)).body.totals).toMatchObject({ subtotal: '5700.00', discount: '0.00' });
+    });
+
+    it('refuses a discount over 100% or with more than 2 decimals', async () => {
+      for (const discountPercent of [101, -1, 10.005]) {
+        const res = await api('POST', '/purchase-orders', { supplierId, vatRate: 15, lines: [{ materialId, orderedQty: 1, unitPrice: 1, discountPercent }] });
+        expect(res.status).toBe(400);
+      }
     });
 
     it('refuses a VAT rate over 100', async () => {

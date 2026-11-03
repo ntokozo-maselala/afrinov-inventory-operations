@@ -34,8 +34,12 @@ interface POLine {
   material: { sku: string; name: string; unitOfMeasure: string };
   orderedQty: string;
   receivedQty: string;
-  /** Excluding VAT; null when the line has no price. */
+  /** Excluding VAT; null when the line has no price. The list price, before its discount. */
   unitPrice?: string | null;
+  /** Percent off the unit price; "0" for none. */
+  discountPercent?: string | null;
+  /** What the discount saves on the line, before VAT. */
+  discount?: string | null;
   subtotal?: string | null;
   vat?: string | null;
   net?: string | null;
@@ -554,6 +558,11 @@ function lineColumns(po: PO): DataTableColumn<POLine>[] {
       },
     },
     { key: 'price', header: 'Unit price', align: 'right', className: 'text-num', render: (l) => (l.unitPrice === null || l.unitPrice === undefined ? <span className="text-warning-700">No price</span> : <span className="font-mono whitespace-nowrap">{formatMoney(l.unitPrice, currency)}</span>), width: '8rem' },
+    // Only when some line has a discount (Procurement's KPIs count the saving).
+    ...(po.lines.some((l) => Number(l.discountPercent ?? 0) > 0) ? [{
+      key: 'discount', header: 'Discount', align: 'right' as const, className: 'text-num', width: '6rem',
+      render: (l: POLine) => (Number(l.discountPercent ?? 0) > 0 ? <span className="font-mono whitespace-nowrap">{formatRate(l.discountPercent)}</span> : none),
+    }] : []),
     { key: 'subtotal', header: 'Subtotal', align: 'right', className: 'text-num', render: (l) => (l.subtotal ? <span className="font-mono whitespace-nowrap">{formatMoney(l.subtotal, currency)}</span> : none), width: '8rem' },
     { key: 'vat', header: 'VAT', align: 'right', className: 'text-num', render: (l) => (l.vat ? <span className="font-mono whitespace-nowrap">{formatMoney(l.vat, currency)}</span> : none), width: '7rem' },
     { key: 'net', header: 'Net value', align: 'right', className: 'text-num', render: (l) => (l.net ? <span className="font-mono whitespace-nowrap font-semibold">{formatMoney(l.net, currency)}</span> : none), width: '8rem' },
@@ -634,6 +643,12 @@ function OrderTotals({ po, totals, onAddPrices }: { po: PO; totals: PoTotals; on
   return (
     <div className="mt-3 flex flex-col items-end gap-2">
       <dl className="surface-card p-4 text-sm grid grid-cols-2 gap-x-6 gap-y-1 w-full sm:w-80" aria-label="Order total">
+        {Number(totals.discount ?? 0) > 0 && (
+          <>
+            <dt className="text-surface-500">Before discounts</dt><dd className="text-right font-mono">{formatMoney((Number(totals.subtotal) + Number(totals.discount)).toFixed(2), currency)}</dd>
+            <dt className="text-surface-500">Line discounts</dt><dd className="text-right font-mono text-success-700">−{formatMoney(totals.discount, currency)}</dd>
+          </>
+        )}
         <dt className="text-surface-500">Subtotal</dt><dd className="text-right font-mono">{formatMoney(totals.subtotal, currency)}</dd>
         <dt className="text-surface-500">VAT {formatRate(po.vatRate)}</dt><dd className="text-right font-mono">{formatMoney(totals.vat, currency)}</dd>
         <dt className="font-semibold text-surface-900 border-t border-surface-200 pt-1">Total</dt>

@@ -548,8 +548,8 @@ export const OPERATIONS: Operation[] = [
     procurement: true, byOrderKind: P.CreatePurchaseOrder, body: createPOSchema, success: 201, errors: [404],
   },
   {
-    method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices or delivery dates',
-    description: 'A project order stays on a project and a Stores order off one (400).',
+    method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices, discounts or delivery dates',
+    description: "A project order stays on a project and a Stores order off one (400). A line's discount (`lineDiscounts`, in percent) comes off its unit price; the order's `totals.discount` is what the discounts save, before VAT. Changing a price, a discount or the VAT rate on an approved order sends it back for approval when it goes over the approver's limit.",
     procurement: true, byOrderKind: P.CreatePurchaseOrder, body: updatePOSchema, errors: [404, 409],
   },
   {
