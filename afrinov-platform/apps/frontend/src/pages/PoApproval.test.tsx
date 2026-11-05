@@ -143,6 +143,15 @@ describe('the record of who signed', () => {
     expect(await screen.findByText('by Ona Moloane, Chief Executive (standing in)')).toBeInTheDocument();
   });
 
+  it('names whoever approved it without signing, as well as who signed', async () => {
+    current.po = {
+      ...order('APPROVED'), approvedAt: '2026-11-03T09:00:00Z', approvedBy: { id: 'u-2', name: 'Second Person' },
+      signatures: [{ step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { name: 'Ona Moloane' } }],
+    } as typeof current.po;
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('by Ona Moloane, approved by Second Person')).toBeInTheDocument();
+  });
+
   it('says in the Activity who stood in, and when signatures were cleared', async () => {
     mockGet.mockImplementation(async (path: string) => {
       if (path === '/purchase-orders/po-1') return current.po;

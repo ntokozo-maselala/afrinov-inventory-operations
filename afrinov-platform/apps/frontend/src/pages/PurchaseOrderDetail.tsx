@@ -115,6 +115,16 @@ function statusLabel(s: POStatus): string {
   } as Record<string, string>)[s] ?? s;
 }
 
+/** Who signed it, then whoever approved it without signing, as when the threshold was raised part-way. */
+function approvedByLine(po: PO): string {
+  const signatures = po.signatures ?? [];
+  if (signatures.length === 0) return po.approvedBy?.name ?? '—';
+  const names = signatures.map((s) => `${s.signedBy?.name ?? 'A removed user'}${s.standIn ? ' (standing in)' : ''}`);
+  const approver = po.approvedBy?.name;
+  if (approver && !signatures.some((s) => s.signedBy?.name === approver)) names.push(`approved by ${approver}`);
+  return names.join(', ');
+}
+
 function isCancellable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
 function isEditable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
 function isSubmittable(s: POStatus): boolean { return s === 'DRAFT'; }
@@ -272,9 +282,7 @@ export function PurchaseOrderDetail() {
                   <><dt className="text-surface-500">Expected</dt><dd className="col-span-2 text-meta">{formatDate(fresh.expectedDeliveryDate)}</dd></>
                 )}
                 {fresh.approvedAt && (
-                  <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {fresh.signatures?.length
-                    ? fresh.signatures.map((s) => `${s.signedBy?.name ?? 'A removed user'}${s.standIn ? ' (standing in)' : ''}`).join(', ')
-                    : fresh.approvedBy?.name ?? '—'}</span></dd></>
+                  <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {approvedByLine(fresh)}</span></dd></>
                 )}
                 {fresh.deliveredAt && (
                   // An order finished by the retired Confirm delivery went to site, not into the store; one

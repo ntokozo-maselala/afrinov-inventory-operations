@@ -344,8 +344,12 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   ensure(34);
   y += 2;
   const signed = po.signatures ?? [];
+  // Someone who approved it without signing, as when the threshold was raised
+  // part-way and the signatures it had were then enough. Older orders, with none
+  // recorded, have only their approver.
+  const finishedBy = signed.length > 0 && po.approvedAt && po.approvedBy && !signed.some((s) => s.signedBy?.name === po.approvedBy!.name) ? po.approvedBy : null;
   // A fourth box when two signed, as an order from the Director's value up is.
-  const boxes = signed.length > 1 ? 4 : 3;
+  const boxes = signed.length > 1 || finishedBy ? 4 : 3;
   const third = (width - 4 * (boxes - 1)) / boxes;
   const signature = (title: string, name: string, note: string, i: number) => {
     const x = SIDE + i * (third + 4);
@@ -365,13 +369,14 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
     doc.text('Signature and date', x + 2, y + 25);
   };
   signature('Originator', po.createdBy?.name ?? dash, formatDate(po.createdAt), 0);
-  if (signed.length > 1) {
+  if (signed.length > 1 || finishedBy) {
     signed.slice(0, 2).forEach((s, i) => signature(
       s.step === 'DIRECTOR' ? 'Authorization (Director)' : 'Authorization (Procurement)',
       s.signedBy?.name ?? dash,
       `${s.standIn ? 'Stood in, signed' : 'Signed'} ${formatDate(s.signedAt)}`,
       i + 1,
     ));
+    if (finishedBy) signature('Authorization (approved)', finishedBy.name, `Approved ${formatDate(po.approvedAt!)}`, 2);
   } else if (signed.length === 1) {
     // Part-signed, it isn't approved yet; the stamp across the page says so too.
     const only = signed[0]!;
