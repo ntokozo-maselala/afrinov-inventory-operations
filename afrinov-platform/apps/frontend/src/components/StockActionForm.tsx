@@ -105,6 +105,10 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
 
   function reset() { setQuantity(''); setNote(''); setResponsible(''); setReasonCode(''); setOtherDirection(null); setValidation(null); }
 
+  // The error is about what was entered: once any of it changes, it is cleared
+  // until the next post checks again, rather than left saying something no longer true.
+  const edited = <T,>(set: (value: T) => void) => (value: T) => { set(value); setValidation(null); };
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setValidation(null);
@@ -187,10 +191,10 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
       {kind === 'transfer' && (
         <>
           <Field label={quantityLabel} htmlFor="qty" required help={`Available at source: ${row.quantity} ${unit}. ${quantityHelp}`}>
-            <QuantityInput id="qty" kind={unitKind} unit={unit} required value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation && !parsed.ok} />
+            <QuantityInput id="qty" kind={unitKind} unit={unit} required value={quantity} onChange={(e) => edited(setQuantity)(e.target.value)} invalid={!!validation && !parsed.ok} />
           </Field>
           <Field label="Destination location" htmlFor="to" required error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
-            <Select id="to" required value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} invalid={!!validation && !toLocationId}>
+            <Select id="to" required value={toLocationId} onChange={(e) => edited(setToLocationId)(e.target.value)} invalid={!!validation && !toLocationId}>
               <option value="">— select —</option>
               {(locations.data ?? []).filter((l) => l.id !== row.locationId).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
             </Select>
@@ -220,7 +224,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
               <span id="direction-label" className="field-label field-required">Remove or add?</span>
               <div role="group" aria-labelledby="direction-label" className="grid grid-cols-2 gap-2">
                 {(['remove', 'add'] as const).map((d) => (
-                  <Button key={d} type="button" variant={otherDirection === d ? 'primary' : 'secondary'} aria-pressed={otherDirection === d} onClick={() => setOtherDirection(d)}>
+                  <Button key={d} type="button" variant={otherDirection === d ? 'primary' : 'secondary'} aria-pressed={otherDirection === d} onClick={() => edited(setOtherDirection)(d)}>
                     {d === 'remove' ? '− Remove stock' : '+ Add stock'}
                   </Button>
                 ))}
@@ -233,7 +237,7 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
             required
             help={`${quantityHelp}${approvalOn && limit !== null ? ` Worth more than ${formatMoney(limit)} at the unit cost, or with no unit cost, it waits for someone else to approve it.` : ''}`}
           >
-            <QuantityInput id="qty" kind={unitKind} unit={unit} required value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={(!!validation && !parsed.ok) || tooMany} />
+            <QuantityInput id="qty" kind={unitKind} unit={unit} required value={quantity} onChange={(e) => edited(setQuantity)(e.target.value)} invalid={(!!validation && !parsed.ok) || tooMany} />
           </Field>
           {responsibleHelp && (
             <RecipientSelect
@@ -241,14 +245,14 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
               label="Responsible"
               help={responsibleHelp}
               value={responsible}
-              onChange={setResponsible}
+              onChange={edited(setResponsible)}
               recipients={recipients.data ?? []}
               notKnownValue={NOT_KNOWN}
               invalid={!!validation && !responsible}
             />
           )}
           <Field label={noteLabel} htmlFor="note" required={noteRequired}>
-            <Textarea id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={reasonCode === 'FOUND' ? 'e.g. Box behind rack B-2 after the stocktake' : 'e.g. Two discs cracked in the grinder'} invalid={!!validation && noteRequired && !note.trim()} />
+            <Textarea id="note" value={note} onChange={(e) => edited(setNote)(e.target.value)} placeholder={reasonCode === 'FOUND' ? 'e.g. Box behind rack B-2 after the stocktake' : 'e.g. Two discs cracked in the grinder'} invalid={!!validation && noteRequired && !note.trim()} />
           </Field>
           {named && (
             <Alert tone="info" title="This records who was involved, not who is at fault.">
