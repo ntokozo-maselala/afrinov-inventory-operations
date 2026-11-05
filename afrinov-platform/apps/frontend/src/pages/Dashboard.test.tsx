@@ -156,7 +156,7 @@ describe('Dashboard: pending approvals card', () => {
     totals: { subtotal: net, vat: '0.00', net, unpricedLines: 0 },
   });
   beforeEach(() => {
-    auth.roles = ['APPROVER'];
+    auth.roles = ['DIRECTOR'];
     mockGet.mockReset().mockImplementation(async (path: string) => {
       if (path === '/purchase-orders?awaitingMyApproval=true') return [order('po-1', 'AFRI-0101', '920.00')];
       if (path === '/purchase-orders?status=PENDING_APPROVAL') return [order('po-1', 'AFRI-0101', '920.00'), order('po-2', 'AFRI-0102', '9000.00'), order('po-3', 'AFRI-0103', '1.00')];
@@ -168,12 +168,12 @@ describe('Dashboard: pending approvals card', () => {
 
   const approvalCard = async () => (await screen.findByText('Pending Approvals')).closest('a')!;
 
-  it('shows a card with the orders the approver can approve, and counts the others', async () => {
+  it('shows a card with the orders waiting on this person, and counts the others', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const card = await approvalCard();
     expect(card).toHaveAttribute('href', '/purchase-orders?status=mine');
     expect(await within(card).findByText('1')).toBeInTheDocument();
-    expect(await within(card).findByText('waiting for you · 2 more need prices or a higher limit')).toBeInTheDocument();
+    expect(await within(card).findByText('waiting for you · 2 more waiting on prices or someone else')).toBeInTheDocument();
   });
 
   it('says when nothing is waiting', async () => {
@@ -192,9 +192,16 @@ describe('Dashboard: pending approvals card', () => {
     expect(mockGet).not.toHaveBeenCalledWith('/purchase-orders?awaitingMyApproval=true');
   });
 
-  // Stores and Procurement Separation Roadmap: the store approves its own stock orders, in Order stock.
-  it("opens the storeman's queue in Order stock", async () => {
+  it('is not shown to the store, who raises its orders and does not sign them', async () => {
     auth.roles = ['STORE_CONTROLLER'];
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByText('Stock value by category');
+    expect(screen.queryByText('Pending Approvals')).not.toBeInTheDocument();
+  });
+
+  // Those who sign both kinds open the side with orders waiting.
+  it("opens Order stock when only stock orders are waiting on someone who signs both", async () => {
+    auth.roles = ['WORKSHOP_MANAGER'];
     mockGet.mockImplementation(async (path: string) => {
       if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
       if (path === '/reports/stock-value') return VALUE;
@@ -206,15 +213,14 @@ describe('Dashboard: pending approvals card', () => {
     expect(await within(card).findByText('1')).toBeInTheDocument();
   });
 
-  it("counts only stock orders as the storeman's others, not project orders waiting for an approver", async () => {
-    auth.roles = ['STORE_CONTROLLER'];
+  it('counts only project orders as the others for someone who signs only those', async () => {
     mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?awaitingMyApproval=true') return [{ ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null }];
+      if (path === '/purchase-orders?awaitingMyApproval=true') return [order('po-1', 'AFRI-0101', '920.00')];
       if (path === '/purchase-orders?status=PENDING_APPROVAL') {
         return [
+          order('po-1', 'AFRI-0101', '920.00'),
           { ...order('po-7', 'AFRI-0107', '400.00'), projectNumber: null },
-          { ...order('po-1', 'AFRI-0101', '920.00'), projectNumber: 'AFRI-1402' },
-          { ...order('po-2', 'AFRI-0102', '900.00'), projectNumber: 'AFRI-1402' },
+          { ...order('po-8', 'AFRI-0108', '400.00'), projectNumber: null },
         ];
       }
       if (path === '/reports/stock-value') return VALUE;
@@ -223,7 +229,7 @@ describe('Dashboard: pending approvals card', () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const card = await approvalCard();
     expect(await within(card).findByText('waiting for your approval')).toBeInTheDocument();
-    expect(within(card).queryByText(/more need prices/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/more waiting/)).not.toBeInTheDocument();
   });
 
   // Qodo, PR #120: the Dashboard tells the kinds apart as the server does, by a null project.
@@ -236,19 +242,6 @@ describe('Dashboard: pending approvals card', () => {
     });
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(await approvalCard()).toHaveAttribute('href', '/purchase-orders?status=mine');
-  });
-
-  it("doesn't count an order with an empty project number among the storeman's", async () => {
-    auth.roles = ['STORE_CONTROLLER'];
-    mockGet.mockImplementation(async (path: string) => {
-      if (path === '/purchase-orders?awaitingMyApproval=true') return [];
-      if (path === '/purchase-orders?status=PENDING_APPROVAL') return [{ ...order('po-8', 'AFRI-0108', '500.00'), projectNumber: '' }];
-      if (path === '/reports/stock-value') return VALUE;
-      return path.startsWith('/reports/inventory') ? { generatedAt: '2026-10-09T08:00:00Z', currency: 'ZAR', inventory: [], kpis: {} } : [];
-    });
-    render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    const card = await approvalCard();
-    expect(await within(card).findByText('nothing waiting for you')).toBeInTheDocument();
   });
 
   it('counts both kinds for someone who approves both, and opens the side with project orders waiting', async () => {

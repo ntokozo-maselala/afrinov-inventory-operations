@@ -1,105 +1,167 @@
-// Approval by order value, as on the AFRI-0000_x template, where the approver
-// is chosen by the order total (Ona Moloane under R500 000, Simbongile
-// Bantubani from R500 000). Here each user who may approve has a limit: the
-// largest order total, in rand including VAT, they may approve. No limit
-// means any order. Limits are in rand, so an order in another currency needs
-// an approver without a limit. Every line must have a price first, or the
-// total the limit is checked against is not known.
+// Who signs a purchase order, as Afrinov approves them. By the order's value,
+// in rand excluding VAT:
+//   - a project order under the threshold (R200 000): the Procurement Manager;
+//   - a project order at or above it: the Procurement Manager, then the Director;
+//   - a Stores order, at any value: the Procurement Manager.
+// The CEO or Workshop Manager may sign a project order's step in place of either
+// signer, and the Workshop Manager a Stores order's. Stand-ins may sign at any
+// time; the signature records that one did. Nobody signs an order twice, and
+// Admin signs only by holding one of these roles.
 //
-// Each kind of order has its own approvers (Stores and Procurement Separation
-// Roadmap): a project order those who approve purchase orders, a Stores order
-// the store, who order Stores stock. Limits work the same for both.
-import { Prisma } from '@prisma/client';
+// An order in another currency is converted at its locked exchange rate. Every
+// line must have a price first, or its value is not known.
+import { Prisma, type RoleName } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import { PermissionCode } from '../../shared/permissions.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { orderTotals } from './po-pricing.js';
+import { SUPPLIER_CURRENCIES } from './supplier-fields.js';
 import type { OrderKind } from './procurement.service.js';
 
 type Num = Prisma.Decimal | number | string;
 type Priceable = { orderedQty: Num; unitPrice?: Num | null; discountPercent?: Num | null };
 
+export type ApprovalStep = 'MANAGER' | 'DIRECTOR';
+export const STEP_LABEL: Record<ApprovalStep, string> = { MANAGER: 'Procurement Manager', DIRECTOR: 'Director' };
+
+const SIGNERS: Record<OrderKind, Partial<Record<ApprovalStep, { usual: RoleName; standIns: RoleName[] }>>> = {
+  projects: {
+    MANAGER: { usual: 'PROCUREMENT_MANAGER', standIns: ['CEO', 'WORKSHOP_MANAGER'] },
+    DIRECTOR: { usual: 'DIRECTOR', standIns: ['CEO', 'WORKSHOP_MANAGER'] },
+  },
+  stores: {
+    MANAGER: { usual: 'PROCUREMENT_MANAGER', standIns: ['WORKSHOP_MANAGER'] },
+  },
+};
+
 export interface OrderForApproval {
   currency?: string | null;
   vatRate?: Num | null;
+  exchangeRate?: Num | null;
+  projectNumber: string | null;
   lines: Priceable[];
+  signatures?: Array<{ step: ApprovalStep; signedById: string }>;
 }
 
-export interface Approver { id: string; name: string; approvalLimit: string | null }
+export interface ApprovalSettings {
+  /** From this value, in rand excluding VAT, a project order also needs the Director. */
+  threshold: number;
+  /** Rand per unit of each currency; 0 when not set. */
+  rates: Record<string, number>;
+}
+
+export interface Approver { id: string; name: string; standIn: boolean }
 
 export type ApprovalBlock =
   | { code: 'UNPRICED'; message: string }
-  | { code: 'OVER_LIMIT'; message: string };
+  | { code: 'NO_RATE'; message: string };
 
-const rand = (v: Num) => `R ${new Prisma.Decimal(v).toNumber().toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-/** Whether an order of this total and currency is within the limit. Null limit: any order. */
-export function withinLimit(limit: Num | null | undefined, total: Num, currency: string): boolean {
-  if (limit === null || limit === undefined) return true;
-  if (currency !== 'ZAR') return false;
-  return new Prisma.Decimal(total).lte(new Prisma.Decimal(limit));
+export interface ApprovalState {
+  block: ApprovalBlock | null;
+  /** The order's value in rand excluding VAT; null while it can't be worked out. */
+  randValue: string | null;
+  /** The signatures it needs, in signing order; empty while it can't be worked out. */
+  steps: ApprovalStep[];
+  /** The next signature it is waiting on; null when none. */
+  next: ApprovalStep | null;
 }
 
-/** Why this order can't be approved by someone with this limit, or null when it can. */
-export function approvalBlock(po: OrderForApproval, limit: Num | null | undefined): ApprovalBlock | null {
+const THRESHOLD_KEY = 'purchaseOrders.directorApprovalFrom';
+const rateKey = (currency: string) => `purchaseOrders.exchangeRate${currency}`;
+const FOREIGN_CURRENCIES = SUPPLIER_CURRENCIES.filter((c) => c !== 'ZAR');
+
+export async function loadApprovalSettings(): Promise<ApprovalSettings> {
+  const values = await SettingsService.getValues([THRESHOLD_KEY, ...FOREIGN_CURRENCIES.map(rateKey)]);
+  return {
+    threshold: Number(values[THRESHOLD_KEY]),
+    rates: Object.fromEntries(FOREIGN_CURRENCIES.map((c) => [c, Number(values[rateKey(c)])])),
+  };
+}
+
+/** The rate to use for this order: the one locked on it, or today's until it has one. */
+export function exchangeRateOf(po: Pick<OrderForApproval, 'currency' | 'exchangeRate'>, settings: ApprovalSettings): Prisma.Decimal | null {
+  const currency = po.currency ?? 'ZAR';
+  if (currency === 'ZAR') return null;
+  if (po.exchangeRate !== null && po.exchangeRate !== undefined) return new Prisma.Decimal(po.exchangeRate);
+  const today = settings.rates[currency];
+  return today ? new Prisma.Decimal(today) : null;
+}
+
+export function noRateMessage(currency: string): string {
+  return `This order is in ${currency}, and there is no exchange rate for ${currency} yet. An admin can add one under Settings → Purchase orders.`;
+}
+
+/** Where an order stands: its value in rand, the signatures it needs, and the next one. */
+export function approvalState(po: OrderForApproval, settings: ApprovalSettings): ApprovalState {
   const totals = orderTotals(po.lines, po.vatRate ?? 0);
   if (totals.unpricedLines > 0) {
     const n = totals.unpricedLines;
-    return { code: 'UNPRICED', message: `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.` };
+    return {
+      block: { code: 'UNPRICED', message: `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.` },
+      randValue: null, steps: [], next: null,
+    };
   }
   const currency = po.currency ?? 'ZAR';
-  if (withinLimit(limit, totals.net, currency)) return null;
-  if (currency !== 'ZAR') {
-    return { code: 'OVER_LIMIT', message: `This order is in ${currency}. Approval limits are in rand, so it needs an approver without a limit.` };
+  const rate = exchangeRateOf(po, settings);
+  if (currency !== 'ZAR' && !rate) {
+    return { block: { code: 'NO_RATE', message: noRateMessage(currency) }, randValue: null, steps: [], next: null };
   }
-  return { code: 'OVER_LIMIT', message: `This order is ${rand(totals.net)} including VAT; your approval limit is ${rand(limit!)}.` };
+  const value = new Prisma.Decimal(totals.subtotal).times(rate ?? 1).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  const needsDirector = (po.projectNumber ?? null) !== null && value.gte(settings.threshold);
+  const steps: ApprovalStep[] = needsDirector ? ['MANAGER', 'DIRECTOR'] : ['MANAGER'];
+  const signed = new Set((po.signatures ?? []).map((s) => s.step));
+  return { block: null, randValue: value.toFixed(2), steps, next: steps.find((s) => !signed.has(s)) ?? null };
 }
 
-/** The permission that approves an order of this kind. */
-export function approvePermissionFor(kind: OrderKind) {
-  return kind === 'stores' ? PermissionCode.OrderStoresStock : PermissionCode.ApprovePurchaseOrder;
+/** Whether someone with these roles signs any step of this kind of order. */
+export function signsOrdersOfKind(kind: OrderKind, roles: string[]): boolean {
+  return Object.values(SIGNERS[kind]).some((s) => roles.includes(s.usual) || s.standIns.some((r) => roles.includes(r)));
 }
 
-/**
- * Whether this user may approve Stores orders. A store controller approves
- * the store's orders, his own included, only once an admin has set his
- * approval limit (Stores and Procurement Separation Roadmap: a blank limit
- * would otherwise mean any value, unchecked). Admin approves without one.
- */
-export function approvesStores(u: { approvalLimit: unknown; roles?: Array<{ role: { name: string } }> }): boolean {
-  const roles = (u.roles ?? []).map((r) => r.role.name);
-  return u.approvalLimit !== null || !roles.includes('STORE_CONTROLLER') || roles.includes('ADMIN');
+function holdsStep(kind: OrderKind, step: ApprovalStep, roles: string[]): boolean {
+  const signer = SIGNERS[kind][step];
+  return !!signer && (roles.includes(signer.usual) || signer.standIns.some((r) => roles.includes(r)));
 }
 
-/** Active users who may approve orders of this kind, with their limits, most senior first. */
-export async function listApprovers(kind: OrderKind = 'projects'): Promise<Approver[]> {
+/** Whether someone with these roles signs this step in place of its usual signer. */
+export function isStandIn(kind: OrderKind, step: ApprovalStep, roles: string[]): boolean {
+  const usual = SIGNERS[kind][step]?.usual;
+  return !usual || !roles.includes(usual);
+}
+
+/** Why this person can't sign the order now, or null when they can. */
+export function signRefusal(kind: OrderKind, state: ApprovalState, po: OrderForApproval, actor: { id: string; roles: string[] }): string | null {
+  if (state.block) return state.block.message;
+  // Signed in full but still pending, as when the threshold was raised part-way: any signer finishes it.
+  if (!state.next) return signsOrdersOfKind(kind, actor.roles) ? null : 'This order has every signature it needs.';
+  if ((po.signatures ?? []).some((s) => s.signedById === actor.id)) {
+    return `You have already signed this order. It is waiting on the ${STEP_LABEL[state.next]}.`;
+  }
+  if (!holdsStep(kind, state.next, actor.roles)) {
+    const yours = state.steps.find((s) => holdsStep(kind, s, actor.roles));
+    if (yours && state.steps.indexOf(yours) > state.steps.indexOf(state.next)) {
+      return `The ${STEP_LABEL[state.next]} signs this order first.`;
+    }
+    return `This order is waiting on the ${STEP_LABEL[state.next]}.`;
+  }
+  return null;
+}
+
+/** Active users who may sign this step of this kind of order, its usual signers first. */
+export async function listSigners(kind: OrderKind, step: ApprovalStep): Promise<Approver[]> {
+  const signer = SIGNERS[kind][step];
+  if (!signer) return [];
   const users = await prisma.user.findMany({
-    where: {
-      active: true,
-      roles: { some: { role: { permissions: { some: { permission: { code: approvePermissionFor(kind) } } } } } },
-    },
-    select: { id: true, name: true, approvalLimit: true, roles: { select: { role: { select: { name: true } } } } },
+    where: { active: true, roles: { some: { role: { name: { in: [signer.usual, ...signer.standIns] } } } } },
+    select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
   });
   return users
-    .filter((u) => kind !== 'stores' || approvesStores(u))
-    .map((u) => ({ id: u.id, name: u.name, approvalLimit: u.approvalLimit?.toString() ?? null }))
-    .sort((a, b) => {
-      if (a.approvalLimit === b.approvalLimit) return a.name.localeCompare(b.name);
-      if (a.approvalLimit === null) return -1;
-      if (b.approvalLimit === null) return 1;
-      return Number(b.approvalLimit) - Number(a.approvalLimit);
-    });
+    .map((u) => ({ id: u.id, name: u.name, standIn: !u.roles.some((r) => r.role.name === signer.usual) }))
+    .sort((a, b) => Number(a.standIn) - Number(b.standIn) || a.name.localeCompare(b.name));
 }
 
-/** The approvers whose limit covers this order. */
-export function approversFor(po: OrderForApproval, approvers: Approver[]): Approver[] {
-  const totals = orderTotals(po.lines, po.vatRate ?? 0);
-  if (totals.unpricedLines > 0) return [];
-  return approvers.filter((a) => withinLimit(a.approvalLimit, totals.net, po.currency ?? 'ZAR'));
-}
-
-/** "Ask Simbongile Bantubani to approve it." or a fallback when nobody can. */
+/** "Ask Simbongile Bantubani to sign it." or a fallback when nobody can. */
 export function whoToAsk(names: string[]): string {
-  if (names.length === 0) return 'Nobody has a high enough limit: an admin can raise one under Settings → Users.';
-  if (names.length === 1) return `Ask ${names[0]} to approve it.`;
-  return `Ask ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]} to approve it.`;
+  if (names.length === 0) return 'Nobody holds that role yet: an admin can assign it under Settings → Users.';
+  if (names.length === 1) return `Ask ${names[0]} to sign it.`;
+  return `Ask ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]} to sign it.`;
 }

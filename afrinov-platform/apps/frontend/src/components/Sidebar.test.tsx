@@ -92,6 +92,10 @@ describe('useNavGroups', () => {
     ['VIEWER', ['Stock', 'Tools']],
     // The storeman orders stock for the shelf (Stores ordering roadmap); Procurement doesn't.
     ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Order stock', 'Tools']],
+    // Those who sign Stores orders open them in Order stock; the Director signs project orders only.
+    ['PROCUREMENT_MANAGER', ['Stock', 'Order stock', 'Tools']],
+    ['WORKSHOP_MANAGER', ['Stock', 'Order stock', 'Tools']],
+    ['DIRECTOR', ['Stock', 'Tools']],
   ])('shows a %s only the Store actions the server lets them do', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Store')).toEqual(expected);

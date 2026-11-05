@@ -91,3 +91,14 @@ export async function ledgerAndBalance(materialId: string, locationId: string, h
 }
 
 export { prisma };
+
+/**
+ * Gives the seeded admin the Procurement Manager's role, so a test can sign its
+ * small orders with the one client: Admin alone doesn't sign (po-approval.ts).
+ */
+export async function letAdminSign(api: ReturnType<typeof client>): Promise<void> {
+  const users = await api<Array<{ id: string; email: string }>>('GET', '/users');
+  const admin = users.body.find((u) => u.email === ADMIN_EMAIL)!;
+  const updated = await api('PATCH', `/users/${admin.id}`, { roleNames: ['ADMIN', 'PROCUREMENT_MANAGER'] });
+  if (updated.status !== 200) throw new Error(`Could not give the admin a signing role: ${updated.status}`);
+}

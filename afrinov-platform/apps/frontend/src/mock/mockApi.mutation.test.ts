@@ -143,13 +143,44 @@ describe('mock API mutation flows', () => {
       expect(isApiError(e) && (e as ApiError).code).toBe('VALIDATION_ERROR');
     });
 
-    it('refuses an order over the signed-in user\'s limit', async () => {
-      await api.patch('/users/user-1', { approvalLimit: 100 });
-      const id = await submitted([{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }]); // R115 with VAT
-      expect(await api.get<{ canApprove: boolean }>(`/purchase-orders/${id}/approval`)).toMatchObject({ canApprove: false });
-      const e = await api.post(`/purchase-orders/${id}/approve`, {}).catch((x: unknown) => x);
-      expect(isApiError(e) && (e as ApiError).code).toBe('FORBIDDEN');
-      await api.patch('/users/user-1', { approvalLimit: null });
+    it('takes the Manager and then the Director on a project order from R200 000, excluding VAT', async () => {
+      const projects = await api.get<Array<{ projectNumber: string; status?: string; active?: boolean }>>('/projects');
+      const projectNumber = projects.find((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED')!.projectNumber;
+      const beam = await api.post<{ id: string }>('/materials', { sku: 'MOCK-BEAM-SIGN', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
+      const raise = async (unitPrice: number) => {
+        const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 15, lines: [{ materialId: beam.id, orderedQty: 1, unitPrice }] });
+        await api.post(`/purchase-orders/${po.id}/submit`, {});
+        return po.id;
+      };
+      const small = await raise(199999.99);
+      expect(await api.post(`/purchase-orders/${small}/approve`, {})).toMatchObject({ status: 'APPROVED' });
+
+      const big = await raise(200000);
+      expect(await api.get(`/purchase-orders/${big}/approval`)).toMatchObject({ randValue: '200000.00', next: { step: 'MANAGER' }, steps: [{ step: 'MANAGER' }, { step: 'DIRECTOR' }] });
+      expect(await api.post(`/purchase-orders/${big}/approve`, {})).toMatchObject({ status: 'PENDING_APPROVAL' });
+      expect(await api.get(`/purchase-orders/${big}/approval`)).toMatchObject({ next: { step: 'DIRECTOR' } });
+      expect(await api.post(`/purchase-orders/${big}/approve`, {})).toMatchObject({ status: 'APPROVED' });
+    });
+
+    it('takes one signature on a Stores order at any value', async () => {
+      const id = await submitted([{ materialId: 'mat-1', orderedQty: 1, unitPrice: 5000000 }]);
+      expect(await api.post(`/purchase-orders/${id}/approve`, {})).toMatchObject({ status: 'APPROVED' });
+    });
+
+    it('needs an exchange rate to submit an order in another currency, and locks it', async () => {
+      const usd = await api.post<{ id: string }>('/suppliers', { name: 'Mock USD supplier', currency: 'USD' });
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: usd.id, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 100 }] });
+      const e = await api.post(`/purchase-orders/${po.id}/submit`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError).code).toBe('VALIDATION_ERROR');
+      await api.patch('/settings', { updates: { 'purchaseOrders.exchangeRateUSD': 18.5 } });
+      try {
+        await api.post(`/purchase-orders/${po.id}/submit`, {});
+        await api.patch('/settings', { updates: { 'purchaseOrders.exchangeRateUSD': 25 } });
+        expect(await api.get(`/purchase-orders/${po.id}/approval`)).toMatchObject({ exchangeRate: '18.5', randValue: '1850.00' });
+      } finally {
+        // Settings outlive resetMockState.
+        await api.patch('/settings', { updates: { 'purchaseOrders.exchangeRateUSD': 0 } });
+      }
     });
   });
 

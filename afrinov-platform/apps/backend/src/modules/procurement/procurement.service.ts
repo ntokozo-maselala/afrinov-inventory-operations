@@ -23,7 +23,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
-import { approvalBlock, approversFor, approvesStores, listApprovers, whoToAsk } from './po-approval.js';
+import { STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 
@@ -362,6 +362,12 @@ export type OrderKind = (typeof ORDER_KINDS)[number];
 /** A Stores order has no project (null), as the order lists filter; any project number makes it a project order. */
 export const kindOfOrder = (po: { projectNumber?: string | null }): OrderKind => (po.projectNumber == null ? 'stores' : 'projects');
 
+/** The roles that decide what this user may sign. */
+async function signerOf(actorId: string): Promise<{ id: string; roles: string[] }> {
+  const user = await prisma.user.findUnique({ where: { id: actorId }, select: { roles: { select: { role: { select: { name: true } } } } } });
+  return { id: actorId, roles: (user?.roles ?? []).map((r) => r.role.name) };
+}
+
 export const PurchaseOrderService = {
   async list(filter: { status?: PurchaseOrderStatus; projectNumber?: string; kind?: OrderKind } = {}) {
     const { kind, ...where } = filter;
@@ -401,16 +407,16 @@ export const PurchaseOrderService = {
    * as they have waited longest. Empty for anyone who may not approve.
    */
   async awaitingApproval(actorId: string, kind?: OrderKind) {
-    // Each kind has its own approvers: the store approves Stores orders, approvers project orders.
+    const settings = await loadApprovalSettings();
+    const me = await signerOf(actorId);
     const waiting = [];
     for (const k of kind ? [kind] : ORDER_KINDS) {
-      const me = (await listApprovers(k)).find((a) => a.id === actorId);
-      if (!me) continue;
+      if (!signsOrdersOfKind(k, me.roles)) continue;
       const orders = await prisma.purchaseOrder.findMany({
         where: { status: 'PENDING_APPROVAL', projectNumber: k === 'stores' ? null : { not: null } },
-        include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } } },
+        include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } }, signatures: true },
       });
-      waiting.push(...orders.filter((po) => !approvalBlock(po, me.approvalLimit)));
+      waiting.push(...orders.filter((po) => !signRefusal(k, approvalState(po, settings), po, me)));
     }
     return waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(withTotals);
   },
@@ -426,6 +432,7 @@ export const PurchaseOrderService = {
         deliveredBy: { select: { id: true, name: true, email: true } },
         cancelledBy: { select: { id: true, name: true, email: true } },
         closedBy: { select: { id: true, name: true, email: true } },
+        signatures: { include: { signedBy: { select: { id: true, name: true } } }, orderBy: { signedAt: 'asc' } },
         lines: { include: { material: true } },
         goodsReceipts: { include: { lines: true } },
         // The request for quotation it was awarded from, if any.
@@ -569,8 +576,10 @@ export const PurchaseOrderService = {
 
   async update(input: UpdatePOInput, actorId: string) {
     const allowEditAfterApproval = await SettingsService.getValue<boolean>('purchaseOrders.allowEditAfterApproval');
+    const requireApproval = await SettingsService.getValue<boolean>('purchaseOrders.requireApprovalBeforeProcessing');
+    const approvalSettings = await loadApprovalSettings();
     return prisma.$transaction(async (tx) => {
-      const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
+      const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (!isEditable(po.status, allowEditAfterApproval)) {
         throw Errors.invalidState(`Purchase order in status ${po.status} is no longer editable`, { status: po.status });
@@ -635,14 +644,25 @@ export const PurchaseOrderService = {
       // Changing an approved order makes a new revision, as the template's
       // "Rev 01", so the supplier can tell the copies apart.
       if (po.status === 'APPROVED' && anyChange) data.revision = po.revision + 1;
-      // An approved order whose new total is past its approver's limit (or has
-      // lost a price) goes back for approval; the edit can't raise the amount
-      // someone signed off.
-      if (po.status === 'APPROVED' && po.approvedById && (priceChanges.length > 0 || discountChanges.length > 0 || 'vatRate' in data)) {
+      const moneyChanged = priceChanges.length > 0 || discountChanges.length > 0 || 'vatRate' in data;
+      let signaturesCleared = false;
+      // A signature is for the money as it stood: changing it on an order still
+      // being signed starts the signing again.
+      if (moneyChanged && po.status === 'PENDING_APPROVAL' && po.signatures.length > 0) {
+        await tx.purchaseOrderSignature.deleteMany({ where: { purchaseOrderId: po.id } });
+        signaturesCleared = true;
+      }
+      // An approved order that is now worth more than was signed for, needs a
+      // signature it doesn't have, or has lost a price goes back for approval.
+      // Lowering its value keeps the signatures: nobody is held to more.
+      if (moneyChanged && requireApproval && po.status === 'APPROVED' && po.approvedById) {
         const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
-        const approver = await tx.user.findUnique({ where: { id: po.approvedById }, select: { approvalLimit: true } });
-        const vat = input.vatRate ?? po.vatRate;
-        if (approvalBlock({ currency: po.currency, vatRate: vat, lines }, approver?.approvalLimit ?? null)) {
+        const state = approvalState({ ...po, vatRate: input.vatRate ?? po.vatRate, lines }, approvalSettings);
+        const signedFor = approvalState(po, approvalSettings).randValue;
+        const raised = signedFor !== null && state.randValue !== null && new Prisma.Decimal(state.randValue).gt(signedFor);
+        if (state.block || state.next || raised) {
+          await tx.purchaseOrderSignature.deleteMany({ where: { purchaseOrderId: po.id } });
+          signaturesCleared = po.signatures.length > 0;
           // Back for approval, it has no approved wording until approved again:
           // its draft prints today's small print, and approval takes that.
           Object.assign(data, { status: 'PENDING_APPROVAL', approvedAt: null, approvedById: null, printedTerms: Prisma.DbNull });
@@ -670,6 +690,7 @@ export const PurchaseOrderService = {
             ...(priceChanges.length ? { unitPrices: priceChanges.map((c) => ({ lineId: c.lineId, unitPrice: c.after })) } : {}),
             ...(discountChanges.length ? { discounts: discountChanges.map((c) => ({ lineId: c.lineId, discountPercent: c.after })) } : {}),
             ...(dateChanges.length ? { deliveryDates: dateChanges.map((c) => ({ lineId: c.lineId, deliveryDate: c.after })) } : {}),
+            ...(signaturesCleared ? { signaturesCleared: true } : {}),
           } as Prisma.InputJsonValue,
         },
       });
@@ -679,6 +700,7 @@ export const PurchaseOrderService = {
 
   async submit(id: string, actorId: string) {
     const requireApproval = await SettingsService.getValue<boolean>('purchaseOrders.requireApprovalBeforeProcessing');
+    const approvalSettings = await loadApprovalSettings();
     return prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
@@ -694,9 +716,12 @@ export const PurchaseOrderService = {
       const now = new Date();
       if (requireApproval) {
         const target: PurchaseOrderStatus = 'PENDING_APPROVAL';
+        // The rate locks here, so who has to sign can't move with today's rate.
+        const exchangeRate = exchangeRateOf({ currency: po.currency, exchangeRate: null }, approvalSettings);
+        if (po.currency !== 'ZAR' && !exchangeRate) throw Errors.validation(noRateMessage(po.currency));
         const result = await tx.purchaseOrder.updateMany({
           where: { id, status: { in: allowed } },
-          data: { status: target },
+          data: { status: target, exchangeRate },
         });
         if (result.count === 0) {
           throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
@@ -736,49 +761,91 @@ export const PurchaseOrderService = {
     });
   },
 
-  /** Who may approve this order, and whether the asking user can. */
+  /** The signatures this order needs, who may give the next, and whether the asking user can. */
   async approval(id: string, actorId: string) {
-    const po = await prisma.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: { lines: true, signatures: { include: { signedBy: { select: { name: true } } } } },
+    });
     if (!po) throw Errors.notFound('PurchaseOrder');
-    const approvers = await listApprovers(kindOfOrder(po));
-    const me = approvers.find((a) => a.id === actorId);
-    const block = me ? approvalBlock(po, me.approvalLimit) : null;
+    const kind = kindOfOrder(po);
+    const settings = await loadApprovalSettings();
+    const state = approvalState(po, settings);
+    const me = await signerOf(actorId);
+    const refusal = signRefusal(kind, state, po, me);
+    const signed = new Set(po.signatures.map((s) => s.signedById));
     return {
       ...orderTotals(po.lines, po.vatRate ?? 0),
       currency: po.currency,
-      canApprove: !!me && po.status === 'PENDING_APPROVAL' && !block,
-      reason: me ? block?.message ?? null : null,
-      myLimit: me?.approvalLimit ?? null,
-      approvers: approversFor(po, approvers),
+      exchangeRate: exchangeRateOf(po, settings)?.toString() ?? null,
+      randValue: state.randValue,
+      noRate: state.block?.code === 'NO_RATE',
+      steps: state.steps.map((step) => {
+        const s = po.signatures.find((x) => x.step === step);
+        return { step, label: STEP_LABEL[step], signature: s ? { name: s.signedBy.name, signedAt: s.signedAt, standIn: s.standIn } : null };
+      }),
+      next: state.next ? { step: state.next, label: STEP_LABEL[state.next] } : null,
+      canApprove: po.status === 'PENDING_APPROVAL' && !refusal,
+      // Only for those who sign this kind of order: to anyone else it isn't theirs to be told.
+      reason: po.status === 'PENDING_APPROVAL' && signsOrdersOfKind(kind, me.roles) ? refusal : null,
+      approvers: state.next ? (await listSigners(kind, state.next)).filter((a) => !signed.has(a.id)) : [],
     };
   },
 
+  /** Signs the next step the order needs; the last signature approves it. */
   async approve(id: string, actorId: string) {
+    const settings = await loadApprovalSettings();
+    const me = await signerOf(actorId);
     return prisma.$transaction(async (tx) => {
-      const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true } });
+      const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];
       if (!allowed.includes(po.status)) {
         throw Errors.invalidState(`Cannot approve a PO in status ${po.status}`, { status: po.status });
       }
-      // The approver's limit must cover the order total (rand, including VAT).
-      const actor = await tx.user.findUnique({ where: { id: actorId }, select: { approvalLimit: true, roles: { select: { role: { select: { name: true } } } } } });
-      // A store controller approves Stores orders only once his limit is set (Qodo, PR #122).
-      if (kindOfOrder(po) === 'stores' && actor && !approvesStores(actor)) {
-        throw Errors.forbidden("Your approval limit isn't set yet, so you can't approve stock orders. Ask an admin to set it under Settings → Users.");
+      const kind = kindOfOrder(po);
+      const state = approvalState(po, settings);
+      if (state.block) throw Errors.validation(state.block.message);
+      const refusal = signRefusal(kind, state, po, me);
+      if (refusal) {
+        const signed = new Set(po.signatures.map((s) => s.signedById));
+        const names = state.next ? (await listSigners(kind, state.next)).filter((a) => !signed.has(a.id)).map((a) => a.name) : [];
+        throw Errors.forbidden(`${refusal} ${whoToAsk(names)}`);
       }
-      const block = approvalBlock(po, actor?.approvalLimit ?? null);
-      if (block?.code === 'UNPRICED') throw Errors.validation(block.message);
-      if (block) {
-        const names = approversFor(po, await listApprovers(kindOfOrder(po))).map((a) => a.name);
-        throw Errors.forbidden(`${block.message} ${whoToAsk(names)}`);
-      }
+      const step = state.next;
+      const standIn = step ? isStandIn(kind, step, me.roles) : false;
       const now = new Date();
+      if (step) {
+        // Two signing the same step at once: the unique key lets one through.
+        const added = await tx.purchaseOrderSignature.createMany({
+          data: [{ purchaseOrderId: id, step, signedById: actorId, signedAt: now, standIn }],
+          skipDuplicates: true,
+        });
+        if (added.count === 0) {
+          throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
+        }
+      }
+      // An order submitted before rates were locked takes today's at its first signature.
+      const exchangeRate = exchangeRateOf(po, settings);
+      if (step && step !== state.steps[state.steps.length - 1]) {
+        await tx.purchaseOrder.update({ where: { id }, data: { exchangeRate } });
+        await tx.auditLogEntry.create({
+          data: {
+            actorId,
+            action: 'PO_SIGN',
+            entityType: 'PurchaseOrder',
+            entityId: id,
+            before: { status: po.status },
+            after: { status: po.status, step, standIn },
+          },
+        });
+        return tx.purchaseOrder.findUnique({ where: { id } });
+      }
       // The order keeps the small print it was approved with; approving a
       // revision again takes the wording of the day.
       const result = await tx.purchaseOrder.updateMany({
         where: { id, status: { in: allowed } },
-        data: { status: 'APPROVED', approvedAt: now, approvedById: actorId, printedTerms: await currentPrintedTerms(tx) },
+        data: { status: 'APPROVED', approvedAt: now, approvedById: actorId, exchangeRate, printedTerms: await currentPrintedTerms(tx) },
       });
       if (result.count === 0) {
         throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
@@ -790,7 +857,7 @@ export const PurchaseOrderService = {
           entityType: 'PurchaseOrder',
           entityId: id,
           before: { status: po.status },
-          after: { status: 'APPROVED', approvedAt: now.toISOString(), approvedById: actorId },
+          after: { status: 'APPROVED', approvedAt: now.toISOString(), approvedById: actorId, step, standIn },
         },
       });
       return tx.purchaseOrder.findUnique({ where: { id } });

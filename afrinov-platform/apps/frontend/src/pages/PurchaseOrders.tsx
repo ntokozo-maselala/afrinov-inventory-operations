@@ -68,7 +68,7 @@ export function PurchaseOrders() {
   const statuses = status && !mine ? status.split(',') : [];
   // Procurement lists project orders only: the store's are kept, and approved,
   // in Store → Order stock (Stores and Procurement Separation Roadmap).
-  // "Waiting for my approval" depends on the approver's limit, so the server picks those.
+  // "Waiting for my approval" depends on who has signed, so the server picks those.
   const pos = useApi<PO[]>(mine ? '/purchase-orders?awaitingMyApproval=true&kind=projects' : '/purchase-orders?kind=projects');
   const setParam = (key: string, v: string | null) => setParams((p) => { if (v === null) p.delete(key); else p.set(key, v); return p; }, { replace: true });
   const setStatus = (v: string) => setParam('status', v === defaultStatus ? null : v || 'all');

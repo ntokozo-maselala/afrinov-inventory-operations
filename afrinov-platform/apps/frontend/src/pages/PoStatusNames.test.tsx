@@ -18,7 +18,7 @@ const entry = (action: string, before: string | null, after: string, actorName: 
   id: `${action}-${createdAt}`, action, entityId: 'po-1', entityType: 'PurchaseOrder', actorId, actorName,
   before: before ? { status: before } : null, after: { status: after }, createdAt,
 });
-const APPROVAL = { subtotal: '10.00', vat: '1.50', net: '11.50', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null };
+const APPROVAL = { subtotal: '10.00', vat: '1.50', net: '11.50', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, randValue: '10.00', exchangeRate: null, noRate: false, steps: [], next: { step: 'MANAGER', label: 'Procurement Manager' } };
 
 describe('shortName', () => {
   it('keeps the first name and the last initial', () => {
@@ -59,17 +59,24 @@ describe('stepActors', () => {
 });
 
 describe('waitingOn', () => {
-  const approvers = (...names: string[]) => names.map((name, i) => ({ id: `a${i}`, name, approvalLimit: null }));
+  const approvers = (...names: string[]) => names.map((name, i) => ({ id: `a${i}`, name, standIn: false }));
 
-  it('names the approvers whose limit covers the order', () => {
+  it('names the usual signers of the next signature', () => {
     expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, approvers: approvers('Thandi Mokoena', 'Sipho Nkosi') }))
-      .toEqual({ step: 'APPROVED', person: { label: 'Waiting on Thandi M. or Sipho N.', title: 'Any of: Thandi Mokoena, Sipho Nkosi', waiting: true } });
+      .toEqual({ step: 'APPROVED', person: { label: 'Waiting on Thandi M. or Sipho N.', title: 'Procurement Manager. Any of: Thandi Mokoena, Sipho Nkosi', waiting: true } });
     expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, approvers: approvers('Thandi Mokoena', 'Sipho Nkosi', 'Ayanda Mthembu') })!.person.label).toBe('Waiting on Thandi M. +2');
+  });
+
+  it('leaves stand-ins to the title when a usual signer holds the role', () => {
+    const shown = waitingOn('PENDING_APPROVAL', { ...APPROVAL, next: { step: 'DIRECTOR', label: 'Director' }, approvers: [{ id: 'd', name: 'Sipho Nkosi', standIn: false }, { id: 'c', name: 'Chief Executive', standIn: true }] })!.person;
+    expect(shown).toMatchObject({ label: 'Waiting on Sipho N.', title: 'Director. Any of: Sipho Nkosi, Chief Executive' });
+    expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, approvers: [{ id: 'c', name: 'Chief Executive', standIn: true }] })!.person.label).toBe('Waiting on Chief E.');
   });
 
   it('says why no one can approve yet', () => {
     expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, unpricedLines: 1, approvers: [] })!.person.label).toBe('Needs prices');
-    expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, approvers: [] })!.person.label).toBe('No approver');
+    expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, approvers: [] })!.person).toMatchObject({ label: 'No approver', title: 'Nobody holds the Procurement Manager role yet' });
+    expect(waitingOn('PENDING_APPROVAL', { ...APPROVAL, noRate: true, currency: 'USD', approvers: [] })!.person.label).toBe('Needs a rate');
   });
 
   it('waits on the store for a delivery, and on no one once received', () => {
@@ -92,7 +99,7 @@ describe('the status bar on an order', () => {
         entry('PO_SUBMIT', 'DRAFT', 'PENDING_APPROVAL', 'Lindiwe Dube', '2026-10-01T09:00:00Z'),
         entry('CREATE', null, 'DRAFT', 'Lindiwe Dube', '2026-10-01T08:00:00Z'),
       ];
-      if (path === '/purchase-orders/po-1/approval') return { ...APPROVAL, approvers: [{ id: 'a1', name: 'Thandi Mokoena', approvalLimit: null }] };
+      if (path === '/purchase-orders/po-1/approval') return { ...APPROVAL, approvers: [{ id: 'a1', name: 'Thandi Mokoena', standIn: false }] };
       return [];
     });
   });
@@ -109,7 +116,7 @@ describe('the status bar on an order', () => {
     const steps = within(bar).getAllByRole('listitem');
     expect(await within(steps[0]!).findByText(/^Lindiwe D\. · /)).toBeInTheDocument();
     expect(within(steps[1]!).getByText(/^Lindiwe D\. · /)).toBeInTheDocument();
-    expect(await within(steps[2]!).findByText('Waiting on Thandi M.')).toHaveAttribute('title', 'Any of: Thandi Mokoena');
+    expect(await within(steps[2]!).findByText('Waiting on Thandi M.')).toHaveAttribute('title', 'Procurement Manager. Any of: Thandi Mokoena');
     expect(steps[3]).toHaveTextContent(/^4Partly received$/);
   });
 });

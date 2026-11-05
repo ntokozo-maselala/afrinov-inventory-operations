@@ -23,12 +23,11 @@ See `08-api/authorization.md` for the role table. Implementation notes:
   entries carry the permissions they need, action buttons are hidden
   without the matching permission, and an action page reached by a typed or
   old link shows a "no access" message instead of a form the server would
-  refuse. A user whose only role is APPROVER lands on the orders waiting for
+  refuse. A user who only signs orders lands on the orders waiting for
   them. This is a convenience only; the server's checks enforce access.
-- Approving a purchase order also depends on the approver's limit
-  (`users.approval_limit`, set under Settings → Users): the largest order
-  total, in rand including VAT, they may approve; none means any order
-  (`04-processes/purchase-order-lifecycle.md`).
+- Signing a purchase order also depends on the order: its value, the signatures
+  it has, and whether this person has already signed (ADR-030,
+  `04-processes/purchase-order-lifecycle.md`).
 
 ## Evidence
 - `afrinov-platform/apps/backend/src/shared/authorization.ts`

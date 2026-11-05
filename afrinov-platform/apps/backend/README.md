@@ -281,7 +281,9 @@ needs an `Authorization: Bearer <token>` header, using the token returned by
 Errors use one shape: `{ "error": { "code", "message", "details" } }`.
 
 Permissions are checked on the server. The roles are `ADMIN`,
-`STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`, `TECHNICIAN` and `VIEWER`;
+`STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER` (view only), `TECHNICIAN`, `VIEWER`,
+and the roles that sign purchase orders: `PROCUREMENT_MANAGER`, `DIRECTOR`, `CEO`
+and `WORKSHOP_MANAGER` (`src/modules/procurement/po-approval.ts` has the rule);
 `src/shared/permissions.ts` maps each role to what it may do.
 
 There is no self-registration: an administrator creates accounts and

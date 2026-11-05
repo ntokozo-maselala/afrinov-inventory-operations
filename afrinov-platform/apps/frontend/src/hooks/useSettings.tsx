@@ -85,12 +85,15 @@ function validate(def: SettingValue, raw: unknown): string | null {
       if (raw === '' || raw === null || raw === undefined) return 'Required.';
       const n = typeof raw === 'number' ? raw : Number(raw);
       if (!Number.isFinite(n)) return 'Must be a number.';
-      if (!Number.isInteger(n)) return 'Must be a whole number.';
+      // An exchange rate has decimals, and the Director's threshold may have cents; as the server's checks allow.
+      const decimal = def.key.startsWith('purchaseOrders.exchangeRate') || def.key === 'purchaseOrders.directorApprovalFrom';
+      if (!decimal && !Number.isInteger(n)) return 'Must be a whole number.';
       const min = def.key === 'general.defaultPageSize' ? 5 : 0;
       const max = def.key === 'general.defaultPageSize' ? 200
         : def.key === 'inventory.urgentBelowPercent' ? 100
         : def.key === 'inventory.warningBelowPercent' ? 1000
-        : def.key === 'security.sessionTimeoutMinutes' ? 720 : 1_000_000;
+        : def.key === 'security.sessionTimeoutMinutes' ? 720
+        : def.key === 'purchaseOrders.directorApprovalFrom' ? 1_000_000_000_000 : 1_000_000;
       if (n < min) return `Must be at least ${min}.`;
       if (n > max) return `Must be at most ${max}.`;
       return null;

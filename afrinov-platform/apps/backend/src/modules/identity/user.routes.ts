@@ -4,19 +4,19 @@ import { UserService } from './identity.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 
+const ROLE_NAMES = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'] as const;
+
 export const createUserSchema = z.object({
   email: z.email(),
   name: z.string().min(1),
   password: z.string().min(8).regex(/[^\0]/),
-  roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1),
+  roleNames: z.array(z.enum(ROLE_NAMES)).min(1),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
   active: z.boolean().optional(),
-  roleNames: z.array(z.enum(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])).min(1).optional(),
-  // Largest purchase order (rand, incl. VAT) the user may approve; null: no limit.
-  approvalLimit: z.number().nonnegative().max(1e12).nullable().optional(),
+  roleNames: z.array(z.enum(ROLE_NAMES)).min(1).optional(),
 });
 
 function actorId(req: unknown): string {

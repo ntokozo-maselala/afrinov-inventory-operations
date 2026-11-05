@@ -62,6 +62,8 @@ export interface PoDocumentOrder {
   afrinovContact?: string | null;
   createdBy?: { name: string } | null;
   approvedBy?: { name: string } | null;
+  /** Who signed it, oldest first; the Authorization box prints each. Older orders have only approvedBy. */
+  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { name: string } | null }>;
   approvedAt?: string | null;
   /** The small print as it was when the order was approved; null before. */
   printedTerms?: Partial<PoSmallPrintWording> | null;
@@ -341,7 +343,10 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   // Originator, authorization and supplier acceptance, as at the foot of the Order sheet.
   ensure(34);
   y += 2;
-  const third = (width - 8) / 3;
+  const signed = po.signatures ?? [];
+  // A fourth box when two signed, as an order from the Director's value up is.
+  const boxes = signed.length > 1 ? 4 : 3;
+  const third = (width - 4 * (boxes - 1)) / boxes;
   const signature = (title: string, name: string, note: string, i: number) => {
     const x = SIDE + i * (third + 4);
     doc.setDrawColor(...RULE);
@@ -360,8 +365,17 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
     doc.text('Signature and date', x + 2, y + 25);
   };
   signature('Originator', po.createdBy?.name ?? dash, formatDate(po.createdAt), 0);
-  signature('Authorization', po.approvedBy?.name ?? 'Not yet approved', po.approvedAt ? `Approved ${formatDate(po.approvedAt)}` : '', 1);
-  signature('Supplier acceptance', po.supplier.name, 'Name, signature and date', 2);
+  if (signed.length > 1) {
+    signed.slice(0, 2).forEach((s, i) => signature(
+      s.step === 'DIRECTOR' ? 'Authorization (Director)' : 'Authorization (Procurement)',
+      s.signedBy?.name ?? dash,
+      `${s.standIn ? 'Stood in, signed' : 'Signed'} ${formatDate(s.signedAt)}`,
+      i + 1,
+    ));
+  } else {
+    signature('Authorization', po.approvedBy?.name ?? 'Not yet approved', po.approvedAt ? `Approved ${formatDate(po.approvedAt)}` : '', 1);
+  }
+  signature('Supplier acceptance', po.supplier.name, 'Name, signature and date', boxes - 1);
 
   finishPages(doc, documentStamp(po.status), `${po.number} ${revisionLabel(po.revision)} · ${company.name} · Printed ${formatDate(generatedAt.toISOString())}`);
   return doc.output('arraybuffer');

@@ -20,7 +20,6 @@ import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/c
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
-import { formatCurrency } from '../lib/currency';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
 // Hide "Purchase orders" as a landing page while procurement is off, unless it
@@ -200,6 +199,12 @@ export function SettingsPurchaseOrders() {
   const allowCancellation = useSetting('purchaseOrders.allowCancellation');
   const allowEditAfterApproval = useSetting('purchaseOrders.allowEditAfterApproval');
   const vatRate = useSetting('purchaseOrders.vatRate');
+  const directorFrom = useSetting('purchaseOrders.directorApprovalFrom');
+  const exchangeRates = [
+    useSetting('purchaseOrders.exchangeRateUSD'),
+    useSetting('purchaseOrders.exchangeRateEUR'),
+    useSetting('purchaseOrders.exchangeRateGBP'),
+  ];
   const firstNumber = useSetting('purchaseOrders.firstNumber');
   const deliveryDefaults = [
     useSetting('purchaseOrders.deliveryTo'),
@@ -240,6 +245,31 @@ export function SettingsPurchaseOrders() {
           error={errors['purchaseOrders.vatRate'] ?? null}
         />
       )}
+      {directorFrom && (
+        <NumberField
+          def={directorFrom}
+          value={Number(draft['purchaseOrders.directorApprovalFrom'] ?? 200000)}
+          onChange={(v) => setDraft('purchaseOrders.directorApprovalFrom', v)}
+          error={errors['purchaseOrders.directorApprovalFrom'] ?? null}
+        />
+      )}
+      {exchangeRates.some(Boolean) && (
+        <div className="pt-2">
+          <h3 className="text-sm font-semibold text-surface-900">Exchange rates</h3>
+          <p className="text-xs text-surface-500 mt-0.5">
+            In rand, to work out who signs an order in another currency. 0 means not set, and an order in that currency can&rsquo;t be submitted until it is.
+          </p>
+        </div>
+      )}
+      {exchangeRates.map((def) => def && (
+        <NumberField
+          key={def.key}
+          def={def}
+          value={Number(draft[def.key] ?? 0)}
+          onChange={(v) => setDraft(def.key, v)}
+          error={errors[def.key] ?? null}
+        />
+      ))}
       <NumberField
         def={firstNumber}
         value={Number(draft['purchaseOrders.firstNumber'] ?? 1)}
@@ -381,15 +411,19 @@ export function SettingsAppearance() {
 }
 
 // ── Users & permissions ───────────────────────────────────────────────
-type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER';
-const ALL_ROLES: RoleName[] = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'];
+type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER';
+const ALL_ROLES: RoleName[] = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'APPROVER', 'TECHNICIAN', 'VIEWER'];
 const ROLE_LABEL: Record<RoleName, string> = {
   ADMIN: 'Administrator',
   STORE_CONTROLLER: 'Store controller',
   PROCUREMENT: 'Procurement',
-  APPROVER: 'Approver',
+  APPROVER: 'Approver (view only)',
   TECHNICIAN: 'Technician',
   VIEWER: 'Viewer',
+  PROCUREMENT_MANAGER: 'Procurement Manager',
+  DIRECTOR: 'Director',
+  CEO: 'CEO',
+  WORKSHOP_MANAGER: 'Workshop Manager',
 };
 
 interface AdminUser {
@@ -399,32 +433,20 @@ interface AdminUser {
   active: boolean;
   createdAt: string;
   roles: { role: { name: RoleName } }[];
-  /** Largest purchase order (rand, incl. VAT) they may approve; null: no limit. */
-  approvalLimit?: string | null;
 }
 
 /**
- * What a user may approve, as the server decides it: approvers (and Admin)
- * approve project orders up to their limit, a blank one meaning any value; a
- * store controller approves stock orders up to his, but none until it is set
- * (Admin aside). Someone with both roles is told both (Qodo, PR #122).
+ * What a user signs, as the server decides it (po-approval.ts), or null when
+ * they sign nothing. A role comes first when it signs in its own right.
  */
-export function approvalLine(roles: string[], limit: string | null | undefined): string {
-  const upTo = limit == null ? 'of any value' : `up to ${formatCurrency(Number(limit), 'ZAR')}`;
-  if (roles.includes('ADMIN')) return `Approves orders ${upTo}`;
-  const projects = roles.includes('APPROVER');
-  const stores = roles.includes('STORE_CONTROLLER');
-  if (projects && stores) return limit == null ? 'Approves project orders of any value; no stock orders until a limit is set' : `Approves orders ${upTo}`;
-  if (stores) return limit == null ? 'Approves no stock orders until a limit is set' : `Approves stock orders ${upTo}`;
-  return `Approves orders ${upTo}`;
+export function approvalLine(roles: string[]): string | null {
+  const signs: string[] = [];
+  if (roles.includes('PROCUREMENT_MANAGER')) signs.push('Signs every order first');
+  if (roles.includes('DIRECTOR')) signs.push('Signs large project orders');
+  if (roles.includes('CEO')) signs.push('Stands in on project orders');
+  if (roles.includes('WORKSHOP_MANAGER')) signs.push('Stands in on project and stock orders');
+  return signs.length > 0 ? signs.join(' · ') : null;
 }
-
-/**
- * Roles that approve orders, so have an approval limit: approvers approve
- * project orders, the store controller the store's own (Stores and
- * Procurement Separation Roadmap).
- */
-const APPROVING_ROLES: RoleName[] = ['ADMIN', 'APPROVER', 'STORE_CONTROLLER'];
 
 interface UserFormProps {
   initial?: Partial<AdminUser>;
@@ -441,12 +463,9 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
   const [confirm, setConfirm] = useState('');
   const [roles, setRoles] = useState<RoleName[]>(initial?.roles?.map((r) => r.role.name) ?? ['VIEWER']);
   const [active, setActive] = useState(initial?.active ?? true);
-  // Blank: no limit.
-  const [limit, setLimit] = useState(initial?.approvalLimit == null ? '' : String(Number(initial.approvalLimit)));
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const approves = PROCUREMENT_ENABLED && roles.some((r) => APPROVING_ROLES.includes(r));
 
   function toggleRole(r: RoleName): void {
     setRoles((prev) => prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]);
@@ -465,7 +484,6 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       if (password !== confirm) errs.confirm = 'Passwords do not match.';
     }
     if (roles.length === 0) errs.roles = 'Select at least one role.';
-    if (approves && limit.trim() !== '' && !(Number(limit) >= 0)) errs.approvalLimit = 'Enter an amount of 0 or more, or leave it blank for no limit.';
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       setValidation('Please correct the highlighted fields.');
@@ -473,14 +491,11 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
     }
     setBusy(true);
     try {
-      const approvalLimit = approves && limit.trim() !== '' ? Number(limit) : null;
       if (isEdit && initial?.id) {
-        await api.patch(`/users/${initial.id}`, { name: name.trim(), active, roleNames: roles, ...(PROCUREMENT_ENABLED ? { approvalLimit } : {}) });
+        await api.patch(`/users/${initial.id}`, { name: name.trim(), active, roleNames: roles });
         onSaved(`User ${name.trim()} updated.`);
       } else {
-        const created = await api.post<{ id: string }>('/users', { name: name.trim(), email: email.trim().toLowerCase(), password, roleNames: roles });
-        // New users start without a limit; a limit is set in a second step.
-        if (approvalLimit !== null) await api.patch(`/users/${created.id}`, { approvalLimit });
+        await api.post('/users', { name: name.trim(), email: email.trim().toLowerCase(), password, roleNames: roles });
         onSaved(`User ${name.trim()} created.`);
       }
     } catch (err) {
@@ -540,12 +555,6 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
           ))}
         </div>
       </Field>
-      {approves && (
-        <Field label="Approval limit (R, including VAT)" htmlFor="usr-limit" error={fieldErrors.approvalLimit}
-          help="The largest order this person may approve: project orders for an approver, stock orders for a store controller. Leave blank for no limit, except for a store controller, who approves nothing until a limit is set. Orders in other currencies need someone without a limit.">
-          <Input id="usr-limit" type="number" min="0" step="0.01" inputMode="decimal" placeholder="No limit" value={limit} onChange={(e) => setLimit(e.target.value)} invalid={!!fieldErrors.approvalLimit} />
-        </Field>
-      )}
       {isEdit && (
         <Field label="Status" htmlFor="usr-active" help="Inactive users cannot sign in but their historical records are preserved.">
           <Select id="usr-active" value={active ? 'ACTIVE' : 'INACTIVE'} onChange={(e) => setActive(e.target.value === 'ACTIVE')}>
@@ -618,11 +627,8 @@ export function SettingsUsers() {
                   {u.roles.length === 0 && <span className="text-xs text-surface-400">No roles</span>}
                   {u.roles.map((r) => <Badge key={r.role.name} tone={r.role.name === 'ADMIN' ? 'brand' : 'neutral'}>{ROLE_LABEL[r.role.name]}</Badge>)}
                 </div>
-                {PROCUREMENT_ENABLED && u.roles.some((r) => APPROVING_ROLES.includes(r.role.name)) && (
-                  <div className="text-xs text-surface-500 mt-1">
-                    {/* A store controller approves the store's own stock orders, once his limit is set; approvers, project orders. */}
-                    {approvalLine(u.roles.map((r) => r.role.name), u.approvalLimit)}
-                  </div>
+                {PROCUREMENT_ENABLED && approvalLine(u.roles.map((r) => r.role.name)) && (
+                  <div className="text-xs text-surface-500 mt-1">{approvalLine(u.roles.map((r) => r.role.name))}</div>
                 )}
               </div>
               <div className="flex items-center gap-1">

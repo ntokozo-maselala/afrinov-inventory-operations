@@ -16,7 +16,7 @@ Quantities and money are `DECIMAL(18,4)`.
 | `user_roles` (UserRole) | user_id, role_id | composite PK; cascade on delete |
 | `role_permissions` (RolePermission) | role_id, permission_id | composite PK; cascade on delete |
 
-`RoleName`: ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER.
+`RoleName`: ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER, PROCUREMENT_MANAGER, DIRECTOR, CEO, WORKSHOP_MANAGER.
 
 ## Master data
 | Table (model) | Key columns | Constraints and notes |
@@ -39,6 +39,7 @@ code only; the column is free text (TD-024).
 | Table (model) | Key columns | Constraints and notes |
 |---|---|---|
 | `purchase_orders` (PurchaseOrder) | id, number, supplier_id, status, notes, created_by_id, expected_delivery_date, approved_*, delivered_*, cancelled_*, closed_*, shipped_*/tracking_number/carrier/shipment_notes (kept, no longer written) | number unique; indexes on status, supplier_id |
+| `purchase_order_signatures` (PurchaseOrderSignature) | id, purchase_order_id, step (MANAGER, DIRECTOR), signed_by_id, signed_at, stand_in | unique on purchase_order_id and step; cascade on PO delete; `purchase_orders.exchange_rate` holds the rate locked at submission (ADR-030) |
 | `purchase_order_lines` | id, purchase_order_id, material_id, ordered_qty, received_qty (default 0) | cascade on PO delete; index on purchase_order_id; no price column |
 | `goods_receipts` (GoodsReceipt) | id, number, purchase_order_id (nullable), supplier_id, delivery_ref, status, received_by_id, received_at | number unique; indexes on status, purchase_order_id |
 | `goods_receipt_lines` | id, goods_receipt_id, material_id, location_id, quantity, purchase_order_line_id (no FK) | cascade on receipt delete |

@@ -59,9 +59,9 @@ with `CANCELLED` before anything is received (ADR-007; full rules in
 2. **Submit** (`POST /:id/submit`): from `DRAFT` to `PENDING_APPROVAL`, or
    straight to `APPROVED` when `purchaseOrders.requireApprovalBeforeProcessing`
    is off.
-3. **Approve** (`POST /:id/approve`, APPROVER or ADMIN), by order value (see
-   *Approval*). `GET /:id/approval` tells the order's page who may approve it
-   and whether the signed-in user can.
+3. **Approve** (`POST /:id/approve`), signed by role and order value (see
+   *Approval*). `GET /:id/approval` tells the order's page which signatures it
+   needs, who may give the next, and whether the signed-in user can.
 4. **Send:** download the order document (PDF) from the order's page and
    send it outside the system (email or phone); no status records it.
 5. **Receive** from the order's page, as deliveries arrive (see *Receiving*).
@@ -93,22 +93,36 @@ A new order's VAT rate is the `purchaseOrders.vatRate` setting for a rand
 changed on the order.
 
 ## Approval
-As on the template, where the approver is chosen by the order total. Each
-user who may approve has an approval limit (Settings → Users): the largest
-order total, in rand including VAT, they may approve. No limit means any
-order.
-- Every line must have a price before approval, or the total is not known.
-- An order in another currency needs an approver without a limit, since
-  limits are in rand.
-- When the signed-in approver's limit is too low, Approve is refused with the
-  names of the approvers whose limit covers the order.
-- If an approved order is edited so that its total is past its approver's
-  limit, or a line loses its price, it goes back to `PENDING_APPROVAL`.
-- Approvers land on the Purchase orders list filtered to the orders waiting
-  for them (`/purchase-orders?status=mine`, from
-  `GET /purchase-orders?awaitingMyApproval=true`). The Dashboard shows
-  "Waiting for your approval": the orders they can approve now, oldest
-  first, and how many more are pending but need prices or a higher limit.
+An order is signed by role, according to its value in rand excluding VAT
+(ADR-030, `po-approval.ts`):
+
+| Order | Signed by |
+|---|---|
+| Project order under the threshold (`purchaseOrders.directorApprovalFrom`, R200 000) | Procurement Manager |
+| Project order at or above the threshold | Procurement Manager, then Director |
+| Stores order, at any value | Procurement Manager |
+
+- The CEO or Workshop Manager may sign either step of a project order in place
+  of its usual signer, and the Workshop Manager a Stores order. Stand-ins may
+  sign at any time; the signature and the Activity record that one did.
+- Nobody signs an order twice, and the Director's step waits for the Manager's.
+  Admin signs only by holding one of these roles.
+- The order is `APPROVED` when its last signature is in, and takes its small
+  print then.
+- Every line must have a price before signing, or the value is not known.
+- An order in another currency is converted at the rate in Settings
+  (`purchaseOrders.exchangeRateUSD`, `EUR`, `GBP`), which locks on the order
+  when it is submitted. With no rate set it can't be submitted.
+- Changing a price, discount or VAT rate clears the signatures on an order still
+  being signed. An approved order goes back to `PENDING_APPROVAL`, with its
+  signatures cleared, if the edit raises its value excluding VAT by any amount,
+  leaves it needing a signature it doesn't have, or a line loses its price. It
+  stays approved, at a new revision, if its value falls or only its VAT changes.
+- Those who only sign land on the Purchase orders list filtered to the orders
+  waiting for them (`/purchase-orders?status=mine`, from
+  `GET /purchase-orders?awaitingMyApproval=true`). The Dashboard shows the
+  orders waiting on them now, oldest first, and how many more are pending but
+  waiting on prices or someone else.
 
 ## Order details (the template's Inputs sheet)
 Project number, payment terms, payment milestone, settlement discount (%),

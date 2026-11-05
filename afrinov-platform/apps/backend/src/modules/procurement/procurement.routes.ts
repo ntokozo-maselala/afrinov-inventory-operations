@@ -176,12 +176,13 @@ async function requireForKind(req: FastifyRequest, projectNumber: string | null 
 
 /**
  * Which kinds of order this user sees (Stores and Procurement Separation
- * Roadmap): Stores orders with order:stores_stock, project orders with
- * view:purchase_order. Each side's orders are not found to the other.
+ * Roadmap): Stores orders with order:stores_stock, or approve:stores_order for
+ * those who sign them; project orders with view:purchase_order. Each side's
+ * orders are not found to the other.
  */
 async function kindsSeen(req: FastifyRequest): Promise<{ stores: boolean; projects: boolean }> {
   return {
-    stores: await userHasPermission(req, PermissionCode.OrderStoresStock),
+    stores: await userHasPermission(req, PermissionCode.OrderStoresStock) || await userHasPermission(req, PermissionCode.ApproveStoresOrder),
     projects: await userHasPermission(req, PermissionCode.ViewPurchaseOrder),
   };
 }
@@ -206,6 +207,17 @@ async function requireForOrder(req: FastifyRequest, id: string, forProject: Perm
   if (!po) return;
   await requireSeesOrder(req, po);
   await requirePermission(req, kindOfOrder(po) === 'projects' ? forProject : PermissionCode.OrderStoresStock);
+}
+
+/** Signing an order: each kind has its permission. Which step they may sign is the service's to decide. */
+async function requireApproveOrder(req: FastifyRequest, id: string): Promise<void> {
+  if (!(await userHasPermission(req, PermissionCode.ApprovePurchaseOrder)) && !(await userHasPermission(req, PermissionCode.ApproveStoresOrder))) {
+    await requirePermission(req, PermissionCode.ApprovePurchaseOrder);
+  }
+  const po = await prisma.purchaseOrder.findUnique({ where: { id }, select: { projectNumber: true } });
+  if (!po) return;
+  await requireSeesOrder(req, po);
+  await requirePermission(req, kindOfOrder(po) === 'projects' ? PermissionCode.ApprovePurchaseOrder : PermissionCode.ApproveStoresOrder);
 }
 
 /**
@@ -360,7 +372,7 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     return PurchaseOrderService.submit(id, actorId(req));
   });
 
-  // Who may approve this order (by limit), and whether the asking user can.
+  // The signatures this order needs, who may give the next, and whether the asking user can.
   app.get('/purchase-orders/:id/approval', { preHandler: [app.authenticate] }, async (req) => {
     const id = (req.params as { id: string }).id;
     await requireViewOrder(req, id);
@@ -369,8 +381,7 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/purchase-orders/:id/approve', { preHandler: [app.authenticate] }, async (req) => {
     const id = (req.params as { id: string }).id;
-    // A Stores order is approved by the store, a project order by approvers.
-    await requireForOrder(req, id, PermissionCode.ApprovePurchaseOrder);
+    await requireApproveOrder(req, id);
     return PurchaseOrderService.approve(id, actorId(req));
   });
 

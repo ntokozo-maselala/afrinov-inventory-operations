@@ -17,18 +17,21 @@ const LANDING_PATHS: Record<string, string> = {
 };
 
 /** Roles that do more than issue at the counter, so start on the Dashboard under "by-role". */
-const OVERVIEW_ROLES = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER'];
+const OVERVIEW_ROLES = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'];
+/** Roles that only sign orders, so start on the orders waiting for them. */
+const SIGNING_ROLES = ['PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'];
 
 /**
  * Where a user lands after sign-in. "by-role" puts each role where it works:
  * a technician (who issues at the counter and nothing more) on Issue stock,
- * an approver (and nothing more) on the orders waiting for their approval,
+ * someone who only signs orders on the orders waiting for their signature, an
+ * approver (view only now) on the same list,
  * everyone else on the Dashboard.
  */
 export function landingPathFor(key: string, roles: readonly string[] = []): string {
   if (key === 'by-role') {
     const upper = roles.map((r) => r.toUpperCase());
-    if (PROCUREMENT_ENABLED && upper.length > 0 && upper.every((r) => r === 'APPROVER')) return '/purchase-orders?status=mine';
+    if (PROCUREMENT_ENABLED && upper.length > 0 && upper.every((r) => r === 'APPROVER' || SIGNING_ROLES.includes(r))) return '/purchase-orders?status=mine';
     const technicianOnly = upper.includes('TECHNICIAN') && !upper.some((r) => OVERVIEW_ROLES.includes(r));
     return technicianOnly ? LANDING_PATHS['issue-stock']! : LANDING_PATHS['dashboard']!;
   }

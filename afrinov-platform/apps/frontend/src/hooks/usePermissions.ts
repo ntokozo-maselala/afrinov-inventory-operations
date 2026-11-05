@@ -1,6 +1,6 @@
 import { useAuth } from '../auth';
 
-export type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER';
+export type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER';
 
 export function useHasRole(requiredRoles: RoleName | RoleName[]): boolean {
   const { user } = useAuth();
@@ -29,7 +29,7 @@ export function useCanManageProcurement(): boolean {
 }
 
 export function useCanApprove(): boolean {
-  return useHasRole(['ADMIN', 'APPROVER']);
+  return useHasRole(['ADMIN', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER']);
 }
 
 /** Other activity on Movements (server permission view:audit_log). */
@@ -67,8 +67,10 @@ export const PERMISSION_ROLES = {
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
   'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order (project orders)
   'stores:order': ['STORE_CONTROLLER'], // order:stores_stock (Stores orders: those without a project)
-  'orders:approve': ['APPROVER'], // approve:purchase_order (within the user's approval limit)
-  'orders:view': ['PROCUREMENT', 'APPROVER'], // view:purchase_order (project orders; the store sees its own through stores:order)
+  'stores:approve': ['PROCUREMENT_MANAGER', 'WORKSHOP_MANAGER'], // approve:stores_order (signing Stores orders)
+  'stores:view': ['STORE_CONTROLLER', 'PROCUREMENT_MANAGER', 'WORKSHOP_MANAGER'], // order:stores_stock or approve:stores_order (the store's orders)
+  'orders:approve': ['PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'], // approve:purchase_order (the server decides which step of which order)
+  'orders:view': ['PROCUREMENT', 'APPROVER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'], // view:purchase_order (project orders; the store sees its own through stores:order)
   'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order
   'receipts:view': ['STORE_CONTROLLER', 'PROCUREMENT'], // view:goods_receipt
   'users:manage': [], // manage:users (ADMIN only)

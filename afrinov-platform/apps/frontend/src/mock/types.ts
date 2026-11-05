@@ -151,6 +151,10 @@ export interface MockPurchaseOrder {
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
   approvedBy?: MockUser | null;
+  /** Who signed it, oldest first (po-approval.ts). */
+  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { id: string; name: string } | null }>;
+  /** Rand per unit of its currency, locked when submitted. */
+  exchangeRate?: string | null;
   deliveredAt?: string | null;
   deliveredBy?: MockUser | null;
   deliveryNotes?: string | null;

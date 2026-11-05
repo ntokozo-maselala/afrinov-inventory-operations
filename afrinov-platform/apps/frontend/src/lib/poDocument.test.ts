@@ -228,3 +228,25 @@ describe('smallPrint', () => {
     expect(out).not.toContain('Deliver by the order delivery date.');
   });
 });
+
+describe('the signatures at the foot', () => {
+  const signed = [
+    { step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', signedBy: { name: 'Ona Moloane' } },
+    { step: 'DIRECTOR', signedAt: '2026-11-03T09:00:00Z', standIn: true, signedBy: { name: 'Chief Executive' } },
+  ];
+
+  it('prints both on an order that needed both, and marks a stand-in', async () => {
+    const pdf = text(await buildPoDocument(order({ signatures: signed }), COMPANY));
+    expect(pdf).toContain('Authorization \\(Procurement\\)');
+    expect(pdf).toContain('Authorization \\(Director\\)');
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('Chief Executive');
+    expect(pdf).toContain('Stood in, signed');
+  });
+
+  it('keeps the one Authorization box on an order with one signature', async () => {
+    const pdf = text(await buildPoDocument(order({ signatures: signed.slice(0, 1) }), COMPANY));
+    expect(pdf).toContain('(Authorization)');
+    expect(pdf).toContain('Approver Name');
+  });
+});

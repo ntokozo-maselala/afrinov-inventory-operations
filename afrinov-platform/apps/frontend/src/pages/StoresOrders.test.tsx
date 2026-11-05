@@ -1,7 +1,7 @@
 // Stores → Order stock (Stores ordering roadmap, Phase 2): the store's own
 // orders, those without a project, and New order for the storeman only.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet, auth } = vi.hoisted(() => ({ mockGet: vi.fn(), auth: { roles: ['STORE_CONTROLLER'] as string[] } }));
@@ -91,7 +91,14 @@ describe('Order stock', () => {
     expect(await screen.findByRole('link', { name: /New order/ })).toHaveAttribute('href', '/stock/orders/new');
   });
 
-  it.each(['PROCUREMENT', 'APPROVER'])("keeps the store's orders from a %s", async (role) => {
+  it('lets the Procurement Manager open them to sign, without raising one', async () => {
+    auth.roles = ['PROCUREMENT_MANAGER'];
+    page();
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/purchase-orders?kind=stores'));
+    expect(screen.queryByRole('link', { name: /New order/ })).not.toBeInTheDocument();
+  });
+
+  it.each(['PROCUREMENT', 'APPROVER', 'DIRECTOR', 'CEO'])("keeps the store's orders from a %s", async (role) => {
     auth.roles = [role];
     page();
     expect(await screen.findByText(/Your role cannot see the store's orders/)).toBeInTheDocument();

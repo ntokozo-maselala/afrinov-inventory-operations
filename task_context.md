@@ -66,8 +66,9 @@ database; CI runs them on every backend pull request.
   users; manage them on the Recipients page.
 - **Accounts are created by an administrator.** There is no self-registration
   (ADR-006).
-- **Roles:** `ADMIN`, `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER`,
-  `TECHNICIAN`, `VIEWER`. Server permissions are in
+- **Roles:** `ADMIN`, `STORE_CONTROLLER`, `PROCUREMENT`, `APPROVER` (view only),
+  `TECHNICIAN`, `VIEWER`, and those who sign orders: `PROCUREMENT_MANAGER`,
+  `DIRECTOR`, `CEO`, `WORKSHOP_MANAGER` (ADR-030). Server permissions are in
   `apps/backend/src/shared/permissions.ts`. In the UI, `useHasRole()` lets
   ADMIN pass any check.
 - **Purchase orders** go DRAFT → PENDING_APPROVAL → APPROVED →
@@ -76,12 +77,12 @@ database; CI runs them on every backend pull request.
   `VITE_PROCUREMENT_ENABLED=false` (frontend) switch it off (ADR-019).
 - **Stores and Projects are kept apart** (ADR-020, ADR-021). An order with a
   project is Procurement's: raised on New purchase order, seen with
-  `view:purchase_order`, approved by approvers; its delivery is received by
+  `view:purchase_order`, signed by role and value (ADR-030); its delivery is received by
   the store into stock held for its project (ADR-027), through a receiving
   view with no prices. An order without a project is a
-  Stores order: raised, seen, approved (within the storeman's limit) and
-  received into stock by the store controller with `order:stores_stock`, in
-  Store → Order stock. Each side's orders are not found to the other. The
+  Stores order: raised, seen and received into stock by the store controller
+  with `order:stores_stock`, in Store → Order stock, and signed there by the
+  Procurement Manager or Workshop Manager (ADR-030). Each side's orders are not found to the other. The
   server enforces it (`kindsSeen`, `requireForOrder` in
   `procurement.routes.ts`); the screens follow `lib/orderKind.ts`.
 - **Stock carries its project** (ADR-027). Each movement says whose stock it

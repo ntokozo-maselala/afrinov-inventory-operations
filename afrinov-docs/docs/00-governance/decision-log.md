@@ -712,3 +712,40 @@ unchanged (it reads `project_number`).
 `afrinov-platform/apps/frontend/src/pages/ReceiveStock.tsx`, `IssueStock.tsx`,
 `ProjectLeftovers.tsx`, `components/LeftoversNotice.tsx`,
 `afrinov-docs/docs/13-project-management/roadmaps/project-material-through-the-store-roadmap.md`.
+
+### ADR-030 — Purchase orders are signed by role and value
+**Date:** 2026-11-05 · **Status:** Accepted · **Amends:** ADR-021 (who approves Stores orders)
+
+**Context:** Each approver had a limit in rand including VAT, one signature
+approved an order, and the store controller approved the store's own orders.
+Afrinov's rule is different: the Procurement Manager approves under R200 000,
+and from R200 000 both the Procurement Manager and the Director must, in that
+order.
+
+**Decision:** An order is signed by role, by its value in rand excluding VAT.
+A project order under the threshold needs the Procurement Manager; at or above
+it, the Procurement Manager and then the Director. A Stores order needs the
+Procurement Manager at any value, as Stores orders are small. The CEO or
+Workshop Manager may stand in on a project order, and the Workshop Manager on a
+Stores order; they may sign at any time, with no "away" switch, and the record
+shows they stood in. Nobody signs an order twice. Admin signs only by holding a
+signing role. An order in another currency is converted at a rate an admin keeps
+in Settings, locked on the order at submission, so that nobody raising an order
+sets who has to approve it. The threshold is a setting.
+
+**Consequences:** Approval limits are retired: `users.approval_limit` is no
+longer read, and is kept so older records keep their history. The APPROVER role
+is view only. The store controller no longer approves Stores orders. An admin
+must assign the new roles before anyone can sign. Orders approved earlier keep
+their approver as a Manager signature, so one from R200 000 goes back for both
+signatures if its money changes. An approved order goes back for signing when an
+edit raises its value excluding VAT by any amount, as nobody signed for the new
+amount; it stays approved when its value falls or only its VAT changes. Migrations
+`20260101000043` and `20260101000044`.
+
+**Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`,
+`procurement.service.ts` (`submit`, `approval`, `approve`, `update`),
+`procurement.routes.ts` (`requireApproveOrder`, `kindsSeen`),
+`src/shared/permissions.ts`, `src/modules/settings/settings.service.ts`,
+`afrinov-platform/apps/frontend/src/pages/PurchaseOrderDetail.tsx`,
+`src/lib/poDocument.ts`, `src/pages/SettingsSections.tsx`.
