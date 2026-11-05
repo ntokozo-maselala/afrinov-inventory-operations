@@ -2122,10 +2122,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     const from = qs.from || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
     const to = qs.to || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
     if (from > to) throw err('VALIDATION_ERROR', 'The start date is after the end date');
-    return computeProcurementSavings({ from, to, projectNumber: qs.projectNumber || undefined }, {
+    const savings = computeProcurementSavings({ from, to, projectNumber: qs.projectNumber || undefined }, {
       rfqs: state.rfqs, salesRfqs: state.salesRfqs, purchaseOrders: state.purchaseOrders,
       material: findMaterial, supplier: findSupplier, projectName: (n) => projectRef(n)?.name,
     });
+    // As the server's MAX_SAVINGS_LINES.
+    if (savings.rows.length > 2000) throw err('VALIDATION_ERROR', `That is ${savings.rows.length} lines, more than the 2000 this report can show at once. Choose a shorter period or one project.`);
+    return savings;
   }
   if (method === 'GET' && p === '/reports/stock-status') {
     const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);

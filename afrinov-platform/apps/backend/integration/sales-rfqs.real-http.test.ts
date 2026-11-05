@@ -323,7 +323,7 @@ describe('Sales requests for quotation over real HTTP', () => {
 
       const before = await admin<Report>('GET', `/reports/procurement-savings?${query}`);
       expect(before.status).toBe(200);
-      expect(before.body.rows[0]).toMatchObject({ sales: null, order: null, salesVsProcurement: null, notes: ['Not linked to a Sales line'] });
+      expect(before.body.rows[0]).toMatchObject({ sales: null, order: null, salesVsProcurement: null, notes: ['Not linked to a Sales line', 'Not awarded yet, so there is no order to compare'] });
 
       await admin('PUT', `/rfqs/${rfq.body.id}/lines/${line}/sales-line`, { salesRfqLineId: salesLine });
       await admin('POST', `/rfqs/${rfq.body.id}/award`, { supplierId: supplierB });

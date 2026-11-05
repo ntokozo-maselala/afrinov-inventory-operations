@@ -15,12 +15,16 @@
 // otherwise the same Sales line would look cheaper or dearer by the filter.
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
+import { Errors } from '../../shared/errors.js';
 import { lineMoney } from '../procurement/po-pricing.js';
 import { parseRange } from './consumption.service.js';
 
 const CURRENCY = 'ZAR';
 
-const QUOTE = { select: { currency: true, declined: true, quotedAt: true, supplier: { select: { name: true, currency: true } } } } as const;
+/** Each line brings every quote with it, so a selection larger than this is refused rather than loaded. */
+export const MAX_SAVINGS_LINES = 2000;
+
+const QUOTE = { select: { supplierId: true, currency: true, declined: true, quotedAt: true, supplier: { select: { name: true, currency: true } } } } as const;
 
 const SAVINGS_RFQ = {
   project: { select: { name: true } },
@@ -34,7 +38,7 @@ const SAVINGS_RFQ = {
   },
   purchaseOrder: {
     select: {
-      number: true, status: true, currency: true, supplier: { select: { name: true } },
+      number: true, status: true, currency: true, supplierId: true, supplier: { select: { name: true } },
       lines: { orderBy: { id: 'asc' }, select: { id: true, materialId: true, orderedQty: true, unitPrice: true, discountPercent: true } },
     },
   },
@@ -116,14 +120,27 @@ function quotesFor(prices: QuotedPrice[], quantity: Prisma.Decimal): { prices: S
 
 /**
  * Pairs an RFQ's lines with its order's. An order has no line numbers and can
- * have the same item twice, so the same quantity is taken first.
+ * have the same item twice, so the closest match goes first: the same quantity
+ * at the price the supplier awarded quoted for that line, then the same
+ * quantity, then the item alone.
  */
 function orderLinesFor(rfq: SavingsRfq) {
-  const left = [...(rfq.purchaseOrder?.lines ?? [])];
-  const pairs = new Map<string, (typeof left)[number]>();
-  const take = (line: SavingsLine, i: number) => { if (i >= 0) pairs.set(line.id, left.splice(i, 1)[0]!); };
-  for (const l of rfq.lines) take(l, left.findIndex((o) => o.materialId === l.materialId && o.orderedQty.equals(l.quantity)));
-  for (const l of rfq.lines) if (!pairs.has(l.id)) take(l, left.findIndex((o) => o.materialId === l.materialId));
+  const po = rfq.purchaseOrder;
+  const left = [...(po?.lines ?? [])];
+  type OrderLine = (typeof left)[number];
+  const pairs = new Map<string, OrderLine>();
+  const sameQty = (l: SavingsLine, o: OrderLine) => o.orderedQty.equals(l.quantity);
+  const asQuoted = (l: SavingsLine, o: OrderLine) => {
+    const quoted = l.prices.find((p) => p.rfqSupplier.supplierId === po?.supplierId)?.unitPrice;
+    return sameQty(l, o) && !!quoted && !!o.unitPrice?.equals(quoted);
+  };
+  for (const closeEnough of [asQuoted, sameQty, () => true]) {
+    for (const l of rfq.lines) {
+      if (pairs.has(l.id)) continue;
+      const i = left.findIndex((o) => o.materialId === l.materialId && closeEnough(l, o));
+      if (i >= 0) pairs.set(l.id, left.splice(i, 1)[0]!);
+    }
+  }
   return pairs;
 }
 
@@ -223,7 +240,9 @@ export function buildSavingsReport(rfqs: SavingsRfq[], others: SavingsRfq[], ran
     if (procurementLow) totals.procurement.push(procurementLow);
     if (own.comparable) totals.order.push(own.comparable);
     if (procurementVsOrder) totals.procurementVsOrder.push(procurementVsOrder);
-    if (own.order?.discount && own.order.currency === CURRENCY) totals.discount.push(own.order.discount);
+    // Over the same lines as the order total, so the two can be read together.
+    if (own.order?.discount && own.comparable) totals.discount.push(own.order.discount);
+    if (!rfq.purchaseOrder) notes.push('Not awarded yet, so there is no order to compare');
 
     return {
       rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.project?.name ?? null,
@@ -248,17 +267,23 @@ export const ProcurementSavingsService = {
   /**
    * The RFQs sent to suppliers in the period, drafts and cancelled ones aside.
    *
-   * @throws {ApiError} VALIDATION_ERROR for a bad period.
+   * @throws {ApiError} VALIDATION_ERROR for a bad period, or more lines than
+   * MAX_SAVINGS_LINES.
    */
   async report(q: { from?: string; to?: string; projectNumber?: string }): Promise<SavingsReport> {
     const { from, to, start, end } = parseRange(q.from, q.to);
     const counted = { status: { in: ['SENT', 'AWARDED'] } } satisfies Prisma.RfqWhereInput;
+    const chosen = {
+      ...counted,
+      issuedAt: { gte: start, lt: end },
+      ...(q.projectNumber ? { projectNumber: q.projectNumber } : {}),
+    } satisfies Prisma.RfqWhereInput;
+    const lines = await prisma.rfqLine.count({ where: { rfq: chosen } });
+    if (lines > MAX_SAVINGS_LINES) {
+      throw Errors.validation(`That is ${lines} lines, more than the ${MAX_SAVINGS_LINES} this report can show at once. Choose a shorter period or one project.`);
+    }
     const rfqs = await prisma.rfq.findMany({
-      where: {
-        ...counted,
-        issuedAt: { gte: start, lt: end },
-        ...(q.projectNumber ? { projectNumber: q.projectNumber } : {}),
-      },
+      where: chosen,
       include: SAVINGS_RFQ,
       orderBy: [{ projectNumber: 'asc' }, { number: 'asc' }],
     });

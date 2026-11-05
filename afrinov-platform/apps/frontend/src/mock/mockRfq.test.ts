@@ -288,7 +288,7 @@ describe('mock: Procurement savings report', () => {
     expect(await unitOf('mat-9')).toBe('kg');
     const sales = await sentSales();
     const r = await quotedRfq();
-    expect((await report()).rows[0]).toMatchObject({ sales: null, salesVsProcurement: null, notes: ['Not linked to a Sales line'] });
+    expect((await report()).rows[0]).toMatchObject({ sales: null, salesVsProcurement: null, notes: ['Not linked to a Sales line', 'Not awarded yet, so there is no order to compare'] });
     await api.put(`/rfqs/${r.id}/lines/${r.line}/sales-line`, { salesRfqLineId: sales.line });
     await api.post(`/rfqs/${r.id}/award`, { supplierId: 'sup-2' });
     const { rows, total } = await report();

@@ -26,7 +26,7 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, salesLineAsked, salesLineDiffers, salesLineLabel, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSalesLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, salesLineAsked, salesLineDifference, salesLineLabel, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSalesLine, type RfqSupplier } from '../lib/rfq';
 import { PROCUREMENT_RFQS, type RfqArea } from '../lib/rfqArea';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -294,6 +294,7 @@ function salesLineColumn(lines: RfqLine[], linking?: SalesLinking): DataTableCol
   return {
     key: 'salesLine', header: 'Sales line', render: (l) => {
       const linked = l.salesRfqLine ?? null;
+      const difference = salesLineDifference(lines, l);
       return (
         <div className="space-y-1 min-w-48">
           {linking
@@ -313,7 +314,7 @@ function salesLineColumn(lines: RfqLine[], linking?: SalesLinking): DataTableCol
           {/* The dropdown is too narrow to show a whole line: what was picked is spelled out here. */}
           {linking && linked && <div className="text-meta">{linked.description} ({salesLineAsked(linked)})</div>}
           {linked?.rfq.status === 'CANCELLED' && <Badge tone="warning">Sales RFQ cancelled</Badge>}
-          {linked && salesLineDiffers(lines, l) && <div className="text-meta">Sales asked for {salesLineAsked(linked)}</div>}
+          {difference && <div className="text-meta">{difference}</div>}
         </div>
       );
     },

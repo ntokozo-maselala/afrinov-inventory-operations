@@ -59,16 +59,17 @@ describe('useNavGroups', () => {
     expect(useLabelsIn('Reports')).toEqual(['Stock status', 'Stock used', 'Stock report', 'Procurement savings', 'Movements']);
   });
 
-  it('shows Procurement savings only to those who may see Sales prices, and only with procurement on', () => {
-    for (const role of ['SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO']) {
-      signedIn.roles = [role];
-      expect(useLabelsIn('Reports'), role).toContain('Procurement savings');
-    }
-    for (const role of ['PROCUREMENT', 'STORE_CONTROLLER', 'VIEWER']) {
-      signedIn.roles = [role];
-      expect(useLabelsIn('Reports'), role).not.toContain('Procurement savings');
-    }
-    signedIn.roles = ['ADMIN'];
+  it.each(['SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO'])('shows Procurement savings to %s, who may see Sales prices', (role) => {
+    signedIn.roles = [role];
+    expect(useLabelsIn('Reports')).toContain('Procurement savings');
+  });
+
+  it.each(['PROCUREMENT', 'STORE_CONTROLLER', 'VIEWER'])('keeps Procurement savings from %s, who may not see Sales prices', (role) => {
+    signedIn.roles = [role];
+    expect(useLabelsIn('Reports')).not.toContain('Procurement savings');
+  });
+
+  it('has no Procurement savings with procurement off', () => {
     features.procurement = false;
     expect(useLabelsIn('Reports')).not.toContain('Procurement savings');
   });

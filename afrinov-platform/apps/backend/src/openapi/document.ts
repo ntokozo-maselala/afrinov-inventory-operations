@@ -828,7 +828,7 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/reports/procurement-savings', tag: 'Reports', summary: 'Sales, Procurement and order prices compared',
     description: 'Each line of a Procurement RFQ sent between ?from and ?to (YYYY-MM-DD, both included; default this month), optionally for one ?projectNumber=. '
-      + 'Line totals excl. VAT: every quote by supplier, each side compared at its lowest, the order before line discounts. Only rand is compared; a figure that cannot be compared is null, with a note, and out of the totals.',
+      + 'Line totals excl. VAT: every quote by supplier, each side compared at its lowest, the order before line discounts. Only rand is compared; a figure that cannot be compared is null, with a note, and out of the totals. A selection of more than 2000 lines is refused (400).',
     procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
   },
   {

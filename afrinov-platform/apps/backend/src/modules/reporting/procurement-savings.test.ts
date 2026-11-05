@@ -1,15 +1,18 @@
 // The savings report's figures: lowest on each side, line totals, what is left
 // out and why, and lines sharing a Sales line counted once.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
-import { buildSavingsReport, type SavingsRfq } from './procurement-savings.service.js';
+import { MAX_SAVINGS_LINES, ProcurementSavingsService, buildSavingsReport, type SavingsRfq } from './procurement-savings.service.js';
 import { buildSavingsXlsx, savingsFilename } from './procurement-savings-export.js';
+
+const { count, findMany } = vi.hoisted(() => ({ count: vi.fn(), findMany: vi.fn() }));
+vi.mock('../../shared/db.js', () => ({ prisma: { rfqLine: { count }, rfq: { findMany } } }));
 
 const D = (v: number) => new Prisma.Decimal(v);
 const quote = (supplier: string, unitPrice: number, over: Record<string, unknown> = {}) => ({
   unitPrice: D(unitPrice),
-  rfqSupplier: { currency: 'ZAR', declined: false, quotedAt: new Date('2026-11-01'), supplier: { name: supplier, currency: 'ZAR' }, ...over },
+  rfqSupplier: { supplierId: supplier, currency: 'ZAR', declined: false, quotedAt: new Date('2026-11-01'), supplier: { name: supplier, currency: 'ZAR' }, ...over },
 });
 const salesLine = (over: Record<string, unknown> = {}) => ({
   id: 'sl-1', lineNo: 1, description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: D(24),
@@ -20,7 +23,7 @@ const line = (over: Record<string, unknown> = {}) => ({
   material: { sku: 'PIPE', name: 'Pipe', unitOfMeasure: 'each' }, prices: [quote('EMV', 95), quote('Macsteel', 88)], ...over,
 });
 const orderLine = (over: Record<string, unknown> = {}) => ({ id: 'o-1', materialId: 'm-1', orderedQty: D(24), unitPrice: D(88), discountPercent: D(0), ...over });
-const order = (lines: unknown[] = [orderLine()], over: Record<string, unknown> = {}) => ({ number: 'PO-1', status: 'APPROVED', currency: 'ZAR', supplier: { name: 'Macsteel' }, lines, ...over });
+const order = (lines: unknown[] = [orderLine()], over: Record<string, unknown> = {}) => ({ number: 'PO-1', status: 'APPROVED', currency: 'ZAR', supplierId: 'Macsteel', supplier: { name: 'Macsteel' }, lines, ...over });
 const rfq = (lines: unknown[], over: Record<string, unknown> = {}) => ({
   id: 'r-1', number: 'AFRI-02A-1404-02-02', status: 'AWARDED', projectNumber: 'AFRI-1404', project: { name: 'Pipe spools' }, purchaseOrder: order(), lines, ...over,
 }) as unknown as SavingsRfq;
@@ -136,6 +139,46 @@ describe('Procurement savings report', () => {
     const r = build([rfq([a, b], { purchaseOrder: order([orderLine({ id: 'o-1', orderedQty: D(5), unitPrice: D(10) }), orderLine({ id: 'o-2', orderedQty: D(2), unitPrice: D(10) })]) })]);
     expect(r.rows.map((x) => x.order?.quantity)).toEqual(['2', '5']);
     expect(r.rows.map((x) => x.procurementVsOrder)).toEqual(['0.00', '0.00']);
+  });
+
+  it('pairs the same item at the same quantity by the price quoted for each line (Qodo, PR #159)', () => {
+    const a = line({ salesRfqLineId: null, salesRfqLine: null, prices: [quote('Macsteel', 10)] });
+    const b = line({ id: 'l-2', lineNo: 2, salesRfqLineId: null, salesRfqLine: null, prices: [quote('Macsteel', 20)] });
+    // The order's lines come back in no particular order.
+    const r = build([rfq([a, b], { purchaseOrder: order([orderLine({ id: 'o-1', unitPrice: D(20) }), orderLine({ id: 'o-2', unitPrice: D(10) })]) })]);
+    expect(r.rows.map((x) => x.order?.unitPrice)).toEqual(['10', '20']);
+    expect(r.rows.map((x) => x.procurementVsOrder)).toEqual(['0.00', '0.00']);
+  });
+
+  it('says why the order columns are blank on an RFQ not yet awarded (Qodo, PR #159)', () => {
+    const r = build([rfq([line()], { status: 'SENT', purchaseOrder: null })]);
+    expect(r.rows[0]).toMatchObject({ salesVsProcurement: '48.00', procurementVsOrder: null, salesVsOrder: null });
+    expect(r.rows[0]!.notes).toEqual(['Not awarded yet, so there is no order to compare']);
+  });
+
+  it('adds up discounts over the same lines as the order total (Qodo, PR #159)', () => {
+    const r = build([rfq([line()], { purchaseOrder: order([orderLine({ orderedQty: D(30), discountPercent: D(10) })]) })]);
+    expect(r.rows[0]!.order).toMatchObject({ discount: '264.00' });
+    expect(r.total).toMatchObject({ order: '0.00', discount: '0.00' });
+  });
+
+  describe('how much it loads (Qodo, PR #159)', () => {
+    beforeEach(() => {
+      count.mockReset();
+      findMany.mockReset().mockResolvedValue([]);
+    });
+
+    it('refuses a selection over the limit, without loading it', async () => {
+      count.mockResolvedValue(MAX_SAVINGS_LINES + 1);
+      await expect(ProcurementSavingsService.report({ from: '2026-01-01', to: '2026-12-31' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('shorter period') });
+      expect(findMany).not.toHaveBeenCalled();
+    });
+
+    it('loads one at the limit', async () => {
+      count.mockResolvedValue(MAX_SAVINGS_LINES);
+      await expect(ProcurementSavingsService.report({ from: '2026-01-01', to: '2026-12-31' })).resolves.toMatchObject({ rows: [] });
+      expect(findMany).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('downloads as a sheet with every price, the notes and a total row', async () => {

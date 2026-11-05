@@ -33,14 +33,24 @@ function quotesFor(rfq: MockRfq, line: Line, data: SavingsData): { prices: Savin
   return { prices, lowest, foreignOnly: prices.length > 0 && rand.length === 0 };
 }
 
-/** One line's own figures; as the server, the same item twice on an order is paired by quantity first. */
+/** One line's own figures; as the server, the same item twice on an order is paired by quantity and the price quoted first. */
 function figuresOf(rfq: MockRfq, data: SavingsData) {
   const po = rfq.purchaseOrderId ? data.purchaseOrders.find((o) => o.id === rfq.purchaseOrderId) : undefined;
   const left = [...(po?.lines ?? [])];
   const pairs = new Map<string, (typeof left)[number]>();
-  const take = (l: Line, i: number) => { if (i >= 0) pairs.set(l.id, left.splice(i, 1)[0]!); };
-  for (const l of rfq.lines) take(l, left.findIndex((o) => o.materialId === l.materialId && Number(o.orderedQty) === Number(l.quantity)));
-  for (const l of rfq.lines) if (!pairs.has(l.id)) take(l, left.findIndex((o) => o.materialId === l.materialId));
+  type OrderLine = (typeof left)[number];
+  const sameQty = (l: Line, o: OrderLine) => Number(o.orderedQty) === Number(l.quantity);
+  const asQuoted = (l: Line, o: OrderLine) => {
+    const quoted = rfq.suppliers.find((s) => s.supplierId === po?.supplierId)?.prices.find((p) => p.rfqLineId === l.id)?.unitPrice;
+    return sameQty(l, o) && quoted !== undefined && o.unitPrice !== null && o.unitPrice !== undefined && Number(o.unitPrice) === Number(quoted);
+  };
+  for (const closeEnough of [asQuoted, sameQty, () => true]) {
+    for (const l of rfq.lines) {
+      if (pairs.has(l.id)) continue;
+      const i = left.findIndex((o) => o.materialId === l.materialId && closeEnough(l, o));
+      if (i >= 0) pairs.set(l.id, left.splice(i, 1)[0]!);
+    }
+  }
 
   return rfq.lines.map((line) => {
     const procurement = quotesFor(rfq, line, data);
@@ -136,7 +146,8 @@ export function computeProcurementSavings(q: { from: string; to: string; project
     if (low) totals.procurement.push(low);
     if (own.comparable) totals.order.push(own.comparable);
     if (procurementVsOrder) totals.procurementVsOrder.push(procurementVsOrder);
-    if (own.order?.discount && own.order.currency === CURRENCY) totals.discount.push(own.order.discount);
+    if (own.order?.discount && own.comparable) totals.discount.push(own.order.discount);
+    if (!rfq.purchaseOrderId) notes.push('Not awarded yet, so there is no order to compare');
     return {
       rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.projectNumber ? data.projectName(rfq.projectNumber) ?? null : null,
       lineNo: line.lineNo, sku: material?.sku ?? line.materialId, material: material?.name ?? line.materialId, unitOfMeasure: material?.unitOfMeasure ?? '', quantity: qty(line.quantity),

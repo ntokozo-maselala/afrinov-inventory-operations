@@ -105,16 +105,20 @@ export function salesLineLabel(s: RfqSalesLine): string {
 }
 
 /**
- * Whether what this RFQ asks for differs from what Sales asked for on the line
- * it is linked to: another unit, or a quantity that doesn't add up across the
- * lines sharing it. Compared in whole ten-thousandths, as quantities are kept.
+ * How what this RFQ asks for differs from what Sales asked for on the line it
+ * is linked to, in words; null when it doesn't: another unit, or a quantity
+ * that doesn't add up across this RFQ's lines sharing it. Other RFQs may make up
+ * the rest, which the savings report takes into account, so it says only what
+ * this RFQ comes to. Compared in whole ten-thousandths, as quantities are kept.
  */
-export function salesLineDiffers(lines: RfqLine[], line: RfqLine): boolean {
+export function salesLineDifference(lines: RfqLine[], line: RfqLine): string | null {
   const asked = line.salesRfqLine;
-  if (!asked) return false;
-  if (lineUnits(line).toLowerCase() !== asked.unitOfMeasure.toLowerCase()) return true;
+  if (!asked) return null;
+  const said = `Sales asked for ${salesLineAsked(asked)}`;
+  if (lineUnits(line).toLowerCase() !== asked.unitOfMeasure.toLowerCase()) return `${said}; this line is in ${lineUnits(line)}`;
   const kept = (q: string) => Math.round(Number(q) * 1e4);
-  return lines.filter((l) => l.salesRfqLine?.id === asked.id).reduce((sum, l) => sum + kept(l.quantity), 0) !== kept(asked.quantity);
+  const here = lines.filter((l) => l.salesRfqLine?.id === asked.id).reduce((sum, l) => sum + kept(l.quantity), 0);
+  return here === kept(asked.quantity) ? null : `${said}; this RFQ's lines come to ${formatNumber(here / 1e4)} ${asked.unitOfMeasure}`;
 }
 
 /** Days from sending to closing unless the buyer picks another, as the RFQ sheet's Closing = Issued + 4. */

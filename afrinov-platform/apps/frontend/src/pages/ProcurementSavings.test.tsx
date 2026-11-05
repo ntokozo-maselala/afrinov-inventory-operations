@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
 vi.mock('../api/client', () => ({
@@ -28,8 +28,11 @@ const REPORT = {
 };
 
 const lastReportCall = () => mockGet.mock.calls.map((c) => String(c[0])).filter((p) => p.startsWith('/reports/procurement-savings')).pop()!;
+function Address() {
+  return <output data-testid="address">{useLocation().search}</output>;
+}
 const renderPage = (url = '/reports/procurement-savings?from=2026-11-01&to=2026-11-30') => render(
-  <MemoryRouter initialEntries={[url]}><ToastProvider><ProcurementSavings /></ToastProvider></MemoryRouter>,
+  <MemoryRouter initialEntries={[url]}><ToastProvider><ProcurementSavings /><Address /></ToastProvider></MemoryRouter>,
 );
 
 beforeEach(() => {
@@ -85,6 +88,23 @@ describe('Procurement savings page', () => {
     expect(lastReportCall()).toBe('/reports/procurement-savings?from=2026-11-01&to=2026-11-30');
     fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1404' } });
     await waitFor(() => expect(lastReportCall()).toBe('/reports/procurement-savings?from=2026-11-01&to=2026-11-30&projectNumber=AFRI-1404'));
+  });
+
+  it('keeps the project in the address, so a reload or shared link keeps it (Qodo, PR #159)', async () => {
+    renderPage();
+    const select = await screen.findByLabelText('Project');
+    await screen.findByRole('option', { name: /AFRI-1404/ });
+    fireEvent.change(select, { target: { value: 'AFRI-1404' } });
+    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent('?from=2026-11-01&to=2026-11-30&projectNumber=AFRI-1404'));
+    fireEvent.change(select, { target: { value: '' } });
+    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent(/^\?from=2026-11-01&to=2026-11-30$/));
+  });
+
+  it('opens on the project in the address', async () => {
+    renderPage('/reports/procurement-savings?from=2026-11-01&to=2026-11-30&projectNumber=AFRI-1404');
+    await screen.findByRole('option', { name: /AFRI-1404/ });
+    expect(screen.getByLabelText('Project')).toHaveValue('AFRI-1404');
+    await waitFor(() => expect(lastReportCall()).toContain('projectNumber=AFRI-1404'));
   });
 
   it('asks nothing of the server for a period that runs backwards', async () => {

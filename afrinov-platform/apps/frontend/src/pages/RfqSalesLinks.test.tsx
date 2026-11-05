@@ -91,8 +91,9 @@ describe('Linking a line to its Sales line', () => {
     current = rfq([line('l-1', 1, '20', 'each', PIPES), line('l-2', 2, '12.5', 'm', PLATE)]);
     page();
     await screen.findByRole('table', { name: 'RFQ lines' });
-    expect(await screen.findByText('Sales asked for 24 each')).toBeInTheDocument();
-    expect(screen.getByText(/Sales asked for 12[.,]5 kg/)).toBeInTheDocument();
+    // About this RFQ only: another RFQ may make up the rest (Qodo, PR #159).
+    expect(await screen.findByText("Sales asked for 24 each; this RFQ's lines come to 20 each")).toBeInTheDocument();
+    expect(screen.getByText(/Sales asked for 12[.,]5 kg; this line is in m/)).toBeInTheDocument();
   });
 
   it('adds up the lines sharing a Sales line before noting a difference', async () => {

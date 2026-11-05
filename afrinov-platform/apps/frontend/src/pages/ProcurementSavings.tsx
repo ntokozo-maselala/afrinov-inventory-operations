@@ -83,7 +83,7 @@ export function ProcurementSavings() {
     : range.from > range.to ? 'The start date is after the end date.'
       : range.from > today ? 'Choose a period that has started.'
         : null;
-  const [project, setProject] = useState(() => params.get('projectNumber') ?? '');
+  const project = params.get('projectNumber') ?? '';
   const [downloading, setDownloading] = useState(false);
   const toast = useToast();
 
@@ -93,6 +93,16 @@ export function ProcurementSavings() {
       next.set('from', range.from);
       next.set('to', range.to);
       next.set(key, value);
+      return next;
+    }, { replace: true });
+  }
+
+  /** In the address too, so a reload or a shared link keeps it. */
+  function setProject(value: string) {
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      if (value) next.set('projectNumber', value);
+      else next.delete('projectNumber');
       return next;
     }, { replace: true });
   }
