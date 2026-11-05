@@ -71,6 +71,28 @@ describe('StockActionForm: the reason sets the direction', () => {
     expect(lastBody()).toMatchObject({ reasonCode: 'DAMAGE', quantity: -3, recipientId: null });
   });
 
+  // Seen running the app: a refused quantity's error stayed up after it was corrected.
+  it('clears the error once what it was about is changed, and checks again on posting', async () => {
+    const { onSuccess } = renderAdjust();
+    reason('DAMAGE');
+    fireEvent.change(screen.getByLabelText('Responsible'), { target: { value: '__none__' } });
+    // Once the units are in, the washer is known to be counted.
+    await screen.findByText(/^Counted in whole each: 1, 2, 3 …/);
+    quantity('0,0001');
+    submit();
+    expect(await screen.findByText('Counted in whole each: enter 1, 2, 3 …')).toBeInTheDocument();
+    expect(screen.getByText('Cannot submit')).toBeInTheDocument();
+    quantity('30');
+    expect(screen.queryByText('Cannot submit')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Quantity/)).not.toHaveClass('input-error');
+    quantity('50');
+    submit();
+    expect(await screen.findByText("Only 41 each on hand, so 50 can't be removed.")).toBeInTheDocument();
+    quantity('3');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 3 each' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith('Removed 3 each of GRIND-DISC-125'));
+  });
+
   it('refuses a minus sign, part of an item counted in each, and more than is on hand', async () => {
     renderAdjust();
     reason('SCRAP');

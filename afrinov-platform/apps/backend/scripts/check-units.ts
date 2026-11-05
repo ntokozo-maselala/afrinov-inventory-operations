@@ -14,6 +14,7 @@
 // exact remainder, so whoever receives or takes them back should know.
 //
 //   npm run check:units --workspace=@afrinov/backend
+import { Prisma } from '@prisma/client';
 import { prisma } from '../src/shared/db.js';
 import { COUNTED_AT_RELEASE, UNIT_ALIASES, unitCode } from '../src/shared/units.js';
 
@@ -74,7 +75,13 @@ async function main(): Promise<void> {
   // work it out: an issue less what came back and its live used-up and broken
   // marks (a withdrawn mark, or a withdrawal, doesn't count); a loan less what
   // was checked in and any lost write-off waiting for approval. Listed only
-  // when that remainder is part of a unit.
+  // when that remainder is part of a unit. Write-off requests come with
+  // migration 045; on a database not migrated that far, none can be waiting.
+  const [{ requests }] = await prisma.$queryRaw<[{ requests: boolean }]>`SELECT to_regclass('public.adjustment_requests') IS NOT NULL AS requests`;
+  const lostWaiting = requests
+    ? Prisma.sql`- CASE WHEN t.type = 'LOAN' THEN COALESCE((SELECT -SUM(q.quantity) FROM adjustment_requests q
+            WHERE q.status = 'PENDING' AND q.reference_type = 'ToolLoan' AND q.reference_id = t.id), 0) ELSE 0 END`
+    : Prisma.empty;
   const out = (await prisma.$queryRaw<Row[]>`
     WITH open_out AS (
       SELECT t.id, t.material_id, t.type, t.posted_at,
@@ -86,8 +93,7 @@ async function main(): Promise<void> {
         - CASE WHEN t.type = 'ISSUE' THEN COALESCE((SELECT SUM(o.quantity) FROM consumable_outcomes o
             WHERE o.issue_transaction_id = t.id AND o.withdraws_id IS NULL
               AND NOT EXISTS (SELECT 1 FROM consumable_outcomes w WHERE w.withdraws_id = o.id)), 0) ELSE 0 END
-        - CASE WHEN t.type = 'LOAN' THEN COALESCE((SELECT -SUM(q.quantity) FROM adjustment_requests q
-            WHERE q.status = 'PENDING' AND q.reference_type = 'ToolLoan' AND q.reference_id = t.id), 0) ELSE 0 END
+        ${lostWaiting}
         AS remaining
       FROM inventory_transactions t
       WHERE t.type IN ('ISSUE', 'LOAN') AND t.reverses_id IS NULL
