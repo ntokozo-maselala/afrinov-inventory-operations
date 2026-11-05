@@ -304,8 +304,6 @@ function nextPoNumber(): string {
   return `AFRI-${String(Math.max(highest + 1, first)).padStart(4, '0')}`;
 }
 
-// Approval by value as the server works it out (po-approval.ts), for the
-// signed-in mock user (user-1, an admin without a limit).
 /** The small print as the settings have it now, kept on an order when it is approved. */
 function mockPrintedTerms(): NonNullable<MockPurchaseOrder['printedTerms']> {
   const wording = (k: string) => String(MOCK_SETTINGS[`purchaseOrders.${k}`]?.value ?? '');
@@ -315,23 +313,39 @@ function mockPrintedTerms(): NonNullable<MockPurchaseOrder['printedTerms']> {
   };
 }
 
+const MOCK_STEP_LABEL: Record<string, string> = { MANAGER: 'Procurement Manager', DIRECTOR: 'Director' };
+
+// Who signs as the server works it out (po-approval.ts). The mock has one
+// signed-in user, so it signs every step of the demo; the server refuses one
+// person signing an order twice.
 function mockApproval(po: MockPurchaseOrder) {
   const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
   const currency = po.currency ?? 'ZAR';
-  const within = (limit: string | null | undefined) => limit == null || (currency === 'ZAR' && Number(totals.net) <= Number(limit));
-  const approvers = mockUsers
-    .filter((u) => u.active && u.roles.some((r) => r.role.name === 'ADMIN' || r.role.name === 'APPROVER'))
-    .map((u) => ({ id: u.id, name: u.name, approvalLimit: u.approvalLimit ?? null }));
-  const me = approvers.find((a) => a.id === 'user-1');
   const unpriced = totals.unpricedLines > 0;
   const n = totals.unpricedLines;
+  const rate = currency === 'ZAR' ? null : Number(po.exchangeRate ?? MOCK_SETTINGS[`purchaseOrders.exchangeRate${currency}`]?.value ?? 0) || null;
+  const noRate = !unpriced && currency !== 'ZAR' && !rate;
+  const value = Number(totals.subtotal) * (rate ?? 1);
+  const threshold = Number(MOCK_SETTINGS['purchaseOrders.directorApprovalFrom']?.value ?? 200000);
+  const stepNames = unpriced || noRate ? [] : po.projectNumber && value >= threshold ? ['MANAGER', 'DIRECTOR'] : ['MANAGER'];
+  const signatures = po.signatures ?? [];
+  const nextStep = stepNames.find((s) => !signatures.some((x) => x.step === s)) ?? null;
   const reason = unpriced
     ? `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.`
-    : me && !within(me.approvalLimit) ? 'This order is over your approval limit.' : null;
+    : noRate ? `This order is in ${currency}, and there is no exchange rate for ${currency} yet.` : null;
   return {
-    ...totals, currency, myLimit: me?.approvalLimit ?? null, reason,
-    canApprove: !!me && po.status === 'PENDING_APPROVAL' && !unpriced && within(me.approvalLimit),
-    approvers: unpriced ? [] : approvers.filter((a) => within(a.approvalLimit)),
+    ...totals, currency, reason, noRate,
+    exchangeRate: rate === null ? null : String(rate),
+    randValue: unpriced || noRate ? null : value.toFixed(2),
+    canApprove: po.status === 'PENDING_APPROVAL' && !unpriced && !noRate,
+    steps: stepNames.map((step) => {
+      const s = signatures.find((x) => x.step === step);
+      return { step, label: MOCK_STEP_LABEL[step]!, signature: s ? { name: s.signedBy?.name ?? 'You (admin)', signedAt: s.signedAt, standIn: !!s.standIn } : null };
+    }),
+    next: nextStep ? { step: nextStep, label: MOCK_STEP_LABEL[nextStep]! } : null,
+    nextStep,
+    lastStep: stepNames[stepNames.length - 1] ?? null,
+    approvers: nextStep ? [{ id: 'user-1', name: 'You (admin)', standIn: false }] : [],
   };
 }
 
@@ -1285,6 +1299,12 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (po.projectNumber) assertProjectOpen(po.projectNumber);
     const before = { status: po.status };
     po.history = po.history ?? [];
+    // As the server: an order in another currency locks the rate here, and needs one.
+    if ((po.currency ?? 'ZAR') !== 'ZAR') {
+      const rate = Number(MOCK_SETTINGS[`purchaseOrders.exchangeRate${po.currency}`]?.value ?? 0);
+      if (!rate) throw err('VALIDATION_ERROR', `This order is in ${po.currency}, and there is no exchange rate for ${po.currency} yet. An admin can add one under Settings → Purchase orders.`);
+      po.exchangeRate = String(rate);
+    }
     // As the server: with approval not required, submission approves it, and
     // it keeps the small print it was approved with.
     if (MOCK_SETTINGS['purchaseOrders.requireApprovalBeforeProcessing']?.value === false) {
@@ -1306,14 +1326,23 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
     const check = mockApproval(po);
     if (check.unpricedLines > 0) throw err('VALIDATION_ERROR', check.reason!);
+    if (check.noRate) throw err('VALIDATION_ERROR', check.reason!);
     if (!check.canApprove) throw err('FORBIDDEN', check.reason ?? 'You cannot approve this order.');
     const before = { status: po.status };
+    po.history = po.history ?? [];
+    // The next signature; the last one approves it.
+    if (check.nextStep) {
+      po.signatures = [...(po.signatures ?? []), { step: check.nextStep, signedAt: new Date().toISOString(), standIn: false, signedBy: { id: 'u-admin', name: 'You (admin)' } }];
+    }
+    if (check.nextStep && check.nextStep !== check.lastStep) {
+      po.history.push({ id: nextId('audit'), action: 'PO_SIGN', actorId: 'u-admin', before, after: { status: po.status, step: check.nextStep, standIn: false }, createdAt: new Date().toISOString() });
+      return po;
+    }
     po.status = 'APPROVED';
     po.approvedAt = new Date().toISOString();
     po.approvedBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
     // As the server: the order keeps the small print it was approved with.
     po.printedTerms = mockPrintedTerms();
-    po.history = po.history ?? [];
     po.history.push({ id: nextId('audit'), action: 'PO_APPROVE', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
@@ -1420,6 +1449,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     // And whether its money did, by value: a price, discount or VAT rate sent unchanged is no change.
     const money = (x: MockPurchaseOrder) => JSON.stringify([Number(x.vatRate ?? 15), x.lines.map((l) => [l.unitPrice == null ? null : Number(l.unitPrice), Number(l.discountPercent ?? 0)])]);
     const moneyBefore = money(po);
+    const signedFor = mockApproval(po).randValue;
+    const vatBefore = Number(po.vatRate ?? 15);
     const nextProject = b.projectNumber === undefined ? undefined : (b.projectNumber?.trim() || null);
     if (nextProject !== undefined && nextProject !== (po.projectNumber ?? null)) {
       // As the server: neither kind of order becomes the other.
@@ -1444,17 +1475,20 @@ function route(method: string, path: string, body?: unknown): unknown {
       line.deliveryDate = ld.deliveryDate;
     }
     Object.assign(po, poDetails(b));
+    // As the server: a signature is for the money as it stood.
+    if (po.status === 'PENDING_APPROVAL' && money(po) !== moneyBefore) po.signatures = [];
     if (po.status === 'APPROVED' && snapshot(po) !== before) {
       po.revision = (po.revision ?? 0) + 1;
-      // As the server: a new price, discount or VAT rate that takes the order past
-      // its approver's limit (or leaves a line unpriced) sends it back for approval,
-      // without the approved small print. The mock's approver is the signed-in user;
-      // an order with no approver on record (as seeded) is left as it is.
+      // As the server: a new VAT rate, or a new price or discount that raises its
+      // value or leaves it needing a signature it doesn't have (or a line unpriced),
+      // sends it back for approval, without the approved small print. An order with
+      // no approver on record (as seeded) is left as it is.
       if (po.approvedBy && money(po) !== moneyBefore) {
-        const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
-        const limit = mockUsers.find((u) => u.id === 'user-1')?.approvalLimit ?? null;
-        const within = limit == null || ((po.currency ?? 'ZAR') === 'ZAR' && Number(totals.net) <= Number(limit));
-        if (totals.unpricedLines > 0 || !within) Object.assign(po, { status: 'PENDING_APPROVAL', approvedAt: null, approvedBy: null, printedTerms: null });
+        const check = mockApproval(po);
+        const raised = signedFor !== null && check.randValue !== null && Number(check.randValue) > Number(signedFor);
+        if (check.unpricedLines > 0 || check.noRate || check.nextStep || raised || Number(po.vatRate ?? 15) !== vatBefore) {
+          Object.assign(po, { status: 'PENDING_APPROVAL', approvedAt: null, approvedBy: null, printedTerms: null, signatures: [] });
+        }
       }
     }
     po.history = po.history ?? [];
@@ -1878,7 +1912,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'PATCH' && p.startsWith('/users/') && p.split('/').length === 3) {
     const id = p.slice('/users/'.length);
-    const b = body as { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null };
+    const b = body as { name?: string; active?: boolean; roleNames?: string[] };
     return mockUsersApi.update(id, b);
   }
 
@@ -2001,6 +2035,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.projectReceivingLocationId': row('inventory.projectReceivingLocationId', '', 'string', 'inventory', 'Where project deliveries are booked on Receive stock, such as the workshop floor: project material is not shelved, it is issued from there. Leave blank to choose a location on each delivery.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
 
+    'purchaseOrders.directorApprovalFrom': row('purchaseOrders.directorApprovalFrom', 200000, 'number', 'purchase_orders', 'From this value, in rand excluding VAT, a project order needs the Director as well as the Procurement Manager.'),
+    'purchaseOrders.exchangeRateUSD': row('purchaseOrders.exchangeRateUSD', 0, 'number', 'purchase_orders', 'Rand per US dollar, to work out who signs an order in USD. An order keeps the rate it was submitted with.'),
+    'purchaseOrders.exchangeRateEUR': row('purchaseOrders.exchangeRateEUR', 0, 'number', 'purchase_orders', 'Rand per euro, to work out who signs an order in EUR. An order keeps the rate it was submitted with.'),
+    'purchaseOrders.exchangeRateGBP': row('purchaseOrders.exchangeRateGBP', 0, 'number', 'purchase_orders', 'Rand per pound, to work out who signs an order in GBP. An order keeps the rate it was submitted with.'),
     'purchaseOrders.requireApprovalBeforeProcessing': row('purchaseOrders.requireApprovalBeforeProcessing', true, 'boolean', 'purchase_orders', 'When on, submission routes through PENDING_APPROVAL; when off, submission auto-approves.'),
     'purchaseOrders.allowCancellation': row('purchaseOrders.allowCancellation', true, 'boolean', 'purchase_orders', 'Allow cancelling purchase orders before delivery.'),
     'purchaseOrders.allowEditAfterApproval': row('purchaseOrders.allowEditAfterApproval', true, 'boolean', 'purchase_orders', 'Allow editing a purchase order once it has been approved.'),
@@ -2055,7 +2093,9 @@ function validateMockSetting(key: string, raw: unknown): { value?: unknown; erro
     case 'number': {
       const n = typeof raw === 'number' ? raw : Number(raw);
       if (!Number.isFinite(n)) return { error: 'Must be a number' };
-      if (!Number.isInteger(n)) return { error: 'Must be a whole number' };
+      // As the server: an exchange rate has decimals, and the Director's threshold may have cents.
+      const decimal = key.startsWith('purchaseOrders.exchangeRate') || key === 'purchaseOrders.directorApprovalFrom';
+      if (!decimal && !Number.isInteger(n)) return { error: 'Must be a whole number' };
       return { value: n };
     }
     case 'boolean': {
@@ -2117,7 +2157,7 @@ function devUser(): MockUser {
     id: 'user-1',
     email: 'admin@afrinov.local',
     name: 'System Administrator (dev)',
-    roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'],
+    roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'],
   };
 }
 
@@ -3083,7 +3123,7 @@ interface MockAdminUser {
   name: string;
   active: boolean;
   createdAt: string;
-  roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' } }>;
+  roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' } }>;
   /** Largest order (rand, incl. VAT) they may approve; null: no limit. */
   approvalLimit?: string | null;
 }
@@ -3129,13 +3169,12 @@ const mockUsersApi = {
     recordAudit('CREATE', created.id, null, { email: created.email, name: created.name, roles: b.roleNames });
     return created;
   },
-  update(id: string, b: { name?: string; active?: boolean; roleNames?: string[]; approvalLimit?: number | null }): MockAdminUser {
+  update(id: string, b: { name?: string; active?: boolean; roleNames?: string[] }): MockAdminUser {
     const u = mockUsers.find((x) => x.id === id);
     if (!u) throw err('NOT_FOUND', 'User not found');
     const before = { name: u.name, active: u.active, roles: u.roles.map((r) => r.role.name) };
     if (b.name !== undefined) u.name = b.name;
     if (b.active !== undefined) u.active = b.active;
-    if (b.approvalLimit !== undefined) u.approvalLimit = b.approvalLimit === null ? null : String(b.approvalLimit);
     if (b.roleNames !== undefined) {
       u.roles = b.roleNames.map((r) => ({ role: { name: r as MockAdminUser['roles'][number]['role']['name'] } }));
     }

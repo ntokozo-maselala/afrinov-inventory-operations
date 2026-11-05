@@ -102,7 +102,8 @@ In frontend-only mode the dev user is:
 ```text
 email:   admin@afrinov.local
 name:    System Administrator (dev)
-roles:   ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER
+roles:   ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER,
+         PROCUREMENT_MANAGER, DIRECTOR, CEO, WORKSHOP_MANAGER
 ```
 
 The name and roles are clearly marked as development so it is obvious in

@@ -55,7 +55,7 @@ export function useNavGroups(): NavGroup[] {
         { to: '/stock/return', label: 'Return stock', icon: <Icon.Arrows />, permissions: ['inventory:return'] },
         { to: '/stock/count', label: 'Count stock', icon: <Icon.Check />, permissions: ['inventory:count'] },
         // The storeman orders stock for the shelf; Procurement buys for projects.
-        ...(PROCUREMENT_ENABLED ? [{ to: '/stock/orders', label: 'Order stock', icon: <Icon.Cart />, permissions: ['stores:order'] }] : []),
+        ...(PROCUREMENT_ENABLED ? [{ to: '/stock/orders', label: 'Order stock', icon: <Icon.Cart />, permissions: ['stores:view'] }] : []),
         { to: '/tools', label: 'Tools', icon: <Icon.Wrench /> },
       ],
     },

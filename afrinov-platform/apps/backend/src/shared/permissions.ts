@@ -19,6 +19,8 @@ export const PermissionCode = {
   // Raising, editing, submitting, cancelling and closing a Stores order (one
   // without a project); the purchase order codes above cover project orders.
   OrderStoresStock: 'order:stores_stock',
+  // Signing a Stores order, and seeing them to sign; approve:purchase_order covers project orders.
+  ApproveStoresOrder: 'approve:stores_order',
   ViewGoodsReceipt: 'view:goods_receipt',
   ReceiveInventory: 'receive:inventory',
   IssueInventory: 'issue:inventory',
@@ -94,8 +96,13 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.ManageProjects,
     PermissionCode.ViewReports,
   ],
-  // Approvers open the orders they approve (procurement roadmap Phase 4).
-  APPROVER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  // View only: orders are signed by the roles below (po-approval.ts).
+  APPROVER: [PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  // These open the orders they sign. Who signs which order is decided in po-approval.ts.
+  PROCUREMENT_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  DIRECTOR: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  CEO: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  WORKSHOP_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
   TECHNICIAN: [
     PermissionCode.IssueInventory,
     PermissionCode.CheckOutTool,

@@ -17,7 +17,7 @@ import { Field, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
-import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
+import { approvedWithoutSigning, PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
 import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath, receivePath } from '../lib/orderKind';
@@ -64,6 +64,8 @@ interface PO extends OrderDetails {
   expectedDeliveryDate?: string | null;
   approvedAt?: string | null;
   approvedBy?: POUser | null;
+  /** Who signed it, oldest first. */
+  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { id?: string; name: string } | null }>;
   deliveredAt?: string | null;
   deliveredBy?: POUser | null;
   deliveryNotes?: string | null;
@@ -111,6 +113,16 @@ function statusLabel(s: POStatus): string {
     CLOSED: 'Closed',
     CANCELLED: 'Cancelled',
   } as Record<string, string>)[s] ?? s;
+}
+
+/** Who signed it, then whoever approved it without signing, as when the threshold was raised part-way. */
+function approvedByLine(po: PO): string {
+  const signatures = po.signatures ?? [];
+  if (signatures.length === 0) return po.approvedBy?.name ?? '—';
+  const names = signatures.map((s) => `${s.signedBy?.name ?? 'A removed user'}${s.standIn ? ' (standing in)' : ''}`);
+  const finishedBy = approvedWithoutSigning(po);
+  if (finishedBy) names.push(`approved by ${finishedBy.name}`);
+  return names.join(', ');
 }
 
 function isCancellable(s: POStatus): boolean { return s === 'DRAFT' || s === 'PENDING_APPROVAL' || s === 'APPROVED'; }
@@ -177,8 +189,9 @@ export function PurchaseOrderDetail() {
         if (!draft.draft.reason.trim()) { toast.error('A cancellation reason is required'); setBusy(false); return; }
         payload = { reason: draft.draft.reason.trim() };
       }
-      await api.post(`/purchase-orders/${po.data.id}/${draft.kind}`, payload);
-      toast.success(`PO ${po.data.number} ${kindLabel(draft.kind)}`);
+      const after = await api.post<{ status?: POStatus } | undefined>(`/purchase-orders/${po.data.id}/${draft.kind}`, payload);
+      // A signature that isn't the last leaves the order pending.
+      toast.success(`PO ${po.data.number} ${draft.kind === 'approve' && after?.status === 'PENDING_APPROVAL' ? 'signed' : kindLabel(draft.kind)}`);
       setDraft(null);
       reload();
     } catch (err) {
@@ -189,14 +202,14 @@ export function PurchaseOrderDetail() {
   }
 
   const fresh = po.data;
-  // Each action shows only to those the server lets do it; Approve also needs a limit that covers the order.
+  // Each action shows only to those the server lets do it; Approve only when the order is waiting on this person.
   const cancellable = fresh ? canManage && isCancellable(fresh.status) : false;
   const editable = fresh ? canManage && isEditable(fresh.status) : false;
   const closable = fresh ? canManage && isClosable(fresh.status) : false;
   const primary: { kind: PrimaryKind; label: string } | null = useMemo(() => {
     if (!fresh) return null;
     if (isSubmittable(fresh.status)) return canManage ? { kind: 'submit', label: 'Submit for approval' } : null;
-    if (isApprovable(fresh.status)) return approval.data?.canApprove ? { kind: 'approve', label: 'Approve' } : null;
+    if (isApprovable(fresh.status)) return approval.data?.canApprove ? { kind: 'approve', label: approval.data.steps.length > 1 && approval.data.next?.step === 'MANAGER' ? 'Sign' : 'Approve' } : null;
     if (isReceivable(fresh.status) && canReceive) return { kind: 'receive', label: 'Receive delivery' };
     return null;
   }, [fresh, approval.data, canReceive, canManage]);
@@ -251,7 +264,7 @@ export function PurchaseOrderDetail() {
 
       {fresh && (
         <div className="space-y-6">
-          <LifecycleTracker status={fresh.status} />
+          <LifecycleTracker status={fresh.status} history={history.data ?? []} approval={approval.data} />
           {isApprovable(fresh.status) && approval.data && (
             <ApprovalPanel view={approval.data} onAddPrices={canManage ? editOrder : undefined} />
           )}
@@ -269,7 +282,7 @@ export function PurchaseOrderDetail() {
                   <><dt className="text-surface-500">Expected</dt><dd className="col-span-2 text-meta">{formatDate(fresh.expectedDeliveryDate)}</dd></>
                 )}
                 {fresh.approvedAt && (
-                  <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {fresh.approvedBy?.name ?? '—'}</span></dd></>
+                  <><dt className="text-surface-500">Approved</dt><dd className="col-span-2 text-meta">{formatDateTime(fresh.approvedAt)}<br /><span className="text-surface-400">by {approvedByLine(fresh)}</span></dd></>
                 )}
                 {fresh.deliveredAt && (
                   // An order finished by the retired Confirm delivery went to site, not into the store; one
@@ -328,6 +341,7 @@ export function PurchaseOrderDetail() {
         <ActionDialog
           draft={draft}
           po={fresh}
+          signOnly={primary?.label === 'Sign'}
           busy={busy}
           onClose={() => { if (!busy) setDraft(null); }}
           onConfirm={performAction}
@@ -339,7 +353,54 @@ export function PurchaseOrderDetail() {
 }
 
 // ── Lifecycle tracker ────────────────────────────────────────────────────
-function LifecycleTracker({ status }: { status: POStatus }) {
+/** "Thandi Mokoena" as "Thandi M.", to fit under a step. */
+export function shortName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name.trim();
+}
+
+/** Under a step: who did it and when, or who it is waiting on. */
+export interface StepPerson { label: string; title: string; waiting?: boolean }
+
+/**
+ * Who moved the order into each step, from its Activity: the latest entry that
+ * moved it into that status (so an order sent back for approval shows the
+ * latest round). Every status change is logged with the status it moved to.
+ */
+export function stepActors(history: HistoryEntry[]): Partial<Record<POStatus, StepPerson>> {
+  const out: Partial<Record<POStatus, StepPerson>> = {};
+  const oldestFirst = [...history].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const e of oldestFirst) {
+    const to = e.after?.status as POStatus | undefined;
+    if (!to || e.before?.status === to) continue;
+    const name = e.actorName ?? (e.actorId ? 'A removed user' : 'System');
+    const shown = e.actorName ? shortName(e.actorName) : name;
+    out[to] = { label: `${shown} · ${formatDate(e.createdAt)}`, title: `${name}, ${formatDateTime(e.createdAt)}` };
+  }
+  return out;
+}
+
+/** Who the next step is waiting on: who may give the next signature, or the store for a delivery. */
+export function waitingOn(status: POStatus, approval: ApprovalView | null | undefined): { step: POStatus; person: StepPerson } | null {
+  if (status === 'PENDING_APPROVAL' && approval) {
+    if (approval.unpricedLines > 0) return { step: 'APPROVED', person: { label: 'Needs prices', title: 'Every line needs a price before the order can be approved', waiting: true } };
+    if (approval.noRate) return { step: 'APPROVED', person: { label: 'Needs a rate', title: `No exchange rate for ${approval.currency} yet`, waiting: true } };
+    const role = approval.next?.label ?? 'an approver';
+    const names = approval.approvers.map((a) => a.name);
+    if (names.length === 0) return { step: 'APPROVED', person: { label: 'No approver', title: `Nobody holds the ${role} role yet`, waiting: true } };
+    // The usual signer by name; the stand-ins are in the title.
+    const usual = approval.approvers.filter((a) => !a.standIn).map((a) => a.name);
+    const shown = usual.length > 0 ? usual : names;
+    const label = shown.length > 2 ? `${shortName(shown[0]!)} +${shown.length - 1}` : shown.map(shortName).join(' or ');
+    return { step: 'APPROVED', person: { label: `Waiting on ${label}`, title: `${role}. Any of: ${names.join(', ')}`, waiting: true } };
+  }
+  // Anyone who receives orders books a delivery, so it waits on the store, not a person.
+  if (status === 'APPROVED') return { step: 'PARTIALLY_RECEIVED', person: { label: 'Waiting on Stores', title: 'Booked on Receive stock when it arrives', waiting: true } };
+  if (status === 'PARTIALLY_RECEIVED') return { step: 'RECEIVED', person: { label: 'Waiting on Stores', title: 'The rest is booked on Receive stock when it arrives', waiting: true } };
+  return null;
+}
+
+function LifecycleTracker({ status, history, approval }: { status: POStatus; history: HistoryEntry[]; approval?: ApprovalView | null }) {
   if (status === 'CANCELLED') {
     return (
       <div className="surface-card p-4">
@@ -351,6 +412,8 @@ function LifecycleTracker({ status }: { status: POStatus }) {
     );
   }
   const currentIndex = LIFECYCLE_ORDER.indexOf(status);
+  const actors = stepActors(history);
+  const next = waitingOn(status, approval);
   return (
     <div className="surface-card p-4">
       <ol className="grid grid-cols-6 gap-1 sm:gap-3" aria-label="Purchase order lifecycle">
@@ -369,6 +432,16 @@ function LifecycleTracker({ status }: { status: POStatus }) {
               <span className={`mt-1 text-[10px] sm:text-sm truncate max-w-[72px] sm:max-w-none ${isCurrent ? 'font-semibold text-brand-700' : reached ? 'text-surface-700' : 'text-surface-400'}`}>
                 {statusLabel(s)}
               </span>
+              {/* Too tight on a phone: the step labels alone there, the Activity below has the names. */}
+              {(() => {
+                const person = reached ? actors[s] : next?.step === s ? next.person : undefined;
+                if (!person) return null;
+                return (
+                  <span title={person.title} className={`hidden sm:block mt-0.5 text-xs truncate max-w-full ${person.waiting ? 'text-warning-700 italic' : 'text-surface-500'}`}>
+                    {person.label}
+                  </span>
+                );
+              })()}
             </li>
           );
         })}
@@ -402,10 +475,14 @@ function History({ entries, loading }: { entries: HistoryEntry[]; loading: boole
 }
 
 function describeEntry(e: HistoryEntry): string {
-  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string; rfqNumber?: string };
+  const after = (e.after ?? {}) as { status?: string; goodsReceiptNumber?: string; rfqNumber?: string; step?: string; standIn?: boolean; signaturesCleared?: boolean };
   const before = (e.before ?? {}) as { status?: string };
   // An order awarded from a request for quotation says which.
   if (e.action === 'CREATE' && after.rfqNumber) return `Purchase order raised from ${after.rfqNumber}`;
+  // Each signature says for whom, and whether someone stood in.
+  if (e.action === 'PO_SIGN') return `Signed as ${after.step === 'DIRECTOR' ? 'Director' : 'Procurement Manager'}${after.standIn ? ' (standing in)' : ''}`;
+  if (e.action === 'PO_APPROVE' && after.standIn) return `Approved (standing in for the ${after.step === 'DIRECTOR' ? 'Director' : 'Procurement Manager'}): ${statusLabel(before.status as POStatus)} → ${statusLabel(after.status as POStatus)}`;
+  if (e.action === 'UPDATE' && after.signaturesCleared && before.status === after.status) return 'Details updated: signatures cleared, as the money changed';
   const label = e.action === 'PO_GOODS_RECEIVED' && after.goodsReceiptNumber
     ? `Received on ${after.goodsReceiptNumber}`
     : labelForAction(e.action);
@@ -421,6 +498,7 @@ function labelForAction(action: string): string {
     CREATE: 'Purchase order created',
     UPDATE: 'Details updated',
     PO_SUBMIT: 'Submitted for approval',
+    PO_SIGN: 'Signed',
     PO_APPROVE: 'Approved',
     PO_SUBMIT_AUTO_APPROVE: 'Submitted and approved',
     PO_RECEIVE: 'Received all outstanding',
@@ -435,12 +513,14 @@ function labelForAction(action: string): string {
 }
 
 // ── Action dialog (lifted state) ─────────────────────────────────────────
-function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
+function ActionDialog({ draft, po, signOnly, busy, onClose, onConfirm, onChangeDraft }: {
   draft: ActionDraft;
   po: PO | null;
   busy: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  /** Approve is a signature that isn't the last one. */
+  signOnly?: boolean;
   onChangeDraft: (next: ActionDraft) => void;
 }) {
   if (draft.kind === 'submit') {
@@ -468,9 +548,9 @@ function ActionDialog({ draft, po, busy, onClose, onConfirm, onChangeDraft }: {
         open
         onClose={onClose}
         onConfirm={onConfirm}
-        title="Approve purchase order?"
-        description={po ? `Approve ${po.number} from ${po.supplier.name}. ${po.lines.length} line(s), ${formatNumber(po.lines.reduce((a, l) => a + Number(l.orderedQty), 0))} units.` : ''}
-        confirmLabel="Approve"
+        title={signOnly ? 'Sign purchase order?' : 'Approve purchase order?'}
+        description={po ? `${signOnly ? 'Sign' : 'Approve'} ${po.number} from ${po.supplier.name}. ${po.lines.length} line(s), ${formatNumber(po.lines.reduce((a, l) => a + Number(l.orderedQty), 0))} units.${signOnly ? ' The Director signs next.' : ''}` : ''}
+        confirmLabel={signOnly ? 'Sign' : 'Approve'}
         loading={busy}
       />
     );
@@ -575,13 +655,21 @@ interface ApprovalView extends PoTotals {
   canApprove: boolean;
   /** Why the reader can't approve it, when they may approve orders. */
   reason: string | null;
-  myLimit: string | null;
-  approvers: Array<{ id: string; name: string; approvalLimit: string | null }>;
+  /** Its value in rand excluding VAT, which decides who signs; null until it can be worked out. */
+  randValue: string | null;
+  /** Rand per unit of its currency; null on a rand order. */
+  exchangeRate: string | null;
+  /** In another currency with no exchange rate yet. */
+  noRate: boolean;
+  /** The signatures it needs, in signing order. */
+  steps: Array<{ step: string; label: string; signature: { name: string; signedAt: string; standIn: boolean } | null }>;
+  next: { step: string; label: string } | null;
+  /** Who may give the next signature. */
+  approvers: Array<{ id: string; name: string; standIn: boolean }>;
 }
 
-/** Who can sign this order off, by approval limit, as the template picks its approver. */
+/** The signatures this order needs, who has given them, and who may give the next. */
 function ApprovalPanel({ view, onAddPrices }: { view: ApprovalView; onAddPrices?: () => void }) {
-  const limit = (l: string | null) => (l === null ? 'no limit' : `up to ${formatMoney(l, 'ZAR')}`);
   if (view.unpricedLines > 0) {
     return (
       <Alert tone="warning" title="Waiting for prices">
@@ -590,14 +678,33 @@ function ApprovalPanel({ view, onAddPrices }: { view: ApprovalView; onAddPrices?
       </Alert>
     );
   }
-  const names = view.approvers.map((a) => `${a.name} (${limit(a.approvalLimit)})`);
+  if (view.noRate) {
+    return (
+      <Alert tone="warning" title="Waiting for an exchange rate">
+        This order is in {view.currency}, and there is no exchange rate for {view.currency} yet, so it can&rsquo;t be signed. An admin can add one under Settings → Purchase orders.
+      </Alert>
+    );
+  }
+  const names = view.approvers.map((a) => (a.standIn ? `${a.name} (standing in)` : a.name));
+  const converted = view.currency !== 'ZAR' && view.exchangeRate
+    ? ` (${formatMoney(view.subtotal, view.currency)} at R${Number(view.exchangeRate)})`
+    : '';
   return (
-    <Alert tone={view.canApprove ? 'success' : 'info'} title={`Approval for ${formatMoney(view.net, view.currency)} including VAT`}>
-      {view.canApprove && <>You can approve this order. </>}
+    <Alert tone={view.canApprove ? 'success' : 'info'} title={`Approval for ${formatMoney(view.randValue ?? view.subtotal, 'ZAR')} excluding VAT${converted}`}>
+      <ul className="mb-1">
+        {view.steps.map((s) => (
+          <li key={s.step}>
+            {s.label}: {s.signature
+              ? <>signed by {s.signature.name}{s.signature.standIn ? ' (standing in)' : ''}, {formatDateTime(s.signature.signedAt)}</>
+              : view.next?.step === s.step ? 'waiting' : 'after the signature above'}
+          </li>
+        ))}
+      </ul>
+      {view.canApprove && <>You can sign this order. </>}
       {!view.canApprove && view.reason && <>{view.reason} </>}
-      {names.length > 0
-        ? <>Can approve it: {names.join(', ')}.</>
-        : <>Nobody has a high enough approval limit. An admin can raise one under Settings → Users &amp; permissions.</>}
+      {view.next && (names.length > 0
+        ? <>Can sign next: {names.join(', ')}.</>
+        : <>Nobody holds the {view.next.label} role yet. An admin can assign it under Settings → Users &amp; permissions.</>)}
     </Alert>
   );
 }

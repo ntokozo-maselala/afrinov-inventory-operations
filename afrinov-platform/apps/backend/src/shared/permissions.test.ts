@@ -36,7 +36,7 @@ describe('RolePermissions', () => {
 
   it("keeps project orders and RFQs from the store controller, who sees the store's own", () => {
     const holders = (code: string) => Object.entries(RolePermissions).filter(([, p]) => (p as string[]).includes(code)).map(([role]) => role).sort();
-    expect(holders(PermissionCode.ViewPurchaseOrder)).toEqual(['ADMIN', 'APPROVER', 'PROCUREMENT']);
+    expect(holders(PermissionCode.ViewPurchaseOrder)).toEqual(['ADMIN', 'APPROVER', 'CEO', 'DIRECTOR', 'PROCUREMENT', 'PROCUREMENT_MANAGER', 'WORKSHOP_MANAGER']);
   });
 
   it('only references known permission codes', () => {

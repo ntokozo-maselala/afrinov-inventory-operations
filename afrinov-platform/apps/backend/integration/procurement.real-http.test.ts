@@ -9,7 +9,7 @@ import {
   ADMIN_EMAIL,
   client,
   ledgerAndBalance,
-  login,
+  letAdminSign, login,
   prisma,
   requireAdminPassword,
   runId,
@@ -85,6 +85,7 @@ describe('receiving stock over real HTTP', () => {
     const password = requireAdminPassword();
     server = await startServer({ procurementEnabled: true });
     api = client(server.port, await login(server.port, ADMIN_EMAIL, password));
+    await letAdminSign(api);
 
     const material = await api<{ id: string }>('POST', '/materials', {
       sku: `IT-PO-${run}`,
@@ -434,15 +435,19 @@ describe('receiving stock over real HTTP', () => {
   });
 
   describe('approval by value', () => {
-    it('lets an approver with a limit open and approve orders within it, and refuses one over it', async () => {
-      const email = `it-approver-${run}@afrinov.local`;
-      const password = `It-${run}-approver`;
-      const created = await api<{ id: string }>('POST', '/users', { email, name: `IT Approver ${run}`, password, roleNames: ['APPROVER'] });
-      expect(created.status).toBe(201);
-      expect((await api('PATCH', `/users/${created.body.id}`, { approvalLimit: 1000 })).status).toBe(200);
-      const approver = client(server.port, await login(server.port, email, password));
+    it('signs by role and value: the Manager alone under R200 000 excluding VAT, then the Director too', async () => {
+      const person = async (role: string, label: string) => {
+        const email = `it-${label}-${run}@afrinov.local`;
+        const password = `It-${run}-${label}`;
+        const created = await api('POST', '/users', { email, name: `IT ${label} ${run}`, password, roleNames: [role] });
+        expect(created.status).toBe(201);
+        return client(server.port, await login(server.port, email, password));
+      };
+      const manager = await person('PROCUREMENT_MANAGER', 'manager');
+      const director = await person('DIRECTOR', 'director');
+      const ceo = await person('CEO', 'ceo');
+      const oldApprover = await person('APPROVER', 'old-approver');
 
-      // Approvers approve project orders; the store approves its own (Stores and Procurement Separation Roadmap).
       const projectNumber = `IT-AV-${run}`;
       expect((await api('POST', '/projects', { projectNumber, name: `IT approval ${run}` })).status).toBe(201);
       const beam = await api<{ id: string }>('POST', '/materials', {
@@ -454,23 +459,120 @@ describe('receiving stock over real HTTP', () => {
         await api('POST', `/purchase-orders/${res.body.id}/submit`);
         return res.body.id;
       };
-      const small = await order(800); // R920 with VAT
-      const large = await order(900); // R1 035 with VAT
+      const small = await order(199999.99); // R229 999.99 with VAT: VAT doesn't count
+      const large = await order(200000);
       // With approval switched off in Settings, submitting approves: nothing to check here.
       if ((await api<{ status: string }>('GET', `/purchase-orders/${small}`)).body.status !== 'PENDING_APPROVAL') return;
 
-      expect((await approver('GET', `/purchase-orders/${small}`)).status).toBe(200);
-      const view = await approver<{ canApprove: boolean; net: string }>('GET', `/purchase-orders/${large}/approval`);
-      expect(view.body).toMatchObject({ canApprove: false, net: '1035.00' });
-      const waiting = await approver<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true');
-      expect(waiting.status).toBe(200);
-      expect(waiting.body.map((p) => p.id)).toContain(small);
-      expect(waiting.body.map((p) => p.id)).not.toContain(large);
+      // The old Approver role opens orders and signs none.
+      expect((await oldApprover('GET', `/purchase-orders/${small}`)).status).toBe(200);
+      expect((await oldApprover('POST', `/purchase-orders/${small}/approve`)).status).toBe(403);
 
-      const refused = await approver<{ error: { code: string; message: string } }>('POST', `/purchase-orders/${large}/approve`);
-      expect(refused.status).toBe(403);
-      expect(refused.body.error.message).toMatch(/approval limit/);
-      expect((await approver('POST', `/purchase-orders/${small}/approve`)).status).toBe(200);
+      const signed = await manager<{ status: string }>('POST', `/purchase-orders/${small}/approve`);
+      expect([signed.status, signed.body.status]).toEqual([200, 'APPROVED']);
+
+      // The Director waits for the Manager, and only then sees the order.
+      const waiting = async (who: typeof api) => (await who<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((p) => p.id);
+      expect(await waiting(director)).not.toContain(large);
+      expect(await waiting(manager)).toContain(large);
+      const early = await director<{ error: { message: string } }>('POST', `/purchase-orders/${large}/approve`);
+      expect(early.status).toBe(403);
+      expect(early.body.error.message).toMatch(/^The Procurement Manager signs this order first/);
+
+      const first = await manager<{ status: string }>('POST', `/purchase-orders/${large}/approve`);
+      expect([first.status, first.body.status]).toEqual([200, 'PENDING_APPROVAL']);
+      const twice = await manager<{ error: { message: string } }>('POST', `/purchase-orders/${large}/approve`);
+      expect(twice.status).toBe(403);
+      expect(twice.body.error.message).toMatch(/^You have already signed this order/);
+      expect(await waiting(director)).toContain(large);
+      expect(await waiting(manager)).not.toContain(large);
+
+      const view = await director<{ canApprove: boolean; randValue: string; next: { step: string }; steps: Array<{ step: string; signature: { standIn: boolean } | null }> }>('GET', `/purchase-orders/${large}/approval`);
+      expect(view.body).toMatchObject({ canApprove: true, randValue: '200000.00', next: { step: 'DIRECTOR' }, steps: [{ step: 'MANAGER', signature: { standIn: false } }, { step: 'DIRECTOR', signature: null }] });
+
+      // The CEO stands in for the Director, and the record says so.
+      const last = await ceo<{ status: string }>('POST', `/purchase-orders/${large}/approve`);
+      expect([last.status, last.body.status]).toEqual([200, 'APPROVED']);
+      const final = await api<{ signatures: Array<{ step: string; standIn: boolean; signedBy: { name: string } }> }>('GET', `/purchase-orders/${large}`);
+      expect(final.body.signatures).toMatchObject([
+        { step: 'MANAGER', standIn: false, signedBy: { name: `IT manager ${run}` } },
+        { step: 'DIRECTOR', standIn: true, signedBy: { name: `IT ceo ${run}` } },
+      ]);
+    });
+
+    // Qodo, PR #155: a signature for the old money must not survive an edit made at the same moment.
+    it('makes signing and editing the money take turns on the order', async () => {
+      const email = `it-turns-${run}@afrinov.local`;
+      const password = `It-${run}-turns`;
+      expect((await api('POST', '/users', { email, name: `IT turns ${run}`, password, roleNames: ['PROCUREMENT_MANAGER'] })).status).toBe(201);
+      const manager = client(server.port, await login(server.port, email, password));
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const projectNumber = `IT-TURN-${run}`;
+        expect((await api('POST', '/projects', { projectNumber, name: `IT turns ${run}` })).status).toBe(201);
+        const beam = await api<{ id: string }>('POST', '/materials', {
+          sku: `IT-TURN-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber,
+        });
+        const po = await api<{ id: string; lines: Array<{ id: string }> }>('POST', '/purchase-orders', { supplierId, projectNumber, lines: [{ materialId: beam.body.id, orderedQty: 1, unitPrice: 300000 }] });
+        await api('POST', `/purchase-orders/${po.body.id}/submit`);
+
+        // Holds the order's row, and checks the request waits for it.
+        const waitsForTheOrder = async <T>(request: () => Promise<T>): Promise<T> => {
+          let release!: () => void;
+          let locked!: () => void;
+          const held = new Promise<void>((r) => { release = r; });
+          const acquired = new Promise<void>((r) => { locked = r; });
+          const holder = prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.body.id} FOR UPDATE`;
+            locked();
+            await held;
+          }, { timeout: 20000 });
+          await acquired;
+          let finished = false;
+          const pending = request().then((r) => { finished = true; return r; });
+          await new Promise((r) => setTimeout(r, 500));
+          expect(finished).toBe(false);
+          release();
+          await holder;
+          return pending;
+        };
+
+        const signed = await waitsForTheOrder(() => manager<{ status: string }>('POST', `/purchase-orders/${po.body.id}/approve`));
+        expect([signed.status, signed.body.status]).toEqual([200, 'PENDING_APPROVAL']);
+        const edited = await waitsForTheOrder(() => api('PATCH', `/purchase-orders/${po.body.id}`, { linePrices: [{ lineId: po.body.lines[0]!.id, unitPrice: 310000 }] }));
+        expect(edited.status).toBe(200);
+        const after = await api<{ signatures: unknown[] }>('GET', `/purchase-orders/${po.body.id}`);
+        expect(after.body.signatures).toEqual([]);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    it('converts another currency at the rate locked on submission', async () => {
+      const key = '/settings/purchaseOrders.exchangeRateUSD';
+      const was = (await api<{ value: number }>('GET', key)).body.value;
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const usd = await api<{ id: string }>('POST', '/suppliers', { name: `IT USD ${run}`, currency: 'USD' });
+        expect(usd.status).toBe(201);
+        const order = await api<{ id: string }>('POST', '/purchase-orders', { supplierId: usd.body.id, lines: [{ materialId, orderedQty: 1, unitPrice: 100 }] });
+        expect((await api('PUT', key, { value: 0 })).status).toBe(200);
+        const refused = await api<{ error: { message: string } }>('POST', `/purchase-orders/${order.body.id}/submit`);
+        expect(refused.status).toBe(400);
+        expect(refused.body.error.message).toMatch(/no exchange rate for USD yet/);
+        expect((await api('PUT', key, { value: 18.5 })).status).toBe(200);
+        expect((await api('POST', `/purchase-orders/${order.body.id}/submit`)).status).toBe(200);
+        expect((await api('PUT', key, { value: 25 })).status).toBe(200);
+        const view = await api<{ exchangeRate: string; randValue: string }>('GET', `/purchase-orders/${order.body.id}/approval`);
+        expect(view.body).toMatchObject({ exchangeRate: '18.5', randValue: '1850.00' });
+      } finally {
+        await api('PUT', key, { value: was });
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
     });
   });
 
@@ -669,11 +771,6 @@ describe('receiving stock over real HTTP', () => {
       beamId = beam.body.id;
       storeman = await as('STORE_CONTROLLER');
       buyer = await as('PROCUREMENT');
-      // A store controller approves the store's orders once an admin has set his limit.
-      await prisma.user.updateMany({
-        where: { email: { endsWith: `-${run}@afrinov.local` }, roles: { some: { role: { name: 'STORE_CONTROLLER' } } } },
-        data: { approvalLimit: 1000000 },
-      });
     });
 
     const storesOrder = () => ({ supplierId, lines: [{ materialId, orderedQty: 3, unitPrice: 12.5 }] });
@@ -766,57 +863,47 @@ describe('receiving stock over real HTTP', () => {
     });
 
     // Phase 4: every role end to end.
-    // Stores and Procurement Separation Roadmap, Phase 2: each kind has its own approvers.
-    it('lets the storeman approve Stores orders and an approver project orders, each only their own', async () => {
+    // Who signs which kind of order (po-approval.ts).
+    it('has the Procurement Manager sign both kinds, the Director only project orders, and the store neither', async () => {
       const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
       const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
       expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
       try {
-        const approver = await as('APPROVER');
-        const store = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        const manager = await as('PROCUREMENT_MANAGER');
+        const director = await as('DIRECTOR');
+        const workshop = await as('WORKSHOP_MANAGER');
+        const raiseStores = async () => {
+          const made = await storeman<{ id: string }>('POST', '/purchase-orders', storesOrder());
+          expect((await storeman<{ status: string }>('POST', `/purchase-orders/${made.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+          return made.body.id;
+        };
+        const store = await raiseStores();
         const project = await buyer<{ id: string }>('POST', '/purchase-orders', { ...projectOrder(), lines: [{ materialId: beamId, orderedQty: 2, unitPrice: 40 }] });
-        expect((await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
         expect((await buyer<{ status: string }>('POST', `/purchase-orders/${project.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
 
-        // Each one's "Waiting for my approval" holds only their own kind.
         const waiting = async (who: typeof api) => (await who<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id);
-        expect(await waiting(storeman)).toContain(store.body.id);
-        expect(await waiting(storeman)).not.toContain(project.body.id);
-        expect(await waiting(approver)).toContain(project.body.id);
-        expect(await waiting(approver)).not.toContain(store.body.id);
-        const panel = await storeman<{ canApprove: boolean }>('GET', `/purchase-orders/${store.body.id}/approval`);
-        expect(panel.body.canApprove).toBe(true);
+        expect(await waiting(manager)).toEqual(expect.arrayContaining([store, project.body.id]));
+        expect(await waiting(storeman)).not.toContain(store);
+        expect(await waiting(director)).not.toContain(store);
 
-        // Neither approves the other's: the approver doesn't even find a Stores order.
-        expect((await approver('POST', `/purchase-orders/${store.body.id}/approve`)).status).toBe(404);
-        expect((await storeman('POST', `/purchase-orders/${project.body.id}/approve`)).status).toBe(404);
+        // The store raises its orders and doesn't sign them; the Director doesn't even find one.
+        expect((await storeman('POST', `/purchase-orders/${store}/approve`)).status).toBe(403);
+        expect((await storeman('POST', `/purchase-orders/${project.body.id}/approve`)).status).toBe(403);
+        expect((await director('POST', `/purchase-orders/${store}/approve`)).status).toBe(404);
+        // Those who sign Stores orders can't change them.
+        expect((await manager('PATCH', `/purchase-orders/${store}`, { notes: 'x' })).status).toBe(403);
 
-        const storeApproved = await storeman<{ status: string }>('POST', `/purchase-orders/${store.body.id}/approve`);
+        const storeApproved = await manager<{ status: string }>('POST', `/purchase-orders/${store}/approve`);
         expect([storeApproved.status, storeApproved.body.status]).toEqual([200, 'APPROVED']);
-        const projectApproved = await approver<{ status: string }>('POST', `/purchase-orders/${project.body.id}/approve`);
+        const projectApproved = await manager<{ status: string }>('POST', `/purchase-orders/${project.body.id}/approve`);
         expect([projectApproved.status, projectApproved.body.status]).toEqual([200, 'APPROVED']);
 
-        expect((await approver('POST', '/purchase-orders', storesOrder())).status).toBe(403);
-        expect((await approver('POST', '/purchase-orders', projectOrder())).status).toBe(403);
-      } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
-      }
-    });
+        // The Workshop Manager stands in on a Stores order.
+        const covered = await raiseStores();
+        expect((await workshop<{ status: string }>('POST', `/purchase-orders/${covered}/approve`)).body.status).toBe('APPROVED');
 
-    // Qodo, PR #122: a blank limit would mean any value, unchecked.
-    it("won't let a store controller approve until an admin sets his limit", async () => {
-      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
-      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
-      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
-      try {
-        const fresh = await as('STORE_CONTROLLER');
-        const order = await fresh<{ id: string }>('POST', '/purchase-orders', storesOrder());
-        await fresh('POST', `/purchase-orders/${order.body.id}/submit`);
-        expect((await fresh<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id)).not.toContain(order.body.id);
-        expect((await fresh<{ canApprove: boolean }>('GET', `/purchase-orders/${order.body.id}/approval`)).body.canApprove).toBe(false);
-        const refused = await fresh<{ error: { message: string } }>('POST', `/purchase-orders/${order.body.id}/approve`);
-        expect(refused.status).toBe(403);
-        expect(refused.body.error.message).toMatch(/approval limit isn't set yet/);
+        expect((await manager('POST', '/purchase-orders', storesOrder())).status).toBe(403);
+        expect((await manager('POST', '/purchase-orders', projectOrder())).status).toBe(403);
       } finally {
         await api('PUT', approvalKey, { value: approvalWas });
       }
@@ -858,34 +945,6 @@ describe('receiving stock over real HTTP', () => {
         expect(seen.map((e) => e.entityId)).not.toContain(project.body.id);
       } finally {
         await prisma.rolePermission.delete({ where: grant });
-      }
-    });
-
-    it("holds the storeman to his approval limit, as an approver is held to theirs", async () => {
-      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
-      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
-      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
-      try {
-        // A storeman whose limit is R 100 including VAT.
-        const email = `it-so-limited-${run}@afrinov.local`;
-        const password = `It-${run}-limited`;
-        const made = await api<{ id: string }>('POST', '/users', { email, name: `IT SO limited ${run}`, password, roleNames: ['STORE_CONTROLLER'] });
-        expect(made.status).toBe(201);
-        expect((await api('PATCH', `/users/${made.body.id}`, { approvalLimit: 100 })).status).toBe(200);
-        const limited = client(server.port, await login(server.port, email, password));
-
-        // 3 x 12.50 = 37.50, R 43.13 with VAT: within it. 30 x 12.50 = R 431.25: over it.
-        const small = await limited<{ id: string }>('POST', '/purchase-orders', storesOrder());
-        const big = await limited<{ id: string }>('POST', '/purchase-orders', { supplierId, lines: [{ materialId, orderedQty: 30, unitPrice: 12.5 }] });
-        for (const id of [small.body.id, big.body.id]) await limited('POST', `/purchase-orders/${id}/submit`);
-        expect((await limited<{ status: string }>('POST', `/purchase-orders/${small.body.id}/approve`)).body.status).toBe('APPROVED');
-        const refused = await limited<{ error: { message: string } }>('POST', `/purchase-orders/${big.body.id}/approve`);
-        expect(refused.status).toBe(403);
-        expect(refused.body.error.message).toMatch(/approval limit/);
-        const waiting = (await limited<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id);
-        expect(waiting).not.toContain(big.body.id);
-      } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
       }
     });
 

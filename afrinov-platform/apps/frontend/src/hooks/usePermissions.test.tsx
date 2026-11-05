@@ -182,14 +182,18 @@ describe('usePermissions — the role check sheet', () => {
       'inventory:adjust', 'inventory:count', 'inventory:reverse', 'tools:lend', 'locations:manage',
       'projects:manage', 'recipients:manage', 'suppliers:manage', 'activity:view', 'orders:receive', 'receipts:view',
       // Stores orders: those without a project (Stores ordering roadmap).
-      'stores:order',
+      'stores:order', 'stores:view',
       // A later due date for a tool loan is the store's decision.
       'tools:extend',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
     PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
-    // Approvers open the orders they approve (procurement roadmap Phase 4).
-    APPROVER: ['orders:approve', 'orders:view'],
+    // View only: orders are signed by the roles below.
+    APPROVER: ['orders:view'],
+    PROCUREMENT_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view'],
+    DIRECTOR: ['orders:approve', 'orders:view'],
+    CEO: ['orders:approve', 'orders:view'],
+    WORKSHOP_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view'],
     TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend'],
     VIEWER: [],
   };

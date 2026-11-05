@@ -5,7 +5,7 @@
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import ExcelJS from 'exceljs';
-import { ADMIN_EMAIL, client, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, letAdminSign, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
 
 interface StatusRow {
   materialId: string; sku: string; status: string; onHand: string; onOrder: string; reorderQuantity: string;
@@ -32,6 +32,7 @@ describe('stock on order over real HTTP', () => {
     server = await startServer({ procurementEnabled: true });
     token = await login(server.port, ADMIN_EMAIL, requireAdminPassword());
     api = client(server.port, token);
+    await letAdminSign(api);
     const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-OO-${run}`, name: `On order disc ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: 100 });
     expect(m.status).toBe(200);
     materialId = m.body.id;

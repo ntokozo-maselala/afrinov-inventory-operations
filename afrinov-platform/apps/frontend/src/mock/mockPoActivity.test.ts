@@ -55,26 +55,41 @@ describe('mock: small print kept on approval', () => {
   });
 });
 
-// As the server: a change to the money on an approved order that takes it past
-// its approver's limit sends it back for approval.
+// As the server: a change to the money on an approved order that raises its
+// value or leaves it needing another signature sends it back for approval.
 describe('mock: discount changes on an approved order', () => {
-  type Order = { id: string; status: string; revision?: number; approvedBy?: unknown; printedTerms?: unknown; lines: Array<{ id: string }> };
+  type Order = { id: string; status: string; revision?: number; approvedBy?: unknown; printedTerms?: unknown; signatures?: unknown[]; lines: Array<{ id: string }> };
 
-  async function approvedAt(limit: number, discountPercent: number) {
-    await api.patch('/users/user-1', { approvalLimit: limit });
-    const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', vatRate: 0, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 10, discountPercent }] });
+  async function approvedProjectOrder(discountPercent: number) {
+    const projects = await api.get<Array<{ projectNumber: string; status?: string; active?: boolean }>>('/projects');
+    const projectNumber = projects.find((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED')!.projectNumber;
+    const beam = await api.post<{ id: string }>('/materials', { sku: `MOCK-BEAM-${discountPercent}`, name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
+    const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 0, lines: [{ materialId: beam.id, orderedQty: 10, unitPrice: 21000, discountPercent }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
     return api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
   }
 
-  it('goes back for approval when a smaller discount takes it over the limit', async () => {
-    const po = await approvedAt(95, 10); // 90.00, within 95
+  it('goes back for approval when a smaller discount takes it to the Director\'s value', async () => {
+    const po = await approvedProjectOrder(10); // R189 000: the Manager alone
+    expect(po.status).toBe('APPROVED');
     const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 0 }] });
-    expect(after).toMatchObject({ status: 'PENDING_APPROVAL', approvedBy: null, printedTerms: null });
+    expect(after).toMatchObject({ status: 'PENDING_APPROVAL', approvedBy: null, printedTerms: null, signatures: [] });
   });
 
-  it('stays approved, at a new revision, when the change keeps it within the limit', async () => {
-    const po = await approvedAt(95, 10);
+  it('goes back for approval when its value rises at all, needing no more signatures', async () => {
+    const po = await approvedProjectOrder(20); // R168 000
+    const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 19 }] }); // R170 100
+    expect(after).toMatchObject({ status: 'PENDING_APPROVAL', signatures: [] });
+  });
+
+  it('goes back for approval when its VAT rate changes', async () => {
+    const po = await approvedProjectOrder(30);
+    const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { vatRate: 15 });
+    expect(after).toMatchObject({ status: 'PENDING_APPROVAL', signatures: [] });
+  });
+
+  it('stays approved, at a new revision, when its value falls', async () => {
+    const po = await approvedProjectOrder(11);
     const revision = po.revision ?? 0;
     const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 20 }] });
     expect(after.status).toBe('APPROVED');
@@ -86,17 +101,14 @@ describe('mock: approval re-checked only as the server does', () => {
   type Order = { id: string; status: string; approvedBy?: unknown; lines: Array<{ id: string; discountPercent?: string }> };
 
   it('leaves an approved order alone when its discount is sent unchanged with another change', async () => {
-    await api.patch('/users/user-1', { approvalLimit: 1000 });
     const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', vatRate: 0, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 10, discountPercent: 10 }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
     await api.post(`/purchase-orders/${po.id}/approve`, {});
-    await api.patch('/users/user-1', { approvalLimit: 50 });
     const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { notes: 'Deliver to gate 2', lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 10 }] });
     expect(after.status).toBe('APPROVED');
   });
 
   it('leaves an approved order with no approver on record alone', async () => {
-    await api.patch('/users/user-1', { approvalLimit: 1 });
     const orders = await api.get<Order[]>('/purchase-orders?kind=projects').catch(() => [] as Order[]);
     const all = [...orders, ...(await api.get<Order[]>('/purchase-orders?kind=stores').catch(() => [] as Order[]))];
     const seeded = all.find((o) => o.status === 'APPROVED' && !o.approvedBy)!;

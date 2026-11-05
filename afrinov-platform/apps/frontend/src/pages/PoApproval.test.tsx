@@ -1,6 +1,5 @@
-// Approval by order value (procurement roadmap Phase 4): Approve only for
-// someone whose limit covers the order, who can approve it, and only the
-// actions each role may take. Signed in through the auth mock, so the real
+// Signing an order: Approve only for someone it is waiting on, who can sign it,
+// and only the actions each role may take. Signed in through the auth mock, so the real
 // permission table decides.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
@@ -25,10 +24,13 @@ const order = (status: string) => ({
   currency: 'ZAR', vatRate: '15', totals: { subtotal: '600000.00', vat: '90000.00', net: '690000.00', unpricedLines: 0 },
   lines: [{ id: 'l-1', materialId: 'm-1', material: { sku: 'PUMP-1', name: 'Hydraulic pump', unitOfMeasure: 'each' }, orderedQty: '1', receivedQty: '0', unitPrice: '600000', subtotal: '600000.00', vat: '90000.00', net: '690000.00' }],
 });
-const SENIOR = { id: 'u-sb', name: 'Simbongile Bantubani', approvalLimit: null };
+const SENIOR = { id: 'u-sb', name: 'Simbongile Bantubani', standIn: false };
+const MANAGER_STEP = { step: 'MANAGER', label: 'Procurement Manager', signature: null };
+const DIRECTOR_STEP = { step: 'DIRECTOR', label: 'Director', signature: null };
 const approval = (over: Record<string, unknown> = {}) => ({
   subtotal: '600000.00', vat: '90000.00', net: '690000.00', unpricedLines: 0, currency: 'ZAR',
-  canApprove: false, reason: null, myLimit: null, approvers: [SENIOR], ...over,
+  canApprove: false, reason: null, randValue: '600000.00', exchangeRate: null, noRate: false,
+  steps: [MANAGER_STEP, DIRECTOR_STEP], next: { step: 'MANAGER', label: 'Procurement Manager' }, approvers: [SENIOR], ...over,
 });
 
 let current = { po: order('PENDING_APPROVAL'), approval: approval() };
@@ -61,37 +63,108 @@ const page = (roles: string[], url = '/purchase-orders/po-1') => {
 };
 const button = (name: string) => screen.queryByRole('button', { name });
 
-describe('approving by value', () => {
-  it('offers Approve to an approver whose limit covers the order', async () => {
-    current.approval = approval({ canApprove: true });
-    page(['APPROVER']);
-    await screen.findByText(/You can approve this order/);
+describe('signing an order', () => {
+  it('offers Approve to the last signature the order needs', async () => {
+    current.approval = approval({ canApprove: true, steps: [MANAGER_STEP] });
+    page(['PROCUREMENT_MANAGER']);
+    await screen.findByText(/You can sign this order/);
     fireEvent.click(button('Approve')!);
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getAllByRole('button').find((b) => /^Approve/.test(b.textContent ?? ''))!);
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders/po-1/approve', {}));
   });
 
-  it('says why not, and who can, when the order is over the approver\'s limit', async () => {
-    current.approval = approval({ reason: 'This order is R 690 000,00 including VAT; your approval limit is R 500 000,00.', myLimit: '500000' });
-    page(['APPROVER']);
-    expect(await screen.findByText(/your approval limit is R 500 000,00\./)).toBeInTheDocument();
-    expect(screen.getByText(/Can approve it: Simbongile Bantubani \(no limit\)/)).toBeInTheDocument();
+  it('offers Sign to the Manager when the Director signs after, and says who is next', async () => {
+    current.approval = approval({ canApprove: true });
+    page(['PROCUREMENT_MANAGER']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getAllByText(/The Director signs next/).length).toBeGreaterThan(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/purchase-orders/po-1/approve', {}));
+  });
+
+  it('shows the value excluding VAT that decides who signs, and each signature', async () => {
+    current.approval = approval({
+      next: { step: 'DIRECTOR', label: 'Director' }, reason: 'You have already signed this order. It is waiting on the Director.',
+      steps: [{ ...MANAGER_STEP, signature: { name: 'Ona Moloane', signedAt: '2026-11-02T09:00:00Z', standIn: false } }, DIRECTOR_STEP],
+    });
+    page(['PROCUREMENT_MANAGER']);
+    expect(await screen.findByText(/Approval for R\s600\s000,00 excluding VAT/)).toBeInTheDocument();
+    expect(screen.getByText(/Procurement Manager: signed by Ona Moloane/)).toBeInTheDocument();
+    expect(screen.getByText(/Director: waiting/)).toBeInTheDocument();
+    expect(screen.getByText(/You have already signed this order/)).toBeInTheDocument();
+    expect(screen.getByText(/Can sign next: Simbongile Bantubani\./)).toBeInTheDocument();
     expect(button('Approve')).not.toBeInTheDocument();
+    expect(button('Sign')).not.toBeInTheDocument();
+  });
+
+  it('marks stand-ins, and shows the rate on an order in another currency', async () => {
+    current.approval = approval({
+      currency: 'USD', subtotal: '100.00', exchangeRate: '18.5', randValue: '1850.00', steps: [{ ...MANAGER_STEP, signature: null }],
+      approvers: [SENIOR, { id: 'u-ws', name: 'Workshop Boss', standIn: true }],
+    });
+    page(['PROCUREMENT']);
+    expect(await screen.findByText(/Can sign next: Simbongile Bantubani, Workshop Boss \(standing in\)\./)).toBeInTheDocument();
+    expect(screen.getByText(/Approval for R\s1\s850,00 excluding VAT .*at R18\.5/)).toBeInTheDocument();
   });
 
   it('waits for prices before anyone can approve', async () => {
-    current.approval = approval({ unpricedLines: 2, approvers: [] });
+    current.approval = approval({ unpricedLines: 2, approvers: [], steps: [], next: null, randValue: null });
     page(['PROCUREMENT']);
     expect(await screen.findByText('Waiting for prices')).toBeInTheDocument();
     expect(screen.getByText(/2 lines have no price/)).toBeInTheDocument();
     expect(button('Approve')).not.toBeInTheDocument();
   });
 
-  it('says so when nobody has a high enough limit', async () => {
+  it('waits for an exchange rate', async () => {
+    current.approval = approval({ currency: 'EUR', noRate: true, approvers: [], steps: [], next: null, randValue: null });
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('Waiting for an exchange rate')).toBeInTheDocument();
+  });
+
+  it('says so when nobody holds the role', async () => {
     current.approval = approval({ approvers: [] });
     page(['PROCUREMENT']);
-    expect(await screen.findByText(/Nobody has a high enough approval limit/)).toBeInTheDocument();
+    expect(await screen.findByText(/Nobody holds the Procurement Manager role yet/)).toBeInTheDocument();
+  });
+});
+
+describe('the record of who signed', () => {
+  it('names each signer on an approved order, and marks a stand-in', async () => {
+    current.po = {
+      ...order('APPROVED'), approvedAt: '2026-11-03T09:00:00Z', approvedBy: { id: 'u-c', name: 'Chief Executive' },
+      signatures: [
+        { step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { id: 'u-o', name: 'Ona Moloane' } },
+        { step: 'DIRECTOR', signedAt: '2026-11-03T09:00:00Z', standIn: true, signedBy: { id: 'u-c', name: 'Chief Executive' } },
+      ],
+    } as typeof current.po;
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('by Ona Moloane, Chief Executive (standing in)')).toBeInTheDocument();
+  });
+
+  it('names whoever approved it without signing, as well as who signed', async () => {
+    current.po = {
+      ...order('APPROVED'), approvedAt: '2026-11-03T09:00:00Z', approvedBy: { id: 'u-2', name: 'Second Person' },
+      signatures: [{ step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { id: 'u-o', name: 'Ona Moloane' } }],
+    } as typeof current.po;
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('by Ona Moloane, approved by Second Person')).toBeInTheDocument();
+  });
+
+  it('says in the Activity who stood in, and when signatures were cleared', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/purchase-orders/po-1') return current.po;
+      if (path === '/purchase-orders/po-1/approval') return current.approval;
+      if (path === '/purchase-orders/po-1/history') return [
+        { id: 'a', action: 'PO_SIGN', entityId: 'po-1', entityType: 'PurchaseOrder', actorId: 'u', actorName: 'Workshop Boss', before: { status: 'PENDING_APPROVAL' }, after: { status: 'PENDING_APPROVAL', step: 'MANAGER', standIn: true }, createdAt: '2026-11-02T09:00:00Z' },
+        { id: 'b', action: 'UPDATE', entityId: 'po-1', entityType: 'PurchaseOrder', actorId: 'u', actorName: 'Buyer', before: {}, after: { signaturesCleared: true }, createdAt: '2026-11-02T10:00:00Z' },
+      ];
+      return [];
+    });
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('Signed as Procurement Manager (standing in)')).toBeInTheDocument();
+    expect(screen.getByText('Details updated: signatures cleared, as the money changed')).toBeInTheDocument();
   });
 });
 

@@ -35,6 +35,13 @@ describe('landingPathFor', () => {
   it('by role, sends someone who only approves to the orders waiting for them', () => {
     expect(landingPathFor('by-role', ['APPROVER'])).toBe('/purchase-orders?status=mine');
     expect(landingPathFor('by-role', ['APPROVER', 'STORE_CONTROLLER'])).toBe('/');
+    expect(landingPathFor('by-role', ['DIRECTOR'])).toBe('/purchase-orders?status=mine');
+    expect(landingPathFor('by-role', ['CEO'])).toBe('/purchase-orders?status=mine');
+    // These sign Stores orders too, so start where both kinds are counted.
+    expect(landingPathFor('by-role', ['PROCUREMENT_MANAGER'])).toBe('/');
+    expect(landingPathFor('by-role', ['WORKSHOP_MANAGER'])).toBe('/');
+    expect(landingPathFor('by-role', ['CEO', 'WORKSHOP_MANAGER'])).toBe('/');
+    expect(landingPathFor('by-role', ['PROCUREMENT_MANAGER', 'PROCUREMENT'])).toBe('/');
     features.procurement = false;
     expect(landingPathFor('by-role', ['APPROVER'])).toBe('/');
   });

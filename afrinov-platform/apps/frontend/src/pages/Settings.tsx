@@ -238,6 +238,7 @@ export function NumberField({ def, value, onChange, disabled, error }: { def: Se
           disabled={disabled}
           aria-label={def.key}
           min={0}
+          step="any"
         />
       </div>
       {error && <p role="alert" className="field-error mt-1">{error}</p>}
@@ -332,6 +333,10 @@ function labelForKey(key: string): string {
     .replace(/\bUom\b/, 'UoM')
     .replace(/\bPo\b/, 'PO')
     .replace(/^Vat Rate$/, 'VAT rate (%)')
+    .replace(/^Director Approval From$/, 'Director signs from (R, excl. VAT)')
+    .replace(/^Exchange Rate U S D$/, 'Rand per USD')
+    .replace(/^Exchange Rate E U R$/, 'Rand per EUR')
+    .replace(/^Exchange Rate G B P$/, 'Rand per GBP')
     .replace(/^Company Vat Number$/, 'Company VAT number')
     .replace(/^First Number$/, 'First AFRI number')
     .replace(/^Late Penalty$/, 'Late delivery penalty')

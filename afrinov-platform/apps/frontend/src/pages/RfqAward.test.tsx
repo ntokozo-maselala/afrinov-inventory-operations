@@ -55,7 +55,7 @@ beforeEach(() => {
     if (path === '/purchase-orders/po-9/history') {
       return [{ id: 'h-1', action: 'CREATE', actorId: 'u-1', actorName: 'Buyer', before: null, after: { number: 'AFRI-0042', status: 'DRAFT', rfqNumber: 'AFRI-02A-1325-02-02' }, createdAt: '2026-10-29T09:00:00Z' }];
     }
-    if (path.endsWith('/approval')) return { subtotal: '0', vat: '0', net: '0', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
+    if (path.endsWith('/approval')) return { subtotal: '0', vat: '0', net: '0', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] };
     return [];
   });
   mockPost.mockReset().mockResolvedValue(AWARDED);

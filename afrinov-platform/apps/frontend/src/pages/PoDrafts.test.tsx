@@ -40,7 +40,7 @@ beforeEach(() => {
     if (path === '/purchase-orders?kind=projects') return ORDERS;
     const found = ORDERS.find((o) => path === `/purchase-orders/${o.id}`);
     if (found) return found;
-    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
+    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
     if (path === '/suppliers') return [{ id: 's-1', name: 'Hydac', active: true, currency: 'ZAR' }];
     if (path === '/materials') return [{ id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0', unitCost: '5', active: true, projectNumber: 'AFRI-1325', project: { projectNumber: 'AFRI-1325', status: 'ACTIVE' } }];

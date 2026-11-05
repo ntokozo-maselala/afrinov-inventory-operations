@@ -3,7 +3,7 @@
 // writes its pages uncompressed.
 import { describe, it, expect } from 'vitest';
 import {
-  buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, revisionLabel, smallPrint, type PoDocumentOrder,
+  approvedWithoutSigning, buildPoDocument, companyFromSettings, documentBlocks, documentFilename, documentLines, documentStamp, revisionLabel, smallPrint, type PoDocumentOrder,
 } from './poDocument';
 
 const text = (buf: ArrayBuffer) => new TextDecoder('latin1').decode(buf);
@@ -226,5 +226,73 @@ describe('smallPrint', () => {
     const out = text(await buildPoDocument(order({ printedTerms: { terms: 'Terms as approved.', latePenalty: '', documentation: '', invoicing: '', invoiceEmail: '', codeOfConduct: '' } }), COMPANY));
     expect(out).toContain('Terms as approved.');
     expect(out).not.toContain('Deliver by the order delivery date.');
+  });
+});
+
+describe('the signatures at the foot', () => {
+  const signed = [
+    { step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', signedBy: { id: 'u-ona', name: 'Ona Moloane' } },
+    { step: 'DIRECTOR', signedAt: '2026-11-03T09:00:00Z', standIn: true, signedBy: { id: 'u-ceo', name: 'Chief Executive' } },
+  ];
+  const ONA = { id: 'u-ona', name: 'Ona Moloane' };
+
+  it('prints both on an order that needed both, and marks a stand-in', async () => {
+    const pdf = text(await buildPoDocument(order({ signatures: signed }), COMPANY));
+    expect(pdf).toContain('(Procurement Manager)');
+    expect(pdf).toContain('(Director)');
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('Chief Executive');
+    expect(pdf).toContain('Stood in, signed');
+  });
+
+  it('keeps the one Authorization box on an order with one signature, naming who signed', async () => {
+    const pdf = text(await buildPoDocument(order({ approvedBy: ONA, signatures: signed.slice(0, 1) }), COMPANY));
+    expect(pdf).toContain('(Authorization)');
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('(Approved ');
+    expect(pdf).not.toContain('(Director)');
+  });
+
+  it('marks a stand-in who was the only signature', async () => {
+    const pdf = text(await buildPoDocument(order({ approvedBy: ONA, signatures: [{ ...signed[0]!, standIn: true }] }), COMPANY));
+    expect(pdf).toContain('Stood in, approved');
+  });
+
+  it('names the first signer on an order still waiting for the second, not yet as approved', async () => {
+    const pdf = text(await buildPoDocument(order({ status: 'PENDING_APPROVAL', approvedBy: null, approvedAt: null, signatures: signed.slice(0, 1) }), COMPANY));
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('(Signed ');
+    expect(pdf).not.toContain('Not yet approved');
+  });
+
+  it('credits each with their own when someone else approved it after the signature', async () => {
+    const pdf = text(await buildPoDocument(order({ approvedBy: { id: 'u-2', name: 'Second Person' }, approvedAt: '2026-11-04T09:00:00Z', signatures: signed.slice(0, 1) }), COMPANY));
+    expect(pdf).toContain('(Procurement Manager)');
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('(Signed ');
+    expect(pdf).toContain('(Final approval)');
+    expect(pdf).toContain('Second Person');
+    expect(pdf).toContain('(Approved ');
+  });
+
+  it('tells two people with the same name apart, by id', () => {
+    const signatures = signed.slice(0, 1);
+    const approvedAt = '2026-11-04T09:00:00Z';
+    expect(approvedWithoutSigning({ signatures, approvedAt, approvedBy: { id: 'u-other', name: 'Ona Moloane' } })).toMatchObject({ id: 'u-other' });
+    expect(approvedWithoutSigning({ signatures, approvedAt, approvedBy: ONA })).toBeNull();
+    expect(approvedWithoutSigning({ signatures: [], approvedAt, approvedBy: ONA })).toBeNull();
+  });
+
+  it('cuts a long signer name to its box, in the four-box layout', async () => {
+    const long = 'Bartholomew Maximilian Featherstonehaugh-Cholmondeley van der Westhuizen';
+    const pdf = text(await buildPoDocument(order({ signatures: [{ ...signed[0]!, signedBy: { id: 'u-l', name: long } }, signed[1]!] }), COMPANY));
+    expect(pdf).not.toContain(long);
+    expect(pdf).toContain('Bartholomew');
+    expect(pdf).toContain('...');
+  });
+
+  it('says not yet approved with no signature at all', async () => {
+    const pdf = text(await buildPoDocument(order({ status: 'PENDING_APPROVAL', approvedBy: null, approvedAt: null, signatures: [] }), COMPANY));
+    expect(pdf).toContain('Not yet approved');
   });
 });

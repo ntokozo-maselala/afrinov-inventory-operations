@@ -49,8 +49,12 @@ const db = {
   audit: [] as AuditRow[],
   settings: new Map<string, SettingRow>(),
   projects: new Map<string, { projectNumber: string; active: boolean; status?: string }>(),
-  users: new Map<string, { id: string; name: string; approvalLimit: Prisma.Decimal | null; canApprove: boolean; canApproveStores?: boolean; roles?: Array<{ role: { name: string } }> }>(),
+  users: new Map<string, { id: string; name: string; roles: Array<{ role: { name: string } }> }>(),
+  signatures: [] as Array<{ purchaseOrderId: string; step: string; signedById: string; signedAt: Date; standIn: boolean }>,
 };
+const person = (id: string, name: string, ...roles: string[]) => ({ id, name, roles: roles.map((r) => ({ role: { name: r } })) });
+const signaturesOf = (id: string) => db.signatures.filter((s) => s.purchaseOrderId === id)
+  .map((s) => ({ ...s, signedBy: db.users.get(s.signedById) ?? null }));
 let poCounter = 0;
 let lineCounter = 0;
 let txCounter = 0;
@@ -74,14 +78,11 @@ function makePrisma(): unknown {
     },
     user: {
       findUnique: async ({ where }: { where: { id: string } }) => db.users.get(where.id) ?? null,
-      // By id (names on the order's Activity), or else stands in for "active
-      // users whose role holds" the permission that approves the kind asked
-      // for. Approval by value is the same for both kinds, so these approvers
-      // approve either, unless a test marks them for one kind only.
-      findMany: async ({ where }: { where?: { id?: { in: string[] }; roles?: { some: { role: { permissions: { some: { permission: { code: string } } } } } } } } = {}) => {
+      // By id (names on the order's Activity), or active users holding one of the roles.
+      findMany: async ({ where }: { where?: { id?: { in: string[] }; roles?: { some: { role: { name: { in: string[] } } } } } } = {}) => {
         if (where?.id) return where.id.in.map((id) => db.users.get(id)).filter((u) => !!u);
-        const stores = where?.roles?.some.role.permissions.some.permission.code === 'order:stores_stock';
-        return [...db.users.values()].filter((u) => (stores ? u.canApproveStores ?? u.canApprove : u.canApprove));
+        const wanted = where?.roles?.some.role.name.in ?? [];
+        return [...db.users.values()].filter((u) => u.roles.some((r) => wanted.includes(r.role.name)));
       },
     },
     material: {
@@ -97,7 +98,7 @@ function makePrisma(): unknown {
         if (!po) return null;
         if (include?.lines) {
           const lines = [...db.lines.values()].filter((l) => l.purchaseOrderId === po.id);
-          return { ...po, lines: lines.map((l) => ({ ...l, material: db.materials.get(l.materialId) })) };
+          return { ...po, signatures: signaturesOf(po.id), lines: lines.map((l) => ({ ...l, material: db.materials.get(l.materialId) })) };
         }
         return po;
       },
@@ -108,7 +109,7 @@ function makePrisma(): unknown {
           .filter((p) => !where?.status || p.status === where.status)
           // A Stores order (no project), or a project order.
           .filter((p) => where?.projectNumber === undefined || (where.projectNumber === null ? !p.projectNumber : !!p.projectNumber))
-          .map((p) => (include?.lines ? { ...p, lines: [...db.lines.values()].filter((l) => l.purchaseOrderId === p.id) } : p));
+          .map((p) => (include?.lines ? { ...p, signatures: signaturesOf(p.id), lines: [...db.lines.values()].filter((l) => l.purchaseOrderId === p.id) } : p));
         if (orderBy?.createdAt) rows.sort((a, b) => (a.createdAt.getTime() - b.createdAt.getTime()) * (orderBy.createdAt === 'asc' ? 1 : -1));
         return rows;
       },
@@ -147,6 +148,23 @@ function makePrisma(): unknown {
         const updated = { ...po, ...data, updatedAt: new Date() };
         db.pos.set(where.id, updated);
         return { count: 1 };
+      },
+    },
+    purchaseOrderSignature: {
+      // As the unique key on order and step.
+      createMany: async ({ data }: { data: typeof db.signatures }) => {
+        let count = 0;
+        for (const s of data) {
+          if (db.signatures.some((x) => x.purchaseOrderId === s.purchaseOrderId && x.step === s.step)) continue;
+          db.signatures.push(s);
+          count += 1;
+        }
+        return { count };
+      },
+      deleteMany: async ({ where }: { where: { purchaseOrderId: string } }) => {
+        const kept = db.signatures.filter((s) => s.purchaseOrderId !== where.purchaseOrderId);
+        db.signatures.length = 0;
+        db.signatures.push(...kept);
       },
     },
     purchaseOrderLine: {
@@ -239,13 +257,18 @@ beforeEach(() => {
   db.settings.clear();
   db.projects.clear();
   db.users.clear();
-  db.users.set('user-1', { id: 'user-1', name: 'Thandi Buyer', approvalLimit: null, canApprove: false });
-  // As on the template: Ona Moloane under R500 000, Simbongile Bantubani from R500 000.
-  db.users.set('u-ona', { id: 'u-ona', name: 'Ona Moloane', approvalLimit: new Prisma.Decimal(500000), canApprove: true });
-  db.users.set('u-sb', { id: 'u-sb', name: 'Simbongile Bantubani', approvalLimit: null, canApprove: true });
+  db.signatures.length = 0;
+  db.users.set('user-1', person('user-1', 'Thandi Buyer', 'PROCUREMENT'));
+  db.users.set('user-2', person('user-2', 'Second Manager', 'PROCUREMENT_MANAGER'));
+  db.users.set('u-ona', person('u-ona', 'Ona Moloane', 'PROCUREMENT_MANAGER'));
+  db.users.set('u-sb', person('u-sb', 'Simbongile Bantubani', 'DIRECTOR'));
+  db.users.set('u-ceo', person('u-ceo', 'Chief Executive', 'CEO'));
+  db.users.set('u-ws', person('u-ws', 'Workshop Boss', 'WORKSHOP_MANAGER'));
+  db.users.set('u-admin', person('u-admin', 'An Admin', 'ADMIN'));
   poCounter = 0; lineCounter = 0; txCounter = 0; auditCounter = 0;
   db.suppliers.set('sup-1', { id: 'sup-1', name: 'Acme', active: true });
   db.materials.set('mat-1', { id: 'mat-1', sku: 'A-1', name: 'Widget', active: true });
+  db.materials.set('mat-p', { id: 'mat-p', sku: 'P-1', name: 'Project steel', active: true, category: 'PROJECT_MATERIAL', projectNumber: 'AFRI-1325' } as Mat);
   db.locations.set('loc-1', { id: 'loc-1', name: 'Main', active: true });
 });
 
@@ -847,7 +870,7 @@ describe('PurchaseOrderService supplier details', () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await createOrder();
     await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'u-sb');
+    await PurchaseOrderService.approve(po.id, 'u-ona');
     await PurchaseOrderService.update({ id: po.id, [key]: value }, 'user-1');
     await PurchaseOrderService.update({ id: po.id, [key]: `  ${value}  ` }, 'user-1');
     expect(await PurchaseOrderService.getById(po.id)).toMatchObject({ ...copied, [key]: value, revision: 1, status: 'APPROVED' });
@@ -857,118 +880,277 @@ describe('PurchaseOrderService supplier details', () => {
   });
 });
 
-describe('PurchaseOrderService approval by value (procurement roadmap Phase 4)', () => {
-  /** A submitted rand order of `price` + 15% VAT. */
-  async function submitted(price: number, extra: Record<string, unknown> = {}) {
+describe('PurchaseOrderService signing an order', () => {
+  /** A submitted rand project order of `price` excluding VAT, or a Stores order. */
+  async function submitted(price: number, opts: { stores?: boolean; extra?: Record<string, unknown> } = {}) {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: price }], ...extra }, 'user-1');
+    db.projects.set('AFRI-1325', { projectNumber: 'AFRI-1325', active: true, status: 'OPEN' });
+    const po = await PurchaseOrderService.create({
+      supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: opts.stores ? 'mat-1' : 'mat-p', orderedQty: 1, unitPrice: price }],
+      ...(opts.stores ? {} : { projectNumber: 'AFRI-1325' }), ...opts.extra,
+    }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
     return po.id;
   }
 
-  it('lets an approver approve an order within their limit (total including VAT)', async () => {
+  it('approves a project order under R200 000 excluding VAT with the Procurement Manager alone', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const id = await submitted(434782.61); // R500 000.00 with VAT
+    const id = await submitted(199999.99); // R229 999.99 with VAT
     expect(await PurchaseOrderService.approve(id, 'u-ona')).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
+    expect(db.signatures).toMatchObject([{ step: 'MANAGER', signedById: 'u-ona', standIn: false }]);
   });
 
-  it('refuses an order over the limit and names who can approve it', async () => {
+  it('needs the Manager, then the Director, from exactly R200 000', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const id = await submitted(434782.62); // R500 000.01 with VAT
-    await expect(PurchaseOrderService.approve(id, 'u-ona')).rejects.toMatchObject({
-      statusCode: 403, message: expect.stringMatching(/your approval limit is R 500\s000,00\. Ask Simbongile Bantubani to approve it\.$/),
+    const id = await submitted(200000);
+    await expect(PurchaseOrderService.approve(id, 'u-sb')).rejects.toMatchObject({
+      statusCode: 403, message: 'The Procurement Manager signs this order first. Ask Ona Moloane, Second Manager, Chief Executive or Workshop Boss to sign it.',
     });
+    expect(await PurchaseOrderService.approve(id, 'u-ona')).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(db.audit.filter((a) => a.action === 'PO_SIGN')).toMatchObject([{ actorId: 'u-ona', after: { status: 'PENDING_APPROVAL', step: 'MANAGER', standIn: false } }]);
+    // Only now does it take the small print, once the last signature is in.
+    expect(db.pos.get(id)!.printedTerms).toBeFalsy();
+    expect(await PurchaseOrderService.approve(id, 'u-sb')).toMatchObject({ status: 'APPROVED', approvedById: 'u-sb' });
+    expect(db.pos.get(id)!.printedTerms).toBeTruthy();
+    expect(db.signatures.map((s) => s.step)).toEqual(['MANAGER', 'DIRECTOR']);
+  });
+
+  it('refuses one person signing both steps, whatever roles they hold', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.users.set('u-both', person('u-both', 'Both Hats', 'PROCUREMENT_MANAGER', 'DIRECTOR'));
+    const id = await submitted(300000);
+    await PurchaseOrderService.approve(id, 'u-both');
+    await expect(PurchaseOrderService.approve(id, 'u-both')).rejects.toMatchObject({ statusCode: 403, message: expect.stringMatching(/^You have already signed this order/) });
     expect(db.pos.get(id)!.status).toBe('PENDING_APPROVAL');
-    expect(await PurchaseOrderService.approve(id, 'u-sb')).toMatchObject({ status: 'APPROVED' });
+  });
+
+  it('takes the CEO and Workshop Manager as stand-ins for either step, and records it', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(300000);
+    await PurchaseOrderService.approve(id, 'u-ws');
+    expect(await PurchaseOrderService.approve(id, 'u-ceo')).toMatchObject({ status: 'APPROVED' });
+    expect(db.signatures).toMatchObject([{ step: 'MANAGER', signedById: 'u-ws', standIn: true }, { step: 'DIRECTOR', signedById: 'u-ceo', standIn: true }]);
+    expect(db.audit.find((a) => a.action === 'PO_APPROVE')).toMatchObject({ after: { step: 'DIRECTOR', standIn: true } });
+  });
+
+  it('keeps Admin from signing unless they hold a signing role', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(1000);
+    await expect(PurchaseOrderService.approve(id, 'u-admin')).rejects.toMatchObject({ statusCode: 403 });
+    expect(await PurchaseOrderService.approval(id, 'u-admin')).toMatchObject({ canApprove: false, reason: null });
+    expect(await PurchaseOrderService.awaitingApproval('u-admin')).toEqual([]);
+  });
+
+  it('signs a Stores order with the Procurement Manager or Workshop Manager alone, at any value', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const big = await submitted(5000000, { stores: true });
+    await expect(PurchaseOrderService.approve(big, 'u-ceo')).rejects.toMatchObject({ statusCode: 403, message: expect.stringMatching(/Ask Ona Moloane, Second Manager or Workshop Boss to sign it\.$/) });
+    expect(await PurchaseOrderService.approve(big, 'u-ona')).toMatchObject({ status: 'APPROVED' });
+    const other = await submitted(1000, { stores: true });
+    expect(await PurchaseOrderService.approve(other, 'u-ws')).toMatchObject({ status: 'APPROVED' });
+    expect(db.signatures.find((s) => s.purchaseOrderId === other)).toMatchObject({ standIn: true });
   });
 
   it('refuses an order with unpriced lines, for everyone', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
-    await expect(PurchaseOrderService.approve(po.id, 'u-sb')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/^1 line has no price/) });
+    await expect(PurchaseOrderService.approve(po.id, 'u-ona')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/^1 line has no price/) });
   });
 
-  it('needs an approver without a limit for an order in another currency', async () => {
+  describe('in another currency', () => {
+    async function euroOrder(price: number) {
+      const { PurchaseOrderService } = await import('./procurement.service.js');
+      db.suppliers.set('sup-eu', { id: 'sup-eu', name: 'HS SRL', active: true, currency: 'EUR' });
+      db.projects.set('AFRI-1325', { projectNumber: 'AFRI-1325', active: true, status: 'OPEN' });
+      return PurchaseOrderService.create({ supplierId: 'sup-eu', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-p', orderedQty: 1, unitPrice: price }] }, 'user-1');
+    }
+
+    it('refuses to submit without a rate', async () => {
+      const { PurchaseOrderService } = await import('./procurement.service.js');
+      const { SettingsService } = await import('../settings/settings.service.js');
+      await SettingsService.ensureSeeded();
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+      const po = await euroOrder(10);
+      await expect(PurchaseOrderService.submit(po.id, 'user-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/no exchange rate for EUR yet/) });
+      expect(db.pos.get(po.id)!.status).toBe('DRAFT');
+    });
+
+    it('needs a rate and locks it with approval turned off too', async () => {
+      const { PurchaseOrderService } = await import('./procurement.service.js');
+      const { SettingsService } = await import('../settings/settings.service.js');
+      await SettingsService.ensureSeeded();
+      await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1');
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+      try {
+        const po = await euroOrder(10);
+        await expect(PurchaseOrderService.submit(po.id, 'user-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/no exchange rate for EUR yet/) });
+        await SettingsService.set('purchaseOrders.exchangeRateEUR', 20, 'user-1');
+        expect(await PurchaseOrderService.submit(po.id, 'user-1')).toMatchObject({ status: 'APPROVED' });
+        expect(String((db.pos.get(po.id) as unknown as { exchangeRate: unknown }).exchangeRate)).toBe('20');
+      } finally {
+        await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', true, 'user-1');
+        await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+      }
+    });
+
+    it('locks the rate at submission, so a later change does not move who signs', async () => {
+      const { PurchaseOrderService } = await import('./procurement.service.js');
+      const { SettingsService } = await import('../settings/settings.service.js');
+      await SettingsService.ensureSeeded();
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 20, 'user-1');
+      const po = await euroOrder(9000); // R180 000 at 20
+      await PurchaseOrderService.submit(po.id, 'user-1');
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 30, 'user-1'); // would be R270 000
+      expect(await PurchaseOrderService.approval(po.id, 'u-ona')).toMatchObject({ randValue: '180000.00', exchangeRate: '20', steps: [{ step: 'MANAGER' }] });
+      expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'APPROVED' });
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+    });
+
+    it('needs both once the converted value reaches the threshold', async () => {
+      const { PurchaseOrderService } = await import('./procurement.service.js');
+      const { SettingsService } = await import('../settings/settings.service.js');
+      await SettingsService.ensureSeeded();
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 20, 'user-1');
+      const po = await euroOrder(10000); // R200 000 at 20
+      await PurchaseOrderService.submit(po.id, 'user-1');
+      expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'PENDING_APPROVAL' });
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+    });
+  });
+
+  it('tells the reader where the order stands, and who can sign next', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    db.suppliers.set('sup-eu', { id: 'sup-eu', name: 'HS SRL', active: true, currency: 'EUR' });
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-eu', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] }, 'user-1');
-    await PurchaseOrderService.submit(po.id, 'user-1');
-    await expect(PurchaseOrderService.approve(po.id, 'u-ona')).rejects.toMatchObject({ statusCode: 403, message: expect.stringMatching(/^This order is in EUR/) });
+    const id = await submitted(300000);
+    expect(await PurchaseOrderService.approval(id, 'u-ona')).toMatchObject({
+      canApprove: true, reason: null, randValue: '300000.00', net: '345000.00',
+      steps: [{ step: 'MANAGER', signature: null }, { step: 'DIRECTOR', signature: null }],
+      next: { step: 'MANAGER', label: 'Procurement Manager' },
+      approvers: [{ name: 'Ona Moloane', standIn: false }, { name: 'Second Manager', standIn: false }, { name: 'Chief Executive', standIn: true }, { name: 'Workshop Boss', standIn: true }],
+    });
+    expect(await PurchaseOrderService.approval(id, 'u-sb')).toMatchObject({ canApprove: false, reason: 'The Procurement Manager signs this order first.' });
+    expect(await PurchaseOrderService.approval(id, 'user-1')).toMatchObject({ canApprove: false, reason: null });
+    await PurchaseOrderService.approve(id, 'u-ona');
+    expect(await PurchaseOrderService.approval(id, 'u-ona')).toMatchObject({ canApprove: false, reason: expect.stringMatching(/^You have already signed/) });
+    const asDirector = await PurchaseOrderService.approval(id, 'u-sb');
+    expect(asDirector).toMatchObject({ canApprove: true, next: { step: 'DIRECTOR' }, steps: [{ step: 'MANAGER', signature: { name: 'Ona Moloane', standIn: false } }, { step: 'DIRECTOR', signature: null }] });
+    expect(asDirector.approvers.map((a) => a.name)).toEqual(['Simbongile Bantubani', 'Chief Executive', 'Workshop Boss']);
   });
 
-  it('tells the reader whether they can approve, and who can', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    const id = await submitted(600000);
-    const asOna = await PurchaseOrderService.approval(id, 'u-ona');
-    expect(asOna).toMatchObject({ canApprove: false, myLimit: '500000', net: '690000.00', approvers: [{ name: 'Simbongile Bantubani' }] });
-    expect(asOna.reason).toMatch(/your approval limit is/);
-    expect(await PurchaseOrderService.approval(id, 'u-sb')).toMatchObject({ canApprove: true, reason: null });
-    expect(await PurchaseOrderService.approval(id, 'user-1')).toMatchObject({ canApprove: false, reason: null, myLimit: null });
-  });
-
-  it('lists the orders waiting for an approver: within their limit and priced, oldest first', async () => {
+  it('lists only what is waiting on this person: the Director sees an order once the Manager has signed', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const newer = await submitted(1000);
     const older = await submitted(2000);
-    const over = await submitted(600000); // R690 000 with VAT: over Ona's limit
+    const big = await submitted(600000);
     db.pos.get(older)!.createdAt = new Date('2026-01-01');
     db.pos.get(newer)!.createdAt = new Date('2026-02-01');
+    db.pos.get(big)!.createdAt = new Date('2026-03-01');
     const unpriced = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1 }] }, 'user-1');
     await PurchaseOrderService.submit(unpriced.id, 'user-1');
-    await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 5 }] }, 'user-1'); // a draft
 
-    expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((p) => p.id)).toEqual([older, newer]);
-    expect((await PurchaseOrderService.awaitingApproval('u-sb')).map((p) => p.id)).toEqual([older, newer, over]);
+    expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((p) => p.id)).toEqual([older, newer, big]);
+    expect(await PurchaseOrderService.awaitingApproval('u-sb')).toEqual([]);
     expect(await PurchaseOrderService.awaitingApproval('user-1')).toEqual([]);
+    await PurchaseOrderService.approve(big, 'u-ona');
+    expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((p) => p.id)).toEqual([older, newer]);
+    expect((await PurchaseOrderService.awaitingApproval('u-sb')).map((p) => p.id)).toEqual([big]);
   });
 
-  // Stores and Procurement Separation Roadmap: each kind has its own approvers.
-  it("gives each approver only their own kind's orders to approve", async () => {
+  it("gives each signer only their own kind's orders", async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    db.users.set('u-proc', { id: 'u-proc', name: 'Project approver', approvalLimit: null, canApprove: true, canApproveStores: false });
-    db.users.set('u-store', { id: 'u-store', name: 'Storeman', approvalLimit: null, canApprove: false, canApproveStores: true });
-    const stores = await submitted(1000);
-    expect((await PurchaseOrderService.awaitingApproval('u-store')).map((p) => p.id)).toEqual([stores]);
-    expect(await PurchaseOrderService.awaitingApproval('u-proc')).toEqual([]);
-    // Asked for project orders, the storeman has none.
-    expect(await PurchaseOrderService.awaitingApproval('u-store', 'projects')).toEqual([]);
-    // The order's approval panel names the store, not the project approver.
-    const panel = await PurchaseOrderService.approval(stores, 'u-store');
-    expect(panel).toMatchObject({ canApprove: true });
-    expect(panel.approvers.map((a) => a.id)).toContain('u-store');
-    expect(panel.approvers.map((a) => a.id)).not.toContain('u-proc');
-    expect(await PurchaseOrderService.approval(stores, 'u-proc')).toMatchObject({ canApprove: false });
+    const stores = await submitted(1000, { stores: true });
+    expect(await PurchaseOrderService.awaitingApproval('u-ceo')).toEqual([]);
+    expect((await PurchaseOrderService.awaitingApproval('u-ws')).map((p) => p.id)).toEqual([stores]);
+    expect(await PurchaseOrderService.awaitingApproval('u-ws', 'projects')).toEqual([]);
+    const panel = await PurchaseOrderService.approval(stores, 'u-ona');
+    expect(panel.approvers.map((a) => a.id)).toEqual(['u-ona', 'user-2', 'u-ws']);
   });
 
-  // Qodo, PR #122: a blank limit would mean any value, unchecked.
-  it('lets a store controller approve Stores orders only once his limit is set', async () => {
+  it('starts the signing again when the money changes on an order part-signed', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const storeman = { role: { name: 'STORE_CONTROLLER' } };
-    db.users.set('u-new', { id: 'u-new', name: 'New storeman', approvalLimit: null, canApprove: false, canApproveStores: true, roles: [storeman] });
-    const stores = await submitted(1000);
-    expect(await PurchaseOrderService.awaitingApproval('u-new')).toEqual([]);
-    expect(await PurchaseOrderService.approval(stores, 'u-new')).toMatchObject({ canApprove: false });
-    await expect(PurchaseOrderService.approve(stores, 'u-new')).rejects.toMatchObject({ code: 'FORBIDDEN', message: expect.stringMatching(/approval limit isn't set yet/) });
-    db.users.set('u-new', { ...db.users.get('u-new')!, approvalLimit: new Prisma.Decimal(5000) });
-    expect(await PurchaseOrderService.approve(stores, 'u-new')).toMatchObject({ status: 'APPROVED' });
-  });
-
-  it('sends an approved order back for approval when an edit takes it past the approver\'s limit', async () => {
-    const { PurchaseOrderService } = await import('./procurement.service.js');
-    const id = await submitted(100000);
+    const id = await submitted(300000);
     await PurchaseOrderService.approve(id, 'u-ona');
     const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === id)!.id;
-    await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 200000 }] }, 'user-1'); // R230 000: still within
-    expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
-    // Still approved, it keeps the small print it was approved with.
-    expect(db.pos.get(id)!.printedTerms).toBeTruthy();
-    await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 450000 }] }, 'user-1'); // R517 500
+    await PurchaseOrderService.update({ id, notes: 'Gate 2' }, 'user-1');
+    expect(db.signatures).toHaveLength(1);
+    await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 310000 }] }, 'user-1');
+    expect(db.signatures).toEqual([]);
+    expect(db.audit.at(-1)).toMatchObject({ action: 'UPDATE', after: { signaturesCleared: true } });
+    expect(await PurchaseOrderService.approval(id, 'u-sb')).toMatchObject({ canApprove: false, next: { step: 'MANAGER' } });
+  });
+
+  it('sends an approved order back for both signatures when an edit takes it to R200 000', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(150000);
+    await PurchaseOrderService.approve(id, 'u-ona');
+    const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === id)!.id;
+    await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 250000 }] }, 'user-1');
     expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null, approvedAt: null });
+    expect(db.signatures).toEqual([]);
     // Back for approval, it drops it: its draft prints today's wording, and approving it again takes that.
     expect(db.pos.get(id)!.printedTerms).toBe(Prisma.DbNull);
+    await PurchaseOrderService.approve(id, 'u-ona');
     await PurchaseOrderService.approve(id, 'u-sb');
     expect(db.pos.get(id)!.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za' });
+  });
+
+  it('sends an approved order back when its value rises by any amount, even needing no more signatures', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const small = await submitted(150000);
+    await PurchaseOrderService.approve(small, 'u-ona');
+    const smallLine = [...db.lines.values()].find((l) => l.purchaseOrderId === small)!.id;
+    await PurchaseOrderService.update({ id: small, linePrices: [{ lineId: smallLine, unitPrice: 150000.01 }] }, 'user-1');
+    expect(db.pos.get(small)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null });
+    expect(db.signatures.filter((s) => s.purchaseOrderId === small)).toEqual([]);
+
+    const big = await submitted(300000);
+    await PurchaseOrderService.approve(big, 'u-ona');
+    await PurchaseOrderService.approve(big, 'u-sb');
+    const bigLine = [...db.lines.values()].find((l) => l.purchaseOrderId === big)!.id;
+    await PurchaseOrderService.update({ id: big, linePrices: [{ lineId: bigLine, unitPrice: 5000000 }] }, 'user-1');
+    expect(db.pos.get(big)).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(db.signatures.filter((s) => s.purchaseOrderId === big)).toEqual([]);
+    expect(db.audit.at(-1)).toMatchObject({ action: 'UPDATE', after: { signaturesCleared: true } });
+  });
+
+  it('counts a smaller discount as a rise, as more is paid', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(1000, { extra: { lines: [{ materialId: 'mat-p', orderedQty: 1, unitPrice: 1000, discountPercent: 10 }] } });
+    await PurchaseOrderService.approve(id, 'u-ona');
+    const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === id)!.id;
+    await PurchaseOrderService.update({ id, lineDiscounts: [{ lineId, discountPercent: 5 }] }, 'user-1');
+    expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL' });
+  });
+
+  it('keeps an approved order approved, with its signatures, when its value falls', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(300000);
+    await PurchaseOrderService.approve(id, 'u-ona');
+    await PurchaseOrderService.approve(id, 'u-sb');
+    const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === id)!.id;
+    await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 280000 }] }, 'user-1');
+    expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED', revision: 1 });
+    expect(db.signatures).toHaveLength(2);
+  });
+
+  it('sends an approved order back when its VAT rate changes, either way, and still asks by the value excluding VAT', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    for (const vatRate of [20, 0]) {
+      const id = await submitted(1000);
+      await PurchaseOrderService.approve(id, 'u-ona');
+      await PurchaseOrderService.update({ id, vatRate }, 'user-1');
+      expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null });
+      expect(db.signatures.filter((s) => s.purchaseOrderId === id)).toEqual([]);
+      expect(await PurchaseOrderService.approval(id, 'u-ona')).toMatchObject({ randValue: '1000.00', steps: [{ step: 'MANAGER' }] });
+    }
+  });
+
+  it('leaves an approved order approved when the VAT rate is sent unchanged', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(1000);
+    await PurchaseOrderService.approve(id, 'u-ona');
+    await PurchaseOrderService.update({ id, vatRate: 15, notes: 'Gate 2' }, 'user-1');
+    expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED' });
   });
 });
 
@@ -1007,7 +1189,7 @@ describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: line }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'u-sb');
+    await PurchaseOrderService.approve(po.id, 'u-ona');
     await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Ex works' }, 'user-1');
     expect(db.pos.get(po.id)!.revision).toBe(1);
     await PurchaseOrderService.update({ id: po.id, shippingTerms: 'Delivered to site' }, 'user-1');
@@ -1021,7 +1203,7 @@ describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const po = await PurchaseOrderService.create({ supplierId: 'sup-1', shippingTerms: 'FOB', lines: line }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
-    await PurchaseOrderService.approve(po.id, 'u-sb');
+    await PurchaseOrderService.approve(po.id, 'u-ona');
     const lineId = [...db.lines.values()].find((l) => l.purchaseOrderId === po.id)!.id;
     const logged = db.audit.length;
     await PurchaseOrderService.update({ id: po.id, shippingTerms: 'FOB', vatRate: 15, linePrices: [{ lineId, unitPrice: 10 }] }, 'user-1');

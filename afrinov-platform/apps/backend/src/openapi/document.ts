@@ -171,7 +171,7 @@ export const OPERATIONS: Operation[] = [
     body: createUserSchema, success: 201, errors: [409],
   },
   {
-    method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate, change roles or set an approval limit',
+    method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate or change roles',
     permissions: [P.ManageUsers], body: updateUserSchema, errors: [404],
   },
 
@@ -528,7 +528,7 @@ export const OPERATIONS: Operation[] = [
   // Purchase orders and goods receipts (PROCUREMENT_ENABLED)
   {
     method: 'get', path: '/purchase-orders', tag: 'Purchase orders', summary: 'List purchase orders', procurement: true,
-    description: 'Each side lists only its own: Stores orders (no project) to those with `order:stores_stock`, project orders to those with `view:purchase_order`; one of the two is required (403 otherwise). With awaitingMyApproval, the orders the user may approve now: Stores orders for the store, project orders for approvers.',
+    description: 'Each side lists only its own: Stores orders (no project) to those with `order:stores_stock`, project orders to those with `view:purchase_order`; one of the two is required (403 otherwise). Those who sign Stores orders (`approve:stores_order`) see them too. With awaitingMyApproval, the orders waiting on this user\'s signature now.',
     query: listPOQuerySchema, errors: [400, 403],
   },
   {
@@ -549,7 +549,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices, discounts or delivery dates',
-    description: "A project order stays on a project and a Stores order off one (400). A line's discount (`lineDiscounts`, in percent) comes off its unit price; the order's `totals.discount` is what the discounts save, before VAT. Changing a price, a discount or the VAT rate on an approved order sends it back for approval when it goes over the approver's limit.",
+    description: "A project order stays on a project and a Stores order off one (400). A line's discount (`lineDiscounts`, in percent) comes off its unit price; the order's `totals.discount` is what the discounts save, before VAT. Changing a price, a discount or the VAT rate clears the signatures on an order still being signed, and sends an approved order back for approval, with its signatures cleared, when its value excluding VAT rises at all, its VAT rate changes, or it now needs a signature it doesn't have.",
     procurement: true, byOrderKind: P.CreatePurchaseOrder, body: updatePOSchema, errors: [404, 409],
   },
   {
@@ -559,17 +559,17 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/purchase-orders/:id/submit', tag: 'Purchase orders', summary: 'Submit a draft',
-    description: 'Goes to PENDING_APPROVAL, or straight to APPROVED when approval is turned off in settings.',
+    description: 'Goes to PENDING_APPROVAL, or straight to APPROVED when approval is turned off in settings. An order in another currency locks the exchange rate from Settings here, and is refused (400) when there is none.',
     procurement: true, byOrderKind: P.SubmitPurchaseOrder, errors: [404, 409],
   },
   {
-    method: 'post', path: '/purchase-orders/:id/approve', tag: 'Purchase orders', summary: 'Approve a submitted order',
-    description: 'Every line needs a price (400), and the order total in rand including VAT must be within the approver\'s limit (403, naming who can approve it). Orders in other currencies need an approver without a limit.',
-    procurement: true, byOrderKind: P.ApprovePurchaseOrder, errors: [400, 403, 404, 409],
+    method: 'post', path: '/purchase-orders/:id/approve', tag: 'Purchase orders', summary: 'Sign a submitted order',
+    description: 'Signs the next step the order needs; the last signature approves it. By value in rand excluding VAT: a project order under the threshold needs the Procurement Manager, one at or above it the Procurement Manager and then the Director; a Stores order needs the Procurement Manager at any value. The CEO or Workshop Manager may stand in on a project order, the Workshop Manager on a Stores order. Every line needs a price and a foreign order an exchange rate (400); anyone else, or someone who has already signed, is refused (403, naming who can sign). Requires `approve:purchase_order` for a project order, `approve:stores_order` for a Stores order.',
+    procurement: true, errors: [400, 403, 404, 409],
   },
   {
-    method: 'get', path: '/purchase-orders/:id/approval', tag: 'Purchase orders', summary: 'Who may approve this order, and whether you can',
-    description: 'As the order: a Stores order needs `order:stores_stock`, a project order `view:purchase_order`, and to anyone else it is not found (404). A Stores order is approved by the store, a store controller only once his approval limit is set.',
+    method: 'get', path: '/purchase-orders/:id/approval', tag: 'Purchase orders', summary: 'The signatures this order needs, and whether you can give the next',
+    description: 'As the order: a Stores order needs `order:stores_stock` or `approve:stores_order`, a project order `view:purchase_order`, and to anyone else it is not found (404).',
     procurement: true, errors: [403, 404],
   },
   {

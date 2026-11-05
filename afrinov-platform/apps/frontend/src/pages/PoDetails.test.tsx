@@ -47,7 +47,7 @@ beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
     if (path === '/purchase-orders?kind=projects') return [ORDER, OTHER, STORES];
     if (path === '/purchase-orders/po-1') return ORDER;
-    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
+    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
     if (path === '/suppliers') return SUPPLIERS;
     if (path === '/materials') return MATERIALS;

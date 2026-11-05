@@ -202,6 +202,12 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
 
   // ── Purchase Orders ─────────────────────────────────────────────────────
   { key: 'purchaseOrders.requireApprovalBeforeProcessing', type: 'boolean', category: 'purchase_orders', description: 'When on, submitting a purchase order moves it to PENDING_APPROVAL; when off, submission auto-approves.', default: true },
+  // Who signs an order goes by its value in rand excluding VAT (po-approval.ts).
+  { key: 'purchaseOrders.directorApprovalFrom', type: 'number', category: 'purchase_orders', description: 'From this value, in rand excluding VAT, a project order needs the Director as well as the Procurement Manager.', default: 200000, validate: NON_NEG(1e12) },
+  // An order locks the rate when submitted. 0: not set, so an order in that currency can't be submitted.
+  { key: 'purchaseOrders.exchangeRateUSD', type: 'number', category: 'purchase_orders', description: 'Rand per US dollar, to work out who signs an order in USD. An order keeps the rate it was submitted with.', default: 0, validate: NON_NEG(1e6) },
+  { key: 'purchaseOrders.exchangeRateEUR', type: 'number', category: 'purchase_orders', description: 'Rand per euro, to work out who signs an order in EUR. An order keeps the rate it was submitted with.', default: 0, validate: NON_NEG(1e6) },
+  { key: 'purchaseOrders.exchangeRateGBP', type: 'number', category: 'purchase_orders', description: 'Rand per pound, to work out who signs an order in GBP. An order keeps the rate it was submitted with.', default: 0, validate: NON_NEG(1e6) },
   { key: 'purchaseOrders.allowCancellation', type: 'boolean', category: 'purchase_orders', description: 'Allow cancelling purchase orders before delivery.', default: true },
   { key: 'purchaseOrders.allowEditAfterApproval', type: 'boolean', category: 'purchase_orders', description: 'Allow editing a purchase order once it has been approved.', default: true },
   { key: 'purchaseOrders.vatRate', type: 'number', category: 'purchase_orders', description: 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.', default: 15, validate: NON_NEG(100) },

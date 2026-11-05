@@ -49,11 +49,11 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
  * pending but need prices or a higher limit. Links to their approval queue.
  */
 function approvalCard(mine: Waiting[], pending: Waiting[] | null, sides: { projects: boolean; stores: boolean }) {
-  // Only the kinds this person approves count as "more": a storeman isn't
-  // told about project orders waiting for an approver (Qodo, PR #120).
+  // Only the kinds this person signs count as "more": someone who signs Stores
+  // orders alone isn't told about project orders (Qodo, PR #120).
   const theirs = pending?.filter((o) => (orderKindOf(o) === 'projects' ? sides.projects : sides.stores)) ?? null;
   const others = theirs ? Math.max(0, theirs.length - mine.length) : 0;
-  const more = others === 1 ? '1 more needs prices or a higher limit' : `${formatNumber(others)} more need prices or a higher limit`;
+  const more = others === 1 ? '1 more waiting on prices or someone else' : `${formatNumber(others)} more waiting on prices or someone else`;
   // Each side approves in its own section (Stores and Procurement Separation
   // Roadmap): stock orders in Order stock, project orders in Procurement.
   // Someone who approves both opens the side that has orders waiting.
@@ -109,9 +109,9 @@ function stores(v: StockValue): { items: number; itemsInStock: number } {
 
 export function Dashboard() {
   const { hasPermission } = usePermissions();
-  // Approvers approve project orders; the store approves its own stock orders.
+  // Each kind of order has its signers, and the server picks which are waiting on them.
   const approvesProjects = PROCUREMENT_ENABLED && hasPermission('orders:approve');
-  const approvesStores = PROCUREMENT_ENABLED && hasPermission('stores:order');
+  const approvesStores = PROCUREMENT_ENABLED && hasPermission('stores:approve');
   const canApprove = approvesProjects || approvesStores;
 
   const { data: report, loading, error, reload } = useApi<ReportResult>('/reports/inventory?range=ALL&stockStatus=ALL&itemStatus=ACTIVE&page=1&pageSize=200');

@@ -36,21 +36,22 @@ const STORES_STATUS_OPTIONS = [
 
 export function StoresOrders() {
   const { hasPermission } = usePermissions();
-  if (!hasPermission('stores:order')) {
+  // The store orders; the Procurement Manager and Workshop Manager sign them here.
+  if (!hasPermission('stores:view')) {
     return <NoAccess title="Order stock" action="see the store's orders" section={{ label: 'Stock', to: '/stock' }} />;
   }
   // Receiving posts a goods receipt, so it needs the server's permission for that too, as on the order's page.
   const canReceive = hasPermission('orders:receive') && hasPermission('inventory:receive');
-  return <StoresOrderList canReceive={canReceive} />;
+  return <StoresOrderList canReceive={canReceive} canOrder={hasPermission('stores:order')} />;
 }
 
-function StoresOrderList({ canReceive }: { canReceive: boolean }) {
+function StoresOrderList({ canReceive, canOrder }: { canReceive: boolean; canOrder: boolean }) {
   // The status lives in the link (?status=), so the Dashboard can open "Waiting for my approval".
   const [params, setParams] = useSearchParams();
   const status = params.get('status') ?? '';
   const setStatus = (v: string) => setParams((p) => { if (v) p.set('status', v); else p.delete('status'); return p; }, { replace: true });
   const mine = status === MINE;
-  // "Waiting for my approval" depends on the storeman's limit, so the server picks those.
+  // "Waiting for my approval" depends on who has signed, so the server picks those.
   const orders = useApi<PO[]>(mine ? '/purchase-orders?awaitingMyApproval=true&kind=stores' : '/purchase-orders?kind=stores');
   const [q, setQ] = useState('');
   const statuses = status && !mine ? status.split(',') : [];
@@ -60,7 +61,7 @@ function StoresOrderList({ canReceive }: { canReceive: boolean }) {
     if (needle && !`${p.number} ${p.supplier?.name ?? ''}`.toLowerCase().includes(needle)) return false;
     return true;
   });
-  const newOrder = <Link to="/stock/orders/new" className="btn-primary inline-flex items-center gap-1.5"><Icon.Plus size={14} /> New order</Link>;
+  const newOrder = canOrder ? <Link to="/stock/orders/new" className="btn-primary inline-flex items-center gap-1.5"><Icon.Plus size={14} /> New order</Link> : undefined;
   const columns: DataTableColumn<PO>[] = [
     ...orderColumns(),
     ...(canReceive ? [{
@@ -75,7 +76,7 @@ function StoresOrderList({ canReceive }: { canReceive: boolean }) {
     <div>
       <PageHeader
         title="Order stock"
-        description="Stock ordered for the store: Stores items, without a project. The store approves each order by value, and receives it here or on Receive stock."
+        description="Stock ordered for the store: Stores items, without a project. The Procurement Manager signs each order, and the store receives it here or on Receive stock."
         actions={newOrder}
       />
 

@@ -48,7 +48,7 @@ beforeEach(() => {
       { ...ORDER, id: 'po-4', number: 'AFRI-0401', status: 'PARTIALLY_RECEIVED', supplierId: 's-2', supplier: { name: 'Other' }, expectedDeliveryDate: null },
     ];
     if (path === '/purchase-orders/po-1') return booked ? { ...ORDER, status: after.status } : ORDER;
-    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
+    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 0, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] };
     if (path.startsWith('/suppliers')) return [{ id: 's-1', name: 'Hydac', active: true }, { id: 's-2', name: 'Other', active: true }];
     if (path.startsWith('/locations')) return [{ id: 'loc-1', name: 'Main store', active: true }, { id: 'loc-2', name: 'Yard', active: true }];
     return [];

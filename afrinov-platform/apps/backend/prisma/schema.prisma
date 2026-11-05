@@ -19,9 +19,20 @@ enum RoleName {
   ADMIN
   STORE_CONTROLLER
   PROCUREMENT
+  // View only since orders are signed by the four roles below.
   APPROVER
   TECHNICIAN
   VIEWER
+  PROCUREMENT_MANAGER
+  DIRECTOR
+  CEO
+  WORKSHOP_MANAGER
+}
+
+// The signatures an order can need, in the order they are signed.
+enum ApprovalStep {
+  MANAGER
+  DIRECTOR
 }
 
 model User {
@@ -30,8 +41,8 @@ model User {
   name         String
   passwordHash String        @map("password_hash")
   active       Boolean       @default(true)
-  // Largest purchase order total (rand, including VAT) this user may approve.
-  // Null: no limit. Only matters to users whose role may approve orders.
+  // No longer read: who signs an order goes by role and the order's value. Kept
+  // so older records keep their history.
   approvalLimit Decimal?     @map("approval_limit") @db.Decimal(18, 2)
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
@@ -44,6 +55,7 @@ model User {
   deliveredPurchaseOrders PurchaseOrder[] @relation("PO_DeliveredBy")
   cancelledPurchaseOrders PurchaseOrder[] @relation("PO_CancelledBy")
   closedPurchaseOrders PurchaseOrder[]   @relation("PO_ClosedBy")
+  purchaseOrderSignatures PurchaseOrderSignature[] @relation("PO_SignedBy")
   goodsReceipts        GoodsReceipt[]    @relation("GR_ReceivedBy")
   inventoryTransactions InventoryTransaction[]
   managedProjects      Project[]         @relation("ProjectManager")
@@ -309,6 +321,9 @@ model PurchaseOrder {
   // later changes to either don't rewrite it. vatRate is a percentage (15.00).
   currency   String              @default("ZAR")
   vatRate    Decimal             @default(15) @map("vat_rate") @db.Decimal(5, 2)
+  // Rand per unit of the order's currency, locked when the order is submitted
+  // so a later change of rate can't change who has to sign. Null on rand orders.
+  exchangeRate Decimal?          @map("exchange_rate") @db.Decimal(18, 6)
   // ── Order details from the template's Inputs sheet ───────────────────────
   // Optional: general store stock is bought without a project.
   projectNumber      String?  @map("project_number")
@@ -376,11 +391,31 @@ model PurchaseOrder {
   goodsReceipts GoodsReceipt[]
   // The request for quotation this order was awarded from, if any.
   rfq          Rfq?
+  signatures   PurchaseOrderSignature[]
 
   @@index([status])
   @@index([supplierId])
   @@index([projectNumber])
   @@map("purchase_orders")
+}
+
+// One signature on an order. An order is approved when every step it needs is
+// signed; changing its money clears them, and the audit log keeps the history.
+model PurchaseOrderSignature {
+  id              String       @id @default(uuid())
+  purchaseOrderId String       @map("purchase_order_id")
+  step            ApprovalStep
+  signedById      String       @map("signed_by_id")
+  signedAt        DateTime     @default(now()) @map("signed_at")
+  // Signed by the CEO or Workshop Manager in place of the step's usual signer.
+  standIn         Boolean      @default(false) @map("stand_in")
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  signedBy      User          @relation("PO_SignedBy", fields: [signedById], references: [id])
+
+  @@unique([purchaseOrderId, step])
+  @@index([signedById])
+  @@map("purchase_order_signatures")
 }
 
 model PurchaseOrderLine {

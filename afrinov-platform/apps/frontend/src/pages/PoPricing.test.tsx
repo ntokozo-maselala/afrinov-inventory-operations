@@ -36,7 +36,7 @@ beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
     if (path === '/purchase-orders?kind=projects') return [PRICED, UNPRICED];
     if (path === '/purchase-orders/po-1') return PRICED;
-    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] };
+    if (path.endsWith('/approval')) return { subtotal: '0.00', vat: '0.00', net: '0.00', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] };
     if (path.startsWith('/purchase-orders/')) return [];
     if (path === '/suppliers') return SUPPLIERS;
     if (path === '/materials') return MATERIALS;
@@ -252,7 +252,7 @@ describe('line discounts', () => {
       lines: [{ ...PRICED.lines[0]!, discountPercent: '20', discount: '7.50', subtotal: '30.00', vat: '4.50', net: '34.50' }, PRICED.lines[1]!],
       totals: { subtotal: '30.00', vat: '4.50', net: '34.50', unpricedLines: 1, discount: '7.50' },
     };
-    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/po-1' ? discounted : path.endsWith('/approval') ? { subtotal: '30.00', vat: '4.50', net: '34.50', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, myLimit: null, approvers: [] } : []));
+    mockGet.mockImplementation(async (path: string) => (path === '/purchase-orders/po-1' ? discounted : path.endsWith('/approval') ? { subtotal: '30.00', vat: '4.50', net: '34.50', unpricedLines: 1, currency: 'ZAR', canApprove: false, reason: null, randValue: null, exchangeRate: null, noRate: false, steps: [], next: null, approvers: [] } : []));
     detailPage();
     const line = (await screen.findByText('Cutting disc')).closest('tr')!;
     expect(within(line).getByText('20%')).toBeInTheDocument();
