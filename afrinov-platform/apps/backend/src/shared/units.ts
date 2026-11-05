@@ -11,7 +11,7 @@ type Decimal = Prisma.Decimal;
 
 /**
  * Every spelling of a listed unit, trimmed and lower-case, to its code. The
- * migration that created the list (20260101000043_units_of_measure) mapped
+ * migration that created the list (20260101000047_units_of_measure) mapped
  * existing items with the same table; keep the two in step.
  */
 export const UNIT_ALIASES: Readonly<Record<string, string>> = {

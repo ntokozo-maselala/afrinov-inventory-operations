@@ -1,5 +1,5 @@
 // Checks the units of measure in the database DATABASE_URL points at, before
-// or after the units migration (20260101000043_units_of_measure): how each
+// or after the units migration (20260101000047_units_of_measure): how each
 // spelling items use maps onto the list, which match nothing and would be kept
 // for review, and where a counted item already holds part of a unit. Read-only.
 //

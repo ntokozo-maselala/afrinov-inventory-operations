@@ -21,7 +21,7 @@ describe('unitCode', () => {
   // The migration that created the list mapped existing items with its own
   // copy of this table; new items and imports use this one.
   it('matches the spellings the units migration mapped', () => {
-    const sql = readFileSync(new URL('../../prisma/migrations/20260101000043_units_of_measure/migration.sql', import.meta.url), 'utf8');
+    const sql = readFileSync(new URL('../../prisma/migrations/20260101000047_units_of_measure/migration.sql', import.meta.url), 'utf8');
     const block = sql.slice(sql.indexOf('FROM (VALUES'), sql.indexOf(') AS a("alias", "code")'));
     const pairs = Object.fromEntries([...block.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => [m[1], m[2]]));
     expect(pairs).toEqual(UNIT_ALIASES);

@@ -65,7 +65,7 @@ describe('mock: discount changes on an approved order', () => {
   async function approvedProjectOrder(discountPercent: number) {
     const projects = await api.get<Array<{ projectNumber: string; status?: string; active?: boolean }>>('/projects');
     const projectNumber = projects.find((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED')!.projectNumber;
-    const beam = await api.post<{ id: string }>('/materials', { sku: `MOCK-BEAM-${discountPercent}`, name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
+    const beam = await api.post<{ id: string }>('/materials', { sku: `MOCK-BEAM-${discountPercent}`, name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber });
     const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 0, lines: [{ materialId: beam.id, orderedQty: 10, unitPrice: 21000, discountPercent }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
     mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own

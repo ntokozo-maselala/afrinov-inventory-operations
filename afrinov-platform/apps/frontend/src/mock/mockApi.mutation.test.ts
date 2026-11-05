@@ -158,7 +158,7 @@ describe('mock API mutation flows', () => {
     it('takes the Manager and then the Director on a project order from R200 000, excluding VAT', async () => {
       const projects = await api.get<Array<{ projectNumber: string; status?: string; active?: boolean }>>('/projects');
       const projectNumber = projects.find((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED')!.projectNumber;
-      const beam = await api.post<{ id: string }>('/materials', { sku: 'MOCK-BEAM-SIGN', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
+      const beam = await api.post<{ id: string }>('/materials', { sku: 'MOCK-BEAM-SIGN', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber });
       const raise = async (unitPrice: number) => {
         const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 15, lines: [{ materialId: beam.id, orderedQty: 1, unitPrice }] });
         // Raised by someone else: the demo user signs what others raise (ADR-028).
