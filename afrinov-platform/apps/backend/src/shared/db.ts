@@ -38,6 +38,21 @@ export function schemaFromUrl(url: string): string | undefined {
   }
 }
 
+/**
+ * The adapter's schema qualifies only the queries Prisma builds. Raw SQL (the
+ * row locks, `holdUnits`, the checks in scripts/) names tables unqualified,
+ * so each connection also starts with that schema as its search_path, or those
+ * queries would read `public`. Undefined for `public`, the server's default.
+ * The name is a quoted identifier, with the spaces and backslashes a startup
+ * option needs escaped.
+ */
+export function searchPathOption(url: string): string | undefined {
+  const schema = schemaFromUrl(url);
+  if (!schema) return undefined;
+  const identifier = `"${schema.replace(/"/g, '""')}"`;
+  return `-c search_path=${identifier.replace(/[\\\s]/g, (c) => `\\${c}`)}`;
+}
+
 function createClient(): PrismaClient {
   const connectionString = requireDatabaseUrl();
   const adapter = new PrismaPg(
@@ -46,6 +61,7 @@ function createClient(): PrismaClient {
       connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
       idleTimeoutMillis: IDLE_TIMEOUT_MS,
       max: MAX_POOL_SIZE,
+      options: searchPathOption(connectionString),
     },
     { schema: schemaFromUrl(connectionString) },
   );

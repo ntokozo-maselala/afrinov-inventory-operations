@@ -77,7 +77,9 @@ async function main(): Promise<void> {
   // was checked in and any lost write-off waiting for approval. Listed only
   // when that remainder is part of a unit. Write-off requests come with
   // migration 045; on a database not migrated that far, none can be waiting.
-  const [{ requests }] = await prisma.$queryRaw<[{ requests: boolean }]>`SELECT to_regclass('public.adjustment_requests') IS NOT NULL AS requests`;
+  // Looked up unqualified, so in the schema DATABASE_URL names, as every query
+  // here is (the connection's search_path is that schema; see shared/db.ts).
+  const [{ requests }] = await prisma.$queryRaw<[{ requests: boolean }]>`SELECT to_regclass('adjustment_requests') IS NOT NULL AS requests`;
   const lostWaiting = requests
     ? Prisma.sql`- CASE WHEN t.type = 'LOAN' THEN COALESCE((SELECT -SUM(q.quantity) FROM adjustment_requests q
             WHERE q.status = 'PENDING' AND q.reference_type = 'ToolLoan' AND q.reference_id = t.id), 0) ELSE 0 END`
