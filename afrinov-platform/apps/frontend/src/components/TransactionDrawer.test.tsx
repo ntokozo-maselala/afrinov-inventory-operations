@@ -216,6 +216,23 @@ describe('TransactionDrawer', () => {
     expect(screen.getByText(/received against a purchase order \(GR-2026-0008\), so it cannot be reversed here: correct it on the order/)).toBeInTheDocument();
   });
 
+  // Qodo, PR #151: receiving the whole order at once books against the order itself.
+  it('treats a whole order received at once as received against the order', () => {
+    renderDrawer({ type: 'RECEIPT', quantity: '10', referenceType: 'PurchaseOrder', fromPurchaseOrder: true });
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(screen.getByText(/received against a purchase order, so it cannot be reversed here/)).toBeInTheDocument();
+  });
+
+  // ADR-028: undoing a write-off over the limit takes approval, as posting it did.
+  it('does not offer to reverse an adjustment over the write-off limit, and says how to put it right', () => {
+    renderDrawer({ type: 'ADJUSTMENT', quantity: '-8', reversalNeedsApproval: true } as never);
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(screen.getByText(/over the write-off limit.*Post an adjustment the other way from Stock/)).toBeInTheDocument();
+    cleanup();
+    renderDrawer({ type: 'ADJUSTMENT', quantity: '-1', reversalNeedsApproval: false } as never);
+    expect(screen.getByRole('button', { name: 'Reverse this movement' })).toBeInTheDocument();
+  });
+
   // Qodo, PR #144: undoing the return would leave its used up and broken counting.
   it('does not offer to reverse a return booked with used up or broken until those are withdrawn, then does', () => {
     const ret = { ...issue, type: 'RETURN', quantity: '2', usedUpQuantity: '1', brokenQuantity: '0', bookedMarksLive: true };

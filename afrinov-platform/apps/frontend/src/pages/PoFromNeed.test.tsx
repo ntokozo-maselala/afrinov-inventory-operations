@@ -134,9 +134,9 @@ describe('the new-order form filled in from its link', () => {
     expect(screen.getByLabelText(/^Supplier(?! address)/)).toHaveValue('s-1');
     expect(screen.getByLabelText('Payment terms')).toHaveValue('30 DAYS NETT');
     expect(screen.getByLabelText('Line 1 material')).toHaveValue('m-1');
-    expect(screen.getByLabelText('Line 1 quantity')).toHaveValue(8);
+    expect(screen.getByLabelText('Line 1 quantity')).toHaveValue('8');
     expect(screen.getByLabelText('Line 1 unit price')).toHaveValue(12.5);
-    expect(screen.getByLabelText('Line 2 quantity')).toHaveValue(5);
+    expect(screen.getByLabelText('Line 2 quantity')).toHaveValue('5');
     expect(screen.getByLabelText('Line 2 unit price')).toHaveValue(null);
     expect(screen.getByText(/Filled in from what needs ordering/)).toBeInTheDocument();
   });

@@ -17,9 +17,15 @@ import { formatDate, formatNumber } from '../lib/format';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdueBlocks, suggestedDueOn, useLoanTerms } from '../lib/toolLoans';
 import { today } from '../lib/dates';
-import { useIsAdmin } from '../hooks/usePermissions';
+import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
 import type { OpenLoan, ToolRow } from '../api/types';
+
+/** What can still come back on a loan: what is out, less any lost one waiting for its write-off to be approved. */
+const canComeBack = (l: OpenLoan) => Math.round((Number(l.out) - Number(l.lostWaiting ?? 0)) * 1e4) / 1e4;
 import { useLocationLabel } from '../hooks/useLocationLabel';
+import { QuantityInput } from './QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { firstLineQuantityError, parseQuantity, readQuantity } from '../lib/quantity';
 
 const stockKey = (materialId: string, locationId: string) => `${materialId}|${locationId}`;
 
@@ -61,6 +67,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const locationName = useLocationLabel();
+  const { kindOf } = useUnits();
 
   // What is in store, per tool and location.
   const available = useMemo(() => tools.flatMap((t) => t.locations.map((l) => ({ tool: t, ...l }))), [tools]);
@@ -72,7 +79,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
   })), [available, locationName]);
 
   const asked = new Map<string, number>();
-  for (const l of lines) if (l.stockKey && Number(l.quantity) > 0) asked.set(l.stockKey, (asked.get(l.stockKey) ?? 0) + Number(l.quantity));
+  for (const l of lines) if (l.stockKey && readQuantity(l.quantity) > 0) asked.set(l.stockKey, (asked.get(l.stockKey) ?? 0) + readQuantity(l.quantity));
   const over = new Set([...asked].filter(([k, q]) => q > Number(byKey.get(k)?.quantity ?? 0)).map(([k]) => k));
   const update = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
@@ -102,7 +109,12 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
     if (!recipientId) { setError('Choose who the tools are checked out to.'); return; }
     if (blocked) { setError(`${recipient?.name ?? 'This person'} has overdue tools. Check them in or change their due dates first.`); return; }
     if (filled.length === 0) { setError('Add at least one tool.'); return; }
-    if (filled.some((l) => !l.stockKey || !(Number(l.quantity) > 0))) { setError('Every line needs a tool and a quantity above zero.'); return; }
+    if (filled.some((l) => !l.stockKey)) { setError('Every line needs a tool and a quantity above zero.'); return; }
+    const badQuantity = firstLineQuantityError(filled.map((l) => {
+      const unit = byKey.get(l.stockKey)!.tool.unitOfMeasure;
+      return { text: l.quantity, kind: kindOf(unit), unit, line: lines.indexOf(l) + 1 };
+    }));
+    if (badQuantity) { setError(badQuantity); return; }
     if (over.size > 0) { setError('Some lines ask for more than is in store.'); return; }
     if (dueProblem) { setError(dueProblem); return; }
     if (needsReason && !overrideReason.trim()) { setError(`Say why tools are lent to ${recipient?.name ?? 'this person'} while they have an overdue tool.`); return; }
@@ -116,7 +128,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
         overrideReason: needsReason ? overrideReason.trim() : undefined,
         lines: filled.map((l) => {
           const a = byKey.get(l.stockKey)!;
-          return { materialId: a.tool.materialId, locationId: a.locationId, quantity: Number(l.quantity) };
+          return { materialId: a.tool.materialId, locationId: a.locationId, quantity: readQuantity(l.quantity) };
         }),
       });
       const who = recipient?.name ?? 'recipient';
@@ -168,7 +180,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
                 />
               </Field>
               <Field label="Quantity" htmlFor={`loan-qty-${l.key}`} error={tooMany ? 'More than in store' : null}>
-                <Input id={`loan-qty-${l.key}`} type="number" inputMode="numeric" min="0" step="1" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} invalid={tooMany} />
+                <QuantityInput id={`loan-qty-${l.key}`} kind={kindOf(byKey.get(l.stockKey)?.tool.unitOfMeasure)} value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} invalid={tooMany} />
               </Field>
               <Button
                 type="button" variant="ghost" aria-label={`Remove tool ${i + 1}`} className="sm:mt-6"
@@ -219,30 +231,47 @@ export function CheckInForm({ tool, onCancel, onDone }: {
 }) {
   // With one loan, all of it is coming back; with several, the storeman fills in the ones that are.
   const [back, setBack] = useState<Record<string, Back>>(() => Object.fromEntries(tool.loans.map((l) => [
-    l.loanId, { quantity: tool.loans.length === 1 ? l.out : '', condition: 'GOOD' as Condition, note: '' },
+    l.loanId, { quantity: tool.loans.length === 1 ? String(canComeBack(l)) : '', condition: 'GOOD' as Condition, note: '' },
   ])));
+  // Lost writes the tool off, which the store does, not the borrower (adjust:inventory).
+  const canWriteOff = usePermissions().hasPermission('inventory:adjust');
+  const { kindOf } = useUnits();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const update = (loanId: string, patch: Partial<Back>) => setBack((b) => ({ ...b, [loanId]: { ...b[loanId]!, ...patch } }));
-  const tooMany = (l: OpenLoan) => Number(back[l.loanId]?.quantity) > Number(l.out);
+  const tooMany = (l: OpenLoan) => readQuantity(back[l.loanId]?.quantity ?? '') > canComeBack(l);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const lines = tool.loans.filter((l) => Number(back[l.loanId]?.quantity) > 0);
+    const typed = tool.loans.find((l) => (back[l.loanId]?.quantity ?? '').trim() !== '' && !parseQuantity(back[l.loanId]!.quantity, kindOf(tool.unitOfMeasure), tool.unitOfMeasure, { allowZero: true, remainder: canComeBack(l) }).ok);
+    if (typed) {
+      const parsed = parseQuantity(back[typed.loanId]!.quantity, kindOf(tool.unitOfMeasure), tool.unitOfMeasure, { allowZero: true, remainder: canComeBack(typed) });
+      setError(parsed.ok ? null : parsed.error);
+      return;
+    }
+    const lines = tool.loans.filter((l) => readQuantity(back[l.loanId]?.quantity ?? '') > 0);
     if (lines.length === 0) { setError('Enter how many came back.'); return; }
     if (lines.some(tooMany)) { setError('Some check-outs get back more than is out.'); return; }
     if (lines.some((l) => back[l.loanId]!.condition === 'LOST' && !back[l.loanId]!.note.trim())) { setError('Say what happened to a lost tool.'); return; }
     setBusy(true);
     try {
-      await api.post('/tools/check-in', {
+      const result = await api.post<{ heldLoanIds?: string[] }>('/tools/check-in', {
         lines: lines.map((l) => {
           const b = back[l.loanId]!;
-          return { loanId: l.loanId, quantity: Number(b.quantity), condition: b.condition, note: b.note.trim() || undefined };
+          return { loanId: l.loanId, quantity: readQuantity(b.quantity), condition: b.condition, note: b.note.trim() || undefined };
         }),
       });
-      const count = lines.reduce((n, l) => n + Number(back[l.loanId]!.quantity), 0);
-      onDone(`Checked in ${formatNumber(count)} × ${tool.name}`);
+      // A lost tool over the write-off limit is written off once someone else
+      // approves it (ADR-028): it stays on loan, so it is not counted as checked in.
+      const held = new Set(result?.heldLoanIds ?? []);
+      const sum = (ls: typeof lines) => ls.reduce((n, l) => n + readQuantity(back[l.loanId]!.quantity), 0);
+      const checkedIn = sum(lines.filter((l) => !(back[l.loanId]!.condition === 'LOST' && held.has(l.loanId))));
+      const waiting = sum(lines.filter((l) => back[l.loanId]!.condition === 'LOST' && held.has(l.loanId)));
+      const waits = `writing off ${formatNumber(waiting)} lost × ${tool.name} waits for someone else to approve it under Write-offs to approve; until then ${waiting === 1 ? 'it stays' : 'they stay'} on loan.`;
+      onDone(waiting === 0 ? `Checked in ${formatNumber(checkedIn)} × ${tool.name}`
+        : checkedIn === 0 ? `Nothing checked in yet: ${waits}`
+          : `Checked in ${formatNumber(checkedIn)} × ${tool.name}. Separately, ${waits}`);
     } catch (err) {
       setError((err as ApiError).message);
     } finally {
@@ -260,18 +289,19 @@ export function CheckInForm({ tool, onCancel, onDone }: {
             <div className="text-sm">
               <span className="font-medium text-surface-900">{l.recipientName ?? 'Not recorded'}</span>
               <span className="text-surface-600"> · {formatNumber(Number(l.out))} out since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
+              {Number(l.lostWaiting ?? 0) > 0 && <div className="text-xs text-surface-500">{formatNumber(Number(l.lostWaiting))} lost, waiting for the write-off to be approved under Write-offs to approve.</div>}
               <div><LoanDue loan={l} /></div>
               <div className="text-xs text-surface-500">From {l.locationName}; it goes back there. Checked out by {l.checkedOutBy}.{l.note ? ` ${l.note}` : ''}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-[6rem_10rem_1fr] gap-2 items-start">
               <Field label="Back now" htmlFor={`back-qty-${l.loanId}`} error={tooMany(l) ? 'More than out' : null}>
-                <Input id={`back-qty-${l.loanId}`} type="number" inputMode="numeric" min="0" step="1" value={b.quantity} onChange={(e) => update(l.loanId, { quantity: e.target.value })} invalid={tooMany(l)} />
+                <QuantityInput id={`back-qty-${l.loanId}`} kind={kindOf(tool.unitOfMeasure)} value={b.quantity} onChange={(e) => update(l.loanId, { quantity: e.target.value })} invalid={tooMany(l)} />
               </Field>
               <Field label="Condition" htmlFor={`back-cond-${l.loanId}`}>
                 <Select id={`back-cond-${l.loanId}`} value={b.condition} onChange={(e) => update(l.loanId, { condition: e.target.value as Condition })}>
                   <option value="GOOD">Good</option>
                   <option value="DAMAGED">Damaged</option>
-                  <option value="LOST">Lost (write off)</option>
+                  {canWriteOff && <option value="LOST">Lost (write off)</option>}
                 </Select>
               </Field>
               <Field label={b.condition === 'LOST' ? 'What happened' : 'Note (optional)'} htmlFor={`back-note-${l.loanId}`} required={b.condition === 'LOST'}>

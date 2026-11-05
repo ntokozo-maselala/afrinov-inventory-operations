@@ -47,7 +47,7 @@ describe('useNavGroups', () => {
   });
 
   it('puts the counter actions in Store, after Stock', () => {
-    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Order stock', 'Tools']);
+    expect(useLabelsIn('Store')).toEqual(['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Write-offs to approve', 'Order stock', 'Tools']);
   });
 
   it('offers Order stock only with procurement on, as the orders it raises are purchase orders', () => {
@@ -91,7 +91,7 @@ describe('useNavGroups', () => {
     ['PROCUREMENT', ['Stock', 'Tools']],
     ['VIEWER', ['Stock', 'Tools']],
     // The storeman orders stock for the shelf (Stores ordering roadmap); Procurement doesn't.
-    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Order stock', 'Tools']],
+    ['STORE_CONTROLLER', ['Stock', 'Issue stock', 'Receive stock', 'Return stock', 'Count stock', 'Write-offs to approve', 'Order stock', 'Tools']],
     // Those who sign Stores orders open them in Order stock; the Director signs project orders only.
     ['PROCUREMENT_MANAGER', ['Stock', 'Order stock', 'Tools']],
     ['WORKSHOP_MANAGER', ['Stock', 'Order stock', 'Tools']],

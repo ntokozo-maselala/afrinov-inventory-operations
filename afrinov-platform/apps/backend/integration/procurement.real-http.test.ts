@@ -13,6 +13,7 @@ import {
   prisma,
   requireAdminPassword,
   runId,
+  secondAdmin,
   startServer,
   type TestServer,
 } from './helpers.js';
@@ -32,6 +33,8 @@ describe('receiving stock over real HTTP', () => {
   const run = runId();
   let server: TestServer;
   let api: ReturnType<typeof client>;
+  /** Approves what the admin raises: nobody approves their own order. */
+  let checker: ReturnType<typeof client>;
   let materialId: string;
   let locationId: string;
   let supplierId: string;
@@ -61,7 +64,7 @@ describe('receiving stock over real HTTP', () => {
     expect(submitted.status).toBe(200);
     // Submission auto-approves when the approval setting is off.
     if (submitted.body.status === 'PENDING_APPROVAL') {
-      const approved = await api<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/approve`);
+      const approved = await checker<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/approve`);
       expect(approved.status).toBe(200);
     }
     const order = await getOrder(created.body.id);
@@ -86,6 +89,7 @@ describe('receiving stock over real HTTP', () => {
     server = await startServer({ procurementEnabled: true });
     api = client(server.port, await login(server.port, ADMIN_EMAIL, password));
     await letAdminSign(api);
+    checker = await secondAdmin(server.port, api, run);
 
     const material = await api<{ id: string }>('POST', '/materials', {
       sku: `IT-PO-${run}`,
@@ -654,7 +658,7 @@ describe('receiving stock over real HTTP', () => {
       });
       expect(created.status).toBe(201);
       const submitted = await api<PurchaseOrder>('POST', `/purchase-orders/${created.body.id}/submit`);
-      if (submitted.body.status === 'PENDING_APPROVAL') await api('POST', `/purchase-orders/${created.body.id}/approve`);
+      if (submitted.body.status === 'PENDING_APPROVAL') await checker('POST', `/purchase-orders/${created.body.id}/approve`);
       const order = (await api<PurchaseOrder>('GET', `/purchase-orders/${created.body.id}`)).body;
       expect(order.status).toBe('APPROVED');
 
@@ -765,7 +769,7 @@ describe('receiving stock over real HTTP', () => {
     beforeAll(async () => {
       expect((await api('POST', '/projects', { projectNumber, name: `IT stores ordering ${run}` })).status).toBe(201);
       const beam = await api<{ id: string }>('POST', '/materials', {
-        sku: `IT-SO-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber,
+        sku: `IT-SO-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber,
       });
       expect(beam.status).toBe(200);
       beamId = beam.body.id;
@@ -904,6 +908,29 @@ describe('receiving stock over real HTTP', () => {
 
         expect((await manager('POST', '/purchase-orders', storesOrder())).status).toBe(403);
         expect((await manager('POST', '/purchase-orders', projectOrder())).status).toBe(403);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
+    // Segregation of duties: whoever raised an order never signs it, whatever
+    // their role; another holder of the role does.
+    it("won't let anyone sign an order they raised", async () => {
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        // The admin holds the Procurement Manager's role, so could otherwise sign it.
+        const own = await api<{ id: string }>('POST', '/purchase-orders', storesOrder());
+        expect((await api<{ status: string }>('POST', `/purchase-orders/${own.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+        expect((await api<Array<{ id: string }>>('GET', '/purchase-orders?awaitingMyApproval=true')).body.map((o) => o.id)).not.toContain(own.body.id);
+        const panel = (await api<{ canApprove: boolean; reason: string; approvers: Array<{ name: string }> }>('GET', `/purchase-orders/${own.body.id}/approval`)).body;
+        expect(panel).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must sign it.' });
+        expect(panel.approvers.map((a) => a.name)).not.toContain('System Administrator');
+        const refused = await api<{ error: { message: string } }>('POST', `/purchase-orders/${own.body.id}/approve`);
+        expect(refused.status).toBe(403);
+        expect(refused.body.error.message).toMatch(/^You raised this order, so someone else must sign it\. Ask .*IT Checker/);
+        expect((await checker<{ status: string }>('POST', `/purchase-orders/${own.body.id}/approve`)).body.status).toBe('APPROVED');
       } finally {
         await api('PUT', approvalKey, { value: approvalWas });
       }
@@ -1158,7 +1185,7 @@ describe('receiving stock over real HTTP', () => {
           // Stores stock never moved, and a project that doesn't exist holds nothing.
           expect(await ledgerAndBalance(looseId, locationId)).toEqual(stores);
           expect((await storeman('POST', '/inventory-adjustments', {
-            materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', heldForProject: `IT-NOPE-${run}`,
+            materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', reasonNote: 'Wrong project', heldForProject: `IT-NOPE-${run}`,
           })).status).toBe(404);
         });
 

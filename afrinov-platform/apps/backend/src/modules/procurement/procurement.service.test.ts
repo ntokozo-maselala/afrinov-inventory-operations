@@ -33,7 +33,7 @@ interface Sup {
   id: string; name: string; active: boolean; currency?: string; paymentTerms?: string | null;
   contactName?: string | null; contactPhone?: string | null; contactEmail?: string | null; address?: string | null;
 }
-interface Mat { id: string; sku: string; name: string; active: boolean; category?: string; projectNumber?: string | null }
+interface Mat { id: string; sku: string; name: string; active: boolean; category?: string; projectNumber?: string | null; unitOfMeasure?: string; unit?: { kind: 'COUNTED' | 'MEASURED' } }
 interface TxRow { id: string; materialId: string; locationId: string; type: TxType; quantity: Prisma.Decimal; referenceType: string | null; referenceId: string | null; actorId: string; postedAt: Date }
 interface BalRow { materialId: string; locationId: string; quantity: Prisma.Decimal }
 interface AuditRow { id: string; actorId: string | null; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: Date }
@@ -78,16 +78,18 @@ function makePrisma(): unknown {
     },
     user: {
       findUnique: async ({ where }: { where: { id: string } }) => db.users.get(where.id) ?? null,
-      // By id (names on the order's Activity), or active users holding one of the roles.
-      findMany: async ({ where }: { where?: { id?: { in: string[] }; roles?: { some: { role: { name: { in: string[] } } } } } } = {}) => {
-        if (where?.id) return where.id.in.map((id) => db.users.get(id)).filter((u) => !!u);
+      // By id (names on the order's Activity), or active users holding one of the roles, less any left out.
+      findMany: async ({ where }: { where?: { id?: { in?: string[]; notIn?: string[] }; roles?: { some: { role: { name: { in: string[] } } } } } } = {}) => {
+        if (where?.id?.in) return where.id.in.map((id) => db.users.get(id)).filter((u) => !!u);
         const wanted = where?.roles?.some.role.name.in ?? [];
-        return [...db.users.values()].filter((u) => u.roles.some((r) => wanted.includes(r.role.name)));
+        const leftOut = where?.id?.notIn ?? [];
+        return [...db.users.values()].filter((u) => !leftOut.includes(u.id) && u.roles.some((r) => wanted.includes(r.role.name)));
       },
     },
     material: {
       findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null,
-      findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => db.materials.get(id)).filter((m): m is Mat => !!m),
+      // Measured unless a test says otherwise, so a fraction goes through.
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => db.materials.get(id)).filter((m): m is Mat => !!m).map((m) => ({ unitOfMeasure: 'm', unit: { kind: 'MEASURED' as const }, ...m })),
     },
     location: {
       findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null,
@@ -238,14 +240,26 @@ function makePrisma(): unknown {
         return next;
       },
     },
-  $executeRaw: async () => void 0,
+  // Raw SQL is only locks here. Taking the order's row lock runs whatever
+  // another user committed while this one waited for it (see onOrderLock).
+  $executeRaw: async (sql: TemplateStringsArray) => {
+    if (sql.join('?').includes('FROM purchase_orders') && onOrderLock) {
+      const committedMeanwhile = onOrderLock;
+      onOrderLock = null;
+      committedMeanwhile();
+    }
+  },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
   };
 }
 
 interface SettingRow { key: string; value: unknown; type: string; category: string; description: string; isEditable: boolean; enumOptions: unknown; updatedAt: Date; updatedById: string | null }
 
+/** What another user commits while this request waits for the order's row lock. */
+let onOrderLock: (() => void) | null = null;
+
 beforeEach(() => {
+  onOrderLock = null;
   db.pos.clear();
   db.lines.clear();
   db.suppliers.clear();
@@ -1209,5 +1223,113 @@ describe('PurchaseOrderService numbers and revisions (procurement roadmap Phase 
     await PurchaseOrderService.update({ id: po.id, shippingTerms: 'FOB', vatRate: 15, linePrices: [{ lineId, unitPrice: 10 }] }, 'user-1');
     expect(db.pos.get(po.id)!.revision).toBe(0);
     expect(db.audit.length).toBe(logged);
+  });
+});
+
+// Posting a goods receipt locks the order's row. Each change to the order takes
+// the same lock before reading it, so what another user committed meanwhile is
+// what it works from.
+describe('PurchaseOrderService and the order row lock', () => {
+  const lineOf = (poId: string, materialId: string) => [...db.lines.values()].find((l) => l.purchaseOrderId === poId && l.materialId === materialId)!;
+
+  it('receiving the whole order books only what a goods receipt posted meanwhile left outstanding', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-2', { id: 'mat-2', sku: 'B-1', name: 'Bolt', active: true });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [
+      { materialId: 'mat-1', orderedQty: 10, unitPrice: 10 },
+      { materialId: 'mat-2', orderedQty: 5, unitPrice: 10 },
+    ] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'user-2');
+    const a = lineOf(po.id, 'mat-1');
+    db.lines.set(a.id, { ...a, receivedQty: new Prisma.Decimal(4) });
+    db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' });
+    // The other 6 of line A arrive on a goods receipt; the order stays partly received.
+    onOrderLock = () => { db.lines.set(a.id, { ...lineOf(po.id, 'mat-1'), receivedQty: new Prisma.Decimal(10) }); };
+
+    await PurchaseOrderService.receive({ id: po.id, locationId: 'loc-1' }, 'user-4');
+    expect(db.transactions.map((t) => [t.materialId, t.quantity.toString()])).toEqual([['mat-2', '5']]);
+  });
+
+  it('signing counts a price saved while it waited for the order', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.projects.set('AFRI-1325', { projectNumber: 'AFRI-1325', active: true, status: 'OPEN' });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-p', orderedQty: 1, unitPrice: 1000 }] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    // Someone saves a price that takes it to R600 000: the Director must sign too.
+    onOrderLock = () => { const l = lineOf(po.id, 'mat-p'); db.lines.set(l.id, { ...l, unitPrice: 600000 }); };
+
+    expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(db.signatures.map((x) => x.step)).toEqual(['MANAGER']);
+  });
+
+  it('an edit that waited for a goods receipt finds the order partly received, and leaves it so', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 1000 }] }, 'user-1');
+    await PurchaseOrderService.submit(po.id, 'user-1');
+    await PurchaseOrderService.approve(po.id, 'u-ona');
+    onOrderLock = () => { db.pos.set(po.id, { ...db.pos.get(po.id)!, status: 'PARTIALLY_RECEIVED' }); };
+
+    const lineId = lineOf(po.id, 'mat-1').id;
+    await expect(PurchaseOrderService.update({ id: po.id, linePrices: [{ lineId, unitPrice: 60000 }] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(db.pos.get(po.id)!.status).toBe('PARTIALLY_RECEIVED');
+  });
+});
+
+// Segregation of duties: nobody signs an order they raised, whatever their
+// role, so raising, approving and receiving are never one person (ADR-028).
+describe('PurchaseOrderService and signing your own order', () => {
+  /** A submitted Stores order, raised by this user: the Procurement Manager signs it. */
+  async function raisedBy(userId: string) {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 1000 }] }, userId);
+    await PurchaseOrderService.submit(po.id, userId);
+    return po.id;
+  }
+
+  it('refuses to let whoever raised an order sign it, and names who else can', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await raisedBy('u-ona');
+    await expect(PurchaseOrderService.approve(id, 'u-ona')).rejects.toMatchObject({
+      statusCode: 403, message: 'You raised this order, so someone else must sign it. Ask Second Manager or Workshop Boss to sign it.',
+    });
+    expect(db.pos.get(id)!.status).toBe('PENDING_APPROVAL');
+    expect(db.signatures).toEqual([]);
+    expect(await PurchaseOrderService.approve(id, 'user-2')).toMatchObject({ status: 'APPROVED', approvedById: 'user-2' });
+  });
+
+  it('says so when nobody else holds a role that signs it', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.users.delete('user-2');
+    db.users.delete('u-ws');
+    const id = await raisedBy('u-ona');
+    await expect(PurchaseOrderService.approve(id, 'u-ona')).rejects.toMatchObject({
+      statusCode: 403, message: 'You raised this order, so someone else must sign it. Nobody else holds that role yet: an admin can assign it to another user under Settings → Users.',
+    });
+  });
+
+  it('tells the one who raised it they cannot sign it, and leaves it off their list and the signers named', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const own = await raisedBy('u-ona');
+    const other = await raisedBy('user-1');
+    const panel = await PurchaseOrderService.approval(own, 'u-ona');
+    expect(panel).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must sign it.' });
+    expect(panel.approvers.map((a) => a.id)).toEqual(['user-2', 'u-ws']);
+    expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((x) => x.id)).toEqual([other]);
+  });
+});
+
+// Qodo, PR #153: an RFQ saved before the rule could order half a washer when awarded.
+describe('PurchaseOrderService and whole units', () => {
+  it('refuses part of a counted item, on an award too, saying how to go on', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-washer', { id: 'mat-washer', sku: 'WSH-1', name: 'M16 flat washer', active: true, unitOfMeasure: 'each', unit: { kind: 'COUNTED' } });
+    const line = { materialId: 'mat-washer', orderedQty: 1.5, unitPrice: 1 };
+    await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [line] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'M16 flat washer is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [line] }, 'user-1', { fromRfq: { id: 'rfq-1', number: 'AFRI-02A-1325-02-01' } }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'M16 flat washer is counted in whole numbers (each). Enter 1, 2, 3 … AFRI-02A-1325-02-01 asks for part of one, so it can\'t be awarded: cancel it and raise the request for quotation again.' });
+    expect(await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ ...line, orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
   });
 });

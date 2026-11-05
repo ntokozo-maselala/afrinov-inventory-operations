@@ -3,6 +3,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
+import { checkWholeUnits } from '../../shared/units.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 /** Slack for a client clock a little ahead of the server's. */
@@ -116,6 +117,9 @@ export const GoodsReceiptService = {
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
     if (!supplier.active) throw Errors.validation('Supplier is inactive');
+    // What each order line still expects: a delivery may take exactly that,
+    // even in part-units, so an order raised before the rule can be finished.
+    const outstanding = new Map<string, Prisma.Decimal>();
     if (input.purchaseOrderId) {
       const po = await prisma.purchaseOrder.findUnique({
         where: { id: input.purchaseOrderId },
@@ -126,6 +130,7 @@ export const GoodsReceiptService = {
         throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
       }
       assertLinesOnOrder(po, input);
+      for (const l of po.lines) outstanding.set(l.id, l.orderedQty.minus(l.receivedQty));
     } else if (input.lines.some((l) => l.purchaseOrderLineId)) {
       throw Errors.validation('These lines belong to a purchase order: choose the order the delivery is for.');
     }
@@ -138,6 +143,11 @@ export const GoodsReceiptService = {
       // increase, and every receipt takes its locks in the same order, so
       // none can deadlock with another.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
+      // Whole units of a counted item, read under a hold on the items so a
+      // change of unit waits for this receipt.
+      await checkWholeUnits(input.lines.map((l) => (l.purchaseOrderLineId
+        ? { materialId: l.materialId, quantity: l.quantity, group: l.purchaseOrderLineId, remainder: outstanding.get(l.purchaseOrderLineId) }
+        : { materialId: l.materialId, quantity: l.quantity })), tx);
       const number = await generateGRNumber(tx);
       const gr = await tx.goodsReceipt.create({
         data: {

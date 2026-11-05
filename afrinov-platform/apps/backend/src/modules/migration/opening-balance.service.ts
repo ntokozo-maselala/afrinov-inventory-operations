@@ -12,6 +12,7 @@ import { InventoryTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal } from '../../shared/decimal.js';
+import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js';
 import { recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { assertParent, lockLocationTree } from '../inventory/location.service.js';
 import type { MappedImport } from './mapping.js';
@@ -63,6 +64,14 @@ export const OpeningBalanceService = {
     if (plan.materials.length === 0) throw Errors.validation('Nothing to import');
     const blocking = plan.problems.filter((p) => PROBLEM_TEXT[p.code].severity === 'error');
     if (blocking.length > 0) throw Errors.validation(`The mapping has ${blocking.length} blocking problems; run the dry run and fix them first`);
+    // Each item on a listed unit, and a counted one in whole numbers.
+    const units = new Map<string, Awaited<ReturnType<typeof checkUnitOfMeasure>>>();
+    for (const m of plan.materials) {
+      const unit = units.get(m.unitOfMeasure) ?? await checkUnitOfMeasure(m.unitOfMeasure, prisma);
+      units.set(m.unitOfMeasure, unit);
+      checkQuantityForUnit(m.name, unit, m.requiredStock, 'requiredStock');
+      for (const b of m.balances) checkQuantityForUnit(m.name, unit, b.quantity, 'quantity');
+    }
 
     const importId = randomUUID();
     return prisma.$transaction(async (tx) => {
@@ -160,7 +169,7 @@ export const OpeningBalanceService = {
           sku: m.sku,
           name: m.name,
           category: m.category,
-          unitOfMeasure: m.unitOfMeasure,
+          unitOfMeasure: units.get(m.unitOfMeasure)!.code,
           // Project material is bought per job and never re-ordered (materials
           // sections roadmap); it lands with no project, to be assigned in the app.
           requiredStock: m.category === 'PROJECT_MATERIAL' ? toDecimal(0) : toDecimal(m.requiredStock),

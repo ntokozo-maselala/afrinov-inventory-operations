@@ -34,7 +34,7 @@ describe('month-end report against a real database', () => {
       data: { materialId: m.body.id, locationId: loc.body.id, type: 'RECEIPT', quantity: 15, actorId: admin.id, postedAt: new Date(lastMonthStart.getTime() + 14 * 86400000) },
     });
     // 85 more this month.
-    expect((await api('POST', '/inventory-adjustments', { materialId: m.body.id, locationId: loc.body.id, quantity: 85, reasonCode: 'OTHER' })).status).toBe(201);
+    expect((await api('POST', '/inventory-adjustments', { materialId: m.body.id, locationId: loc.body.id, quantity: 85, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
   });
 
   afterAll(async () => {

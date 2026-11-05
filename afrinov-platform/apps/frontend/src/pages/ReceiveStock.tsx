@@ -40,9 +40,13 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
+import { round4 } from '../lib/movementReason';
 import { todayInSouthAfrica } from '../lib/rfq';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { PROJECT_RECEIVING_LOCATION, type IssuePrefill } from '../lib/issuePrefill';
+import { QuantityInput } from '../components/QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { firstLineQuantityError, readQuantity } from '../lib/quantity';
 
 interface Supplier { id: string; name: string; active: boolean }
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
@@ -116,6 +120,7 @@ function ReceiveAgainstOrder() {
   const settings = useApi<Record<string, unknown>>(`/settings/values?keys=${PROJECT_RECEIVING_LOCATION}`);
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
+  const { kindOf } = useUnits();
   const [params] = useSearchParams();
   const openOrders = useMemo(
     () => (orders.data ?? []).filter(receivable).sort((a, b) => a.number.localeCompare(b.number)),
@@ -200,7 +205,7 @@ function ReceiveAgainstOrder() {
     setError(null);
     if (!chosenOrder) { setError('Choose the order this delivery is against.'); return; }
     if (!deliveryRef.trim()) { setError('Enter the delivery note or invoice number.'); return; }
-    const checked = checkReceiptLines(orderLines, true);
+    const checked = checkReceiptLines(orderLines, true, kindOf);
     if ('problem' in checked) { setError(checked.problem); return; }
     if (closeShort && !closeReason.trim()) { setError('Say why nothing more is coming, to close the order.'); return; }
     const order = chosenOrder;
@@ -237,7 +242,7 @@ function ReceiveAgainstOrder() {
       for (const l of checked.lines) {
         const key = `${l.materialId}|${l.locationId}`;
         const a = arrived.get(key) ?? { materialId: l.materialId, locationId: l.locationId, quantity: 0 };
-        a.quantity += Number(l.quantity);
+        a.quantity = round4(a.quantity + readQuantity(l.quantity)); // 0.1 + 0.2 is not 0.3 in floating point
         arrived.set(key, a);
       }
       const issue: IssuePrefill = { projectNumber: order.projectNumber, lines: [...arrived.values()] };
@@ -396,7 +401,7 @@ function ReceiveAgainstOrder() {
               <div className="space-y-2">
                 {orderLines.map((l, i) => (
                   <OrderReceiptRow
-                    key={l.purchaseOrderLineId} line={l} index={i} locations={activeLocations} fixedLocation={fixedHome}
+                    key={l.purchaseOrderLineId} line={l} index={i} locations={activeLocations} fixedLocation={fixedHome} kind={kindOf(l.unit)}
                     onChange={(patch) => setOrderLines((ls) => ls.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))}
                   />
                 ))}
@@ -449,6 +454,7 @@ function CounterReceipt() {
   const canAddSupplier = hasPermission('suppliers:manage');
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
+  const { kindOf } = useUnits();
 
   const activeSuppliers = useMemo(() => (suppliers.data ?? []).filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name)), [suppliers.data]);
   // A Projects item with no project is refused at the counter, as its stock
@@ -521,17 +527,22 @@ function CounterReceipt() {
     if (!supplierId) { setError('Choose the supplier.'); return; }
     if (!deliveryRef.trim()) { setError('Enter the delivery note or invoice number.'); return; }
     if (filled.length === 0) { setError('Add at least one item.'); return; }
-    if (filled.some((l) => !l.materialId || !l.locationId || !(Number(l.quantity) > 0))) {
+    if (filled.some((l) => !l.materialId || !l.locationId)) {
       setError('Every line needs an item, a location and a quantity above zero.');
       return;
     }
+    const badQuantity = firstLineQuantityError(filled.map((l) => {
+      const unit = materialById.get(l.materialId)?.unitOfMeasure ?? '';
+      return { text: l.quantity, kind: kindOf(unit), unit, line: lines.indexOf(l) + 1 };
+    }));
+    if (badQuantity) { setError(badQuantity); return; }
     setBusy(true);
     try {
       const receiptBody = {
         supplierId,
         deliveryRef: deliveryRef.trim(),
         receivedAt: receivedAt || undefined,
-        lines: filled.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity) })),
+        lines: filled.map((l) => ({ materialId: l.materialId, locationId: l.locationId, quantity: readQuantity(l.quantity) })),
       };
       const result = await api.post<{ number: string }>('/stock-receipts', receiptBody, { idempotencyKey: idem.keyFor(receiptBody) });
       toast.success(`Received ${filled.length} item${filled.length === 1 ? '' : 's'} as ${result.number}`);
@@ -615,8 +626,8 @@ function CounterReceipt() {
                     {activeLocations.map((loc) => <option key={loc.id} value={loc.id}>{locationLabel(loc)}</option>)}
                   </Select>
                 </Field>
-                <Field label="Quantity" htmlFor={`rcv-qty-${l.key}`} help={materialById.get(l.materialId)?.unitOfMeasure}>
-                  <Input id={`rcv-qty-${l.key}`} type="number" inputMode="decimal" min="0" step="any" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} />
+                <Field label="Quantity" htmlFor={`rcv-qty-${l.key}`}>
+                  <QuantityInput id={`rcv-qty-${l.key}`} kind={kindOf(materialById.get(l.materialId)?.unitOfMeasure)} unit={materialById.get(l.materialId)?.unitOfMeasure} value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} />
                 </Field>
                 <Button
                   type="button"

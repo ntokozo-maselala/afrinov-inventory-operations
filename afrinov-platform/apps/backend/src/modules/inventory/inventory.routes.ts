@@ -8,12 +8,13 @@ import { InventoryService, type HistoryFilter } from './inventory.service.js';
 import { ConsumableOutcomeService } from './consumable-outcome.service.js';
 import { buildMovementsXlsx, movementsFilename, MOVEMENTS_EXPORT_LIMIT } from './movements-export.js';
 import { prisma } from '../../shared/db.js';
-import { toDecimal, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
+import { storedQuantity, storedCount, storedSignedQuantity } from '../../shared/decimal.js';
 import { StockReceiptService } from './stock-receipt.service.js';
 import { StockCountService } from './stock-count.service.js';
+import { WriteOffApprovalService } from './write-off-approval.service.js';
 import { locationsWithin } from './location.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
-import { requirePermission } from '../../shared/authorization.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { idempotentMutation } from '../../shared/idempotency.js';
 import { Errors } from '../../shared/errors.js';
 
@@ -72,7 +73,7 @@ export const issueSchema = z.object({
   lines: z.array(z.object({
     materialId: uuidSchema,
     locationId: uuidSchema,
-    quantity: z.number().positive(),
+    quantity: storedQuantity,
     // The stock the line takes: the issue's project's own, or null/left out for Stores stock.
     heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
   })).min(1).max(50),
@@ -82,7 +83,7 @@ export const transferSchema = z.object({
   materialId: uuidSchema,
   fromLocationId: uuidSchema,
   toLocationId: uuidSchema,
-  quantity: z.number().positive(),
+  quantity: storedQuantity,
   // Whose stock it takes: the project it is held for, or null/left out for
   // Stores stock (Project Material Through the Store Roadmap, Phase 3).
   heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
@@ -91,14 +92,22 @@ export const transferSchema = z.object({
 export const adjustmentSchema = z.object({
   materialId: uuidSchema,
   locationId: uuidSchema,
-  quantity: z.number(),
-  reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER']),
+  quantity: storedSignedQuantity,
+  reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER', 'FOUND']),
   reasonNote: z.string().optional(),
   // Who was responsible for damaged, lost or scrapped stock; null or left out when nobody is known.
   recipientId: uuidSchema.nullable().optional(),
   // Whose stock it takes: the project it is held for, or null/left out for
   // Stores stock (Project Material Through the Store Roadmap, Phase 3).
   heldForProject: z.string().trim().min(1).max(64).nullable().optional(),
+});
+
+export const adjustmentRequestQuerySchema = z.object({
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+});
+
+export const adjustmentRejectionSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
 });
 
 export const stockReceiptSchema = z.object({
@@ -108,7 +117,7 @@ export const stockReceiptSchema = z.object({
   lines: z.array(z.object({
     materialId: uuidSchema,
     locationId: uuidSchema,
-    quantity: z.number().positive(),
+    quantity: storedQuantity,
   })).min(1).max(50),
 });
 
@@ -119,14 +128,12 @@ export const stockCountSchema = z.object({
     materialId: uuidSchema,
     // What the system shows, checked against the balance when posting. It can be below
     // zero after a booking mistake, which is what the count is there to correct.
-    expectedQuantity: z.number(),
-    countedQuantity: z.number().min(0),
+    expectedQuantity: storedSignedQuantity,
+    countedQuantity: storedCount,
     note: z.string().trim().max(200).optional(),
   })).min(1).max(2000),
 });
 
-/** A positive quantity the Decimal(18, 4) columns can hold exactly; finer ones would be stored rounded, even as zero. */
-const storedQuantity = z.number().positive().refine((q) => fitsQuantityColumn(toDecimal(q)), { message: QUANTITY_PRECISION_MESSAGE });
 
 export const returnSchema = z.object({
   quantity: storedQuantity,
@@ -263,9 +270,47 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
         error: { code: 'VALIDATION_ERROR', message: 'Invalid adjustment payload', details: parsed.error.flatten() },
       });
     }
-    return idempotentMutation(req, reply, 'POST /inventory-adjustments', async (tx) => ({
+    // Worth more than inventory.writeOffApprovalAbove, it waits for someone
+    // else's approval: 202, with nothing posted yet.
+    return idempotentMutation(req, reply, 'POST /inventory-adjustments', async (tx) => {
+      const outcome = await WriteOffApprovalService.adjustOrRequest({ ...parsed.data, actorId: actorId(req) }, tx);
+      return { statusCode: outcome.status === 'POSTED' ? 201 : 202, body: outcome };
+    });
+  });
+
+  // Adjustments waiting for approval, and those decided. Seen by whoever may
+  // ask for one or approve one.
+  app.get('/adjustment-requests', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (!(await userHasPermission(req, PermissionCode.ApproveWriteOff))) await requirePermission(req, PermissionCode.AdjustInventory);
+    const parsed = adjustmentRequestQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid status', details: parsed.error.flatten() } });
+    }
+    return WriteOffApprovalService.list(parsed.data);
+  });
+
+  // Posts it. Never by whoever asked for it.
+  app.post('/adjustment-requests/:id/approve', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ApproveWriteOff);
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /adjustment-requests/:id/approve', async (tx) => ({
       statusCode: 201,
-      body: await InventoryService.adjust({ ...parsed.data, actorId: actorId(req) }, tx),
+      body: await WriteOffApprovalService.approve(id, actorId(req), tx),
+    }));
+  });
+
+  // Turns it down, posting nothing: someone who approves, or whoever asked for it, withdrawing it.
+  app.post('/adjustment-requests/:id/reject', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const mayDecide = await userHasPermission(req, PermissionCode.ApproveWriteOff);
+    if (!mayDecide) await requirePermission(req, PermissionCode.AdjustInventory);
+    const parsed = adjustmentRejectionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Say why it is rejected', details: parsed.error.flatten() } });
+    }
+    const { id } = req.params as { id: string };
+    return idempotentMutation(req, reply, 'POST /adjustment-requests/:id/reject', async (tx) => ({
+      statusCode: 200,
+      body: await WriteOffApprovalService.reject(id, parsed.data.reason, actorId(req), mayDecide, tx),
     }));
   });
 

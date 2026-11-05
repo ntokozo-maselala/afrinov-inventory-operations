@@ -26,10 +26,10 @@ describe('stock counts over real HTTP', () => {
     expect(rack.status).toBe(201);
     rackId = rack.body.id;
     for (const [key, qty] of [['disc', 20], ['gloves', 6], ['tape', 4], ['found', 0]] as const) {
-      const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-CNT-${key}-${run}`, name: `Count ${key} ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+      const m = await api<{ id: string }>('POST', '/materials', { sku: `IT-CNT-${key}-${run}`, name: `Count ${key} ${run}`, category: 'CONSUMABLES', unitOfMeasure: key === 'found' ? 'm' : 'each' });
       expect(m.status).toBe(200);
       items[key] = m.body.id;
-      if (qty > 0) expect((await api('POST', '/inventory-adjustments', { materialId: m.body.id, locationId: rackId, quantity: qty, reasonCode: 'OTHER' })).status).toBe(201);
+      if (qty > 0) expect((await api('POST', '/inventory-adjustments', { materialId: m.body.id, locationId: rackId, quantity: qty, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
     }
   });
 

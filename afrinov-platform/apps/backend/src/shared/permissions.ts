@@ -26,6 +26,9 @@ export const PermissionCode = {
   IssueInventory: 'issue:inventory',
   TransferInventory: 'transfer:inventory',
   AdjustInventory: 'adjust:inventory',
+  // Approving an adjustment worth more than inventory.writeOffApprovalAbove
+  // that someone else asked for; nobody approves their own.
+  ApproveWriteOff: 'approve:write_off',
   CheckOutTool: 'checkout:tool',
   CheckInTool: 'checkin:tool',
   // Giving a tool loan a later due date: the store's decision, not the borrower's.
@@ -63,6 +66,8 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
     PermissionCode.IssueInventory,
     PermissionCode.TransferInventory,
     PermissionCode.AdjustInventory,
+    // Another store controller's write-offs over the limit, never their own.
+    PermissionCode.ApproveWriteOff,
     PermissionCode.CheckOutTool,
     PermissionCode.CheckInTool,
     PermissionCode.ExtendToolLoan,

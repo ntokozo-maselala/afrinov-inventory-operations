@@ -33,7 +33,7 @@ export type PurchaseOrderStatus =
 
 export type GoodsReceiptStatus = 'DRAFT' | 'SUBMITTED' | 'POSTED';
 
-export type AdjustmentReasonCode = 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | 'PO_RECEIPT' | 'TRANSFER' | 'ADJUSTMENT';
+export type AdjustmentReasonCode = 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | 'FOUND' | 'PO_RECEIPT' | 'TRANSFER' | 'ADJUSTMENT';
 
 export interface MockUser {
   id: string;
@@ -165,6 +165,8 @@ export interface MockPurchaseOrder {
   closedBy?: MockUser | null;
   closeReason?: string | null;
   createdBy?: MockUser | null;
+  /** Who raised it: the demo user (user-1) for an order raised in the demo; unset on the seeded ones, raised by others. */
+  createdById?: string;
   lines: MockPurchaseOrderLine[];
   history?: Array<{ id: string; action: string; actorId: string | null; actorName?: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; createdAt: string }>;
   goodsReceipts?: Array<{ id: string; number: string; status: string; receivedAt: string; deliveryRef?: string; lines: Array<{ quantity: string }> }>;

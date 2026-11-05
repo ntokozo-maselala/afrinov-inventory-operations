@@ -27,7 +27,7 @@ describe('opening balance import against a real database', () => {
   let alreadyImported = false;
 
   const material = (sku: string, balances: PlannedMaterial['balances'], extra: Partial<PlannedMaterial> = {}): PlannedMaterial => ({
-    sku, name: `Opening item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'each',
+    sku, name: `Opening item ${sku}`, category: 'CONSUMABLES', unitOfMeasure: 'kg',
     requiredStock: 10, unitCost: 42.05, serialNumber: null, oldProductIds: ['P-001'], balances, ...extra,
   });
 
@@ -105,6 +105,16 @@ describe('opening balance import against a real database', () => {
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
+  it('refuses part of an item counted in each, or a unit not on the list, before writing anything', async () => {
+    await expect(OpeningBalanceService.import({
+      plan: plan([material(`IT-OB-HALF-${run}`, balances(), { unitOfMeasure: 'each' })]), openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: `Opening item IT-OB-HALF-${run} is counted in whole numbers (each). Enter 1, 2, 3 …` });
+    await expect(OpeningBalanceService.import({
+      plan: plan([material(`IT-OB-LOTS-${run}`, [{ location: rackName, quantity: 1 }], { unitOfMeasure: 'LOTS' })]), openingDate: new Date('2026-10-01T00:00:00Z'), actorId, sourceFile: 'test.xlsm',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(await prisma.material.count({ where: { sku: { in: [`IT-OB-HALF-${run}`, `IT-OB-LOTS-${run}`] } } })).toBe(0);
+  });
+
   it('creates the items and locations and posts one dated receipt per item and location', async (ctx) => {
     if (alreadyImported) ctx.skip();
     const result = await OpeningBalanceService.import({
@@ -136,7 +146,7 @@ describe('opening balance import against a real database', () => {
     expect(await prisma.supplier.count({ where: { name: { equals: `IT OB Supplier ${run}`, mode: 'insensitive' } } })).toBe(1);
 
     const first = await prisma.material.findUniqueOrThrow({ where: { sku: `IT-OB-1-${run}` } });
-    expect(first).toMatchObject({ category: 'CONSUMABLES', unitOfMeasure: 'each', description: 'Workbook Product ID: P-001' });
+    expect(first).toMatchObject({ category: 'CONSUMABLES', unitOfMeasure: 'kg', description: 'Workbook Product ID: P-001' });
     expect(first.unitCost?.toString()).toBe('42.05');
     expect(first.requiredStock.toString()).toBe('10');
     expect((await prisma.material.findUniqueOrThrow({ where: { sku: `IT-OB-2-${run}` } })).unitCost).toBeNull();

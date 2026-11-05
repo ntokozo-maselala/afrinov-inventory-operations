@@ -35,6 +35,9 @@ export interface TestServer {
 }
 
 export async function startServer(opts: BuildServerOptions = {}): Promise<TestServer> {
+  // Adjustments post at once, as most suites set up stock with them; the
+  // write-off approval suite switches approval on for its own tests.
+  await prisma.setting.update({ where: { key: 'inventory.requireWriteOffApproval' }, data: { value: false } });
   const app = await buildServer(opts);
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address();
@@ -63,6 +66,19 @@ export function client(port: number, token?: string) {
     const text = await res.text();
     return { status: res.status, body: (text ? JSON.parse(text) : null) as T, headers: res.headers };
   };
+}
+
+/**
+ * Signs in a second admin, made for the run, who signs as the Procurement
+ * Manager. Nobody signs an order they raised, so an order the bootstrap admin
+ * raises is signed by this one.
+ */
+export async function secondAdmin(port: number, api: ReturnType<typeof client>, run: string): Promise<ReturnType<typeof client>> {
+  const email = `it-checker-${run}@afrinov.local`;
+  const password = `It-${run}-checker`;
+  const made = await api('POST', '/users', { email, name: `IT Checker ${run}`, password, roleNames: ['ADMIN', 'PROCUREMENT_MANAGER'] });
+  if (made.status !== 201) throw new Error(`Creating the second admin failed with ${made.status}: ${JSON.stringify(made.body)}`);
+  return client(port, await login(port, email, password));
 }
 
 export async function login(port: number, email: string, password: string): Promise<string> {

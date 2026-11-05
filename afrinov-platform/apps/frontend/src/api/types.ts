@@ -39,6 +39,8 @@ export interface OpenLoan {
   locationId: string; locationName: string;
   /** How many were lent, and how many of them are still out. */
   quantity: string; out: string;
+  /** Of those out, how many are waiting to be written off as lost: not to be checked in again (ADR-028). */
+  lostWaiting?: string;
   checkedOutAt: string; checkedOutBy: string; note: string | null;
   /** Whole days since it went out. */
   daysOut: number;
@@ -156,6 +158,8 @@ export interface MovementRow {
   receiptNumber?: string | null; supplierName?: string | null; deliveryRef?: string | null;
   /** A receipt against a purchase order: it cannot be reversed from the movement, only on the order. */
   fromPurchaseOrder?: boolean;
+  /** An ADJUSTMENT over the write-off limit: not reversed directly, but put right by one the other way, for approval. */
+  reversalNeedsApproval?: boolean;
   /** A transfer's other leg: where the stock went to (or came from). */
   otherLocationName?: string | null;
   /** Tool loans. Check-out: the date agreed. Check-in: the date as it stood then. Due date change: the new date. */
@@ -217,7 +221,11 @@ export interface IssueSlip {
 
 /** One delivery on the received-stock report (GET /stock-receipts). */
 export interface ReceiptRecord {
-  id: string; cursor: string; number: string; receivedAt: string;
+  id: string; cursor: string; number: string;
+  /** The date on the delivery note, which may be earlier than it was booked. */
+  receivedAt: string;
+  /** When it was booked into stock: the day the report counts it on, as the ledger and month-end do. */
+  postedAt: string;
   supplierName: string; deliveryRef: string | null; receivedByName: string;
   lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; locationName: string; quantity: string }>;
 }

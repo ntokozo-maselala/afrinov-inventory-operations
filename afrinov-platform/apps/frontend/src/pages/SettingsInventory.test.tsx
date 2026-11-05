@@ -30,6 +30,7 @@ const SETTINGS = [
   setting('inventory.toolOverdueDays', 7), setting('inventory.toolMaxLoanDays', 30), setting('inventory.toolEscalateDays', 14),
   setting('inventory.toolOverdueCheckout', 'warn', 'enum', ['warn', 'block-contractors', 'block']),
   setting('inventory.projectReceivingLocationId', 'loc-old', 'string'),
+  setting('inventory.requireWriteOffApproval', true, 'boolean'), setting('inventory.writeOffApprovalAbove', 1000),
 ];
 
 describe('Settings: project receiving location', () => {

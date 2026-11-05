@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
-import { createMockApi, resetMockState } from './mockApi';
+import { createMockApi, resetMockState, mockOrderRaisedBy } from './mockApi';
 
 const api = createMockApi();
 beforeEach(() => resetMockState());
@@ -18,6 +18,7 @@ async function approvedProjectOrder(): Promise<Order> {
   await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1325' });
   const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', orderedQty: 4, unitPrice: 10 }] });
   const submitted = await api.post<Order>(`/purchase-orders/${po.id}/submit`, {});
+  mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
   if (submitted.status === 'PENDING_APPROVAL') await api.post(`/purchase-orders/${po.id}/approve`, {});
   return api.get<Order>(`/purchase-orders/${po.id}`);
 }
@@ -136,6 +137,7 @@ describe('mock: delivery of a project order', () => {
     await api.patch('/materials/mat-9', { projectNumber: 'AFRI-1402' });
     const created = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', orderedQty: 4, unitPrice: 10 }] });
     const submitted = await api.post<Order>(`/purchase-orders/${created.id}/submit`, {});
+    mockOrderRaisedBy(created.id, 'user-2'); // raised by someone else: nobody approves their own
     if (submitted.status === 'PENDING_APPROVAL') await api.post(`/purchase-orders/${created.id}/approve`, {});
     await api.post(`/purchase-orders/${created.id}/receive`, { locationId: 'loc-1' });
     await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });

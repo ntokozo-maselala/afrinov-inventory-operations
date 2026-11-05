@@ -12,6 +12,9 @@ import ExcelJS from 'exceljs';
 import type { LocationType, MaterialCategory } from '@prisma/client';
 import { CATEGORY_SHEETS, textOf } from './workbook-reader.js';
 import { CATEGORY_LABEL, type Analysis, type PlannedItem, type Problem } from './workbook-analysis.js';
+import { UNIT_ALIASES, unitCode } from '../../shared/units.js';
+
+const LISTED_UNITS = new Set(Object.values(UNIT_ALIASES));
 
 export interface ItemMapping {
   category: MaterialCategory;
@@ -442,7 +445,7 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
     if (!map.sku) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'No New SKU' }); ok = false; }
     else if (!SKU_PATTERN.test(map.sku)) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: `SKU "${map.sku}": use letters, digits and - . / _ only, at most 64` }); ok = false; }
     if (!map.unitOfMeasure) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'No unit of measure' }); ok = false; }
-    else if (map.unitOfMeasure.length > 32) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'Unit of measure longer than 32 characters' }); ok = false; }
+    else if (!LISTED_UNITS.has(unitCode(map.unitOfMeasure))) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: `Unit of measure "${map.unitOfMeasure}" is not on the list: use one such as each, pair, box, m or kg` }); ok = false; }
     if (map.serialNumber) {
       if (item.category !== 'TOOLS') { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: `Serial number "${map.serialNumber}": only tools have one` }); ok = false; }
       else if (map.serialNumber.length > 64) { problems.push({ code: 'MAPPING_ROW_INVALID', ...at(map), detail: 'Serial number longer than 64 characters' }); ok = false; }
@@ -474,7 +477,7 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
   for (const [sku, rows] of groups) {
     const first = rows[0]!;
     const categories = new Set(rows.map((r) => r.item.category));
-    const units = new Set(rows.map((r) => r.map.unitOfMeasure!.toLowerCase()));
+    const units = new Set(rows.map((r) => unitCode(r.map.unitOfMeasure!)));
     const where = rows.map((r) => `${r.item.sheet} row ${r.item.row}`).join(', ');
     if (categories.size > 1) {
       problems.push({ code: 'SKU_CONFLICT', productId: sku, detail: `${sku} is used in ${[...categories].map((c) => CATEGORY_LABEL[c]).join(' and ')} (${where})` });
@@ -507,7 +510,7 @@ export function applyMapping(analysis: Analysis, mapping: Mapping): MappedImport
       sku,
       name: first.item.name,
       category: first.item.category,
-      unitOfMeasure: first.map.unitOfMeasure!,
+      unitOfMeasure: unitCode(first.map.unitOfMeasure!),
       requiredStock: rows.reduce((a, r) => a + r.item.requiredStock, 0),
       unitCost: prices[0] ?? null,
       serialNumber: serials[0] ?? null,

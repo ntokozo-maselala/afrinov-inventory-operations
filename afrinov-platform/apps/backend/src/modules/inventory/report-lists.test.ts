@@ -26,9 +26,10 @@ const material = (sku: string, name: string) => ({ sku, name, unitOfMeasure: 'ea
 describe('StockReceiptService.list', () => {
   beforeEach(() => grFindMany.mockReset().mockResolvedValue([]));
 
+  // Booked on the 25th against a delivery note dated the 23rd: it counts on the 25th, as its stock does.
   it('returns each delivery with its supplier, note, who received it and its lines', async () => {
     grFindMany.mockResolvedValue([{
-      id: 'gr-1', number: 'GR-2026-0007', receivedAt: at, deliveryRef: 'INV-2041',
+      id: 'gr-1', number: 'GR-2026-0007', receivedAt: new Date('2026-09-23T00:00:00.000Z'), postedAt: at, createdAt: at, deliveryRef: 'INV-2041',
       supplier: { name: 'Hydroscand' }, receivedBy: { name: 'Vusi' },
       lines: [
         { materialId: 'm-2', material: material('GLOVE-L', 'Welding gloves'), location: { name: 'Boiler Shop' }, quantity: { toString: () => '6' } },
@@ -36,7 +37,7 @@ describe('StockReceiptService.list', () => {
       ],
     }]);
     expect(await StockReceiptService.list({ from: '2026-09-25' })).toEqual([{
-      id: 'gr-1', cursor: '2026-09-25T10:00:00.000Z_gr-1', number: 'GR-2026-0007', receivedAt: '2026-09-25T10:00:00.000Z',
+      id: 'gr-1', cursor: '2026-09-25T10:00:00.000Z_gr-1', number: 'GR-2026-0007', receivedAt: '2026-09-23T00:00:00.000Z', postedAt: '2026-09-25T10:00:00.000Z',
       supplierName: 'Hydroscand', deliveryRef: 'INV-2041', receivedByName: 'Vusi',
       lines: [
         { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', locationName: 'Main Storeroom', quantity: '20' },
@@ -45,18 +46,18 @@ describe('StockReceiptService.list', () => {
     }]);
   });
 
-  it('filters posted deliveries by delivery day, supplier, location and a search, newest first', async () => {
+  it('filters posted deliveries by the day they were booked, supplier, location and a search, newest first', async () => {
     await StockReceiptService.list({ from: '2026-09-25', supplierId: 's-1', locationId: 'l-1', q: 'inv', before: '2026-09-26T08:00:00.000Z_gr-9', limit: 999 });
     const args = grFindMany.mock.calls[0]![0];
     expect(args.where.AND).toEqual(expect.arrayContaining([
       { status: 'POSTED' },
-      { receivedAt: { gte: new Date('2026-09-25T00:00:00.000Z') } },
+      { postedAt: { gte: new Date('2026-09-25T00:00:00.000Z') } },
       { supplierId: 's-1' },
       { lines: { some: { locationId: 'l-1' } } },
-      { OR: [{ receivedAt: { lt: new Date('2026-09-26T08:00:00.000Z') } }, { receivedAt: new Date('2026-09-26T08:00:00.000Z'), id: { lt: 'gr-9' } }] },
+      { OR: [{ postedAt: { lt: new Date('2026-09-26T08:00:00.000Z') } }, { postedAt: new Date('2026-09-26T08:00:00.000Z'), id: { lt: 'gr-9' } }] },
     ]));
     expect(JSON.stringify(args.where.AND)).toContain('"deliveryRef":{"contains":"inv","mode":"insensitive"}');
-    expect(args.orderBy).toEqual([{ receivedAt: 'desc' }, { id: 'desc' }]);
+    expect(args.orderBy).toEqual([{ postedAt: 'desc' }, { id: 'desc' }]);
     expect(args.take).toBe(200);
   });
 });

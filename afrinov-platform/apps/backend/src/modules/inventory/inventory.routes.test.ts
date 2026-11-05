@@ -32,6 +32,8 @@ const { mockedSummary, mockedActors, mockedCount, mockedSlips, mockedByResponsib
 }));
 vi.mock('./stock-receipt.service.js', () => ({ StockReceiptService: { receive: mockedReceive, list: mockedReceiptList } }));
 vi.mock('./stock-count.service.js', () => ({ StockCountService: { list: mockedCountList } }));
+// An adjustment goes through the write-off limit, which posts it or holds it for approval.
+vi.mock('./write-off-approval.service.js', () => ({ WriteOffApprovalService: { adjustOrRequest: mockedAdjust } }));
 
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
@@ -86,7 +88,7 @@ describe('inventory routes', () => {
     app = await buildServer({ skipConfigValidation: true, procurementEnabled: false });
     mockedIssue.mockResolvedValue({ transactionIds: ['tx-1'] });
     mockedTransfer.mockResolvedValue({ outTransactionId: 'tx-out-1', inTransactionId: 'tx-in-1' });
-    mockedAdjust.mockResolvedValue({ transactionId: 'tx-1' });
+    mockedAdjust.mockResolvedValue({ status: 'POSTED', transactionId: 'tx-1' });
     mockedQueryHistory.mockResolvedValue([]);
     mockedReverse.mockResolvedValue({ reversalIds: ['tx-rev-1'] });
   });
@@ -362,7 +364,7 @@ describe('inventory routes', () => {
         payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: 5, reasonCode: 'COUNT_VARIANCE' },
       });
       expect(res.statusCode).toBe(201);
-      expect(res.json()).toEqual({ transactionId: 'tx-1' });
+      expect(res.json()).toEqual({ status: 'POSTED', transactionId: 'tx-1' });
       expect(mockedAdjust).toHaveBeenCalledWith(
         expect.objectContaining({ actorId: 'user-admin' }),
         undefined,
@@ -380,6 +382,19 @@ describe('inventory routes', () => {
         expect(res.statusCode).toBe(201);
         expect(mockedAdjust).toHaveBeenLastCalledWith(expect.objectContaining({ recipientId }), undefined);
       }
+    });
+
+    // Worth more than the write-off limit: held for someone else's approval, nothing posted yet.
+    it('returns 202 when the adjustment waits for approval', async () => {
+      mockedAdjust.mockResolvedValueOnce({ status: 'PENDING_APPROVAL', requestId: 'req-1', value: '2500.00', limit: '1000.00' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/inventory-adjustments',
+        headers: authed(),
+        payload: { materialId: VALID_UUID, locationId: OTHER_UUID, quantity: -10, reasonCode: 'LOSS', reasonNote: 'Missing from the shelf' },
+      });
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ status: 'PENDING_APPROVAL', requestId: 'req-1', value: '2500.00', limit: '1000.00' });
     });
 
     it('returns 400 when recipientId is not an id', async () => {
@@ -673,5 +688,39 @@ describe('the stock count body', () => {
     const { stockCountSchema } = await import('./inventory.routes.js');
     expect(stockCountSchema.safeParse(line(-4, 0)).success).toBe(true);
     expect(stockCountSchema.safeParse(line(4, -1)).success).toBe(false);
+  });
+
+  it('refuses a figure finer than the 4 decimal places it is stored to', async () => {
+    const { stockCountSchema } = await import('./inventory.routes.js');
+    expect(stockCountSchema.safeParse(line(5, 5.0001)).success).toBe(true);
+    expect(stockCountSchema.safeParse(line(5, 5.00006)).success).toBe(false);
+    expect(stockCountSchema.safeParse(line(5.00006, 5)).success).toBe(false);
+  });
+});
+
+// The quantity columns are Decimal(18, 4): a finer quantity would be stored
+// rounded, so 0.00001 would post a zero movement, and a huge one would not fit.
+describe('quantities on stock movements', () => {
+  const ids = { a: '11111111-1111-4111-8111-111111111111', b: '22222222-2222-4222-8222-222222222222', c: '33333333-3333-4333-8333-333333333333' };
+
+  it('are refused past 4 decimal places or beyond the column, on every movement', async () => {
+    const { issueSchema, transferSchema, adjustmentSchema, stockReceiptSchema } = await import('./inventory.routes.js');
+    const { toolCheckOutSchema, toolCheckInSchema } = await import('./tool.routes.js');
+    const bodies = {
+      issue: (quantity: number) => issueSchema.safeParse({ recipientId: ids.a, lines: [{ materialId: ids.b, locationId: ids.c, quantity }] }),
+      transfer: (quantity: number) => transferSchema.safeParse({ materialId: ids.a, fromLocationId: ids.b, toLocationId: ids.c, quantity }),
+      adjustment: (quantity: number) => adjustmentSchema.safeParse({ materialId: ids.a, locationId: ids.b, quantity, reasonCode: 'LOSS' }),
+      receipt: (quantity: number) => stockReceiptSchema.safeParse({ supplierId: 's', deliveryRef: 'DN 1', lines: [{ materialId: ids.a, locationId: ids.b, quantity }] }),
+      checkOut: (quantity: number) => toolCheckOutSchema.safeParse({ recipientId: ids.a, lines: [{ materialId: ids.b, locationId: ids.c, quantity }] }),
+      checkIn: (quantity: number) => toolCheckInSchema.safeParse({ lines: [{ loanId: ids.a, quantity, condition: 'GOOD' }] }),
+    };
+    for (const [name, parse] of Object.entries(bodies)) {
+      expect(parse(1.2345).success, `${name} 1.2345`).toBe(true);
+      expect(parse(0.00001).success, `${name} 0.00001`).toBe(false);
+      expect(parse(1e15).success, `${name} 1e15`).toBe(false);
+    }
+    // An adjustment takes stock away as a negative quantity, kept to the same places.
+    expect(bodies.adjustment(-2.5).success).toBe(true);
+    expect(bodies.adjustment(-0.00004).success).toBe(false);
   });
 });

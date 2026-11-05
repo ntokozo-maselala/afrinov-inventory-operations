@@ -8,6 +8,10 @@
 // time; the signature records that one did. Nobody signs an order twice, and
 // Admin signs only by holding one of these roles.
 //
+// Nobody signs an order they raised (segregation of duties): raising,
+// approving and receiving the same order is one person spending the
+// company's money unchecked. Another holder of the role signs it.
+//
 // An order in another currency is converted at its locked exchange rate. Every
 // line must have a price first, or its value is not known.
 import { Prisma, type RoleName } from '@prisma/client';
@@ -34,6 +38,8 @@ const SIGNERS: Record<OrderKind, Partial<Record<ApprovalStep, { usual: RoleName;
 };
 
 export interface OrderForApproval {
+  /** Who raised it: they never sign it. */
+  createdById?: string | null;
   currency?: string | null;
   vatRate?: Num | null;
   exchangeRate?: Num | null;
@@ -128,9 +134,13 @@ export function isStandIn(kind: OrderKind, step: ApprovalStep, roles: string[]):
   return !usual || !roles.includes(usual);
 }
 
+export const OWN_ORDER = 'You raised this order, so someone else must sign it.';
+
 /** Why this person can't sign the order now, or null when they can. */
 export function signRefusal(kind: OrderKind, state: ApprovalState, po: OrderForApproval, actor: { id: string; roles: string[] }): string | null {
   if (state.block) return state.block.message;
+  // Whoever raised it never signs it, whatever their role.
+  if (po.createdById && po.createdById === actor.id) return OWN_ORDER;
   // Signed in full but still pending, as when the threshold was raised part-way: any signer finishes it.
   if (!state.next) return signsOrdersOfKind(kind, actor.roles) ? null : 'This order has every signature it needs.';
   if ((po.signatures ?? []).some((s) => s.signedById === actor.id)) {
@@ -146,12 +156,16 @@ export function signRefusal(kind: OrderKind, state: ApprovalState, po: OrderForA
   return null;
 }
 
-/** Active users who may sign this step of this kind of order, its usual signers first. */
-export async function listSigners(kind: OrderKind, step: ApprovalStep): Promise<Approver[]> {
+/**
+ * Active users who may sign this step of this order, its usual signers first:
+ * not whoever raised it, nor anyone who has signed it already.
+ */
+export async function listSigners(kind: OrderKind, step: ApprovalStep, po?: Pick<OrderForApproval, 'createdById' | 'signatures'>): Promise<Approver[]> {
   const signer = SIGNERS[kind][step];
   if (!signer) return [];
+  const excluded = [po?.createdById, ...(po?.signatures ?? []).map((s) => s.signedById)].filter((id): id is string => !!id);
   const users = await prisma.user.findMany({
-    where: { active: true, roles: { some: { role: { name: { in: [signer.usual, ...signer.standIns] } } } } },
+    where: { active: true, id: { notIn: excluded }, roles: { some: { role: { name: { in: [signer.usual, ...signer.standIns] } } } } },
     select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
   });
   return users
@@ -159,8 +173,12 @@ export async function listSigners(kind: OrderKind, step: ApprovalStep): Promise<
     .sort((a, b) => Number(a.standIn) - Number(b.standIn) || a.name.localeCompare(b.name));
 }
 
-/** "Ask Simbongile Bantubani to sign it." or a fallback when nobody can. */
-export function whoToAsk(names: string[]): string {
+/**
+ * "Ask Simbongile Bantubani to sign it." or a fallback when nobody can: when
+ * the only holder of the role raised the order (own), nobody *else* holds it.
+ */
+export function whoToAsk(names: string[], own = false): string {
+  if (names.length === 0 && own) return 'Nobody else holds that role yet: an admin can assign it to another user under Settings → Users.';
   if (names.length === 0) return 'Nobody holds that role yet: an admin can assign it under Settings → Users.';
   if (names.length === 1) return `Ask ${names[0]} to sign it.`;
   return `Ask ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]} to sign it.`;

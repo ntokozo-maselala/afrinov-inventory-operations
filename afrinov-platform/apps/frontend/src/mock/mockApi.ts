@@ -28,6 +28,7 @@ import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
   MockMaterial,
   MockLocation,
@@ -58,7 +59,16 @@ interface Balance {
   quantity: number;
 }
 
+/** An adjustment waiting for someone else's approval, as adjustment_requests on the server. */
+interface MockAdjustmentRequest {
+  id: string; status: 'PENDING' | 'APPROVED' | 'REJECTED'; materialId: string; locationId: string; heldForProject: string | null;
+  quantity: string; reasonCode: AdjustmentReasonCode; reasonNote: string | null; recipientId: string | null; projectNumber: string | null;
+  referenceType: string | null; referenceId: string | null; value: string | null; requestedById: string; requestedAt: string;
+  decidedById: string | null; decidedAt: string | null; decisionNote: string | null;
+}
+
 interface State {
+  adjustmentRequests: MockAdjustmentRequest[];
   materials: MockMaterial[];
   locations: MockLocation[];
   suppliers: MockSupplier[];
@@ -106,7 +116,14 @@ function freshState(): State {
     rfqs: [],
     toolLoanExtensions: [],
     consumableOutcomes: [],
+    adjustmentRequests: [],
   };
+}
+
+/** For tests: an order raised by someone other than the demo user, so the demo user may approve it, as on the server. */
+export function mockOrderRaisedBy(orderId: string, userId: string): void {
+  const po = state.purchaseOrders.find((x) => x.id === orderId);
+  if (po) po.createdById = userId;
 }
 
 // Reset (useful if we ever want a "reset mocks" button).
@@ -314,10 +331,11 @@ function mockPrintedTerms(): NonNullable<MockPurchaseOrder['printedTerms']> {
 }
 
 const MOCK_STEP_LABEL: Record<string, string> = { MANAGER: 'Procurement Manager', DIRECTOR: 'Director' };
+const MOCK_OWN_ORDER = 'You raised this order, so someone else must sign it.';
 
 // Who signs as the server works it out (po-approval.ts). The mock has one
-// signed-in user, so it signs every step of the demo; the server refuses one
-// person signing an order twice.
+// signed-in user, so it signs every step of the demo, except of an order it
+// raised: as the server, nobody signs an order they raised (ADR-028), or one twice.
 function mockApproval(po: MockPurchaseOrder) {
   const { totals } = priceLines(po.lines, Number(po.vatRate ?? 15));
   const currency = po.currency ?? 'ZAR';
@@ -330,14 +348,16 @@ function mockApproval(po: MockPurchaseOrder) {
   const stepNames = unpriced || noRate ? [] : po.projectNumber && value >= threshold ? ['MANAGER', 'DIRECTOR'] : ['MANAGER'];
   const signatures = po.signatures ?? [];
   const nextStep = stepNames.find((s) => !signatures.some((x) => x.step === s)) ?? null;
+  const own = po.createdById === 'user-1';
   const reason = unpriced
     ? `${n} line${n === 1 ? ' has' : 's have'} no price. Add prices before approving, so the order total is known.`
-    : noRate ? `This order is in ${currency}, and there is no exchange rate for ${currency} yet.` : null;
+    : noRate ? `This order is in ${currency}, and there is no exchange rate for ${currency} yet.`
+      : own ? MOCK_OWN_ORDER : null;
   return {
     ...totals, currency, reason, noRate,
     exchangeRate: rate === null ? null : String(rate),
     randValue: unpriced || noRate ? null : value.toFixed(2),
-    canApprove: po.status === 'PENDING_APPROVAL' && !unpriced && !noRate,
+    canApprove: po.status === 'PENDING_APPROVAL' && !unpriced && !noRate && !own,
     steps: stepNames.map((step) => {
       const s = signatures.find((x) => x.step === step);
       return { step, label: MOCK_STEP_LABEL[step]!, signature: s ? { name: s.signedBy?.name ?? 'You (admin)', signedAt: s.signedAt, standIn: !!s.standIn } : null };
@@ -345,7 +365,7 @@ function mockApproval(po: MockPurchaseOrder) {
     next: nextStep ? { step: nextStep, label: MOCK_STEP_LABEL[nextStep]! } : null,
     nextStep,
     lastStep: stepNames[stepNames.length - 1] ?? null,
-    approvers: nextStep ? [{ id: 'user-1', name: 'You (admin)', standIn: false }] : [],
+    approvers: nextStep && !own ? [{ id: 'user-1', name: 'You (admin)', standIn: false }] : [],
   };
 }
 
@@ -904,6 +924,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       throw err('VALIDATION_ERROR', `Project ${projectNumber} is closed, so no new material can be added to it`);
     }
   };
+  if (method === 'GET' && p === '/units-of-measure') return MOCK_UNITS;
   if (method === 'GET' && p === '/materials') {
     let list = [...state.materials].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
@@ -951,7 +972,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       name: b.name,
       description: b.description,
       category: b.category,
-      unitOfMeasure: b.unitOfMeasure,
+      unitOfMeasure: mockUnitCode(b.unitOfMeasure),
       requiredStock: String(b.requiredStock ?? 0),
       unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
       active: true,
@@ -982,7 +1003,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     if (b.name !== undefined) m.name = b.name;
     if (b.description !== undefined) m.description = b.description ?? undefined;
-    if (b.unitOfMeasure !== undefined) m.unitOfMeasure = b.unitOfMeasure;
+    if (b.unitOfMeasure !== undefined && b.unitOfMeasure !== m.unitOfMeasure) m.unitOfMeasure = mockUnitCode(b.unitOfMeasure);
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
     if (b.unitCost !== undefined) m.unitCost = b.unitCost === null ? undefined : String(b.unitCost);
     if (b.active !== undefined) m.active = b.active;
@@ -1276,6 +1297,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       notes: b.notes,
       expectedDeliveryDate: b.expectedDeliveryDate ?? null,
       createdAt: new Date().toISOString(),
+      createdById: 'user-1',
       currency: supplier.currency ?? 'ZAR',
       vatRate: String(b.vatRate ?? ((supplier.currency ?? 'ZAR') === 'ZAR' ? Number(MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15) : 0)),
       history: [],
@@ -1319,11 +1341,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });
     return po;
   }
-  if (method === 'POST' && p.endsWith('/approve')) {
+  if (method === 'POST' && p.startsWith('/purchase-orders/') && p.endsWith('/approve')) {
     const id = p.slice('/purchase-orders/'.length, -'/approve'.length);
     const po = state.purchaseOrders.find((x) => x.id === id);
     if (!po) throw err('NOT_FOUND', 'Purchase order not found');
     if (po.status !== 'PENDING_APPROVAL') throw err('INVALID_STATE', `Cannot approve from ${po.status}`);
+    // As the server: whoever raised it never approves it, before any other check.
+    if (po.createdById === 'user-1') throw err('FORBIDDEN', MOCK_OWN_ORDER);
     const check = mockApproval(po);
     if (check.unpricedLines > 0) throw err('VALIDATION_ERROR', check.reason!);
     if (check.noRate) throw err('VALIDATION_ERROR', check.reason!);
@@ -1645,6 +1669,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const lines = b.lines ?? [];
     if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
     if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');
+    checkMockWholeUnits(lines);
     const supplier = b.supplierId ? findSupplier(b.supplierId) : undefined;
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', 'Supplier is inactive');
@@ -1677,6 +1702,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     return handleIssue((body as IssueBody) ?? {});
   }
   if (method === 'GET' && p === '/tools') return listTools();
+  // Adjustments waiting for approval (switched off in the demo by default; see the settings below).
+  if (method === 'GET' && p === '/adjustment-requests') return listAdjustmentRequests(qs);
+  const requestDecision = /^\/adjustment-requests\/([^/]+)\/(approve|reject)$/.exec(p);
+  if (method === 'POST' && requestDecision) return decideAdjustmentRequest(decodeURIComponent(requestDecision[1]!), requestDecision[2] as 'approve' | 'reject', (body as { reason?: string }) ?? {});
   if (method === 'POST' && p === '/tools/check-out') return handleToolCheckOut((body as ToolCheckOutBody) ?? {});
   if (method === 'POST' && p === '/tools/check-in') return handleToolCheckIn((body as ToolCheckInBody) ?? {});
   const dueDateMatch = p.match(/^\/tools\/loans\/([^/]+)\/due-date$/);
@@ -2032,6 +2061,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.toolOverdueCheckout': row('inventory.toolOverdueCheckout', 'warn', 'enum', 'inventory', 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', ['warn', 'block-contractors', 'block']),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
+    // Off by default in the demo: its one user asked for every request, so could only ever withdraw one.
+    // Switched on, adjustments and lost tools over the limit wait, as on the server.
+    'inventory.requireWriteOffApproval': row('inventory.requireWriteOffApproval', false, 'boolean', 'inventory', 'When on, adjustments and write-offs worth more than the limit below wait for someone other than whoever asked for them to approve them. When off, every adjustment posts at once.'),
+    'inventory.writeOffApprovalAbove': row('inventory.writeOffApprovalAbove', 1000, 'number', 'inventory', "Adjustments and write-offs worth more than this, in rand at the item's unit cost, wait for someone else to approve them before stock moves. An item with no unit cost always waits. 0: every adjustment waits."),
     'inventory.projectReceivingLocationId': row('inventory.projectReceivingLocationId', '', 'string', 'inventory', 'Where project deliveries are booked on Receive stock, such as the workshop floor: project material is not shelved, it is issued from there. Leave blank to choose a location on each delivery.'),
     'inventory.enableStockAlerts': row('inventory.enableStockAlerts', true, 'boolean', 'inventory', 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.'),
 
@@ -2184,7 +2217,7 @@ function handleStockItemCreate(b: {
     name: b.name,
     description: b.description,
     category: b.category as MockMaterial['category'],
-    unitOfMeasure: b.unitOfMeasure,
+    unitOfMeasure: mockUnitCode(b.unitOfMeasure),
     requiredStock: String(b.requiredStock ?? 0),
     unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
     active: true,
@@ -2271,6 +2304,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to issue');
   if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  checkMockWholeUnits(lines);
   const recipient = state.recipients.find((x) => x.id === b.recipientId);
   if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
   if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
@@ -2423,6 +2457,8 @@ function listTools() {
             recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
             projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
             quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
+            // As the server: of those out, how many are waiting to be written off as lost.
+            lostWaiting: String(state.adjustmentRequests.filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && r.referenceId === t.id).reduce((n, r) => n - Number(r.quantity), 0)),
             checkedOutBy: mockUsers.find((u) => u.id === t.actorId)?.name ?? 'Unknown', note: t.reasonNote ?? null,
             daysOut, dueOn, ...loanState(dueOn, utcDay(new Date())),
             extensions: loanChanges(t.id).map((e) => ({
@@ -2560,7 +2596,7 @@ function loanHistory(loanId: string) {
   };
 }
 
-function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[] } {
+function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[]; heldLoanIds: string[] } {
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool to check in');
   if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Check-in quantity must be positive');
@@ -2574,15 +2610,38 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
   }
   for (const [loanId, quantity] of asked) {
     const loan = state.transactions.find((t) => t.id === loanId)!;
-    const out = -Number(loan.quantity) - returnedOnLoan(loanId);
+    // As the server: a lost tool waiting for its write-off to be approved is still out, but not checked in again.
+    const pending = state.adjustmentRequests.filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && r.referenceId === loanId)
+      .reduce((n, r) => n - Number(r.quantity), 0);
+    const out = -Number(loan.quantity) - returnedOnLoan(loanId) - pending;
     if (quantity > out) throw err('VALIDATION_ERROR', `Cannot check in ${quantity} × ${findMaterial(loan.materialId)?.sku}: only ${out} still checked out.`);
   }
   const postedAt = new Date().toISOString();
   const returnIds: string[] = [];
   const writeOffIds: string[] = [];
+  const writeOffRequestIds: string[] = [];
+  const heldLoanIds: string[] = [];
+  // As the server: whether lost tools wait is decided on all lost of a tool from one location.
+  const lostTotal = new Map<string, number>();
+  for (const l of lines) {
+    if (l.condition !== 'LOST') continue;
+    const loan = state.transactions.find((t) => t.id === l.loanId)!;
+    lostTotal.set(`${loan.materialId}|${loan.locationId}`, (lostTotal.get(`${loan.materialId}|${loan.locationId}`) ?? 0) + l.quantity);
+  }
   for (const l of lines) {
     const loan = state.transactions.find((t) => t.id === l.loanId)!;
     const note = l.note?.trim() || undefined;
+    if (l.condition === 'LOST' && mockWriteOffCheck(loan.materialId, lostTotal.get(`${loan.materialId}|${loan.locationId}`)!).needsApproval) {
+      heldLoanIds.push(loan.id);
+      // Over the limit: it stays on loan until the write-off is approved.
+      const who = state.recipients.find((r) => r.id === loan.recipientId)?.name ?? 'an unknown recipient';
+      writeOffRequestIds.push(requestMockAdjustment({
+        materialId: loan.materialId, locationId: loan.locationId, heldForProject: null, quantity: String(-l.quantity), reasonCode: 'LOSS',
+        reasonNote: `Lost while checked out to ${who}: ${note}`, recipientId: loan.recipientId ?? null, projectNumber: loan.projectNumber ?? null,
+        referenceType: 'ToolLoan', referenceId: loan.id, value: mockWriteOffCheck(loan.materialId, l.quantity).value,
+      }));
+      continue;
+    }
     const back = nextId('t');
     state.transactions.push({
       id: back, postedAt, type: 'LOAN_RETURN', materialId: loan.materialId, locationId: loan.locationId, quantity: String(l.quantity),
@@ -2602,7 +2661,7 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
       writeOffIds.push(writeOff);
     }
   }
-  return { returnIds, writeOffIds };
+  return { returnIds, writeOffIds, writeOffRequestIds, heldLoanIds };
 }
 
 function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number; heldForProject?: string | null }): { outTransactionId: string; inTransactionId: string } {
@@ -2611,6 +2670,7 @@ function handleTransfer(b: { materialId: string; fromLocationId: string; toLocat
   }
   if (b.fromLocationId === b.toLocationId) throw err('VALIDATION_ERROR', 'Source and destination must differ');
   if (!findMaterial(b.materialId)) throw err('NOT_FOUND', 'Material not found');
+  checkMockWholeUnits([b]);
   // As the server: the stock keeps its project as it moves.
   const heldForProject = b.heldForProject ?? null;
   if (heldForProject && !state.projects.some((x) => x.projectNumber === heldForProject)) throw err('NOT_FOUND', 'Project not found');
@@ -2873,10 +2933,103 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
 /** The write-off reasons that record who was responsible, when anyone is known. */
 const RESPONSIBLE_REASONS = new Set<string>(['DAMAGE', 'LOSS', 'SCRAP']);
 
+/** The units of measure, as the units migration lists them. */
+const MOCK_UNITS: UnitOfMeasure[] = ([
+  ['each', 'Each', 'COUNTED'], ['pair', 'Pair', 'COUNTED'], ['set', 'Set', 'COUNTED'], ['box', 'Box', 'COUNTED'],
+  ['pack', 'Pack', 'COUNTED'], ['roll', 'Roll', 'COUNTED'], ['bag', 'Bag', 'COUNTED'], ['sheet', 'Sheet', 'COUNTED'],
+  ['length', 'Length', 'COUNTED'], ['m', 'Metre', 'MEASURED'], ['mm', 'Millimetre', 'MEASURED'], ['kg', 'Kilogram', 'MEASURED'],
+  ['g', 'Gram', 'MEASURED'], ['l', 'Litre', 'MEASURED'], ['ml', 'Millilitre', 'MEASURED'], ['m2', 'Square metre', 'MEASURED'],
+  ['m3', 'Cubic metre', 'MEASURED'],
+] as const).map(([code, label, kind]) => ({ code, label, kind, needsReview: false, active: true }));
+
+/** As checkUnitOfMeasure: a listed code, by any case. */
+function mockUnitCode(typed: string): string {
+  const unit = MOCK_UNITS.find((u) => u.code === typed.trim().toLowerCase());
+  if (!unit) throw err('VALIDATION_ERROR', `"${typed.trim()}" is not a unit on the list. Choose one, such as each, pair, box, m or kg.`);
+  return unit.code;
+}
+
+/** As checkWholeUnits: part of a counted item is refused. */
+function checkMockWholeUnits(entries: ReadonlyArray<{ materialId: string; quantity: number }>) {
+  for (const e of entries) {
+    const m = findMaterial(e.materialId);
+    if (m && unitKindOf(MOCK_UNITS, m.unitOfMeasure) === 'COUNTED' && !Number.isInteger(e.quantity)) {
+      throw err('VALIDATION_ERROR', `${m.name} is counted in whole numbers (${m.unitOfMeasure}). Enter 1, 2, 3 …`);
+    }
+  }
+}
+
+/** As checkRequestedAdjustment: the reason sets the direction, and a gain or an "other" says why. */
+function checkMockAdjustmentDirection(b: { quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string }) {
+  if (RESPONSIBLE_REASONS.has(b.reasonCode) && b.quantity > 0) throw err('VALIDATION_ERROR', 'Damage, loss and scrap remove stock. To add stock, choose Found or Other.');
+  if (b.reasonCode === 'FOUND' && b.quantity < 0) throw err('VALIDATION_ERROR', 'Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.');
+  if ((b.reasonCode === 'FOUND' || b.reasonCode === 'OTHER') && !b.reasonNote?.trim()) {
+    throw err('VALIDATION_ERROR', b.reasonCode === 'FOUND' ? 'Say where the stock was found.' : 'Say why the stock is adjusted.');
+  }
+}
+
 // Mirrors InventoryService.adjust, with who was responsible for damage, loss or scrap.
-function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string; recipientId?: string | null; heldForProject?: string | null }): { transactionId: string } {
+/** As write-off-limit.ts: whether this adjustment waits for someone else's approval, and its value at unit cost. */
+function mockWriteOffCheck(materialId: string, quantity: number): { needsApproval: boolean; value: string | null; limit: string } {
+  const on = MOCK_SETTINGS['inventory.requireWriteOffApproval']?.value !== false;
+  const limit = Number(MOCK_SETTINGS['inventory.writeOffApprovalAbove']?.value ?? 0) || 0;
+  const cost = findMaterial(materialId)?.unitCost;
+  const exact = cost === undefined || cost === null ? null : Math.abs(quantity) * Number(cost);
+  return {
+    needsApproval: on && (exact === null || limit === 0 || exact > limit),
+    value: exact === null ? null : (Math.round(exact * 100) / 100).toFixed(2),
+    limit: limit.toFixed(2),
+  };
+}
+
+function requestMockAdjustment(r: Omit<MockAdjustmentRequest, 'id' | 'status' | 'requestedById' | 'requestedAt' | 'decidedById' | 'decidedAt' | 'decisionNote'>): string {
+  const id = nextId('req');
+  state.adjustmentRequests.push({ ...r, id, status: 'PENDING', requestedById: 'user-1', requestedAt: new Date().toISOString(), decidedById: null, decidedAt: null, decisionNote: null });
+  return id;
+}
+
+function listAdjustmentRequests(qs: Record<string, string>) {
+  const status = qs.status ?? 'PENDING';
+  const userName = (id: string | null) => (id ? mockUsers.find((u) => u.id === id)?.name ?? 'Unknown user' : null);
+  return state.adjustmentRequests
+    .filter((r) => r.status === status)
+    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+    .map((r) => {
+      const m = findMaterial(r.materialId);
+      const recipient = r.recipientId ? state.recipients.find((x) => x.id === r.recipientId) : undefined;
+      return {
+        ...r,
+        material: { id: r.materialId, sku: m?.sku ?? r.materialId, name: m?.name ?? 'Unknown', unitOfMeasure: m?.unitOfMeasure ?? '' },
+        location: { id: r.locationId, name: findLocation(r.locationId)?.name ?? r.locationId },
+        recipient: recipient ? { id: recipient.id, name: recipient.name } : null,
+        requestedBy: { id: r.requestedById, name: userName(r.requestedById)! },
+        decidedBy: r.decidedById ? { id: r.decidedById, name: userName(r.decidedById)! } : null,
+      };
+    });
+}
+
+// The demo has one user, who asked for every request, so a request is only
+// ever withdrawn in the demo: as the server, nobody approves their own.
+function decideAdjustmentRequest(id: string, decision: 'approve' | 'reject', b: { reason?: string }) {
+  const r = state.adjustmentRequests.find((x) => x.id === id);
+  if (!r) throw err('NOT_FOUND', 'Adjustment request not found');
+  if (r.status !== 'PENDING') throw err('INVALID_STATE', `This adjustment was already ${r.status === 'APPROVED' ? 'approved' : 'rejected'}.`);
+  if (decision === 'approve') throw err('FORBIDDEN', 'You asked for this adjustment, so someone else must approve it.');
+  const reason = b.reason?.trim();
+  if (!reason) throw err('VALIDATION_ERROR', 'Say why it is rejected');
+  Object.assign(r, { status: 'REJECTED', decidedById: 'user-1', decidedAt: new Date().toISOString(), decisionNote: reason });
+  return { id };
+}
+
+function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string; recipientId?: string | null; heldForProject?: string | null }): { status: 'POSTED'; transactionId: string } | { status: 'PENDING_APPROVAL'; requestId: string; value: string | null; limit: string } {
   if (!b.materialId || !b.locationId || !b.reasonCode) throw err('VALIDATION_ERROR', 'Invalid adjustment payload');
   if (b.quantity === 0) throw err('VALIDATION_ERROR', 'Quantity must be non-zero');
+  checkMockAdjustmentDirection(b);
+  checkMockWholeUnits([{ materialId: b.materialId, quantity: b.quantity }]);
+  // As the server: with one waiting for this stock, approving both would correct it twice.
+  if (state.adjustmentRequests.some((r) => r.status === 'PENDING' && r.materialId === b.materialId && r.locationId === b.locationId && r.heldForProject === (b.heldForProject ?? null))) {
+    throw err('INVALID_STATE', `${findMaterial(b.materialId)?.sku ?? 'This item'} here already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then adjust again.`);
+  }
   if (b.recipientId) {
     if (!RESPONSIBLE_REASONS.has(b.reasonCode)) throw err('VALIDATION_ERROR', 'Only damage, loss or scrap records who was responsible.');
     if (!b.reasonNote?.trim()) throw err('VALIDATION_ERROR', 'Say what happened when naming who was responsible.');
@@ -2890,6 +3043,15 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
   const balance = getBalance(b.materialId, b.locationId, heldForProject);
   if (b.quantity < 0 && balance < -b.quantity) {
     throw err('INSUFFICIENT_BALANCE', `Cannot adjust ${b.quantity} units: only ${balance} available.`);
+  }
+  // As the server: over the write-off limit, or with no unit cost, nothing moves until someone else approves it.
+  const check = mockWriteOffCheck(b.materialId, b.quantity);
+  if (check.needsApproval) {
+    const requestId = requestMockAdjustment({
+      materialId: b.materialId, locationId: b.locationId, heldForProject, quantity: String(b.quantity), reasonCode: b.reasonCode,
+      reasonNote: b.reasonNote?.trim() || null, recipientId: b.recipientId ?? null, projectNumber: null, referenceType: null, referenceId: null, value: check.value,
+    });
+    return { status: 'PENDING_APPROVAL', requestId, value: check.value, limit: check.limit };
   }
   const id = nextId('t');
   state.transactions.push({
@@ -2905,7 +3067,7 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
     reasonNote: b.reasonNote,
     recipientId: b.recipientId ?? undefined,
   });
-  return { transactionId: id };
+  return { status: 'POSTED', transactionId: id };
 }
 
 // Mirrors InventoryService.writeoffsByResponsible: damage, loss and scrap that
@@ -2950,26 +3112,43 @@ function handleStockCount(b: { locationId?: string; note?: string; lines?: Array
   if (moved.length > 0) {
     throw err('CONFLICT', `Stock at ${location.name} changed while you were counting (${moved.slice(0, 3).map((m) => `${m.sku}: ${m.expected} → ${m.current}`).join(', ')}). Reload the system quantities, check those items, and post again.`);
   }
+  // As the server: an item with an adjustment already waiting here is decided first, or it would be corrected twice.
+  const waitingHere = lines.filter((l) => Math.abs(l.countedQuantity - getBalance(l.materialId, b.locationId!)) >= 0.00005
+    && state.adjustmentRequests.some((r) => r.status === 'PENDING' && r.materialId === l.materialId && r.locationId === b.locationId && !r.heldForProject));
+  if (waitingHere.length > 0) {
+    throw err('INVALID_STATE', `${waitingHere.map((l) => findMaterial(l.materialId)!.sku).join(', ')} at ${location.name} already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then count again.`);
+  }
   const countId = nextId('count');
   const note = b.note?.trim();
   for (const l of lines) MOCK_COUNT_LINES.push({ countId, materialId: l.materialId, expected: getBalance(l.materialId, b.locationId!), counted: l.countedQuantity, note: l.note?.trim() || null });
   const results = lines.map((l) => {
     const variance = l.countedQuantity - getBalance(l.materialId, b.locationId!);
-    if (Math.abs(variance) < 0.00005) return { materialId: l.materialId, variance: '0', transactionId: null as string | null };
+    if (Math.abs(variance) < 0.00005) return { materialId: l.materialId, variance: '0', transactionId: null as string | null, requestId: null as string | null };
+    const reasonNote = [note, l.note?.trim()].some(Boolean) ? `Stock count: ${[note, l.note?.trim()].filter(Boolean).join(' — ')}` : 'Stock count';
+    // As the server: a difference over the write-off limit waits for someone else's approval.
+    const check = mockWriteOffCheck(l.materialId, variance);
+    if (check.needsApproval) {
+      const requestId = requestMockAdjustment({
+        materialId: l.materialId, locationId: b.locationId!, heldForProject: null, quantity: String(variance), reasonCode: 'COUNT_VARIANCE',
+        reasonNote, recipientId: null, projectNumber: null, referenceType: 'StockCount', referenceId: countId, value: check.value,
+      });
+      return { materialId: l.materialId, variance: String(variance), transactionId: null as string | null, requestId: requestId as string | null };
+    }
     const id = nextId('t');
     state.transactions.push({
       id, postedAt: new Date().toISOString(), type: 'ADJUSTMENT', materialId: l.materialId, locationId: b.locationId!,
       quantity: String(variance), actorId: 'user-1', reasonCode: 'COUNT_VARIANCE',
-      reasonNote: [note, l.note?.trim()].some(Boolean) ? `Stock count: ${[note, l.note?.trim()].filter(Boolean).join(' — ')}` : 'Stock count', referenceType: 'StockCount', referenceId: countId,
+      reasonNote, referenceType: 'StockCount', referenceId: countId,
     });
-    return { materialId: l.materialId, variance: String(variance), transactionId: id as string | null };
+    return { materialId: l.materialId, variance: String(variance), transactionId: id as string | null, requestId: null as string | null };
   });
   const adjusted = results.filter((r) => r.transactionId).length;
+  const waitingForApproval = results.filter((r) => r.requestId).length;
   MOCK_AUDIT.unshift({
     id: nextId('audit'), action: 'STOCK_COUNT', entityType: 'StockCount', entityId: countId, before: null,
-    after: { locationId: b.locationId, counted: lines.length, adjusted, note: note ?? null }, createdAt: new Date().toISOString(), actorId: 'user-1',
+    after: { locationId: b.locationId, counted: lines.length, adjusted, waitingForApproval, note: note ?? null }, createdAt: new Date().toISOString(), actorId: 'user-1',
   });
-  return { countId, counted: lines.length, adjusted, lines: results };
+  return { countId, counted: lines.length, adjusted, waitingForApproval, lines: results };
 }
 
 /** Projects material still in stock for a project, or with no project (null), by SKU. */
@@ -3525,7 +3704,8 @@ function listReceipts(qs: Record<string, string>) {
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id.localeCompare(a.id));
   const limit = Math.min(qs.limit ? Number(qs.limit) : 50, 200);
   return olderThan(rows, qs.before, (g) => g.receivedAt).slice(0, limit).map((g) => ({
-    id: g.id, cursor: `${g.receivedAt}_${g.id}`, number: g.number, receivedAt: g.receivedAt,
+    // The demo books each delivery on its note's date.
+    id: g.id, cursor: `${g.receivedAt}_${g.id}`, number: g.number, receivedAt: g.receivedAt, postedAt: g.receivedAt,
     supplierName: findSupplier(g.supplierId)?.name ?? 'Unknown supplier', deliveryRef: g.deliveryRef ?? null,
     receivedByName: mockUsers.find((u) => u.id === 'user-1')?.name ?? 'Unknown user',
     lines: g.lines.map((l) => {

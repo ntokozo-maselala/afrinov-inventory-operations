@@ -4,9 +4,12 @@
 // it credits; typing lines by hand used to book the stock without crediting
 // the order.
 import { Button } from './Button';
-import { Select, Input } from './Field';
+import { Select } from './Field';
+import { QuantityInput } from './QuantityInput';
 import { formatNumber } from '../lib/format';
 import { locationLabel } from '../lib/locations';
+import { round4 } from '../lib/movementReason';
+import { parseQuantity, readQuantity, type UnitKind } from '../lib/quantity';
 
 export interface OrderForReceipt {
   id: string; number: string; supplierId: string;
@@ -26,7 +29,8 @@ interface LocationOpt { id: string; name: string; parent?: { name: string } | nu
 /** The order's lines with something still outstanding, each filled in with that amount. */
 export function receiptLinesFromOrder(order: OrderForReceipt): ReceiptLineDraft[] {
   return order.lines
-    .map((l) => ({ l, outstanding: Number(l.orderedQty) - Number(l.receivedQty) }))
+    // Rounded to the 4 places the server keeps: 10 - 9.7 is 0.3000000000000007 in floating point.
+    .map((l) => ({ l, outstanding: round4(Number(l.orderedQty) - Number(l.receivedQty)) }))
     .filter(({ outstanding }) => outstanding > 0)
     .map(({ l, outstanding }) => ({
       materialId: l.materialId, locationId: '', quantity: String(outstanding), purchaseOrderLineId: l.id,
@@ -34,12 +38,22 @@ export function receiptLinesFromOrder(order: OrderForReceipt): ReceiptLineDraft[
     }));
 }
 
-/** The lines that arrived (lines left at 0 did not), or why they can't be received. */
-export function checkReceiptLines(lines: ReceiptLineDraft[], fromOrder: boolean): { lines: ReceiptLineDraft[] } | { problem: string } {
-  const arrived = lines.filter((l) => l.materialId && Number(l.quantity) > 0);
+/**
+ * The lines that arrived (lines left at 0 did not), or why they can't be
+ * received. kindOf says whether a line's unit is counted, so part of one is refused.
+ */
+export function checkReceiptLines(
+  lines: ReceiptLineDraft[], fromOrder: boolean, kindOf: (unit: string | undefined) => UnitKind = () => 'MEASURED',
+): { lines: ReceiptLineDraft[] } | { problem: string } {
+  for (const l of lines) {
+    if (!l.materialId || l.quantity.trim() === '') continue;
+    const parsed = parseQuantity(l.quantity, kindOf(l.unit), l.unit ?? '', { allowZero: true, remainder: l.outstanding });
+    if (!parsed.ok) return { problem: `${l.label ?? 'A line'}: ${parsed.error}` };
+  }
+  const arrived = lines.filter((l) => l.materialId && readQuantity(l.quantity) > 0);
   if (arrived.length === 0) return { problem: fromOrder ? 'Enter what arrived on at least one line.' : 'Add at least one complete line.' };
   if (arrived.some((l) => !l.locationId)) return { problem: 'Choose where each line is going.' };
-  const over = arrived.find((l) => l.outstanding !== undefined && Number(l.quantity) > l.outstanding);
+  const over = arrived.find((l) => l.outstanding !== undefined && readQuantity(l.quantity) > l.outstanding);
   if (over) return { problem: `${over.label}: only ${formatNumber(over.outstanding!)} ${over.unit ?? ''} is still outstanding.` };
   return { lines: arrived };
 }
@@ -47,7 +61,7 @@ export function checkReceiptLines(lines: ReceiptLineDraft[], fromOrder: boolean)
 /** The receipt lines as the server takes them. */
 export function receiptLinesBody(lines: ReceiptLineDraft[]) {
   return lines.map((l) => ({
-    materialId: l.materialId, locationId: l.locationId, quantity: Number(l.quantity),
+    materialId: l.materialId, locationId: l.locationId, quantity: readQuantity(l.quantity),
     ...(l.purchaseOrderLineId ? { purchaseOrderLineId: l.purchaseOrderLineId } : {}),
   }));
 }
@@ -63,8 +77,10 @@ export function EveryLineInto({ locations, onChoose }: { locations: LocationOpt[
 }
 
 /** One row for an order line: the item and what is outstanding, where it goes, how many came. */
-export function OrderReceiptRow({ line, index, locations, onChange, fixedLocation = false }: {
+export function OrderReceiptRow({ line, index, locations, onChange, kind = 'MEASURED', fixedLocation = false }: {
   line: ReceiptLineDraft; index: number; locations: LocationOpt[]; onChange: (patch: Partial<ReceiptLineDraft>) => void;
+  /** Whether the line's unit is counted (whole numbers) or measured. */
+  kind?: UnitKind;
   /** The location is set for every line (a project delivery's receiving location): no picker. */
   fixedLocation?: boolean;
 }) {
@@ -83,7 +99,7 @@ export function OrderReceiptRow({ line, index, locations, onChange, fixedLocatio
         )}
       </div>
       <div className="col-span-5 sm:col-span-2">
-        <Input type="number" min="0" max={line.outstanding} step="0.0001" placeholder="Qty" value={line.quantity} onChange={(e) => onChange({ quantity: e.target.value })} aria-label={`Line ${index + 1} quantity`} />
+        <QuantityInput kind={kind} unit={line.unit} placeholder="Qty" value={line.quantity} onChange={(e) => onChange({ quantity: e.target.value })} aria-label={`Line ${index + 1} quantity`} />
       </div>
       <div className="col-span-12 sm:col-span-2">
         <Button size="sm" variant="ghost" type="button" onClick={() => onChange({ quantity: '0' })} className="w-full">None came</Button>

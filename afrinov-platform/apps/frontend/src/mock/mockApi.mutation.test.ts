@@ -11,11 +11,11 @@
 //   - goods-receipt posting rejects receiving more than the ordered quantity.
 //
 // The mock is reset between tests via `resetMockState()`.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
-import { createMockApi, resetMockState } from './mockApi';
+import { createMockApi, resetMockState, mockOrderRaisedBy } from './mockApi';
 import { isApiError } from '../api/client';
 import type { ApiError } from '../api/client';
 import type { MockPurchaseOrder, MockSupplier } from './types';
@@ -121,6 +121,7 @@ describe('mock API mutation flows', () => {
       await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'FOB' });
       expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(0);
       await api.post(`/purchase-orders/${po.id}/submit`, {});
+      mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
       await api.post(`/purchase-orders/${po.id}/approve`, {});
       await api.patch(`/purchase-orders/${po.id}`, { shippingTerms: 'FOB' });
       expect((await api.get<{ revision: number }>(`/purchase-orders/${po.id}`)).revision).toBe(0);
@@ -133,8 +134,19 @@ describe('mock API mutation flows', () => {
     async function submitted(lines: Array<{ materialId: string; orderedQty: number; unitPrice?: number }>) {
       const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines });
       await api.post(`/purchase-orders/${po.id}/submit`, {});
+      mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
       return po.id;
     }
+
+    // As the server (Qodo, PR #151): the demo user never approves an order they raised.
+    it('refuses to let the demo user approve an order they raised, and leaves it off their list', async () => {
+      const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] });
+      await api.post(`/purchase-orders/${po.id}/submit`, {});
+      expect(await api.get(`/purchase-orders/${po.id}/approval`)).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must sign it.' });
+      const e = await api.post(`/purchase-orders/${po.id}/approve`, {}).catch((x: unknown) => x);
+      expect(isApiError(e) && (e as ApiError)).toMatchObject({ code: 'FORBIDDEN', message: 'You raised this order, so someone else must sign it.' });
+      expect((await api.get<Array<{ id: string }>>('/purchase-orders?awaitingMyApproval=true')).map((o) => o.id)).not.toContain(po.id);
+    });
 
     it('refuses to approve while a line has no price', async () => {
       const id = await submitted([{ materialId: 'mat-1', orderedQty: 1 }]);
@@ -146,9 +158,11 @@ describe('mock API mutation flows', () => {
     it('takes the Manager and then the Director on a project order from R200 000, excluding VAT', async () => {
       const projects = await api.get<Array<{ projectNumber: string; status?: string; active?: boolean }>>('/projects');
       const projectNumber = projects.find((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED')!.projectNumber;
-      const beam = await api.post<{ id: string }>('/materials', { sku: 'MOCK-BEAM-SIGN', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
+      const beam = await api.post<{ id: string }>('/materials', { sku: 'MOCK-BEAM-SIGN', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber });
       const raise = async (unitPrice: number) => {
         const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 15, lines: [{ materialId: beam.id, orderedQty: 1, unitPrice }] });
+        // Raised by someone else: the demo user signs what others raise (ADR-028).
+        mockOrderRaisedBy(po.id, 'user-2');
         await api.post(`/purchase-orders/${po.id}/submit`, {});
         return po.id;
       };
@@ -468,6 +482,7 @@ describe('mock API mutation flows', () => {
     async function approvedPO() {
       const draft = await makeDraftPO();
       await api.post(`/purchase-orders/${draft.id}/submit`, {});
+      mockOrderRaisedBy(draft.id, 'user-2'); // raised by someone else: nobody approves their own
       await api.post(`/purchase-orders/${draft.id}/approve`, {});
       return draft;
     }
@@ -918,5 +933,74 @@ describe('mock API: a location inside another', () => {
     await api.patch(`/locations/${rack.id}/status`, { active: false });
     await api.patch(`/locations/${store.id}/status`, { active: false });
     await expect(api.patch(`/locations/${rack.id}/status`, { active: true })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+});
+
+// Qodo, PR #151: switched on in the demo, write-off approval works as on the
+// server: nothing moves, the demo user can't approve their own, only withdraw it.
+describe('mock: write-off approval when switched on', () => {
+  const api = createMockApi();
+  beforeEach(async () => {
+    resetMockState();
+    await api.put('/settings/inventory.requireWriteOffApproval', { value: true });
+  });
+  afterEach(async () => {
+    await api.put('/settings/inventory.requireWriteOffApproval', { value: false });
+  });
+
+  it('holds an adjustment over the limit, which the demo user may withdraw but not approve', async () => {
+    const stock = async () => (await api.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock'))
+      .filter((r) => r.materialId === 'mat-1' && r.locationId === 'loc-1').reduce((n, r) => n + Number(r.quantity), 0);
+    const before = await stock();
+    const small = await api.post<{ status: string }>('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'OTHER', reasonNote: 'Found' });
+    expect(small.status).toBe('POSTED'); // R 9,00
+    const big = await api.post<{ status: string; requestId: string; value: string }>('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 300, reasonCode: 'OTHER', reasonNote: 'Found a box' });
+    expect(big).toMatchObject({ status: 'PENDING_APPROVAL', value: '1350.00' });
+    expect(await stock()).toBe(before + 2);
+    expect((await api.get<Array<{ id: string; requestedBy: { id: string } }>>('/adjustment-requests')).map((r) => r.id)).toEqual([big.requestId]);
+    await expect(api.post(`/adjustment-requests/${big.requestId}/approve`, {})).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await api.post(`/adjustment-requests/${big.requestId}/reject`, { reason: 'Booked on the wrong item' });
+    expect(await api.get<unknown[]>('/adjustment-requests')).toEqual([]);
+    expect(await stock()).toBe(before + 2);
+  });
+});
+
+// As the server: units are a list, a counted item moves in whole units, and
+// the reason decides which way an adjustment goes.
+describe('mock: units of measure and the direction of an adjustment', () => {
+  beforeEach(() => {
+    resetMockState();
+  });
+
+  const refusal = async (p: Promise<unknown>): Promise<ApiError | undefined> => {
+    try { await p; } catch (e) { if (isApiError(e)) return e; }
+    return undefined;
+  };
+
+  it('lists the units, counted and measured', async () => {
+    const units = await api.get<Array<{ code: string; kind: string }>>('/units-of-measure');
+    expect(units.find((u) => u.code === 'each')?.kind).toBe('COUNTED');
+    expect(units.find((u) => u.code === 'kg')?.kind).toBe('MEASURED');
+  });
+
+  it('refuses part of a counted item, and takes part of a measured one', async () => {
+    expect(await refusal(issue('mat-3', 'loc-1', 0.5))).toMatchObject({ code: 'VALIDATION_ERROR', message: 'M16 FLAT WASHER is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-3', locationId: 'loc-1', quantity: -0.0001, reasonCode: 'DAMAGE' })))
+      .toMatchObject({ code: 'VALIDATION_ERROR' });
+    await api.post('/inventory-adjustments', { materialId: 'mat-4', locationId: 'loc-1', quantity: 2.5, reasonCode: 'FOUND', reasonNote: 'Open box' });
+  });
+
+  it('lets damage only remove stock and found stock only add it, with a note', async () => {
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'DAMAGE' })))
+      .toMatchObject({ message: 'Damage, loss and scrap remove stock. To add stock, choose Found or Other.' });
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: -5, reasonCode: 'FOUND', reasonNote: 'x' })))
+      .toMatchObject({ message: 'Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.' });
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'FOUND' })))
+      .toMatchObject({ message: 'Say where the stock was found.' });
+  });
+
+  it('refuses an item on a unit that is not on the list', async () => {
+    expect(await refusal(api.post('/materials', { sku: 'NEW-1', name: 'Rods', category: 'CONSUMABLES', unitOfMeasure: 'bundle' })))
+      .toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 });

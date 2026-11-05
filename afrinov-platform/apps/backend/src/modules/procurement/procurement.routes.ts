@@ -5,6 +5,7 @@ import { supplierIdSchema } from '../../shared/ids.js';
 import { DELIVERY_METHODS, ORDER_KINDS, PurchaseOrderService, SupplierService, kindOfOrder } from './procurement.service.js';
 import { Errors } from '../../shared/errors.js';
 import { fourDecimals } from './rfq.routes.js';
+import { storedQuantity } from '../../shared/decimal.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
 import { COUNTER_RECEIPTS_OFF } from '../inventory/inventory.routes.js';
 import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
@@ -46,7 +47,8 @@ export const updateSupplierSchema = z.object({
 });
 
 const vatRate = z.number().min(0).max(100);
-const unitPrice = z.number().nonnegative().max(1e12);
+// Kept to 4 decimal places, as the order line keeps it.
+const unitPrice = z.number().nonnegative().max(1e12).refine(fourDecimals, 'At most 4 decimal places');
 /** Percent off a line's unit price, to 2 places (Procurement KPIs count the saving). */
 const discountPercent = z.number().min(0).max(100).refine((n) => Number.isInteger(Math.round(n * 100 * 1e6) / 1e6), 'At most 2 decimal places');
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD');
@@ -91,8 +93,8 @@ export const createPOSchema = z.object({
     .array(
       z.object({
         materialId: z.uuid(),
-        orderedQty: z.number().positive(),
-        unitPrice: z.number().nonnegative().max(1e12).optional(),
+        orderedQty: storedQuantity,
+        unitPrice: unitPrice.optional(),
         discountPercent: discountPercent.optional(),
         deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').optional(),
       }),
@@ -152,7 +154,7 @@ export const createGRSchema = z.object({
       z.object({
         materialId: z.uuid(),
         locationId: z.uuid(),
-        quantity: z.number().positive(),
+        quantity: storedQuantity,
         purchaseOrderLineId: z.uuid().optional(),
       }),
     )

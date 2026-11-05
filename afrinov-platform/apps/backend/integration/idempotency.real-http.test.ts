@@ -64,6 +64,7 @@ describe('idempotent inventory mutations over real HTTP', () => {
       locationId,
       quantity: 100,
       reasonCode: 'OTHER',
+      reasonNote: 'Stock for the test',
     });
     expect(receipt.status).toBe(201);
 

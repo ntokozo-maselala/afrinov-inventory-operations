@@ -4,6 +4,8 @@ import { ToolLoanService } from './tool-loan.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
 import { idempotentMutation } from '../../shared/idempotency.js';
+import { Errors } from '../../shared/errors.js';
+import { storedQuantity } from '../../shared/decimal.js';
 
 export const toolCheckOutSchema = z.object({
   recipientId: z.uuid(),
@@ -16,14 +18,14 @@ export const toolCheckOutSchema = z.object({
   lines: z.array(z.object({
     materialId: z.uuid(),
     locationId: z.uuid(),
-    quantity: z.number().positive(),
+    quantity: storedQuantity,
   })).min(1).max(50),
 });
 
 export const toolCheckInSchema = z.object({
   lines: z.array(z.object({
     loanId: z.uuid(),
-    quantity: z.number().positive(),
+    quantity: storedQuantity,
     condition: z.enum(['GOOD', 'DAMAGED', 'LOST']),
     note: z.string().max(500).optional(),
   })).min(1).max(50),
@@ -57,6 +59,10 @@ export async function toolRoutes(app: FastifyInstance): Promise<void> {
     const parsed = toolCheckInSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid check-in payload', details: parsed.error.flatten() } });
+    }
+    // Lost is a write-off: the store's to post, not the borrower's (segregation of duties).
+    if (parsed.data.lines.some((l) => l.condition === 'LOST') && !(await userHasPermission(req, PermissionCode.AdjustInventory))) {
+      throw Errors.forbidden('Checking a tool in as lost writes it off, which the store does. Check it in as good or damaged, or ask the store to write it off.');
     }
     return reply.code(201).send(await ToolLoanService.checkIn({ ...parsed.data, actorId: actorId(req) }));
   });

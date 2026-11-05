@@ -67,6 +67,8 @@ model User {
   idempotencyKeys      IdempotencyKey[]
   toolLoanExtensions   ToolLoanExtension[]
   consumableOutcomes   ConsumableOutcome[]
+  requestedAdjustments AdjustmentRequest[] @relation("AdjustmentRequestedBy")
+  decidedAdjustments   AdjustmentRequest[] @relation("AdjustmentDecidedBy")
 
   @@map("users")
 }
@@ -121,6 +123,32 @@ enum MaterialCategory {
   TOOLS
 }
 
+// How an item is counted. A COUNTED unit (each, pair, box) takes whole
+// numbers only; a MEASURED one (m, kg, l) takes up to the 4 decimal places the
+// quantity columns hold.
+enum UnitKind {
+  COUNTED
+  MEASURED
+}
+
+// The units of measure items can use, keyed by the code items store. Every
+// item points at one, so "EA", "pcs" and "each" can't be three different units.
+// needsReview marks a unit carried over from before this list that matched none
+// of its codes: kept as MEASURED so nothing stopped working, and listed until
+// its items are moved to a listed unit.
+model UnitOfMeasure {
+  code        String   @id
+  label       String
+  kind        UnitKind
+  needsReview Boolean  @default(false) @map("needs_review")
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+
+  materials Material[]
+
+  @@map("units_of_measure")
+}
+
 model Material {
   id            String              @id @default(uuid())
   sku           String              @unique
@@ -151,7 +179,9 @@ model Material {
   inventoryBalances    InventoryBalance[]
   stockCountLines      StockCountLine[]
   rfqLines             RfqLine[]
+  adjustmentRequests   AdjustmentRequest[]
   project              Project?            @relation(fields: [projectNumber], references: [projectNumber])
+  unit                 UnitOfMeasure       @relation(fields: [unitOfMeasure], references: [code])
 
   @@index([category])
   @@index([active])
@@ -195,6 +225,7 @@ model Location {
   goodsReceiptLines    GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
   inventoryBalances    InventoryBalance[]
+  adjustmentRequests   AdjustmentRequest[]
   parent               Location?  @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
   children             Location[] @relation("LocationParent")
 
@@ -288,6 +319,7 @@ model Recipient {
   updatedAt DateTime      @updatedAt @map("updated_at")
 
   inventoryTransactions InventoryTransaction[]
+  adjustmentRequests    AdjustmentRequest[]
 
   @@index([type])
   @@index([active])
@@ -582,8 +614,13 @@ model GoodsReceipt {
   deliveryRef    String?             @map("delivery_ref")
   status         GoodsReceiptStatus  @default(DRAFT)
   receivedById   String              @map("received_by_id")
+  // The date on the delivery note, which may be earlier than it was booked.
   receivedAt     DateTime            @default(now()) @map("received_at")
   createdAt      DateTime            @default(now()) @map("created_at")
+  // When its stock went into the ledger (status POSTED), which is when it
+  // counts on the reports: a back-dated delivery note never changes a month
+  // already reported. Null until posted.
+  postedAt       DateTime?           @map("posted_at")
 
   purchaseOrder PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id])
   supplier      Supplier           @relation(fields: [supplierId], references: [id])
@@ -592,6 +629,7 @@ model GoodsReceipt {
 
   @@index([status])
   @@index([purchaseOrderId])
+  @@index([status, postedAt])
   @@map("goods_receipts")
 }
 
@@ -650,12 +688,15 @@ enum InventoryTransactionType {
   LOAN_RETURN
 }
 
+// The reason sets the direction: DAMAGE, LOSS and SCRAP only remove stock and
+// FOUND only adds it; OTHER may do either; COUNT_VARIANCE comes from a count.
 enum AdjustmentReasonCode {
   COUNT_VARIANCE
   DAMAGE
   LOSS
   SCRAP
   OTHER
+  FOUND
 }
 
 model InventoryTransaction {
@@ -719,6 +760,8 @@ model InventoryTransaction {
   // Issues: used up or broken against it. Returns: the marks booked in the same counter visit.
   consumableOutcomes ConsumableOutcome[] @relation("OutcomeIssue")
   bookedOutcomes     ConsumableOutcome[] @relation("OutcomeReturn")
+  // An adjustment posted on approval: the request it came from.
+  adjustmentRequest  AdjustmentRequest?
 
   @@index([materialId, locationId, postedAt])
   @@index([referenceType, referenceId])
@@ -728,6 +771,54 @@ model InventoryTransaction {
   @@index([issueId])
   @@index([materialId, locationId, heldForProject])
   @@map("inventory_transactions")
+}
+
+enum AdjustmentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// An adjustment worth more than inventory.writeOffApprovalAbove, waiting for
+// someone other than whoever asked for it (segregation of duties). Nothing
+// moves until it is approved: approving posts the ADJUSTMENT (transactionId),
+// rejecting posts nothing. value is quantity x the item's unit cost when asked,
+// null when the item has no cost, which also needs approval.
+model AdjustmentRequest {
+  id             String                  @id @default(uuid())
+  materialId     String                  @map("material_id")
+  locationId     String                  @map("location_id")
+  heldForProject String?                 @map("held_for_project")
+  // Signed, as the ADJUSTMENT it becomes.
+  quantity       Decimal                 @db.Decimal(18, 4)
+  reasonCode     AdjustmentReasonCode    @map("reason_code")
+  reasonNote     String?                 @map("reason_note")
+  recipientId    String?                 @map("recipient_id")
+  // Who the stock was used for, and what the adjustment comes from, as on the
+  // ADJUSTMENT it becomes: a stock count (StockCount, its count id) or a tool
+  // lost on loan (ToolLoan, the loan; its return is posted on approval too).
+  projectNumber  String?                 @map("project_number")
+  referenceType  String?                 @map("reference_type")
+  referenceId    String?                 @map("reference_id")
+  value          Decimal?                @db.Decimal(18, 2)
+  status         AdjustmentRequestStatus @default(PENDING)
+  requestedById  String                  @map("requested_by_id")
+  requestedAt    DateTime                @default(now()) @map("requested_at")
+  decidedById    String?                 @map("decided_by_id")
+  decidedAt      DateTime?               @map("decided_at")
+  decisionNote   String?                 @map("decision_note")
+  transactionId  String?                 @unique @map("transaction_id")
+
+  material    Material              @relation(fields: [materialId], references: [id])
+  location    Location              @relation(fields: [locationId], references: [id])
+  recipient   Recipient?            @relation(fields: [recipientId], references: [id])
+  requestedBy User                  @relation("AdjustmentRequestedBy", fields: [requestedById], references: [id])
+  decidedBy   User?                 @relation("AdjustmentDecidedBy", fields: [decidedById], references: [id])
+  transaction InventoryTransaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([status, requestedAt])
+  @@index([referenceType, referenceId])
+  @@map("adjustment_requests")
 }
 
 // A tool loan's due date changed, later or earlier, and why. Only ever added

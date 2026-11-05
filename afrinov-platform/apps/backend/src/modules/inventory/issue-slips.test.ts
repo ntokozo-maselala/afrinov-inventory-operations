@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { findMany, groupBy } = vi.hoisted(() => ({ findMany: vi.fn(), groupBy: vi.fn() }));
 vi.mock('../../shared/db.js', () => ({
-  prisma: { inventoryTransaction: { findMany, groupBy }, goodsReceipt: { findMany: vi.fn(async () => []) }, consumableOutcome: { groupBy: vi.fn(async () => []) } },
+  prisma: { inventoryTransaction: { findMany, groupBy }, goodsReceipt: { findMany: vi.fn(async () => []) }, consumableOutcome: { groupBy: vi.fn(async () => []) }, setting: { findMany: vi.fn(async () => []) } },
 }));
 
 const { InventoryService } = await import('./inventory.service.js');

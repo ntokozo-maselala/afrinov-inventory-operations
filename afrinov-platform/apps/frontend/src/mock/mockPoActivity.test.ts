@@ -1,7 +1,7 @@
 // The mock API keeps an order's Activity as the server does: an entry when it
 // is created, and each entry named after the user it is by.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createMockApi, resetMockState } from './mockApi';
+import { createMockApi, resetMockState, mockOrderRaisedBy } from './mockApi';
 
 const api = createMockApi();
 
@@ -13,6 +13,7 @@ describe('mock: purchase order Activity', () => {
       supplierId: 'sup-1', lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }],
     });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     await api.post(`/purchase-orders/${po.id}/approve`, {});
 
     const history = await api.get<Array<{ action: string; actorId: string | null; actorName: string | null; after: Record<string, unknown> | null }>>(`/purchase-orders/${po.id}/history`);
@@ -37,6 +38,7 @@ describe('mock: small print kept on approval', () => {
   it('keeps it when an approver approves the order', async () => {
     const po = await draft();
     expect((await api.post<Order>(`/purchase-orders/${po.id}/submit`, {})).printedTerms ?? null).toBeNull();
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     const approved = await api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
     expect(approved.printedTerms).toMatchObject({ invoiceEmail: 'accounts@afrinov.co.za', terms: expect.stringContaining('Purchase Order delivery date') });
   });
@@ -63,9 +65,10 @@ describe('mock: discount changes on an approved order', () => {
   async function approvedProjectOrder(discountPercent: number) {
     const projects = await api.get<Array<{ projectNumber: string; status?: string; active?: boolean }>>('/projects');
     const projectNumber = projects.find((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED')!.projectNumber;
-    const beam = await api.post<{ id: string }>('/materials', { sku: `MOCK-BEAM-${discountPercent}`, name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
+    const beam = await api.post<{ id: string }>('/materials', { sku: `MOCK-BEAM-${discountPercent}`, name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber });
     const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 0, lines: [{ materialId: beam.id, orderedQty: 10, unitPrice: 21000, discountPercent }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     return api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
   }
 
@@ -103,6 +106,7 @@ describe('mock: approval re-checked only as the server does', () => {
   it('leaves an approved order alone when its discount is sent unchanged with another change', async () => {
     const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', vatRate: 0, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 10, discountPercent: 10 }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     await api.post(`/purchase-orders/${po.id}/approve`, {});
     const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { notes: 'Deliver to gate 2', lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 10 }] });
     expect(after.status).toBe('APPROVED');

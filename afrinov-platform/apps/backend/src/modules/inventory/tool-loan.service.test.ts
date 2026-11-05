@@ -19,9 +19,10 @@ const db = vi.hoisted(() => ({
   locks: [] as string[],
   audit: [] as Array<{ action: string; before?: unknown; after?: unknown }>,
   settings: {} as Record<string, unknown>,
+  requests: [] as Array<Record<string, unknown>>,
   projectEnd: null as string | null,
   materials: [
-    { id: 'm-drill', sku: 'TL-0001', name: 'Makita Hand Drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: '34322', active: true },
+    { id: 'm-drill', sku: 'TL-0001', name: 'Makita Hand Drill', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: '34322', active: true, unitCost: 1800 },
     { id: 'm-scraper', sku: 'TL-0002', name: 'Scraper', category: 'TOOLS', unitOfMeasure: 'each', serialNumber: null, active: true },
     { id: 'm-disc', sku: 'CON-0001', name: 'Grinding disc', category: 'CONSUMABLES', unitOfMeasure: 'each', serialNumber: null, active: true },
   ],
@@ -49,16 +50,19 @@ const withRelations = (r: Row) => ({
   recipient: r.recipientId ? { name: names[r.recipientId] } : null,
   location: { name: names[r.locationId] },
   actor: { name: names[r.actorId] },
-  material: { sku: db.materials.find((m) => m.id === r.materialId)!.sku, name: db.materials.find((m) => m.id === r.materialId)!.name },
+  material: { unitOfMeasure: 'each', unit: { kind: 'COUNTED' as const }, sku: db.materials.find((m) => m.id === r.materialId)!.sku, name: db.materials.find((m) => m.id === r.materialId)!.name, unitCost: ((c) => (c === undefined ? null : D(c)))((db.materials.find((m) => m.id === r.materialId) as { unitCost?: number }).unitCost) },
   project: r.projectNumber ? project() : null,
   loanExtensions: db.extensions.filter((e) => e.loanId === r.id).map((e) => ({ ...e, actor: { name: names[e.actorId] } })),
 });
 
 const client = {
-  $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => { db.locks.push(key); return 0; }),
+  // The hold on the items' units (holdUnits) is left out: these are the tool locks.
+  $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => { if (!strings.join('').includes('FOR SHARE')) db.locks.push(key); return 0; }),
   material: {
     findUnique: async ({ where }: { where: { id: string } }) => db.materials.find((m) => m.id === where.id) ?? null,
-    findMany: async ({ where }: { where: { category: string } }) => db.materials.filter((m) => m.category === where.category),
+    findMany: async ({ where }: { where: { category?: string; id?: { in: string[] } } }) => (where.id
+      ? db.materials.filter((m) => where.id!.in.includes(m.id)).map((m) => ({ ...m, unit: { kind: 'COUNTED' as const } }))
+      : db.materials.filter((m) => m.category === where.category)),
   },
   location: { findUnique: async ({ where }: { where: { id: string } }) => (where.id === 'l-store' ? { id: 'l-store', active: true } : null) },
   recipient: {
@@ -94,6 +98,13 @@ const client = {
     },
   },
   auditLogEntry: { create: async ({ data }: { data: { action: string } }) => { db.audit.push(data); return data; } },
+  adjustmentRequest: {
+    create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, status: 'PENDING', ...data }; db.requests.push(row); return row; },
+    // Lost tools waiting for their write-off, by loan.
+    findMany: async ({ where }: { where: { referenceId: { in: string[] } } }) => db.requests
+      .filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && where.referenceId.in.includes(r.referenceId as string))
+      .map((r) => ({ referenceId: r.referenceId, quantity: r.quantity })),
+  },
 };
 
 vi.mock('../../shared/db.js', () => ({ prisma: { ...client, $transaction: async (fn: (t: typeof client) => unknown) => fn(client) } }));
@@ -130,7 +141,9 @@ beforeEach(() => {
   db.extensions.length = 0;
   db.locks.length = 0;
   db.audit.length = 0;
-  db.settings = {};
+  // A lost tool posts its write-off at once unless a test switches write-off approval on.
+  db.settings = { 'inventory.requireWriteOffApproval': false };
+  db.requests.length = 0;
   db.projectEnd = null;
   seq = 0;
   receive('m-drill', 1);
@@ -197,6 +210,39 @@ describe('ToolLoanService', () => {
     expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.reasonNote]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'Lost while checked out to Sabelo: Left on site']);
     const drill = await tool('m-drill');
     expect([drill.inStore, drill.onLoan, drill.owned]).toEqual(['0', '0', '0']);
+  });
+
+  // ADR-028; Qodo, PR #151: a lost tool over the write-off limit is written
+  // off only once someone else approves it. It stays on loan meanwhile, so it
+  // can't be lent again, and approval posts its return and write-off together.
+  it('holds the write-off of a lost tool over the limit for approval, keeping it on loan', async () => {
+    db.settings = { 'inventory.requireWriteOffApproval': true, 'inventory.writeOffApprovalAbove': 1000 };
+    const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] });
+    const { writeOffIds, writeOffRequestIds } = await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'LOST', note: 'Left on site' }] });
+    expect(writeOffIds).toEqual([]);
+    expect(writeOffRequestIds).toHaveLength(1);
+    expect(db.requests[0]).toMatchObject({
+      materialId: 'm-drill', reasonCode: 'LOSS', reasonNote: 'Lost while checked out to Sabelo: Left on site', requestedById: 'u-1',
+      referenceType: 'ToolLoan', referenceId: loanId,
+    });
+    expect(String(db.requests[0]!.quantity)).toBe('-1');
+    expect(String(db.requests[0]!.value)).toBe('1800');
+    expect(db.ledger.some((r) => r.type === 'ADJUSTMENT' || r.type === 'LOAN_RETURN')).toBe(false);
+    // Still on loan, and not for lending again.
+    const drill = await tool('m-drill');
+    expect([drill.inStore, drill.onLoan, drill.loans[0]!.lostWaiting]).toEqual(['0', '1', '1']);
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('only 0 still checked out (1 more is waiting to be written off as lost)') });
+
+    // Approved: its return and its LOSS, against the loan and its project, as a direct write-off.
+    const { transactionId } = await ToolLoanService.writeOffLost({ loanId: loanId!, quantity: D(1), reasonNote: 'Lost while checked out to Sabelo: Left on site', actorId: 'u-1' });
+    const writeOff = db.ledger.find((r) => r.id === transactionId)!;
+    expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.referenceType, writeOff.referenceId]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'ToolLoan', loanId]);
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN' && r.referenceId === loanId).map((r) => r.quantity.toString())).toEqual(['1']);
+    const after = await tool('m-drill');
+    expect([after.inStore, after.onLoan, after.owned]).toEqual(['0', '0', '0']);
+    // Not twice: it is no longer out.
+    await expect(ToolLoanService.writeOffLost({ loanId: loanId!, quantity: D(1), reasonNote: 'again', actorId: 'u-1' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
   });
 
   it('says how long each loan has been out, and that it is overdue after the days set (7)', async () => {
@@ -375,5 +421,51 @@ describe('ToolLoanService.history', () => {
     expect(h).toMatchObject({ out: '1', state: 'ON_LOAN', daysLate: -4 });
     expect(h.events.map((e) => e.kind)).toEqual(['CHECKED_OUT']);
     await expect(ToolLoanService.history(db.ledger[0]!.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+// Tools are counted in whole units; a loan from before the rule can still be closed off.
+describe('ToolLoanService and whole units', () => {
+  const loanOf = (quantity: number) => {
+    const row: Row = { id: `tx-${++seq}`, materialId: 'm-scraper', locationId: 'l-store', type: 'LOAN', quantity: D(-quantity), actorId: 'u-1', recipientId: 'r-bukho', issueId: 'slip-old', postedAt: new Date() };
+    db.ledger.push(row);
+    return row.id;
+  };
+
+  // Qodo, PR #153: two lines of 0.5 are two loans of half a scraper, though they total 1.
+  it('refuses part of a tool on any line of a check-out, whatever the lines total', async () => {
+    await expect(ToolLoanService.checkOut({
+      recipientId: 'r-sabelo', actorId: 'u-1',
+      lines: [{ materialId: 'm-scraper', locationId: 'l-store', quantity: 0.5 }, { materialId: 'm-scraper', locationId: 'l-store', quantity: 0.5 }],
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(db.ledger.filter((r) => r.type === 'LOAN')).toEqual([]);
+  });
+
+  // Qodo, PR #153: a loan of 1.5 from before the rule could never be checked in in full.
+  it('takes back the part-unit of a loan made in part-units, but no other part of one', async () => {
+    const loanId = loanOf(1.5);
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.25, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'DAMAGED', note: 'Half a set' }] });
+    // What is left is whole now, so it comes back whole.
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 1, condition: 'GOOD' }] });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN').map((r) => r.quantity.toString())).toEqual(['0.5', '1']);
+  });
+
+  // Qodo, PR #153: lines adding up to a whole loan could still split it into part-tools.
+  it('refuses to split a whole loan into part-tools, however the lines add up', async () => {
+    const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-bukho', actorId: 'u-1', lines: [{ materialId: 'm-scraper', locationId: 'l-store', quantity: 2 }] });
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [
+      { loanId: loanId!, quantity: 1.5, condition: 'GOOD' }, { loanId: loanId!, quantity: 0.5, condition: 'LOST', note: 'Half went missing' },
+    ] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN' || r.type === 'ADJUSTMENT')).toEqual([]);
+  });
+
+  it('takes the whole of a part-unit loan in one go, split over lines', async () => {
+    const loanId = loanOf(2.5);
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 2, condition: 'GOOD' }, { loanId, quantity: 0.5, condition: 'DAMAGED', note: 'Snapped' }] });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN').map((r) => r.quantity.toString())).toEqual(['2', '0.5']);
   });
 });

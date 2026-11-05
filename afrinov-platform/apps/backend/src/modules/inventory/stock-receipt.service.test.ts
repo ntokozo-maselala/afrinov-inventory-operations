@@ -19,7 +19,12 @@ let seq = 0;
 function makeTx() {
   return {
     supplier: { findUnique: async ({ where }: { where: { id: string } }) => db.suppliers.get(where.id) ?? null },
-    material: { findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null },
+    material: {
+      findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null,
+      // Measured, so a fraction goes through.
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.flatMap((id) => db.materials.get(id) ?? []).map((m) => ({ ...m, name: m.sku, unitOfMeasure: 'm', unit: { kind: 'MEASURED' } })),
+    },
     location: { findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null },
     goodsReceipt: {
       count: async () => db.receipts.length,

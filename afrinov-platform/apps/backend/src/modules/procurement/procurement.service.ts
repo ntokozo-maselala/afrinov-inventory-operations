@@ -17,13 +17,14 @@
 // same PO cannot both succeed.
 import { Prisma, PurchaseOrderStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import { Errors } from '../../shared/errors.js';
+import { ApiError, Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
+import { checkWholeUnits } from '../../shared/units.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
-import { STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
+import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 
@@ -416,6 +417,7 @@ export const PurchaseOrderService = {
         where: { status: 'PENDING_APPROVAL', projectNumber: k === 'stores' ? null : { not: null } },
         include: { supplier: true, project: { select: { projectNumber: true, name: true } }, lines: { include: { material: true } }, signatures: true },
       });
+      // Not their own: signRefusal refuses whoever raised it.
       waiting.push(...orders.filter((po) => !signRefusal(k, approvalState(po, settings), po, me)));
     }
     return waiting.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map(withTotals);
@@ -487,7 +489,6 @@ export const PurchaseOrderService = {
     // that rule may still hold Stores items, and its award keeps them.
     if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), lineMaterials);
     refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), lineMaterials);
-
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods
     // are collected), the Afrinov contact from whoever raises the order.
@@ -526,6 +527,17 @@ export const PurchaseOrderService = {
       const held = await lineMaterialsOf(ids, tx);
       if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), held);
       refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), held);
+      // Whole units of a counted item, read under the same hold, so a change of
+      // unit waits for this order. An award is checked too: an RFQ sent before
+      // the rule may ask for part of one, and a sent RFQ's lines can't change.
+      try {
+        await checkWholeUnits(input.lines.map((l) => ({ materialId: l.materialId, quantity: l.orderedQty })), tx);
+      } catch (e) {
+        if (opts.fromRfq && e instanceof ApiError) {
+          throw Errors.validation(`${e.message} ${opts.fromRfq.number} asks for part of one, so it can't be awarded: cancel it and raise the request for quotation again.`, e.details);
+        }
+        throw e;
+      }
       // Serialize PO-number generation so two concurrent creates cannot
       // collide on the same sequential number. The advisory lock is scoped
       // to this transaction and auto-released on commit/rollback.
@@ -580,7 +592,7 @@ export const PurchaseOrderService = {
     const approvalSettings = await loadApprovalSettings();
     return prisma.$transaction(async (tx) => {
       // Takes turns with signing: a signature is for the money as it stood.
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${input.id} FOR UPDATE`;
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (!isEditable(po.status, allowEditAfterApproval)) {
@@ -776,7 +788,6 @@ export const PurchaseOrderService = {
     const state = approvalState(po, settings);
     const me = await signerOf(actorId);
     const refusal = signRefusal(kind, state, po, me);
-    const signed = new Set(po.signatures.map((s) => s.signedById));
     return {
       ...orderTotals(po.lines, po.vatRate ?? 0),
       currency: po.currency,
@@ -791,7 +802,7 @@ export const PurchaseOrderService = {
       canApprove: po.status === 'PENDING_APPROVAL' && !refusal,
       // Only for those who sign this kind of order: to anyone else it isn't theirs to be told.
       reason: po.status === 'PENDING_APPROVAL' && signsOrdersOfKind(kind, me.roles) ? refusal : null,
-      approvers: state.next ? (await listSigners(kind, state.next)).filter((a) => !signed.has(a.id)) : [],
+      approvers: state.next ? await listSigners(kind, state.next, po) : [],
     };
   },
 
@@ -801,7 +812,7 @@ export const PurchaseOrderService = {
     const me = await signerOf(actorId);
     return prisma.$transaction(async (tx) => {
       // Takes turns with an edit, which may clear the signatures or change the money.
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
+      await lockOrder(id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];
@@ -813,9 +824,8 @@ export const PurchaseOrderService = {
       if (state.block) throw Errors.validation(state.block.message);
       const refusal = signRefusal(kind, state, po, me);
       if (refusal) {
-        const signed = new Set(po.signatures.map((s) => s.signedById));
-        const names = state.next ? (await listSigners(kind, state.next)).filter((a) => !signed.has(a.id)).map((a) => a.name) : [];
-        throw Errors.forbidden(`${refusal} ${whoToAsk(names)}`);
+        const names = state.next ? (await listSigners(kind, state.next, po)).map((a) => a.name) : [];
+        throw Errors.forbidden(`${refusal} ${whoToAsk(names, refusal === OWN_ORDER)}`);
       }
       const step = state.next;
       const standIn = step ? isStandIn(kind, step, me.roles) : false;
@@ -876,6 +886,10 @@ export const PurchaseOrderService = {
   // source of truth).
   async receive(input: ReceiveInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
+      // The order before its stock, as posting a goods receipt locks them, so
+      // the two cannot deadlock; and before its lines are read, so the
+      // shortfall counts a goods receipt posted meanwhile.
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({
         where: { id: input.id },
         include: { lines: true },
@@ -884,9 +898,6 @@ export const PurchaseOrderService = {
       // A project order's delivery is held for its project; a Stores order's is
       // Stores stock (Project Material Through the Store Roadmap, Phase 2).
       const stockOf = (materialId: string) => ({ materialId, locationId: input.locationId, heldForProject: po.projectNumber });
-      // The order before its stock, as posting a goods receipt locks them, so
-      // the two cannot deadlock.
-      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.id} FOR UPDATE`;
       await lockInventoryBalances(po.lines.map((line) => stockOf(line.materialId)), tx);
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Only an approved or partly received purchase order can be received`, { status: po.status });
@@ -972,6 +983,7 @@ export const PurchaseOrderService = {
       throw Errors.forbidden('Cancelling purchase orders is disabled in system settings');
     }
     return prisma.$transaction(async (tx) => {
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
@@ -1006,6 +1018,7 @@ export const PurchaseOrderService = {
   // not fully received — needs a reason, so the shortfall is explained.
   async close(input: CloseInput, actorId: string) {
     return prisma.$transaction(async (tx) => {
+      await lockOrder(input.id, tx);
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PARTIALLY_RECEIVED', 'RECEIVED'];
@@ -1056,6 +1069,15 @@ export const PurchaseOrderService = {
     return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
   },
 };
+
+/**
+ * Locks the order's row before anything about it is read. Posting a goods
+ * receipt takes the same lock, so an edit, an approval, a receipt, a cancel
+ * and a close each see the order exactly as the one before left it.
+ */
+async function lockOrder(id: string, tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
+}
 
 function isEditable(status: PurchaseOrderStatus, allowEditAfterApproval = true): boolean {
   if (allowEditAfterApproval) {

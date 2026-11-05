@@ -30,7 +30,8 @@ const live = (o: Outcome) => !o.withdrawsId && !db.outcomes.some((w) => w.withdr
 
 function client(): unknown {
   return {
-    $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => { db.locks.push(String(values[0])); return 1; },
+    // The hold on the items' units (holdUnits) is left out: these are the balance locks.
+    $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => { if (!strings.join('').includes('FOR SHARE')) db.locks.push(String(values[0])); return 1; },
     inventoryTransaction: {
       // A reversal of the issue, looked for again under the lock.
       findFirst: async ({ where }: { where: { reversesId: string } }) => db.txns.find((x) => x.reversesId === where.reversesId) ?? null,
@@ -46,6 +47,13 @@ function client(): unknown {
       aggregate: async ({ where }: { where: { referenceId: string } }) => ({
         _sum: { quantity: db.txns.filter((x) => x.type === 'RETURN' && x.referenceId === where.referenceId).reduce((a, x) => a.plus(x.quantity), D(0)) },
       }),
+    },
+    // An item whose id starts "blade" is counted in each; the rest are measured.
+    material: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => id.startsWith('blade')
+          ? { id, name: `Item ${id}`, unitOfMeasure: 'each', unit: { kind: 'COUNTED' } }
+          : { id, name: `Item ${id}`, unitOfMeasure: 'm', unit: { kind: 'MEASURED' } }),
     },
     consumableOutcome: {
       groupBy: async ({ where }: { where: { issueTransactionId: { in: string[] } } }) => {
@@ -127,6 +135,15 @@ describe('ConsumableOutcomeService.record', () => {
     expect(db.outcomes).toHaveLength(0);
     const r = await ConsumableOutcomeService.record({ issueTransactionId: id, outcome: 'USED_UP', quantity: 0.0001, actorId: 'storeman' });
     expect(r.usedUp).toBe('0.0001');
+  });
+
+  it('refuses part of an item counted in whole units, and writes nothing', async () => {
+    const id = issue('iss-blade', 10, 'blade-1');
+    await expect(ConsumableOutcomeService.record({ issueTransactionId: id, outcome: 'BROKEN', quantity: 0.5, actorId: 'storeman' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Item blade-1 is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(db.outcomes).toHaveLength(0);
+    const r = await ConsumableOutcomeService.record({ issueTransactionId: id, outcome: 'BROKEN', quantity: 2, actorId: 'storeman' });
+    expect(r.broken).toBe('2');
   });
 
   it('only takes an unreversed issue of an item that tracks use', async () => {

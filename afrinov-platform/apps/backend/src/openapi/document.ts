@@ -19,7 +19,7 @@ import { loginSchema } from '../modules/identity/auth.routes.js';
 import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema,
-  consumableOutcomeSchema, outcomeWithdrawalSchema,
+  consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
 } from '../modules/inventory/inventory.routes.js';
 import { toolCheckInSchema, toolCheckOutSchema, toolLoanDueDateSchema } from '../modules/inventory/tool.routes.js';
 import {
@@ -154,10 +154,14 @@ export const OPERATIONS: Operation[] = [
   // Auth
   {
     method: 'post', path: '/auth/login', tag: 'Auth', summary: 'Log in and receive a bearer token', public: true,
-    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute).',
+    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute). '
+      + 'The user carries their roles and the permission codes those roles grant.',
     body: loginSchema, errors: [401, 429],
   },
-  { method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user' },
+  {
+    method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user',
+    description: 'Their id, email, name, roles (from the token) and permissions, read from the database on each call.',
+  },
 
   // Users
   { method: 'get', path: '/users', tag: 'Users', summary: 'List users', permissions: [P.ManageUsers] },
@@ -186,6 +190,10 @@ export const OPERATIONS: Operation[] = [
     errors: [400],
   },
   { method: 'get', path: '/materials/:id', tag: 'Materials', summary: 'Get a material', errors: [404] },
+  {
+    method: 'get', path: '/units-of-measure', tag: 'Materials', summary: 'List units of measure',
+    description: 'Every unit an item can have, in display order. A COUNTED unit takes whole quantities only; a MEASURED one up to 4 decimal places. needsReview marks a unit carried over from before the list that matched none of its codes.',
+  },
   {
     method: 'post', path: '/materials', tag: 'Materials', summary: 'Create a material',
     description: 'Answers 200, not 201. A Projects material needs no project of its own (the order it is bought on says which); any project given must be open. A Stores material has no project.', permissions: [P.CreateMaterial], body: createMaterialSchema, errors: [409],
@@ -296,7 +304,12 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/tools/check-in', tag: 'Tools', summary: 'Take lent tools back',
     description: 'Each line is against a loan, at most what is still out on it, and comes back to the location it left. '
       + 'GOOD or DAMAGED puts it back in store (LOAN_RETURN); LOST needs a note and writes it off at once '
-      + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned.',
+      + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned. Writing a tool off as LOST also '
+      + 'needs adjust:inventory (403 otherwise): a borrower does not write off what they borrowed. A lost tool worth more '
+      + 'than inventory.writeOffApprovalAbove, or with no unit cost, stays on loan while its write-off waits for '
+      + 'approval by someone else (writeOffRequestIds, its loan in heldLoanIds; lostWaiting on the loan in GET /tools). '
+      + 'Whether lost tools wait is decided on everything lost of one tool from one location on the check-in. Approving posts its '
+      + 'return and its write-off against the loan. writeOffIds lists the write-offs posted at once.',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },
   {
@@ -371,8 +384,11 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/stock-counts', tag: 'Stock movements', summary: 'Post a stock count for one location',
     description: 'The counted quantity of each item, with the system quantity the counter was shown. Every difference '
       + 'is posted as a COUNT_VARIANCE adjustment linked to one count id; items that match are recorded as counted only. '
+      + 'A difference over inventory.writeOffApprovalAbove, or of an item with no unit cost, is recorded for someone '
+      + 'else to approve instead (its requestId; waitingForApproval counts them), and posts as part of the count once approved. '
       + 'All or nothing. Refused with 409 CONFLICT when the stock at the location has changed since it was shown, '
-      + 'and 404 for an unknown location or material.',
+      + '409 INVALID_STATE for an item with an adjustment already waiting at the location, 400 for a difference too '
+      + 'large for one movement, and 404 for an unknown location or material.',
     permissions: [P.AdjustInventory], body: stockCountSchema, success: 201, errors: [404, 409],
   },
   {
@@ -380,8 +396,29 @@ export const OPERATIONS: Operation[] = [
     description: 'A signed quantity with a reason. DAMAGE, LOSS and SCRAP may name who was responsible (recipientId, an '
       + 'active recipient); naming someone needs a reasonNote saying what happened. Other reasons take no recipientId. '
       + 'With heldForProject, adjusts that project\'s stock; otherwise Stores stock. '
-      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location, recipient or project.',
-    permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [404, 422],
+      + '400 VALIDATION_ERROR for either rule, 404 for an unknown material, location, recipient or project. '
+      + 'Worth more than inventory.writeOffApprovalAbove (rand, at the unit cost of the item), or for an item with no cost, '
+      + 'nothing is posted: 202 with status PENDING_APPROVAL, the requestId, value and limit, until someone else approves it. '
+      + 'Otherwise 201 with status POSTED and the transactionId.',
+    permissions: [P.AdjustInventory], body: adjustmentSchema, success: 201, errors: [202, 404, 422],
+  },
+  {
+    method: 'get', path: '/adjustment-requests', tag: 'Stock movements', summary: 'Adjustments waiting for approval, or decided',
+    description: 'Newest first, at most 200: PENDING unless another status is asked for, each with its item, location, '
+      + 'who asked and who decided. Needs approve:write_off or adjust:inventory.',
+    query: adjustmentRequestQuerySchema, errors: [403],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/approve', tag: 'Stock movements', summary: 'Approve an adjustment someone else asked for',
+    description: 'Posts the ADJUSTMENT, booked to whoever asked for it, checked again against the stock now. 403 for your own '
+      + 'request, 409 INVALID_STATE once decided, 422 when there is no longer enough stock. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ApproveWriteOff], success: 201, errors: [404, 409, 422],
+  },
+  {
+    method: 'post', path: '/adjustment-requests/:id/reject', tag: 'Stock movements', summary: 'Reject or withdraw an adjustment waiting for approval',
+    description: 'Posts nothing. Whoever asked for it may withdraw it with adjust:inventory; anyone else needs approve:write_off. '
+      + '409 INVALID_STATE once decided. Retry-safe with an Idempotency-Key header.',
+    body: adjustmentRejectionSchema, success: 200, errors: [403, 404, 409],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/returns', tag: 'Stock movements',
@@ -416,7 +453,9 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/inventory-transactions/:id/reversal', tag: 'Stock movements',
     summary: 'Reverse a movement',
     description: 'Posts an opposite entry linked to the original; the ledger is never edited. Both legs of a transfer are reversed together. '
-      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal or a goods-receipt receipt, and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
+      + 'Refused with 409 CONFLICT when already reversed, 409 INVALID_STATE for a reversal, a receipt against a purchase order, '
+      + 'or an adjustment over the write-off limit (put right by an adjustment the other way, for approval), '
+      + 'and 422 INSUFFICIENT_BALANCE when the stock has already been used.',
     permissions: [P.ReverseInventoryTransaction], body: reversalSchema, success: 201, errors: [404, 409, 422],
   },
   {

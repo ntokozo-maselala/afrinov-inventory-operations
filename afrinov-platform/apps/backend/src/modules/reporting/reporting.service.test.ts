@@ -100,7 +100,7 @@ function makePrisma(): unknown {
     inventoryTransaction: {
       findMany: async ({ where, take }: { where?: Record<string, unknown>; take?: number } = {}) => {
         let list = db.transactions.slice();
-        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; OR?: Array<{ projectNumber?: string; heldForProject?: string }>; postedAt?: { gte?: Date; lte?: Date } } | undefined;
+        const w = where as { materialId?: string; type?: string | { in: string[] }; projectNumber?: string; OR?: Array<{ projectNumber?: string; heldForProject?: string }>; postedAt?: { gte?: Date; lt?: Date; lte?: Date } } | undefined;
         if (w?.materialId) list = list.filter((t) => t.materialId === w.materialId);
         if (w?.type) {
           const types = typeof w.type === 'string' ? [w.type] : w.type.in;
@@ -111,6 +111,7 @@ function makePrisma(): unknown {
         if (w?.postedAt) {
           if (w.postedAt.gte) list = list.filter((t) => t.postedAt >= w.postedAt!.gte!);
           if (w.postedAt.lte) list = list.filter((t) => t.postedAt <= w.postedAt!.lte!);
+          if (w.postedAt.lt) list = list.filter((t) => t.postedAt < w.postedAt!.lt!);
         }
         list.sort((a, b) => b.postedAt.getTime() - a.postedAt.getTime());
         if (take) list = list.slice(0, take);
@@ -525,6 +526,16 @@ describe('ReportingService', () => {
       expect(result[0]!.materialSku).toBe('SKU-001');
       expect(result[0]!.locationName).toBe('Main Storeroom');
       expect(result[0]!.projectNumber).toBe('AFRI-1325');
+    });
+
+    // As on the other reports, a `to` day is the whole day, not its first instant.
+    it('includes the whole of the last day, and ignores a limit that is not a number', async () => {
+      seedMaterials();
+      const at = (id: string, postedAt: string) => ({ id, postedAt: new Date(postedAt), type: 'ISSUE', materialId: 'm-1', locationId: 'l-1', quantity: DEC(-1), actorId: 'u-1', recipientId: null, reasonCode: null, reasonNote: null, projectNumber: null, referenceType: null, referenceId: null });
+      db.transactions = [at('before', '2026-08-31T23:59:59Z'), at('first', '2026-09-01T00:00:00Z'), at('late', '2026-09-05T15:30:00Z'), at('after', '2026-09-06T00:00:00Z')];
+      const { ReportingService } = await import('./reporting.service.js');
+      const result = await ReportingService.movementHistory({ from: '2026-09-01', to: '2026-09-05', limit: Number('abc') });
+      expect(result.map((r) => r.id)).toEqual(['late', 'first']);
     });
 
     it('filters by type', async () => {

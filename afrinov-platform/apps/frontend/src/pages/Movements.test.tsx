@@ -31,7 +31,7 @@ const row = (n: number) => ({
 });
 
 const RECEIPT = {
-  id: 'gr-1', cursor: 'c', number: 'GR-2026-0007', receivedAt: '2026-09-25T10:00:00.000Z', supplierName: 'Hydroscand', deliveryRef: 'INV-2041', receivedByName: 'Vusi',
+  id: 'gr-1', cursor: 'c', number: 'GR-2026-0007', receivedAt: '2026-09-25T10:00:00.000Z', postedAt: '2026-09-25T10:00:00.000Z', supplierName: 'Hydroscand', deliveryRef: 'INV-2041', receivedByName: 'Vusi',
   lines: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', locationName: 'Main Storeroom', quantity: '20' }],
 };
 const SLIP = {
@@ -193,7 +193,7 @@ describe('Movements page', () => {
     renderAt('/movements?report=received&from=2026-09-25&supplierId=s-1');
     const table = await screen.findByRole('table', { name: 'Received stock' });
     const disc = within(table).getByText('DISC-115').closest('tr')!;
-    expect(cells(disc).slice(1)).toEqual(['Hydroscand', 'INV-2041', 'DISC-115 Cutting disc', 'Main Storeroom', '20 each', 'GR-2026-0007', 'Vusi']);
+    expect(cells(disc).slice(2)).toEqual(['Hydroscand', 'INV-2041', 'DISC-115 Cutting disc', 'Main Storeroom', '20 each', 'GR-2026-0007', 'Vusi']);
     expect(screen.getByText('1 delivery, 1 line')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Table' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('region', { name: 'Delivery INV-2041' })).not.toBeInTheDocument();

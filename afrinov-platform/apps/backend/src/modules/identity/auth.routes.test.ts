@@ -18,7 +18,7 @@ interface UserRow {
   name: string;
   passwordHash: string;
   active: boolean;
-  roles: { role: { id: string; name: string } }[];
+  roles: { role: { id: string; name: string; permissions: { permission: { code: string } }[] } }[];
 }
 
 const db = {
@@ -39,7 +39,7 @@ beforeEach(() => {
     name: 'Alice',
     passwordHash: validHash,
     active: true,
-    roles: [{ role: { id: 'r-1', name: 'ADMIN' } }],
+    roles: [{ role: { id: 'r-1', name: 'ADMIN', permissions: [{ permission: { code: 'approve:write_off' } }, { permission: { code: 'adjust:inventory' } }] } }],
   });
 });
 
@@ -53,6 +53,9 @@ vi.mock('../../shared/db.js', () => ({
           }
           return [...db.users.values()].find((u) => u.email === where.email) ?? null;
         },
+      },
+      userRole: {
+        findMany: async ({ where }: { where: { userId: string } }) => db.users.get(where.userId)?.roles ?? [],
       },
     };
   },
@@ -88,6 +91,8 @@ describe('auth routes', () => {
       expect(body.user.name).toBe('Alice');
       expect(body.user.active).toBe(true);
       expect(body.user.roles).toEqual(['ADMIN']);
+      // What the roles grant, so the screens follow grants outside their own role table.
+      expect((body.user as unknown as { permissions: string[] }).permissions).toEqual(['adjust:inventory', 'approve:write_off']);
     });
 
     it('returns 400 when the payload is missing', async () => {
@@ -133,7 +138,7 @@ describe('auth routes', () => {
         name: 'Bob',
         passwordHash: validHash,
         active: false,
-        roles: [{ role: { id: 'r-2', name: 'VIEWER' } }],
+        roles: [{ role: { id: 'r-2', name: 'VIEWER', permissions: [] } }],
       });
       const res = await app.inject({
         method: 'POST',
@@ -170,6 +175,7 @@ describe('auth routes', () => {
       expect(body.email).toBe('alice@afrinov.local');
       expect(body.name).toBe('Alice');
       expect(body.roles).toEqual(['ADMIN']);
+      expect((body as unknown as { permissions: string[] }).permissions).toEqual(['adjust:inventory', 'approve:write_off']);
     });
 
     it('returns 401 for a malformed token', async () => {

@@ -79,7 +79,7 @@ describe('Stores and Projects materials over real HTTP', () => {
     // As the workbook import and the migration leave it: Project Material with no project.
     const old = await prisma.material.create({ data: { sku: `IT-SEC-OLD-${run}`, name: 'Old plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' } });
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections rack ${run}`, type: 'RACK' });
-    expect((await api('POST', '/inventory-adjustments', { materialId: old.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER' })).status).toBe(201);
+    expect((await api('POST', '/inventory-adjustments', { materialId: old.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections fitter ${run}`, type: 'WORKER' });
     const issue = () => api<{ error?: { message: string } }>('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber, lines: [{ materialId: old.id, locationId: loc.body.id, quantity: 1 }] });
 
@@ -152,7 +152,7 @@ describe('Stores and Projects materials over real HTTP', () => {
     const disc = await create({ sku: `IT-SEC-DISC2-${run}`, category: 'CONSUMABLES' });
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections shelf ${run}`, type: 'RACK' });
     for (const m of [pipe.body, disc.body]) {
-      expect((await api('POST', '/inventory-adjustments', { materialId: m.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER' })).status).toBe(201);
+      expect((await api('POST', '/inventory-adjustments', { materialId: m.id, locationId: loc.body.id, quantity: 5, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
     }
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections rigger ${run}`, type: 'WORKER' });
     const issue = (materialId: string, to?: string) => api<{ error?: { message: string } }>('POST', '/inventory-issues', {
@@ -213,7 +213,7 @@ describe('Stores and Projects materials over real HTTP', () => {
     for (const p of [job, next]) expect((await api('POST', '/projects', { projectNumber: p, name: `Job ${p}` })).status).toBe(201);
     const pipe = await create({ sku: `IT-SEC-LEFT-${run}`, category: 'PROJECT_MATERIAL', projectNumber: job, unitCost: 25 });
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections bay ${run}`, type: 'RACK' });
-    expect((await api('POST', '/inventory-adjustments', { materialId: pipe.body.id, locationId: loc.body.id, quantity: 10, reasonCode: 'OTHER' })).status).toBe(201);
+    expect((await api('POST', '/inventory-adjustments', { materialId: pipe.body.id, locationId: loc.body.id, quantity: 10, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT sections welder ${run}`, type: 'WORKER' });
     const issue = (to: string) => api('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber: to, lines: [{ materialId: pipe.body.id, locationId: loc.body.id, quantity: 3 }] });
     expect((await issue(job)).status).toBe(201);

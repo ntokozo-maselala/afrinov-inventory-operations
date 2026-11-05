@@ -54,6 +54,8 @@ export function useNavGroups(): NavGroup[] {
         { to: '/stock/receive', label: 'Receive stock', icon: <Icon.ArrowDown />, permissions: PROCUREMENT_ENABLED ? ['inventory:receive', 'orders:receive'] : ['inventory:receive'] },
         { to: '/stock/return', label: 'Return stock', icon: <Icon.Arrows />, permissions: ['inventory:return'] },
         { to: '/stock/count', label: 'Count stock', icon: <Icon.Check />, permissions: ['inventory:count'] },
+        // Adjustments over the write-off limit, waiting for someone other than whoever asked.
+        { to: '/stock/write-offs', label: 'Write-offs to approve', icon: <Icon.Warning />, permissions: ['writeoffs:view'] },
         // The storeman orders stock for the shelf; Procurement buys for projects.
         ...(PROCUREMENT_ENABLED ? [{ to: '/stock/orders', label: 'Order stock', icon: <Icon.Cart />, permissions: ['stores:view'] }] : []),
         { to: '/tools', label: 'Tools', icon: <Icon.Wrench /> },

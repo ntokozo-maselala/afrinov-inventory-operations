@@ -13,7 +13,7 @@ import { Errors } from '../../shared/errors.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } from '../../shared/decimal.js';
-import { recomputeBalance, getCurrentBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
+import { recomputeBalance, getCurrentBalance, lockInventoryBalances, type InventoryBalanceKey } from '../../shared/inventory/balances.js';
 import { classifyItem, getStatusBands, needsAttention } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { checkProjectMaterial, refuseUnassigned } from './material-section.js';
@@ -21,6 +21,8 @@ import { MOVE_TO_STORES_REFERENCE } from './project-leftovers.service.js';
 import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
+import { checkWriteOff, writeOffRule } from './write-off-limit.js';
+import { checkWholeUnits } from '../../shared/units.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -55,18 +57,82 @@ export interface AdjustmentInput {
   materialId: string;
   locationId: string;
   quantity: number | string | Decimal;
-  reasonCode: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER';
+  reasonCode: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | 'FOUND';
   reasonNote?: string;
   /** Who was responsible (damage, loss or scrap only); naming someone needs a note saying what happened. */
   recipientId?: string | null;
   /** Whose stock is adjusted: a project's, or Stores stock (null or left out). */
   heldForProject?: string | null;
   actorId: string;
+  /**
+   * Set by the services, never from a request body: who the stock was used
+   * for, and what it comes from (a stock count, its count id), as an
+   * adjustment waiting for approval keeps them (ADR-028).
+   */
+  projectNumber?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
+}
+
+/**
+ * Whether this adjustment can be posted now: its rules, its item, location,
+ * project and recipient still active, and enough stock for a negative one.
+ * adjust() checks it under the balance lock; a write-off waiting for approval
+ * is checked when it is asked for, and again when it is approved.
+ */
+export async function checkAdjustment(input: AdjustmentInput, tx: Prisma.TransactionClient): Promise<Decimal> {
+  const qty = toDecimal(input.quantity);
+  if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
+  if (input.recipientId) {
+    if (!takesResponsible(input.reasonCode)) throw Errors.validation('Only damage, loss or scrap records who was responsible.');
+    if (!input.reasonNote?.trim()) throw Errors.validation('Say what happened when naming who was responsible.');
+  }
+  const heldForProject = input.heldForProject ?? null;
+  await checkMaterialActive(input.materialId, tx);
+  await checkLocationActive(input.locationId, tx);
+  if (heldForProject) await checkProjectExists(heldForProject, tx);
+  if (input.recipientId) await checkRecipientActive(input.recipientId, tx);
+
+  // See issue(): stock can never go below zero.
+  if (qty.isNegative()) {
+    const balance = await getCurrentBalance({ materialId: input.materialId, locationId: input.locationId, heldForProject }, tx);
+    if (balance.lt(qty.negated())) {
+      throw Errors.insufficientBalance(
+        `Cannot adjust ${qty.toString()} units: only ${balance.toString()} available.`,
+        { materialId: input.materialId, locationId: input.locationId, requested: qty.toString(), available: balance.toString() },
+      );
+    }
+  }
+  return qty;
 }
 
 /** The write-off reasons that record who was responsible, when anyone is known. */
 export const RESPONSIBLE_REASONS = ['DAMAGE', 'LOSS', 'SCRAP'] as const;
 export const takesResponsible = (reason: string) => (RESPONSIBLE_REASONS as readonly string[]).includes(reason);
+
+/** Reasons that need a note: a gain, or anything the reason doesn't explain. */
+const NOTE_REASONS = ['FOUND', 'OTHER'] as const;
+
+/**
+ * The rules for an adjustment someone asks for, on top of checkAdjustment():
+ * the reason sets the direction (damage, loss and scrap only remove stock,
+ * found stock only adds it), a gain or an "other" says why, and a counted item
+ * moves in whole units. Checked when it is asked for, not again when approved,
+ * so a request already waiting is decided as it was made.
+ */
+export async function checkRequestedAdjustment(input: AdjustmentInput, tx: Prisma.TransactionClient): Promise<void> {
+  const qty = toDecimal(input.quantity);
+  if (takesResponsible(input.reasonCode) && qty.isPositive()) {
+    throw Errors.validation('Damage, loss and scrap remove stock. To add stock, choose Found or Other.');
+  }
+  if (input.reasonCode === 'FOUND' && qty.isNegative()) {
+    throw Errors.validation('Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.');
+  }
+  if ((NOTE_REASONS as readonly string[]).includes(input.reasonCode) && !input.reasonNote?.trim()) {
+    throw Errors.validation(input.reasonCode === 'FOUND' ? 'Say where the stock was found.' : 'Say why the stock is adjusted.');
+  }
+  await checkWholeUnits([{ materialId: input.materialId, quantity: qty }], tx);
+}
 
 export interface ReturnInput {
   issueTransactionId: string;
@@ -210,6 +276,10 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   const closedOff = closedTotal((await closedOffAgainst(tx, [issue.id])).get(issue.id));
   const returnable = issued.minus(alreadyReturned).minus(closedOff);
   const total = input.qty.plus(usedUp).plus(broken);
+  // Whole units, but for one part that carries the part-unit still out on an
+  // issue made before the rule, so what is left becomes whole.
+  await checkWholeUnits([input.qty, usedUp, broken].filter(gtZero).map((quantity) => (
+    { materialId: issue.materialId, quantity, group: issue.id, remainder: returnable })), tx);
   if (total.gt(returnable)) {
     const what = marking ? `take back ${total.toString()} × ${issue.material.sku}` : `return ${input.qty.toString()} × ${issue.material.sku}`;
     throw Errors.validation(
@@ -712,6 +782,7 @@ export const InventoryService = {
       select: { id: true, location: { select: { name: true } } },
     });
     const partnerLocation = new Map(partners.map((p) => [p.id, p.location.name]));
+    const writeOff = await writeOffRule();
     const movements = new Map(rows.map((t) => [t.id, {
       id: t.id,
       cursor: historyCursor(t),
@@ -741,6 +812,8 @@ export const InventoryService = {
       referenceId: t.referenceId,
       reversesId: t.reversesId,
       reversedById: t.reversedBy?.id ?? null,
+      // An adjustment over the write-off limit isn't reversed directly: it is put right by one the other way, for approval.
+      reversalNeedsApproval: t.type === InventoryTransactionType.ADJUSTMENT && writeOff(t.quantity, t.material.unitCost).needsApproval,
       returnedQuantity: t.type === InventoryTransactionType.ISSUE ? (returnedByIssue.get(t.id)?.toString() ?? '0') : null,
       // Issues: marked used up or broken so far. Returns: marked in the same
       // counter visit. trackUse says whether the item asks for it.
@@ -760,7 +833,7 @@ export const InventoryService = {
       ...(() => {
         const r = t.referenceId ? receiptById.get(t.referenceId) : undefined;
         // fromPurchaseOrder: such a receipt also moved the order's received quantities, so it cannot be reversed here.
-        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null, fromPurchaseOrder: !!r?.purchaseOrderId };
+        return { receiptNumber: r?.number ?? null, supplierName: r?.supplier.name ?? null, deliveryRef: r?.deliveryRef ?? null, fromPurchaseOrder: !!r?.purchaseOrderId || t.referenceType === 'PurchaseOrder' };
       })(),
       ...loanFields(t, loanDates),
     }]));
@@ -934,11 +1007,24 @@ export const InventoryService = {
         }
         // Receipts against a purchase order also moved the order's received
         // quantities, so they cannot be reversed here. Counter receipts
-        // (no purchase order) can.
+        // (no purchase order) can. Receiving a whole order at once books its
+        // receipts against the order itself.
+        if (original.referenceType === 'PurchaseOrder') {
+          throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
+        }
         if (original.referenceType === 'GoodsReceipt' && original.referenceId) {
           const gr = await tx.goodsReceipt.findUnique({ where: { id: original.referenceId } });
           if (gr?.purchaseOrderId) {
             throw Errors.invalidState('Stock received against a purchase order cannot be reversed here.');
+          }
+        }
+        // An adjustment over the write-off limit takes someone else's approval,
+        // so undoing one does too: it is put right by an adjustment the other
+        // way, which waits for approval (ADR-028; Qodo, PR #151).
+        if (original.type === InventoryTransactionType.ADJUSTMENT) {
+          const material = await tx.material.findUnique({ where: { id: original.materialId }, select: { unitCost: true } });
+          if ((await checkWriteOff(original.quantity, material?.unitCost ?? null, tx)).needsApproval) {
+            throw Errors.invalidState("This adjustment is over the write-off limit, or its item has no unit cost, so it isn't reversed directly. Post an adjustment the other way instead: it waits for someone else to approve it.");
           }
         }
 
@@ -1069,6 +1155,7 @@ export const InventoryService = {
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
         materials.set(t.materialId, material);
       }
+      await checkWholeUnits(lines.map((l) => ({ materialId: l.materialId, quantity: l.qty })), tx);
       // A project's own stock goes to that project only.
       for (const t of totals.values()) {
         if (t.heldForProject && t.heldForProject !== (input.projectNumber ?? null)) {
@@ -1186,6 +1273,17 @@ export const InventoryService = {
     }
 
     return inTx(within, async (tx) => {
+      // Every line's stock is locked first, in the one sorted order an issue
+      // takes, so two return slips (or a slip and an issue) over the same
+      // items cannot deadlock. bookReturn takes them again, which is free.
+      const keys: InventoryBalanceKey[] = [];
+      for (const id of new Set(lines.map((l) => l.issueTransactionId))) {
+        const issue = await tx.inventoryTransaction.findUnique({ where: { id }, select: { materialId: true, locationId: true, heldForProject: true } });
+        if (!issue) continue;
+        keys.push(issue);
+        for (const l of lines) if (l.issueTransactionId === id && l.locationId) keys.push({ ...issue, locationId: l.locationId });
+      }
+      await lockInventoryBalances(keys, tx);
       const postedAt = new Date();
       const transactionIds: string[] = [];
       const outcomeIds: string[] = [];
@@ -1279,6 +1377,7 @@ export const InventoryService = {
     return inTx(within, async (tx) => {
       await lockInventoryBalances([from, to], tx);
       await checkMaterialActive(input.materialId, tx);
+      await checkWholeUnits([{ materialId: input.materialId, quantity: qty }], tx);
       if (heldForProject) await checkProjectExists(heldForProject, tx);
       await checkLocationActive(input.fromLocationId, tx);
       await checkLocationActive(input.toLocationId, tx);
@@ -1337,33 +1436,12 @@ export const InventoryService = {
   },
 
   async adjust(input: AdjustmentInput, within?: Prisma.TransactionClient): Promise<{ transactionId: string }> {
-    const qty = toDecimal(input.quantity);
-    if (qty.isZero()) throw Errors.validation('Adjustment quantity must be non-zero');
-    if (input.recipientId) {
-      if (!takesResponsible(input.reasonCode)) throw Errors.validation('Only damage, loss or scrap records who was responsible.');
-      if (!input.reasonNote?.trim()) throw Errors.validation('Say what happened when naming who was responsible.');
-    }
-
     // Stores stock, or a project's own (Project Material Through the Store Roadmap, Phase 3).
     const heldForProject = input.heldForProject ?? null;
     const stock = { materialId: input.materialId, locationId: input.locationId, heldForProject };
     return inTx(within, async (tx) => {
       await lockInventoryBalances([stock], tx);
-      await checkMaterialActive(input.materialId, tx);
-      await checkLocationActive(input.locationId, tx);
-      if (heldForProject) await checkProjectExists(heldForProject, tx);
-      if (input.recipientId) await checkRecipientActive(input.recipientId, tx);
-
-      // See issue(): stock can never go below zero.
-      if (qty.isNegative()) {
-        const balance = await getCurrentBalance(stock, tx);
-        if (balance.lt(qty.negated())) {
-          throw Errors.insufficientBalance(
-            `Cannot adjust ${qty.toString()} units: only ${balance.toString()} available.`,
-            { materialId: input.materialId, locationId: input.locationId, requested: qty.toString(), available: balance.toString() },
-          );
-        }
-      }
+      const qty = await checkAdjustment(input, tx);
 
       const trx = await tx.inventoryTransaction.create({
         data: {
@@ -1375,6 +1453,9 @@ export const InventoryService = {
           reasonCode: input.reasonCode,
           reasonNote: input.reasonNote ?? null,
           recipientId: input.recipientId ?? null,
+          projectNumber: input.projectNumber ?? null,
+          referenceType: input.referenceType ?? null,
+          referenceId: input.referenceId ?? null,
           actorId: input.actorId,
         },
       });
@@ -1444,7 +1525,7 @@ export const InventoryService = {
 
       const claimed = await tx.goodsReceipt.updateMany({
         where: { id: gr.id, status: 'SUBMITTED' },
-        data: { status: 'POSTED' },
+        data: { status: 'POSTED', postedAt: new Date() },
       });
       if (claimed.count === 0) throw Errors.invalidState('Goods receipt already posted');
 

@@ -226,6 +226,8 @@ describe('line discounts', () => {
     await screen.findByRole('heading', { name: 'New purchase order' });
     fireEvent.change(screen.getByLabelText(/^Supplier(?! address)/), { target: { value: 's-za' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    // The catalogue loads after the heading: until it does, the line can't take the item.
+    await within(screen.getByLabelText('Line 1 material')).findByRole('option', { name: /^DISC-115/ });
     fireEvent.change(screen.getByLabelText('Line 1 material'), { target: { value: 'm-1' } });
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText('Line 1 discount percent'), { target: { value: '120' } });

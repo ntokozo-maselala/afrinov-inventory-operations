@@ -81,7 +81,7 @@ test.describe('failure handling over the live stack', () => {
     // Scope to the combobox's own listbox: the Project <select> also exposes
     // hidden options with role="option".
     await page.getByRole('listbox').getByRole('option').first().click();
-    await page.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
+    await page.getByRole('textbox', { name: 'Quantity' }).fill('1');
     await failApi(page, '**/api/v1/inventory-issues', 422, {
       error: { code: 'INSUFFICIENT_BALANCE', message: 'Only 2 of SKU TEST-1 are available at D-1.' },
     });

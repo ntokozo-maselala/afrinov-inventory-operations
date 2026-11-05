@@ -5,6 +5,8 @@ import { LocationService } from './location.service.js';
 import { LEFTOVER_CATEGORIES, ProjectLeftoversService } from './project-leftovers.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+import { prisma } from '../../shared/db.js';
+import { listUnits } from '../../shared/units.js';
 
 export const createMaterialSchema = z.object({
   sku: z.string().min(1),
@@ -75,6 +77,9 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
       projectNumber: q.projectNumber,
     });
   });
+
+  // The units an item can have, and whether each is counted or measured.
+  app.get('/units-of-measure', { preHandler: [app.authenticate] }, async () => listUnits(prisma));
 
   app.get('/materials/:id', { preHandler: [app.authenticate] }, async (req) => {
     const id = (req.params as { id: string }).id;

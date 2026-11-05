@@ -18,7 +18,7 @@ export const AuthService = {
   async login(email: string, password: string) {
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
-      include: { roles: { include: { role: true } } },
+      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
     });
     if (!user || !user.active) throw Errors.unauthenticated('Invalid credentials');
     const ok = await this.verifyPassword(password, user.passwordHash);
@@ -29,6 +29,9 @@ export const AuthService = {
       name: user.name,
       active: user.active,
       roles: user.roles.map((r) => r.role.name),
+      // What the roles grant, as the server checks it, so the screens can
+      // follow a grant that isn't in their own role table (Qodo, PR #151).
+      permissions: [...new Set(user.roles.flatMap((r) => r.role.permissions.map((p) => p.permission.code)))].sort(),
     };
   },
 };

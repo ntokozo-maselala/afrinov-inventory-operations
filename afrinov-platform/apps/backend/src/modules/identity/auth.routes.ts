@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from './identity.service.js';
+import { loadUserPermissions } from '../../shared/authorization.js';
 
 export const loginSchema = z.object({
   email: z.email(),
@@ -22,6 +23,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/auth/me', { preHandler: [app.authenticate] }, async (req) => {
     const u = (req as unknown as { user: { sub: string; email: string; name: string; roles: string[] } }).user;
-    return { id: u.sub, email: u.email, name: u.name, roles: u.roles };
+    // Permissions are read now, not from the token, so a changed grant shows on the next load.
+    const permissions = [...(await loadUserPermissions(u.sub, req))].sort();
+    return { id: u.sub, email: u.email, name: u.name, roles: u.roles, permissions };
   });
 }

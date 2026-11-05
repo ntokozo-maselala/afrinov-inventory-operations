@@ -19,6 +19,7 @@ import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 import { cleanText } from './supplier-fields.js';
+import { checkWholeUnits } from '../../shared/units.js';
 import { defaultVatRate, lineMoney, orderTotals } from './po-pricing.js';
 import { PurchaseOrderService, assertProjectOpen } from './procurement.service.js';
 
@@ -401,6 +402,7 @@ export const RfqService = {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
       const projectName = projectNumber ? await openProjectName(projectNumber, tx) : null;
       await checkLines(input.lines, projectNumber, tx);
+      await checkWholeUnits(input.lines, tx);
       const supplierIds = await checkSuppliers(input.supplierIds ?? [], tx);
       const number = await generateRfqNumber(tx, projectNumber);
       const rfq = await tx.rfq.create({
@@ -488,6 +490,7 @@ export const RfqService = {
       // The lines are checked against the project they will have, kept or new.
       const nextLines = input.lines ?? rfq.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity) }));
       if (input.lines !== undefined || 'projectNumber' in data) await checkLines(nextLines, projectNumber, tx);
+      if (input.lines !== undefined) await checkWholeUnits(input.lines, tx);
       const linesChanged = input.lines !== undefined
         && JSON.stringify(linesForLog(input.lines)) !== JSON.stringify(linesForLog(rfq.lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity.toNumber() }))));
       if (linesChanged) {

@@ -57,6 +57,8 @@ export const PERMISSION_ROLES = {
   'inventory:transfer': ['STORE_CONTROLLER'], // transfer:inventory
   'inventory:adjust': ['STORE_CONTROLLER'], // adjust:inventory
   'inventory:count': ['STORE_CONTROLLER'], // adjust:inventory (a count posts its differences as adjustments)
+  'writeoffs:approve': ['STORE_CONTROLLER'], // approve:write_off (someone else's, over the limit; never their own)
+  'writeoffs:view': ['STORE_CONTROLLER'], // approve:write_off or adjust:inventory (the Write-offs to approve page)
   'inventory:reverse': ['STORE_CONTROLLER'], // reverse:inventory_transaction
   'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
   'tools:extend': ['STORE_CONTROLLER'], // extend:tool_loan
@@ -78,6 +80,16 @@ export const PERMISSION_ROLES = {
 
 export type Permission = keyof typeof PERMISSION_ROLES;
 
+/**
+ * Server permissions that also admit to a UI permission, for grants the role
+ * table above doesn't know: a role given approve:write_off in the database
+ * then sees the approvals it may make (Qodo, PR #151). Any one admits.
+ */
+const SERVER_GRANTS: Partial<Record<Permission, readonly string[]>> = {
+  'writeoffs:approve': ['approve:write_off'],
+  'writeoffs:view': ['approve:write_off', 'adjust:inventory'],
+};
+
 export function usePermissions(): { hasPermission: (permission: Permission | string) => boolean } {
   const { user } = useAuth();
   const roles = (user?.roles ?? []).map((r) => r.toUpperCase() as RoleName);
@@ -89,7 +101,9 @@ export function usePermissions(): { hasPermission: (permission: Permission | str
     // The server enforces permissions authoritatively; this is
     // defence-in-depth for UI gating.
     const allowed: readonly RoleName[] | undefined = (PERMISSION_ROLES as Record<string, readonly RoleName[]>)[permission];
-    return !!allowed && allowed.some((r) => roles.includes(r));
+    if (allowed?.some((r) => roles.includes(r))) return true;
+    const granted = SERVER_GRANTS[permission as Permission];
+    return !!granted && granted.some((code) => user?.permissions?.includes(code));
   };
 
   return { hasPermission };

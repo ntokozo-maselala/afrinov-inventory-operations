@@ -39,6 +39,9 @@ Counts are a guide, not a contract; they move with every feature. Run
 
 To check that balances and issued stock add up in a database, run
 `npm run check:issued-stock --workspace=@afrinov/backend` (read-only).
+To see how a database's units of measure map onto the list, and which counted
+items hold part of a unit, run `npm run check:units --workspace=@afrinov/backend`
+(read-only; works before and after the units migration).
 
 Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`
@@ -135,6 +138,28 @@ Use these forms; the older spellings still work but are deprecated or removed.
   the same key on a different record is a `CONFLICT`, not a replay. Wire new
   mutation forms through `useIdempotencyKey` and rotate the key only after a
   confirmed success — never after an `OUTCOME_UNKNOWN` failure.
+- **Quantities follow the item's unit.** Units live in `units_of_measure`;
+  a COUNTED unit (each, pair, box) takes whole numbers, a MEASURED one (m, kg, l)
+  up to 4 decimals. Every service that takes a quantity a person typed calls
+  `checkWholeUnits` (`src/shared/units.ts`) inside the transaction that
+  writes; figures the system works out are not checked again. Where something
+  is left to close off (owed on an order line, out on an issue or a tool loan),
+  pass it as the `remainder`, with the lines taking from it in one `group`
+  (`fitsRemainder`): each is whole, except one may carry exactly the
+  remainder's part-unit, so stock booked in part-units before the rule can be
+  finished and none is started. `checkWholeUnits` holds the items' rows
+  `FOR SHARE`, and a change to a counted unit takes them `FOR UPDATE`, so the
+  two can't interleave. On the frontend, use `QuantityInput` and
+  `parseQuantity` (`src/lib/quantity.ts`, with the same `remainder` option),
+  never `type="number"`, for a stock quantity. A new spelling of a unit goes in
+  `UNIT_ALIASES`.
+- **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
+  stock, Found only adds it, Other goes either way; Found and Other need a note
+  (`checkRequestedAdjustment`). The API still takes the signed quantity.
+- **One adjustment of a stock waits at a time.** A manual adjustment, like a
+  stock count, takes the balance lock and is refused while any adjustment of
+  that material, location and project stock is waiting for approval; approving
+  both would correct the same difference twice.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

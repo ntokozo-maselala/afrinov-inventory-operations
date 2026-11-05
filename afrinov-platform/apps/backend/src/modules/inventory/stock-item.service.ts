@@ -16,6 +16,7 @@ import { toDecimal, gtZero, ZERO } from '../../shared/decimal.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { projectForNewMaterial } from './material-section.js';
 import { recomputeBalance, storesStock } from '../../shared/inventory/balances.js';
+import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js';
 
 export type MaterialCategory =
   | 'FASTENERS_SLUGS_INSULATION'
@@ -82,6 +83,9 @@ export const StockItemService = {
       const existing = await tx.material.findUnique({ where: { sku } });
       if (existing) throw Errors.conflict(`An item with this SKU already exists.`);
       const projectNumber = await projectForNewMaterial(input, tx, { projectRequired: true });
+      const unit = await checkUnitOfMeasure(unitOfMeasure, tx);
+      checkQuantityForUnit(name, unit, initialQty, 'initialQuantity');
+      if (input.requiredStock !== undefined) checkQuantityForUnit(name, unit, input.requiredStock, 'requiredStock');
 
       const material = await tx.material.create({
         data: {
@@ -89,7 +93,7 @@ export const StockItemService = {
           name,
           description: input.description?.trim() || null,
           category: input.category,
-          unitOfMeasure,
+          unitOfMeasure: unit.code,
           requiredStock: input.requiredStock ?? 0,
           unitCost: input.unitCost ?? null,
           projectNumber,

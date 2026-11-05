@@ -275,7 +275,7 @@ describe('IssueStock with project material', () => {
     await waitFor(() => expect(screen.getByLabelText(/Project/)).toHaveValue('AFRI-1325'));
     expect(screen.getByLabelText(/Project/)).toBeDisabled();
     expect(screen.getByLabelText('Item 1')).toHaveValue('Pipe 7 (HELD-7) · A-1 · held for AFRI-1325');
-    expect(screen.getAllByLabelText('Quantity')[0]).toHaveValue(4);
+    expect(screen.getAllByLabelText('Quantity')[0]).toHaveValue('4');
     // A line no longer held isn't added, and the page says so (Qodo, PR #146).
     expect(screen.queryByLabelText('Item 2')).not.toBeInTheDocument();
     expect(screen.getByText('1 line of that delivery can\u2019t be issued here')).toBeInTheDocument();
