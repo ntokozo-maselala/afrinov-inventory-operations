@@ -500,6 +500,56 @@ describe('receiving stock over real HTTP', () => {
       ]);
     });
 
+    // Qodo, PR #155: a signature for the old money must not survive an edit made at the same moment.
+    it('makes signing and editing the money take turns on the order', async () => {
+      const email = `it-turns-${run}@afrinov.local`;
+      const password = `It-${run}-turns`;
+      expect((await api('POST', '/users', { email, name: `IT turns ${run}`, password, roleNames: ['PROCUREMENT_MANAGER'] })).status).toBe(201);
+      const manager = client(server.port, await login(server.port, email, password));
+      const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
+      const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
+      expect((await api('PUT', approvalKey, { value: true })).status).toBe(200);
+      try {
+        const projectNumber = `IT-TURN-${run}`;
+        expect((await api('POST', '/projects', { projectNumber, name: `IT turns ${run}` })).status).toBe(201);
+        const beam = await api<{ id: string }>('POST', '/materials', {
+          sku: `IT-TURN-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber,
+        });
+        const po = await api<{ id: string; lines: Array<{ id: string }> }>('POST', '/purchase-orders', { supplierId, projectNumber, lines: [{ materialId: beam.body.id, orderedQty: 1, unitPrice: 300000 }] });
+        await api('POST', `/purchase-orders/${po.body.id}/submit`);
+
+        // Holds the order's row, and checks the request waits for it.
+        const waitsForTheOrder = async <T>(request: () => Promise<T>): Promise<T> => {
+          let release!: () => void;
+          let locked!: () => void;
+          const held = new Promise<void>((r) => { release = r; });
+          const acquired = new Promise<void>((r) => { locked = r; });
+          const holder = prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${po.body.id} FOR UPDATE`;
+            locked();
+            await held;
+          }, { timeout: 20000 });
+          await acquired;
+          let finished = false;
+          const pending = request().then((r) => { finished = true; return r; });
+          await new Promise((r) => setTimeout(r, 500));
+          expect(finished).toBe(false);
+          release();
+          await holder;
+          return pending;
+        };
+
+        const signed = await waitsForTheOrder(() => manager<{ status: string }>('POST', `/purchase-orders/${po.body.id}/approve`));
+        expect([signed.status, signed.body.status]).toEqual([200, 'PENDING_APPROVAL']);
+        const edited = await waitsForTheOrder(() => api('PATCH', `/purchase-orders/${po.body.id}`, { linePrices: [{ lineId: po.body.lines[0]!.id, unitPrice: 310000 }] }));
+        expect(edited.status).toBe(200);
+        const after = await api<{ signatures: unknown[] }>('GET', `/purchase-orders/${po.body.id}`);
+        expect(after.body.signatures).toEqual([]);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
+
     it('converts another currency at the rate locked on submission', async () => {
       const key = '/settings/purchaseOrders.exchangeRateUSD';
       const was = (await api<{ value: number }>('GET', key)).body.value;

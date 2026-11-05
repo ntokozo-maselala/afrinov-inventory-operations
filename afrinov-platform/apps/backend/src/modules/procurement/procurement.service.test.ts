@@ -976,6 +976,24 @@ describe('PurchaseOrderService signing an order', () => {
       expect(db.pos.get(po.id)!.status).toBe('DRAFT');
     });
 
+    it('needs a rate and locks it with approval turned off too', async () => {
+      const { PurchaseOrderService } = await import('./procurement.service.js');
+      const { SettingsService } = await import('../settings/settings.service.js');
+      await SettingsService.ensureSeeded();
+      await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', false, 'user-1');
+      await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+      try {
+        const po = await euroOrder(10);
+        await expect(PurchaseOrderService.submit(po.id, 'user-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/no exchange rate for EUR yet/) });
+        await SettingsService.set('purchaseOrders.exchangeRateEUR', 20, 'user-1');
+        expect(await PurchaseOrderService.submit(po.id, 'user-1')).toMatchObject({ status: 'APPROVED' });
+        expect(String((db.pos.get(po.id) as unknown as { exchangeRate: unknown }).exchangeRate)).toBe('20');
+      } finally {
+        await SettingsService.set('purchaseOrders.requireApprovalBeforeProcessing', true, 'user-1');
+        await SettingsService.set('purchaseOrders.exchangeRateEUR', 0, 'user-1');
+      }
+    });
+
     it('locks the rate at submission, so a later change does not move who signs', async () => {
       const { PurchaseOrderService } = await import('./procurement.service.js');
       const { SettingsService } = await import('../settings/settings.service.js');

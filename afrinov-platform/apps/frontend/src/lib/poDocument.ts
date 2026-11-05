@@ -372,6 +372,12 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
       `${s.standIn ? 'Stood in, signed' : 'Signed'} ${formatDate(s.signedAt)}`,
       i + 1,
     ));
+  } else if (signed.length === 1) {
+    // Part-signed, it isn't approved yet; the stamp across the page says so too.
+    const only = signed[0]!;
+    const done = po.approvedAt ? 'approved' : 'signed';
+    signature('Authorization', only.signedBy?.name ?? po.approvedBy?.name ?? dash,
+      `${only.standIn ? `Stood in, ${done}` : done === 'approved' ? 'Approved' : 'Signed'} ${formatDate(only.signedAt)}`, 1);
   } else {
     signature('Authorization', po.approvedBy?.name ?? 'Not yet approved', po.approvedAt ? `Approved ${formatDate(po.approvedAt)}` : '', 1);
   }

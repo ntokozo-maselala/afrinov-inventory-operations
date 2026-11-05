@@ -1299,6 +1299,12 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (po.projectNumber) assertProjectOpen(po.projectNumber);
     const before = { status: po.status };
     po.history = po.history ?? [];
+    // As the server: an order in another currency locks the rate here, and needs one.
+    if ((po.currency ?? 'ZAR') !== 'ZAR') {
+      const rate = Number(MOCK_SETTINGS[`purchaseOrders.exchangeRate${po.currency}`]?.value ?? 0);
+      if (!rate) throw err('VALIDATION_ERROR', `This order is in ${po.currency}, and there is no exchange rate for ${po.currency} yet. An admin can add one under Settings → Purchase orders.`);
+      po.exchangeRate = String(rate);
+    }
     // As the server: with approval not required, submission approves it, and
     // it keeps the small print it was approved with.
     if (MOCK_SETTINGS['purchaseOrders.requireApprovalBeforeProcessing']?.value === false) {
@@ -1308,12 +1314,6 @@ function route(method: string, path: string, body?: unknown): unknown {
       po.printedTerms = mockPrintedTerms();
       po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT_AUTO_APPROVE', actorId: 'u-admin', before, after: { status: po.status, autoApprove: true }, createdAt: new Date().toISOString() });
       return po;
-    }
-    // As the server: an order in another currency locks the rate here, and needs one.
-    if ((po.currency ?? 'ZAR') !== 'ZAR') {
-      const rate = Number(MOCK_SETTINGS[`purchaseOrders.exchangeRate${po.currency}`]?.value ?? 0);
-      if (!rate) throw err('VALIDATION_ERROR', `This order is in ${po.currency}, and there is no exchange rate for ${po.currency} yet. An admin can add one under Settings → Purchase orders.`);
-      po.exchangeRate = String(rate);
     }
     po.status = 'PENDING_APPROVAL';
     po.history.push({ id: nextId('audit'), action: 'PO_SUBMIT', actorId: 'u-admin', before, after: { status: po.status }, createdAt: new Date().toISOString() });

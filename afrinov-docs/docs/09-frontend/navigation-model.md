@@ -24,8 +24,10 @@ Menu items for actions are shown only to roles that may take them, and
 action buttons inside pages are hidden by role; an action page reached by a
 typed or old link shows a "no access" message (`10-security/access-control.md`).
 After sign-in the user lands on the page set by the
-`general.defaultLandingPage` setting, except that a user who only signs orders
-(or holds only the view-only APPROVER role) lands on the purchase orders waiting for their approval.
+`general.defaultLandingPage` setting, except that a user who signs only project orders (Director, CEO), or holds only
+the view-only APPROVER role, lands on the purchase orders waiting for their
+approval. The Procurement Manager and Workshop Manager sign Stores orders too, so
+they start on the Dashboard, whose Pending Approvals card counts both kinds.
 
 ## Evidence
 - `afrinov-platform/apps/frontend/src/hooks/useNavGroups.tsx`

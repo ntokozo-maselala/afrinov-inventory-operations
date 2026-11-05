@@ -579,6 +579,8 @@ export const PurchaseOrderService = {
     const requireApproval = await SettingsService.getValue<boolean>('purchaseOrders.requireApprovalBeforeProcessing');
     const approvalSettings = await loadApprovalSettings();
     return prisma.$transaction(async (tx) => {
+      // Takes turns with signing: a signature is for the money as it stood.
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${input.id} FOR UPDATE`;
       const po = await tx.purchaseOrder.findUnique({ where: { id: input.id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       if (!isEditable(po.status, allowEditAfterApproval)) {
@@ -715,11 +717,11 @@ export const PurchaseOrderService = {
       refuseProjectMaterialOnStoresOrder(po.projectNumber, await lineMaterialsOf(po.lines.map((l) => l.materialId), tx));
       if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
       const now = new Date();
+      // The rate locks here, so who has to sign can't move with today's rate.
+      const exchangeRate = exchangeRateOf({ currency: po.currency, exchangeRate: null }, approvalSettings);
+      if (po.currency !== 'ZAR' && !exchangeRate) throw Errors.validation(noRateMessage(po.currency));
       if (requireApproval) {
         const target: PurchaseOrderStatus = 'PENDING_APPROVAL';
-        // The rate locks here, so who has to sign can't move with today's rate.
-        const exchangeRate = exchangeRateOf({ currency: po.currency, exchangeRate: null }, approvalSettings);
-        if (po.currency !== 'ZAR' && !exchangeRate) throw Errors.validation(noRateMessage(po.currency));
         const result = await tx.purchaseOrder.updateMany({
           where: { id, status: { in: allowed } },
           data: { status: target, exchangeRate },
@@ -742,7 +744,7 @@ export const PurchaseOrderService = {
         // the small print it was approved with.
         const result = await tx.purchaseOrder.updateMany({
           where: { id, status: { in: allowed } },
-          data: { status: 'APPROVED', approvedAt: now, approvedById: actorId, printedTerms: await currentPrintedTerms(tx) },
+          data: { status: 'APPROVED', approvedAt: now, approvedById: actorId, exchangeRate, printedTerms: await currentPrintedTerms(tx) },
         });
         if (result.count === 0) {
           throw Errors.conflict('This purchase order was updated by another user. Refresh the page to view the latest status.');
@@ -798,6 +800,8 @@ export const PurchaseOrderService = {
     const settings = await loadApprovalSettings();
     const me = await signerOf(actorId);
     return prisma.$transaction(async (tx) => {
+      // Takes turns with an edit, which may clear the signatures or change the money.
+      await tx.$executeRaw`SELECT id FROM purchase_orders WHERE id = ${id} FOR UPDATE`;
       const po = await tx.purchaseOrder.findUnique({ where: { id }, include: { lines: true, signatures: true } });
       if (!po) throw Errors.notFound('PurchaseOrder');
       const allowed: PurchaseOrderStatus[] = ['PENDING_APPROVAL'];

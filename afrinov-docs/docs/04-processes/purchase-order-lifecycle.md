@@ -112,15 +112,17 @@ An order is signed by role, according to its value in rand excluding VAT
 - Every line must have a price before signing, or the value is not known.
 - An order in another currency is converted at the rate in Settings
   (`purchaseOrders.exchangeRateUSD`, `EUR`, `GBP`), which locks on the order
-  when it is submitted. With no rate set it can't be submitted.
+  when it is submitted. With no rate set it can't be submitted, even with
+  approval turned off.
 - Changing a price, discount or VAT rate clears the signatures on an order still
   being signed. An approved order goes back to `PENDING_APPROVAL`, with its
   signatures cleared, if the edit raises its value excluding VAT by any amount,
   changes its VAT rate, leaves it needing a signature it doesn't have, or a line
   loses its price. It stays approved, at a new revision, if its value falls.
-- Those who only sign land on the Purchase orders list filtered to the orders
-  waiting for them (`/purchase-orders?status=mine`, from
-  `GET /purchase-orders?awaitingMyApproval=true`). The Dashboard shows the
+- Those who sign only project orders land on the Purchase orders list filtered
+  to the orders waiting for them (`/purchase-orders?status=mine`, from
+  `GET /purchase-orders?awaitingMyApproval=true`); those who sign Stores orders
+  too start on the Dashboard. The Dashboard shows the
   orders waiting on them now, oldest first, and how many more are pending but
   waiting on prices or someone else.
 

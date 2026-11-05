@@ -244,9 +244,28 @@ describe('the signatures at the foot', () => {
     expect(pdf).toContain('Stood in, signed');
   });
 
-  it('keeps the one Authorization box on an order with one signature', async () => {
+  it('keeps the one Authorization box on an order with one signature, naming who signed', async () => {
     const pdf = text(await buildPoDocument(order({ signatures: signed.slice(0, 1) }), COMPANY));
     expect(pdf).toContain('(Authorization)');
-    expect(pdf).toContain('Approver Name');
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('(Approved ');
+    expect(pdf).not.toContain('Authorization \\(Director\\)');
+  });
+
+  it('marks a stand-in who was the only signature', async () => {
+    const pdf = text(await buildPoDocument(order({ signatures: [{ ...signed[0]!, standIn: true }] }), COMPANY));
+    expect(pdf).toContain('Stood in, approved');
+  });
+
+  it('names the first signer on an order still waiting for the second, not yet as approved', async () => {
+    const pdf = text(await buildPoDocument(order({ status: 'PENDING_APPROVAL', approvedBy: null, approvedAt: null, signatures: signed.slice(0, 1) }), COMPANY));
+    expect(pdf).toContain('Ona Moloane');
+    expect(pdf).toContain('(Signed ');
+    expect(pdf).not.toContain('Not yet approved');
+  });
+
+  it('says not yet approved with no signature at all', async () => {
+    const pdf = text(await buildPoDocument(order({ status: 'PENDING_APPROVAL', approvedBy: null, approvedAt: null, signatures: [] }), COMPANY));
+    expect(pdf).toContain('Not yet approved');
   });
 });
