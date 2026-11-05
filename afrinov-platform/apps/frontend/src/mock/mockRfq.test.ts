@@ -253,3 +253,77 @@ describe('mock: award currency', () => {
     await expect(api.post(`/rfqs/${rfq.id}/award`, { supplierId: 'sup-1' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('quoted in ZAR but now trades in EUR') });
   });
 });
+
+// Sales RFQs: typed lines, numbered apart from Procurement's, and nothing to award.
+describe('mock: Sales requests for quotation', () => {
+  type SalesRfq = { id: string; number: string; status: string; lines: Array<{ id: string; description: string }>; suppliers: Array<{ supplierId: string; declined: boolean; totals: { subtotal: string } | null; quoteFile?: unknown }> };
+  const lines = [{ description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: 24 }];
+  const raiseSales = (body: Record<string, unknown> = {}) => api.post<SalesRfq>('/sales-rfqs', { projectNumber: 'AFRI-1325', lines, supplierIds: ['sup-1', 'sup-2'], ...body });
+
+  it('numbers apart from Procurement, and keeps the typed lines', async () => {
+    await raise({ projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 4 }] });
+    const first = await raiseSales();
+    expect(first).toMatchObject({ number: 'AFRI-02A-1325-02-01', status: 'DRAFT' });
+    expect(first.lines).toMatchObject([{ lineNo: 1, description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: '24' }]);
+    expect((await raiseSales()).number).toBe('AFRI-02A-1325-02-02');
+  });
+
+  it('sends, records a quote and a decline, and cancels', async () => {
+    const draft = await raiseSales();
+    const base = `/sales-rfqs/${draft.id}`;
+    await expect(api.put(`${base}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: draft.lines[0]!.id, unitPrice: 100 }] })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect((await api.post<SalesRfq>(`${base}/send`, {})).status).toBe('SENT');
+    const quoted = await api.put<SalesRfq>(`${base}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: draft.lines[0]!.id, unitPrice: 100 }] });
+    expect(quoted.suppliers[0]!.totals).toMatchObject({ subtotal: '2400.00' });
+    const declined = await api.post<SalesRfq>(`${base}/suppliers/sup-2/decline`, { notes: 'No stock' });
+    expect(declined.suppliers[1]).toMatchObject({ declined: true, totals: null });
+    expect((await api.post<SalesRfq>(`${base}/cancel`, { reason: 'Client went elsewhere' })).status).toBe('CANCELLED');
+    await expect(api.get(`${base}/history`)).resolves.toHaveLength(5);
+  });
+
+  it('refuses a unit not on the list and part of a counted unit, as the server does (Qodo, PR #158)', async () => {
+    await expect(raiseSales({ lines: [{ description: 'Bend', unitOfMeasure: 'furlong', quantity: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('not a unit on the list') });
+    await expect(raiseSales({ lines: [{ description: 'Bend', unitOfMeasure: 'each', quantity: 1.5 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('whole numbers') });
+    const measured = await raiseSales({ lines: [{ description: 'Plate', unitOfMeasure: 'KG', quantity: 12.5 }] });
+    expect(measured.lines).toMatchObject([{ unitOfMeasure: 'kg', quantity: '12.5' }]);
+  });
+
+  it('checks the suppliers and the closing date again when sending, as the server does (Qodo, PR #158)', async () => {
+    const draft = await raiseSales({ supplierIds: ['sup-3'] });
+    const base = `/sales-rfqs/${draft.id}`;
+    await expect(api.post(`${base}/send`, { closingDate: '2020-01-01' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining("can't be before") });
+    await expect(api.post(`${base}/send`, { closingDate: '2099-02-30' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await api.patch('/suppliers/sup-3', { active: false });
+    await expect(api.post(`${base}/send`, {})).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('is inactive') });
+    await api.patch('/suppliers/sup-3', { active: true });
+    expect((await api.post<SalesRfq>(`${base}/send`, {})).status).toBe('SENT');
+    await expect(api.patch(base, { closingDate: '2020-01-01' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('refuses a send once the project has closed, as the server does (Qodo, PR #158)', async () => {
+    const draft = await raiseSales();
+    await api.patch('/projects/AFRI-1325', { status: 'COMPLETED' });
+    await expect(api.post(`/sales-rfqs/${draft.id}/send`, {})).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('completed') });
+  });
+
+  it("takes prices only for this RFQ's lines, kept to what the server holds (Qodo, PR #158)", async () => {
+    const other = await raiseSales();
+    const draft = await raiseSales();
+    const base = `/sales-rfqs/${draft.id}`;
+    await api.post(`${base}/send`, {});
+    const line = draft.lines[0]!.id;
+    const quote = (body: Record<string, unknown>) => api.put<SalesRfq>(`${base}/suppliers/sup-1/quote`, body);
+    await expect(quote({ prices: [{ rfqLineId: other.lines[0]!.id, unitPrice: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('is not on') });
+    await expect(quote({ prices: [{ rfqLineId: line, unitPrice: -1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(quote({ prices: [{ rfqLineId: line, unitPrice: 1.00001 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(quote({ quotedAt: '2099-01-01', prices: [{ rfqLineId: line, unitPrice: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(quote({ validUntil: '2020-01-01', prices: [{ rfqLineId: line, unitPrice: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    const twice = await quote({ prices: [{ rfqLineId: line, unitPrice: 1 }, { rfqLineId: line, unitPrice: 2 }] });
+    expect(twice.suppliers[0]!.totals).toMatchObject({ subtotal: '48.00' });
+  });
+
+  it('refuses a line with no description, and an RFQ it does not have', async () => {
+    await expect(raiseSales({ lines: [{ description: ' ', unitOfMeasure: 'each', quantity: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(api.get('/sales-rfqs/nope')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});

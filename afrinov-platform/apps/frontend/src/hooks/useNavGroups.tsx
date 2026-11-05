@@ -86,6 +86,8 @@ export function useNavGroups(): NavGroup[] {
       title: 'Sales',
       items: [
         { to: '/projects', label: 'Projects', icon: <Icon.Tag /> },
+        // What suppliers quote Sales can give away a job's margin, so buyers and the store don't see it.
+        ...(PROCUREMENT_ENABLED ? [{ to: '/sales-rfqs', label: 'Sales RFQ', icon: <Icon.Doc />, permissions: ['sales:view'] }] : []),
       ],
     },
     {

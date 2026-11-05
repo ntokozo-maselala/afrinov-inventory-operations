@@ -49,7 +49,7 @@ The router in `afrinov-platform/apps/frontend/src/App.tsx` defines these active 
 
 - Public: `/login`.
 - Protected shell: `/`, `/stock`, `/stock/issue`, `/stock/return`, `/stock/receive`, `/stock/count`, `/materials`, `/materials/:id`, `/movements`, `/suppliers`, `/suppliers/:id`, `/reports/stock-status`, `/reports/consumption`, `/reports/stock-report`, `/locations`, `/projects`, `/recipients`, `/tools`, and `/settings`.
-- Conditional procurement routes when `PROCUREMENT_ENABLED`: `/stock/orders`, `/stock/orders/new`, `/purchase-orders`, `/purchase-orders/new`, `/purchase-orders/:id`, `/purchase-orders/:id/edit`, `/rfqs` and its pages, and `/settings/purchase-orders`.
+- Conditional procurement routes when `PROCUREMENT_ENABLED`: `/stock/orders`, `/stock/orders/new`, `/purchase-orders`, `/purchase-orders/new`, `/purchase-orders/:id`, `/purchase-orders/:id/edit`, `/sales-rfqs`, `/sales-rfqs/new`, `/sales-rfqs/:id`, `/sales-rfqs/:id/edit`, `/rfqs` and its pages, and `/settings/purchase-orders`.
 - Settings child routes: `/settings/notifications`, `/settings/inventory`, `/settings/appearance`, `/settings/users`, `/settings/security`, `/settings/system`, `/settings/data`, and `/settings/history`; `/settings` renders the general section.
 - Fallback: all other protected paths render Not found.
 

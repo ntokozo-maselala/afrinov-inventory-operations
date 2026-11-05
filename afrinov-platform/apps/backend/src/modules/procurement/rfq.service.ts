@@ -67,17 +67,17 @@ export function addDays(day: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const asDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
-const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+export const asDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
+export const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
 /** Refuses a day that doesn't exist (2026-02-30), which would otherwise be saved as another one. */
-function checkDay(day: string): void {
+export function checkDay(day: string): void {
   const d = asDate(day);
   if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== day) throw Errors.validation(`${day} is not a date`);
 }
 
 /** A closing date on or after the day it is sent; an RFQ can't close before it goes out. */
-function checkClosingDate(closing: string, issued: string): void {
+export function checkClosingDate(closing: string, issued: string): void {
   checkDay(closing);
   if (closing < issued) throw Errors.validation(`The closing date can't be before ${issued}, the day it was sent`);
 }
@@ -156,7 +156,7 @@ async function quotable(rfqId: string, supplierId: string, tx: Prisma.Transactio
 }
 
 /** A file name safe to keep and to send back in a download: no folders, no control characters. */
-function cleanFileName(name: string): string {
+export function cleanFileName(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? '';
   const clean = [...base].filter((c) => c.charCodeAt(0) >= 0x20 && c !== '\u007f' && c !== '"').join('').trim().slice(0, 196);
   // Always a .pdf, so a download opens as the PDF it was checked to be, never as a page a browser runs.
@@ -165,7 +165,7 @@ function cleanFileName(name: string): string {
 }
 
 /** A recorded quote, or decline, as the audit log keeps it before it changes. */
-function quoteForLog(asked: {
+export function quoteForLog(asked: {
   supplierId: string; declined: boolean; quotedAt: Date | null; quoteReference: string | null; validUntil: Date | null;
   leadTime: string | null; notes: string | null; prices: Array<{ rfqLineId: string; unitPrice: Prisma.Decimal }>;
 }) {
@@ -261,7 +261,7 @@ async function generateRfqNumber(tx: Prisma.TransactionClient, projectNumber: st
  * ends so it can't be archived between the check and the RFQ being written.
  * Returns its name, the RFQ's description by default.
  */
-async function openProjectName(projectNumber: string, tx: Prisma.TransactionClient): Promise<string | null> {
+export async function openProjectName(projectNumber: string, tx: Prisma.TransactionClient): Promise<string | null> {
   await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${projectNumber} FOR SHARE`;
   await assertProjectOpen(projectNumber, tx);
   return cleanText((await tx.project.findUnique({ where: { projectNumber }, select: { name: true } }))?.name);
@@ -293,7 +293,7 @@ async function checkLines(lines: RfqLineInput[], projectNumber: string | null, t
 }
 
 /** The suppliers to ask, each once; missing or inactive ones are refused. */
-async function checkSuppliers(supplierIds: string[], tx: Prisma.TransactionClient): Promise<string[]> {
+export async function checkSuppliers(supplierIds: string[], tx: Prisma.TransactionClient): Promise<string[]> {
   const ids = [...new Set(supplierIds.map((s) => s.trim()))];
   if (ids.length === 0) return [];
   // Held until the RFQ is written, as for its items.
@@ -311,7 +311,7 @@ async function checkSuppliers(supplierIds: string[], tx: Prisma.TransactionClien
  * listed by when they were asked, and rows saved together would otherwise
  * share a time and come back in any order.
  */
-function askedInOrder(supplierIds: string[], from = Date.now()) {
+export function askedInOrder(supplierIds: string[], from = Date.now()) {
   return supplierIds.map((supplierId, i) => ({ supplierId, createdAt: new Date(from + i) }));
 }
 
@@ -321,7 +321,7 @@ const lineRows = (lines: RfqLineInput[]) => lines.map((l, i) => ({ lineNo: i + 1
 const linesForLog = (lines: Array<{ materialId: string; quantity: Prisma.Decimal | number }>) =>
   lines.map((l) => ({ materialId: l.materialId, quantity: String(l.quantity) }));
 
-const person = { select: { id: true, name: true } } as const;
+export const person = { select: { id: true, name: true } } as const;
 
 const DETAIL = {
   project: { select: { projectNumber: true, name: true } },
@@ -341,31 +341,47 @@ const DETAIL = {
 type RfqDetail = Prisma.RfqGetPayload<{ include: typeof DETAIL }>;
 
 /** Sent and past its closing date: quotes may still be recorded, but none are expected. */
-function isClosed(rfq: { status: RfqStatus; closingDate: Date | null }, today = todayInSouthAfrica()): boolean {
+export function isClosed(rfq: { status: string; closingDate: Date | null }, today = todayInSouthAfrica()): boolean {
   return rfq.status === 'SENT' && !!rfq.closingDate && dayOf(rfq.closingDate)! < today;
 }
 
 /**
- * Each supplier's quote priced as an order would be: per line subtotal, VAT
- * and net from po-pricing, VAT at the setting for rand suppliers and 0% for
- * other currencies. Totals are null until the quote is recorded.
+ * One supplier's quote priced as an order would be: per line subtotal, VAT and
+ * net from po-pricing, VAT at the setting for rand suppliers and 0% for other
+ * currencies. Totals are null until the quote is recorded.
  */
-function withQuotes(rfq: RfqDetail, vatSetting: number) {
+export function withQuoteTotals<S extends {
+  currency: string | null; quotedAt: Date | null; supplier: { currency: string | null };
+  prices: Array<{ rfqLineId: string; unitPrice: Prisma.Decimal }>;
+}>(s: S, lines: Array<{ id: string; quantity: Prisma.Decimal }>, vatSetting: number) {
+  const vatRate = defaultVatRate(s.currency ?? s.supplier.currency ?? 'ZAR', vatSetting);
+  const priced = lines.map((l) => ({ rfqLineId: l.id, orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
   return {
-    ...rfq,
-    closed: isClosed(rfq),
-    suppliers: rfq.suppliers.map((s) => {
-      const vatRate = defaultVatRate(s.currency ?? s.supplier.currency ?? 'ZAR', vatSetting);
-      const priced = rfq.lines.map((l) => ({ rfqLineId: l.id, orderedQty: l.quantity, unitPrice: s.prices.find((p) => p.rfqLineId === l.id)?.unitPrice ?? null }));
-      return {
-        ...s,
-        vatRate,
-        totals: s.quotedAt ? orderTotals(priced, vatRate) : null,
-        // Each priced line's subtotal, rounded as the order will round it, for the comparison.
-        lineSubtotals: s.quotedAt ? priced.flatMap((p) => { const m = lineMoney(p, vatRate); return m ? [{ rfqLineId: p.rfqLineId, subtotal: m.subtotal }] : []; }) : [],
-      };
-    }),
+    ...s,
+    vatRate,
+    totals: s.quotedAt ? orderTotals(priced, vatRate) : null,
+    // Each priced line's subtotal, rounded as the order will round it, for the comparison.
+    lineSubtotals: s.quotedAt ? priced.flatMap((p) => { const m = lineMoney(p, vatRate); return m ? [{ rfqLineId: p.rfqLineId, subtotal: m.subtotal }] : []; }) : [],
   };
+}
+
+function withQuotes(rfq: RfqDetail, vatSetting: number) {
+  return { ...rfq, closed: isClosed(rfq), suppliers: rfq.suppliers.map((s) => withQuoteTotals(s, rfq.lines, vatSetting)) };
+}
+
+/** An RFQ's Activity, newest first, each entry with the name of who did it. */
+export async function rfqActivity(entityType: 'Rfq' | 'SalesRfq', id: string) {
+  const entries = await prisma.auditLogEntry.findMany({
+    where: { entityType, entityId: id },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  const actorIds = [...new Set(entries.map((e) => e.actorId).filter((a): a is string => a !== null))];
+  const actors = actorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+    : [];
+  const names = new Map(actors.map((a) => [a.id, a.name]));
+  return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
 }
 
 export const RfqService = {
@@ -832,16 +848,6 @@ export const RfqService = {
   /** The RFQ's Activity, newest first, each entry with the name of who did it. */
   async history(id: string) {
     if (!(await prisma.rfq.findUnique({ where: { id }, select: { id: true } }))) throw Errors.notFound('Rfq');
-    const entries = await prisma.auditLogEntry.findMany({
-      where: { entityType: 'Rfq', entityId: id },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
-    const actorIds = [...new Set(entries.map((e) => e.actorId).filter((a): a is string => a !== null))];
-    const actors = actorIds.length
-      ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
-      : [];
-    const names = new Map(actors.map((a) => [a.id, a.name]));
-    return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
+    return rfqActivity('Rfq', id);
   },
 };

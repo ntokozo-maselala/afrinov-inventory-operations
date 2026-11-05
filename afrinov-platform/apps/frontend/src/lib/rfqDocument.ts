@@ -14,7 +14,7 @@ import { triggerDownload } from '../api/exportReport';
 import { drawLogo, pdfText } from './pdf';
 import { finishPages } from './poDocument';
 import { formatDate, formatNumber } from './format';
-import { formatDay, type Rfq, type RfqSupplier } from './rfq';
+import { formatDay, lineDescription, lineUnits, type Rfq, type RfqSupplier } from './rfq';
 
 /** Company details and the wording Settings → Purchase orders has for RFQs. */
 export interface RfqCompany {
@@ -81,8 +81,8 @@ export function rfqDocumentLines(rfq: Pick<Rfq, 'lines'>): string[][] {
     .sort((a, b) => a.lineNo - b.lineNo)
     .map((l) => [
       String(l.lineNo),
-      l.material ? `${l.material.sku}  ${l.material.name}` : l.materialId,
-      l.material?.unitOfMeasure ?? dash,
+      l.material ? `${l.material.sku}  ${l.material.name}` : lineDescription(l),
+      lineUnits(l).replace('—', dash),
       formatNumber(Number(l.quantity)),
       '',
       '',

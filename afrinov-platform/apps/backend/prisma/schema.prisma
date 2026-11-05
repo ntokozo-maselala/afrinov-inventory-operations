@@ -27,6 +27,7 @@ enum RoleName {
   DIRECTOR
   CEO
   WORKSHOP_MANAGER
+  SALES
 }
 
 // The signatures an order can need, in the order they are signed.
@@ -36,56 +37,60 @@ enum ApprovalStep {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  name         String
-  passwordHash String        @map("password_hash")
-  active       Boolean       @default(true)
+  id            String   @id @default(uuid())
+  email         String   @unique
+  name          String
+  passwordHash  String   @map("password_hash")
+  active        Boolean  @default(true)
   // No longer read: who signs an order goes by role and the order's value. Kept
   // so older records keep their history.
-  approvalLimit Decimal?     @map("approval_limit") @db.Decimal(18, 2)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  approvalLimit Decimal? @map("approval_limit") @db.Decimal(18, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  roles                UserRole[]
-  settingsUpdated      Setting[]            @relation("SettingUpdatedBy")
-  purchaseOrders       PurchaseOrder[]   @relation("PO_CreatedBy")
-  approvedPurchaseOrders PurchaseOrder[] @relation("PO_ApprovedBy")
-  shippedPurchaseOrders PurchaseOrder[]  @relation("PO_ShippedBy")
-  deliveredPurchaseOrders PurchaseOrder[] @relation("PO_DeliveredBy")
-  cancelledPurchaseOrders PurchaseOrder[] @relation("PO_CancelledBy")
-  closedPurchaseOrders PurchaseOrder[]   @relation("PO_ClosedBy")
+  roles                   UserRole[]
+  settingsUpdated         Setting[]                @relation("SettingUpdatedBy")
+  purchaseOrders          PurchaseOrder[]          @relation("PO_CreatedBy")
+  approvedPurchaseOrders  PurchaseOrder[]          @relation("PO_ApprovedBy")
+  shippedPurchaseOrders   PurchaseOrder[]          @relation("PO_ShippedBy")
+  deliveredPurchaseOrders PurchaseOrder[]          @relation("PO_DeliveredBy")
+  cancelledPurchaseOrders PurchaseOrder[]          @relation("PO_CancelledBy")
+  closedPurchaseOrders    PurchaseOrder[]          @relation("PO_ClosedBy")
   purchaseOrderSignatures PurchaseOrderSignature[] @relation("PO_SignedBy")
-  goodsReceipts        GoodsReceipt[]    @relation("GR_ReceivedBy")
-  inventoryTransactions InventoryTransaction[]
-  managedProjects      Project[]         @relation("ProjectManager")
-  rfqs                 Rfq[]             @relation("RFQ_CreatedBy")
-  sentRfqs             Rfq[]             @relation("RFQ_SentBy")
-  awardedRfqs          Rfq[]             @relation("RFQ_AwardedBy")
-  cancelledRfqs        Rfq[]             @relation("RFQ_CancelledBy")
-  rfqQuoteFiles        RfqQuoteFile[]    @relation("RFQ_QuoteFileUploadedBy")
-  idempotencyKeys      IdempotencyKey[]
-  toolLoanExtensions   ToolLoanExtension[]
-  consumableOutcomes   ConsumableOutcome[]
-  requestedAdjustments AdjustmentRequest[] @relation("AdjustmentRequestedBy")
-  decidedAdjustments   AdjustmentRequest[] @relation("AdjustmentDecidedBy")
+  goodsReceipts           GoodsReceipt[]           @relation("GR_ReceivedBy")
+  inventoryTransactions   InventoryTransaction[]
+  managedProjects         Project[]                @relation("ProjectManager")
+  rfqs                    Rfq[]                    @relation("RFQ_CreatedBy")
+  sentRfqs                Rfq[]                    @relation("RFQ_SentBy")
+  awardedRfqs             Rfq[]                    @relation("RFQ_AwardedBy")
+  cancelledRfqs           Rfq[]                    @relation("RFQ_CancelledBy")
+  rfqQuoteFiles           RfqQuoteFile[]           @relation("RFQ_QuoteFileUploadedBy")
+  salesRfqs               SalesRfq[]               @relation("SalesRfq_CreatedBy")
+  sentSalesRfqs           SalesRfq[]               @relation("SalesRfq_SentBy")
+  cancelledSalesRfqs      SalesRfq[]               @relation("SalesRfq_CancelledBy")
+  salesRfqQuoteFiles      SalesRfqQuoteFile[]      @relation("SalesRfq_QuoteFileUploadedBy")
+  idempotencyKeys         IdempotencyKey[]
+  toolLoanExtensions      ToolLoanExtension[]
+  consumableOutcomes      ConsumableOutcome[]
+  requestedAdjustments    AdjustmentRequest[]      @relation("AdjustmentRequestedBy")
+  decidedAdjustments      AdjustmentRequest[]      @relation("AdjustmentDecidedBy")
 
   @@map("users")
 }
 
 model UserRole {
-  userId String   @map("user_id")
-  roleId String   @map("role_id")
-  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role   Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+  roleId String @map("role_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
   @@map("user_roles")
 }
 
 model Role {
-  id          String     @id @default(uuid())
-  name        RoleName   @unique
+  id          String           @id @default(uuid())
+  name        RoleName         @unique
   description String?
   users       UserRole[]
   permissions RolePermission[]
@@ -144,44 +149,45 @@ model UnitOfMeasure {
   active      Boolean  @default(true)
   sortOrder   Int      @default(0) @map("sort_order")
 
-  materials Material[]
+  materials     Material[]
+  salesRfqLines SalesRfqLine[]
 
   @@map("units_of_measure")
 }
 
 model Material {
-  id            String              @id @default(uuid())
-  sku           String              @unique
+  id            String           @id @default(uuid())
+  sku           String           @unique
   name          String
   description   String?
   category      MaterialCategory
-  unitOfMeasure String              @map("unit_of_measure")
-  requiredStock Decimal             @default(0) @map("required_stock") @db.Decimal(18, 4)
-  unitCost      Decimal?            @map("unit_cost") @db.Decimal(18, 4)
+  unitOfMeasure String           @map("unit_of_measure")
+  requiredStock Decimal          @default(0) @map("required_stock") @db.Decimal(18, 4)
+  unitCost      Decimal?         @map("unit_cost") @db.Decimal(18, 4)
   // A tool kept as one unit (a drill, a harness): its maker's serial number.
   // Only tools have one; null for everything else.
-  serialNumber  String?             @unique @map("serial_number")
+  serialNumber  String?          @unique @map("serial_number")
   // Projects material (category PROJECT_MATERIAL): the one project it is
   // bought for. Stores material has none. Null on a Projects item that has
   // not been assigned its project yet.
-  projectNumber String?             @map("project_number")
+  projectNumber String?          @map("project_number")
   // A consumable whose fate after issue is recorded (a disc, a blade, a bit):
   // each issue of it is later closed off as used up or broken, and whatever is
   // neither returned nor closed off is still out with the person. Never a tool.
-  trackUse      Boolean             @default(false) @map("track_use")
-  active        Boolean             @default(true)
-  createdAt     DateTime            @default(now()) @map("created_at")
-  updatedAt     DateTime            @updatedAt @map("updated_at")
+  trackUse      Boolean          @default(false) @map("track_use")
+  active        Boolean          @default(true)
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
 
-  poLines              PurchaseOrderLine[]
-  goodsReceiptLines    GoodsReceiptLine[]
+  poLines               PurchaseOrderLine[]
+  goodsReceiptLines     GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
-  inventoryBalances    InventoryBalance[]
-  stockCountLines      StockCountLine[]
-  rfqLines             RfqLine[]
-  adjustmentRequests   AdjustmentRequest[]
-  project              Project?            @relation(fields: [projectNumber], references: [projectNumber])
-  unit                 UnitOfMeasure       @relation(fields: [unitOfMeasure], references: [code])
+  inventoryBalances     InventoryBalance[]
+  stockCountLines       StockCountLine[]
+  rfqLines              RfqLine[]
+  adjustmentRequests    AdjustmentRequest[]
+  project               Project?               @relation(fields: [projectNumber], references: [projectNumber])
+  unit                  UnitOfMeasure          @relation(fields: [unitOfMeasure], references: [code])
 
   @@index([category])
   @@index([active])
@@ -198,36 +204,36 @@ enum LocationType {
 }
 
 model Location {
-  id          String       @id @default(uuid())
-  name        String       @unique
+  id            String       @id @default(uuid())
+  name          String       @unique
   // Short, human-friendly identifier (e.g. "WH-A1"). Unique across the
   // catalogue. Falls back to null for legacy rows that pre-date this field;
   // application code treats null code as the existing `name`.
-  code        String?      @unique
-  type        LocationType
-  active      Boolean      @default(true)
+  code          String?      @unique
+  type          LocationType
+  active        Boolean      @default(true)
   // The room or area this location stands in: rack "D-1" in "Main Storeroom".
   // One level only — a location with a parent is never a parent itself, and a
   // rack is never a parent. Stock stays on the location itself (the rack).
-  parentId    String?      @map("parent_id")
+  parentId      String?      @map("parent_id")
   // Extended master-data fields (added with the Location Management feature).
-  address        String?
-  description    String?
-  contactPerson  String?  @map("contact_person")
-  contactPhone   String?  @map("contact_phone")
-  contactEmail   String?  @map("contact_email")
-  notes          String?
-  createdById    String?  @map("created_by_id")
-  updatedById    String?  @map("updated_by_id")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  address       String?
+  description   String?
+  contactPerson String?      @map("contact_person")
+  contactPhone  String?      @map("contact_phone")
+  contactEmail  String?      @map("contact_email")
+  notes         String?
+  createdById   String?      @map("created_by_id")
+  updatedById   String?      @map("updated_by_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
 
-  goodsReceiptLines    GoodsReceiptLine[]
+  goodsReceiptLines     GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
-  inventoryBalances    InventoryBalance[]
-  adjustmentRequests   AdjustmentRequest[]
-  parent               Location?  @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
-  children             Location[] @relation("LocationParent")
+  inventoryBalances     InventoryBalance[]
+  adjustmentRequests    AdjustmentRequest[]
+  parent                Location?              @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
+  children              Location[]             @relation("LocationParent")
 
   @@index([type])
   @@index([active])
@@ -236,26 +242,27 @@ model Location {
 }
 
 model Supplier {
-  id            String         @id @default(uuid())
-  name          String
-  contactName  String?         @map("contact_name")
-  contactEmail String?         @map("contact_email")
-  contactPhone String?         @map("contact_phone")
+  id           String   @id @default(uuid())
+  name         String
+  contactName  String?  @map("contact_name")
+  contactEmail String?  @map("contact_email")
+  contactPhone String?  @map("contact_phone")
   notes        String?
   // From the vendor list in the AFRI-0000_x purchase order template.
   // vendorCode is the template's "V001"; stored upper-case.
-  vendorCode   String?         @unique @map("vendor_code")
+  vendorCode   String?  @unique @map("vendor_code")
   address      String?
-  currency     String          @default("ZAR")
-  paymentTerms String?         @map("payment_terms")
+  currency     String   @default("ZAR")
+  paymentTerms String?  @map("payment_terms")
   website      String?
   services     String?
-  active       Boolean         @default(true)
-  createdAt    DateTime        @default(now()) @map("created_at")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
 
-  purchaseOrders PurchaseOrder[]
-  goodsReceipts  GoodsReceipt[]
-  rfqSuppliers   RfqSupplier[]
+  purchaseOrders    PurchaseOrder[]
+  goodsReceipts     GoodsReceipt[]
+  rfqSuppliers      RfqSupplier[]
+  salesRfqSuppliers SalesRfqSupplier[]
 
   // Case-insensitive name uniqueness is enforced at the database
   // level via a citext unique index (migration
@@ -267,30 +274,31 @@ model Supplier {
 }
 
 model Project {
-  projectNumber String   @id @map("project_number")
+  projectNumber String    @id @map("project_number")
   // Extended project master fields (added with the Projects feature).
   // projectNumber remains the canonical identifier so existing transactions,
   // movement references, and migration data keep working unchanged.
   name          String?
-  code          String?  @unique
-  status        String   @default("PLANNING")
-  managerId     String?  @map("manager_id")
+  code          String?   @unique
+  status        String    @default("PLANNING")
+  managerId     String?   @map("manager_id")
   client        String?
   startDate     DateTime? @map("start_date") @db.Date
   endDate       DateTime? @map("end_date") @db.Date
   notes         String?
-  active        Boolean  @default(true)
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  active        Boolean   @default(true)
+  updatedAt     DateTime  @updatedAt @map("updated_at")
   description   String?
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
 
-  manager             User?     @relation("ProjectManager", fields: [managerId], references: [id])
+  manager               User?                  @relation("ProjectManager", fields: [managerId], references: [id])
   inventoryTransactions InventoryTransaction[] @relation("UsedFor")
   // Stock held for the project (see InventoryTransaction.heldForProject).
-  stockHeld           InventoryTransaction[] @relation("HeldFor")
-  purchaseOrders      PurchaseOrder[]
-  materials           Material[]
-  rfqs                Rfq[]
+  stockHeld             InventoryTransaction[] @relation("HeldFor")
+  purchaseOrders        PurchaseOrder[]
+  materials             Material[]
+  rfqs                  Rfq[]
+  salesRfqs             SalesRfq[]
 
   @@index([status])
   @@index([active])
@@ -342,88 +350,88 @@ enum PurchaseOrderStatus {
 }
 
 model PurchaseOrder {
-  id         String              @id @default(uuid())
-  number     String              @unique
+  id                   String              @id @default(uuid())
+  number               String              @unique
   // As the template's "Rev 00": raised each time the order is changed after approval.
-  revision   Int                 @default(0)
-  supplierId String              @map("supplier_id")
-  status     PurchaseOrderStatus @default(DRAFT)
-  notes      String?
+  revision             Int                 @default(0)
+  supplierId           String              @map("supplier_id")
+  status               PurchaseOrderStatus @default(DRAFT)
+  notes                String?
   // Copied from the supplier and the VAT setting when the order is raised, so
   // later changes to either don't rewrite it. vatRate is a percentage (15.00).
-  currency   String              @default("ZAR")
-  vatRate    Decimal             @default(15) @map("vat_rate") @db.Decimal(5, 2)
+  currency             String              @default("ZAR")
+  vatRate              Decimal             @default(15) @map("vat_rate") @db.Decimal(5, 2)
   // Rand per unit of the order's currency, locked when the order is submitted
   // so a later change of rate can't change who has to sign. Null on rand orders.
-  exchangeRate Decimal?          @map("exchange_rate") @db.Decimal(18, 6)
+  exchangeRate         Decimal?            @map("exchange_rate") @db.Decimal(18, 6)
   // ── Order details from the template's Inputs sheet ───────────────────────
   // Optional: general store stock is bought without a project.
-  projectNumber      String?  @map("project_number")
+  projectNumber        String?             @map("project_number")
   // The supplier's contact and address, as on the template's Inputs sheet:
   // copied from the supplier when the order is raised; editable on the order.
-  supplierContactName  String? @map("supplier_contact_name")
-  supplierContactPhone String? @map("supplier_contact_phone")
-  supplierContactEmail String? @map("supplier_contact_email")
-  supplierAddress      String? @map("supplier_address")
+  supplierContactName  String?             @map("supplier_contact_name")
+  supplierContactPhone String?             @map("supplier_contact_phone")
+  supplierContactEmail String?             @map("supplier_contact_email")
+  supplierAddress      String?             @map("supplier_address")
   // Copied from the supplier when the order is raised; editable on the order.
-  paymentTerms       String?  @map("payment_terms")
-  paymentMilestone   String?  @map("payment_milestone")
-  settlementDiscount Decimal  @default(0) @map("settlement_discount") @db.Decimal(5, 2)
-  shippingTerms      String?  @map("shipping_terms")
-  penaltiesApply     Boolean  @default(false) @map("penalties_apply")
+  paymentTerms         String?             @map("payment_terms")
+  paymentMilestone     String?             @map("payment_milestone")
+  settlementDiscount   Decimal             @default(0) @map("settlement_discount") @db.Decimal(5, 2)
+  shippingTerms        String?             @map("shipping_terms")
+  penaltiesApply       Boolean             @default(false) @map("penalties_apply")
   // The small print (terms, documentation, invoicing, code of conduct) as it
   // was when the order was approved, so a later change to the settings does
   // not change what the supplier accepted. Null until approved.
-  printedTerms       Json?    @map("printed_terms")
+  printedTerms         Json?               @map("printed_terms")
   // DELIVERY: the supplier delivers to the address below. COLLECTION: Afrinov collects.
-  deliveryMethod       String  @default("DELIVERY") @map("delivery_method")
-  deliveryTo           String? @map("delivery_to")
-  deliveryAddress      String? @map("delivery_address")
-  deliveryCountry      String? @map("delivery_country")
-  deliveryContactName  String? @map("delivery_contact_name")
-  deliveryContactPhone String? @map("delivery_contact_phone")
+  deliveryMethod       String              @default("DELIVERY") @map("delivery_method")
+  deliveryTo           String?             @map("delivery_to")
+  deliveryAddress      String?             @map("delivery_address")
+  deliveryCountry      String?             @map("delivery_country")
+  deliveryContactName  String?             @map("delivery_contact_name")
+  deliveryContactPhone String?             @map("delivery_contact_phone")
   // Who at Afrinov the supplier deals with; typed, so it need not be a user.
-  afrinovContact       String? @map("afrinov_contact")
-  createdById String             @map("created_by_id")
-  createdAt  DateTime            @default(now()) @map("created_at")
-  updatedAt  DateTime            @updatedAt @map("updated_at")
+  afrinovContact       String?             @map("afrinov_contact")
+  createdById          String              @map("created_by_id")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
   // ── Lifecycle audit fields (added with the PO workflow enhancement) ───────
   // All populated transactionally by the procurement service. Never overwritten
   // once set; only updated when the corresponding transition occurs.
-  expectedDeliveryDate DateTime? @map("expected_delivery_date") @db.Date
-  approvedAt           DateTime? @map("approved_at")
-  approvedById         String?   @map("approved_by_id")
-  shippedAt            DateTime? @map("shipped_at")
-  shippedById          String?   @map("shipped_by_id")
-  trackingNumber       String?   @map("tracking_number")
+  expectedDeliveryDate DateTime?           @map("expected_delivery_date") @db.Date
+  approvedAt           DateTime?           @map("approved_at")
+  approvedById         String?             @map("approved_by_id")
+  shippedAt            DateTime?           @map("shipped_at")
+  shippedById          String?             @map("shipped_by_id")
+  trackingNumber       String?             @map("tracking_number")
   carrier              String?
-  shipmentNotes        String?   @map("shipment_notes")
+  shipmentNotes        String?             @map("shipment_notes")
   // The shipped_* columns above are no longer written (there is no shipping
   // stage); they are kept so older records keep their history.
   // delivered_* records when the order became fully RECEIVED.
-  deliveredAt          DateTime? @map("delivered_at")
-  deliveredById        String?   @map("delivered_by_id")
-  deliveryNotes        String?   @map("delivery_notes")
-  cancelledAt          DateTime? @map("cancelled_at")
-  cancelledById        String?   @map("cancelled_by_id")
-  cancellationReason   String?   @map("cancellation_reason")
-  closedAt             DateTime? @map("closed_at")
-  closedById           String?   @map("closed_by_id")
-  closeReason          String?   @map("close_reason")
+  deliveredAt          DateTime?           @map("delivered_at")
+  deliveredById        String?             @map("delivered_by_id")
+  deliveryNotes        String?             @map("delivery_notes")
+  cancelledAt          DateTime?           @map("cancelled_at")
+  cancelledById        String?             @map("cancelled_by_id")
+  cancellationReason   String?             @map("cancellation_reason")
+  closedAt             DateTime?           @map("closed_at")
+  closedById           String?             @map("closed_by_id")
+  closeReason          String?             @map("close_reason")
 
-  supplier     Supplier            @relation(fields: [supplierId], references: [id])
-  project      Project?            @relation(fields: [projectNumber], references: [projectNumber])
-  createdBy    User                @relation("PO_CreatedBy", fields: [createdById], references: [id])
-  approvedBy   User?               @relation("PO_ApprovedBy", fields: [approvedById], references: [id])
-  shippedBy    User?               @relation("PO_ShippedBy", fields: [shippedById], references: [id])
-  deliveredBy  User?               @relation("PO_DeliveredBy", fields: [deliveredById], references: [id])
-  cancelledBy  User?               @relation("PO_CancelledBy", fields: [cancelledById], references: [id])
-  closedBy     User?               @relation("PO_ClosedBy", fields: [closedById], references: [id])
-  lines        PurchaseOrderLine[]
+  supplier      Supplier                 @relation(fields: [supplierId], references: [id])
+  project       Project?                 @relation(fields: [projectNumber], references: [projectNumber])
+  createdBy     User                     @relation("PO_CreatedBy", fields: [createdById], references: [id])
+  approvedBy    User?                    @relation("PO_ApprovedBy", fields: [approvedById], references: [id])
+  shippedBy     User?                    @relation("PO_ShippedBy", fields: [shippedById], references: [id])
+  deliveredBy   User?                    @relation("PO_DeliveredBy", fields: [deliveredById], references: [id])
+  cancelledBy   User?                    @relation("PO_CancelledBy", fields: [cancelledById], references: [id])
+  closedBy      User?                    @relation("PO_ClosedBy", fields: [closedById], references: [id])
+  lines         PurchaseOrderLine[]
   goodsReceipts GoodsReceipt[]
   // The request for quotation this order was awarded from, if any.
-  rfq          Rfq?
-  signatures   PurchaseOrderSignature[]
+  rfq           Rfq?
+  signatures    PurchaseOrderSignature[]
 
   @@index([status])
   @@index([supplierId])
@@ -451,19 +459,19 @@ model PurchaseOrderSignature {
 }
 
 model PurchaseOrderLine {
-  id              String        @id @default(uuid())
-  purchaseOrderId String        @map("purchase_order_id")
-  materialId      String        @map("material_id")
-  orderedQty      Decimal       @map("ordered_qty") @db.Decimal(18, 4)
-  receivedQty     Decimal       @default(0) @map("received_qty") @db.Decimal(18, 4)
+  id              String    @id @default(uuid())
+  purchaseOrderId String    @map("purchase_order_id")
+  materialId      String    @map("material_id")
+  orderedQty      Decimal   @map("ordered_qty") @db.Decimal(18, 4)
+  receivedQty     Decimal   @default(0) @map("received_qty") @db.Decimal(18, 4)
   // Excluding VAT, in the order's currency. Null on lines raised before prices were kept.
   // The supplier's list price: the line's discount comes off it.
-  unitPrice       Decimal?      @map("unit_price") @db.Decimal(18, 4)
+  unitPrice       Decimal?  @map("unit_price") @db.Decimal(18, 4)
   // Percent off the unit price, as the supplier gives it; 0 for none. What is
   // paid, and its VAT and approval, are on the discounted price.
-  discountPercent Decimal       @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  discountPercent Decimal   @default(0) @map("discount_percent") @db.Decimal(5, 2)
   // When this line is due; the order's expected date when not set.
-  deliveryDate    DateTime?     @map("delivery_date") @db.Date
+  deliveryDate    DateTime? @map("delivery_date") @db.Date
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   material      Material      @relation(fields: [materialId], references: [id])
@@ -586,6 +594,127 @@ model RfqQuoteFile {
   @@map("rfq_quote_files")
 }
 
+// ── Sales requests for quotation ─────────────────────────────────────────
+// What the Sales team asks suppliers to price when costing a job, on the same
+// AFRI-02A-xxxx-02-01 sheet as Procurement's. Kept apart from Procurement's
+// RFQs because who may see the prices differs, and lines are typed as the sheet
+// has them (cut lengths and the like), not picked from the catalogue. Nothing
+// is awarded: the prices are compared with Procurement's on the savings report.
+//
+// DRAFT → SENT, or CANCELLED from either.
+enum SalesRfqStatus {
+  DRAFT
+  SENT
+  CANCELLED
+}
+
+model SalesRfq {
+  id                 String         @id @default(uuid())
+  // The sheet's document number, AFRI-02A-1325-02-01 for AFRI-1325. Sales and
+  // Procurement each number their own, so the same number can be on both.
+  number             String         @unique
+  status             SalesRfqStatus @default(DRAFT)
+  projectNumber      String         @map("project_number")
+  description        String?
+  // Remarks, printed under the lines.
+  notes              String?
+  penaltiesApply     Boolean        @default(false) @map("penalties_apply")
+  issuedAt           DateTime?      @map("issued_at") @db.Date
+  closingDate        DateTime?      @map("closing_date") @db.Date
+  createdById        String         @map("created_by_id")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+  sentAt             DateTime?      @map("sent_at")
+  sentById           String?        @map("sent_by_id")
+  cancelledAt        DateTime?      @map("cancelled_at")
+  cancelledById      String?        @map("cancelled_by_id")
+  cancellationReason String?        @map("cancellation_reason")
+
+  project     Project            @relation(fields: [projectNumber], references: [projectNumber])
+  createdBy   User               @relation("SalesRfq_CreatedBy", fields: [createdById], references: [id])
+  sentBy      User?              @relation("SalesRfq_SentBy", fields: [sentById], references: [id])
+  cancelledBy User?              @relation("SalesRfq_CancelledBy", fields: [cancelledById], references: [id])
+  lines       SalesRfqLine[]
+  suppliers   SalesRfqSupplier[]
+
+  @@index([status])
+  @@index([projectNumber])
+  @@map("sales_rfqs")
+}
+
+model SalesRfqLine {
+  id            String  @id @default(uuid())
+  rfqId         String  @map("sales_rfq_id")
+  // The sheet's ITEM column: 1, 2, 3, … in the order the lines were entered.
+  lineNo        Int     @map("line_no")
+  // As the sheet has it: "200NB pipes x 3m". Not a catalogue item.
+  description   String
+  unitOfMeasure String  @map("unit_of_measure")
+  quantity      Decimal @db.Decimal(18, 4)
+
+  rfq    SalesRfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  unit   UnitOfMeasure        @relation(fields: [unitOfMeasure], references: [code])
+  prices SalesRfqQuotePrice[]
+
+  @@unique([rfqId, lineNo])
+  @@map("sales_rfq_lines")
+}
+
+// A supplier asked to quote, and their quote once it is recorded.
+model SalesRfqSupplier {
+  id             String    @id @default(uuid())
+  rfqId          String    @map("sales_rfq_id")
+  supplierId     String    @map("supplier_id")
+  quoteReference String?   @map("quote_reference")
+  // When the quote came in; null until it is recorded.
+  quotedAt       DateTime? @map("quoted_at") @db.Date
+  validUntil     DateTime? @map("valid_until") @db.Date
+  leadTime       String?   @map("lead_time")
+  notes          String?
+  // The currency the quote was given in: the supplier's when it was recorded.
+  currency       String?
+  declined       Boolean   @default(false)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  rfq       SalesRfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplier  Supplier             @relation(fields: [supplierId], references: [id])
+  prices    SalesRfqQuotePrice[]
+  quoteFile SalesRfqQuoteFile?
+
+  @@unique([rfqId, supplierId])
+  @@index([supplierId])
+  @@map("sales_rfq_suppliers")
+}
+
+// A supplier's unit price for one line, excluding VAT, in the quote's currency.
+model SalesRfqQuotePrice {
+  rfqSupplierId String  @map("sales_rfq_supplier_id")
+  rfqLineId     String  @map("sales_rfq_line_id")
+  unitPrice     Decimal @map("unit_price") @db.Decimal(18, 4)
+
+  rfqSupplier SalesRfqSupplier @relation(fields: [rfqSupplierId], references: [id], onDelete: Cascade)
+  rfqLine     SalesRfqLine     @relation(fields: [rfqLineId], references: [id], onDelete: Cascade)
+
+  @@id([rfqSupplierId, rfqLineId])
+  @@index([rfqLineId])
+  @@map("sales_rfq_quote_prices")
+}
+
+// The supplier's returned sheet or quotation, as the PDF it came back as.
+model SalesRfqQuoteFile {
+  rfqSupplierId String   @id @map("sales_rfq_supplier_id")
+  fileName      String   @map("file_name")
+  size          Int
+  data          Bytes
+  uploadedAt    DateTime @default(now()) @map("uploaded_at")
+  uploadedById  String   @map("uploaded_by_id")
+
+  rfqSupplier SalesRfqSupplier @relation(fields: [rfqSupplierId], references: [id], onDelete: Cascade)
+  uploadedBy  User             @relation("SalesRfq_QuoteFileUploadedBy", fields: [uploadedById], references: [id])
+
+  @@map("sales_rfq_quote_files")
+}
+
 // One supplier's unit price for one line, excluding VAT, in the supplier's currency.
 model RfqQuotePrice {
   rfqSupplierId String  @map("rfq_supplier_id")
@@ -607,22 +736,22 @@ enum GoodsReceiptStatus {
 }
 
 model GoodsReceipt {
-  id             String              @id @default(uuid())
-  number         String              @unique
+  id              String             @id @default(uuid())
+  number          String             @unique
   purchaseOrderId String?            @map("purchase_order_id")
-  supplierId     String              @map("supplier_id")
-  deliveryRef    String?             @map("delivery_ref")
-  status         GoodsReceiptStatus  @default(DRAFT)
-  receivedById   String              @map("received_by_id")
+  supplierId      String             @map("supplier_id")
+  deliveryRef     String?            @map("delivery_ref")
+  status          GoodsReceiptStatus @default(DRAFT)
+  receivedById    String             @map("received_by_id")
   // The date on the delivery note, which may be earlier than it was booked.
-  receivedAt     DateTime            @default(now()) @map("received_at")
-  createdAt      DateTime            @default(now()) @map("created_at")
+  receivedAt      DateTime           @default(now()) @map("received_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
   // When its stock went into the ledger (status POSTED), which is when it
   // counts on the reports: a back-dated delivery note never changes a month
   // already reported. Null until posted.
-  postedAt       DateTime?           @map("posted_at")
+  postedAt        DateTime?          @map("posted_at")
 
-  purchaseOrder PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrder PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
   supplier      Supplier           @relation(fields: [supplierId], references: [id])
   receivedBy    User               @relation("GR_ReceivedBy", fields: [receivedById], references: [id])
   lines         GoodsReceiptLine[]
@@ -637,11 +766,11 @@ model GoodsReceipt {
 // or not. The count itself is the STOCK_COUNT audit entry with this count id;
 // its differences were posted as COUNT_VARIANCE adjustments.
 model StockCountLine {
-  id               String   @id @default(uuid())
-  countId          String   @map("count_id")
-  materialId       String   @map("material_id")
-  expectedQuantity Decimal  @map("expected_quantity") @db.Decimal(18, 4)
-  countedQuantity  Decimal  @map("counted_quantity") @db.Decimal(18, 4)
+  id               String  @id @default(uuid())
+  countId          String  @map("count_id")
+  materialId       String  @map("material_id")
+  expectedQuantity Decimal @map("expected_quantity") @db.Decimal(18, 4)
+  countedQuantity  Decimal @map("counted_quantity") @db.Decimal(18, 4)
   // Why it differs, as the counter wrote it; also added to its adjustment's note.
   note             String?
 
@@ -652,11 +781,11 @@ model StockCountLine {
 }
 
 model GoodsReceiptLine {
-  id             String       @id @default(uuid())
-  goodsReceiptId String       @map("goods_receipt_id")
-  materialId     String       @map("material_id")
-  locationId     String       @map("location_id")
-  quantity       Decimal      @db.Decimal(18, 4)
+  id                  String  @id @default(uuid())
+  goodsReceiptId      String  @map("goods_receipt_id")
+  materialId          String  @map("material_id")
+  locationId          String  @map("location_id")
+  quantity            Decimal @db.Decimal(18, 4)
   purchaseOrderLineId String? @map("purchase_order_line_id")
 
   goodsReceipt GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
@@ -700,66 +829,66 @@ enum AdjustmentReasonCode {
 }
 
 model InventoryTransaction {
-  id           String                    @id @default(uuid())
-  materialId   String                    @map("material_id")
-  locationId   String                    @map("location_id")
-  type         InventoryTransactionType
+  id                    String                   @id @default(uuid())
+  materialId            String                   @map("material_id")
+  locationId            String                   @map("location_id")
+  type                  InventoryTransactionType
   // Signed: RECEIPT/TRANSFER_IN are positive; ISSUE/TRANSFER_OUT negative;
   // ADJUSTMENT may be either. Stored as Decimal so transactions are atomic and exact.
-  quantity     Decimal                   @db.Decimal(18, 4)
+  quantity              Decimal                  @db.Decimal(18, 4)
   // Polymorphic reference to the document that caused the transaction.
-  referenceType String?                  @map("reference_type")
-  referenceId   String?                  @map("reference_id")
+  referenceType         String?                  @map("reference_type")
+  referenceId           String?                  @map("reference_id")
   // Who received the stock (issues; copied onto their reversals).
-  recipientId   String?                  @map("recipient_id")
+  recipientId           String?                  @map("recipient_id")
   // Issues and tool loans: shared by every line one issue or check-out posted
   // (the slip). Earlier issue lines carry their own id; reversals and other
   // types carry none.
-  issueId       String?                  @map("issue_id")
+  issueId               String?                  @map("issue_id")
   // Tool loans (LOAN): the day the tool is due back, agreed at check-out. Set
   // when the loan is posted and never changed; a different date is a
   // ToolLoanExtension. Null on loans from before due dates, which fall due
   // inventory.toolOverdueDays after they went out.
-  dueOn         DateTime?                @map("due_on") @db.Date
+  dueOn                 DateTime?                @map("due_on") @db.Date
   // Tool loans (LOAN): why tools were lent to someone who already had an
   // overdue one. Set when the loan is posted and never changed.
-  overdueOverrideReason String?          @map("overdue_override_reason")
+  overdueOverrideReason String?                  @map("overdue_override_reason")
   // Adjustment reason (mandatory for type=ADJUSTMENT).
-  reasonCode    AdjustmentReasonCode?    @map("reason_code")
-  reasonNote    String?                  @map("reason_note")
+  reasonCode            AdjustmentReasonCode?    @map("reason_code")
+  reasonNote            String?                  @map("reason_note")
   // Project linkage (FR-REP-004): who the stock was used for. A Stores item
   // issued to a project carries it, though it comes out of Stores stock.
-  projectNumber String?                  @map("project_number")
+  projectNumber         String?                  @map("project_number")
   // Whose stock it is: the project it is held for, or null for Stores stock,
   // the store's own. Not the same as projectNumber above. A movement adds to
   // or takes from the balance held for this project only (Project Material
   // Through the Store Roadmap, Phase 1).
-  heldForProject String?                 @map("held_for_project")
+  heldForProject        String?                  @map("held_for_project")
   // Audit fields
-  actorId       String                   @map("actor_id")
-  postedAt      DateTime                 @default(now()) @map("posted_at")
+  actorId               String                   @map("actor_id")
+  postedAt              DateTime                 @default(now()) @map("posted_at")
   // For transfers: the linked partner transaction id so both legs are tied.
-  pairedWithId  String?                  @unique @map("paired_with_id")
+  pairedWithId          String?                  @unique @map("paired_with_id")
   // For reversals: the transaction this one cancels. A reversal keeps the
   // original's type with the opposite sign, so signed totals net to zero.
   // Unique, so a transaction can be reversed at most once. The ledger has no
   // update path; mistakes are corrected only by reversing.
-  reversesId    String?                  @unique @map("reverses_id")
+  reversesId            String?                  @unique @map("reverses_id")
 
-  material Material  @relation(fields: [materialId], references: [id])
-  location Location  @relation(fields: [locationId], references: [id])
-  actor    User      @relation(fields: [actorId], references: [id])
-  project  Project?  @relation("UsedFor", fields: [projectNumber], references: [projectNumber])
-  heldFor  Project?  @relation("HeldFor", fields: [heldForProject], references: [projectNumber], onDelete: Restrict, onUpdate: Restrict)
-  recipient Recipient? @relation(fields: [recipientId], references: [id])
-  pairedWith InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
-  pairedBy   InventoryTransaction? @relation("TransferPair")
-  reverses   InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
-  reversedBy InventoryTransaction? @relation("Reversal")
-  loanExtensions ToolLoanExtension[]
+  material           Material              @relation(fields: [materialId], references: [id])
+  location           Location              @relation(fields: [locationId], references: [id])
+  actor              User                  @relation(fields: [actorId], references: [id])
+  project            Project?              @relation("UsedFor", fields: [projectNumber], references: [projectNumber])
+  heldFor            Project?              @relation("HeldFor", fields: [heldForProject], references: [projectNumber], onDelete: Restrict, onUpdate: Restrict)
+  recipient          Recipient?            @relation(fields: [recipientId], references: [id])
+  pairedWith         InventoryTransaction? @relation("TransferPair", fields: [pairedWithId], references: [id])
+  pairedBy           InventoryTransaction? @relation("TransferPair")
+  reverses           InventoryTransaction? @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy         InventoryTransaction? @relation("Reversal")
+  loanExtensions     ToolLoanExtension[]
   // Issues: used up or broken against it. Returns: the marks booked in the same counter visit.
-  consumableOutcomes ConsumableOutcome[] @relation("OutcomeIssue")
-  bookedOutcomes     ConsumableOutcome[] @relation("OutcomeReturn")
+  consumableOutcomes ConsumableOutcome[]   @relation("OutcomeIssue")
+  bookedOutcomes     ConsumableOutcome[]   @relation("OutcomeReturn")
   // An adjustment posted on approval: the request it came from.
   adjustmentRequest  AdjustmentRequest?
 
@@ -853,25 +982,25 @@ enum ConsumableOutcomeKind {
 // (withdrawsId, with the reason in note), and the pair then counts for
 // nothing, as a ledger reversal does.
 model ConsumableOutcome {
-  id                 String                @id @default(uuid())
-  issueTransactionId String                @map("issue_transaction_id")
-  outcome            ConsumableOutcomeKind
-  quantity           Decimal               @db.Decimal(18, 4)
-  note               String?
+  id                  String                @id @default(uuid())
+  issueTransactionId  String                @map("issue_transaction_id")
+  outcome             ConsumableOutcomeKind
+  quantity            Decimal               @db.Decimal(18, 4)
+  note                String?
   // Unique, so an outcome is withdrawn at most once.
-  withdrawsId        String?               @unique @map("withdraws_id")
+  withdrawsId         String?               @unique @map("withdraws_id")
   // The RETURN booked in the same counter visit, when some also went back on
   // the shelf; Movements shows the mark on that row. Without one, the mark is
   // its own row (nothing went back on the shelf).
-  returnTransactionId String?              @map("return_transaction_id")
-  actorId            String                @map("actor_id")
-  createdAt          DateTime              @default(now()) @map("created_at")
+  returnTransactionId String?               @map("return_transaction_id")
+  actorId             String                @map("actor_id")
+  createdAt           DateTime              @default(now()) @map("created_at")
 
   issue       InventoryTransaction  @relation("OutcomeIssue", fields: [issueTransactionId], references: [id])
   return      InventoryTransaction? @relation("OutcomeReturn", fields: [returnTransactionId], references: [id])
-  actor       User                 @relation(fields: [actorId], references: [id])
-  withdraws   ConsumableOutcome?   @relation("OutcomeWithdrawal", fields: [withdrawsId], references: [id])
-  withdrawnBy ConsumableOutcome?   @relation("OutcomeWithdrawal")
+  actor       User                  @relation(fields: [actorId], references: [id])
+  withdraws   ConsumableOutcome?    @relation("OutcomeWithdrawal", fields: [withdrawsId], references: [id])
+  withdrawnBy ConsumableOutcome?    @relation("OutcomeWithdrawal")
 
   @@index([issueTransactionId])
   @@index([returnTransactionId])
@@ -882,15 +1011,15 @@ model ConsumableOutcome {
 // ADR-002: derived/materialized view. Application code never writes to this
 // table; it's recomputed by the recomputeBalances job / refresh trigger.
 model InventoryBalance {
-  materialId String   @map("material_id")
-  locationId String   @map("location_id")
+  materialId     String   @map("material_id")
+  locationId     String   @map("location_id")
   // The project the stock is held for, or '' for Stores stock. Not null, so
   // it can be part of the key: one Stores balance per item and location, and
   // one per project. No foreign key, as the row is rebuilt from the ledger;
   // read and write it through shared/inventory/balances.ts.
-  heldForProject String @default("") @map("held_for_project")
-  quantity   Decimal  @db.Decimal(18, 4)
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  heldForProject String   @default("") @map("held_for_project")
+  quantity       Decimal  @db.Decimal(18, 4)
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
   location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)

@@ -48,6 +48,7 @@ import {
 import {
   awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
 } from '../modules/procurement/rfq.routes.js';
+import { createSalesRfqSchema, listSalesRfqQuerySchema, updateSalesRfqSchema } from '../modules/sales/sales-rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
@@ -657,6 +658,58 @@ export const OPERATIONS: Operation[] = [
     description:
       'All-or-nothing. 400 when a line would exceed its order line\'s ordered quantity; 409 when already posted.',
     procurement: true, permissions: [P.ReceiveInventory], errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'List Sales requests for quotation',
+    procurement: true, permissions: [P.ViewSalesRfq], query: listSalesRfqQuerySchema, errors: [400],
+  },
+  {
+    method: 'get', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Get a Sales request for quotation with its lines, suppliers and quotes',
+    description: "Each supplier carries its VAT rate and, once its quote is recorded, the quote's totals.",
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
+  },
+  {
+    method: 'post', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'Raise a draft Sales request for quotation',
+    description: 'Lines are typed as the RFQ sheet has them, with a unit on the list; they are not catalogue items.',
+    procurement: true, permissions: [P.ManageSalesRfq], body: createSalesRfqSchema, success: 201,
+  },
+  {
+    method: 'patch', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Change a draft, or a sent RFQ\'s closing date and suppliers',
+    procurement: true, permissions: [P.ManageSalesRfq], body: updateSalesRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/sales-rfqs/:id/send', tag: 'Sales requests for quotation', summary: 'Mark a draft as sent to its suppliers',
+    description: 'Nothing is emailed: each supplier\'s copy is downloaded and sent by hand.',
+    procurement: true, permissions: [P.ManageSalesRfq], body: sendRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/sales-rfqs/:id/cancel', tag: 'Sales requests for quotation', summary: 'Cancel a draft or sent Sales request for quotation',
+    procurement: true, permissions: [P.ManageSalesRfq], body: cancelRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'put', path: '/sales-rfqs/:id/suppliers/:supplierId/quote', tag: 'Sales requests for quotation', summary: "Record or correct a supplier's quote",
+    procurement: true, permissions: [P.ManageSalesRfq], body: recordQuoteSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/sales-rfqs/:id/suppliers/:supplierId/decline', tag: 'Sales requests for quotation', summary: "Record that a supplier won't quote",
+    procurement: true, permissions: [P.ManageSalesRfq], body: declineQuoteSchema, errors: [404, 409],
+  },
+  {
+    method: 'put', path: '/sales-rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Sales requests for quotation', summary: "Attach the supplier's quotation PDF",
+    description: 'The body is the PDF itself (application/pdf, up to 10 MB), with its name in the X-File-Name header.',
+    procurement: true, permissions: [P.ManageSalesRfq], errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/sales-rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Sales requests for quotation', summary: "Download the supplier's quotation PDF",
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
+  },
+  {
+    method: 'delete', path: '/sales-rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Sales requests for quotation', summary: "Take off the supplier's quotation PDF",
+    procurement: true, permissions: [P.ManageSalesRfq], errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/sales-rfqs/:id/history', tag: 'Sales requests for quotation', summary: "A Sales request for quotation's Activity",
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
   },
   {
     method: 'get', path: '/rfqs', tag: 'Requests for quotation', summary: 'List requests for quotation',

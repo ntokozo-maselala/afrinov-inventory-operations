@@ -329,6 +329,9 @@ export interface MockRfqLine {
   lineNo: number;
   materialId: string;
   quantity: string;
+  /** Typed as the sheet has it, on a Sales RFQ, whose lines have no catalogue item. */
+  description?: string;
+  unitOfMeasure?: string;
 }
 
 /** A supplier asked to quote, and their quote once it is recorded. */

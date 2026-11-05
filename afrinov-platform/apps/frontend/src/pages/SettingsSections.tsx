@@ -424,8 +424,8 @@ export function SettingsAppearance() {
 }
 
 // ── Users & permissions ───────────────────────────────────────────────
-type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER';
-const ALL_ROLES: RoleName[] = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'APPROVER', 'TECHNICIAN', 'VIEWER'];
+type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES';
+const ALL_ROLES: RoleName[] = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES', 'APPROVER', 'TECHNICIAN', 'VIEWER'];
 const ROLE_LABEL: Record<RoleName, string> = {
   ADMIN: 'Administrator',
   STORE_CONTROLLER: 'Store controller',
@@ -437,6 +437,7 @@ const ROLE_LABEL: Record<RoleName, string> = {
   DIRECTOR: 'Director',
   CEO: 'CEO',
   WORKSHOP_MANAGER: 'Workshop Manager',
+  SALES: 'Sales',
 };
 
 interface AdminUser {

@@ -71,7 +71,7 @@ describe('Quotes on an RFQ’s page', () => {
     expect(within(emv).getByText('1 line not offered')).toBeInTheDocument();
     expect(within(emv).getByText(/Ref Q-2291/)).toBeInTheDocument();
     fireEvent.click(within(emv).getByRole('button', { name: 'Their quotation EMV quote 1094.pdf' }));
-    await waitFor(() => expect(mockDownloadFile).toHaveBeenCalledWith('r-1', 's-1', 'EMV quote 1094.pdf'));
+    await waitFor(() => expect(mockDownloadFile).toHaveBeenCalledWith('r-1', 's-1', 'EMV quote 1094.pdf', '/rfqs'));
     expect(within(within(table).getByText('Macsteel').closest('tr')!).getByText('Awaiting quote')).toBeInTheDocument();
   });
 
@@ -96,7 +96,7 @@ describe('Quotes on an RFQ’s page', () => {
       quotedAt: todayInSouthAfrica(), quoteReference: 'MS-77', validUntil: null, leadTime: 'Ex stock', notes: null,
       prices: [{ rfqLineId: 'l-1', unitPrice: 150 }],
     }));
-    await waitFor(() => expect(mockUpload).toHaveBeenCalledWith('r-1', 's-2', pdf));
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledWith('r-1', 's-2', pdf, '/rfqs'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 

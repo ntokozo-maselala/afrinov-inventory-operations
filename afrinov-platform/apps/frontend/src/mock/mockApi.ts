@@ -78,6 +78,7 @@ interface State {
   projects: MockProject[];
   recipients: MockRecipient[];
   rfqs: MockRfq[];
+  salesRfqs: MockRfq[];
   /** Later due dates given to tool loans, as the backend's tool_loan_extensions. */
   toolLoanExtensions: Array<{ id: string; loanId: string; dueOn: string; reason: string; actorId: string; createdAt: string }>;
   /** Used up or broken against issue lines of tracked consumables, as the backend's consumable_outcomes. */
@@ -114,6 +115,7 @@ function freshState(): State {
       { id: 'rcp-5', name: 'KTS', type: 'CONTRACTOR', active: true },
     ],
     rfqs: [],
+    salesRfqs: [],
     toolLoanExtensions: [],
     consumableOutcomes: [],
     adjustmentRequests: [],
@@ -475,7 +477,8 @@ const RFQ_DAY = /^\d{4}-\d{2}-\d{2}$/;
  */
 export async function mockPutQuoteFile(rfqId: string, supplierId: string, fileName: string, data: Uint8Array): Promise<unknown> {
   await new Promise((res) => setTimeout(res, 60));
-  const rfq = state.rfqs.find((r) => r.id === rfqId);
+  const sales = state.salesRfqs.some((r) => r.id === rfqId);
+  const rfq = (sales ? state.salesRfqs : state.rfqs).find((r) => r.id === rfqId);
   const asked = rfq?.suppliers.find((s) => s.supplierId === supplierId);
   if (!rfq || !asked) throw err('NOT_FOUND', 'Supplier on this request for quotation not found');
   if (rfq.status !== 'SENT') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is ${rfq.status.toLowerCase()}, so its quotes can no longer change`);
@@ -491,12 +494,13 @@ export async function mockPutQuoteFile(rfqId: string, supplierId: string, fileNa
     suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? { ...s, quoteFile: { fileName: name, size: data.length, uploadedAt: now, data } } : s)),
     history: [...rfq.history, { id: nextId('audit'), action: 'RFQ_QUOTE_FILE', actorId: 'u-admin', before: null, after: { supplierId, fileName: name, size: data.length }, createdAt: now }],
   };
-  state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? updated : r));
+  if (sales) state.salesRfqs = state.salesRfqs.map((r) => (r.id === rfq.id ? updated : r));
+  else state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? updated : r));
   return rfqView(updated);
 }
 
 export function mockGetQuoteFile(rfqId: string, supplierId: string): { fileName: string; data: Uint8Array } {
-  const file = state.rfqs.find((r) => r.id === rfqId)?.suppliers.find((s) => s.supplierId === supplierId)?.quoteFile;
+  const file = [...state.rfqs, ...state.salesRfqs].find((r) => r.id === rfqId)?.suppliers.find((s) => s.supplierId === supplierId)?.quoteFile;
   if (!file) throw err('NOT_FOUND', 'Quotation file not found');
   return { fileName: file.fileName, data: file.data };
 }
@@ -517,6 +521,160 @@ function mockAddDays(day: string, days: number): string {
   const d = new Date(`${day}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Sales RFQs, as sales-rfq.service.ts: typed lines rather than catalogue items
+ * (kept with no materialId), numbered apart from Procurement's, and never awarded.
+ */
+function routeSalesRfq(method: string, p: string, qs: Record<string, string>, body: unknown): unknown {
+  type Body = { projectNumber?: string; description?: string | null; notes?: string | null; penaltiesApply?: boolean; closingDate?: string; supplierIds?: string[]; lines?: Array<{ description: string; unitOfMeasure: string; quantity: number }> };
+  const id = /^\/sales-rfqs\/([^/]+)/.exec(p)?.[1];
+  const rfq = id && id !== 'new' ? state.salesRfqs.find((r) => r.id === id) : undefined;
+  if (id && !rfq) throw err('NOT_FOUND', 'Sales RFQ not found');
+  const b = (body ?? {}) as Body;
+  const now = new Date().toISOString();
+  const entry = (action: string, after: Record<string, unknown>) => ({ id: nextId('audit'), action, actorId: 'u-admin', before: null, after, createdAt: now });
+  const save = (next: MockRfq) => {
+    state.salesRfqs = state.salesRfqs.map((r) => (r.id === next.id ? next : r));
+    return rfqView(next);
+  };
+  const number = (projectNumber: string) => {
+    const prefix = rfqNumberPrefix(projectNumber);
+    const highest = state.salesRfqs.reduce((max, r) => {
+      const rest = r.number.startsWith(prefix) ? r.number.slice(prefix.length) : '';
+      return /^\d+$/.test(rest) ? Math.max(max, Number(rest)) : max;
+    }, 0);
+    return `${prefix}${String(highest + 1).padStart(2, '0')}`;
+  };
+  const lineRows = (lines: NonNullable<Body['lines']>) => {
+    if (lines.length === 0) throw err('VALIDATION_ERROR', 'A request for quotation needs at least one line');
+    return lines.map((l, i) => {
+      if (!l.description?.trim()) throw err('VALIDATION_ERROR', `Line ${i + 1} needs a description`);
+      if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', 'Invalid Sales RFQ');
+      const unitOfMeasure = mockUnitCode(l.unitOfMeasure);
+      if (unitKindOf(MOCK_UNITS, unitOfMeasure) === 'COUNTED' && !Number.isInteger(Number(l.quantity))) {
+        throw err('VALIDATION_ERROR', `${l.description.trim()} is counted in whole numbers (${unitOfMeasure}). Enter 1, 2, 3 …`);
+      }
+      return { id: nextId('srfql'), lineNo: i + 1, materialId: '', description: l.description.trim(), unitOfMeasure, quantity: String(l.quantity) };
+    });
+  };
+
+  /** As checkClosingDate: a day that exists, on or after the day it was sent. */
+  const checkClosing = (closing: string, issued: string) => {
+    if (!isRealDay(closing)) throw err('VALIDATION_ERROR', `${closing} is not a date`);
+    if (closing < issued) throw err('VALIDATION_ERROR', `The closing date can't be before ${issued}, the day it was sent`);
+  };
+
+  if (method === 'GET' && p === '/sales-rfqs') {
+    return state.salesRfqs
+      .filter((r) => (!qs.status || r.status === qs.status) && (!qs.projectNumber || r.projectNumber === qs.projectNumber))
+      .sort((x, y) => y.createdAt.localeCompare(x.createdAt))
+      .map(rfqView);
+  }
+  if (method === 'POST' && p === '/sales-rfqs') {
+    if (!b.projectNumber) throw err('VALIDATION_ERROR', 'A Sales RFQ is for one project: choose its project.');
+    assertProjectOpen(b.projectNumber);
+    const created: MockRfq = {
+      id: nextId('srfq'), number: number(b.projectNumber), status: 'DRAFT', projectNumber: b.projectNumber,
+      description: b.description === undefined ? rfqText(projectRef(b.projectNumber)?.name) : rfqText(b.description),
+      notes: rfqText(b.notes), penaltiesApply: b.penaltiesApply ?? false, issuedAt: null, closingDate: null,
+      createdAt: now, updatedAt: now, purchaseOrderId: null, sentAt: null, cancelledAt: null, cancellationReason: null,
+      lines: lineRows(b.lines ?? []), suppliers: checkRfqSuppliers(b.supplierIds ?? []).map(rfqSupplierRow),
+      history: [],
+    };
+    created.history.push(entry('CREATE', { number: created.number }));
+    state.salesRfqs.push(created);
+    return rfqView(created);
+  }
+  if (!rfq) throw err('NOT_FOUND', `No mock route for ${method} ${p}`);
+  const base = `/sales-rfqs/${rfq.id}`;
+  if (method === 'GET' && p === base) return rfqView(rfq);
+  if (method === 'GET' && p === `${base}/history`) {
+    return [...rfq.history].reverse().map((e) => ({ ...e, actorName: (e.actorId && MOCK_ACTOR_NAMES[e.actorId]) || null }));
+  }
+  if (method === 'PATCH' && p === base) {
+    if (rfq.status === 'CANCELLED') throw err('INVALID_STATE', `Sales RFQ ${rfq.number} is cancelled, so it can no longer be edited`);
+    const had = rfq.suppliers.map((s) => s.supplierId);
+    if (rfq.status === 'SENT') {
+      if (b.closingDate) checkClosing(b.closingDate, rfq.issuedAt?.slice(0, 10) ?? mockToday());
+      const added = (b.supplierIds ?? had).filter((s) => !had.includes(s));
+      return save({
+        ...rfq, updatedAt: now, closingDate: b.closingDate ? `${b.closingDate}T00:00:00.000Z` : rfq.closingDate,
+        suppliers: [...rfq.suppliers, ...checkRfqSuppliers(added).map(rfqSupplierRow)],
+        history: [...rfq.history, entry('UPDATE', { ...(b.closingDate ? { closingDate: b.closingDate } : {}), ...(added.length ? { supplierIds: [...had, ...added] } : {}) })],
+      });
+    }
+    const moved = b.projectNumber && b.projectNumber !== rfq.projectNumber ? b.projectNumber : null;
+    if (moved) assertProjectOpen(moved);
+    const next = checkRfqSuppliers(b.supplierIds ?? had);
+    return save({
+      ...rfq, updatedAt: now, projectNumber: moved ?? rfq.projectNumber, number: moved ? number(moved) : rfq.number,
+      description: b.description === undefined ? rfq.description : rfqText(b.description),
+      notes: b.notes === undefined ? rfq.notes : rfqText(b.notes), penaltiesApply: b.penaltiesApply ?? rfq.penaltiesApply,
+      lines: b.lines ? lineRows(b.lines) : rfq.lines,
+      suppliers: next.map((s) => rfq.suppliers.find((x) => x.supplierId === s) ?? rfqSupplierRow(s)),
+      history: [...rfq.history, entry('UPDATE', { lines: true })],
+    });
+  }
+  if (method === 'POST' && p === `${base}/send`) {
+    if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Sales RFQ ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be sent`);
+    if (rfq.suppliers.length === 0) throw err('VALIDATION_ERROR', `Add at least one supplier to ask before sending ${rfq.number}`);
+    // As the server: checked again as it goes out.
+    assertProjectOpen(rfq.projectNumber!);
+    checkRfqSuppliers(rfq.suppliers.map((s) => s.supplierId));
+    const issued = mockToday();
+    const closing = b.closingDate ?? mockAddDays(issued, 4);
+    checkClosing(closing, issued);
+    return save({
+      ...rfq, status: 'SENT', updatedAt: now, sentAt: now, issuedAt: `${issued}T00:00:00.000Z`, closingDate: `${closing}T00:00:00.000Z`,
+      history: [...rfq.history, entry('RFQ_SEND', { closingDate: closing, supplierIds: rfq.suppliers.map((s) => s.supplierId) })],
+    });
+  }
+  if (method === 'POST' && p === `${base}/cancel`) {
+    if (rfq.status === 'CANCELLED') throw err('INVALID_STATE', `Sales RFQ ${rfq.number} is already cancelled`);
+    const reason = (body as { reason?: string } | undefined)?.reason;
+    return save({ ...rfq, status: 'CANCELLED', updatedAt: now, cancelledAt: now, cancellationReason: reason ?? null, history: [...rfq.history, entry('RFQ_CANCEL', { reason })] });
+  }
+  const quote = /\/suppliers\/([^/]+)\/(quote|decline|quote-file)$/.exec(p);
+  if (quote) {
+    const supplierId = decodeURIComponent(quote[1]!);
+    const asked = rfq.suppliers.find((s) => s.supplierId === supplierId);
+    if (!asked) throw err('NOT_FOUND', 'Supplier on this Sales RFQ not found');
+    if (rfq.status !== 'SENT') throw err('INVALID_STATE', `${rfq.number} isn't out with suppliers, so its quotes can't change`);
+    const put = (row: MockRfq['suppliers'][number], action: string, after: Record<string, unknown>) => save({
+      ...rfq, updatedAt: now, suppliers: rfq.suppliers.map((s) => (s.supplierId === supplierId ? row : s)), history: [...rfq.history, entry(action, { supplierId, ...after })],
+    });
+    if (method === 'PUT' && quote[2] === 'quote') {
+      const q = (body ?? {}) as { quotedAt?: string; quoteReference?: string | null; validUntil?: string | null; leadTime?: string | null; notes?: string | null; prices?: Array<{ rfqLineId: string; unitPrice: number }> };
+      if (!q.prices?.length) throw err('VALIDATION_ERROR', 'Price at least one line, or mark the supplier as declined');
+      if (q.prices.length > 200) throw err('VALIDATION_ERROR', 'Invalid quote');
+      for (const pr of q.prices) {
+        if (!rfq.lines.some((l) => l.id === pr.rfqLineId)) throw err('VALIDATION_ERROR', `Line ${pr.rfqLineId} is not on ${rfq.number}`);
+        const n = pr.unitPrice;
+        if (typeof n !== 'number' || !(n >= 0 && n <= 1e12) || !fourDecimals(n)) throw err('VALIDATION_ERROR', 'Invalid quote');
+      }
+      const today = mockToday();
+      const quotedAt = q.quotedAt ?? today;
+      if (!isRealDay(quotedAt) || (q.validUntil && !isRealDay(q.validUntil))) throw err('VALIDATION_ERROR', 'Invalid quote');
+      if (quotedAt > today) throw err('VALIDATION_ERROR', `${quotedAt} is still to come: record the day the quote came in`);
+      if (q.validUntil && q.validUntil < quotedAt) throw err('VALIDATION_ERROR', `A quote received on ${quotedAt} can't be valid only until ${q.validUntil}: check the date`);
+      return put({
+        ...asked, declined: false, currency: findSupplier(supplierId)?.currency ?? 'ZAR', quotedAt: `${quotedAt}T00:00:00.000Z`, quoteReference: rfqText(q.quoteReference),
+        validUntil: q.validUntil ? `${q.validUntil}T00:00:00.000Z` : null, leadTime: rfqText(q.leadTime), notes: rfqText(q.notes),
+        prices: [...new Map(q.prices.map((pr) => [pr.rfqLineId, String(pr.unitPrice)])).entries()].map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice })),
+      }, asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE', { quoteReference: rfqText(q.quoteReference), quotedAt });
+    }
+    if (method === 'POST' && quote[2] === 'decline') {
+      const notes = rfqText((body as { notes?: string | null } | undefined)?.notes);
+      return put({ ...asked, declined: true, quotedAt: null, quoteReference: null, validUntil: null, leadTime: null, currency: null, notes, prices: [] }, 'RFQ_DECLINED', { notes });
+    }
+    if (method === 'DELETE' && quote[2] === 'quote-file') {
+      if (!asked.quoteFile) throw err('NOT_FOUND', 'Quotation file not found');
+      return put({ ...asked, quoteFile: null }, 'RFQ_QUOTE_FILE_REMOVED', {});
+    }
+  }
+  throw err('NOT_FOUND', `No mock route for ${method} ${p}`);
 }
 
 /**
@@ -1193,6 +1351,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Requests for quotation, before the purchase order routes, whose /submit
   // and /cancel suffix matches would otherwise catch their paths.
   if (p === '/rfqs' || p.startsWith('/rfqs/')) return routeRfq(method, p, qs, body);
+  if (p === '/sales-rfqs' || p.startsWith('/sales-rfqs/')) return routeSalesRfq(method, p, qs, body);
 
   // Purchase Orders
   // As the server: orders waiting for delivery, in a receiving view with no
@@ -2190,7 +2349,7 @@ function devUser(): MockUser {
     id: 'user-1',
     email: 'admin@afrinov.local',
     name: 'System Administrator (dev)',
-    roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'],
+    roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'],
   };
 }
 
@@ -3302,7 +3461,7 @@ interface MockAdminUser {
   name: string;
   active: boolean;
   createdAt: string;
-  roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' } }>;
+  roles: Array<{ role: { name: 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES' } }>;
   /** Largest order (rand, incl. VAT) they may approve; null: no limit. */
   approvalLimit?: string | null;
 }

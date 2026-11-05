@@ -39,6 +39,8 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     const seesStores = await userHasPermission(req, PermissionCode.OrderStoresStock);
     const seesProjects = await userHasPermission(req, PermissionCode.ViewPurchaseOrder);
     if (!seesProjects) conditions.push(Prisma.sql`a.entity_type <> 'Rfq'`);
+    // A Sales RFQ's entries hold the prices quoted, which its permission guards.
+    if (!(await userHasPermission(req, PermissionCode.ViewSalesRfq))) conditions.push(Prisma.sql`a.entity_type <> 'SalesRfq'`);
     if (!seesStores && !seesProjects) {
       conditions.push(Prisma.sql`a.entity_type <> 'PurchaseOrder'`);
     } else if (!seesStores || !seesProjects) {

@@ -41,6 +41,10 @@ export const PermissionCode = {
   ManageProjects: 'manage:projects',
   ManageRecipients: 'manage:recipients',
   ManageSettings: 'manage:settings',
+  // The prices Sales is quoted can give away the margin on a job, so seeing
+  // them is its own permission, not the purchase order one buyers hold.
+  ViewSalesRfq: 'view:sales_rfq',
+  ManageSalesRfq: 'manage:sales_rfq',
   ReverseInventoryTransaction: 'reverse:inventory_transaction',
 } as const;
 
@@ -104,10 +108,20 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
   // View only: orders are signed by the roles below (po-approval.ts).
   APPROVER: [PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
   // These open the orders they sign. Who signs which order is decided in po-approval.ts.
-  PROCUREMENT_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
-  DIRECTOR: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
-  CEO: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  PROCUREMENT_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ViewReports],
+  DIRECTOR: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ViewReports],
+  CEO: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewSalesRfq, PermissionCode.ViewReports],
   WORKSHOP_MANAGER: [PermissionCode.ApprovePurchaseOrder, PermissionCode.ApproveStoresOrder, PermissionCode.ViewPurchaseOrder, PermissionCode.ViewReports],
+  // Sales asks suppliers for prices when costing a job: the project and any new
+  // supplier have to exist first. No purchase orders or Procurement RFQs.
+  SALES: [
+    PermissionCode.ViewSalesRfq,
+    PermissionCode.ManageSalesRfq,
+    PermissionCode.ManageProjects,
+    PermissionCode.CreateSupplier,
+    PermissionCode.EditSupplier,
+    PermissionCode.ViewReports,
+  ],
   TECHNICIAN: [
     PermissionCode.IssueInventory,
     PermissionCode.CheckOutTool,

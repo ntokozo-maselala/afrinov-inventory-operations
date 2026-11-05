@@ -13,8 +13,9 @@ import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { RfqStatusBadge } from '../components/Badge';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
-import { useCanManageProcurement } from '../hooks/usePermissions';
+import { usePermissions } from '../hooks/usePermissions';
 import { formatDay, quotesIn, type Rfq } from '../lib/rfq';
+import { PROCUREMENT_RFQS, type RfqArea } from '../lib/rfqArea';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 /** RFQs a buyer still has to send or chase: the default view. */
@@ -30,8 +31,13 @@ const STATUS_OPTIONS = [
 ];
 
 export function Rfqs() {
-  const canManage = useCanManageProcurement();
-  const rfqs = useApi<Rfq[]>('/rfqs');
+  return <RfqList area={PROCUREMENT_RFQS} />;
+}
+
+/** The RFQs of either kind (see rfqArea.ts). */
+export function RfqList({ area }: { area: RfqArea }) {
+  const canManage = usePermissions().hasPermission(area.managePermission);
+  const rfqs = useApi<Rfq[]>(area.api);
   const [q, setQ] = useState('');
   const [params, setParams] = useSearchParams();
   const project = params.get('project') ?? '';
@@ -57,9 +63,9 @@ export function Rfqs() {
   return (
     <div>
       <PageHeader
-        title="Requests for quotation"
-        description="Ask suppliers to price what you need, as on the RFQ sheet, before raising the order."
-        actions={canManage ? <Link to="/rfqs/new" className="btn-primary"><Icon.Plus size={14} /> New RFQ</Link> : undefined}
+        title={area.listTitle}
+        description={area.listDescription}
+        actions={canManage ? <Link to={`${area.path}/new`} className="btn-primary"><Icon.Plus size={14} /> {area.raiseLabel}</Link> : undefined}
       />
 
       <Toolbar
@@ -70,7 +76,7 @@ export function Rfqs() {
               <Input className="pl-8" placeholder="Search RFQ, project or supplier…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search requests for quotation" />
             </div>
             <Select className="sm:w-48" value={status} onChange={(e) => setParam('status', e.target.value === defaultStatus ? null : e.target.value || 'all')} aria-label="Filter by status">
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {STATUS_OPTIONS.filter((o) => area.canAward || o.value !== 'AWARDED').map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
             <Select className="sm:w-48" value={project} onChange={(e) => setParam('project', e.target.value || null)} aria-label="Filter by project">
               <option value="">All projects</option>
@@ -89,11 +95,11 @@ export function Rfqs() {
 
       {(!rfqs.error || rfqs.stale) && (
         <DataTable
-          ariaLabel="Requests for quotation"
+          ariaLabel={area.listTitle}
           isLoading={rfqs.loading}
           rowKey={(r) => r.id}
           rows={filtered}
-          columns={COLUMNS}
+          columns={columnsFor(area)}
           emptyState={(rfqs.data?.length ?? 0) > 0 || q || project ? (
             <EmptyState
               title={status === IN_HAND && !q && !project ? 'No drafts or RFQs out with suppliers' : 'No RFQs match your filters'}
@@ -101,9 +107,9 @@ export function Rfqs() {
             />
           ) : (
             <EmptyState
-              title="No requests for quotation yet"
-              description="Raise an RFQ to ask suppliers for prices before ordering."
-              action={canManage ? <Link to="/rfqs/new" className="btn-primary">Raise your first RFQ</Link> : undefined}
+              title={area.emptyTitle}
+              description={area.emptyDescription}
+              action={canManage ? <Link to={`${area.path}/new`} className="btn-primary">Raise your first RFQ</Link> : undefined}
             />
           )}
         />
@@ -112,10 +118,10 @@ export function Rfqs() {
   );
 }
 
-const COLUMNS: DataTableColumn<Rfq>[] = [
+const columnsFor = (area: RfqArea): DataTableColumn<Rfq>[] => [
   {
     key: 'num', header: 'RFQ', width: '13rem',
-    render: (r) => <Link to={`/rfqs/${r.id}`} className="btn-link text-mono whitespace-nowrap">{r.number}</Link>,
+    render: (r) => <Link to={`${area.path}/${r.id}`} className="btn-link text-mono whitespace-nowrap">{r.number}</Link>,
   },
   {
     key: 'desc', header: 'Description', render: (r) => (
