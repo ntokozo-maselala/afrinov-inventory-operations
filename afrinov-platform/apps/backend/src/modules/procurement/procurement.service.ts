@@ -23,7 +23,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
-import { STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
+import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
 
@@ -814,7 +814,7 @@ export const PurchaseOrderService = {
       const refusal = signRefusal(kind, state, po, me);
       if (refusal) {
         const names = state.next ? (await listSigners(kind, state.next, po)).map((a) => a.name) : [];
-        throw Errors.forbidden(`${refusal} ${whoToAsk(names)}`);
+        throw Errors.forbidden(`${refusal} ${whoToAsk(names, refusal === OWN_ORDER)}`);
       }
       const step = state.next;
       const standIn = step ? isStandIn(kind, step, me.roles) : false;

@@ -68,6 +68,7 @@ describe('mock: discount changes on an approved order', () => {
     const beam = await api.post<{ id: string }>('/materials', { sku: `MOCK-BEAM-${discountPercent}`, name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
     const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 0, lines: [{ materialId: beam.id, orderedQty: 10, unitPrice: 21000, discountPercent }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     return api.post<Order>(`/purchase-orders/${po.id}/approve`, {});
   }
 
@@ -105,6 +106,7 @@ describe('mock: approval re-checked only as the server does', () => {
   it('leaves an approved order alone when its discount is sent unchanged with another change', async () => {
     const po = await api.post<Order>('/purchase-orders', { supplierId: 'sup-1', vatRate: 0, lines: [{ materialId: 'mat-1', orderedQty: 10, unitPrice: 10, discountPercent: 10 }] });
     await api.post(`/purchase-orders/${po.id}/submit`, {});
+    mockOrderRaisedBy(po.id, 'user-2'); // raised by someone else: nobody approves their own
     await api.post(`/purchase-orders/${po.id}/approve`, {});
     const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { notes: 'Deliver to gate 2', lineDiscounts: [{ lineId: po.lines[0]!.id, discountPercent: 10 }] });
     expect(after.status).toBe('APPROVED');

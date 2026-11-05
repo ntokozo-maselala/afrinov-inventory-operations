@@ -908,6 +908,10 @@ describe('receiving stock over real HTTP', () => {
 
         expect((await manager('POST', '/purchase-orders', storesOrder())).status).toBe(403);
         expect((await manager('POST', '/purchase-orders', projectOrder())).status).toBe(403);
+      } finally {
+        await api('PUT', approvalKey, { value: approvalWas });
+      }
+    });
 
     // Segregation of duties: whoever raised an order never signs it, whatever
     // their role; another holder of the role does.
@@ -927,10 +931,6 @@ describe('receiving stock over real HTTP', () => {
         expect(refused.status).toBe(403);
         expect(refused.body.error.message).toMatch(/^You raised this order, so someone else must sign it\. Ask .*IT Checker/);
         expect((await checker<{ status: string }>('POST', `/purchase-orders/${own.body.id}/approve`)).body.status).toBe('APPROVED');
-      } finally {
-        await api('PUT', approvalKey, { value: approvalWas });
-      }
-    });
       } finally {
         await api('PUT', approvalKey, { value: approvalWas });
       }

@@ -173,8 +173,12 @@ export async function listSigners(kind: OrderKind, step: ApprovalStep, po?: Pick
     .sort((a, b) => Number(a.standIn) - Number(b.standIn) || a.name.localeCompare(b.name));
 }
 
-/** "Ask Simbongile Bantubani to sign it." or a fallback when nobody can. */
-export function whoToAsk(names: string[]): string {
+/**
+ * "Ask Simbongile Bantubani to sign it." or a fallback when nobody can: when
+ * the only holder of the role raised the order (own), nobody *else* holds it.
+ */
+export function whoToAsk(names: string[], own = false): string {
+  if (names.length === 0 && own) return 'Nobody else holds that role yet: an admin can assign it to another user under Settings → Users.';
   if (names.length === 0) return 'Nobody holds that role yet: an admin can assign it under Settings → Users.';
   if (names.length === 1) return `Ask ${names[0]} to sign it.`;
   return `Ask ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]} to sign it.`;

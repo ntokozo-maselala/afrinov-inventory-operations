@@ -78,11 +78,12 @@ function makePrisma(): unknown {
     },
     user: {
       findUnique: async ({ where }: { where: { id: string } }) => db.users.get(where.id) ?? null,
-      // By id (names on the order's Activity), or active users holding one of the roles.
-      findMany: async ({ where }: { where?: { id?: { in: string[] }; roles?: { some: { role: { name: { in: string[] } } } } } } = {}) => {
-        if (where?.id) return where.id.in.map((id) => db.users.get(id)).filter((u) => !!u);
+      // By id (names on the order's Activity), or active users holding one of the roles, less any left out.
+      findMany: async ({ where }: { where?: { id?: { in?: string[]; notIn?: string[] }; roles?: { some: { role: { name: { in: string[] } } } } } } = {}) => {
+        if (where?.id?.in) return where.id.in.map((id) => db.users.get(id)).filter((u) => !!u);
         const wanted = where?.roles?.some.role.name.in ?? [];
-        return [...db.users.values()].filter((u) => u.roles.some((r) => wanted.includes(r.role.name)));
+        const leftOut = where?.id?.notIn ?? [];
+        return [...db.users.values()].filter((u) => !leftOut.includes(u.id) && u.roles.some((r) => wanted.includes(r.role.name)));
       },
     },
     material: {
@@ -1249,15 +1250,16 @@ describe('PurchaseOrderService and the order row lock', () => {
     expect(db.transactions.map((t) => [t.materialId, t.quantity.toString()])).toEqual([['mat-2', '5']]);
   });
 
-  it('approving checks the limit against prices saved while it waited', async () => {
+  it('signing counts a price saved while it waited for the order', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 1000 }] }, 'user-1');
+    db.projects.set('AFRI-1325', { projectNumber: 'AFRI-1325', active: true, status: 'OPEN' });
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-p', orderedQty: 1, unitPrice: 1000 }] }, 'user-1');
     await PurchaseOrderService.submit(po.id, 'user-1');
-    // Someone saves a price that takes it past Ona's R500 000.
-    onOrderLock = () => { const l = lineOf(po.id, 'mat-1'); db.lines.set(l.id, { ...l, unitPrice: 600000 }); };
+    // Someone saves a price that takes it to R600 000: the Director must sign too.
+    onOrderLock = () => { const l = lineOf(po.id, 'mat-p'); db.lines.set(l.id, { ...l, unitPrice: 600000 }); };
 
-    await expect(PurchaseOrderService.approve(po.id, 'u-ona')).rejects.toMatchObject({ statusCode: 403 });
-    expect(db.pos.get(po.id)!.status).toBe('PENDING_APPROVAL');
+    expect(await PurchaseOrderService.approve(po.id, 'u-ona')).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(db.signatures.map((x) => x.step)).toEqual(['MANAGER']);
   });
 
   it('an edit that waited for a goods receipt finds the order partly received, and leaves it so', async () => {
@@ -1274,42 +1276,45 @@ describe('PurchaseOrderService and the order row lock', () => {
   });
 });
 
-// Segregation of duties: nobody approves an order they raised, whatever their
-// role or limit, so raising, approving and receiving are never one person.
-describe('PurchaseOrderService and approving your own order', () => {
-  async function raisedBy(userId: string, price = 1000) {
+// Segregation of duties: nobody signs an order they raised, whatever their
+// role, so raising, approving and receiving are never one person (ADR-028).
+describe('PurchaseOrderService and signing your own order', () => {
+  /** A submitted Stores order, raised by this user: the Procurement Manager signs it. */
+  async function raisedBy(userId: string) {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: price }] }, userId);
+    const po = await PurchaseOrderService.create({ supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 1000 }] }, userId);
     await PurchaseOrderService.submit(po.id, userId);
     return po.id;
   }
 
-  it('refuses to let whoever raised an order approve it, and names who can', async () => {
+  it('refuses to let whoever raised an order sign it, and names who else can', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const id = await raisedBy('u-sb');
-    await expect(PurchaseOrderService.approve(id, 'u-sb')).rejects.toMatchObject({
-      statusCode: 403, message: 'You raised this order, so someone else must approve it. Ask Ona Moloane to approve it.',
+    const id = await raisedBy('u-ona');
+    await expect(PurchaseOrderService.approve(id, 'u-ona')).rejects.toMatchObject({
+      statusCode: 403, message: 'You raised this order, so someone else must sign it. Ask Second Manager or Workshop Boss to sign it.',
     });
     expect(db.pos.get(id)!.status).toBe('PENDING_APPROVAL');
-    expect(await PurchaseOrderService.approve(id, 'u-ona')).toMatchObject({ status: 'APPROVED', approvedById: 'u-ona' });
+    expect(db.signatures).toEqual([]);
+    expect(await PurchaseOrderService.approve(id, 'user-2')).toMatchObject({ status: 'APPROVED', approvedById: 'user-2' });
   });
 
-  it('says so when nobody else may approve it', async () => {
+  it('says so when nobody else holds a role that signs it', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const id = await raisedBy('u-sb', 600000); // over Ona's limit: only Simbongile could, and raised it
-    await expect(PurchaseOrderService.approve(id, 'u-sb')).rejects.toMatchObject({
-      statusCode: 403, message: expect.stringMatching(/Nobody else may approve it yet: an admin can give another user approval under Settings → Users\.$/),
+    db.users.delete('user-2');
+    db.users.delete('u-ws');
+    const id = await raisedBy('u-ona');
+    await expect(PurchaseOrderService.approve(id, 'u-ona')).rejects.toMatchObject({
+      statusCode: 403, message: 'You raised this order, so someone else must sign it. Nobody else holds that role yet: an admin can assign it to another user under Settings → Users.',
     });
   });
 
-  it('tells the one who raised it they cannot approve it, and leaves it off their list', async () => {
+  it('tells the one who raised it they cannot sign it, and leaves it off their list and the signers named', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
-    const own = await raisedBy('u-sb');
+    const own = await raisedBy('u-ona');
     const other = await raisedBy('user-1');
-    expect(await PurchaseOrderService.approval(own, 'u-sb')).toMatchObject({
-      canApprove: false, reason: 'You raised this order, so someone else must approve it.', approvers: [{ id: 'u-ona' }],
-    });
-    expect((await PurchaseOrderService.approval(own, 'u-sb')).approvers).toHaveLength(1);
-    expect((await PurchaseOrderService.awaitingApproval('u-sb')).map((p) => p.id)).toEqual([other]);
+    const panel = await PurchaseOrderService.approval(own, 'u-ona');
+    expect(panel).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must sign it.' });
+    expect(panel.approvers.map((a) => a.id)).toEqual(['user-2', 'u-ws']);
+    expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((x) => x.id)).toEqual([other]);
   });
 });

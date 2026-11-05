@@ -142,9 +142,9 @@ describe('mock API mutation flows', () => {
     it('refuses to let the demo user approve an order they raised, and leaves it off their list', async () => {
       const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', vatRate: 15, lines: [{ materialId: 'mat-1', orderedQty: 1, unitPrice: 10 }] });
       await api.post(`/purchase-orders/${po.id}/submit`, {});
-      expect(await api.get(`/purchase-orders/${po.id}/approval`)).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must approve it.' });
+      expect(await api.get(`/purchase-orders/${po.id}/approval`)).toMatchObject({ canApprove: false, reason: 'You raised this order, so someone else must sign it.' });
       const e = await api.post(`/purchase-orders/${po.id}/approve`, {}).catch((x: unknown) => x);
-      expect(isApiError(e) && (e as ApiError)).toMatchObject({ code: 'FORBIDDEN', message: 'You raised this order, so someone else must approve it.' });
+      expect(isApiError(e) && (e as ApiError)).toMatchObject({ code: 'FORBIDDEN', message: 'You raised this order, so someone else must sign it.' });
       expect((await api.get<Array<{ id: string }>>('/purchase-orders?awaitingMyApproval=true')).map((o) => o.id)).not.toContain(po.id);
     });
 
@@ -161,6 +161,8 @@ describe('mock API mutation flows', () => {
       const beam = await api.post<{ id: string }>('/materials', { sku: 'MOCK-BEAM-SIGN', name: 'Beam', category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber });
       const raise = async (unitPrice: number) => {
         const po = await api.post<{ id: string }>('/purchase-orders', { supplierId: 'sup-1', projectNumber, vatRate: 15, lines: [{ materialId: beam.id, orderedQty: 1, unitPrice }] });
+        // Raised by someone else: the demo user signs what others raise (ADR-028).
+        mockOrderRaisedBy(po.id, 'user-2');
         await api.post(`/purchase-orders/${po.id}/submit`, {});
         return po.id;
       };
