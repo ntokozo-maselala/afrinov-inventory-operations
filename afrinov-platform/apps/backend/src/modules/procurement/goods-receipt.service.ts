@@ -117,6 +117,9 @@ export const GoodsReceiptService = {
     const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId } });
     if (!supplier) throw Errors.notFound('Supplier');
     if (!supplier.active) throw Errors.validation('Supplier is inactive');
+    // What each order line still expects: a delivery may take exactly that,
+    // even in part-units, so an order raised before the rule can be finished.
+    const outstanding = new Map<string, Prisma.Decimal>();
     if (input.purchaseOrderId) {
       const po = await prisma.purchaseOrder.findUnique({
         where: { id: input.purchaseOrderId },
@@ -127,10 +130,13 @@ export const GoodsReceiptService = {
         throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
       }
       assertLinesOnOrder(po, input);
+      for (const l of po.lines) outstanding.set(l.id, l.orderedQty.minus(l.receivedQty));
     } else if (input.lines.some((l) => l.purchaseOrderLineId)) {
       throw Errors.validation('These lines belong to a purchase order: choose the order the delivery is for.');
     }
-    await checkWholeUnits(input.lines, outer ?? prisma);
+    await checkWholeUnits(input.lines.map((l) => ({
+      materialId: l.materialId, quantity: l.quantity, remainder: l.purchaseOrderLineId ? outstanding.get(l.purchaseOrderLineId) : undefined,
+    })), outer ?? prisma);
 
     const write = async (tx: Prisma.TransactionClient) => {
       // Serialize GR-number generation so two concurrent creates cannot

@@ -60,7 +60,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const bands = useStatusBands();
-  const { units, kindOf } = useUnits();
+  const { units, kindOf, loading: unitsLoading, error: unitsError, reload: reloadUnits } = useUnits();
   // An item still on a unit from before the list keeps it until someone picks a listed one.
   const listed = (units ?? []).filter((u) => u.active && !u.needsReview);
   const legacyUnit = unitOfMeasure && units && !listed.some((u) => u.code === unitOfMeasure) ? unitOfMeasure : null;
@@ -134,9 +134,10 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
           htmlFor="m-uom"
           required
           help={legacyUnit ? `"${legacyUnit}" is not on the list. Choose the unit it is counted or measured in.` : kindOf(unitOfMeasure) === 'COUNTED' ? 'Counted: quantities are whole numbers.' : 'Measured: quantities can have decimals.'}
+          error={unitsError ? "Couldn't load the units of measure. The item keeps the unit shown until they load." : null}
         >
           <Select id="m-uom" value={unitOfMeasure} onChange={(e) => setUom(e.target.value)} required invalid={missing(unitOfMeasure)}>
-            {!units && <option value={unitOfMeasure}>{unitOfMeasure || 'Loading…'}</option>}
+            {!units && <option value={unitOfMeasure}>{unitOfMeasure || (unitsLoading ? 'Loading…' : '—')}</option>}
             {legacyUnit && <option value={legacyUnit}>{legacyUnit} (not on the list)</option>}
             {units && (['COUNTED', 'MEASURED'] as const).map((kind) => (
               <optgroup key={kind} label={kind === 'COUNTED' ? 'Counted (whole numbers)' : 'Measured (decimals allowed)'}>
@@ -144,6 +145,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
               </optgroup>
             ))}
           </Select>
+          {unitsError && <Button type="button" size="sm" variant="ghost" className="mt-1" onClick={reloadUnits}>Try loading the units again</Button>}
         </Field>
       </div>
       <Field label="Item name" htmlFor="m-name" required>

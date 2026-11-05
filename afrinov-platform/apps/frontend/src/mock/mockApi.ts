@@ -3026,6 +3026,10 @@ function handleAdjustment(b: { materialId: string; locationId: string; quantity:
   if (b.quantity === 0) throw err('VALIDATION_ERROR', 'Quantity must be non-zero');
   checkMockAdjustmentDirection(b);
   checkMockWholeUnits([{ materialId: b.materialId, quantity: b.quantity }]);
+  // As the server: with one waiting for this stock, approving both would correct it twice.
+  if (state.adjustmentRequests.some((r) => r.status === 'PENDING' && r.materialId === b.materialId && r.locationId === b.locationId && r.heldForProject === (b.heldForProject ?? null))) {
+    throw err('INVALID_STATE', `${findMaterial(b.materialId)?.sku ?? 'This item'} here already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then adjust again.`);
+  }
   if (b.recipientId) {
     if (!RESPONSIBLE_REASONS.has(b.reasonCode)) throw err('VALIDATION_ERROR', 'Only damage, loss or scrap records who was responsible.');
     if (!b.reasonNote?.trim()) throw err('VALIDATION_ERROR', 'Say what happened when naming who was responsible.');

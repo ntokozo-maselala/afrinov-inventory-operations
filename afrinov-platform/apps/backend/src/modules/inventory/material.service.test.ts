@@ -1,11 +1,12 @@
 // Unit tests for MaterialService: the serial number a tool kept as one unit
 // carries, and which items track use after issue.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 type Material = { id: string; sku: string; name: string; category: string; serialNumber: string | null; [k: string]: unknown };
 type SerialFilter = { equals: string; mode?: string };
 
-const db = { materials: new Map<string, Material>(), audit: [] as Array<{ action: string; entityId: string }> };
+const db = { materials: new Map<string, Material>(), audit: [] as Array<{ action: string; entityId: string }>, balances: [] as Array<{ materialId: string; quantity: number; location: string }> };
 let seq = 0;
 // Some of the listed units (units_of_measure), and one taken off the list.
 const UNITS: Record<string, { code: string; kind: 'COUNTED' | 'MEASURED'; active: boolean }> = {
@@ -32,6 +33,11 @@ function makePrisma(): unknown {
         db.materials.set(m.id, m);
         return m;
       },
+    },
+    inventoryBalance: {
+      findMany: async ({ where }: { where: { materialId: string } }) => db.balances
+        .filter((b) => b.materialId === where.materialId && b.quantity !== 0)
+        .map((b) => ({ quantity: new Prisma.Decimal(b.quantity), location: { name: b.location } })),
     },
     unitOfMeasure: {
       findUnique: async ({ where }: { where: { code: string } }) => UNITS[where.code] ?? null,
@@ -147,5 +153,19 @@ describe('MaterialService units of measure', () => {
     db.materials.set('old-1', { id: 'old-1', sku: 'OLD-1', name: 'Old item', category: 'CONSUMABLES', serialNumber: null, unitOfMeasure: 'gross' });
     const m = await MaterialService.update({ id: 'old-1', name: 'Renamed', unitOfMeasure: 'gross' }, 'admin');
     expect(m).toMatchObject({ name: 'Renamed', unitOfMeasure: 'gross' });
+  });
+});
+
+// Qodo, PR #153: moved to a counted unit, part-units on hand could never be moved again.
+describe('MaterialService moving an item to a counted unit', () => {
+  it('refuses while it holds part of a unit, or keeps a part-unit Required Stock', async () => {
+    const m = await MaterialService.create({ sku: 'CBL-1', name: 'Welding cable', category: 'CONSUMABLES', unitOfMeasure: 'm', requiredStock: 2.5 }, 'admin');
+    db.balances.push({ materialId: m.id, quantity: 7.5, location: 'Rack A' });
+    await expect(MaterialService.update({ id: m.id, unitOfMeasure: 'each' }, 'admin')).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR', message: 'Welding cable holds part of a unit (7.5 at Rack A), so it can\'t be counted in whole each yet. Count it to a whole number on Count stock first.',
+    });
+    db.balances[0]!.quantity = 8;
+    await expect(MaterialService.update({ id: m.id, unitOfMeasure: 'each' }, 'admin')).rejects.toMatchObject({ message: 'Welding cable is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect((await MaterialService.update({ id: m.id, unitOfMeasure: 'each', requiredStock: 3 }, 'admin')).unitOfMeasure).toBe('each');
   });
 });

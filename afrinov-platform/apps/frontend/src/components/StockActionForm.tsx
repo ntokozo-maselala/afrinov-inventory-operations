@@ -12,6 +12,7 @@ import { locationLabel } from '../lib/locations';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { formatMoney } from '../lib/poMoney';
 import { parseQuantity } from '../lib/quantity';
+import { round4 } from '../lib/movementReason';
 
 // Issuing has its own page (IssueStock), so the row drawer only transfers and adjusts.
 export type StockActionKind = 'transfer' | 'adjust';
@@ -91,7 +92,8 @@ export function StockActionForm({ kind, row, onDone, onError, onSuccess }: Props
   const named = !!responsibleHelp && responsible !== '' && responsible !== NOT_KNOWN;
   const noteRequired = named || reasonCode === 'FOUND' || reasonCode === 'OTHER';
   const noteLabel = named ? 'What happened' : reasonCode === 'FOUND' ? 'Where was it found?' : reasonCode === 'OTHER' ? 'Why' : 'Note (optional)';
-  const after = kind === 'adjust' && direction && parsed.ok ? (direction === 'remove' ? onHand - parsed.value : onHand + parsed.value) : null;
+  // Rounded to the 4 places the server keeps: 41.3 - 0.1 is 41.199999999999996 in floating point.
+  const after = kind === 'adjust' && direction && parsed.ok ? round4(direction === 'remove' ? onHand - parsed.value : onHand + parsed.value) : null;
   const tooMany = after !== null && after < 0;
 
   function chooseReason(value: string) {

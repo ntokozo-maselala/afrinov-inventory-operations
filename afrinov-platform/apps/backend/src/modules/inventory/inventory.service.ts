@@ -254,9 +254,6 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
     include: { reversedBy: { select: { id: true } }, material: { select: { sku: true, name: true, trackUse: true, unitOfMeasure: true, unit: { select: { kind: true } } } } },
   });
   if (!issue) throw Errors.notFound('InventoryTransaction');
-  if (![input.qty, usedUp, broken].every((q) => fitsUnitKind(issue.material.unit.kind, q))) {
-    throw Errors.validation(wholeUnitsMessage(issue.material.name, issue.material.unitOfMeasure));
-  }
   if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
     throw Errors.invalidState('Only an issue can have stock returned against it.');
   }
@@ -279,6 +276,11 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   const closedOff = closedTotal((await closedOffAgainst(tx, [issue.id])).get(issue.id));
   const returnable = issued.minus(alreadyReturned).minus(closedOff);
   const total = input.qty.plus(usedUp).plus(broken);
+  // Whole units, unless this closes off exactly what is left of an issue made
+  // in part-units before the rule.
+  if (![input.qty, usedUp, broken].every((q) => fitsUnitKind(issue.material.unit.kind, q)) && !total.equals(returnable)) {
+    throw Errors.validation(wholeUnitsMessage(issue.material.name, issue.material.unitOfMeasure));
+  }
   if (total.gt(returnable)) {
     const what = marking ? `take back ${total.toString()} × ${issue.material.sku}` : `return ${input.qty.toString()} × ${issue.material.sku}`;
     throw Errors.validation(

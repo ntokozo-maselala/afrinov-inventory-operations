@@ -106,8 +106,6 @@ export const ConsumableOutcomeService = {
       if (!issue.material.trackUse) {
         throw Errors.invalidState(`${issue.material.sku} does not track use after issue. Switch it on for the item first.`);
       }
-      await checkWholeUnits([{ materialId: issue.materialId, quantity: qty }], tx);
-
       // The same lock a return against this issue and its reversal take, so
       // they cannot both spend what is still out.
       await lockInventoryBalances([{ materialId: issue.materialId, locationId: issue.locationId, heldForProject: issue.heldForProject }], tx);
@@ -123,6 +121,8 @@ export const ConsumableOutcomeService = {
           { ...before },
         );
       }
+      // Whole units, or exactly what is left of an issue made in part-units before the rule.
+      await checkWholeUnits([{ materialId: issue.materialId, quantity: qty, remainder: stillOut }], tx);
 
       const outcomeId = await writeOutcome(tx, {
         issueTransactionId: issue.id, outcome: input.outcome, quantity: qty, note: input.note?.trim() || null, actorId: input.actorId,

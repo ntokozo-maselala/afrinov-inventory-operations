@@ -47,7 +47,7 @@ export function checkReceiptLines(
 ): { lines: ReceiptLineDraft[] } | { problem: string } {
   for (const l of lines) {
     if (!l.materialId || l.quantity.trim() === '') continue;
-    const parsed = parseQuantity(l.quantity, kindOf(l.unit), l.unit ?? '', { allowZero: true });
+    const parsed = parseQuantity(l.quantity, kindOf(l.unit), l.unit ?? '', { allowZero: true, remainder: l.outstanding });
     if (!parsed.ok) return { problem: `${l.label ?? 'A line'}: ${parsed.error}` };
   }
   const arrived = lines.filter((l) => l.materialId && readQuantity(l.quantity) > 0);

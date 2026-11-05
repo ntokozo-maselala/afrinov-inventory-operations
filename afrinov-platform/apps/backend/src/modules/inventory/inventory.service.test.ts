@@ -1464,6 +1464,17 @@ describe('whole units and the direction of an adjustment', () => {
     expect(trxRows.filter((r) => r.type === 'RETURN' || r.type === 'TRANSFER_OUT')).toHaveLength(0);
   });
 
+  // Qodo, PR #153: half an issued washer from before the rule could never come back.
+  it('takes back what is left of an issue made in part-units, but no new part of one', async () => {
+    await InventoryService.adjust({ materialId: 'washer-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    trxRows.push({ id: 'iss-old', materialId: 'washer-1', locationId: 'loc-1', type: 'ISSUE', quantity: new Prisma.Decimal(-2.5), actorId: 'u', recipientId: 'user-3', postedAt: new Date() });
+    await expect(InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.5, actorId: 'u' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Material is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    await InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 2, actorId: 'u' });
+    const last = await InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.5, actorId: 'u' });
+    expect(last).toMatchObject({ returnedQuantity: '2.5', returnableQuantity: '0' });
+  });
+
   it('still takes a fraction of a measured item', async () => {
     await InventoryService.adjust({ materialId: 'cable-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
     await issueOne({ materialId: 'cable-1', locationId: 'loc-1', quantity: '2.5', actorId: 'u' });

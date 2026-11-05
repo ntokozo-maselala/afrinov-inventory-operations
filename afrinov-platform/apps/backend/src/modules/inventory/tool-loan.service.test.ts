@@ -50,7 +50,7 @@ const withRelations = (r: Row) => ({
   recipient: r.recipientId ? { name: names[r.recipientId] } : null,
   location: { name: names[r.locationId] },
   actor: { name: names[r.actorId] },
-  material: { sku: db.materials.find((m) => m.id === r.materialId)!.sku, name: db.materials.find((m) => m.id === r.materialId)!.name, unitCost: ((c) => (c === undefined ? null : D(c)))((db.materials.find((m) => m.id === r.materialId) as { unitCost?: number }).unitCost) },
+  material: { unitOfMeasure: 'each', unit: { kind: 'COUNTED' as const }, sku: db.materials.find((m) => m.id === r.materialId)!.sku, name: db.materials.find((m) => m.id === r.materialId)!.name, unitCost: ((c) => (c === undefined ? null : D(c)))((db.materials.find((m) => m.id === r.materialId) as { unitCost?: number }).unitCost) },
   project: r.projectNumber ? project() : null,
   loanExtensions: db.extensions.filter((e) => e.loanId === r.id).map((e) => ({ ...e, actor: { name: names[e.actorId] } })),
 });
@@ -59,7 +59,9 @@ const client = {
   $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => { db.locks.push(key); return 0; }),
   material: {
     findUnique: async ({ where }: { where: { id: string } }) => db.materials.find((m) => m.id === where.id) ?? null,
-    findMany: async ({ where }: { where: { category: string } }) => db.materials.filter((m) => m.category === where.category),
+    findMany: async ({ where }: { where: { category?: string; id?: { in: string[] } } }) => (where.id
+      ? db.materials.filter((m) => where.id!.in.includes(m.id)).map((m) => ({ ...m, unit: { kind: 'COUNTED' as const } }))
+      : db.materials.filter((m) => m.category === where.category)),
   },
   location: { findUnique: async ({ where }: { where: { id: string } }) => (where.id === 'l-store' ? { id: 'l-store', active: true } : null) },
   recipient: {
@@ -418,5 +420,39 @@ describe('ToolLoanService.history', () => {
     expect(h).toMatchObject({ out: '1', state: 'ON_LOAN', daysLate: -4 });
     expect(h.events.map((e) => e.kind)).toEqual(['CHECKED_OUT']);
     await expect(ToolLoanService.history(db.ledger[0]!.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+// Tools are counted in whole units; a loan from before the rule can still be closed off.
+describe('ToolLoanService and whole units', () => {
+  const loanOf = (quantity: number) => {
+    const row: Row = { id: `tx-${++seq}`, materialId: 'm-scraper', locationId: 'l-store', type: 'LOAN', quantity: D(-quantity), actorId: 'u-1', recipientId: 'r-bukho', issueId: 'slip-old', postedAt: new Date() };
+    db.ledger.push(row);
+    return row.id;
+  };
+
+  // Qodo, PR #153: two lines of 0.5 are two loans of half a scraper, though they total 1.
+  it('refuses part of a tool on any line of a check-out, whatever the lines total', async () => {
+    await expect(ToolLoanService.checkOut({
+      recipientId: 'r-sabelo', actorId: 'u-1',
+      lines: [{ materialId: 'm-scraper', locationId: 'l-store', quantity: 0.5 }, { materialId: 'm-scraper', locationId: 'l-store', quantity: 0.5 }],
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(db.ledger.filter((r) => r.type === 'LOAN')).toEqual([]);
+  });
+
+  // Qodo, PR #153: a loan of 1.5 from before the rule could never be checked in in full.
+  it('takes back what is left of a loan made in part-units, but no new part of one', async () => {
+    const loanId = loanOf(1.5);
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 1, condition: 'GOOD' }] });
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'DAMAGED', note: 'Half a set' }] });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN').map((r) => r.quantity.toString())).toEqual(['1', '0.5']);
+  });
+
+  it('takes the whole of a part-unit loan in one go, split over lines', async () => {
+    const loanId = loanOf(2.5);
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 2, condition: 'GOOD' }, { loanId, quantity: 0.5, condition: 'DAMAGED', note: 'Snapped' }] });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN').map((r) => r.quantity.toString())).toEqual(['2', '0.5']);
   });
 });

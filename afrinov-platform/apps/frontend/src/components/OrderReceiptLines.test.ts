@@ -19,3 +19,14 @@ describe('the lines of a delivery against an order', () => {
     expect(receiptLinesFromOrder(order('5', '5'))).toEqual([]);
   });
 });
+
+// Qodo, PR #153: an order with 0.5 each still owed could never be finished.
+describe('checkReceiptLines and counted items', () => {
+  const counted = () => 'COUNTED' as const;
+  const line = { materialId: 'm-1', locationId: 'loc-1', purchaseOrderLineId: 'pl-1', outstanding: 2.5, label: 'WSH-1 — Washer', unit: 'each' };
+  it('takes exactly what is still owed, but no other part of one', () => {
+    expect(checkReceiptLines([{ ...line, quantity: '2,5' }], true, counted)).toMatchObject({ lines: [{ quantity: '2,5' }] });
+    expect(checkReceiptLines([{ ...line, quantity: '2' }], true, counted)).toMatchObject({ lines: [{ quantity: '2' }] });
+    expect(checkReceiptLines([{ ...line, quantity: '1,5' }], true, counted)).toEqual({ problem: 'WSH-1 — Washer: Counted in whole each: enter 1, 2, 3 …' });
+  });
+});

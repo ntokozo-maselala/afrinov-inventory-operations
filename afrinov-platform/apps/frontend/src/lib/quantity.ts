@@ -33,6 +33,12 @@ export type ParsedQuantity =
 interface ParseOptions {
   /** A count may be 0 (an empty shelf); every movement needs more. */
   allowZero?: boolean;
+  /**
+   * What is still left to close off (owed on an order, out on an issue or a
+   * loan). A counted item may take exactly this even in part-units, so stock
+   * booked that way before the rule can be finished; as the server allows.
+   */
+  remainder?: number;
 }
 
 /**
@@ -70,7 +76,7 @@ export function parseQuantity(text: string, kind: UnitKind, unit: string, opts: 
   const plain = t.replace(',', '.');
   if (!/^(\d+(\.\d*)?|\.\d+)$/.test(plain)) return { ok: false, empty: false, error: 'Enter a number, for example 12.' };
   const decimals = (plain.split('.')[1] ?? '').replace(/0+$/, '').length;
-  if (kind === 'COUNTED' && decimals > 0) {
+  if (kind === 'COUNTED' && decimals > 0 && Number(plain) !== opts.remainder) {
     return { ok: false, empty: false, error: `Counted in whole ${unit}: enter 1, 2, 3 …` };
   }
   if (decimals > QUANTITY_DECIMALS) return { ok: false, empty: false, error: `At most ${QUANTITY_DECIMALS} decimal places.` };

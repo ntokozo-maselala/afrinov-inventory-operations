@@ -39,6 +39,12 @@ describe('fitsUnitKind', () => {
     expect(fitsUnitKind('COUNTED', D('2.5'))).toBe(false);
   });
 
+  it('takes exactly the remainder of a counted item, so part-units from before the rule can be closed off', () => {
+    expect(fitsUnitKind('COUNTED', D('0.5'), D('0.5'))).toBe(true);
+    expect(fitsUnitKind('COUNTED', D('0.5'), D('2.5'))).toBe(false);
+    expect(fitsUnitKind('COUNTED', D('2'), D('2.5'))).toBe(true);
+  });
+
   it('takes fractions for a measured unit', () => {
     expect(fitsUnitKind('MEASURED', D('2.5'))).toBe(true);
     expect(fitsUnitKind('MEASURED', D('0.0001'))).toBe(true);

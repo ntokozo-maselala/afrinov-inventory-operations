@@ -17,7 +17,7 @@
 // same PO cannot both succeed.
 import { Prisma, PurchaseOrderStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
-import { Errors } from '../../shared/errors.js';
+import { ApiError, Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { checkWholeUnits } from '../../shared/units.js';
@@ -489,8 +489,16 @@ export const PurchaseOrderService = {
     // that rule may still hold Stores items, and its award keeps them.
     if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), lineMaterials);
     refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), lineMaterials);
-    // An award orders what the RFQ asked for, which was checked when it was asked.
-    if (!opts.fromRfq) await checkWholeUnits(input.lines.map((l) => ({ materialId: l.materialId, quantity: l.orderedQty })), db);
+    // An award is checked too: an RFQ sent before the rule may ask for part of
+    // a counted item, and a sent RFQ's lines can no longer be changed.
+    try {
+      await checkWholeUnits(input.lines.map((l) => ({ materialId: l.materialId, quantity: l.orderedQty })), db);
+    } catch (e) {
+      if (opts.fromRfq && e instanceof ApiError) {
+        throw Errors.validation(`${e.message} ${opts.fromRfq.number} asks for part of one, so it can't be awarded: cancel it and raise the request for quotation again.`, e.details);
+      }
+      throw e;
+    }
 
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods

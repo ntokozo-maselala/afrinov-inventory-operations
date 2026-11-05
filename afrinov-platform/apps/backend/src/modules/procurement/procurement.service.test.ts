@@ -1319,3 +1319,17 @@ describe('PurchaseOrderService and signing your own order', () => {
     expect((await PurchaseOrderService.awaitingApproval('u-ona')).map((x) => x.id)).toEqual([other]);
   });
 });
+
+// Qodo, PR #153: an RFQ saved before the rule could order half a washer when awarded.
+describe('PurchaseOrderService and whole units', () => {
+  it('refuses part of a counted item, on an award too, saying how to go on', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    db.materials.set('mat-washer', { id: 'mat-washer', sku: 'WSH-1', name: 'M16 flat washer', active: true, unitOfMeasure: 'each', unit: { kind: 'COUNTED' } });
+    const line = { materialId: 'mat-washer', orderedQty: 1.5, unitPrice: 1 };
+    await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [line] }, 'user-1'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'M16 flat washer is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    await expect(PurchaseOrderService.create({ supplierId: 'sup-1', lines: [line] }, 'user-1', { fromRfq: { id: 'rfq-1', number: 'AFRI-02A-1325-02-01' } }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'M16 flat washer is counted in whole numbers (each). Enter 1, 2, 3 … AFRI-02A-1325-02-01 asks for part of one, so it can\'t be awarded: cancel it and raise the request for quotation again.' });
+    expect(await PurchaseOrderService.create({ supplierId: 'sup-1', lines: [{ ...line, orderedQty: 2 }] }, 'user-1')).toMatchObject({ status: 'DRAFT' });
+  });
+});

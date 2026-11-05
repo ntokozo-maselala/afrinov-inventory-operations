@@ -140,6 +140,22 @@ export const MaterialService = {
       ? await checkUnitOfMeasure(input.unitOfMeasure, prisma)
       : null;
     if (newUnit) data.unitOfMeasure = newUnit.code;
+    // Moved to a counted unit, the item must not hold part-units it could
+    // then never move: they are counted to a whole number first.
+    if (newUnit?.kind === 'COUNTED') {
+      const name = input.name ?? before.name;
+      const parts = (await prisma.inventoryBalance.findMany({
+        where: { materialId: before.id, quantity: { not: 0 } },
+        select: { quantity: true, location: { select: { name: true } } },
+      })).filter((b) => !b.quantity.isInteger());
+      if (parts.length > 0) {
+        throw Errors.validation(
+          `${name} holds part of a unit (${parts.slice(0, 3).map((b) => `${b.quantity.toString()} at ${b.location.name}`).join(', ')}), so it can't be counted in whole ${newUnit.code} yet. Count it to a whole number on Count stock first.`,
+          { field: 'unitOfMeasure' },
+        );
+      }
+      if (input.requiredStock === undefined) checkQuantityForUnit(name, newUnit, before.requiredStock, 'requiredStock');
+    }
     if (input.requiredStock !== undefined) {
       const unit = newUnit ?? await prisma.unitOfMeasure.findUniqueOrThrow({ where: { code: before.unitOfMeasure }, select: { code: true, kind: true } });
       checkQuantityForUnit(input.name ?? before.name, unit, input.requiredStock, 'requiredStock');

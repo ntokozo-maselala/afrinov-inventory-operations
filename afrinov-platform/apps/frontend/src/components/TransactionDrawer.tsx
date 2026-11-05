@@ -364,7 +364,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
 
   async function submit() {
     setValidation(null);
-    const parsed = parseQuantity(quantity, kindOf(unit), unit);
+    const parsed = parseQuantity(quantity, kindOf(unit), unit, { remainder: returnable });
     if (!parsed.ok) { setValidation(parsed.empty ? 'Enter how much is coming back.' : parsed.error); return; }
     const qty = parsed.value;
     if (qty > returnable) { setValidation(`At most ${returnable} can come back.`); return; }

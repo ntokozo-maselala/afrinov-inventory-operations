@@ -142,12 +142,20 @@ Use these forms; the older spellings still work but are deprecated or removed.
   a COUNTED unit (each, pair, box) takes whole numbers, a MEASURED one (m, kg, l)
   up to 4 decimals. Every service that takes a quantity a person typed calls
   `checkWholeUnits` (`src/shared/units.ts`); figures the system works out are
-  not checked again. On the frontend, use `QuantityInput` and `parseQuantity`
-  (`src/lib/quantity.ts`), never `type="number"`, for a stock quantity. A new
-  spelling of a unit goes in `UNIT_ALIASES`.
+  not checked again. Where something is left to close off (owed on an order,
+  out on an issue or a tool loan), pass it as the `remainder`: exactly that is
+  taken even in part-units, so stock booked that way before the rule can be
+  finished. On the frontend, use `QuantityInput` and `parseQuantity`
+  (`src/lib/quantity.ts`, with the same `remainder` option), never
+  `type="number"`, for a stock quantity. A new spelling of a unit goes in
+  `UNIT_ALIASES`.
 - **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
   stock, Found only adds it, Other goes either way; Found and Other need a note
   (`checkRequestedAdjustment`). The API still takes the signed quantity.
+- **One adjustment of a stock waits at a time.** A manual adjustment, like a
+  stock count, takes the balance lock and is refused while any adjustment of
+  that material, location and project stock is waiting for approval; approving
+  both would correct the same difference twice.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

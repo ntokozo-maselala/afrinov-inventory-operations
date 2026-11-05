@@ -48,9 +48,14 @@ export function unitCode(typed: string): string {
   return UNIT_ALIASES[t.toLowerCase()] ?? t;
 }
 
-/** Whether a quantity fits a unit of this kind: whole for a counted unit. */
-export function fitsUnitKind(kind: 'COUNTED' | 'MEASURED', quantity: Decimal): boolean {
-  return kind !== 'COUNTED' || quantity.isInteger();
+/**
+ * Whether a quantity fits a unit of this kind: whole for a counted unit, or
+ * exactly the remainder given. Stock booked in part-units before the rule (half
+ * a washer still out on an issue, 0.5 still owed on an order) can then be
+ * closed off, though no new part-unit can be started.
+ */
+export function fitsUnitKind(kind: 'COUNTED' | 'MEASURED', quantity: Decimal, remainder?: Decimal): boolean {
+  return kind !== 'COUNTED' || quantity.isInteger() || (remainder !== undefined && quantity.equals(remainder));
 }
 
 /** What to tell someone who entered part of a counted item. */
@@ -91,10 +96,11 @@ export function checkQuantityForUnit(name: string, unit: { code: string; kind: '
  * Refuses part of a counted item: 0.5 of a washer, 2.25 gloves. Called with
  * the quantities a person entered; figures the system works out (a count's
  * difference, a stored request being approved) are not checked again.
- * Materials it can't find are left to the caller's own not-found check.
+ * Materials it can't find are left to the caller's own not-found check. An
+ * entry's remainder, when given, is also taken (see fitsUnitKind).
  */
 export async function checkWholeUnits(
-  entries: ReadonlyArray<{ materialId: string; quantity: number | string | Decimal }>,
+  entries: ReadonlyArray<{ materialId: string; quantity: number | string | Decimal; remainder?: Decimal }>,
   db: MaterialClient,
 ): Promise<void> {
   if (entries.length === 0) return;
@@ -106,7 +112,7 @@ export async function checkWholeUnits(
   const byId = new Map(materials.map((m) => [m.id, m]));
   for (const e of entries) {
     const m = byId.get(e.materialId);
-    if (m && !fitsUnitKind(m.unit.kind, toDecimal(e.quantity))) {
+    if (m && !fitsUnitKind(m.unit.kind, toDecimal(e.quantity), e.remainder)) {
       throw Errors.validation(wholeUnitsMessage(m.name, m.unitOfMeasure), { materialId: e.materialId, quantity: toDecimal(e.quantity).toString() });
     }
   }

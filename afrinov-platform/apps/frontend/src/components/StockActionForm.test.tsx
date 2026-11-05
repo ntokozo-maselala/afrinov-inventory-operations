@@ -209,6 +209,20 @@ describe('StockActionForm: write-offs over the limit', () => {
   });
 });
 
+// Qodo, PR #153: 41.3 - 0.1 is 41.199999999999996 in floating point.
+describe('StockActionForm: the stock left after it', () => {
+  beforeEach(() => answer());
+
+  it('is shown to the places the server keeps', async () => {
+    renderForm('adjust', { ...row, unitOfMeasure: 'm', quantity: '41.3' });
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/units-of-measure'));
+    reason('OTHER');
+    fireEvent.click(screen.getByRole('button', { name: '− Remove stock' }));
+    quantity('0,1');
+    expect(await screen.findByText('41.2')).toBeInTheDocument();
+  });
+});
+
 describe('StockActionForm: transfer', () => {
   beforeEach(() => {
     mockPost.mockReset().mockResolvedValue({ outTransactionId: 'o', inTransactionId: 'i' });

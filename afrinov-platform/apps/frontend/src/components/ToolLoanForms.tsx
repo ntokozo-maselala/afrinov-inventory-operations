@@ -244,9 +244,9 @@ export function CheckInForm({ tool, onCancel, onDone }: {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const typed = tool.loans.find((l) => (back[l.loanId]?.quantity ?? '').trim() !== '' && !parseQuantity(back[l.loanId]!.quantity, kindOf(tool.unitOfMeasure), tool.unitOfMeasure, { allowZero: true }).ok);
+    const typed = tool.loans.find((l) => (back[l.loanId]?.quantity ?? '').trim() !== '' && !parseQuantity(back[l.loanId]!.quantity, kindOf(tool.unitOfMeasure), tool.unitOfMeasure, { allowZero: true, remainder: canComeBack(l) }).ok);
     if (typed) {
-      const parsed = parseQuantity(back[typed.loanId]!.quantity, kindOf(tool.unitOfMeasure), tool.unitOfMeasure, { allowZero: true });
+      const parsed = parseQuantity(back[typed.loanId]!.quantity, kindOf(tool.unitOfMeasure), tool.unitOfMeasure, { allowZero: true, remainder: canComeBack(typed) });
       setError(parsed.ok ? null : parsed.error);
       return;
     }

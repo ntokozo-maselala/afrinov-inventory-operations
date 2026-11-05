@@ -32,6 +32,12 @@ describe('parseQuantity', () => {
     expect(parseQuantity('ten', 'COUNTED', 'each')).toMatchObject({ ok: false, error: 'Enter a number, for example 12.' });
   });
 
+  it('takes exactly what is left of a counted item, so part-units from before the rule can be closed off', () => {
+    expect(parseQuantity('0,5', 'COUNTED', 'each', { remainder: 0.5 })).toEqual({ ok: true, value: 0.5 });
+    expect(parseQuantity('0,5', 'COUNTED', 'each', { remainder: 2.5 })).toMatchObject({ ok: false });
+    expect(parseQuantity('2', 'COUNTED', 'each', { remainder: 2.5 })).toEqual({ ok: true, value: 2 });
+  });
+
   it('lets a count be 0', () => {
     expect(parseQuantity('0', 'COUNTED', 'each', { allowZero: true })).toEqual({ ok: true, value: 0 });
   });
