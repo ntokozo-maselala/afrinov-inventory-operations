@@ -2592,7 +2592,7 @@ function loanHistory(loanId: string) {
   };
 }
 
-function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[] } {
+function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[]; heldLoanIds: string[] } {
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one tool to check in');
   if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Check-in quantity must be positive');
@@ -2616,10 +2616,19 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
   const returnIds: string[] = [];
   const writeOffIds: string[] = [];
   const writeOffRequestIds: string[] = [];
+  const heldLoanIds: string[] = [];
+  // As the server: whether lost tools wait is decided on all lost of a tool from one location.
+  const lostTotal = new Map<string, number>();
+  for (const l of lines) {
+    if (l.condition !== 'LOST') continue;
+    const loan = state.transactions.find((t) => t.id === l.loanId)!;
+    lostTotal.set(`${loan.materialId}|${loan.locationId}`, (lostTotal.get(`${loan.materialId}|${loan.locationId}`) ?? 0) + l.quantity);
+  }
   for (const l of lines) {
     const loan = state.transactions.find((t) => t.id === l.loanId)!;
     const note = l.note?.trim() || undefined;
-    if (l.condition === 'LOST' && mockWriteOffCheck(loan.materialId, l.quantity).needsApproval) {
+    if (l.condition === 'LOST' && mockWriteOffCheck(loan.materialId, lostTotal.get(`${loan.materialId}|${loan.locationId}`)!).needsApproval) {
+      heldLoanIds.push(loan.id);
       // Over the limit: it stays on loan until the write-off is approved.
       const who = state.recipients.find((r) => r.id === loan.recipientId)?.name ?? 'an unknown recipient';
       writeOffRequestIds.push(requestMockAdjustment({
@@ -2648,7 +2657,7 @@ function handleToolCheckIn(b: ToolCheckInBody): { returnIds: string[]; writeOffI
       writeOffIds.push(writeOff);
     }
   }
-  return { returnIds, writeOffIds, writeOffRequestIds };
+  return { returnIds, writeOffIds, writeOffRequestIds, heldLoanIds };
 }
 
 function handleTransfer(b: { materialId: string; fromLocationId: string; toLocationId: string; quantity: number; heldForProject?: string | null }): { outTransactionId: string; inTransactionId: string } {

@@ -120,12 +120,29 @@ describe('write-off approval over real HTTP', () => {
   it('checks the stock again when approving, and refuses what is no longer there', async () => {
     const asked = await adjust(storeman, { quantity: -10, reasonCode: 'SCRAP', reasonNote: 'Water damage' }); // R 2 500, all of it
     expect(asked.status).toBe(202);
-    // Meanwhile 4 m are issued... here, written off within the limit.
-    expect((await adjust(storeman, { quantity: -4, reasonCode: 'SCRAP', reasonNote: 'Offcuts' })).status).toBe(201);
+    // Meanwhile 4 m are issued. (Adjusting it again is refused while this waits.)
+    const fitter = await api<{ id: string }>('POST', '/recipients', { name: `IT WO cable fitter ${run}`, type: 'WORKER' });
+    expect((await storeman('POST', '/inventory-issues', { recipientId: fitter.body.id, lines: [{ materialId, locationId, quantity: 4 }] })).status).toBe(201);
     const refused = await api<{ error: { code: string } }>('POST', `/adjustment-requests/${asked.body.requestId}/approve`);
     expect(refused.status).toBe(422);
     expect(await onHand()).toBe('6');
     expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: asked.body.requestId! } })).status).toBe('PENDING');
+    expect((await api('POST', `/adjustment-requests/${asked.body.requestId}/reject`, { reason: 'Issued since' })).status).toBe(200);
+  });
+
+  // Qodo, PR #151: with one waiting, approving both would correct the same shortfall twice.
+  it('refuses another adjustment of the same stock while one waits for approval', async () => {
+    const asked = await adjust(storeman, { quantity: -5, reasonCode: 'LOSS', reasonNote: 'Missing' }); // R 1 250
+    expect(asked.status).toBe(202);
+    const before = await onHand();
+    for (const body of [{ quantity: -1, reasonCode: 'LOSS', reasonNote: 'The same shortfall' }, { quantity: -5, reasonCode: 'LOSS', reasonNote: 'Booked again' }]) {
+      const again = await adjust(storeman, body);
+      expect([again.status, again.body.error?.code]).toEqual([409, 'INVALID_STATE']);
+      expect(again.body.error?.message).toBe(`IT-WO-${run} here already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then adjust again.`);
+    }
+    expect(await onHand()).toBe(before);
+    expect((await api('POST', `/adjustment-requests/${asked.body.requestId}/reject`, { reason: 'Counted instead' })).status).toBe(200);
+    expect((await adjust(storeman, { quantity: -1, reasonCode: 'LOSS', reasonNote: 'Now on its own' })).status).toBe(201);
   });
 
   it('refuses one that could not be posted at all when it is asked for', async () => {
@@ -240,6 +257,42 @@ describe('write-off approval over real HTTP', () => {
     expect(await onHand(grinder.body.id)).toBe('2');
   });
 
+  // Qodo, PR #151: two lost lines of R 600 under a R 1 000 limit are R 1 200 written off.
+  it('decides the lost tools of one check-in together, so splitting them does not dodge the limit', async () => {
+    const saw = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-SAW-${run}`, name: `Jigsaw ${run}`, category: 'TOOLS', unitOfMeasure: 'each', unitCost: 600 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: saw.body.id, quantity: 2, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT WO joiner ${run}`, type: 'WORKER' });
+    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: saw.body.id, locationId, quantity: 2 }] });
+    const [loanId] = out.body.loanIds;
+    const lost = await storeman<{ writeOffIds: string[]; writeOffRequestIds: string[]; heldLoanIds: string[] }>('POST', '/tools/check-in', { lines: [
+      { loanId, quantity: 1, condition: 'LOST', note: 'Left on site' },
+      { loanId, quantity: 1, condition: 'LOST', note: 'Left on site too' },
+    ] });
+    expect(lost.status).toBe(201);
+    expect([lost.body.writeOffIds, lost.body.writeOffRequestIds.length, lost.body.heldLoanIds]).toEqual([[], 2, [loanId, loanId]]);
+    expect(await prisma.inventoryTransaction.count({ where: { materialId: saw.body.id, type: 'ADJUSTMENT', reasonCode: 'LOSS' } })).toBe(0);
+  });
+
+  // Qodo, PR #151: as approving any adjustment refuses a retired item.
+  it('refuses to write off a lost tool retired while its write-off waited', async () => {
+    const level = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-LEVEL-${run}`, name: `Laser level ${run}`, category: 'TOOLS', unitOfMeasure: 'each', unitCost: 3000 });
+    await setting('inventory.requireWriteOffApproval', false);
+    expect((await adjust(api, { materialId: level.body.id, quantity: 1, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    await setting('inventory.requireWriteOffApproval', true);
+    const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT WO surveyor ${run}`, type: 'WORKER' });
+    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: level.body.id, locationId, quantity: 1 }] });
+    const [loanId] = out.body.loanIds;
+    const lost = await storeman<{ writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST', note: 'Dropped in the dam' }] });
+    const [requestId] = lost.body.writeOffRequestIds;
+    expect((await api('PATCH', `/materials/${level.body.id}`, { active: false })).status).toBe(200);
+    const refused = await api<{ error: { code: string; message: string } }>('POST', `/adjustment-requests/${requestId}/approve`);
+    expect([refused.status, refused.body.error.message]).toEqual([400, 'Material is inactive']);
+    expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: requestId! } })).status).toBe('PENDING');
+    expect(await prisma.inventoryTransaction.count({ where: { type: 'LOAN_RETURN', referenceId: loanId } })).toBe(0);
+  });
+
   // Qodo, PR #151: a count is no way round the write-off limit.
   it('holds a count difference over the limit for approval, posting it as part of the count once approved', async () => {
     // An earlier test left one of this item's adjustments waiting; it is decided first.
@@ -256,6 +309,10 @@ describe('write-off approval over real HTTP', () => {
     // Counting it again while it waits would correct it twice.
     const again = await storeman<{ error: { code: string } }>('POST', '/stock-counts', { locationId, lines: [{ materialId, expectedQuantity: Number(await onHand()), countedQuantity: counted }] });
     expect([again.status, again.body.error.code]).toEqual([409, 'INVALID_STATE']);
+
+    // Nor can the shortfall be booked by hand meanwhile (Qodo, PR #151).
+    const byHand = await adjust(storeman, { quantity: -8, reasonCode: 'LOSS', reasonNote: 'The shortfall the count found' });
+    expect([byHand.status, byHand.body.error?.code]).toEqual([409, 'INVALID_STATE']);
 
     const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${requestId}/approve`);
     expect(approved.status).toBe(201);

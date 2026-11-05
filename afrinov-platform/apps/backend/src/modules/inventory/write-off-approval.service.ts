@@ -16,6 +16,7 @@ import { Errors } from '../../shared/errors.js';
 import { InventoryService, checkAdjustment, type AdjustmentInput } from './inventory.service.js';
 import { checkWriteOff } from './write-off-limit.js';
 import { requestAdjustment } from './write-off-requests.js';
+import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { ToolLoanService, TOOL_LOAN_REFERENCE } from './tool-loan.service.js';
 
 export type AdjustOutcome =
@@ -50,8 +51,18 @@ export const WriteOffApprovalService = {
    */
   async adjustOrRequest(input: AdjustmentInput, within?: Prisma.TransactionClient): Promise<AdjustOutcome> {
     return inTx(within, async (tx) => {
-      const material = await tx.material.findUnique({ where: { id: input.materialId }, select: { unitCost: true } });
+      const material = await tx.material.findUnique({ where: { id: input.materialId }, select: { sku: true, unitCost: true } });
       if (!material) throw Errors.notFound('Material');
+      // The lock a stock count takes before it looks for waiting requests, so
+      // the two can't both see none. With one already waiting for this stock
+      // (a count's difference, a lost tool, another adjustment), approving both
+      // would correct the same shortfall twice: that one is decided first.
+      const stock = { materialId: input.materialId, locationId: input.locationId, heldForProject: input.heldForProject ?? null };
+      await lockInventoryBalances([stock], tx);
+      const waiting = await tx.adjustmentRequest.findFirst({ where: { status: AdjustmentRequestStatus.PENDING, ...stock }, select: { id: true } });
+      if (waiting) {
+        throw Errors.invalidState(`${material.sku} here already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then adjust again.`, { requestId: waiting.id });
+      }
       const qty = await checkAdjustment(input, tx);
       const check = await checkWriteOff(qty, material.unitCost, tx);
       if (!check.needsApproval) {

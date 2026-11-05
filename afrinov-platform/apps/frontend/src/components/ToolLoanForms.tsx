@@ -240,18 +240,22 @@ export function CheckInForm({ tool, onCancel, onDone }: {
     if (lines.some((l) => back[l.loanId]!.condition === 'LOST' && !back[l.loanId]!.note.trim())) { setError('Say what happened to a lost tool.'); return; }
     setBusy(true);
     try {
-      const result = await api.post<{ writeOffRequestIds?: string[] }>('/tools/check-in', {
+      const result = await api.post<{ heldLoanIds?: string[] }>('/tools/check-in', {
         lines: lines.map((l) => {
           const b = back[l.loanId]!;
           return { loanId: l.loanId, quantity: Number(b.quantity), condition: b.condition, note: b.note.trim() || undefined };
         }),
       });
-      const count = lines.reduce((n, l) => n + Number(back[l.loanId]!.quantity), 0);
-      // A lost tool over the write-off limit is written off once someone else approves it (ADR-028).
-      const waiting = result?.writeOffRequestIds?.length ?? 0;
-      onDone(`Checked in ${formatNumber(count)} × ${tool.name}${waiting > 0
-        ? `. Writing off the lost ${waiting === 1 ? 'one' : waiting} waits for someone else to approve it under Write-offs to approve; until then it stays on loan.`
-        : ''}`);
+      // A lost tool over the write-off limit is written off once someone else
+      // approves it (ADR-028): it stays on loan, so it is not counted as checked in.
+      const held = new Set(result?.heldLoanIds ?? []);
+      const sum = (ls: typeof lines) => ls.reduce((n, l) => n + Number(back[l.loanId]!.quantity), 0);
+      const checkedIn = sum(lines.filter((l) => !(back[l.loanId]!.condition === 'LOST' && held.has(l.loanId))));
+      const waiting = sum(lines.filter((l) => back[l.loanId]!.condition === 'LOST' && held.has(l.loanId)));
+      const waits = `writing off ${formatNumber(waiting)} lost × ${tool.name} waits for someone else to approve it under Write-offs to approve; until then ${waiting === 1 ? 'it stays' : 'they stay'} on loan.`;
+      onDone(waiting === 0 ? `Checked in ${formatNumber(checkedIn)} × ${tool.name}`
+        : checkedIn === 0 ? `Nothing checked in yet: ${waits}`
+          : `Checked in ${formatNumber(checkedIn)} × ${tool.name}. Separately, ${waits}`);
     } catch (err) {
       setError((err as ApiError).message);
     } finally {

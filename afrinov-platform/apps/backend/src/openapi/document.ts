@@ -303,7 +303,8 @@ export const OPERATIONS: Operation[] = [
       + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned. Writing a tool off as LOST also '
       + 'needs adjust:inventory (403 otherwise): a borrower does not write off what they borrowed. A lost tool worth more '
       + 'than inventory.writeOffApprovalAbove, or with no unit cost, stays on loan while its write-off waits for '
-      + 'approval by someone else (writeOffRequestIds; lostWaiting on the loan in GET /tools): approving posts its '
+      + 'approval by someone else (writeOffRequestIds, its loan in heldLoanIds; lostWaiting on the loan in GET /tools). '
+      + 'Whether lost tools wait is decided on everything lost of one tool from one location on the check-in. Approving posts its '
       + 'return and its write-off against the loan. writeOffIds lists the write-offs posted at once.',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },

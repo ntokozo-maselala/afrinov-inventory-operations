@@ -215,7 +215,7 @@ describe('Tools page', () => {
 
   // ADR-028: a lost tool over the write-off limit waits for someone else's approval.
   it('says when writing off a lost tool waits for approval', async () => {
-    mockPost.mockResolvedValue({ returnIds: ['t-9'], writeOffIds: [], writeOffRequestIds: ['req-1'] });
+    mockPost.mockResolvedValue({ returnIds: [], writeOffIds: [], writeOffRequestIds: ['req-1'], heldLoanIds: ['t-1'] });
     renderPage();
     await screen.findByText('Makita Hand Drill');
     fireEvent.click(within(row('Makita Hand Drill')).getByRole('button', { name: 'Check in' }));
@@ -223,7 +223,8 @@ describe('Tools page', () => {
     fireEvent.change(within(drawer).getByLabelText('Condition'), { target: { value: 'LOST' } });
     fireEvent.change(within(drawer).getByLabelText('What happened', { exact: false }), { target: { value: 'Left on site' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
-    expect(await screen.findByText(/Writing off the lost one waits for someone else to approve it under Write-offs to approve; until then it stays on loan/)).toBeInTheDocument();
+    // It stays on loan, so it is not reported as checked in (Qodo, PR #151).
+    expect(await screen.findByText('Nothing checked in yet: writing off 1 lost × Makita Hand Drill waits for someone else to approve it under Write-offs to approve; until then it stays on loan.')).toBeInTheDocument();
   });
 
   // Lost writes the tool off: the store's to do, not a borrower's (adjust:inventory).

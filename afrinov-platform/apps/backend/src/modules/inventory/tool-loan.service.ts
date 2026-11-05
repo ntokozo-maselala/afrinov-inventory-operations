@@ -411,9 +411,9 @@ export const ToolLoanService = {
    * unit cost, is written off only once someone else approves it (ADR-028):
    * it stays on loan, so it can't be lent again, and approval posts its return
    * and its write-off together (writeOffLost). Its request is in
-   * writeOffRequestIds; one rejected leaves the tool on loan.
+   * writeOffRequestIds, and its loan in heldLoanIds; one rejected leaves the tool on loan.
    */
-  async checkIn(input: CheckInInput): Promise<{ returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[] }> {
+  async checkIn(input: CheckInInput): Promise<{ returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[]; heldLoanIds: string[] }> {
     if (input.lines.length === 0) throw Errors.validation('Add at least one tool to check in');
     const lines = input.lines.map((l) => ({ ...l, qty: toDecimal(l.quantity), note: l.note?.trim() || null }));
     if (lines.some((l) => !gtZero(l.qty))) throw Errors.validation('Check-in quantity must be positive');
@@ -452,16 +452,34 @@ export const ToolLoanService = {
         await checkLocationActive(loan.locationId, tx);
       }
 
+      // Whether the lost tools wait for approval is decided on everything lost
+      // of a tool from one location on this check-in, as one write-off would
+      // be: two lines (or two loans) of R 600 under a R 1 000 limit are R 1 200.
+      const lostTotal = new Map<string, Decimal>();
+      for (const l of lines) {
+        if (l.condition !== 'LOST') continue;
+        const loan = byId.get(l.loanId)!;
+        const key = `${loan.materialId}|${loan.locationId}`;
+        lostTotal.set(key, (lostTotal.get(key) ?? toDecimal(0)).plus(l.qty));
+      }
+      const needsApproval = new Map<string, boolean>();
+      for (const [key, qty] of lostTotal) {
+        const loan = loans.find((x) => `${x.materialId}|${x.locationId}` === key)!;
+        needsApproval.set(key, (await checkWriteOff(qty, loan.material.unitCost, tx)).needsApproval);
+      }
+
       const postedAt = new Date();
       const returnIds: string[] = [];
       const writeOffIds: string[] = [];
       const writeOffRequestIds: string[] = [];
+      const heldLoanIds: string[] = [];
       for (const l of lines) {
         const loan = byId.get(l.loanId)!;
         if (l.condition === 'LOST') {
           const reasonNote = `Lost while checked out to ${loan.recipient?.name ?? 'an unknown recipient'}: ${l.note}`;
+          // This line's own value is what its request records.
           const check = await checkWriteOff(l.qty, loan.material.unitCost, tx);
-          if (check.needsApproval) {
+          if (needsApproval.get(`${loan.materialId}|${loan.locationId}`)) {
             // Nothing is posted: the tool stays on loan until the write-off is approved.
             const { requestId } = await requestAdjustment({
               materialId: loan.materialId, locationId: loan.locationId, quantity: l.qty.negated(), reasonCode: 'LOSS',
@@ -469,6 +487,7 @@ export const ToolLoanService = {
               referenceType: TOOL_LOAN_REFERENCE, referenceId: loan.id, actorId: input.actorId,
             }, check, tx);
             writeOffRequestIds.push(requestId);
+            heldLoanIds.push(loan.id);
             continue;
           }
           const posted = await postLost(tx, loan, l.qty, { returnNote: l.note, writeOffNote: reasonNote }, input.actorId, postedAt);
@@ -508,7 +527,7 @@ export const ToolLoanService = {
           after: { lines: lines.map((l) => ({ loanId: l.loanId, quantity: l.qty.toString(), condition: l.condition })), returnIds, writeOffIds, writeOffRequestIds } as Prisma.InputJsonValue,
         },
       });
-      return { returnIds, writeOffIds, writeOffRequestIds };
+      return { returnIds, writeOffIds, writeOffRequestIds, heldLoanIds };
     });
   },
 
@@ -528,6 +547,8 @@ export const ToolLoanService = {
       if (input.quantity.gt(out)) {
         throw Errors.invalidState(`Only ${out.toString()} of this tool is still out on that loan: it has been checked in since. Reject this write-off instead.`);
       }
+      // As approving any adjustment: a tool retired while this waited is not written off.
+      await checkMaterialActive(loan.materialId, tx);
       await checkLocationActive(loan.locationId, tx);
       const posted = await postLost(tx, loan, input.quantity, { returnNote: input.reasonNote, writeOffNote: input.reasonNote }, input.actorId, new Date());
       await recomputeBalance(storesStock(loan.materialId, loan.locationId), tx);
