@@ -724,10 +724,12 @@ they had borrowed by checking it in as lost. These are the classic ways
 stock and money go missing.
 
 **Decision:**
-- **Purchase orders:** whoever raised an order never approves it, whatever
-  their role or limit (`approve()` refuses with who else can; `approval`,
-  the approvers named and "Waiting for my approval" leave them out). Orders
-  submitted with approval switched off still auto-approve, as before.
+- **Purchase orders:** whoever raised an order never signs it, whatever
+  their role (`signRefusal`; `approve()` refuses with who else can, and
+  `approval`, the signers named and "Waiting for my approval" leave them
+  out). Since ADR-030 orders are signed by role rather than approved within a
+  limit; the rule holds for every signature an order needs. Orders submitted
+  with approval switched off still auto-approve, as before.
 - **Write-offs:** an adjustment worth more than
   `inventory.writeOffApprovalAbove` (R 1 000 by default, at the item's unit
   cost), or of an item with no unit cost, posts nothing: it becomes an
@@ -762,7 +764,7 @@ stock and money go missing.
   codes the user's roles grant, so a role given `approve:write_off` in the
   database sees Write-offs to approve and its controls.
 
-**Consequences:** Migration 041 adds the table, the permission and the two
+**Consequences:** Migration 045 adds the table, the permission and the two
 settings. A store with one store controller needs the admin to approve its
 Stores orders and its large write-offs. Screens: Store → Write-offs to
 approve, and Settings → Inventory.
@@ -770,7 +772,7 @@ approve, and Settings → Inventory.
 **Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`,
 `procurement.service.ts` (`approve`, `approval`, `awaitingApproval`),
 `modules/inventory/write-off-approval.service.ts`, `inventory.routes.ts`, `tool.routes.ts`,
-`afrinov-platform/apps/backend/prisma/migrations/20260101000041_write_off_approval/migration.sql`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000045_write_off_approval/migration.sql`,
 `afrinov-platform/apps/backend/integration/write-off-approval.real-http.test.ts`,
 `afrinov-platform/apps/frontend/src/pages/WriteOffApprovals.tsx`.
 
@@ -789,14 +791,14 @@ receipts record when they were posted (`goods_receipts.posted_at`), and the
 received-stock report, its downloads and its paging use that, showing the
 delivery note's date beside it ("Booked", "Note dated").
 
-**Consequences:** Migration 042 adds the column, filled for earlier
+**Consequences:** Migration 046 adds the column, filled for earlier
 deliveries from their first RECEIPT, or when they were recorded. A report run
 by delivery-note date is no longer offered; the note's date is still on
 every row.
 
 **Evidence:** `afrinov-platform/apps/backend/src/modules/inventory/stock-receipt.service.ts` (`list`),
 `inventory.service.ts` (`postGoodsReceipt`),
-`afrinov-platform/apps/backend/prisma/migrations/20260101000042_goods_receipt_posted_at/migration.sql`,
+`afrinov-platform/apps/backend/prisma/migrations/20260101000046_goods_receipt_posted_at/migration.sql`,
 `afrinov-platform/apps/frontend/src/components/reports/ReceivedStockReport.tsx`, `src/api/exportReports.ts`.
 
 ### ADR-030 — Purchase orders are signed by role and value
