@@ -56,7 +56,21 @@ describe('useNavGroups', () => {
   });
 
   it('puts Movements, the history of every movement, with the other reports', () => {
-    expect(useLabelsIn('Reports')).toEqual(['Stock status', 'Stock used', 'Stock report', 'Movements']);
+    expect(useLabelsIn('Reports')).toEqual(['Stock status', 'Stock used', 'Stock report', 'Procurement savings', 'Movements']);
+  });
+
+  it('shows Procurement savings only to those who may see Sales prices, and only with procurement on', () => {
+    for (const role of ['SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO']) {
+      signedIn.roles = [role];
+      expect(useLabelsIn('Reports'), role).toContain('Procurement savings');
+    }
+    for (const role of ['PROCUREMENT', 'STORE_CONTROLLER', 'VIEWER']) {
+      signedIn.roles = [role];
+      expect(useLabelsIn('Reports'), role).not.toContain('Procurement savings');
+    }
+    signedIn.roles = ['ADMIN'];
+    features.procurement = false;
+    expect(useLabelsIn('Reports')).not.toContain('Procurement savings');
   });
 
   it('puts the lists the counter draws on in Operations', () => {

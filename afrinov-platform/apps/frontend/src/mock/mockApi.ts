@@ -27,6 +27,7 @@ import { priceLines } from '../lib/poMoney';
 import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
+import { computeProcurementSavings } from './mockProcurementSavings';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
@@ -2114,6 +2115,16 @@ function route(method: string, path: string, body?: unknown): unknown {
       consumableOutcomes: state.consumableOutcomes,
       currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
       userName: (id) => mockUsers.find((u) => u.id === id)?.name ?? 'Unknown',
+    });
+  }
+  if (method === 'GET' && p === '/reports/procurement-savings') {
+    const now = new Date();
+    const from = qs.from || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+    const to = qs.to || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    if (from > to) throw err('VALIDATION_ERROR', 'The start date is after the end date');
+    return computeProcurementSavings({ from, to, projectNumber: qs.projectNumber || undefined }, {
+      rfqs: state.rfqs, salesRfqs: state.salesRfqs, purchaseOrders: state.purchaseOrders,
+      material: findMaterial, supplier: findSupplier, projectName: (n) => projectRef(n)?.name,
     });
   }
   if (method === 'GET' && p === '/reports/stock-status') {

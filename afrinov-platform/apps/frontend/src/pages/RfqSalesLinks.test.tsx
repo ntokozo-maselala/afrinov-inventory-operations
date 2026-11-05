@@ -71,6 +71,8 @@ describe('Linking a line to its Sales line', () => {
     page();
     const select = await pick(1);
     await waitFor(() => expect(select).toHaveValue('sl-1'));
+    // Spelled out, as the dropdown is too narrow to show it all.
+    expect(screen.getByText('200NB pipes x 3m (24 each)')).toBeInTheDocument();
     fireEvent.change(select, { target: { value: '' } });
     await waitFor(() => expect(mockPut).toHaveBeenCalledWith('/rfqs/r-1/lines/l-1/sales-line', { salesRfqLineId: null }));
   });

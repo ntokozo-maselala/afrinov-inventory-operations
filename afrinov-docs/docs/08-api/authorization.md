@@ -19,7 +19,7 @@ role's grants each time it runs.
 | DIRECTOR | sign project orders at or above the threshold (ADR-030), and see project orders; view Sales RFQs; view reports |
 | CEO | stand in on project orders (ADR-030), and see them; view Sales RFQs; view reports |
 | WORKSHOP_MANAGER | stand in on project and Stores orders (ADR-030), and see them; view reports |
-| SALES | view and manage Sales RFQs, whose prices buyers and the store can't see (`view:sales_rfq`, `manage:sales_rfq`); manage projects; create/edit supplier; view reports. No purchase orders or Procurement RFQs |
+| SALES | view and manage Sales RFQs, whose prices buyers and the store can't see (`view:sales_rfq`, `manage:sales_rfq`), and the Procurement savings report, which sets them beside what buyers were quoted and needs `view:sales_rfq`; manage projects; create/edit supplier; view reports. No purchase orders or Procurement RFQs |
 | TECHNICIAN | issue inventory; view reports; view users (lookup); check out/in tool |
 | VIEWER | view reports |
 

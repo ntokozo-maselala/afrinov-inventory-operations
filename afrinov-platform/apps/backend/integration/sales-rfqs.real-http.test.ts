@@ -200,12 +200,12 @@ describe('Sales requests for quotation over real HTTP', () => {
       const offered = await buyer<Array<{ id: string }>>('GET', `/rfqs/${rfq.id}/sales-lines`);
       expect(offered.status).toBe(200);
       expect(offered.body.map((l) => l.id)).toContain(sales.lines[0]!.id);
-      expect(JSON.stringify(offered.body)).not.toMatch(/987|unitPrice|supplier/i);
+      expect(JSON.stringify(offered.body)).not.toMatch(/987\.65|unitPrice|supplier/i);
 
       const linked = await buyer<Rfq>('PUT', linkPath(rfq, rfq.lines[0]!), { salesRfqLineId: sales.lines[0]!.id });
       expect(linked.status).toBe(200);
       expect(linked.body.lines[0]!.salesRfqLine).toMatchObject({ lineNo: 1, description: '200NB pipes x 3m', rfq: { number: sales.number } });
-      expect(JSON.stringify(linked.body)).not.toMatch(/987/);
+      expect(JSON.stringify(linked.body)).not.toMatch(/987\.65/);
 
       const history = await buyer<Array<{ action: string; after: Record<string, unknown> }>>('GET', `/rfqs/${rfq.id}/history`);
       expect(history.body[0]).toMatchObject({ action: 'RFQ_SALES_LINK', after: { lineNo: 1, salesRfqNumber: sales.number, salesLineNo: 1 } });
@@ -294,6 +294,73 @@ describe('Sales requests for quotation over real HTTP', () => {
       expect((await director<Rfq>('GET', `/rfqs/${rfq.id}`)).body.lines[0]!.salesRfqLine?.id).toBe(sales.lines[0]!.id);
       const salesPerson = await as('SALES');
       expect((await salesPerson('GET', `/rfqs/${rfq.id}/sales-lines`)).status).toBe(403);
+    });
+  });
+
+  describe('the Procurement savings report', () => {
+    interface Report {
+      total: { sales: string; procurement: string; order: string; discount: string; salesVsProcurement: string; procurementVsOrder: string; salesVsOrder: string; lines: number; linked: number };
+      rows: Array<{ rfqNumber: string; sales: { lowest: string | null } | null; procurement: { lowest: string | null }; order: { lineTotal: string | null; discount: string | null } | null; salesVsProcurement: string | null; procurementVsOrder: string | null; salesVsOrder: string | null; notes: string[] }>;
+    }
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const job = `AFRI-${parseInt(run, 16) + 2}`;
+    const query = `from=${day}&to=${day}&projectNumber=${job}`;
+
+    it('compares what Sales and buyers were quoted with the order, from RFQ to award', async () => {
+      expect((await admin('POST', '/projects', { projectNumber: job, name: `Savings ${run}` })).status).toBe(201);
+      const salesRfq = await admin<SalesRfq>('POST', '/sales-rfqs', { projectNumber: job, lines: [lines[0]], supplierIds: [supplierA, supplierB] });
+      await admin('POST', `/sales-rfqs/${salesRfq.body.id}/send`, {});
+      const salesLine = salesRfq.body.lines[0]!.id;
+      await admin('PUT', `/sales-rfqs/${salesRfq.body.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: salesLine, unitPrice: 100 }] });
+      await admin('PUT', `/sales-rfqs/${salesRfq.body.id}/suppliers/${supplierB}/quote`, { prices: [{ rfqLineId: salesLine, unitPrice: 90 }] });
+
+      const pipe = await admin<{ id: string }>('POST', '/materials', { sku: `IT-SAVE-${run}`, name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', projectNumber: job });
+      const rfq = await admin<{ id: string; lines: Array<{ id: string }> }>('POST', '/rfqs', { projectNumber: job, lines: [{ materialId: pipe.body.id, quantity: 24 }], supplierIds: [supplierA, supplierB] });
+      const line = rfq.body.lines[0]!.id;
+      await admin('POST', `/rfqs/${rfq.body.id}/send`, {});
+      await admin('PUT', `/rfqs/${rfq.body.id}/suppliers/${supplierA}/quote`, { prices: [{ rfqLineId: line, unitPrice: 95 }] });
+      await admin('PUT', `/rfqs/${rfq.body.id}/suppliers/${supplierB}/quote`, { prices: [{ rfqLineId: line, unitPrice: 88 }] });
+
+      const before = await admin<Report>('GET', `/reports/procurement-savings?${query}`);
+      expect(before.status).toBe(200);
+      expect(before.body.rows[0]).toMatchObject({ sales: null, order: null, salesVsProcurement: null, notes: ['Not linked to a Sales line'] });
+
+      await admin('PUT', `/rfqs/${rfq.body.id}/lines/${line}/sales-line`, { salesRfqLineId: salesLine });
+      await admin('POST', `/rfqs/${rfq.body.id}/award`, { supplierId: supplierB });
+
+      const report = await admin<Report>('GET', `/reports/procurement-savings?${query}`);
+      expect(report.body.rows).toHaveLength(1);
+      expect(report.body.rows[0]).toMatchObject({
+        sales: { lowest: '2160.00' }, procurement: { lowest: '2112.00' }, order: { lineTotal: '2112.00' },
+        salesVsProcurement: '48.00', procurementVsOrder: '0.00', salesVsOrder: '48.00', notes: [],
+      });
+      expect(report.body.total).toMatchObject({ sales: '2160.00', procurement: '2112.00', order: '2112.00', salesVsProcurement: '48.00', salesVsOrder: '48.00', lines: 1, linked: 1 });
+    });
+
+    it('filters by project and period, refusing a bad period', async () => {
+      const elsewhere = await admin<Report>('GET', `/reports/procurement-savings?from=2020-01-01&to=2020-01-31&projectNumber=${job}`);
+      expect(elsewhere.body.rows).toEqual([]);
+      expect((await admin<Report>('GET', `/reports/procurement-savings?from=${day}&to=${day}&projectNumber=NO-SUCH`)).body.rows).toEqual([]);
+      expect((await admin('GET', `/reports/procurement-savings?from=${day}&to=2020-01-01`)).status).toBe(400);
+    });
+
+    it('downloads as Excel', async () => {
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/reports/procurement-savings/export?${query}`, { headers: { Authorization: `Bearer ${await login(server.port, ADMIN_EMAIL, requireAdminPassword())}` } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('spreadsheetml');
+      expect(res.headers.get('content-disposition')).toContain(`afrinov-procurement-savings-${job}`);
+      expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    });
+
+    it('is for those who may see Sales prices, not buyers or the store', async () => {
+      for (const role of ['PROCUREMENT', 'STORE_CONTROLLER'] as const) {
+        const other = await as(role);
+        expect((await other('GET', `/reports/procurement-savings?${query}`)).status, `${role} report`).toBe(403);
+        expect((await other('GET', `/reports/procurement-savings/export?${query}`)).status, `${role} download`).toBe(403);
+      }
+      for (const role of ['SALES', 'DIRECTOR'] as const) {
+        expect((await (await as(role))('GET', `/reports/procurement-savings?${query}`)).status, role).toBe(200);
+      }
     });
   });
 

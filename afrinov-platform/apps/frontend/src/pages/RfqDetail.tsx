@@ -310,6 +310,8 @@ function salesLineColumn(lines: RfqLine[], linking?: SalesLinking): DataTableCol
               </Select>
             )
             : linked ? <div className="text-sm">{salesLineLabel(linked)}</div> : <span className="text-surface-300">—</span>}
+          {/* The dropdown is too narrow to show a whole line: what was picked is spelled out here. */}
+          {linking && linked && <div className="text-meta">{linked.description} ({salesLineAsked(linked)})</div>}
           {linked?.rfq.status === 'CANCELLED' && <Badge tone="warning">Sales RFQ cancelled</Badge>}
           {linked && salesLineDiffers(lines, l) && <div className="text-meta">Sales asked for {salesLineAsked(linked)}</div>}
         </div>

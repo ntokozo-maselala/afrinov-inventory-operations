@@ -20,6 +20,7 @@ Store
 Reports
  |- Stock status                  /reports/stock-status
  |- Stock used                    /reports/consumption
+ |- Procurement savings           /reports/procurement-savings (sales:view; unless VITE_PROCUREMENT_ENABLED=false)
  |- Stock report                  /reports/stock-report
  `- Movements                     /movements
 

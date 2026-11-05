@@ -826,6 +826,17 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports],
   },
   {
+    method: 'get', path: '/reports/procurement-savings', tag: 'Reports', summary: 'Sales, Procurement and order prices compared',
+    description: 'Each line of a Procurement RFQ sent between ?from and ?to (YYYY-MM-DD, both included; default this month), optionally for one ?projectNumber=. '
+      + 'Line totals excl. VAT: every quote by supplier, each side compared at its lowest, the order before line discounts. Only rand is compared; a figure that cannot be compared is null, with a note, and out of the totals.',
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
+  },
+  {
+    method: 'get', path: '/reports/procurement-savings/export', tag: 'Reports', summary: 'Download Procurement savings as Excel',
+    description: 'The Procurement savings report, same query, one row per RFQ line with a total row.',
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
+  },
+  {
     method: 'get', path: '/reports/consumption', tag: 'Reports', summary: 'Stock used in a date range',
     description: 'Issued less returned per item between ?from and ?to (YYYY-MM-DD, both included; default this month), '
       + 'valued at the unit price, with totals by project and by category. Reversed issues and returns are left out with '
