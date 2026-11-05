@@ -549,7 +549,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Update order details, VAT rate, line prices, discounts or delivery dates',
-    description: "A project order stays on a project and a Stores order off one (400). A line's discount (`lineDiscounts`, in percent) comes off its unit price; the order's `totals.discount` is what the discounts save, before VAT. Changing a price, a discount or the VAT rate clears the signatures on an order still being signed, and sends an approved order back for approval, with its signatures cleared, when its value excluding VAT rises at all or it now needs a signature it doesn't have.",
+    description: "A project order stays on a project and a Stores order off one (400). A line's discount (`lineDiscounts`, in percent) comes off its unit price; the order's `totals.discount` is what the discounts save, before VAT. Changing a price, a discount or the VAT rate clears the signatures on an order still being signed, and sends an approved order back for approval, with its signatures cleared, when its value excluding VAT rises at all, its VAT rate changes, or it now needs a signature it doesn't have.",
     procurement: true, byOrderKind: P.CreatePurchaseOrder, body: updatePOSchema, errors: [404, 409],
   },
   {

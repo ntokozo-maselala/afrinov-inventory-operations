@@ -739,8 +739,8 @@ is view only. The store controller no longer approves Stores orders. An admin
 must assign the new roles before anyone can sign. Orders approved earlier keep
 their approver as a Manager signature, so one from R200 000 goes back for both
 signatures if its money changes. An approved order goes back for signing when an
-edit raises its value excluding VAT by any amount, as nobody signed for the new
-amount; it stays approved when its value falls or only its VAT changes. Migrations
+edit raises its value excluding VAT by any amount or changes its VAT rate, as
+nobody signed for the new amount; it stays approved when its value falls. Migrations
 `20260101000043` and `20260101000044`.
 
 **Evidence:** `afrinov-platform/apps/backend/src/modules/procurement/po-approval.ts`,

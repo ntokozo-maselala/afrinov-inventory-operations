@@ -1104,7 +1104,7 @@ describe('PurchaseOrderService signing an order', () => {
     expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL' });
   });
 
-  it('keeps an approved order approved, with its signatures, when its value falls or only its VAT changes', async () => {
+  it('keeps an approved order approved, with its signatures, when its value falls', async () => {
     const { PurchaseOrderService } = await import('./procurement.service.js');
     const id = await submitted(300000);
     await PurchaseOrderService.approve(id, 'u-ona');
@@ -1113,10 +1113,26 @@ describe('PurchaseOrderService signing an order', () => {
     await PurchaseOrderService.update({ id, linePrices: [{ lineId, unitPrice: 280000 }] }, 'user-1');
     expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED', revision: 1 });
     expect(db.signatures).toHaveLength(2);
-    // Who signs goes by the value excluding VAT, so VAT alone doesn't raise it.
-    await PurchaseOrderService.update({ id, vatRate: 0 }, 'user-1');
+  });
+
+  it('sends an approved order back when its VAT rate changes, either way, and still asks by the value excluding VAT', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    for (const vatRate of [20, 0]) {
+      const id = await submitted(1000);
+      await PurchaseOrderService.approve(id, 'u-ona');
+      await PurchaseOrderService.update({ id, vatRate }, 'user-1');
+      expect(db.pos.get(id)).toMatchObject({ status: 'PENDING_APPROVAL', approvedById: null });
+      expect(db.signatures.filter((s) => s.purchaseOrderId === id)).toEqual([]);
+      expect(await PurchaseOrderService.approval(id, 'u-ona')).toMatchObject({ randValue: '1000.00', steps: [{ step: 'MANAGER' }] });
+    }
+  });
+
+  it('leaves an approved order approved when the VAT rate is sent unchanged', async () => {
+    const { PurchaseOrderService } = await import('./procurement.service.js');
+    const id = await submitted(1000);
+    await PurchaseOrderService.approve(id, 'u-ona');
+    await PurchaseOrderService.update({ id, vatRate: 15, notes: 'Gate 2' }, 'user-1');
     expect(db.pos.get(id)).toMatchObject({ status: 'APPROVED' });
-    expect(db.signatures).toHaveLength(2);
   });
 });
 

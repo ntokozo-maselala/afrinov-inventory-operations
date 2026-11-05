@@ -652,15 +652,16 @@ export const PurchaseOrderService = {
         await tx.purchaseOrderSignature.deleteMany({ where: { purchaseOrderId: po.id } });
         signaturesCleared = true;
       }
-      // An approved order that is now worth more than was signed for, needs a
-      // signature it doesn't have, or has lost a price goes back for approval.
-      // Lowering its value keeps the signatures: nobody is held to more.
+      // An approved order that is now worth more than was signed for, has a new
+      // VAT rate, needs a signature it doesn't have, or has lost a price goes back
+      // for approval. Who signs still goes by the value excluding VAT. Lowering
+      // its value keeps the signatures: nobody is held to more.
       if (moneyChanged && requireApproval && po.status === 'APPROVED' && po.approvedById) {
         const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
         const state = approvalState({ ...po, vatRate: input.vatRate ?? po.vatRate, lines }, approvalSettings);
         const signedFor = approvalState(po, approvalSettings).randValue;
         const raised = signedFor !== null && state.randValue !== null && new Prisma.Decimal(state.randValue).gt(signedFor);
-        if (state.block || state.next || raised) {
+        if (state.block || state.next || raised || 'vatRate' in data) {
           await tx.purchaseOrderSignature.deleteMany({ where: { purchaseOrderId: po.id } });
           signaturesCleared = po.signatures.length > 0;
           // Back for approval, it has no approved wording until approved again:

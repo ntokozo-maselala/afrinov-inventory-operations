@@ -1450,6 +1450,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const money = (x: MockPurchaseOrder) => JSON.stringify([Number(x.vatRate ?? 15), x.lines.map((l) => [l.unitPrice == null ? null : Number(l.unitPrice), Number(l.discountPercent ?? 0)])]);
     const moneyBefore = money(po);
     const signedFor = mockApproval(po).randValue;
+    const vatBefore = Number(po.vatRate ?? 15);
     const nextProject = b.projectNumber === undefined ? undefined : (b.projectNumber?.trim() || null);
     if (nextProject !== undefined && nextProject !== (po.projectNumber ?? null)) {
       // As the server: neither kind of order becomes the other.
@@ -1478,14 +1479,14 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (po.status === 'PENDING_APPROVAL' && money(po) !== moneyBefore) po.signatures = [];
     if (po.status === 'APPROVED' && snapshot(po) !== before) {
       po.revision = (po.revision ?? 0) + 1;
-      // As the server: a new price, discount or VAT rate that raises its value, or
-      // leaves it needing a signature it doesn't have (or a line unpriced), sends
-      // it back for approval, without the approved small print. An order with no
-      // approver on record (as seeded) is left as it is.
+      // As the server: a new VAT rate, or a new price or discount that raises its
+      // value or leaves it needing a signature it doesn't have (or a line unpriced),
+      // sends it back for approval, without the approved small print. An order with
+      // no approver on record (as seeded) is left as it is.
       if (po.approvedBy && money(po) !== moneyBefore) {
         const check = mockApproval(po);
         const raised = signedFor !== null && check.randValue !== null && Number(check.randValue) > Number(signedFor);
-        if (check.unpricedLines > 0 || check.noRate || check.nextStep || raised) {
+        if (check.unpricedLines > 0 || check.noRate || check.nextStep || raised || Number(po.vatRate ?? 15) !== vatBefore) {
           Object.assign(po, { status: 'PENDING_APPROVAL', approvedAt: null, approvedBy: null, printedTerms: null, signatures: [] });
         }
       }

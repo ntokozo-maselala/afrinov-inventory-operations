@@ -116,8 +116,8 @@ An order is signed by role, according to its value in rand excluding VAT
 - Changing a price, discount or VAT rate clears the signatures on an order still
   being signed. An approved order goes back to `PENDING_APPROVAL`, with its
   signatures cleared, if the edit raises its value excluding VAT by any amount,
-  leaves it needing a signature it doesn't have, or a line loses its price. It
-  stays approved, at a new revision, if its value falls or only its VAT changes.
+  changes its VAT rate, leaves it needing a signature it doesn't have, or a line
+  loses its price. It stays approved, at a new revision, if its value falls.
 - Those who only sign land on the Purchase orders list filtered to the orders
   waiting for them (`/purchase-orders?status=mine`, from
   `GET /purchase-orders?awaitingMyApproval=true`). The Dashboard shows the

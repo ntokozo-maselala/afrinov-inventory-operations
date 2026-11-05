@@ -82,6 +82,12 @@ describe('mock: discount changes on an approved order', () => {
     expect(after).toMatchObject({ status: 'PENDING_APPROVAL', signatures: [] });
   });
 
+  it('goes back for approval when its VAT rate changes', async () => {
+    const po = await approvedProjectOrder(30);
+    const after = await api.patch<Order>(`/purchase-orders/${po.id}`, { vatRate: 15 });
+    expect(after).toMatchObject({ status: 'PENDING_APPROVAL', signatures: [] });
+  });
+
   it('stays approved, at a new revision, when its value falls', async () => {
     const po = await approvedProjectOrder(11);
     const revision = po.revision ?? 0;
