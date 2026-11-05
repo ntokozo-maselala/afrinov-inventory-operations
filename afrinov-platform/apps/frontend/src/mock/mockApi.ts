@@ -552,8 +552,18 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     return lines.map((l, i) => {
       if (!l.description?.trim()) throw err('VALIDATION_ERROR', `Line ${i + 1} needs a description`);
       if (!(Number(l.quantity) > 0)) throw err('VALIDATION_ERROR', 'Invalid Sales RFQ');
-      return { id: nextId('srfql'), lineNo: i + 1, materialId: '', description: l.description.trim(), unitOfMeasure: l.unitOfMeasure, quantity: String(l.quantity) };
+      const unitOfMeasure = mockUnitCode(l.unitOfMeasure);
+      if (unitKindOf(MOCK_UNITS, unitOfMeasure) === 'COUNTED' && !Number.isInteger(Number(l.quantity))) {
+        throw err('VALIDATION_ERROR', `${l.description.trim()} is counted in whole numbers (${unitOfMeasure}). Enter 1, 2, 3 …`);
+      }
+      return { id: nextId('srfql'), lineNo: i + 1, materialId: '', description: l.description.trim(), unitOfMeasure, quantity: String(l.quantity) };
     });
+  };
+
+  /** As checkClosingDate: a day that exists, on or after the day it was sent. */
+  const checkClosing = (closing: string, issued: string) => {
+    if (!isRealDay(closing)) throw err('VALIDATION_ERROR', `${closing} is not a date`);
+    if (closing < issued) throw err('VALIDATION_ERROR', `The closing date can't be before ${issued}, the day it was sent`);
   };
 
   if (method === 'GET' && p === '/sales-rfqs') {
@@ -587,6 +597,7 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     if (rfq.status === 'CANCELLED') throw err('INVALID_STATE', `Sales RFQ ${rfq.number} is cancelled, so it can no longer be edited`);
     const had = rfq.suppliers.map((s) => s.supplierId);
     if (rfq.status === 'SENT') {
+      if (b.closingDate) checkClosing(b.closingDate, rfq.issuedAt?.slice(0, 10) ?? mockToday());
       const added = (b.supplierIds ?? had).filter((s) => !had.includes(s));
       return save({
         ...rfq, updatedAt: now, closingDate: b.closingDate ? `${b.closingDate}T00:00:00.000Z` : rfq.closingDate,
@@ -609,8 +620,12 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
   if (method === 'POST' && p === `${base}/send`) {
     if (rfq.status !== 'DRAFT') throw err('INVALID_STATE', `Sales RFQ ${rfq.number} is ${rfq.status.toLowerCase()}, so it can't be sent`);
     if (rfq.suppliers.length === 0) throw err('VALIDATION_ERROR', `Add at least one supplier to ask before sending ${rfq.number}`);
+    // As the server: checked again as it goes out.
+    assertProjectOpen(rfq.projectNumber!);
+    checkRfqSuppliers(rfq.suppliers.map((s) => s.supplierId));
     const issued = mockToday();
     const closing = b.closingDate ?? mockAddDays(issued, 4);
+    checkClosing(closing, issued);
     return save({
       ...rfq, status: 'SENT', updatedAt: now, sentAt: now, issuedAt: `${issued}T00:00:00.000Z`, closingDate: `${closing}T00:00:00.000Z`,
       history: [...rfq.history, entry('RFQ_SEND', { closingDate: closing, supplierIds: rfq.suppliers.map((s) => s.supplierId) })],
@@ -633,11 +648,21 @@ function routeSalesRfq(method: string, p: string, qs: Record<string, string>, bo
     if (method === 'PUT' && quote[2] === 'quote') {
       const q = (body ?? {}) as { quotedAt?: string; quoteReference?: string | null; validUntil?: string | null; leadTime?: string | null; notes?: string | null; prices?: Array<{ rfqLineId: string; unitPrice: number }> };
       if (!q.prices?.length) throw err('VALIDATION_ERROR', 'Price at least one line, or mark the supplier as declined');
-      const quotedAt = q.quotedAt ?? mockToday();
+      if (q.prices.length > 200) throw err('VALIDATION_ERROR', 'Invalid quote');
+      for (const pr of q.prices) {
+        if (!rfq.lines.some((l) => l.id === pr.rfqLineId)) throw err('VALIDATION_ERROR', `Line ${pr.rfqLineId} is not on ${rfq.number}`);
+        const n = pr.unitPrice;
+        if (typeof n !== 'number' || !(n >= 0 && n <= 1e12) || !fourDecimals(n)) throw err('VALIDATION_ERROR', 'Invalid quote');
+      }
+      const today = mockToday();
+      const quotedAt = q.quotedAt ?? today;
+      if (!isRealDay(quotedAt) || (q.validUntil && !isRealDay(q.validUntil))) throw err('VALIDATION_ERROR', 'Invalid quote');
+      if (quotedAt > today) throw err('VALIDATION_ERROR', `${quotedAt} is still to come: record the day the quote came in`);
+      if (q.validUntil && q.validUntil < quotedAt) throw err('VALIDATION_ERROR', `A quote received on ${quotedAt} can't be valid only until ${q.validUntil}: check the date`);
       return put({
         ...asked, declined: false, currency: findSupplier(supplierId)?.currency ?? 'ZAR', quotedAt: `${quotedAt}T00:00:00.000Z`, quoteReference: rfqText(q.quoteReference),
         validUntil: q.validUntil ? `${q.validUntil}T00:00:00.000Z` : null, leadTime: rfqText(q.leadTime), notes: rfqText(q.notes),
-        prices: q.prices.map((pr) => ({ rfqLineId: pr.rfqLineId, unitPrice: String(pr.unitPrice) })),
+        prices: [...new Map(q.prices.map((pr) => [pr.rfqLineId, String(pr.unitPrice)])).entries()].map(([rfqLineId, unitPrice]) => ({ rfqLineId, unitPrice })),
       }, asked.quotedAt ? 'RFQ_QUOTE_CORRECTED' : 'RFQ_QUOTE', { quoteReference: rfqText(q.quoteReference), quotedAt });
     }
     if (method === 'POST' && quote[2] === 'decline') {
