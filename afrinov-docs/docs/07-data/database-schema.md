@@ -16,7 +16,7 @@ Quantities and money are `DECIMAL(18,4)`.
 | `user_roles` (UserRole) | user_id, role_id | composite PK; cascade on delete |
 | `role_permissions` (RolePermission) | role_id, permission_id | composite PK; cascade on delete |
 
-`RoleName`: ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER, PROCUREMENT_MANAGER, DIRECTOR, CEO, WORKSHOP_MANAGER.
+`RoleName`: ADMIN, STORE_CONTROLLER, PROCUREMENT, APPROVER, TECHNICIAN, VIEWER, PROCUREMENT_MANAGER, DIRECTOR, CEO, WORKSHOP_MANAGER, SALES.
 
 ## Master data
 | Table (model) | Key columns | Constraints and notes |
@@ -47,6 +47,17 @@ code only; the column is free text (TD-024).
 `PurchaseOrderStatus`: DRAFT, PENDING_APPROVAL, APPROVED, PARTIALLY_RECEIVED,
 RECEIVED, CLOSED, CANCELLED · `GoodsReceiptStatus`: DRAFT, SUBMITTED, POSTED
 (DRAFT is never produced by current code).
+
+## Sales requests for quotation
+What Sales asks suppliers to price when costing a job. Apart from Procurement's RFQs, because who may see the prices differs and lines are typed rather than catalogue items. Nothing is awarded. `SalesRfqStatus`: DRAFT, SENT, CANCELLED.
+
+| Table (model) | Key columns | Constraints and notes |
+|---|---|---|
+| `sales_rfqs` (SalesRfq) | number, status, project_number, description, notes, penalties_apply, issued_at, closing_date, created/sent/cancelled by and at, cancellation_reason | number unique; numbered per project as Procurement's, in its own sequence, so the same number can be on both |
+| `sales_rfq_lines` (SalesRfqLine) | sales_rfq_id, line_no, description, unit_of_measure, quantity | (sales_rfq_id, line_no) unique; unit_of_measure references `units_of_measure`; cascade on delete |
+| `sales_rfq_suppliers` (SalesRfqSupplier) | sales_rfq_id, supplier_id, quote_reference, quoted_at, valid_until, lead_time, notes, currency, declined | (sales_rfq_id, supplier_id) unique; cascade on delete |
+| `sales_rfq_quote_prices` (SalesRfqQuotePrice) | sales_rfq_supplier_id, sales_rfq_line_id, unit_price | composite PK; excluding VAT, in the quote's currency |
+| `sales_rfq_quote_files` (SalesRfqQuoteFile) | sales_rfq_supplier_id, file_name, size, data, uploaded_at, uploaded_by_id | one PDF per supplier, up to 10 MB |
 
 ## Inventory ledger
 | Table (model) | Key columns | Constraints and notes |

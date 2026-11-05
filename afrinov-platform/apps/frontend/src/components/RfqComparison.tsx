@@ -15,7 +15,7 @@ import { Badge } from './Badge';
 import { api, type ApiError } from '../api/client';
 import { formatMoney, formatUnitPrice } from '../lib/poMoney';
 import { formatNumber } from '../lib/format';
-import { awardConcerns, cents, formatDay, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
+import { awardConcerns, cents, formatDay, lineDescription, lineUnits, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
 
 const nameOf = (s: RfqSupplier) => s.supplier?.name ?? s.supplierId;
 const currencyOf = quoteCurrency;
@@ -66,9 +66,9 @@ export function RfqComparison({ rfq, onAward }: {
             <tr key={l.id} className="border-b border-surface-100">
               <th scope="row" className="px-3 py-2 text-left font-normal">
                 <span className="font-mono text-surface-500 mr-1">{l.lineNo}</span>
-                {l.material ? `${l.material.sku} ${l.material.name}` : l.materialId}
+                {lineDescription(l)}
               </th>
-              <td className="px-3 py-2 text-right font-mono whitespace-nowrap">{formatNumber(Number(l.quantity))} <span className="text-meta">{l.material?.unitOfMeasure}</span></td>
+              <td className="px-3 py-2 text-right font-mono whitespace-nowrap">{formatNumber(Number(l.quantity))} <span className="text-meta">{lineUnits(l)}</span></td>
               {quotes.map((s) => {
                 const price = priceOf(s, l.id);
                 const best = price !== null && price === lowest(l.id, currencyOf(s));

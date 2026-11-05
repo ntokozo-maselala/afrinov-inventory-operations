@@ -1,6 +1,6 @@
 import { useAuth } from '../auth';
 
-export type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER';
+export type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES';
 
 export function useHasRole(requiredRoles: RoleName | RoleName[]): boolean {
   const { user } = useAuth();
@@ -63,9 +63,9 @@ export const PERMISSION_ROLES = {
   'tools:lend': ['STORE_CONTROLLER', 'TECHNICIAN'], // checkout:tool, checkin:tool
   'tools:extend': ['STORE_CONTROLLER'], // extend:tool_loan
   'locations:manage': ['STORE_CONTROLLER'], // create/edit/delete:location, manage:location_status
-  'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // manage:projects
+  'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT', 'SALES'], // manage:projects
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
-  'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)
+  'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT', 'SALES'], // create:supplier, edit:supplier (ADR-018)
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
   'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order (project orders)
   'stores:order': ['STORE_CONTROLLER'], // order:stores_stock (Stores orders: those without a project)
@@ -75,6 +75,8 @@ export const PERMISSION_ROLES = {
   'orders:view': ['PROCUREMENT', 'APPROVER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'], // view:purchase_order (project orders; the store sees its own through stores:order)
   'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order
   'receipts:view': ['STORE_CONTROLLER', 'PROCUREMENT'], // view:goods_receipt
+  'sales:view': ['SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO'], // view:sales_rfq (what Sales was quoted; buyers and the store don't see it)
+  'sales:manage': ['SALES'], // manage:sales_rfq
   'users:manage': [], // manage:users (ADMIN only)
 } as const satisfies Record<string, readonly RoleName[]>;
 

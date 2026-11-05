@@ -23,7 +23,8 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { PROCUREMENT_RFQS, type RfqArea } from '../lib/rfqArea';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { downloadQuoteFile } from '../api/rfqQuoteFile';
@@ -44,10 +45,15 @@ interface HistoryEntry {
 type Dialog = 'send' | 'cancel' | 'sent-edit' | null;
 
 export function RfqDetail() {
+  return <RfqPage area={PROCUREMENT_RFQS} />;
+}
+
+/** One RFQ of either kind (see rfqArea.ts). */
+export function RfqPage({ area }: { area: RfqArea }) {
   const { id } = useParams<{ id: string }>();
-  const rfq = useApi<Rfq>(id ? `/rfqs/${id}` : null);
-  const history = useApi<HistoryEntry[]>(id ? `/rfqs/${id}/history` : null);
-  const canManage = usePermissions().hasPermission('procurement:manage');
+  const rfq = useApi<Rfq>(id ? `${area.api}/${id}` : null);
+  const history = useApi<HistoryEntry[]>(id ? `${area.api}/${id}/history` : null);
+  const canManage = usePermissions().hasPermission(area.managePermission);
   const navigate = useNavigate();
   const toast = useToast();
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -60,7 +66,7 @@ export function RfqDetail() {
   async function quoteFileFor(s: RfqSupplier) {
     if (!r || !s.quoteFile) return;
     try {
-      await downloadQuoteFile(r.id, s.supplierId, s.quoteFile.fileName);
+      await downloadQuoteFile(r.id, s.supplierId, s.quoteFile.fileName, area.api);
     } catch (err) {
       toast.error('Could not open the quotation', (err as Error).message ?? String(err));
     }
@@ -97,16 +103,16 @@ export function RfqDetail() {
   return (
     <div>
       <PageHeader
-        title={r?.number ?? (rfq.loading ? 'Loading…' : 'Request for quotation')}
+        title={r?.number ?? (rfq.loading ? 'Loading…' : area.title)}
         description={r ? [r.description, r.projectNumber ? `Project ${r.projectNumber}` : null].filter(Boolean).join(' · ') : ''}
-        breadcrumb={[{ label: 'Requests for quotation', to: '/rfqs' }, { label: r?.number ?? 'RFQ' }]}
+        breadcrumb={[{ label: area.listTitle, to: area.path }, { label: r?.number ?? 'RFQ' }]}
         actions={r && (
           <div className="flex flex-wrap items-center gap-2">
             <RfqStatusBadge status={r.status} closed={r.closed} />
             {canManage && r.status === 'DRAFT' && (
               <>
                 <Button variant="primary" leadingIcon={<Icon.ArrowRight size={14} />} onClick={() => setDialog('send')}>Send to suppliers</Button>
-                <Button variant="secondary" leadingIcon={<Icon.Edit size={14} />} onClick={() => navigate(`/rfqs/${r.id}/edit`)}>Edit</Button>
+                <Button variant="secondary" leadingIcon={<Icon.Edit size={14} />} onClick={() => navigate(`${area.path}/${r.id}/edit`)}>Edit</Button>
               </>
             )}
             {canManage && r.status === 'SENT' && (
@@ -144,11 +150,13 @@ export function RfqDetail() {
             <section>
               <SectionHeader
                 title="Compare quotes"
-                description={r.status === 'SENT'
-                  ? 'Each supplier’s prices side by side, the lowest on each line marked. Award one to raise its purchase order.'
-                  : 'Each supplier’s prices side by side, as they stood when it was awarded.'}
+                description={!area.canAward
+                  ? 'Each supplier’s prices side by side, the lowest on each line marked.'
+                  : r.status === 'SENT'
+                    ? 'Each supplier’s prices side by side, the lowest on each line marked. Award one to raise its purchase order.'
+                    : 'Each supplier’s prices side by side, as they stood when it was awarded.'}
               />
-              <RfqComparison rfq={r} onAward={canManage && r.status === 'SENT' ? (s) => setAwarding(s.supplierId) : undefined} />
+              <RfqComparison rfq={r} onAward={area.canAward && canManage && r.status === 'SENT' ? (s) => setAwarding(s.supplierId) : undefined} />
             </section>
           )}
 
@@ -199,8 +207,8 @@ export function RfqDetail() {
         </div>
       )}
 
-      {r && dialog === 'send' && <SendDialog rfq={r} onClose={() => setDialog(null)} onSend={(closingDate) => act('{n} sent', () => api.post<Rfq>(`/rfqs/${r.id}/send`, { closingDate }))} />}
-      {r && dialog === 'cancel' && <CancelDialog rfq={r} onClose={() => setDialog(null)} onCancel={(reason) => act('{n} cancelled', () => api.post<Rfq>(`/rfqs/${r.id}/cancel`, { reason }))} />}
+      {r && dialog === 'send' && <SendDialog rfq={r} onClose={() => setDialog(null)} onSend={(closingDate) => act('{n} sent', () => api.post<Rfq>(`${area.api}/${r.id}/send`, { closingDate }))} />}
+      {r && dialog === 'cancel' && <CancelDialog rfq={r} onClose={() => setDialog(null)} onCancel={(reason) => act('{n} cancelled', () => api.post<Rfq>(`${area.api}/${r.id}/cancel`, { reason }))} />}
       {r && awarding && (() => {
         const chosen = r.suppliers.find((s) => s.supplierId === awarding);
         return chosen && (
@@ -220,22 +228,22 @@ export function RfqDetail() {
         const asked = r.suppliers.find((s) => s.supplierId === recording);
         return asked && (
           <RfqQuoteDialog
-            rfq={r} asked={asked}
+            rfq={r} asked={asked} api={area.api}
             onClose={() => setRecording(null)}
             onSaved={(_saved, message) => { setRecording(null); toast.success(message); reload(); }}
             onChanged={reload}
           />
         );
       })()}
-      {r && dialog === 'sent-edit' && <SentEditDialog rfq={r} onClose={() => setDialog(null)} onSave={(body) => act('{n} saved', () => api.patch<Rfq>(`/rfqs/${r.id}`, body))} />}
+      {r && dialog === 'sent-edit' && <SentEditDialog rfq={r} onClose={() => setDialog(null)} onSave={(body) => act('{n} saved', () => api.patch<Rfq>(`${area.api}/${r.id}`, body))} />}
     </div>
   );
 }
 
 const LINE_COLUMNS: DataTableColumn<RfqLine>[] = [
   { key: 'item', header: 'Item', align: 'right', width: '4rem', render: (l) => <span className="font-mono">{l.lineNo}</span> },
-  { key: 'desc', header: 'Description', render: (l) => (l.material ? <span><span className="text-mono text-xs">{l.material.sku}</span> {l.material.name}</span> : l.materialId) },
-  { key: 'units', header: 'Units', width: '6rem', render: (l) => l.material?.unitOfMeasure ?? '—' },
+  { key: 'desc', header: 'Description', render: (l) => (l.material ? <span><span className="text-mono text-xs">{l.material.sku}</span> {l.material.name}</span> : lineDescription(l)) },
+  { key: 'units', header: 'Units', width: '6rem', render: (l) => lineUnits(l) },
   { key: 'qty', header: 'Qty', align: 'right', width: '8rem', className: 'text-num', render: (l) => <span className="font-mono">{formatNumber(Number(l.quantity))}</span> },
 ];
 

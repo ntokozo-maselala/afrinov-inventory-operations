@@ -26,14 +26,17 @@ Reports
 Operations
  |- Materials                     /materials
  |- Locations                     /locations
- |- Projects                      /projects
  |- Recipients                    /recipients
  `- Suppliers                     /suppliers
 
+Sales
+ |- Projects                      /projects
+ `- Sales RFQ                     /sales-rfqs           (sales:view; unless VITE_PROCUREMENT_ENABLED=false)
+
 Procurement                       (unless VITE_PROCUREMENT_ENABLED=false)
- |- Purchase orders               /purchase-orders      (orders:view; project orders only, ADR-021)
+ |- RFQ                           /rfqs                 (procurement:manage)
  |- New purchase order            /purchase-orders/new  (procurement:manage)
- `- RFQ                           /rfqs                 (procurement:manage)
+ `- Purchase orders               /purchase-orders      (orders:view; project orders only, ADR-021)
 
 Account
  `- Settings                      /settings  (General, Notifications, Inventory, Purchase orders*,

@@ -10,7 +10,7 @@ import { RfqService } from './rfq.service.js';
 
 export const RFQ_STATUSES = ['DRAFT', 'SENT', 'AWARDED', 'CANCELLED'] as const;
 
-const text = (max: number) => z.string().max(max).nullable().optional();
+export const rfqText = (max: number) => z.string().max(max).nullable().optional();
 /** Quantities are kept to 4 decimal places, so a finer one would be saved as something else, or 0. */
 export const rfqQuantity = z.number().min(0.0001).max(1e9)
   .refine((q) => Math.abs(q * 1e4 - Math.round(q * 1e4)) < 1e-6, 'At most 4 decimal places');
@@ -18,32 +18,32 @@ const rfqLines = z
   .array(z.object({ materialId: z.uuid(), quantity: rfqQuantity }))
   .min(1)
   .max(200);
-const supplierIds = z.array(supplierIdSchema).max(50);
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+export const rfqSupplierIds = z.array(supplierIdSchema).max(50);
+export const rfqDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
 export const createRfqSchema = z.object({
-  projectNumber: text(64),
-  description: text(500),
-  notes: text(2000),
+  projectNumber: rfqText(64),
+  description: rfqText(500),
+  notes: rfqText(2000),
   penaltiesApply: z.boolean().optional(),
   lines: rfqLines,
-  supplierIds: supplierIds.optional(),
+  supplierIds: rfqSupplierIds.optional(),
 });
 
 // Fields left out are unchanged; null (or blank) clears a text field.
 export const updateRfqSchema = z.object({
-  projectNumber: text(64),
-  description: text(500),
-  notes: text(2000),
+  projectNumber: rfqText(64),
+  description: rfqText(500),
+  notes: rfqText(2000),
   penaltiesApply: z.boolean().optional(),
   lines: rfqLines.optional(),
-  supplierIds: supplierIds.optional(),
+  supplierIds: rfqSupplierIds.optional(),
   /** Only once it is sent. */
-  closingDate: day.optional(),
+  closingDate: rfqDay.optional(),
 });
 
 /** Left out: four days after it is sent, as on the RFQ sheet. */
-export const sendRfqSchema = z.object({ closingDate: day.optional() });
+export const sendRfqSchema = z.object({ closingDate: rfqDay.optional() });
 
 export const cancelRfqSchema = z.object({ reason: z.string().trim().min(1).max(500) });
 
@@ -62,19 +62,19 @@ const unitPrice = z.number().min(0).max(1e12).refine(fourDecimals, 'At most 4 de
 
 export const recordQuoteSchema = z.object({
   /** When the quote came in; today unless given. */
-  quotedAt: day.optional(),
-  quoteReference: text(100),
-  validUntil: day.nullable().optional(),
-  leadTime: text(100),
-  notes: text(2000),
+  quotedAt: rfqDay.optional(),
+  quoteReference: rfqText(100),
+  validUntil: rfqDay.nullable().optional(),
+  leadTime: rfqText(100),
+  notes: rfqText(2000),
   /** A price per line the supplier priced; lines they don't offer are left out. */
   prices: z.array(z.object({ rfqLineId: z.uuid(), unitPrice })).min(1).max(200),
 });
 
-export const declineQuoteSchema = z.object({ notes: text(2000) });
+export const declineQuoteSchema = z.object({ notes: rfqText(2000) });
 
 /** The supplier to award to; a reason when the award isn't the clear choice. */
-export const awardRfqSchema = z.object({ supplierId: supplierIdSchema, reason: text(500) });
+export const awardRfqSchema = z.object({ supplierId: supplierIdSchema, reason: rfqText(500) });
 
 /** The supplier's quotation PDF; the rest of the API takes 1 MB. */
 export const QUOTE_FILE_LIMIT = 10 * 1024 * 1024;

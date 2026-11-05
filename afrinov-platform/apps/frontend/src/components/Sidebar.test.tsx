@@ -74,8 +74,27 @@ describe('useNavGroups', () => {
     },
   );
 
-  it('puts Projects under Sales, after Operations', () => {
+  // Sales prices can give away a job's margin (Procurement savings report, step 1).
+  it.each([
+    ['SALES', ['Projects', 'Sales RFQ']],
+    ['DIRECTOR', ['Projects', 'Sales RFQ']],
+    ['CEO', ['Projects', 'Sales RFQ']],
+    ['PROCUREMENT_MANAGER', ['Projects', 'Sales RFQ']],
+    ['PROCUREMENT', ['Projects']],
+    ['STORE_CONTROLLER', ['Projects']],
+    ['VIEWER', ['Projects']],
+  ])('shows %s the Sales entries they may see', (role, expected) => {
+    signedIn.roles = [role];
+    expect(useLabelsIn('Sales')).toEqual(expected);
+  });
+
+  it('offers no Sales RFQ with procurement off', () => {
+    features.procurement = false;
     expect(useLabelsIn('Sales')).toEqual(['Projects']);
+  });
+
+  it('puts Projects under Sales, after Operations', () => {
+    expect(useLabelsIn('Sales')).toEqual(['Projects', 'Sales RFQ']);
     const titles = useNavGroups().map((g) => g.title);
     expect(titles.indexOf('Sales')).toBe(titles.indexOf('Operations') + 1);
   });

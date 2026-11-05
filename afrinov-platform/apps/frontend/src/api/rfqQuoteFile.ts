@@ -8,13 +8,13 @@ import { errorMessage, triggerDownload } from './exportReport';
 /** As the server takes it; the rest of the API takes 1 MB. */
 export const QUOTE_FILE_LIMIT = 10 * 1024 * 1024;
 
-const path = (rfqId: string, supplierId: string) => `/rfqs/${rfqId}/suppliers/${encodeURIComponent(supplierId)}/quote-file`;
+const path = (api: string, rfqId: string, supplierId: string) => `${api}/${rfqId}/suppliers/${encodeURIComponent(supplierId)}/quote-file`;
 
 /**
  * Attaches the file, replacing one attached before, and answers with the RFQ.
  * A file that isn't a PDF or is over 10 MB is refused here, before it is sent.
  */
-export async function uploadQuoteFile<T>(rfqId: string, supplierId: string, file: File): Promise<T> {
+export async function uploadQuoteFile<T>(rfqId: string, supplierId: string, file: File, api = '/rfqs'): Promise<T> {
   if (file.size > QUOTE_FILE_LIMIT) throw apiError('VALIDATION_ERROR', `${file.name} is larger than 10 MB. Attach a smaller copy of the quotation.`);
   if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') throw apiError('VALIDATION_ERROR', `${file.name} is not a PDF. The RFQ asks for quotations back as PDF.`);
   const data = new Uint8Array(await file.arrayBuffer());
@@ -25,7 +25,7 @@ export async function uploadQuoteFile<T>(rfqId: string, supplierId: string, file
   const token = getToken();
   let res: Response;
   try {
-    res = await fetch(`/api/v1${path(rfqId, supplierId)}`, {
+    res = await fetch(`/api/v1${path(api, rfqId, supplierId)}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/pdf',
@@ -43,7 +43,7 @@ export async function uploadQuoteFile<T>(rfqId: string, supplierId: string, file
 }
 
 /** Downloads the quotation as it was attached, under its own name. */
-export async function downloadQuoteFile(rfqId: string, supplierId: string, fileName: string): Promise<void> {
+export async function downloadQuoteFile(rfqId: string, supplierId: string, fileName: string, api = '/rfqs'): Promise<void> {
   if (FRONTEND_ONLY) {
     const { mockGetQuoteFile } = await import('../mock/mockApi');
     const file = mockGetQuoteFile(rfqId, supplierId);
@@ -53,7 +53,7 @@ export async function downloadQuoteFile(rfqId: string, supplierId: string, fileN
   const token = getToken();
   let res: Response;
   try {
-    res = await fetch(`/api/v1${path(rfqId, supplierId)}`, { headers: { Accept: 'application/pdf', ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    res = await fetch(`/api/v1${path(api, rfqId, supplierId)}`, { headers: { Accept: 'application/pdf', ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
   } catch {
     throw new Error('Unable to reach the server. Check your connection and try again.');
   }

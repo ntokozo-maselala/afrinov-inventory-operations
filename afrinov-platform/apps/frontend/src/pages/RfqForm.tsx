@@ -105,7 +105,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   // Projects item, whatever project it was tagged with: the RFQ says which
   // project it is for (Project on the Order Roadmap, Phase 2). What a draft
   // already holds stays listed, so it can be changed.
-  const held = new Set(rfq?.lines.map((l) => l.materialId) ?? []);
+  const held = new Set(rfq?.lines.map((l) => l.materialId ?? '') ?? []);
   const materials = catalogue.filter((m) => held.has(m.id) || sectionOf(m.category) === 'PROJECTS');
   const suppliers = suppliersReq.data ?? [];
 
@@ -114,7 +114,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   const [penaltiesApply, setPenaltiesApply] = useState(rfq?.penaltiesApply ?? false);
   const [notes, setNotes] = useState(rfq?.notes ?? '');
   const [lines, setLines] = useState<DraftLine[]>(() => (rfq
-    ? rfq.lines.map((l) => ({ key: nextLineKey++, materialId: l.materialId, quantity: String(Number(l.quantity)) }))
+    ? rfq.lines.map((l) => ({ key: nextLineKey++, materialId: l.materialId ?? '', quantity: String(Number(l.quantity)) }))
     : [blankLine()]));
   const [supplierIds, setSupplierIds] = useState<string[]>(() => rfq?.suppliers.map((s) => s.supplierId) ?? []);
   const [busy, setBusy] = useState(false);

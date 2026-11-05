@@ -16,7 +16,7 @@ import { useApi } from '../hooks/useApi';
 import { QUOTE_FILE_LIMIT, uploadQuoteFile } from '../api/rfqQuoteFile';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
 import { formatNumber } from '../lib/format';
-import { fourDecimals, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqSupplier } from '../lib/rfq';
+import { fourDecimals, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqSupplier, lineDescription, lineUnits } from '../lib/rfq';
 
 const LINE_GRID = 'grid grid-cols-12 sm:grid-cols-[2.5rem_minmax(0,1fr)_4.5rem_5.5rem_8rem_8.5rem] gap-2 items-center';
 
@@ -28,9 +28,11 @@ function badPrice(v: string): boolean {
 
 const sizeLabel = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
+export function RfqQuoteDialog({ rfq, asked, api: rfqApi = '/rfqs', onClose, onSaved, onChanged }: {
   rfq: Rfq;
   asked: RfqSupplier;
+  /** Where this kind of RFQ lives on the server: Procurement's or Sales'. */
+  api?: string;
   onClose: () => void;
   /** Everything saved: the RFQ after the last save, and what was done. */
   onSaved: (saved: Rfq, message: string) => void;
@@ -82,7 +84,7 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
     setProblem(why);
     if (why) return;
     setBusy(true);
-    const base = `/rfqs/${rfq.id}/suppliers/${encodeURIComponent(asked.supplierId)}`;
+    const base = `${rfqApi}/${rfq.id}/suppliers/${encodeURIComponent(asked.supplierId)}`;
     let saved: Rfq | null = null;
     try {
       saved = answer === 'declined'
@@ -96,7 +98,7 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
           prices: lines.filter((l) => prices[l.id]?.trim()).map((l) => ({ rfqLineId: l.id, unitPrice: Number(prices[l.id]) })),
         });
       if (removeFile && asked.quoteFile && !file) saved = await api.del<Rfq>(`${base}/quote-file`);
-      if (file) saved = await uploadQuoteFile<Rfq>(rfq.id, asked.supplierId, file);
+      if (file) saved = await uploadQuoteFile<Rfq>(rfq.id, asked.supplierId, file, rfqApi);
       onSaved(saved, answer === 'declined' ? `${name} declined to quote` : `Quote from ${name} recorded`);
     } catch (err) {
       const message = (err as ApiError).message ?? String(err);
@@ -145,8 +147,8 @@ export function RfqQuoteDialog({ rfq, asked, onClose, onSaved, onChanged }: {
                 {lines.map((l, i) => (
                   <div key={l.id} className={LINE_GRID}>
                     <span className="hidden sm:block text-right font-mono text-sm text-surface-500">{l.lineNo}</span>
-                    <span className="col-span-12 sm:col-span-1 text-sm truncate">{l.material ? `${l.material.sku} ${l.material.name}` : l.materialId}</span>
-                    <span className="col-span-3 sm:col-span-1 text-sm text-surface-600">{l.material?.unitOfMeasure ?? '—'}</span>
+                    <span className="col-span-12 sm:col-span-1 text-sm truncate">{lineDescription(l)}</span>
+                    <span className="col-span-3 sm:col-span-1 text-sm text-surface-600">{lineUnits(l)}</span>
                     <span className="col-span-3 sm:col-span-1 text-sm text-right font-mono">{formatNumber(Number(l.quantity))}</span>
                     <Input
                       className="col-span-3 sm:col-span-1 text-right" type="number" min="0" step="0.0001" inputMode="decimal" placeholder="Not offered"

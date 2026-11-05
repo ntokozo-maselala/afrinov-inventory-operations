@@ -10,9 +10,13 @@ export interface RfqLine {
   id: string;
   /** The RFQ sheet's ITEM column: 1, 2, 3, … */
   lineNo: number;
-  materialId: string;
+  /** A catalogue item, on Procurement's RFQs. */
+  materialId?: string;
   quantity: string;
   material?: { sku: string; name: string; unitOfMeasure: string; category?: string; projectNumber?: string | null };
+  /** Typed as the sheet has it, on Sales RFQs. */
+  description?: string;
+  unitOfMeasure?: string;
 }
 
 export interface RfqSupplier {
@@ -69,6 +73,15 @@ export interface Rfq {
   purchaseOrder?: { id: string; number: string; status: string; supplierId?: string } | null;
   lines: RfqLine[];
   suppliers: RfqSupplier[];
+}
+
+/** What a line asks to be priced: its catalogue item, or the description typed on a Sales RFQ. */
+export function lineDescription(l: RfqLine): string {
+  return l.material ? `${l.material.sku} ${l.material.name}` : l.description ?? l.materialId ?? '';
+}
+
+export function lineUnits(l: RfqLine): string {
+  return l.material?.unitOfMeasure ?? l.unitOfMeasure ?? '—';
 }
 
 /** Days from sending to closing unless the buyer picks another, as the RFQ sheet's Closing = Issued + 4. */

@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-05 | `07-data/database-schema.md`, `08-api/authorization.md`, `09-frontend/page-inventory.md`, `09-frontend/information-architecture.md` | Sales RFQs and the Sales role, the first step of the Procurement savings report | Engineering |
 | 2026-09-01 | All (`00`–`14`) | Initial documentation set created from AS-IS analysis of `07__July_2026_Report.xlsm` and product-scope discussion with business owner | Engineering |
 | 2026-10-09 | `00-governance/assumptions-register.md` | Extended: A-10 to A-20 for claims that cannot be verified in the repository | Engineering (reconciliation against code at 4e6d76f) |
 | 2026-10-09 | `00-governance/change-log.md` | This set of entries | Engineering (reconciliation against code at 4e6d76f) |

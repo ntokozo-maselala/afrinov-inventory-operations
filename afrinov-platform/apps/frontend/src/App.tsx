@@ -32,6 +32,10 @@ const Rfqs = importPage(() => import('./pages/Rfqs').then(m => ({ default: m.Rfq
 const RfqDetail = importPage(() => import('./pages/RfqDetail').then(m => ({ default: m.RfqDetail })));
 const NewRfq = importPage(() => import('./pages/RfqForm').then(m => ({ default: m.NewRfq })));
 const EditRfq = importPage(() => import('./pages/RfqForm').then(m => ({ default: m.EditRfq })));
+const SalesRfqs = importPage(() => import('./pages/SalesRfqs').then(m => ({ default: m.SalesRfqs })));
+const SalesRfqDetail = importPage(() => import('./pages/SalesRfqs').then(m => ({ default: m.SalesRfqDetail })));
+const NewSalesRfq = importPage(() => import('./pages/SalesRfqForm').then(m => ({ default: m.NewSalesRfq })));
+const EditSalesRfq = importPage(() => import('./pages/SalesRfqForm').then(m => ({ default: m.EditSalesRfq })));
 const StockStatus = importPage(() => import('./pages/StockStatus').then(m => ({ default: m.StockStatus })));
 const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ default: m.Consumption })));
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
@@ -156,6 +160,10 @@ export function App() {
             <Route path="/rfqs/new" element={<RouteBoundary name="New request for quotation"><NewRfq /></RouteBoundary>} />
             <Route path="/rfqs/:id" element={<RouteBoundary name="Request for quotation"><RfqDetail /></RouteBoundary>} />
             <Route path="/rfqs/:id/edit" element={<RouteBoundary name="Edit request for quotation"><EditRfq /></RouteBoundary>} />
+            <Route path="/sales-rfqs" element={<RouteBoundary name="Sales RFQs"><SalesRfqs /></RouteBoundary>} />
+            <Route path="/sales-rfqs/new" element={<RouteBoundary name="New Sales RFQ"><NewSalesRfq /></RouteBoundary>} />
+            <Route path="/sales-rfqs/:id" element={<RouteBoundary name="Sales RFQ"><SalesRfqDetail /></RouteBoundary>} />
+            <Route path="/sales-rfqs/:id/edit" element={<RouteBoundary name="Edit Sales RFQ"><EditSalesRfq /></RouteBoundary>} />
             {/* Goods receipts had its own page; deliveries, against an order or not, are booked on Receive stock. */}
             <Route path="/goods-receipts/*" element={<Navigate to="/purchase-orders" replace />} />
           </>
@@ -164,6 +172,7 @@ export function App() {
             <Route path="/stock/orders/*" element={<Navigate to="/stock" replace />} />
             <Route path="/purchase-orders/*" element={<Navigate to="/" replace />} />
             <Route path="/rfqs/*" element={<Navigate to="/" replace />} />
+            <Route path="/sales-rfqs/*" element={<Navigate to="/" replace />} />
             <Route path="/goods-receipts/*" element={<Navigate to="/" replace />} />
           </>
         )}

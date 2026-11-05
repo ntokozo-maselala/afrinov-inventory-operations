@@ -25,7 +25,7 @@ import { ALL_PERMISSION_CODES, RolePermissions } from '../shared/permissions.js'
 import { recomputeBalancesFor } from '../modules/inventory/balances.js';
 import { prisma } from '../shared/db.js';
 
-type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER';
+type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES';
 
 
 interface DemoMaterial {
