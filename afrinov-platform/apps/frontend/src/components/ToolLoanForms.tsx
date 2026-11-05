@@ -19,6 +19,9 @@ import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdu
 import { today } from '../lib/dates';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
 import type { OpenLoan, ToolRow } from '../api/types';
+
+/** What can still come back on a loan: what is out, less any lost one waiting for its write-off to be approved. */
+const canComeBack = (l: OpenLoan) => Math.round((Number(l.out) - Number(l.lostWaiting ?? 0)) * 1e4) / 1e4;
 import { useLocationLabel } from '../hooks/useLocationLabel';
 
 const stockKey = (materialId: string, locationId: string) => `${materialId}|${locationId}`;
@@ -219,14 +222,14 @@ export function CheckInForm({ tool, onCancel, onDone }: {
 }) {
   // With one loan, all of it is coming back; with several, the storeman fills in the ones that are.
   const [back, setBack] = useState<Record<string, Back>>(() => Object.fromEntries(tool.loans.map((l) => [
-    l.loanId, { quantity: tool.loans.length === 1 ? l.out : '', condition: 'GOOD' as Condition, note: '' },
+    l.loanId, { quantity: tool.loans.length === 1 ? String(canComeBack(l)) : '', condition: 'GOOD' as Condition, note: '' },
   ])));
   // Lost writes the tool off, which the store does, not the borrower (adjust:inventory).
   const canWriteOff = usePermissions().hasPermission('inventory:adjust');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const update = (loanId: string, patch: Partial<Back>) => setBack((b) => ({ ...b, [loanId]: { ...b[loanId]!, ...patch } }));
-  const tooMany = (l: OpenLoan) => Number(back[l.loanId]?.quantity) > Number(l.out);
+  const tooMany = (l: OpenLoan) => Number(back[l.loanId]?.quantity) > canComeBack(l);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -247,7 +250,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
       // A lost tool over the write-off limit is written off once someone else approves it (ADR-028).
       const waiting = result?.writeOffRequestIds?.length ?? 0;
       onDone(`Checked in ${formatNumber(count)} × ${tool.name}${waiting > 0
-        ? `. Writing off the lost ${waiting === 1 ? 'one' : waiting} waits for someone else to approve it under Write-offs to approve.`
+        ? `. Writing off the lost ${waiting === 1 ? 'one' : waiting} waits for someone else to approve it under Write-offs to approve; until then it stays on loan.`
         : ''}`);
     } catch (err) {
       setError((err as ApiError).message);
@@ -266,6 +269,7 @@ export function CheckInForm({ tool, onCancel, onDone }: {
             <div className="text-sm">
               <span className="font-medium text-surface-900">{l.recipientName ?? 'Not recorded'}</span>
               <span className="text-surface-600"> · {formatNumber(Number(l.out))} out since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
+              {Number(l.lostWaiting ?? 0) > 0 && <div className="text-xs text-surface-500">{formatNumber(Number(l.lostWaiting))} lost, waiting for the write-off to be approved under Write-offs to approve.</div>}
               <div><LoanDue loan={l} /></div>
               <div className="text-xs text-surface-500">From {l.locationName}; it goes back there. Checked out by {l.checkedOutBy}.{l.note ? ` ${l.note}` : ''}</div>
             </div>

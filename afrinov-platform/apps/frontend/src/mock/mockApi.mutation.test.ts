@@ -11,7 +11,7 @@
 //   - goods-receipt posting rejects receiving more than the ordered quantity.
 //
 // The mock is reset between tests via `resetMockState()`.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Counter receipts, as with procurement off; receiving against orders needs no switch in the mock.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: false }));
@@ -931,5 +931,34 @@ describe('mock API: a location inside another', () => {
     await api.patch(`/locations/${rack.id}/status`, { active: false });
     await api.patch(`/locations/${store.id}/status`, { active: false });
     await expect(api.patch(`/locations/${rack.id}/status`, { active: true })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+});
+
+// Qodo, PR #151: switched on in the demo, write-off approval works as on the
+// server: nothing moves, the demo user can't approve their own, only withdraw it.
+describe('mock: write-off approval when switched on', () => {
+  const api = createMockApi();
+  beforeEach(async () => {
+    resetMockState();
+    await api.put('/settings/inventory.requireWriteOffApproval', { value: true });
+  });
+  afterEach(async () => {
+    await api.put('/settings/inventory.requireWriteOffApproval', { value: false });
+  });
+
+  it('holds an adjustment over the limit, which the demo user may withdraw but not approve', async () => {
+    const stock = async () => (await api.get<Array<{ materialId: string; locationId: string; quantity: string }>>('/reports/current-stock'))
+      .filter((r) => r.materialId === 'mat-1' && r.locationId === 'loc-1').reduce((n, r) => n + Number(r.quantity), 0);
+    const before = await stock();
+    const small = await api.post<{ status: string }>('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 2, reasonCode: 'OTHER', reasonNote: 'Found' });
+    expect(small.status).toBe('POSTED'); // R 9,00
+    const big = await api.post<{ status: string; requestId: string; value: string }>('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 300, reasonCode: 'OTHER', reasonNote: 'Found a box' });
+    expect(big).toMatchObject({ status: 'PENDING_APPROVAL', value: '1350.00' });
+    expect(await stock()).toBe(before + 2);
+    expect((await api.get<Array<{ id: string; requestedBy: { id: string } }>>('/adjustment-requests')).map((r) => r.id)).toEqual([big.requestId]);
+    await expect(api.post(`/adjustment-requests/${big.requestId}/approve`, {})).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await api.post(`/adjustment-requests/${big.requestId}/reject`, { reason: 'Booked on the wrong item' });
+    expect(await api.get<unknown[]>('/adjustment-requests')).toEqual([]);
+    expect(await stock()).toBe(before + 2);
   });
 });

@@ -6,47 +6,23 @@
 //
 // Nothing moves while a request waits. Approving posts the ADJUSTMENT, booked
 // to whoever asked for it, with the approver on the request and in the audit
-// log; rejecting posts nothing. Nobody approves their own.
+// log; rejecting posts nothing. Nobody approves their own. A tool lost on loan
+// stays on loan while it waits: approving posts its return and its write-off
+// together, as checking it in as lost within the limit does.
 import { Prisma, AdjustmentRequestStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { InventoryService, checkAdjustment, type AdjustmentInput } from './inventory.service.js';
-import { checkWriteOff, type WriteOffCheck } from './write-off-limit.js';
+import { checkWriteOff } from './write-off-limit.js';
+import { requestAdjustment } from './write-off-requests.js';
+import { ToolLoanService, TOOL_LOAN_REFERENCE } from './tool-loan.service.js';
 
 export type AdjustOutcome =
   | { status: 'POSTED'; transactionId: string }
   | { status: 'PENDING_APPROVAL'; requestId: string; value: string | null; limit: string };
 
 const OWN_REQUEST = 'You asked for this adjustment, so someone else must approve it.';
-
-/**
- * Records an adjustment for someone else to approve, posting nothing. Used by
- * adjustOrRequest and by a tool checked in as lost (tool-loan.service.ts).
- */
-export async function requestAdjustment(input: AdjustmentInput, check: WriteOffCheck, tx: Prisma.TransactionClient): Promise<{ requestId: string }> {
-  const quantity = new Prisma.Decimal(input.quantity);
-  const request = await tx.adjustmentRequest.create({
-    data: {
-      materialId: input.materialId,
-      locationId: input.locationId,
-      heldForProject: input.heldForProject ?? null,
-      quantity,
-      reasonCode: input.reasonCode,
-      reasonNote: input.reasonNote?.trim() || null,
-      recipientId: input.recipientId ?? null,
-      value: check.value,
-      requestedById: input.actorId,
-    },
-  });
-  await tx.auditLogEntry.create({
-    data: {
-      actorId: input.actorId, action: 'WRITE_OFF_REQUEST', entityType: 'AdjustmentRequest', entityId: request.id,
-      after: { quantity: quantity.toString(), reasonCode: input.reasonCode, value: check.value?.toString() ?? null, limit: check.limit.toString() },
-    },
-  });
-  return { requestId: request.id };
-}
 
 async function lockRequest(id: string, tx: Prisma.TransactionClient) {
   await tx.$executeRaw`SELECT id FROM adjustment_requests WHERE id = ${id} FOR UPDATE`;
@@ -109,17 +85,25 @@ export const WriteOffApprovalService = {
     return inTx(within, async (tx) => {
       const request = await lockRequest(id, tx);
       if (request.requestedById === actorId) throw Errors.forbidden(OWN_REQUEST);
-      // Checked again: stock may have moved, or the item been retired, since it was asked for.
-      const { transactionId } = await InventoryService.adjust({
-        materialId: request.materialId,
-        locationId: request.locationId,
-        heldForProject: request.heldForProject,
-        quantity: request.quantity,
-        reasonCode: request.reasonCode,
-        reasonNote: request.reasonNote ?? undefined,
-        recipientId: request.recipientId,
-        actorId: request.requestedById,
-      }, tx);
+      // Checked again: stock may have moved, the tool come back, or the item
+      // been retired, since it was asked for.
+      const { transactionId } = request.referenceType === TOOL_LOAN_REFERENCE
+        ? await ToolLoanService.writeOffLost({
+          loanId: request.referenceId!, quantity: request.quantity.negated(), reasonNote: request.reasonNote ?? '', actorId: request.requestedById,
+        }, tx)
+        : await InventoryService.adjust({
+          materialId: request.materialId,
+          locationId: request.locationId,
+          heldForProject: request.heldForProject,
+          quantity: request.quantity,
+          reasonCode: request.reasonCode,
+          reasonNote: request.reasonNote ?? undefined,
+          recipientId: request.recipientId,
+          projectNumber: request.projectNumber,
+          referenceType: request.referenceType,
+          referenceId: request.referenceId,
+          actorId: request.requestedById,
+        }, tx);
       const now = new Date();
       await tx.adjustmentRequest.update({
         where: { id },

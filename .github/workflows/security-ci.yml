@@ -107,8 +107,3 @@ jobs:
             echo "$found"
             exit 1
           fi
-          if [ -n "$found" ]; then
-            echo "::error::Spreadsheets must not be committed to this public repository:"
-            echo "$found"
-            exit 1
-          fi

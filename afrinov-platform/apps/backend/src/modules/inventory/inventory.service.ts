@@ -63,6 +63,14 @@ export interface AdjustmentInput {
   /** Whose stock is adjusted: a project's, or Stores stock (null or left out). */
   heldForProject?: string | null;
   actorId: string;
+  /**
+   * Set by the services, never from a request body: who the stock was used
+   * for, and what it comes from (a stock count, its count id), as an
+   * adjustment waiting for approval keeps them (ADR-028).
+   */
+  projectNumber?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
 }
 
 /**
@@ -1414,6 +1422,9 @@ export const InventoryService = {
           reasonCode: input.reasonCode,
           reasonNote: input.reasonNote ?? null,
           recipientId: input.recipientId ?? null,
+          projectNumber: input.projectNumber ?? null,
+          referenceType: input.referenceType ?? null,
+          referenceId: input.referenceId ?? null,
           actorId: input.actorId,
         },
       });

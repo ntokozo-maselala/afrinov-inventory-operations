@@ -764,6 +764,12 @@ model AdjustmentRequest {
   reasonCode     AdjustmentReasonCode    @map("reason_code")
   reasonNote     String?                 @map("reason_note")
   recipientId    String?                 @map("recipient_id")
+  // Who the stock was used for, and what the adjustment comes from, as on the
+  // ADJUSTMENT it becomes: a stock count (StockCount, its count id) or a tool
+  // lost on loan (ToolLoan, the loan; its return is posted on approval too).
+  projectNumber  String?                 @map("project_number")
+  referenceType  String?                 @map("reference_type")
+  referenceId    String?                 @map("reference_id")
   value          Decimal?                @db.Decimal(18, 2)
   status         AdjustmentRequestStatus @default(PENDING)
   requestedById  String                  @map("requested_by_id")
@@ -781,6 +787,7 @@ model AdjustmentRequest {
   transaction InventoryTransaction? @relation(fields: [transactionId], references: [id])
 
   @@index([status, requestedAt])
+  @@index([referenceType, referenceId])
   @@map("adjustment_requests")
 }
 

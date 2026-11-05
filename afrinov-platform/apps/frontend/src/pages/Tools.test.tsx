@@ -223,7 +223,7 @@ describe('Tools page', () => {
     fireEvent.change(within(drawer).getByLabelText('Condition'), { target: { value: 'LOST' } });
     fireEvent.change(within(drawer).getByLabelText('What happened', { exact: false }), { target: { value: 'Left on site' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
-    expect(await screen.findByText(/Writing off the lost one waits for someone else to approve it under Write-offs to approve/)).toBeInTheDocument();
+    expect(await screen.findByText(/Writing off the lost one waits for someone else to approve it under Write-offs to approve; until then it stays on loan/)).toBeInTheDocument();
   });
 
   // Lost writes the tool off: the store's to do, not a borrower's (adjust:inventory).

@@ -194,31 +194,73 @@ describe('write-off approval over real HTTP', () => {
   });
 
   // Qodo, PR #151: a lost tool over the limit, or with no cost, is written off only once someone else approves.
-  it('holds the write-off of a costly lost tool for approval: approved it is written off, rejected it stays', async () => {
+  // Qodo, PR #151: a lost tool over the limit, or with no cost, is written off
+  // only once someone else approves. Until then it stays on loan, so it can't be
+  // lent again; approval posts its return and write-off against the loan and its
+  // project, and a rejection leaves it with the borrower.
+  it('keeps a costly lost tool on loan until its write-off is approved, then writes it off against the loan', async () => {
     const grinder = await api<{ id: string }>('POST', '/materials', { sku: `IT-WO-GRIND-${run}`, name: `Angle grinder ${run}`, category: 'TOOLS', unitOfMeasure: 'each', unitCost: 2400 });
     await setting('inventory.requireWriteOffApproval', false);
-    expect((await adjust(api, { materialId: grinder.body.id, quantity: 2, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
+    expect((await adjust(api, { materialId: grinder.body.id, quantity: 3, reasonCode: 'OTHER', reasonNote: 'Opening count' })).status).toBe(201);
     await setting('inventory.requireWriteOffApproval', true);
+    const projectNumber = `IT-WO-P-${run}`;
+    expect((await api('POST', '/projects', { projectNumber, name: `IT write-off project ${run}` })).status).toBe(201);
     const recipient = await api<{ id: string }>('POST', '/recipients', { name: `IT WO welder ${run}`, type: 'WORKER' });
-    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: grinder.body.id, locationId, quantity: 2 }] });
+    const out = await storeman<{ loanIds: string[] }>('POST', '/tools/check-out', { recipientId: recipient.body.id, projectNumber, lines: [{ materialId: grinder.body.id, locationId, quantity: 2 }] });
+    expect(out.status).toBe(201);
     const [loanId] = out.body.loanIds;
 
-    const lost = await storeman<{ writeOffIds: string[]; writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [
+    const lost = await storeman<{ returnIds: string[]; writeOffIds: string[]; writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [
       { loanId, quantity: 1, condition: 'LOST', note: 'Fell off the scaffold' },
       { loanId, quantity: 1, condition: 'LOST', note: 'Stolen from the van' },
     ] });
     expect(lost.status).toBe(201);
-    expect(lost.body.writeOffIds).toEqual([]);
-    expect(lost.body.writeOffRequestIds).toHaveLength(2);
-    // Both back from the loan, nothing written off yet.
-    expect(await onHand(grinder.body.id)).toBe('2');
+    expect([lost.body.returnIds, lost.body.writeOffIds, lost.body.writeOffRequestIds.length]).toEqual([[], [], 2]);
+    // Both still on loan: the one left in store is all that can be lent.
+    expect(await onHand(grinder.body.id)).toBe('1');
+    const row = (await storeman<Array<{ materialId: string; loans: Array<{ loanId: string; out: string; lostWaiting: string }> }>>('GET', '/tools')).body
+      .find((t) => t.materialId === grinder.body.id)!;
+    expect(row.loans.find((l) => l.loanId === loanId)).toMatchObject({ out: '2', lostWaiting: '2' });
+    expect((await storeman('POST', '/tools/check-out', { recipientId: recipient.body.id, lines: [{ materialId: grinder.body.id, locationId, quantity: 2 }] })).status).toBe(422);
+    expect((await storeman('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'GOOD' }] })).status).toBe(400);
 
     const [first, second] = lost.body.writeOffRequestIds;
     expect((await storeman('POST', `/adjustment-requests/${first}/approve`)).status).toBe(403);
-    expect((await api('POST', `/adjustment-requests/${first}/approve`)).status).toBe(201);
-    expect((await api('POST', `/adjustment-requests/${second}/reject`, { reason: 'Found in the van' })).status).toBe(200);
+    const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${first}/approve`);
+    expect(approved.status).toBe(201);
+    const writeOff = await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: approved.body.transactionId } });
+    expect(writeOff).toMatchObject({ type: 'ADJUSTMENT', reasonCode: 'LOSS', referenceType: 'ToolLoan', referenceId: loanId, projectNumber });
+    expect((await prisma.inventoryTransaction.findMany({ where: { type: 'LOAN_RETURN', referenceId: loanId } })).map((t) => t.quantity.toString())).toEqual(['1']);
+    // Its return and its loss net to nothing in store.
     expect(await onHand(grinder.body.id)).toBe('1');
-    const request = await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: first! } });
-    expect(request).toMatchObject({ reasonCode: 'LOSS', reasonNote: expect.stringMatching(/^Lost while checked out to IT WO welder .*: Fell off the scaffold$/) });
+
+    // Rejected: the other stays on loan to the welder, to be brought back.
+    expect((await api('POST', `/adjustment-requests/${second}/reject`, { reason: 'Found in the van' })).status).toBe(200);
+    expect((await storeman('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'GOOD' }] })).status).toBe(201);
+    expect(await onHand(grinder.body.id)).toBe('2');
+  });
+
+  // Qodo, PR #151: a count is no way round the write-off limit.
+  it('holds a count difference over the limit for approval, posting it as part of the count once approved', async () => {
+    // An earlier test left one of this item's adjustments waiting; it is decided first.
+    for (const r of (await api<Array<{ id: string; material: { id: string } }>>('GET', '/adjustment-requests')).body.filter((x) => x.material.id === materialId)) {
+      expect((await api('POST', `/adjustment-requests/${r.id}/reject`, { reason: 'Superseded by the count' })).status).toBe(200);
+    }
+    const counted = Number(await onHand()) - 8; // R 2 000 short
+    const count = await storeman<{ countId: string; adjusted: number; waitingForApproval: number; lines: Array<{ requestId: string | null }> }>('POST', '/stock-counts', {
+      locationId, note: `IT count ${run}`, lines: [{ materialId, expectedQuantity: Number(await onHand()), countedQuantity: counted }],
+    });
+    expect(count.status).toBe(201);
+    expect([count.body.adjusted, count.body.waitingForApproval]).toEqual([0, 1]);
+    const requestId = count.body.lines[0]!.requestId!;
+    // Counting it again while it waits would correct it twice.
+    const again = await storeman<{ error: { code: string } }>('POST', '/stock-counts', { locationId, lines: [{ materialId, expectedQuantity: Number(await onHand()), countedQuantity: counted }] });
+    expect([again.status, again.body.error.code]).toEqual([409, 'INVALID_STATE']);
+
+    const approved = await api<{ transactionId: string }>('POST', `/adjustment-requests/${requestId}/approve`);
+    expect(approved.status).toBe(201);
+    expect(await onHand()).toBe(String(counted));
+    const posted = await prisma.inventoryTransaction.findUniqueOrThrow({ where: { id: approved.body.transactionId } });
+    expect(posted).toMatchObject({ reasonCode: 'COUNT_VARIANCE', referenceType: 'StockCount', referenceId: count.body.countId });
   });
 });

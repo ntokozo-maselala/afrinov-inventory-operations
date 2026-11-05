@@ -180,8 +180,13 @@ export function StockCount() {
       }),
     };
     try {
-      const result = await api.post<{ adjusted: number }>('/stock-counts', countBody, { idempotencyKey: idem.keyFor(countBody) });
-      toast.success(`Count posted at ${location?.name ?? 'the location'}: ${result.adjusted} adjustment${result.adjusted === 1 ? '' : 's'}`);
+      const result = await api.post<{ adjusted: number; waitingForApproval?: number }>('/stock-counts', countBody, { idempotencyKey: idem.keyFor(countBody) });
+      // Differences over the write-off limit wait for someone else's approval (ADR-028).
+      const waiting = result.waitingForApproval ?? 0;
+      toast.success(
+        `Count posted at ${location?.name ?? 'the location'}: ${result.adjusted} adjustment${result.adjusted === 1 ? '' : 's'}`,
+        waiting > 0 ? `${waiting} difference${waiting === 1 ? '' : 's'} over the write-off limit wait${waiting === 1 ? 's' : ''} for someone else to approve under Write-offs to approve.` : undefined,
+      );
       idem.confirm();
       setDraft(EMPTY);
       setConfirming(false);

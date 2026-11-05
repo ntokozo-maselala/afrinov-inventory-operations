@@ -39,6 +39,8 @@ export interface OpenLoan {
   locationId: string; locationName: string;
   /** How many were lent, and how many of them are still out. */
   quantity: string; out: string;
+  /** Of those out, how many are waiting to be written off as lost: not to be checked in again (ADR-028). */
+  lostWaiting?: string;
   checkedOutAt: string; checkedOutBy: string; note: string | null;
   /** Whole days since it went out. */
   daysOut: number;

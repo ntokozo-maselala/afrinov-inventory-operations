@@ -18,6 +18,9 @@ CREATE TABLE "adjustment_requests" (
     "reason_code" "AdjustmentReasonCode" NOT NULL,
     "reason_note" TEXT,
     "recipient_id" TEXT,
+    "project_number" TEXT,
+    "reference_type" TEXT,
+    "reference_id" TEXT,
     "value" DECIMAL(18,2),
     "status" "AdjustmentRequestStatus" NOT NULL DEFAULT 'PENDING',
     "requested_by_id" TEXT NOT NULL,
@@ -35,6 +38,9 @@ CREATE UNIQUE INDEX "adjustment_requests_transaction_id_key" ON "adjustment_requ
 
 -- CreateIndex
 CREATE INDEX "adjustment_requests_status_requested_at_idx" ON "adjustment_requests"("status", "requested_at");
+
+-- CreateIndex
+CREATE INDEX "adjustment_requests_reference_type_reference_id_idx" ON "adjustment_requests"("reference_type", "reference_id");
 
 -- AddForeignKey
 ALTER TABLE "adjustment_requests" ADD CONSTRAINT "adjustment_requests_material_id_fkey" FOREIGN KEY ("material_id") REFERENCES "materials"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

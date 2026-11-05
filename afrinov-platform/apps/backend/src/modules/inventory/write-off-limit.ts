@@ -1,6 +1,6 @@
 // Whether an adjustment needs someone else's approval (ADR-028), in one place
-// for every path that writes stock off or adds it: a manual adjustment, a tool
-// checked in as lost, and reversing an adjustment.
+// for every path that writes stock off or adds it: a manual adjustment, a stock
+// count's differences, a tool checked in as lost, and reversing an adjustment.
 //
 // It does when approval is on and the item has no unit cost (its value can't
 // be checked), the limit is 0 ("every adjustment waits"), or its exact value,

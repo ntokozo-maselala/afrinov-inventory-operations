@@ -302,8 +302,9 @@ export const OPERATIONS: Operation[] = [
       + 'GOOD or DAMAGED puts it back in store (LOAN_RETURN); LOST needs a note and writes it off at once '
       + '(LOAN_RETURN and an ADJUSTMENT with reason LOSS), so it is no longer owned. Writing a tool off as LOST also '
       + 'needs adjust:inventory (403 otherwise): a borrower does not write off what they borrowed. A lost tool worth more '
-      + 'than inventory.writeOffApprovalAbove, or with no unit cost, is checked in but its write-off waits for '
-      + 'approval by someone else: writeOffRequestIds lists those requests, and writeOffIds the write-offs posted at once.',
+      + 'than inventory.writeOffApprovalAbove, or with no unit cost, stays on loan while its write-off waits for '
+      + 'approval by someone else (writeOffRequestIds; lostWaiting on the loan in GET /tools): approving posts its '
+      + 'return and its write-off against the loan. writeOffIds lists the write-offs posted at once.',
     permissions: [P.CheckInTool], body: toolCheckInSchema, success: 201, errors: [404],
   },
   {
@@ -378,8 +379,11 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/stock-counts', tag: 'Stock movements', summary: 'Post a stock count for one location',
     description: 'The counted quantity of each item, with the system quantity the counter was shown. Every difference '
       + 'is posted as a COUNT_VARIANCE adjustment linked to one count id; items that match are recorded as counted only. '
+      + 'A difference over inventory.writeOffApprovalAbove, or of an item with no unit cost, is recorded for someone '
+      + 'else to approve instead (its requestId; waitingForApproval counts them), and posts as part of the count once approved. '
       + 'All or nothing. Refused with 409 CONFLICT when the stock at the location has changed since it was shown, '
-      + 'and 404 for an unknown location or material.',
+      + '409 INVALID_STATE for an item with an adjustment already waiting at the location, 400 for a difference too '
+      + 'large for one movement, and 404 for an unknown location or material.',
     permissions: [P.AdjustInventory], body: stockCountSchema, success: 201, errors: [404, 409],
   },
   {

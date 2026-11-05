@@ -95,7 +95,13 @@ const client = {
     },
   },
   auditLogEntry: { create: async ({ data }: { data: { action: string } }) => { db.audit.push(data); return data; } },
-  adjustmentRequest: { create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, ...data }; db.requests.push(row); return row; } },
+  adjustmentRequest: {
+    create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, status: 'PENDING', ...data }; db.requests.push(row); return row; },
+    // Lost tools waiting for their write-off, by loan.
+    findMany: async ({ where }: { where: { referenceId: { in: string[] } } }) => db.requests
+      .filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && where.referenceId.in.includes(r.referenceId as string))
+      .map((r) => ({ referenceId: r.referenceId, quantity: r.quantity })),
+  },
 };
 
 vi.mock('../../shared/db.js', () => ({ prisma: { ...client, $transaction: async (fn: (t: typeof client) => unknown) => fn(client) } }));
@@ -204,19 +210,36 @@ describe('ToolLoanService', () => {
   });
 
   // ADR-028; Qodo, PR #151: a lost tool over the write-off limit is written
-  // off only once someone else approves it; its loan is closed meanwhile.
-  it('holds the write-off of a lost tool over the limit for approval, closing its loan', async () => {
+  // off only once someone else approves it. It stays on loan meanwhile, so it
+  // can't be lent again, and approval posts its return and write-off together.
+  it('holds the write-off of a lost tool over the limit for approval, keeping it on loan', async () => {
     db.settings = { 'inventory.requireWriteOffApproval': true, 'inventory.writeOffApprovalAbove': 1000 };
     const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] });
     const { writeOffIds, writeOffRequestIds } = await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'LOST', note: 'Left on site' }] });
     expect(writeOffIds).toEqual([]);
     expect(writeOffRequestIds).toHaveLength(1);
-    expect(db.requests[0]).toMatchObject({ materialId: 'm-drill', reasonCode: 'LOSS', reasonNote: 'Lost while checked out to Sabelo: Left on site', requestedById: 'u-1' });
+    expect(db.requests[0]).toMatchObject({
+      materialId: 'm-drill', reasonCode: 'LOSS', reasonNote: 'Lost while checked out to Sabelo: Left on site', requestedById: 'u-1',
+      referenceType: 'ToolLoan', referenceId: loanId,
+    });
     expect(String(db.requests[0]!.quantity)).toBe('-1');
     expect(String(db.requests[0]!.value)).toBe('1800');
-    expect(db.ledger.some((r) => r.type === 'ADJUSTMENT')).toBe(false);
+    expect(db.ledger.some((r) => r.type === 'ADJUSTMENT' || r.type === 'LOAN_RETURN')).toBe(false);
+    // Still on loan, and not for lending again.
     const drill = await tool('m-drill');
-    expect([drill.inStore, drill.onLoan]).toEqual(['1', '0']);
+    expect([drill.inStore, drill.onLoan, drill.loans[0]!.lostWaiting]).toEqual(['0', '1', '1']);
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('only 0 still checked out (1 more is waiting to be written off as lost)') });
+
+    // Approved: its return and its LOSS, against the loan and its project, as a direct write-off.
+    const { transactionId } = await ToolLoanService.writeOffLost({ loanId: loanId!, quantity: D(1), reasonNote: 'Lost while checked out to Sabelo: Left on site', actorId: 'u-1' });
+    const writeOff = db.ledger.find((r) => r.id === transactionId)!;
+    expect([writeOff.type, writeOff.quantity.toString(), writeOff.reasonCode, writeOff.referenceType, writeOff.referenceId]).toEqual(['ADJUSTMENT', '-1', 'LOSS', 'ToolLoan', loanId]);
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN' && r.referenceId === loanId).map((r) => r.quantity.toString())).toEqual(['1']);
+    const after = await tool('m-drill');
+    expect([after.inStore, after.onLoan, after.owned]).toEqual(['0', '0', '0']);
+    // Not twice: it is no longer out.
+    await expect(ToolLoanService.writeOffLost({ loanId: loanId!, quantity: D(1), reasonNote: 'again', actorId: 'u-1' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
   });
 
   it('says how long each loan has been out, and that it is overdue after the days set (7)', async () => {

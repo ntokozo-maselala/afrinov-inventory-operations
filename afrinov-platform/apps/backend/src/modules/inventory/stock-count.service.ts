@@ -11,7 +11,9 @@ import { AdjustmentReasonCode, InventoryTransactionType, Prisma } from '@prisma/
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
-import { toDecimal } from '../../shared/decimal.js';
+import { toDecimal, fitsQuantityColumn } from '../../shared/decimal.js';
+import { writeOffRule } from './write-off-limit.js';
+import { requestAdjustment } from './write-off-requests.js';
 import { getCurrentBalance, recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
@@ -36,7 +38,9 @@ export interface StockCountResult {
   countId: string;
   counted: number;
   adjusted: number;
-  lines: Array<{ materialId: string; variance: string; transactionId: string | null }>;
+  /** Differences over the write-off limit, recorded for someone else to approve rather than posted (ADR-028). */
+  waitingForApproval: number;
+  lines: Array<{ materialId: string; variance: string; transactionId: string | null; requestId: string | null }>;
 }
 
 export interface CountListFilter {
@@ -148,8 +152,9 @@ export const StockCountService = {
       if (!location) throw Errors.notFound('Location');
       if (!location.active) throw Errors.validation(`Location ${location.name} is inactive`);
 
-      const materials = await tx.material.findMany({ where: { id: { in: lines.map((l) => l.materialId) } }, select: { id: true, sku: true } });
+      const materials = await tx.material.findMany({ where: { id: { in: lines.map((l) => l.materialId) } }, select: { id: true, sku: true, unitCost: true } });
       const skuById = new Map(materials.map((m) => [m.id, m.sku]));
+      const costById = new Map(materials.map((m) => [m.id, m.unitCost ?? null]));
       const unknown = lines.filter((l) => !skuById.has(l.materialId));
       if (unknown.length > 0) throw Errors.notFound('Material');
 
@@ -167,12 +172,44 @@ export const StockCountService = {
         );
       }
 
+      const variances = new Map(lines.map((l) => [l.materialId, l.counted.minus(current.get(l.materialId)!)]));
+      // Each difference is posted as one movement, so it must fit the column too
+      // (a large negative balance corrected by a large count; Qodo, PR #151).
+      const tooBig = lines.filter((l) => !fitsQuantityColumn(variances.get(l.materialId)!));
+      if (tooBig.length > 0) {
+        throw Errors.validation(`The difference for ${tooBig.map((l) => skuById.get(l.materialId)).join(', ')} is too large to post as one movement. Correct it in smaller steps.`);
+      }
+      // An item with an adjustment already waiting for approval here would be
+      // corrected twice if both were approved: that one is decided first.
+      const differing = lines.filter((l) => !variances.get(l.materialId)!.isZero()).map((l) => l.materialId);
+      const waiting = differing.length === 0 ? [] : await tx.adjustmentRequest.findMany({
+        where: { status: 'PENDING', locationId: input.locationId, heldForProject: null, materialId: { in: differing } },
+        select: { materialId: true },
+      });
+      if (waiting.length > 0) {
+        const skus = [...new Set(waiting.map((w) => skuById.get(w.materialId)))].join(', ');
+        throw Errors.invalidState(`${skus} at ${location.name} already has an adjustment waiting for approval. Approve or reject it under Write-offs to approve, then count again.`);
+      }
+
+      // A difference over the write-off limit, or of an item with no unit cost,
+      // waits for someone else's approval, as any adjustment does (ADR-028).
+      const rule = await writeOffRule(tx);
       const results: StockCountResult['lines'] = [];
       const events: DomainEvent[] = [];
       for (const l of lines) {
-        const variance = l.counted.minus(current.get(l.materialId)!);
+        const variance = variances.get(l.materialId)!;
         if (variance.isZero()) {
-          results.push({ materialId: l.materialId, variance: '0', transactionId: null });
+          results.push({ materialId: l.materialId, variance: '0', transactionId: null, requestId: null });
+          continue;
+        }
+        const reasonNote = [note, l.note].some(Boolean) ? `Stock count: ${[note, l.note].filter(Boolean).join(' — ')}` : 'Stock count';
+        const check = rule(variance, costById.get(l.materialId) ?? null);
+        if (check.needsApproval) {
+          const { requestId } = await requestAdjustment({
+            materialId: l.materialId, locationId: input.locationId, quantity: variance, reasonCode: AdjustmentReasonCode.COUNT_VARIANCE,
+            reasonNote, referenceType: STOCK_COUNT_REFERENCE, referenceId: countId, actorId: input.actorId,
+          }, check, tx);
+          results.push({ materialId: l.materialId, variance: variance.toString(), transactionId: null, requestId });
           continue;
         }
         const trx = await tx.inventoryTransaction.create({
@@ -183,14 +220,14 @@ export const StockCountService = {
             quantity: variance,
             reasonCode: AdjustmentReasonCode.COUNT_VARIANCE,
             // The count's note, then the item's own: "Stock count: Monthly — 3 cracked, binned".
-            reasonNote: [note, l.note].some(Boolean) ? `Stock count: ${[note, l.note].filter(Boolean).join(' — ')}` : 'Stock count',
+            reasonNote,
             referenceType: STOCK_COUNT_REFERENCE,
             referenceId: countId,
             actorId: input.actorId,
           },
         });
         await recomputeBalance(storesStock(l.materialId, input.locationId), tx);
-        results.push({ materialId: l.materialId, variance: variance.toString(), transactionId: trx.id });
+        results.push({ materialId: l.materialId, variance: variance.toString(), transactionId: trx.id, requestId: null });
         events.push({ type: 'InventoryAdjusted', materialId: l.materialId, locationId: input.locationId, quantity: variance.toNumber() });
       }
 
@@ -200,18 +237,19 @@ export const StockCountService = {
       });
 
       const adjusted = results.filter((r) => r.transactionId).length;
+      const waitingForApproval = results.filter((r) => r.requestId).length;
       await tx.auditLogEntry.create({
         data: {
           actorId: input.actorId,
           action: 'STOCK_COUNT',
           entityType: 'StockCount',
           entityId: countId,
-          after: { locationId: input.locationId, counted: lines.length, adjusted, note } as Prisma.InputJsonValue,
+          after: { locationId: input.locationId, counted: lines.length, adjusted, waitingForApproval, note } as Prisma.InputJsonValue,
         },
       });
       await dispatchDomainEvents(events);
 
-      return { countId, counted: lines.length, adjusted, lines: results };
+      return { countId, counted: lines.length, adjusted, waitingForApproval, lines: results };
     });
   },
 };
