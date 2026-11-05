@@ -13,6 +13,9 @@
 // An RFQ is for a project or for Stores, as an order is, and holds a project's
 // material only for that project. Every change is written to the audit log
 // (entity type Rfq) for the RFQ's Activity.
+//
+// Each line can be matched to the line Sales asked suppliers to price, for the
+// savings report. Buyers see what Sales asked for, never what it was quoted.
 import { Prisma, type RfqStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
@@ -321,7 +324,29 @@ const lineRows = (lines: RfqLineInput[]) => lines.map((l, i) => ({ lineNo: i + 1
 const linesForLog = (lines: Array<{ materialId: string; quantity: Prisma.Decimal | number }>) =>
   lines.map((l) => ({ materialId: l.materialId, quantity: String(l.quantity) }));
 
+/**
+ * The Sales line each of a draft's edited lines keeps: its lines are replaced
+ * when edited, so a link follows its item. An item on two lines hands its old
+ * lines' links on in order.
+ */
+export function keptSalesLinks(
+  had: Array<{ materialId: string; salesRfqLineId: string | null }>,
+  next: Array<{ materialId: string }>,
+): Array<string | null> {
+  const left = [...had];
+  return next.map((l) => {
+    const i = left.findIndex((o) => o.materialId === l.materialId);
+    return i < 0 ? null : left.splice(i, 1)[0]!.salesRfqLineId ?? null;
+  });
+}
+
 export const person = { select: { id: true, name: true } } as const;
+
+/** All a buyer sees of a Sales line: what was asked for, and never a price or a supplier. */
+const SALES_LINE = {
+  id: true, lineNo: true, description: true, unitOfMeasure: true, quantity: true,
+  rfq: { select: { number: true, status: true } },
+} satisfies Prisma.SalesRfqLineSelect;
 
 const DETAIL = {
   project: { select: { projectNumber: true, name: true } },
@@ -330,7 +355,7 @@ const DETAIL = {
   awardedBy: person,
   cancelledBy: person,
   purchaseOrder: { select: { id: true, number: true, status: true, supplierId: true } },
-  lines: { include: { material: true }, orderBy: { lineNo: 'asc' } },
+  lines: { include: { material: true, salesRfqLine: { select: SALES_LINE } }, orderBy: { lineNo: 'asc' } },
   suppliers: {
     // The quotation file's details, never its contents: those are downloaded on their own.
     include: { supplier: true, prices: true, quoteFile: { select: { fileName: true, size: true, uploadedAt: true } } },
@@ -509,11 +534,20 @@ export const RfqService = {
       if (input.lines !== undefined) await checkWholeUnits(input.lines, tx);
       const linesChanged = input.lines !== undefined
         && JSON.stringify(linesForLog(input.lines)) !== JSON.stringify(linesForLog(rfq.lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity.toNumber() }))));
+      // A Sales line is for one project, so its links don't move with the draft.
+      const moved = 'projectNumber' in data;
       if (linesChanged) {
+        const kept = moved ? [] : keptSalesLinks(rfq.lines, input.lines!);
         await tx.rfqLine.deleteMany({ where: { rfqId: rfq.id } });
-        await tx.rfqLine.createMany({ data: lineRows(input.lines!).map((l) => ({ ...l, rfqId: rfq.id })) });
+        await tx.rfqLine.createMany({ data: lineRows(input.lines!).map((l, i) => ({ ...l, rfqId: rfq.id, salesRfqLineId: kept[i] ?? null })) });
         before.lines = linesForLog(rfq.lines);
         after.lines = linesForLog(input.lines!);
+      }
+      const linked = rfq.lines.filter((l) => l.salesRfqLineId).length;
+      if (moved && linked > 0) {
+        if (!linesChanged) await tx.rfqLine.updateMany({ where: { rfqId: rfq.id }, data: { salesRfqLineId: null } });
+        before.salesLinks = linked;
+        after.salesLinks = 0;
       }
 
       const had = rfq.suppliers.map((s) => s.supplierId);
@@ -542,6 +576,66 @@ export const RfqService = {
     });
     // The same shape as GET /rfqs/:id.
     return RfqService.getById(input.id);
+  },
+
+  /**
+   * The lines Sales has sent to suppliers for this RFQ's project, for a buyer
+   * to match its lines to. What was asked for only: see SALES_LINE.
+   *
+   * @throws {ApiError} NOT_FOUND.
+   */
+  async salesLines(id: string) {
+    const rfq = await prisma.rfq.findUnique({ where: { id }, select: { projectNumber: true } });
+    if (!rfq) throw Errors.notFound('Rfq');
+    if (!rfq.projectNumber) return [];
+    return prisma.salesRfqLine.findMany({
+      where: { rfq: { projectNumber: rfq.projectNumber, status: 'SENT' } },
+      select: SALES_LINE,
+      orderBy: [{ rfq: { number: 'asc' } }, { lineNo: 'asc' }],
+    });
+  },
+
+  /**
+   * Matches one line to a Sales line, or with null takes the match off. Only
+   * the report reads it, so it can be corrected at any point short of the RFQ
+   * being cancelled, and a project that has since closed doesn't stop it.
+   *
+   * @throws {ApiError} NOT_FOUND; INVALID_STATE once it is cancelled;
+   * VALIDATION_ERROR for anything but a line Sales has sent for this project.
+   */
+  async linkSalesLine(id: string, lineId: string, salesRfqLineId: string | null, actorId: string) {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM rfqs WHERE id = ${id} FOR UPDATE`;
+      const rfq = await tx.rfq.findUnique({ where: { id }, include: { lines: { select: { id: true, lineNo: true, salesRfqLineId: true } } } });
+      if (!rfq) throw Errors.notFound('Rfq');
+      if (rfq.status === 'CANCELLED') throw Errors.invalidState(`Request for quotation ${rfq.number} is cancelled, so its lines can no longer be linked`, { status: rfq.status });
+      const line = rfq.lines.find((l) => l.id === lineId);
+      if (!line) throw Errors.notFound('Line on this request for quotation');
+      if (line.salesRfqLineId === salesRfqLineId) return;
+      let salesLine: { lineNo: number; rfq: { number: string } } | null = null;
+      if (salesRfqLineId) {
+        // Held until the link is written, so the Sales RFQ can't be cancelled between the check and the save.
+        await tx.$executeRaw`SELECT 1 FROM sales_rfqs WHERE id = (SELECT sales_rfq_id FROM sales_rfq_lines WHERE id = ${salesRfqLineId}) FOR SHARE`;
+        const found = await tx.salesRfqLine.findUnique({ where: { id: salesRfqLineId }, select: { lineNo: true, rfq: { select: { number: true, status: true, projectNumber: true } } } });
+        // The same answer for all of these, so nobody can probe for what Sales has raised.
+        if (!found || found.rfq.status !== 'SENT' || found.rfq.projectNumber !== rfq.projectNumber) {
+          throw Errors.validation(`That isn't a line of a Sales RFQ sent for ${rfq.projectNumber}`);
+        }
+        salesLine = found;
+      }
+      await tx.rfqLine.update({ where: { id: lineId }, data: { salesRfqLineId } });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: 'RFQ_SALES_LINK',
+          entityType: 'Rfq',
+          entityId: id,
+          before: { lineNo: line.lineNo, salesRfqLineId: line.salesRfqLineId },
+          after: { lineNo: line.lineNo, salesRfqLineId, salesRfqNumber: salesLine?.rfq.number ?? null, salesLineNo: salesLine?.lineNo ?? null },
+        },
+      });
+    });
+    return RfqService.getById(id);
   },
 
   /**

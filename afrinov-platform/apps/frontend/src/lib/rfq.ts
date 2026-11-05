@@ -1,10 +1,20 @@
 // Requests for quotation as the API returns them (rfq.service.ts), and the
 // small helpers the RFQ pages share.
-import { formatDate } from './format';
+import { formatDate, formatNumber } from './format';
 
 export type RfqStatus = 'DRAFT' | 'SENT' | 'AWARDED' | 'CANCELLED';
 
 export interface RfqPerson { id: string; name: string }
+
+/** All a buyer sees of a Sales line: what was asked for, never a price or a supplier. */
+export interface RfqSalesLine {
+  id: string;
+  lineNo: number;
+  description: string;
+  unitOfMeasure: string;
+  quantity: string;
+  rfq: { number: string; status: RfqStatus };
+}
 
 export interface RfqLine {
   id: string;
@@ -17,6 +27,8 @@ export interface RfqLine {
   /** Typed as the sheet has it, on Sales RFQs. */
   description?: string;
   unitOfMeasure?: string;
+  /** What Sales asked for, as the buyer matched it, on Procurement's RFQs. */
+  salesRfqLine?: RfqSalesLine | null;
 }
 
 export interface RfqSupplier {
@@ -82,6 +94,27 @@ export function lineDescription(l: RfqLine): string {
 
 export function lineUnits(l: RfqLine): string {
   return l.material?.unitOfMeasure ?? l.unitOfMeasure ?? '—';
+}
+
+export function salesLineAsked(s: RfqSalesLine): string {
+  return `${formatNumber(Number(s.quantity))} ${s.unitOfMeasure}`;
+}
+
+export function salesLineLabel(s: RfqSalesLine): string {
+  return `${s.rfq.number} line ${s.lineNo}: ${s.description} (${salesLineAsked(s)})`;
+}
+
+/**
+ * Whether what this RFQ asks for differs from what Sales asked for on the line
+ * it is linked to: another unit, or a quantity that doesn't add up across the
+ * lines sharing it. Compared in whole ten-thousandths, as quantities are kept.
+ */
+export function salesLineDiffers(lines: RfqLine[], line: RfqLine): boolean {
+  const asked = line.salesRfqLine;
+  if (!asked) return false;
+  if (lineUnits(line).toLowerCase() !== asked.unitOfMeasure.toLowerCase()) return true;
+  const kept = (q: string) => Math.round(Number(q) * 1e4);
+  return lines.filter((l) => l.salesRfqLine?.id === asked.id).reduce((sum, l) => sum + kept(l.quantity), 0) !== kept(asked.quantity);
 }
 
 /** Days from sending to closing unless the buyer picks another, as the RFQ sheet's Closing = Issued + 4. */

@@ -47,6 +47,9 @@ export const sendRfqSchema = z.object({ closingDate: rfqDay.optional() });
 
 export const cancelRfqSchema = z.object({ reason: z.string().trim().min(1).max(500) });
 
+/** The line of a sent Sales RFQ for the same project; null takes the link off. */
+export const linkSalesLineSchema = z.object({ salesRfqLineId: z.uuid().nullable() });
+
 /**
  * A number with at most 4 decimal places, as a DECIMAL(18, 4) column keeps
  * it: its 4-place rounding must be the same number, to within the last bit a
@@ -135,6 +138,20 @@ export async function rfqRoutes(app: FastifyInstance): Promise<void> {
     const parsed = cancelRfqSchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send(invalid('cancellation', parsed.error.flatten()));
     return RfqService.cancel((req.params as { id: string }).id, parsed.data.reason, actorId(req));
+  });
+
+  // Those who raise RFQs: others who may open one see only the links already made.
+  app.get('/rfqs/:id/sales-lines', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    return RfqService.salesLines((req.params as { id: string }).id);
+  });
+
+  app.put('/rfqs/:id/lines/:lineId/sales-line', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.CreatePurchaseOrder);
+    const parsed = linkSalesLineSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send(invalid('Sales line', parsed.error.flatten()));
+    const { id, lineId } = req.params as { id: string; lineId: string };
+    return RfqService.linkSalesLine(id, lineId, parsed.data.salesRfqLineId, actorId(req));
   });
 
   app.put('/rfqs/:id/suppliers/:supplierId/quote', { preHandler: [app.authenticate] }, async (req, reply) => {

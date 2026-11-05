@@ -46,7 +46,7 @@ import {
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
 import {
-  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
+  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, linkSalesLineSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
 } from '../modules/procurement/rfq.routes.js';
 import { createSalesRfqSchema, listSalesRfqQuerySchema, updateSalesRfqSchema } from '../modules/sales/sales-rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
@@ -724,6 +724,16 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/rfqs', tag: 'Requests for quotation', summary: 'Raise a draft request for quotation',
     description: "For one project and Projects items only, any of them (the RFQ says which project they are for): Stores stock is ordered without an RFQ. Numbered AFRI-02A-<project>-02-<nn> (other project numbers RFQ-<project>-<nn>). The description defaults to the project's name.",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
+  },
+  {
+    method: 'get', path: '/rfqs/:id/sales-lines', tag: 'Requests for quotation', summary: 'The Sales lines its lines can be linked to',
+    description: "The lines of Sales RFQs sent for this RFQ's project: what was asked for, never a price or a supplier.",
+    procurement: true, permissions: [P.CreatePurchaseOrder], errors: [404],
+  },
+  {
+    method: 'put', path: '/rfqs/:id/lines/:lineId/sales-line', tag: 'Requests for quotation', summary: 'Link a line to a Sales line, or take the link off',
+    description: 'For the savings report. Several lines can share a Sales line, which must be on a Sales RFQ sent for the same project. Can be corrected at any point until the RFQ is cancelled (409).',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: linkSalesLineSchema, errors: [404, 409],
   },
   {
     method: 'patch', path: '/rfqs/:id', tag: 'Requests for quotation', summary: 'Change a draft request for quotation',

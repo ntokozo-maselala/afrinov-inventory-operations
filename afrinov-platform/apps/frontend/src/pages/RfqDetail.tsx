@@ -5,6 +5,9 @@
 // four days later unless another date is picked, as the RFQ sheet does. Once
 // sent, it has gone to its suppliers as it stands: only its closing date
 // moves and suppliers who were missed are added, and it can still be cancelled.
+//
+// On Procurement's, a buyer matches each line to what Sales asked for, for the
+// savings report, seeing nothing of what Sales was quoted.
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -23,7 +26,7 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, salesLineAsked, salesLineDiffers, salesLineLabel, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSalesLine, type RfqSupplier } from '../lib/rfq';
 import { PROCUREMENT_RFQS, type RfqArea } from '../lib/rfqArea';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -54,6 +57,7 @@ export function RfqPage({ area }: { area: RfqArea }) {
   const rfq = useApi<Rfq>(id ? `${area.api}/${id}` : null);
   const history = useApi<HistoryEntry[]>(id ? `${area.api}/${id}/history` : null);
   const canManage = usePermissions().hasPermission(area.managePermission);
+  const salesLines = useApi<RfqSalesLine[]>(id && area.linksSalesLines && canManage ? `${area.api}/${id}/sales-lines` : null);
   const navigate = useNavigate();
   const toast = useToast();
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -84,6 +88,22 @@ export function RfqPage({ area }: { area: RfqArea }) {
       toast.error('Could not make the PDF', (err as ApiError).message ?? String(err));
     } finally {
       setPrinting(null);
+    }
+  }
+
+  // Saved as it is chosen. On a failure the line still shows the link it has.
+  const [linking, setLinking] = useState<string | null>(null);
+  async function linkLine(l: RfqLine, salesRfqLineId: string | null) {
+    if (!r) return;
+    setLinking(l.id);
+    try {
+      await api.put<Rfq>(`${area.api}/${r.id}/lines/${l.id}/sales-line`, { salesRfqLineId });
+      toast.success(salesRfqLineId ? `Line ${l.lineNo} linked` : `Line ${l.lineNo} unlinked`);
+      reload();
+    } catch (err) {
+      toast.error('That did not go through', (err as ApiError).message);
+    } finally {
+      setLinking(null);
     }
   }
 
@@ -179,8 +199,21 @@ export function RfqPage({ area }: { area: RfqArea }) {
 
             <div className="lg:col-span-2 space-y-6">
               <section>
-                <SectionHeader title="Lines" description="What the suppliers are asked to price, as on the RFQ sheet." />
-                <DataTable ariaLabel="RFQ lines" rows={r.lines} rowKey={(l) => l.id} columns={LINE_COLUMNS} />
+                <SectionHeader
+                  title="Lines"
+                  description={area.linksSalesLines && canManage && r.status !== 'CANCELLED'
+                    ? 'What the suppliers are asked to price, as on the RFQ sheet. Link each line to what Sales asked for, for the savings report; you see what Sales asked for, not its prices.'
+                    : 'What the suppliers are asked to price, as on the RFQ sheet.'}
+                />
+                {salesLines.error && canManage && r.status !== 'CANCELLED' && (
+                  <div className="mb-3"><Alert tone="warning" title="Sales lines could not be loaded">Lines cannot be linked just now. Reload the page to try again.</Alert></div>
+                )}
+                <DataTable
+                  ariaLabel="RFQ lines" rows={r.lines} rowKey={(l) => l.id}
+                  columns={area.linksSalesLines
+                    ? [...LINE_COLUMNS, salesLineColumn(r.lines, canManage && r.status !== 'CANCELLED' && !salesLines.error ? { options: salesLines.data ?? [], loading: salesLines.loading, saving: linking, onLink: linkLine } : undefined)]
+                    : LINE_COLUMNS}
+                />
               </section>
               <section>
                 <SectionHeader
@@ -246,6 +279,44 @@ const LINE_COLUMNS: DataTableColumn<RfqLine>[] = [
   { key: 'units', header: 'Units', width: '6rem', render: (l) => lineUnits(l) },
   { key: 'qty', header: 'Qty', align: 'right', width: '8rem', className: 'text-num', render: (l) => <span className="font-mono">{formatNumber(Number(l.quantity))}</span> },
 ];
+
+interface SalesLinking {
+  /** The lines of Sales RFQs sent for this project. */
+  options: RfqSalesLine[];
+  loading: boolean;
+  /** The line being saved. */
+  saving: string | null;
+  onLink: (l: RfqLine, salesRfqLineId: string | null) => void;
+}
+
+/** A dropdown for those who raise RFQs; the link as it stands for others who may open one. */
+function salesLineColumn(lines: RfqLine[], linking?: SalesLinking): DataTableColumn<RfqLine> {
+  return {
+    key: 'salesLine', header: 'Sales line', render: (l) => {
+      const linked = l.salesRfqLine ?? null;
+      return (
+        <div className="space-y-1 min-w-48">
+          {linking
+            ? (
+              <Select
+                aria-label={`Sales line for line ${l.lineNo}`} value={linked?.id ?? ''}
+                disabled={linking.saving !== null || (!linked && linking.options.length === 0)}
+                onChange={(e) => linking.onLink(l, e.target.value || null)}
+              >
+                <option value="">{!linked && !linking.loading && linking.options.length === 0 ? 'No Sales RFQ sent for this project' : 'Not linked'}</option>
+                {/* One Sales has since cancelled is no longer offered, but is still this line's link. */}
+                {linked && !linking.options.some((o) => o.id === linked.id) && <option value={linked.id}>{salesLineLabel(linked)}</option>}
+                {linking.options.map((o) => <option key={o.id} value={o.id}>{salesLineLabel(o)}</option>)}
+              </Select>
+            )
+            : linked ? <div className="text-sm">{salesLineLabel(linked)}</div> : <span className="text-surface-300">—</span>}
+          {linked?.rfq.status === 'CANCELLED' && <Badge tone="warning">Sales RFQ cancelled</Badge>}
+          {linked && salesLineDiffers(lines, l) && <div className="text-meta">Sales asked for {salesLineAsked(linked)}</div>}
+        </div>
+      );
+    },
+  };
+}
 
 interface SupplierActions {
   /** Their copy of the RFQ, to email to them. */
@@ -363,6 +434,11 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
   if (e.action === 'RFQ_DECLINED') return `${who} declined to quote${after.notes ? `: ${String(after.notes)}` : ''}`;
   if (e.action === 'RFQ_QUOTE_FILE') return `${who}'s quotation attached (${String(after.fileName ?? 'PDF')})`;
   if (e.action === 'RFQ_QUOTE_FILE_REMOVED') return `${who}'s quotation taken off`;
+  if (e.action === 'RFQ_SALES_LINK') {
+    return after.salesRfqNumber
+      ? `Line ${String(after.lineNo)} linked to Sales RFQ ${String(after.salesRfqNumber)}, line ${String(after.salesLineNo)}`
+      : `Line ${String(after.lineNo)} unlinked from its Sales line`;
+  }
   if (e.action === 'UPDATE') {
     const parts: string[] = [];
     if ('number' in after) parts.push(`renumbered ${String(after.number)}`);
@@ -377,6 +453,7 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
     }
     if ('lines' in after) parts.push('lines changed');
     if ('projectNumber' in after) parts.push(after.projectNumber ? `moved to project ${String(after.projectNumber)}` : 'taken off its project');
+    if ('salesLinks' in after) parts.push('its links to Sales lines taken off');
     if (['description', 'notes', 'penaltiesApply'].some((k) => k in after)) parts.push('details changed');
     return parts.length ? `${parts[0]!.charAt(0).toUpperCase()}${parts.join('; ').slice(1)}` : 'Details updated';
   }
