@@ -251,7 +251,7 @@ export function PurchaseOrderDetail() {
 
       {fresh && (
         <div className="space-y-6">
-          <LifecycleTracker status={fresh.status} />
+          <LifecycleTracker status={fresh.status} history={history.data ?? []} approval={approval.data} />
           {isApprovable(fresh.status) && approval.data && (
             <ApprovalPanel view={approval.data} onAddPrices={canManage ? editOrder : undefined} />
           )}
@@ -339,7 +339,49 @@ export function PurchaseOrderDetail() {
 }
 
 // ── Lifecycle tracker ────────────────────────────────────────────────────
-function LifecycleTracker({ status }: { status: POStatus }) {
+/** "Thandi Mokoena" as "Thandi M.", to fit under a step. */
+export function shortName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name.trim();
+}
+
+/** Under a step: who did it and when, or who it is waiting on. */
+export interface StepPerson { label: string; title: string; waiting?: boolean }
+
+/**
+ * Who moved the order into each step, from its Activity: the latest entry that
+ * moved it into that status (so an order sent back for approval shows the
+ * latest round). Every status change is logged with the status it moved to.
+ */
+export function stepActors(history: HistoryEntry[]): Partial<Record<POStatus, StepPerson>> {
+  const out: Partial<Record<POStatus, StepPerson>> = {};
+  const oldestFirst = [...history].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const e of oldestFirst) {
+    const to = e.after?.status as POStatus | undefined;
+    if (!to || e.before?.status === to) continue;
+    const name = e.actorName ?? (e.actorId ? 'A removed user' : 'System');
+    const shown = e.actorName ? shortName(e.actorName) : name;
+    out[to] = { label: `${shown} · ${formatDate(e.createdAt)}`, title: `${name}, ${formatDateTime(e.createdAt)}` };
+  }
+  return out;
+}
+
+/** Who the next step is waiting on: the approvers whose limit covers the order, or the store for a delivery. */
+export function waitingOn(status: POStatus, approval: ApprovalView | null | undefined): { step: POStatus; person: StepPerson } | null {
+  if (status === 'PENDING_APPROVAL' && approval) {
+    if (approval.unpricedLines > 0) return { step: 'APPROVED', person: { label: 'Needs prices', title: 'Every line needs a price before the order can be approved', waiting: true } };
+    const names = approval.approvers.map((a) => a.name);
+    if (names.length === 0) return { step: 'APPROVED', person: { label: 'No approver', title: 'No approver has a limit that covers this order', waiting: true } };
+    const shown = names.length > 2 ? `${shortName(names[0]!)} +${names.length - 1}` : names.map(shortName).join(' or ');
+    return { step: 'APPROVED', person: { label: `Waiting on ${shown}`, title: `Any of: ${names.join(', ')}`, waiting: true } };
+  }
+  // Anyone who receives orders books a delivery, so it waits on the store, not a person.
+  if (status === 'APPROVED') return { step: 'PARTIALLY_RECEIVED', person: { label: 'Waiting on Stores', title: 'Booked on Receive stock when it arrives', waiting: true } };
+  if (status === 'PARTIALLY_RECEIVED') return { step: 'RECEIVED', person: { label: 'Waiting on Stores', title: 'The rest is booked on Receive stock when it arrives', waiting: true } };
+  return null;
+}
+
+function LifecycleTracker({ status, history, approval }: { status: POStatus; history: HistoryEntry[]; approval?: ApprovalView | null }) {
   if (status === 'CANCELLED') {
     return (
       <div className="surface-card p-4">
@@ -351,6 +393,8 @@ function LifecycleTracker({ status }: { status: POStatus }) {
     );
   }
   const currentIndex = LIFECYCLE_ORDER.indexOf(status);
+  const actors = stepActors(history);
+  const next = waitingOn(status, approval);
   return (
     <div className="surface-card p-4">
       <ol className="grid grid-cols-6 gap-1 sm:gap-3" aria-label="Purchase order lifecycle">
@@ -369,6 +413,16 @@ function LifecycleTracker({ status }: { status: POStatus }) {
               <span className={`mt-1 text-[10px] sm:text-sm truncate max-w-[72px] sm:max-w-none ${isCurrent ? 'font-semibold text-brand-700' : reached ? 'text-surface-700' : 'text-surface-400'}`}>
                 {statusLabel(s)}
               </span>
+              {/* Too tight on a phone: the step labels alone there, the Activity below has the names. */}
+              {(() => {
+                const person = reached ? actors[s] : next?.step === s ? next.person : undefined;
+                if (!person) return null;
+                return (
+                  <span title={person.title} className={`hidden sm:block mt-0.5 text-xs truncate max-w-full ${person.waiting ? 'text-warning-700 italic' : 'text-surface-500'}`}>
+                    {person.label}
+                  </span>
+                );
+              })()}
             </li>
           );
         })}
