@@ -199,7 +199,7 @@ describe('Tools page', () => {
     await screen.findByText('Makita Hand Drill');
     fireEvent.click(within(row('Makita Hand Drill')).getByRole('button', { name: 'Check in' }));
     const drawer = await screen.findByRole('dialog');
-    expect(within(drawer).getByLabelText('Back now')).toHaveValue(1);
+    expect(within(drawer).getByLabelText('Back now')).toHaveValue('1');
     fireEvent.change(within(drawer).getByLabelText('Back now'), { target: { value: '2' } });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Check in' }));
     expect(await within(drawer).findByText('Some check-outs get back more than is out.')).toBeInTheDocument();

@@ -68,6 +68,10 @@ vi.mock('../../shared/events.js', () => ({
 
 function makePrisma(): unknown {
   return {
+    // Every unit is on the list; each is counted, the rest measured.
+    unitOfMeasure: {
+      findUnique: async ({ where }: { where: { code: string } }) => ({ code: where.code, kind: where.code === 'each' ? 'COUNTED' : 'MEASURED', active: true }),
+    },
     location: {
       findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null,
     },

@@ -33,7 +33,7 @@ export type PurchaseOrderStatus =
 
 export type GoodsReceiptStatus = 'DRAFT' | 'SUBMITTED' | 'POSTED';
 
-export type AdjustmentReasonCode = 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | 'PO_RECEIPT' | 'TRANSFER' | 'ADJUSTMENT';
+export type AdjustmentReasonCode = 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | 'FOUND' | 'PO_RECEIPT' | 'TRANSFER' | 'ADJUSTMENT';
 
 export interface MockUser {
   id: string;

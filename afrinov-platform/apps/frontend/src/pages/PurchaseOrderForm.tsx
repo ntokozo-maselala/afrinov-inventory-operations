@@ -43,7 +43,10 @@ import type { Material } from '../api/types';
 import { formatNumber } from '../lib/format';
 import { sectionOf, suggestedProject } from '../lib/categories';
 import { formatMoney, formatRate, priceLines } from '../lib/poMoney';
-import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
+import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath } from '../lib/orderKind';
+import { QuantityInput } from '../components/QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { firstLineQuantityError, readQuantity } from '../lib/quantity';
 import {
   PurchaseOrderDetailsFields, SupplierDetailsFields, checkDetails, detailsBody, draftFromOrder, supplierDetails,
   type OrderDetails, type OrderDetailsDraft,
@@ -160,6 +163,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const toast = useToast();
   const suppliersReq = useApi<Supplier[]>('/suppliers');
   const materialsReq = useApi<Material[]>('/materials');
+  const { kindOf } = useUnits();
   const suppliers = suppliersReq.data ?? [];
   // Items added from an order line, until the catalogue is loaded again.
   const [added, setAdded] = useState<Material[]>([]);
@@ -182,12 +186,12 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
   const supplier = suppliers.find((s) => s.id === supplierId);
   const currency = supplier?.currency ?? 'ZAR';
   const vatRate = vatOverride ?? String(currency === 'ZAR' ? settingRate : 0);
-  const preview = priceLines(lines.filter((l) => l.materialId && Number(l.orderedQty) > 0), Number(vatRate) || 0);
+  const preview = priceLines(lines.filter((l) => l.materialId && readQuantity(l.orderedQty) > 0).map((l) => ({ ...l, orderedQty: String(readQuantity(l.orderedQty)) })), Number(vatRate) || 0);
   // The order's project is the buyer's choice; no line fixes it.
   const orderProject = stores ? '' : details.projectNumber;
   const lineMaterials = materials;
   // Each row's subtotal, for its Subtotal column (blank until it has a quantity and a price).
-  const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: Number(l.orderedQty) > 0 ? l.orderedQty : 0 })), Number(vatRate) || 0).lines;
+  const rowMoney = priceLines(lines.map((l) => ({ ...l, orderedQty: readQuantity(l.orderedQty) > 0 ? readQuantity(l.orderedQty) : 0 })), Number(vatRate) || 0).lines;
 
   // The delivery block starts from Settings, once they arrive, keeping anything already typed.
   const [deliverySeeded, setDeliverySeeded] = useState(false);
@@ -317,8 +321,14 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
     if (!supplierId) { setValidation('Select a supplier.'); return; }
     if (!stores && !orderProject) { setValidation('Choose the project this order is for.'); return; }
     const dated = applyDates(lines, expected);
-    const validLines = dated.lines.filter((l) => l.materialId && Number(l.orderedQty) > 0);
+    const validLines = dated.lines.filter((l) => l.materialId && readQuantity(l.orderedQty) > 0);
     if (validLines.length === 0) { setValidation('Add at least one line with a positive quantity.'); return; }
+    const badQuantity = firstLineQuantityError(dated.lines.flatMap((l, i) => {
+      if (!l.materialId || l.orderedQty.trim() === '') return [];
+      const unit = catalogue.find((m) => m.id === l.materialId)?.unitOfMeasure ?? '';
+      return [{ text: l.orderedQty, kind: kindOf(unit), unit, line: i + 1 }];
+    }));
+    if (badQuantity) { setValidation(badQuantity); return; }
     if (validLines.some((l) => l.unitPrice.trim() !== '' && !(Number(l.unitPrice) >= 0))) { setValidation('A unit price must be 0 or more, or left blank.'); return; }
     if (validLines.some((l) => badDiscount(l.discountPercent))) { setValidation('A discount must be between 0% and 100%, to 2 decimals, or left blank.'); return; }
     const problem = checkVat(vatRate) ?? checkDetails(details);
@@ -334,7 +344,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
         ...detailsBody({ ...details, projectNumber: orderProject }, 'create'),
         lines: validLines.map((l) => ({
           materialId: l.materialId,
-          orderedQty: Number(l.orderedQty),
+          orderedQty: readQuantity(l.orderedQty),
           ...(l.unitPrice.trim() !== '' ? { unitPrice: Number(l.unitPrice) } : {}),
           ...(Number(l.discountPercent) > 0 ? { discountPercent: Number(l.discountPercent) } : {}),
           ...(l.deliveryDate ? { deliveryDate: l.deliveryDate } : {}),
@@ -431,7 +441,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                   <LineValue label={`Line ${i + 1} units`}>{materials.find((m) => m.id === l.materialId)?.unitOfMeasure ?? '—'}</LineValue>
                 </div>
                 <div className="col-span-3 md:col-span-1">
-                  <Input type="number" min="0.0001" step="0.0001" placeholder="Qty" value={l.orderedQty} onChange={(e) => updateLine(i, { orderedQty: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
+                  <QuantityInput kind={kindOf(materials.find((m) => m.id === l.materialId)?.unitOfMeasure)} placeholder="Qty" value={l.orderedQty} onChange={(e) => updateLine(i, { orderedQty: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
                 </div>
                 <div className="col-span-3 md:col-span-1">
                   <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Unit price" value={l.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} aria-label={`Line ${i + 1} unit price`} className="text-right" />
@@ -442,7 +452,7 @@ function NewPurchaseOrderForm({ stores }: { stores: boolean }) {
                 </div>
                 <div className="col-span-3 md:col-span-1">
                   <LineValue label={`Line ${i + 1} subtotal`} align="right">
-                    {Number(l.orderedQty) > 0 && rowMoney[i]?.subtotal ? formatMoney(rowMoney[i]!.subtotal, currency) : '—'}
+                    {readQuantity(l.orderedQty) > 0 && rowMoney[i]?.subtotal ? formatMoney(rowMoney[i]!.subtotal, currency) : '—'}
                   </LineValue>
                 </div>
                 <div className="col-span-10 md:col-span-1">

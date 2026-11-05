@@ -24,6 +24,7 @@
     "db:seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "db:rotate-admin": "tsx --env-file-if-exists=.env scripts/rotate-admin-password.ts",
     "check:issued-stock": "tsx --env-file-if-exists=.env scripts/check-issued-stock.ts",
+    "check:units": "tsx --env-file-if-exists=.env scripts/check-units.ts",
     "import:workbook": "tsx --env-file-if-exists=.env scripts/import-workbook.ts",
     "import:suppliers": "tsx --env-file-if-exists=.env scripts/import-suppliers.ts",
     "diag:login": "tsx --env-file=.env scripts/diag-login.ts",

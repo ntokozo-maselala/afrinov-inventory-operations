@@ -27,7 +27,10 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import type { Material, Supplier } from '../api/types';
 import { sectionOf, suggestedProject } from '../lib/categories';
-import type { Rfq } from '../lib/rfq';
+import type { Rfq } from '../lib/rfq';
+import { QuantityInput } from '../components/QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { firstLineQuantityError, readQuantity } from '../lib/quantity';
 
 const RFQS = { label: 'Requests for quotation', to: '/rfqs' };
 
@@ -47,7 +50,7 @@ let nextSession = 1;
 
 /** As the server takes them: kept to 4 decimal places, at least 0.0001. */
 function badQuantity(q: string): boolean {
-  const n = Number(q);
+  const n = readQuantity(q);
   return !(n >= 0.0001 && n <= 1e9) || Math.abs(n * 1e4 - Math.round(n * 1e4)) >= 1e-6;
 }
 
@@ -93,6 +96,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
   const suppliersReq = useApi<Supplier[]>('/suppliers');
   const materialsReq = useApi<Material[]>('/materials');
   const projectsReq = useApi<ProjectOpt[]>('/projects?active=true');
+  const { kindOf } = useUnits();
   // Items added from a line, until the catalogue is loaded again.
   const [added, setAdded] = useState<Material[]>([]);
   const catalogue = [...(materialsReq.data ?? []), ...added.filter((a) => !materialsReq.data?.some((m) => m.id === a.id))];
@@ -166,6 +170,11 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
     const filled = lines.filter((l) => l.materialId || l.quantity.trim());
     if (filled.length === 0) { setValidation('Add at least one line.'); return; }
     const incomplete = filled.findIndex((l) => !l.materialId || badQuantity(l.quantity));
+    const unitProblem = incomplete >= 0 ? null : firstLineQuantityError(filled.map((l) => {
+      const unit = catalogue.find((m) => m.id === l.materialId)?.unitOfMeasure ?? '';
+      return { text: l.quantity, kind: kindOf(unit), unit, line: lines.indexOf(l) + 1 };
+    }));
+    if (unitProblem) { setValidation(unitProblem); return; }
     if (incomplete >= 0) {
       setValidation(`Line ${incomplete + 1} needs an item and a quantity above 0, to at most 4 decimal places.`);
       return;
@@ -176,7 +185,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
       description: description.trim() || (rfq ? null : undefined),
       notes: notes.trim() || null,
       penaltiesApply,
-      lines: filled.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity) })),
+      lines: filled.map((l) => ({ materialId: l.materialId, quantity: readQuantity(l.quantity) })),
       supplierIds,
     };
     setBusy(true);
@@ -253,7 +262,7 @@ function RfqFormPage({ rfq }: { rfq?: Rfq }) {
                   </div>
                   <output aria-label={`Line ${i + 1} units`} className="col-span-4 md:col-span-1 py-2 text-sm text-surface-700 truncate">{item?.unitOfMeasure ?? '—'}</output>
                   <div className="col-span-6 md:col-span-1">
-                    <Input type="number" min="0.0001" step="0.0001" placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
+                    <QuantityInput kind={kindOf(item?.unitOfMeasure)} placeholder="Qty" value={l.quantity} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} aria-label={`Line ${i + 1} quantity`} />
                   </div>
                   <div className="col-span-2 md:col-span-1 flex md:justify-center">
                     <Button size="sm" variant="ghost" type="button" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`Remove line ${i + 1}`} leadingIcon={<Icon.Trash size={14} />} disabled={lines.length === 1}>

@@ -20,6 +20,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
+import { checkWholeUnits } from '../../shared/units.js';
 import { recomputeBalance, lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { cleanPaymentTerms, cleanText, cleanVendorCode, cleanWebsite } from './supplier-fields.js';
 import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
@@ -488,6 +489,8 @@ export const PurchaseOrderService = {
     // that rule may still hold Stores items, and its award keeps them.
     if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), lineMaterials);
     refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), lineMaterials);
+    // An award orders what the RFQ asked for, which was checked when it was asked.
+    if (!opts.fromRfq) await checkWholeUnits(input.lines.map((l) => ({ materialId: l.materialId, quantity: l.orderedQty })), db);
 
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods

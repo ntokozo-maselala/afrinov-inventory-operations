@@ -37,7 +37,7 @@ describe('consumption report over real HTTP', () => {
     const rcp = await api<{ id: string }>('POST', '/recipients', { name: `IT consumption fitter ${run}`, type: 'WORKER' });
     recipientId = rcp.body.id;
     for (const m of [disc.body.id, pipe.body.id]) {
-      expect((await api('POST', '/inventory-adjustments', { materialId: m, locationId: loc.body.id, quantity: 100, reasonCode: 'OTHER' })).status).toBe(201);
+      expect((await api('POST', '/inventory-adjustments', { materialId: m, locationId: loc.body.id, quantity: 100, reasonCode: 'OTHER', reasonNote: 'Stock for the test' })).status).toBe(201);
     }
     const issue = async (materialId: string, quantity: number, projectNumber?: string) => {
       const r = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', { recipientId: rcp.body.id, projectNumber, lines: [{ materialId, locationId: loc.body.id, quantity }] });

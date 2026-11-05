@@ -93,7 +93,7 @@ export const adjustmentSchema = z.object({
   materialId: uuidSchema,
   locationId: uuidSchema,
   quantity: storedSignedQuantity,
-  reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER']),
+  reasonCode: z.enum(['COUNT_VARIANCE', 'DAMAGE', 'LOSS', 'SCRAP', 'OTHER', 'FOUND']),
   reasonNote: z.string().optional(),
   // Who was responsible for damaged, lost or scrapped stock; null or left out when nobody is known.
   recipientId: uuidSchema.nullable().optional(),

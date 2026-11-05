@@ -964,3 +964,43 @@ describe('mock: write-off approval when switched on', () => {
     expect(await stock()).toBe(before + 2);
   });
 });
+
+// As the server: units are a list, a counted item moves in whole units, and
+// the reason decides which way an adjustment goes.
+describe('mock: units of measure and the direction of an adjustment', () => {
+  beforeEach(() => {
+    resetMockState();
+  });
+
+  const refusal = async (p: Promise<unknown>): Promise<ApiError | undefined> => {
+    try { await p; } catch (e) { if (isApiError(e)) return e; }
+    return undefined;
+  };
+
+  it('lists the units, counted and measured', async () => {
+    const units = await api.get<Array<{ code: string; kind: string }>>('/units-of-measure');
+    expect(units.find((u) => u.code === 'each')?.kind).toBe('COUNTED');
+    expect(units.find((u) => u.code === 'kg')?.kind).toBe('MEASURED');
+  });
+
+  it('refuses part of a counted item, and takes part of a measured one', async () => {
+    expect(await refusal(issue('mat-3', 'loc-1', 0.5))).toMatchObject({ code: 'VALIDATION_ERROR', message: 'M16 FLAT WASHER is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-3', locationId: 'loc-1', quantity: -0.0001, reasonCode: 'DAMAGE' })))
+      .toMatchObject({ code: 'VALIDATION_ERROR' });
+    await api.post('/inventory-adjustments', { materialId: 'mat-4', locationId: 'loc-1', quantity: 2.5, reasonCode: 'FOUND', reasonNote: 'Open box' });
+  });
+
+  it('lets damage only remove stock and found stock only add it, with a note', async () => {
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'DAMAGE' })))
+      .toMatchObject({ message: 'Damage, loss and scrap remove stock. To add stock, choose Found or Other.' });
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: -5, reasonCode: 'FOUND', reasonNote: 'x' })))
+      .toMatchObject({ message: 'Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.' });
+    expect(await refusal(api.post('/inventory-adjustments', { materialId: 'mat-1', locationId: 'loc-1', quantity: 5, reasonCode: 'FOUND' })))
+      .toMatchObject({ message: 'Say where the stock was found.' });
+  });
+
+  it('refuses an item on a unit that is not on the list', async () => {
+    expect(await refusal(api.post('/materials', { sku: 'NEW-1', name: 'Rods', category: 'CONSUMABLES', unitOfMeasure: 'bundle' })))
+      .toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+});

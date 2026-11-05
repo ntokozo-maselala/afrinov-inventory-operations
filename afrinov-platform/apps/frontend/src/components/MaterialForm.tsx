@@ -18,6 +18,9 @@ import { Button } from './Button';
 import { Field, Input, Select, Textarea } from './Field';
 import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
+import { QuantityInput } from './QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { parseQuantity, readQuantity } from '../lib/quantity';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { PROJECTS_CATEGORY, STORES_CATEGORIES, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
@@ -57,6 +60,10 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const bands = useStatusBands();
+  const { units, kindOf } = useUnits();
+  // An item still on a unit from before the list keeps it until someone picks a listed one.
+  const listed = (units ?? []).filter((u) => u.active && !u.needsReview);
+  const legacyUnit = unitOfMeasure && units && !listed.some((u) => u.code === unitOfMeasure) ? unitOfMeasure : null;
   const projects = section === 'PROJECTS';
   const sectionFixed = editing || !!fixedBy;
 
@@ -71,8 +78,10 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
     e.preventDefault();
     setValidation(null);
     if (!sku.trim() || !name.trim() || !unitOfMeasure.trim()) { setValidation('SKU, name and unit of measure are required.'); return; }
-    const required = projects ? 0 : Number(requiredStock);
-    if (!projects && (requiredStock.trim() === '' || !Number.isFinite(required) || required < 0)) { setValidation('Required stock must be 0 or positive.'); return; }
+    const parsedRequired = parseQuantity(requiredStock, kindOf(unitOfMeasure), unitOfMeasure, { allowZero: true });
+    if (!projects && !(readQuantity(requiredStock) >= 0)) { setValidation('Required stock must be 0 or positive.'); return; }
+    if (!projects && !parsedRequired.ok) { setValidation(`Required stock: ${parsedRequired.error}`); return; }
+    const required = projects || !parsedRequired.ok ? 0 : parsedRequired.value;
     const cost = unitCost.trim() === '' ? undefined : Number(unitCost);
     if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) { setValidation('Unit cost must be 0 or positive.'); return; }
     const itemCategory = projects ? PROJECTS_CATEGORY : category;
@@ -120,8 +129,21 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
         <Field label="SKU / item code" htmlFor="m-sku" required help={fixed}>
           <Input id="m-sku" value={sku} onChange={(e) => setSku(e.target.value)} placeholder={projects ? 'e.g. PIPE-150NB' : 'e.g. M16-WSHR'} autoComplete="off" required invalid={missing(sku)} disabled={editing} />
         </Field>
-        <Field label="Unit of measure" htmlFor="m-uom" required>
-          <Input id="m-uom" value={unitOfMeasure} onChange={(e) => setUom(e.target.value)} required invalid={missing(unitOfMeasure)} />
+        <Field
+          label="Unit of measure"
+          htmlFor="m-uom"
+          required
+          help={legacyUnit ? `"${legacyUnit}" is not on the list. Choose the unit it is counted or measured in.` : kindOf(unitOfMeasure) === 'COUNTED' ? 'Counted: quantities are whole numbers.' : 'Measured: quantities can have decimals.'}
+        >
+          <Select id="m-uom" value={unitOfMeasure} onChange={(e) => setUom(e.target.value)} required invalid={missing(unitOfMeasure)}>
+            {!units && <option value={unitOfMeasure}>{unitOfMeasure || 'Loading…'}</option>}
+            {legacyUnit && <option value={legacyUnit}>{legacyUnit} (not on the list)</option>}
+            {units && (['COUNTED', 'MEASURED'] as const).map((kind) => (
+              <optgroup key={kind} label={kind === 'COUNTED' ? 'Counted (whole numbers)' : 'Measured (decimals allowed)'}>
+                {listed.filter((u) => u.kind === kind).map((u) => <option key={u.code} value={u.code}>{u.label} ({u.code})</option>)}
+              </optgroup>
+            ))}
+          </Select>
         </Field>
       </div>
       <Field label="Item name" htmlFor="m-name" required>
@@ -145,7 +167,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {!projects && (
           <Field label="Required stock" htmlFor="m-required" help={`The level to keep this item topped up to. Stock status compares stock on hand with it: urgent below ${bands.urgentBelowPercent}%, warning below ${bands.warningBelowPercent}%.`}>
-            <Input id="m-required" type="number" min="0" step="any" value={requiredStock} onChange={(e) => setRequiredStock(e.target.value)} />
+            <QuantityInput id="m-required" kind={kindOf(unitOfMeasure)} unit={unitOfMeasure} value={requiredStock} onChange={(e) => setRequiredStock(e.target.value)} />
           </Field>
         )}
         <Field label="Unit cost" htmlFor="m-cost" help={editing ? 'In ZAR excl. VAT. Leave it blank if the price is not known.' : 'Optional, in ZAR excl. VAT.'}>

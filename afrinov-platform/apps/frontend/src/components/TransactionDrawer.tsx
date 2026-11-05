@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from './Button';
-import { Field, Input, Select, Textarea } from './Field';
+import { Field, Select, Textarea } from './Field';
 import { api, type ApiError } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { usePermissions } from '../hooks/usePermissions';
@@ -11,6 +11,9 @@ import { formatDay, lateBy } from '../lib/toolLoans';
 import { LoanHistory } from './LoanHistory';
 import { ConsumableOutcomes } from './ConsumableOutcomes';
 import { round4 } from '../lib/movementReason';
+import { QuantityInput } from './QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { parseQuantity } from '../lib/quantity';
 
 
 interface Props {
@@ -356,11 +359,14 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
   // Scoped to this issue, so another issue opening in the same drawer position
   // gets its own key rather than inheriting this one's.
   const idem = useIdempotencyKey(`issue-return-${transaction.id}`);
+  const { kindOf } = useUnits();
+  const unit = transaction.unitOfMeasure ?? '';
 
   async function submit() {
     setValidation(null);
-    const qty = Number(quantity);
-    if (!(qty > 0)) { setValidation('Enter how much is coming back.'); return; }
+    const parsed = parseQuantity(quantity, kindOf(unit), unit);
+    if (!parsed.ok) { setValidation(parsed.empty ? 'Enter how much is coming back.' : parsed.error); return; }
+    const qty = parsed.value;
     if (qty > returnable) { setValidation(`At most ${returnable} can come back.`); return; }
     setBusy(true);
     const returnBody = {
@@ -394,7 +400,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
         <div className="space-y-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Field label="Quantity returned" htmlFor="return-qty" required>
-              <Input id="return-qty" type="number" inputMode="decimal" min="0" max={returnable} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
+              <QuantityInput id="return-qty" kind={kindOf(unit)} unit={unit || undefined} value={quantity} onChange={(e) => setQuantity(e.target.value)} invalid={!!validation} />
             </Field>
             <Field label="Back into" htmlFor="return-loc" error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
               <Select id="return-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>

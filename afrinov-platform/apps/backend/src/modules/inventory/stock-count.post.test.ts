@@ -31,7 +31,10 @@ describe('StockCountService.post', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tx.location.findUnique.mockResolvedValue({ id: 'l-1', name: 'Boiler Shop', active: true });
-    tx.material.findMany.mockResolvedValue([{ id: 'm-1', sku: 'DISC-115', unitCost: new Prisma.Decimal(5) }, { id: 'm-2', sku: 'GLOVE-L', unitCost: new Prisma.Decimal(5) }]);
+    tx.material.findMany.mockResolvedValue([
+      { id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitCost: new Prisma.Decimal(5), unitOfMeasure: 'each', unit: { kind: 'COUNTED' } },
+      { id: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitCost: new Prisma.Decimal(5), unitOfMeasure: 'pair', unit: { kind: 'COUNTED' } },
+    ]);
     tx.inventoryTransaction.create.mockResolvedValue({ id: 'tx-1' });
     tx.adjustmentRequest.findMany.mockResolvedValue([]);
     tx.adjustmentRequest.create.mockResolvedValue({ id: 'req-1' });
@@ -61,7 +64,10 @@ describe('StockCountService.post', () => {
 
   // ADR-028; Qodo, PR #151: a count is no way round the write-off limit.
   it('holds a difference over the write-off limit for approval and posts the rest', async () => {
-    tx.material.findMany.mockResolvedValue([{ id: 'm-1', sku: 'DISC-115', unitCost: new Prisma.Decimal(500) }, { id: 'm-2', sku: 'GLOVE-L', unitCost: new Prisma.Decimal(5) }]);
+    tx.material.findMany.mockResolvedValue([
+      { id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitCost: new Prisma.Decimal(500), unitOfMeasure: 'each', unit: { kind: 'COUNTED' } },
+      { id: 'm-2', sku: 'GLOVE-L', name: 'Welding gloves', unitCost: new Prisma.Decimal(5), unitOfMeasure: 'pair', unit: { kind: 'COUNTED' } },
+    ]);
     const result = await StockCountService.post({
       locationId: 'l-1', actorId: 'u-1', note: 'Monthly',
       lines: [{ materialId: 'm-1', expectedQuantity: 10, countedQuantity: 7 }, { materialId: 'm-2', expectedQuantity: 4, countedQuantity: 3 }],

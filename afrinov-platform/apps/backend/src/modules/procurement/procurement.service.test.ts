@@ -33,7 +33,7 @@ interface Sup {
   id: string; name: string; active: boolean; currency?: string; paymentTerms?: string | null;
   contactName?: string | null; contactPhone?: string | null; contactEmail?: string | null; address?: string | null;
 }
-interface Mat { id: string; sku: string; name: string; active: boolean; category?: string; projectNumber?: string | null }
+interface Mat { id: string; sku: string; name: string; active: boolean; category?: string; projectNumber?: string | null; unitOfMeasure?: string; unit?: { kind: 'COUNTED' | 'MEASURED' } }
 interface TxRow { id: string; materialId: string; locationId: string; type: TxType; quantity: Prisma.Decimal; referenceType: string | null; referenceId: string | null; actorId: string; postedAt: Date }
 interface BalRow { materialId: string; locationId: string; quantity: Prisma.Decimal }
 interface AuditRow { id: string; actorId: string | null; action: string; entityType: string; entityId: string; before: unknown; after: unknown; createdAt: Date }
@@ -88,7 +88,8 @@ function makePrisma(): unknown {
     },
     material: {
       findUnique: async ({ where }: { where: { id: string } }) => db.materials.get(where.id) ?? null,
-      findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => db.materials.get(id)).filter((m): m is Mat => !!m),
+      // Measured unless a test says otherwise, so a fraction goes through.
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => db.materials.get(id)).filter((m): m is Mat => !!m).map((m) => ({ unitOfMeasure: 'm', unit: { kind: 'MEASURED' as const }, ...m })),
     },
     location: {
       findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null,

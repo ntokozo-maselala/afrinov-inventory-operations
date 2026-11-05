@@ -129,7 +129,7 @@ describe('mock: a closed project\'s leftovers move to Stores (Phase 7)', () => {
 
   it('lists them, refuses to move them while the project is open, then makes them Stores items', async () => {
     const pipe = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402', unitCost: 50 });
-    await api.post('/inventory-adjustments', { materialId: pipe.id, locationId: 'loc-1', quantity: 4, reasonCode: 'OTHER' });
+    await api.post('/inventory-adjustments', { materialId: pipe.id, locationId: 'loc-1', quantity: 4, reasonCode: 'OTHER', reasonNote: 'Stock for the test' });
     const move = () => api.post<{ moved: number }>('/projects/AFRI-1402/leftovers/move', { items: [{ materialId: pipe.id, category: 'CONSUMABLES' }] });
 
     expect(await messageOf(move())).toMatch(/Project AFRI-1402 is still open/);

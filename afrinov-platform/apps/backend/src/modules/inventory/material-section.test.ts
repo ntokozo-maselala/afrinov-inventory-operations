@@ -44,6 +44,11 @@ function makePrisma(): unknown {
     inventoryTransaction: {
       count: async ({ where }: { where: { materialId: string } }) => db.movements.get(where.materialId) ?? 0,
     },
+    // Every unit is on the list and counted.
+    unitOfMeasure: {
+      findUnique: async ({ where }: { where: { code: string } }) => ({ code: where.code, kind: 'COUNTED', active: true }),
+      findUniqueOrThrow: async ({ where }: { where: { code: string } }) => ({ code: where.code, kind: 'COUNTED', active: true }),
+    },
     auditLogEntry: { create: async ({ data }: { data: unknown }) => data },
     // The service wraps each mutation and its audit write in one transaction;
     // the mock runs the callback against the same in-memory client.

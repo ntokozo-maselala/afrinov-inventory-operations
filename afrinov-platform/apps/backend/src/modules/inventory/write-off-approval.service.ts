@@ -13,7 +13,7 @@ import { Prisma, AdjustmentRequestStatus } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
-import { InventoryService, checkAdjustment, type AdjustmentInput } from './inventory.service.js';
+import { InventoryService, checkAdjustment, checkRequestedAdjustment, type AdjustmentInput } from './inventory.service.js';
 import { checkWriteOff } from './write-off-limit.js';
 import { requestAdjustment } from './write-off-requests.js';
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
@@ -53,6 +53,7 @@ export const WriteOffApprovalService = {
     return inTx(within, async (tx) => {
       const material = await tx.material.findUnique({ where: { id: input.materialId }, select: { sku: true, unitCost: true } });
       if (!material) throw Errors.notFound('Material');
+      await checkRequestedAdjustment(input, tx);
       // The lock a stock count takes before it looks for waiting requests, so
       // the two can't both see none. With one already waiting for this stock
       // (a count's difference, a lost tool, another adjustment), approving both

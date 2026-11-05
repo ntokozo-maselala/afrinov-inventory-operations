@@ -37,6 +37,7 @@ describe('the numbers agree after every operation on issued stock', () => {
   let server: TestServer;
   let api: ReturnType<typeof client>;
   let discId: string;
+  let wireId: string;
   let gloveId: string;
   let rackA: string;
   let rackB: string;
@@ -50,7 +51,7 @@ describe('the numbers agree after every operation on issued stock', () => {
   async function reconcile(step: string): Promise<Map<string, Use>> {
     const figures = new Map<string, Use>();
     const history = new Map<string, Row[]>();
-    for (const materialId of [discId, gloveId]) {
+    for (const materialId of [discId, gloveId, wireId]) {
       history.set(materialId, (await api<Row[]>('GET', `/inventory-transactions?materialId=${materialId}&limit=1000`)).body);
     }
     const returnable = (await api<Returnable[]>('GET', `/inventory-returns/returnable?recipientId=${workerId}`)).body;
@@ -106,7 +107,7 @@ describe('the numbers agree after every operation on issued stock', () => {
     }
 
     // 6. Stock used by item: issued less returned, over the issues that count.
-    for (const materialId of [discId, gloveId]) {
+    for (const materialId of [discId, gloveId, wireId]) {
       const counted = issues.filter((i) => i.materialId === materialId && !history.get(materialId)!.find((r) => r.id === i.id)!.reversedById);
       const issued = round4(counted.reduce((a, i) => a + num(figures.get(i.id)!.issued), 0));
       const back = round4(counted.reduce((a, i) => a + num(figures.get(i.id)!.returned), 0));
@@ -117,7 +118,7 @@ describe('the numbers agree after every operation on issued stock', () => {
 
     // 7. Stock on hand: the stored balance is the ledger's sum, the stock
     //    report says it, and the history's quantities add up to it.
-    for (const materialId of [discId, gloveId]) {
+    for (const materialId of [discId, gloveId, wireId]) {
       for (const locationId of [rackA, rackB]) {
         const { ledger, balance } = await ledgerAndBalance(materialId, locationId);
         expect(num(balance), `${step}: stored balance`).toBe(num(ledger));
@@ -139,6 +140,8 @@ describe('the numbers agree after every operation on issued stock', () => {
     server = await startServer();
     api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
     discId = (await api<{ id: string }>('POST', '/materials', { sku: `IT-MATH-DISC-${run}`, name: `Grinding disc ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each', unitCost: 32, trackUse: true })).body.id;
+    // Welding wire is measured in kg, so it moves in fractions.
+    wireId = (await api<{ id: string }>('POST', '/materials', { sku: `IT-MATH-WIRE-${run}`, name: `Welding wire ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'kg', unitCost: 95, trackUse: true })).body.id;
     gloveId = (await api<{ id: string }>('POST', '/materials', { sku: `IT-MATH-GLOVE-${run}`, name: `Gloves ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'pair', unitCost: 50 })).body.id;
     rackA = (await api<{ id: string }>('POST', '/locations', { name: `IT math rack A ${run}`, type: 'RACK' })).body.id;
     rackB = (await api<{ id: string }>('POST', '/locations', { name: `IT math rack B ${run}`, type: 'RACK' })).body.id;
@@ -151,7 +154,7 @@ describe('the numbers agree after every operation on issued stock', () => {
 
   it('agrees at every step from stock in to the issue reversed', async () => {
     // Stock in.
-    for (const materialId of [discId, gloveId]) {
+    for (const materialId of [discId, gloveId, wireId]) {
       expect((await api('POST', '/inventory-adjustments', { materialId, locationId: rackA, quantity: 20, reasonCode: 'COUNT_VARIANCE' })).status).toBe(201);
     }
     await reconcile('stock in');
@@ -247,12 +250,15 @@ describe('the numbers agree after every operation on issued stock', () => {
 
   // Qodo, PR #144: fractional quantities add up exactly, with no floating-point dust.
   it('agrees on fractional quantities, closing an issue off exactly', async () => {
+    // A disc is counted in each: part of one is refused.
+    expect((await api('POST', '/inventory-issues', { recipientId: workerId, lines: [{ materialId: discId, locationId: rackA, quantity: 0.3 }] }, key())).status).toBe(400);
+    expect((await api('POST', '/inventory-adjustments', { materialId: wireId, locationId: rackA, quantity: 5, reasonCode: 'FOUND', reasonNote: 'Spool for the test' }, key())).status).toBe(201);
     const issued = await api<{ transactionIds: string[] }>('POST', '/inventory-issues', {
-      recipientId: workerId, lines: [{ materialId: discId, locationId: rackA, quantity: 0.3 }],
+      recipientId: workerId, lines: [{ materialId: wireId, locationId: rackA, quantity: 0.3 }],
     }, key());
     expect(issued.status).toBe(201);
     const [id] = issued.body.transactionIds as [string];
-    issues.push({ id, materialId: discId });
+    issues.push({ id, materialId: wireId });
     const visit = await api('POST', '/inventory-returns', { lines: [{ issueTransactionId: id, quantity: 0.1, usedUp: 0.2 }] }, key());
     expect(visit.status).toBe(201);
     const f = await reconcile('fractional visit');

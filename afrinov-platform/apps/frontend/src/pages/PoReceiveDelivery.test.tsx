@@ -300,7 +300,7 @@ describe('Receive stock against an approved order', () => {
     await chooseOrder();
     expect(screen.getByText('Supplier: Hydac')).toBeInTheDocument();
     expect(screen.getByText('6 each outstanding')).toBeInTheDocument();
-    expect(screen.getByLabelText('Line 1 quantity')).toHaveValue(6);
+    expect(screen.getByLabelText('Line 1 quantity')).toHaveValue('6');
     fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: '2' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'None came' })[1]!);
     await fillAndReceive();

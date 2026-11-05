@@ -191,6 +191,10 @@ export const OPERATIONS: Operation[] = [
   },
   { method: 'get', path: '/materials/:id', tag: 'Materials', summary: 'Get a material', errors: [404] },
   {
+    method: 'get', path: '/units-of-measure', tag: 'Materials', summary: 'List units of measure',
+    description: 'Every unit an item can have, in display order. A COUNTED unit takes whole quantities only; a MEASURED one up to 4 decimal places. needsReview marks a unit carried over from before the list that matched none of its codes.',
+  },
+  {
     method: 'post', path: '/materials', tag: 'Materials', summary: 'Create a material',
     description: 'Answers 200, not 201. A Projects material needs no project of its own (the order it is bought on says which); any project given must be open. A Stores material has no project.', permissions: [P.CreateMaterial], body: createMaterialSchema, errors: [409],
   },

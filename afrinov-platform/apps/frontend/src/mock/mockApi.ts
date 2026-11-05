@@ -28,6 +28,7 @@ import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { PROCUREMENT_ENABLED } from '../config/features';
+import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
   MockMaterial,
   MockLocation,
@@ -923,6 +924,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       throw err('VALIDATION_ERROR', `Project ${projectNumber} is closed, so no new material can be added to it`);
     }
   };
+  if (method === 'GET' && p === '/units-of-measure') return MOCK_UNITS;
   if (method === 'GET' && p === '/materials') {
     let list = [...state.materials].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
@@ -970,7 +972,7 @@ function route(method: string, path: string, body?: unknown): unknown {
       name: b.name,
       description: b.description,
       category: b.category,
-      unitOfMeasure: b.unitOfMeasure,
+      unitOfMeasure: mockUnitCode(b.unitOfMeasure),
       requiredStock: String(b.requiredStock ?? 0),
       unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
       active: true,
@@ -1001,7 +1003,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     if (b.name !== undefined) m.name = b.name;
     if (b.description !== undefined) m.description = b.description ?? undefined;
-    if (b.unitOfMeasure !== undefined) m.unitOfMeasure = b.unitOfMeasure;
+    if (b.unitOfMeasure !== undefined && b.unitOfMeasure !== m.unitOfMeasure) m.unitOfMeasure = mockUnitCode(b.unitOfMeasure);
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
     if (b.unitCost !== undefined) m.unitCost = b.unitCost === null ? undefined : String(b.unitCost);
     if (b.active !== undefined) m.active = b.active;
@@ -1667,6 +1669,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     const lines = b.lines ?? [];
     if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to receive');
     if (lines.some((l) => !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Received quantity must be positive');
+    checkMockWholeUnits(lines);
     const supplier = b.supplierId ? findSupplier(b.supplierId) : undefined;
     if (!supplier) throw err('NOT_FOUND', 'Supplier not found');
     if (!supplier.active) throw err('VALIDATION_ERROR', 'Supplier is inactive');
@@ -2214,7 +2217,7 @@ function handleStockItemCreate(b: {
     name: b.name,
     description: b.description,
     category: b.category as MockMaterial['category'],
-    unitOfMeasure: b.unitOfMeasure,
+    unitOfMeasure: mockUnitCode(b.unitOfMeasure),
     requiredStock: String(b.requiredStock ?? 0),
     unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
     active: true,
@@ -2301,6 +2304,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to issue');
   if (lines.some((l) => !l.materialId || !l.locationId || !(l.quantity > 0))) throw err('VALIDATION_ERROR', 'Invalid issue payload');
+  checkMockWholeUnits(lines);
   const recipient = state.recipients.find((x) => x.id === b.recipientId);
   if (!recipient) throw err('NOT_FOUND', 'Recipient not found');
   if (!recipient.active) throw err('VALIDATION_ERROR', 'Recipient is inactive');
@@ -2666,6 +2670,7 @@ function handleTransfer(b: { materialId: string; fromLocationId: string; toLocat
   }
   if (b.fromLocationId === b.toLocationId) throw err('VALIDATION_ERROR', 'Source and destination must differ');
   if (!findMaterial(b.materialId)) throw err('NOT_FOUND', 'Material not found');
+  checkMockWholeUnits([b]);
   // As the server: the stock keeps its project as it moves.
   const heldForProject = b.heldForProject ?? null;
   if (heldForProject && !state.projects.some((x) => x.projectNumber === heldForProject)) throw err('NOT_FOUND', 'Project not found');
@@ -2928,6 +2933,41 @@ function handleReversal(id: string, b: { reason?: string } | undefined): { rever
 /** The write-off reasons that record who was responsible, when anyone is known. */
 const RESPONSIBLE_REASONS = new Set<string>(['DAMAGE', 'LOSS', 'SCRAP']);
 
+/** The units of measure, as the units migration lists them. */
+const MOCK_UNITS: UnitOfMeasure[] = ([
+  ['each', 'Each', 'COUNTED'], ['pair', 'Pair', 'COUNTED'], ['set', 'Set', 'COUNTED'], ['box', 'Box', 'COUNTED'],
+  ['pack', 'Pack', 'COUNTED'], ['roll', 'Roll', 'COUNTED'], ['bag', 'Bag', 'COUNTED'], ['sheet', 'Sheet', 'COUNTED'],
+  ['length', 'Length', 'COUNTED'], ['m', 'Metre', 'MEASURED'], ['mm', 'Millimetre', 'MEASURED'], ['kg', 'Kilogram', 'MEASURED'],
+  ['g', 'Gram', 'MEASURED'], ['l', 'Litre', 'MEASURED'], ['ml', 'Millilitre', 'MEASURED'], ['m2', 'Square metre', 'MEASURED'],
+  ['m3', 'Cubic metre', 'MEASURED'],
+] as const).map(([code, label, kind]) => ({ code, label, kind, needsReview: false, active: true }));
+
+/** As checkUnitOfMeasure: a listed code, by any case. */
+function mockUnitCode(typed: string): string {
+  const unit = MOCK_UNITS.find((u) => u.code === typed.trim().toLowerCase());
+  if (!unit) throw err('VALIDATION_ERROR', `"${typed.trim()}" is not a unit on the list. Choose one, such as each, pair, box, m or kg.`);
+  return unit.code;
+}
+
+/** As checkWholeUnits: part of a counted item is refused. */
+function checkMockWholeUnits(entries: ReadonlyArray<{ materialId: string; quantity: number }>) {
+  for (const e of entries) {
+    const m = findMaterial(e.materialId);
+    if (m && unitKindOf(MOCK_UNITS, m.unitOfMeasure) === 'COUNTED' && !Number.isInteger(e.quantity)) {
+      throw err('VALIDATION_ERROR', `${m.name} is counted in whole numbers (${m.unitOfMeasure}). Enter 1, 2, 3 …`);
+    }
+  }
+}
+
+/** As checkRequestedAdjustment: the reason sets the direction, and a gain or an "other" says why. */
+function checkMockAdjustmentDirection(b: { quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string }) {
+  if (RESPONSIBLE_REASONS.has(b.reasonCode) && b.quantity > 0) throw err('VALIDATION_ERROR', 'Damage, loss and scrap remove stock. To add stock, choose Found or Other.');
+  if (b.reasonCode === 'FOUND' && b.quantity < 0) throw err('VALIDATION_ERROR', 'Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.');
+  if ((b.reasonCode === 'FOUND' || b.reasonCode === 'OTHER') && !b.reasonNote?.trim()) {
+    throw err('VALIDATION_ERROR', b.reasonCode === 'FOUND' ? 'Say where the stock was found.' : 'Say why the stock is adjusted.');
+  }
+}
+
 // Mirrors InventoryService.adjust, with who was responsible for damage, loss or scrap.
 /** As write-off-limit.ts: whether this adjustment waits for someone else's approval, and its value at unit cost. */
 function mockWriteOffCheck(materialId: string, quantity: number): { needsApproval: boolean; value: string | null; limit: string } {
@@ -2984,6 +3024,8 @@ function decideAdjustmentRequest(id: string, decision: 'approve' | 'reject', b: 
 function handleAdjustment(b: { materialId: string; locationId: string; quantity: number; reasonCode: AdjustmentReasonCode; reasonNote?: string; recipientId?: string | null; heldForProject?: string | null }): { status: 'POSTED'; transactionId: string } | { status: 'PENDING_APPROVAL'; requestId: string; value: string | null; limit: string } {
   if (!b.materialId || !b.locationId || !b.reasonCode) throw err('VALIDATION_ERROR', 'Invalid adjustment payload');
   if (b.quantity === 0) throw err('VALIDATION_ERROR', 'Quantity must be non-zero');
+  checkMockAdjustmentDirection(b);
+  checkMockWholeUnits([{ materialId: b.materialId, quantity: b.quantity }]);
   if (b.recipientId) {
     if (!RESPONSIBLE_REASONS.has(b.reasonCode)) throw err('VALIDATION_ERROR', 'Only damage, loss or scrap records who was responsible.');
     if (!b.reasonNote?.trim()) throw err('VALIDATION_ERROR', 'Say what happened when naming who was responsible.');

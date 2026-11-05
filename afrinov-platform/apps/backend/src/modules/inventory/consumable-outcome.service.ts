@@ -16,6 +16,7 @@ import { toDecimal, gtZero, fitsQuantityColumn, QUANTITY_PRECISION_MESSAGE } fro
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { returnedAgainst } from './inventory.service.js';
 import { closedOffAgainst, writeOutcome } from './consumable-outcomes.js';
+import { checkWholeUnits } from '../../shared/units.js';
 
 type Decimal = Prisma.Decimal;
 type Tx = Prisma.TransactionClient;
@@ -105,6 +106,7 @@ export const ConsumableOutcomeService = {
       if (!issue.material.trackUse) {
         throw Errors.invalidState(`${issue.material.sku} does not track use after issue. Switch it on for the item first.`);
       }
+      await checkWholeUnits([{ materialId: issue.materialId, quantity: qty }], tx);
 
       // The same lock a return against this issue and its reversal take, so
       // they cannot both spend what is still out.

@@ -14,6 +14,7 @@ import { Errors } from '../../shared/errors.js';
 import { toDecimal, fitsQuantityColumn } from '../../shared/decimal.js';
 import { writeOffRule } from './write-off-limit.js';
 import { requestAdjustment } from './write-off-requests.js';
+import { checkWholeUnits } from '../../shared/units.js';
 import { getCurrentBalance, recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
@@ -157,6 +158,7 @@ export const StockCountService = {
       const costById = new Map(materials.map((m) => [m.id, m.unitCost ?? null]));
       const unknown = lines.filter((l) => !skuById.has(l.materialId));
       if (unknown.length > 0) throw Errors.notFound('Material');
+      await checkWholeUnits(lines.map((l) => ({ materialId: l.materialId, quantity: l.counted })), tx);
 
       const current = new Map<string, Prisma.Decimal>();
       const moved: Array<{ sku: string; expected: string; current: string }> = [];

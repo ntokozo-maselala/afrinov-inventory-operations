@@ -24,6 +24,8 @@ import { daysAgo, today } from '../lib/dates';
 import { locationLabel } from '../lib/locations';
 import { useIdempotencyKey } from '../lib/idempotency';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { useUnits } from '../hooks/useUnits';
+import { parseQuantity, type UnitKind } from '../lib/quantity';
 
 interface Location { id: string; name: string; active: boolean; parent?: { name: string } | null }
 interface Row { materialId: string; sku: string; name: string; unit: string; system: number }
@@ -53,10 +55,11 @@ function saveDraft(locationId: string, draft: Draft) {
 }
 
 /** The counted number, or null when blank; NaN when it is not a usable count. */
-function parseCount(text: string | undefined): number | null {
+/** What was counted: null when left blank, NaN when it can't be a count in this unit (part of a counted item, say). */
+function parseCount(text: string | undefined, kind: UnitKind): number | null {
   if (text === undefined || text.trim() === '') return null;
-  const n = Number(text.replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : NaN;
+  const parsed = parseQuantity(text, kind, '', { allowZero: true });
+  return parsed.ok ? parsed.value : NaN;
 }
 
 const fmt = (n: number) => String(Math.round(n * 10000) / 10000);
@@ -64,6 +67,7 @@ const fmt = (n: number) => String(Math.round(n * 10000) / 10000);
 export function StockCount() {
   const locations = useApi<Location[]>('/locations');
   const materials = useApi<Material[]>('/materials');
+  const { kindOf } = useUnits();
   const [locationId, setLocationId] = useState('');
   const stock = useApi<CurrentStockRow[]>(locationId ? `/reports/current-stock?locationId=${encodeURIComponent(locationId)}` : null);
   // The last few counts here, including ones that found no differences.
@@ -108,13 +112,14 @@ export function StockCount() {
       .map((m) => ({ value: m.id, label: `${m.name} (${m.sku})` }));
   }, [materials.data, rows]);
 
-  const counted = rows.filter((r) => parseCount(draft.counts[r.materialId]) !== null);
-  const invalid = counted.filter((r) => Number.isNaN(parseCount(draft.counts[r.materialId])));
+  const countOf = (r: Row) => parseCount(draft.counts[r.materialId], kindOf(r.unit));
+  const counted = rows.filter((r) => countOf(r) !== null);
+  const invalid = counted.filter((r) => Number.isNaN(countOf(r)));
   const differences = counted.filter((r) => {
-    const c = parseCount(draft.counts[r.materialId]);
+    const c = countOf(r);
     return c !== null && !Number.isNaN(c) && Math.abs(c - r.system) > 0.00005;
   });
-  const up = differences.filter((r) => parseCount(draft.counts[r.materialId])! > r.system).length;
+  const up = differences.filter((r) => countOf(r)! > r.system).length;
   // Stock cannot really be below zero; such a figure comes from a booking mistake, and the count corrects it.
   const belowZero = rows.filter((r) => r.system < 0);
 
@@ -140,7 +145,7 @@ export function StockCount() {
    * counting blind, once anything is counted (so the box gives nothing away).
    */
   function offersNote(r: Row): boolean {
-    const c = parseCount(draft.counts[r.materialId]);
+    const c = countOf(r);
     if (c === null || Number.isNaN(c)) return false;
     return hideSystem || Math.abs(c - r.system) > 0.00005;
   }
@@ -164,7 +169,7 @@ export function StockCount() {
   function askToPost() {
     setError(null);
     if (counted.length === 0) { setError({ message: 'Type the counted quantity of at least one item.', moved: false }); return; }
-    if (invalid.length > 0) { setError({ message: `Check the count for ${invalid.map((r) => r.sku).join(', ')}: enter a number of 0 or more.`, moved: false }); return; }
+    if (invalid.length > 0) { setError({ message: `Check the count for ${invalid.map((r) => r.sku).join(', ')}: enter a number of 0 or more, and a whole number for an item counted in each, pair, box and the like.`, moved: false }); return; }
     setConfirming(true);
   }
 
@@ -176,7 +181,7 @@ export function StockCount() {
       note: draft.note.trim() || undefined,
       lines: counted.map((r) => {
         const lineNote = offersNote(r) ? draft.notes[r.materialId]?.trim() : '';
-        return { materialId: r.materialId, expectedQuantity: r.system, countedQuantity: parseCount(draft.counts[r.materialId])!, ...(lineNote ? { note: lineNote } : {}) };
+        return { materialId: r.materialId, expectedQuantity: r.system, countedQuantity: countOf(r)!, ...(lineNote ? { note: lineNote } : {}) };
       }),
     };
     try {
@@ -320,7 +325,7 @@ export function StockCount() {
                         <tr><td colSpan={7} className="text-surface-500">{rows.length === 0 ? 'Nothing is booked at this location. Add any items you find below.' : 'No item matches.'}</td></tr>
                       )}
                       {!stock.loading && shown.map((r) => {
-                        const c = parseCount(draft.counts[r.materialId]);
+                        const c = countOf(r);
                         const diff = c === null || Number.isNaN(c) ? null : c - r.system;
                         return (
                           <tr key={r.materialId}>
@@ -337,7 +342,7 @@ export function StockCount() {
                                 aria-label={`Counted ${r.name}`}
                                 className="w-28 ml-auto text-right print:hidden"
                                 type="text"
-                                inputMode="decimal"
+                                inputMode={kindOf(r.unit) === 'COUNTED' ? 'numeric' : 'decimal'}
                                 value={draft.counts[r.materialId] ?? ''}
                                 onChange={(e) => setCount(r.materialId, e.target.value)}
                                 invalid={c !== null && Number.isNaN(c)}

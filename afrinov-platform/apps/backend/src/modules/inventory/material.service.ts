@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { categoryWhere, checkMaterialChange, projectForNewMaterial, sectionOf, type MaterialSection } from './material-section.js';
+import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js';
 
 export interface CreateMaterialInput {
   sku: string;
@@ -89,6 +90,8 @@ export const MaterialService = {
     if (serialNumber) await checkSerial(serialNumber, input.category);
     checkTrackUse(input.trackUse, input.category);
     const projectNumber = await projectForNewMaterial(input, prisma);
+    const unit = await checkUnitOfMeasure(input.unitOfMeasure, prisma);
+    if (input.requiredStock !== undefined) checkQuantityForUnit(input.name, unit, input.requiredStock, 'requiredStock');
 
     const created = await prisma.$transaction(async (tx) => {
       const material = await tx.material.create({
@@ -96,7 +99,7 @@ export const MaterialService = {
           sku,
           name: input.name,
           category: input.category,
-          unitOfMeasure: input.unitOfMeasure,
+          unitOfMeasure: unit.code,
           requiredStock: input.requiredStock ?? 0,
           unitCost: input.unitCost ?? null,
           description: input.description ?? null,
@@ -131,8 +134,17 @@ export const MaterialService = {
     if (projectNumber !== undefined) data.projectNumber = projectNumber;
     if (input.name !== undefined) data.name = input.name;
     if (input.description !== undefined) data.description = input.description;
-    if (input.unitOfMeasure !== undefined) data.unitOfMeasure = input.unitOfMeasure;
-    if (input.requiredStock !== undefined) data.requiredStock = input.requiredStock;
+    // A unit sent unchanged is kept as it is, so an item still on a unit marked
+    // for review can be edited without choosing a new one first.
+    const newUnit = input.unitOfMeasure !== undefined && input.unitOfMeasure.trim() !== before.unitOfMeasure
+      ? await checkUnitOfMeasure(input.unitOfMeasure, prisma)
+      : null;
+    if (newUnit) data.unitOfMeasure = newUnit.code;
+    if (input.requiredStock !== undefined) {
+      const unit = newUnit ?? await prisma.unitOfMeasure.findUniqueOrThrow({ where: { code: before.unitOfMeasure }, select: { code: true, kind: true } });
+      checkQuantityForUnit(input.name ?? before.name, unit, input.requiredStock, 'requiredStock');
+      data.requiredStock = input.requiredStock;
+    }
     if (input.unitCost !== undefined) data.unitCost = input.unitCost;
     if (input.active !== undefined) data.active = input.active;
     if (input.trackUse !== undefined) {

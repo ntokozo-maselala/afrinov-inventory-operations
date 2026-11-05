@@ -123,6 +123,32 @@ enum MaterialCategory {
   TOOLS
 }
 
+// How an item is counted. A COUNTED unit (each, pair, box) takes whole
+// numbers only; a MEASURED one (m, kg, l) takes up to the 4 decimal places the
+// quantity columns hold.
+enum UnitKind {
+  COUNTED
+  MEASURED
+}
+
+// The units of measure items can use, keyed by the code items store. Every
+// item points at one, so "EA", "pcs" and "each" can't be three different units.
+// needsReview marks a unit carried over from before this list that matched none
+// of its codes: kept as MEASURED so nothing stopped working, and listed until
+// its items are moved to a listed unit.
+model UnitOfMeasure {
+  code        String   @id
+  label       String
+  kind        UnitKind
+  needsReview Boolean  @default(false) @map("needs_review")
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+
+  materials Material[]
+
+  @@map("units_of_measure")
+}
+
 model Material {
   id            String              @id @default(uuid())
   sku           String              @unique
@@ -155,6 +181,7 @@ model Material {
   rfqLines             RfqLine[]
   adjustmentRequests   AdjustmentRequest[]
   project              Project?            @relation(fields: [projectNumber], references: [projectNumber])
+  unit                 UnitOfMeasure       @relation(fields: [unitOfMeasure], references: [code])
 
   @@index([category])
   @@index([active])
@@ -661,12 +688,15 @@ enum InventoryTransactionType {
   LOAN_RETURN
 }
 
+// The reason sets the direction: DAMAGE, LOSS and SCRAP only remove stock and
+// FOUND only adds it; OTHER may do either; COUNT_VARIANCE comes from a count.
 enum AdjustmentReasonCode {
   COUNT_VARIANCE
   DAMAGE
   LOSS
   SCRAP
   OTHER
+  FOUND
 }
 
 model InventoryTransaction {

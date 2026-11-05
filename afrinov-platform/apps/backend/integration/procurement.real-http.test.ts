@@ -769,7 +769,7 @@ describe('receiving stock over real HTTP', () => {
     beforeAll(async () => {
       expect((await api('POST', '/projects', { projectNumber, name: `IT stores ordering ${run}` })).status).toBe(201);
       const beam = await api<{ id: string }>('POST', '/materials', {
-        sku: `IT-SO-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'PC', projectNumber,
+        sku: `IT-SO-BEAM-${run}`, name: `Integration beam ${run}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber,
       });
       expect(beam.status).toBe(200);
       beamId = beam.body.id;
@@ -1185,7 +1185,7 @@ describe('receiving stock over real HTTP', () => {
           // Stores stock never moved, and a project that doesn't exist holds nothing.
           expect(await ledgerAndBalance(looseId, locationId)).toEqual(stores);
           expect((await storeman('POST', '/inventory-adjustments', {
-            materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', heldForProject: `IT-NOPE-${run}`,
+            materialId: looseId, locationId: spare.body.id, quantity: 1, reasonCode: 'OTHER', reasonNote: 'Wrong project', heldForProject: `IT-NOPE-${run}`,
           })).status).toBe(404);
         });
 

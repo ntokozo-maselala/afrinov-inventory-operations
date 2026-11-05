@@ -51,6 +51,11 @@ function makePrisma(): unknown {
     purchaseOrder: {
       findUnique: async ({ where }: { where: { id: string } }) => db.purchaseOrders.get(where.id) ?? null,
     },
+    // Measured, so a fraction goes through.
+    material: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id, name: db.materials.get(id)?.name ?? id, unitOfMeasure: 'm', unit: { kind: 'MEASURED' } })),
+    },
     goodsReceipt: {
       count: async () => grCounter,
       findUnique: async ({ where, include }: { where: { id: string }; include?: { lines?: boolean | { include?: { material?: boolean; location?: boolean } }; supplier?: boolean } }) => {

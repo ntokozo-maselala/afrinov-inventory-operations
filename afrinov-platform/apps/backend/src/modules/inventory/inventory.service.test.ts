@@ -58,6 +58,16 @@ const projects = new Map<string, { projectNumber: string; active: boolean; statu
 ]);
 // Project material that belongs to a project, by material id.
 const materialProjects: Record<string, string> = { 'pipe-1325': 'AFRI-1325', 'pipe-42': 'P-42' };
+// An id starting "washer" is counted in whole units (each); anything else is
+// measured (m), so a fraction goes through.
+const unitFor = (id: string) => id.startsWith('washer')
+  ? { unitOfMeasure: 'each', unit: { kind: 'COUNTED' as const } }
+  : { unitOfMeasure: 'm', unit: { kind: 'MEASURED' as const } };
+const fakeMaterial = (id: string) => ({
+  id, sku: id.toUpperCase(), name: `Item ${id}`,
+  category: id.startsWith('tool') ? 'TOOLS' : /^(prj|pipe)/.test(id) ? 'PROJECT_MATERIAL' : 'CONSUMABLES',
+  projectNumber: materialProjects[id] ?? null, requiredStock: new Prisma.Decimal(5), active: true, ...unitFor(id),
+});
 const auditLog: Array<{ actorId: string; action: string; entityType: string; entityId: string; before: unknown; after: unknown }> = [];
 const rowLocks: Array<{ sql: string; values: unknown[]; auditEntriesBefore: number }> = [];
 
@@ -144,7 +154,7 @@ const fakeTx = {
       }
       if (include?.material) {
         // An item whose id starts "disc" tracks use after issue.
-        out.material = { sku: 'SKU', name: 'Material', trackUse: row.materialId.startsWith('disc') } as { sku: string; name: string };
+        out.material = { sku: 'SKU', name: 'Material', trackUse: row.materialId.startsWith('disc'), ...unitFor(row.materialId) } as unknown as { sku: string; name: string };
       }
       if (include?.location) {
         out.location = { name: 'Location' };
@@ -181,11 +191,8 @@ const fakeTx = {
   material: {
     // An id starting "tool" is a tool; "prj" is project material with no project
     // yet; "pipe" is project material for its project in materialProjects.
-    findUnique: async ({ where }: { where: { id: string } }) => ({
-      id: where.id, sku: where.id.toUpperCase(),
-      category: where.id.startsWith('tool') ? 'TOOLS' : /^(prj|pipe)/.test(where.id) ? 'PROJECT_MATERIAL' : 'CONSUMABLES',
-      projectNumber: materialProjects[where.id] ?? null, requiredStock: new Prisma.Decimal(5), active: true,
-    }),
+    findUnique: async ({ where }: { where: { id: string } }) => fakeMaterial(where.id),
+    findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map(fakeMaterial),
   },
   location: {
     findUnique: async () => ({ id: 'loc-1', active: true }),
@@ -311,7 +318,7 @@ vi.mock('../../shared/events.js', () => ({
   dispatchDomainEvents: async () => undefined,
 }));
 
-const { InventoryService } = await import('./inventory.service.js');
+const { InventoryService, checkRequestedAdjustment } = await import('./inventory.service.js');
 
 // Most tests issue one line; this keeps them short. 'user-3' is an active recipient.
 async function issueOne(input: {
@@ -1430,5 +1437,60 @@ describe('InventoryService — ADR-002 invariants', () => {
 
       expect(trxRows.filter((r) => r.type === 'RECEIPT')).toHaveLength(2);
     });
+  });
+});
+// An item counted in each moves in whole units; the reason sets which way an
+// adjustment goes (Whole-unit quantities and reason-driven adjustments).
+describe('whole units and the direction of an adjustment', () => {
+  const asked = (reasonCode: 'DAMAGE' | 'LOSS' | 'SCRAP' | 'FOUND' | 'OTHER', quantity: number, reasonNote?: string) =>
+    checkRequestedAdjustment({ materialId: 'washer-1', locationId: 'loc-1', quantity, reasonCode, reasonNote, actorId: 'u' }, fakeTx as unknown as Prisma.TransactionClient);
+
+  beforeEach(() => {
+    trxRows = [];
+    balances = new Map();
+    clearMockSettings();
+  });
+
+  it('refuses a fraction of a counted item on issue, transfer and return, and moves nothing', async () => {
+    await InventoryService.adjust({ materialId: 'washer-1', locationId: 'loc-1', quantity: 750, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    const message = 'Item washer-1 is counted in whole numbers (each). Enter 1, 2, 3 …';
+    await expect(issueOne({ materialId: 'washer-1', locationId: 'loc-1', quantity: '0.0001', actorId: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message });
+    await expect(InventoryService.transfer({ materialId: 'washer-1', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 2.5, actorId: 'u' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message });
+    const { transactionId } = await issueOne({ materialId: 'washer-1', locationId: 'loc-1', quantity: 80, actorId: 'u' });
+    await expect(InventoryService.returnToStock({ issueTransactionId: transactionId, quantity: 0.5, actorId: 'u' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Material is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(getBalance('washer-1', 'loc-1').toString()).toBe('670');
+    expect(trxRows.filter((r) => r.type === 'RETURN' || r.type === 'TRANSFER_OUT')).toHaveLength(0);
+  });
+
+  it('still takes a fraction of a measured item', async () => {
+    await InventoryService.adjust({ materialId: 'cable-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    await issueOne({ materialId: 'cable-1', locationId: 'loc-1', quantity: '2.5', actorId: 'u' });
+    expect(getBalance('cable-1', 'loc-1').toString()).toBe('7.5');
+  });
+
+  it('lets damage, loss and scrap only remove stock', async () => {
+    for (const reason of ['DAMAGE', 'LOSS', 'SCRAP'] as const) {
+      await expect(asked(reason, 80)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Damage, loss and scrap remove stock. To add stock, choose Found or Other.' });
+      await expect(asked(reason, -80)).resolves.toBeUndefined();
+    }
+  });
+
+  it('lets found stock only add, and says where it was found', async () => {
+    await expect(asked('FOUND', -5, 'Behind rack B')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.' });
+    await expect(asked('FOUND', 5)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Say where the stock was found.' });
+    await expect(asked('FOUND', 5, '  ')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(asked('FOUND', 5, 'Behind rack B')).resolves.toBeUndefined();
+  });
+
+  it('lets other go either way, with a note', async () => {
+    await expect(asked('OTHER', 5)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Say why the stock is adjusted.' });
+    await expect(asked('OTHER', 5, 'Booked to the wrong bin')).resolves.toBeUndefined();
+    await expect(asked('OTHER', -5, 'Booked to the wrong bin')).resolves.toBeUndefined();
+  });
+
+  it('refuses part of a counted item on an adjustment', async () => {
+    await expect(asked('DAMAGE', -0.0001)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Item washer-1 is counted in whole numbers (each). Enter 1, 2, 3 …' });
   });
 });

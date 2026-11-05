@@ -57,7 +57,7 @@ describe('requests for quotation over real HTTP', () => {
     const stores = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-S-${run}`, name: 'Side wheel', category: 'CONSUMABLES', unitOfMeasure: 'PC' });
     expect(stores.status).toBe(200);
     storesItem = stores.body.id;
-    const own = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-P-${run}`, name: 'Door C-channel frame 180x70', category: 'PROJECT_MATERIAL', unitOfMeasure: 'LOTS', projectNumber });
+    const own = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-P-${run}`, name: 'Door C-channel frame 180x70', category: 'PROJECT_MATERIAL', unitOfMeasure: 'kg', projectNumber });
     expect(own.status).toBe(200);
     projectItem = own.body.id;
     const own2 = await api<{ id: string }>('POST', '/materials', { sku: `IT-RFQ-P2-${run}`, name: 'Door rail 40x40', category: 'PROJECT_MATERIAL', unitOfMeasure: 'M', projectNumber });

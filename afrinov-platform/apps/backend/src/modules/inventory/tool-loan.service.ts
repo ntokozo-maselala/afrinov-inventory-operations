@@ -25,6 +25,7 @@ import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
 import { checkWriteOff } from './write-off-limit.js';
+import { checkWholeUnits } from '../../shared/units.js';
 import { pendingLostByLoan, requestAdjustment } from './write-off-requests.js';
 import {
   addDays, currentDueOn, dayOf, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState, overdueBlocksCheckout,
@@ -325,6 +326,7 @@ export const ToolLoanService = {
       for (const t of totals.values()) {
         const material = await checkMaterialActive(t.materialId, tx);
         if (material.category !== 'TOOLS') throw Errors.validation(`${material.sku} is not a tool; issue it on Issue stock instead`);
+        await checkWholeUnits([{ materialId: t.materialId, quantity: t.qty }], tx);
         await checkLocationActive(t.locationId, tx);
         const inStore = await getCurrentBalance(storesStock(t.materialId, t.locationId), tx);
         if (inStore.lt(t.qty)) {
@@ -431,6 +433,7 @@ export const ToolLoanService = {
         if (!loan) throw Errors.notFound('Tool check-out');
         if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out can be checked in');
       }
+      await checkWholeUnits(lines.map((l) => ({ materialId: byId.get(l.loanId)!.materialId, quantity: l.qty })), tx);
       await lock(tx, loans.map((l) => `${l.materialId}:${l.locationId}`));
       await lockInventoryBalances(loans.map((l) => storesStock(l.materialId, l.locationId)), tx);
 

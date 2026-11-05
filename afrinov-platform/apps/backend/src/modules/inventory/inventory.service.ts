@@ -22,6 +22,7 @@ import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
 import { checkWriteOff, writeOffRule } from './write-off-limit.js';
+import { checkWholeUnits, fitsUnitKind, wholeUnitsMessage } from '../../shared/units.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -56,7 +57,7 @@ export interface AdjustmentInput {
   materialId: string;
   locationId: string;
   quantity: number | string | Decimal;
-  reasonCode: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER';
+  reasonCode: 'COUNT_VARIANCE' | 'DAMAGE' | 'LOSS' | 'SCRAP' | 'OTHER' | 'FOUND';
   reasonNote?: string;
   /** Who was responsible (damage, loss or scrap only); naming someone needs a note saying what happened. */
   recipientId?: string | null;
@@ -108,6 +109,30 @@ export async function checkAdjustment(input: AdjustmentInput, tx: Prisma.Transac
 /** The write-off reasons that record who was responsible, when anyone is known. */
 export const RESPONSIBLE_REASONS = ['DAMAGE', 'LOSS', 'SCRAP'] as const;
 export const takesResponsible = (reason: string) => (RESPONSIBLE_REASONS as readonly string[]).includes(reason);
+
+/** Reasons that need a note: a gain, or anything the reason doesn't explain. */
+const NOTE_REASONS = ['FOUND', 'OTHER'] as const;
+
+/**
+ * The rules for an adjustment someone asks for, on top of checkAdjustment():
+ * the reason sets the direction (damage, loss and scrap only remove stock,
+ * found stock only adds it), a gain or an "other" says why, and a counted item
+ * moves in whole units. Checked when it is asked for, not again when approved,
+ * so a request already waiting is decided as it was made.
+ */
+export async function checkRequestedAdjustment(input: AdjustmentInput, tx: Prisma.TransactionClient): Promise<void> {
+  const qty = toDecimal(input.quantity);
+  if (takesResponsible(input.reasonCode) && qty.isPositive()) {
+    throw Errors.validation('Damage, loss and scrap remove stock. To add stock, choose Found or Other.');
+  }
+  if (input.reasonCode === 'FOUND' && qty.isNegative()) {
+    throw Errors.validation('Found adds stock. To remove stock, choose Damage, Loss, Scrap or Other.');
+  }
+  if ((NOTE_REASONS as readonly string[]).includes(input.reasonCode) && !input.reasonNote?.trim()) {
+    throw Errors.validation(input.reasonCode === 'FOUND' ? 'Say where the stock was found.' : 'Say why the stock is adjusted.');
+  }
+  await checkWholeUnits([{ materialId: input.materialId, quantity: qty }], tx);
+}
 
 export interface ReturnInput {
   issueTransactionId: string;
@@ -226,9 +251,12 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   const restocking = gtZero(input.qty);
   const issue = await tx.inventoryTransaction.findUnique({
     where: { id: input.issueTransactionId },
-    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true, trackUse: true } } },
+    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true, name: true, trackUse: true, unitOfMeasure: true, unit: { select: { kind: true } } } } },
   });
   if (!issue) throw Errors.notFound('InventoryTransaction');
+  if (![input.qty, usedUp, broken].every((q) => fitsUnitKind(issue.material.unit.kind, q))) {
+    throw Errors.validation(wholeUnitsMessage(issue.material.name, issue.material.unitOfMeasure));
+  }
   if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
     throw Errors.invalidState('Only an issue can have stock returned against it.');
   }
@@ -1126,6 +1154,7 @@ export const InventoryService = {
         if (material.category === 'TOOLS') throw Errors.validation(`${material.sku} is a tool: check it out on the Tools page instead of issuing it`);
         materials.set(t.materialId, material);
       }
+      await checkWholeUnits(lines.map((l) => ({ materialId: l.materialId, quantity: l.qty })), tx);
       // A project's own stock goes to that project only.
       for (const t of totals.values()) {
         if (t.heldForProject && t.heldForProject !== (input.projectNumber ?? null)) {
@@ -1347,6 +1376,7 @@ export const InventoryService = {
     return inTx(within, async (tx) => {
       await lockInventoryBalances([from, to], tx);
       await checkMaterialActive(input.materialId, tx);
+      await checkWholeUnits([{ materialId: input.materialId, quantity: qty }], tx);
       if (heldForProject) await checkProjectExists(heldForProject, tx);
       await checkLocationActive(input.fromLocationId, tx);
       await checkLocationActive(input.toLocationId, tx);

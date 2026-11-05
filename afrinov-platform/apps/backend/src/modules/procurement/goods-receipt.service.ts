@@ -3,6 +3,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
+import { checkWholeUnits } from '../../shared/units.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 /** Slack for a client clock a little ahead of the server's. */
@@ -129,6 +130,7 @@ export const GoodsReceiptService = {
     } else if (input.lines.some((l) => l.purchaseOrderLineId)) {
       throw Errors.validation('These lines belong to a purchase order: choose the order the delivery is for.');
     }
+    await checkWholeUnits(input.lines, outer ?? prisma);
 
     const write = async (tx: Prisma.TransactionClient) => {
       // Serialize GR-number generation so two concurrent creates cannot

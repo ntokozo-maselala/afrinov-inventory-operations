@@ -12,6 +12,7 @@ import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { generateGRNumber, parseReceivedAt } from '../procurement/goods-receipt.service.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { sectionOf } from './material-section.js';
+import { checkWholeUnits } from '../../shared/units.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -154,6 +155,7 @@ export const StockReceiptService = {
           checked.add(`l:${l.locationId}`);
         }
       }
+      await checkWholeUnits(lines.map((l) => ({ materialId: l.materialId, quantity: l.qty })), tx);
 
       const number = await generateGRNumber(tx);
       const gr = await tx.goodsReceipt.create({

@@ -7,6 +7,13 @@ type SerialFilter = { equals: string; mode?: string };
 
 const db = { materials: new Map<string, Material>(), audit: [] as Array<{ action: string; entityId: string }> };
 let seq = 0;
+// Some of the listed units (units_of_measure), and one taken off the list.
+const UNITS: Record<string, { code: string; kind: 'COUNTED' | 'MEASURED'; active: boolean }> = {
+  each: { code: 'each', kind: 'COUNTED', active: true },
+  pair: { code: 'pair', kind: 'COUNTED', active: true },
+  m: { code: 'm', kind: 'MEASURED', active: true },
+  gross: { code: 'gross', kind: 'COUNTED', active: false },
+};
 
 function makePrisma(): unknown {
   return {
@@ -25,6 +32,10 @@ function makePrisma(): unknown {
         db.materials.set(m.id, m);
         return m;
       },
+    },
+    unitOfMeasure: {
+      findUnique: async ({ where }: { where: { code: string } }) => UNITS[where.code] ?? null,
+      findUniqueOrThrow: async ({ where }: { where: { code: string } }) => UNITS[where.code]!,
     },
     auditLogEntry: { create: async ({ data }: { data: { action: string; entityId: string } }) => { db.audit.push(data); return data; } },
     // The service wraps each mutation and its audit write in one transaction;
@@ -106,5 +117,35 @@ describe('MaterialService update', () => {
     const m = await MaterialService.create({ sku: 'CON-2', name: 'Glove', category: 'CONSUMABLES', unitOfMeasure: 'pair' }, 'admin');
     expect((await MaterialService.update({ id: m.id, active: false }, 'admin')).active).toBe(false);
     expect((await MaterialService.update({ id: m.id, active: true }, 'admin')).active).toBe(true);
+  });
+});
+
+describe('MaterialService units of measure', () => {
+  it('saves any spelling of a listed unit under its code', async () => {
+    const m = await MaterialService.create({ sku: 'WSH-1', name: 'M16 flat washer', category: 'FASTENERS_SLUGS_INSULATION', unitOfMeasure: ' EA ' }, 'admin');
+    expect(m.unitOfMeasure).toBe('each');
+    expect((await MaterialService.update({ id: m.id, unitOfMeasure: 'Metres' }, 'admin')).unitOfMeasure).toBe('m');
+  });
+
+  it('refuses a unit that is not on the list, or no longer in use', async () => {
+    await expect(MaterialService.create({ sku: 'WSH-2', name: 'Washer', category: 'CONSUMABLES', unitOfMeasure: 'bundle' }, 'admin'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: '"bundle" is not a unit on the list. Choose one, such as each, pair, box, m or kg.' });
+    await expect(MaterialService.create({ sku: 'WSH-3', name: 'Washer', category: 'CONSUMABLES', unitOfMeasure: 'gross' }, 'admin'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(db.materials.size).toBe(0);
+  });
+
+  it('keeps Required Stock of a counted item whole', async () => {
+    await expect(MaterialService.create({ sku: 'GLV-1', name: 'Welding gloves', category: 'CONSUMABLES', unitOfMeasure: 'pair', requiredStock: 2.5 }, 'admin'))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Welding gloves is counted in whole numbers (pair). Enter 1, 2, 3 …' });
+    const m = await MaterialService.create({ sku: 'GLV-1', name: 'Welding gloves', category: 'CONSUMABLES', unitOfMeasure: 'pair', requiredStock: 4 }, 'admin');
+    await expect(MaterialService.update({ id: m.id, requiredStock: 4.5 }, 'admin')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect((await MaterialService.update({ id: m.id, unitOfMeasure: 'm', requiredStock: 4.5 }, 'admin')).requiredStock).toBe(4.5);
+  });
+
+  it('keeps a unit carried over from before the list when the item is edited without changing it', async () => {
+    db.materials.set('old-1', { id: 'old-1', sku: 'OLD-1', name: 'Old item', category: 'CONSUMABLES', serialNumber: null, unitOfMeasure: 'gross' });
+    const m = await MaterialService.update({ id: 'old-1', name: 'Renamed', unitOfMeasure: 'gross' }, 'admin');
+    expect(m).toMatchObject({ name: 'Renamed', unitOfMeasure: 'gross' });
   });
 });

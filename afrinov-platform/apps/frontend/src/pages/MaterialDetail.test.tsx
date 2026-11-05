@@ -61,7 +61,7 @@ describe('MaterialDetail editing', () => {
 
     expect(screen.getByLabelText(/SKU/)).toBeDisabled();
     expect(screen.getByLabelText(/Category/)).toBeDisabled();
-    expect(screen.getByLabelText(/Required stock/)).toHaveValue(100);
+    expect(screen.getByLabelText(/Required stock/)).toHaveValue('100');
     expect(screen.getByLabelText(/Unit cost/)).toHaveValue(12.5);
 
     fireEvent.change(screen.getByLabelText(/Required stock/), { target: { value: '40' } });

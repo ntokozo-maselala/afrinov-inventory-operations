@@ -5,7 +5,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
-import { Field, Input } from '../components/Field';
+import { Field } from '../components/Field';
 import { SearchSelect, type SearchOption } from '../components/SearchSelect';
 import { Alert } from '../components/Alert';
 import { ErrorState } from '../components/EmptyState';
@@ -23,6 +23,9 @@ import { isStoresStock, balanceKey } from '../lib/heldFor';
 import { useLocationLabel } from '../hooks/useLocationLabel';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { issuePrefillOf } from '../lib/issuePrefill';
+import { QuantityInput } from '../components/QuantityInput';
+import { useUnits } from '../hooks/useUnits';
+import { firstLineQuantityError, readQuantity } from '../lib/quantity';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -61,6 +64,7 @@ export function IssueStock() {
   const toast = useToast();
   const locationName = useLocationLabel();
   const idem = useIdempotencyKey('issue-stock');
+  const { kindOf } = useUnits();
 
   // Only items with stock can be issued, and tools are lent on the Tools page
   // instead. Nor from a deactivated item or location, which the server refuses
@@ -140,7 +144,8 @@ export function IssueStock() {
   // Requested per item and location, across lines, to warn before submitting.
   const requested = new Map<string, number>();
   for (const l of lines) {
-    if (l.stockKey && Number(l.quantity) > 0) requested.set(l.stockKey, (requested.get(l.stockKey) ?? 0) + Number(l.quantity));
+    const q = readQuantity(l.quantity);
+    if (l.stockKey && q > 0) requested.set(l.stockKey, (requested.get(l.stockKey) ?? 0) + q);
   }
   const overIssued = new Set([...requested].filter(([k, q]) => q > Number(byKey.get(k)?.quantity ?? 0)).map(([k]) => k));
 
@@ -165,7 +170,12 @@ export function IssueStock() {
     const filled = lines.filter((l) => l.stockKey || l.quantity);
     if (!recipientId) { setError('Choose who the stock is issued to.'); return; }
     if (filled.length === 0) { setError('Add at least one item.'); return; }
-    if (filled.some((l) => !l.stockKey || !(Number(l.quantity) > 0))) { setError('Every line needs an item and a quantity above zero.'); return; }
+    if (filled.some((l) => !l.stockKey)) { setError('Every line needs an item and a quantity above zero.'); return; }
+    const badQuantity = firstLineQuantityError(filled.map((l) => {
+      const r = byKey.get(l.stockKey)!;
+      return { text: l.quantity, kind: kindOf(r.unitOfMeasure), unit: r.unitOfMeasure, line: lines.indexOf(l) + 1 };
+    }));
+    if (badQuantity) { setError(badQuantity); return; }
     if (overIssued.size > 0) { setError('Some lines ask for more than is in stock.'); return; }
 
     setBusy(true);
@@ -176,7 +186,7 @@ export function IssueStock() {
         lines: filled.map((l) => {
           const r = byKey.get(l.stockKey)!;
           // The stock the line takes: the project's own, or Stores stock.
-          return { materialId: r.materialId, locationId: r.locationId, quantity: Number(l.quantity), heldForProject: r.heldForProject ?? null };
+          return { materialId: r.materialId, locationId: r.locationId, quantity: readQuantity(l.quantity), heldForProject: r.heldForProject ?? null };
         }),
       };
       await api.post('/inventory-issues', issueBody, { idempotencyKey: idem.keyFor(issueBody) });
@@ -279,7 +289,7 @@ export function IssueStock() {
                     />
                   </Field>
                   <Field label="Quantity" htmlFor={`issue-qty-${l.key}`} error={over ? 'More than on hand' : null}>
-                    <Input id={`issue-qty-${l.key}`} type="number" inputMode="decimal" min="0" step="any" value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} invalid={over} />
+                    <QuantityInput id={`issue-qty-${l.key}`} kind={kindOf(row?.unitOfMeasure)} unit={row?.unitOfMeasure} value={l.quantity} onChange={(e) => update(l.key, { quantity: e.target.value })} invalid={over} />
                   </Field>
                   <Button
                     type="button"
