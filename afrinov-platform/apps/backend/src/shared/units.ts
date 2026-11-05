@@ -48,14 +48,36 @@ export function unitCode(typed: string): string {
   return UNIT_ALIASES[t.toLowerCase()] ?? t;
 }
 
+/** Whether a quantity fits a unit of this kind: whole for a counted unit. */
+export function fitsUnitKind(kind: 'COUNTED' | 'MEASURED', quantity: Decimal): boolean {
+  return kind !== 'COUNTED' || quantity.isInteger();
+}
+
+const partOf = (q: Decimal) => q.minus(q.floor());
+
 /**
- * Whether a quantity fits a unit of this kind: whole for a counted unit, or
- * exactly the remainder given. Stock booked in part-units before the rule (half
- * a washer still out on an issue, 0.5 still owed on an order) can then be
- * closed off, though no new part-unit can be started.
+ * Whether these quantities, taken together from what is left (still out on an
+ * issue or a loan, still owed on an order line), fit a unit of this kind. Each
+ * is whole, except that one may carry exactly the remainder's part-unit, so
+ * stock booked in part-units before the rule can be closed off: what is left
+ * becomes whole, and no new part-unit is started. Out of 2.5, 2.5 or 0.5 or
+ * 1.5 is taken; out of 3, 2.5 and 0.5 is not.
  */
-export function fitsUnitKind(kind: 'COUNTED' | 'MEASURED', quantity: Decimal, remainder?: Decimal): boolean {
-  return kind !== 'COUNTED' || quantity.isInteger() || (remainder !== undefined && quantity.equals(remainder));
+export function fitsRemainder(kind: 'COUNTED' | 'MEASURED', quantities: readonly Decimal[], remainder: Decimal): boolean {
+  if (kind !== 'COUNTED') return true;
+  const parts = quantities.filter((q) => !q.isInteger());
+  if (parts.length === 0) return true;
+  return parts.length === 1 && !remainder.isInteger() && partOf(parts[0]!).equals(partOf(remainder));
+}
+
+/**
+ * Holds the items' rows for the rest of the transaction, as every check of a
+ * quantity against an item's unit does, so a change of unit (which takes them
+ * FOR UPDATE) can't slip between the check and the movement it allows.
+ */
+export async function holdUnits(materialIds: readonly string[], db: Pick<Prisma.TransactionClient, '$executeRaw'>): Promise<void> {
+  const ids = [...new Set(materialIds)].sort();
+  if (ids.length > 0) await db.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
 }
 
 /** What to tell someone who entered part of a counted item. */
@@ -96,24 +118,37 @@ export function checkQuantityForUnit(name: string, unit: { code: string; kind: '
  * Refuses part of a counted item: 0.5 of a washer, 2.25 gloves. Called with
  * the quantities a person entered; figures the system works out (a count's
  * difference, a stored request being approved) are not checked again.
- * Materials it can't find are left to the caller's own not-found check. An
- * entry's remainder, when given, is also taken (see fitsUnitKind).
+ * Materials it can't find are left to the caller's own not-found check. The
+ * items are held (holdUnits) for the rest of the caller's transaction.
+ *
+ * Entries that take from one remainder (lines against one order line) share a
+ * `group` and its `remainder`, and are checked together by fitsRemainder.
  */
 export async function checkWholeUnits(
-  entries: ReadonlyArray<{ materialId: string; quantity: number | string | Decimal; remainder?: Decimal }>,
-  db: MaterialClient,
+  entries: ReadonlyArray<{ materialId: string; quantity: number | string | Decimal; remainder?: Decimal; group?: string }>,
+  db: MaterialClient & Pick<Prisma.TransactionClient, '$executeRaw'>,
 ): Promise<void> {
   if (entries.length === 0) return;
   const ids = [...new Set(entries.map((e) => e.materialId))];
+  await holdUnits(ids, db);
   const materials = await db.material.findMany({
     where: { id: { in: ids } },
     select: { id: true, name: true, unitOfMeasure: true, unit: { select: { kind: true } } },
   });
   const byId = new Map(materials.map((m) => [m.id, m]));
-  for (const e of entries) {
-    const m = byId.get(e.materialId);
-    if (m && !fitsUnitKind(m.unit.kind, toDecimal(e.quantity), e.remainder)) {
-      throw Errors.validation(wholeUnitsMessage(m.name, m.unitOfMeasure), { materialId: e.materialId, quantity: toDecimal(e.quantity).toString() });
+  const groups = new Map<string, Array<(typeof entries)[number]>>();
+  entries.forEach((e, i) => {
+    const key = e.group !== undefined ? `g:${e.group}` : `e:${i}`;
+    groups.set(key, [...(groups.get(key) ?? []), e]);
+  });
+  for (const group of groups.values()) {
+    const first = group[0]!;
+    const m = byId.get(first.materialId);
+    if (!m) continue;
+    const quantities = group.map((e) => toDecimal(e.quantity));
+    const fits = first.remainder !== undefined ? fitsRemainder(m.unit.kind, quantities, first.remainder) : quantities.every((q) => fitsUnitKind(m.unit.kind, q));
+    if (!fits) {
+      throw Errors.validation(wholeUnitsMessage(m.name, m.unitOfMeasure), { materialId: first.materialId, quantity: quantities.map(String).join(', ') });
     }
   }
 }

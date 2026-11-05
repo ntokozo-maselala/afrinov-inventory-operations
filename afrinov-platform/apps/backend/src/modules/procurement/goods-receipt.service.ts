@@ -134,9 +134,6 @@ export const GoodsReceiptService = {
     } else if (input.lines.some((l) => l.purchaseOrderLineId)) {
       throw Errors.validation('These lines belong to a purchase order: choose the order the delivery is for.');
     }
-    await checkWholeUnits(input.lines.map((l) => ({
-      materialId: l.materialId, quantity: l.quantity, remainder: l.purchaseOrderLineId ? outstanding.get(l.purchaseOrderLineId) : undefined,
-    })), outer ?? prisma);
 
     const write = async (tx: Prisma.TransactionClient) => {
       // Serialize GR-number generation so two concurrent creates cannot
@@ -146,6 +143,11 @@ export const GoodsReceiptService = {
       // increase, and every receipt takes its locks in the same order, so
       // none can deadlock with another.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:gr-number'))`;
+      // Whole units of a counted item, read under a hold on the items so a
+      // change of unit waits for this receipt.
+      await checkWholeUnits(input.lines.map((l) => (l.purchaseOrderLineId
+        ? { materialId: l.materialId, quantity: l.quantity, group: l.purchaseOrderLineId, remainder: outstanding.get(l.purchaseOrderLineId) }
+        : { materialId: l.materialId, quantity: l.quantity })), tx);
       const number = await generateGRNumber(tx);
       const gr = await tx.goodsReceipt.create({
         data: {

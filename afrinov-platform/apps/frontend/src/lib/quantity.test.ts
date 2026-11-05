@@ -32,10 +32,22 @@ describe('parseQuantity', () => {
     expect(parseQuantity('ten', 'COUNTED', 'each')).toMatchObject({ ok: false, error: 'Enter a number, for example 12.' });
   });
 
-  it('takes exactly what is left of a counted item, so part-units from before the rule can be closed off', () => {
+  it('takes the part-unit of what is left of a counted item, so part-units from before the rule can be closed off', () => {
     expect(parseQuantity('0,5', 'COUNTED', 'each', { remainder: 0.5 })).toEqual({ ok: true, value: 0.5 });
-    expect(parseQuantity('0,5', 'COUNTED', 'each', { remainder: 2.5 })).toMatchObject({ ok: false });
+    expect(parseQuantity('2,5', 'COUNTED', 'each', { remainder: 2.5 })).toEqual({ ok: true, value: 2.5 });
+    expect(parseQuantity('0,5', 'COUNTED', 'each', { remainder: 2.5 })).toEqual({ ok: true, value: 0.5 });
+    expect(parseQuantity('0,25', 'COUNTED', 'each', { remainder: 2.5 })).toMatchObject({ ok: false });
     expect(parseQuantity('2', 'COUNTED', 'each', { remainder: 2.5 })).toEqual({ ok: true, value: 2 });
+  });
+
+  // Qodo, PR #153: no part of a unit comes out of a whole remainder.
+  it('takes no part-unit from a whole remainder', () => {
+    expect(parseQuantity('0,5', 'COUNTED', 'each', { remainder: 3 })).toMatchObject({ ok: false, error: 'Counted in whole each: enter 1, 2, 3 …' });
+  });
+
+  // Qodo, PR #153: 10 - 9.7 is 0.3000000000000007 in floating point.
+  it('compares the remainder to the 4 places the server keeps', () => {
+    expect(parseQuantity('0,3', 'COUNTED', 'each', { remainder: 10 - 9.7 })).toEqual({ ok: true, value: 0.3 });
   });
 
   it('lets a count be 0', () => {

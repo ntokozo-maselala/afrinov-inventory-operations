@@ -25,7 +25,7 @@ import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
 import { checkWriteOff } from './write-off-limit.js';
-import { checkWholeUnits, fitsUnitKind, wholeUnitsMessage } from '../../shared/units.js';
+import { checkWholeUnits } from '../../shared/units.js';
 import { pendingLostByLoan, requestAdjustment } from './write-off-requests.js';
 import {
   addDays, currentDueOn, dayOf, daysBetween, defaultDueOn, dueOnAt, dueOnBefore, dueOnProblem, loanDatesOf, loanState, overdueBlocksCheckout,
@@ -426,7 +426,7 @@ export const ToolLoanService = {
       const loanIds = [...new Set(lines.map((l) => l.loanId))];
       const loans = await tx.inventoryTransaction.findMany({
         where: { id: { in: loanIds } },
-        include: { recipient: { select: { name: true } }, material: { select: { sku: true, name: true, unitCost: true, unitOfMeasure: true, unit: { select: { kind: true } } } } },
+        include: { recipient: { select: { name: true } }, material: { select: { sku: true, unitCost: true } } },
       });
       const byId = new Map(loans.map((l) => [l.id, l]));
       for (const id of loanIds) {
@@ -443,6 +443,7 @@ export const ToolLoanService = {
       const returned = await returnedByLoan(tx, loanIds);
       const waiting = await pendingLostByLoan(loanIds, tx);
       const asked = new Map<string, Decimal>();
+      const outOf = new Map<string, Decimal>();
       for (const l of lines) asked.set(l.loanId, (asked.get(l.loanId) ?? toDecimal(0)).plus(l.qty));
       for (const [id, qty] of asked) {
         const loan = byId.get(id)!;
@@ -452,12 +453,12 @@ export const ToolLoanService = {
           const held = gtZero(pending) ? ` (${pending.toString()} more is waiting to be written off as lost)` : '';
           throw Errors.validation(`Cannot check in ${qty.toString()} × ${loan.material.sku}: only ${out.toString()} still checked out${held}.`, { loanId: id, out: out.toString() });
         }
-        // Whole units, unless the lines close off exactly what is still out on
-        // a loan made in part-units before the rule.
-        const whole = lines.filter((l) => l.loanId === id).every((l) => fitsUnitKind(loan.material.unit.kind, l.qty));
-        if (!whole && !qty.equals(out)) throw Errors.validation(wholeUnitsMessage(loan.material.name, loan.material.unitOfMeasure), { loanId: id });
+        outOf.set(id, out);
         await checkLocationActive(loan.locationId, tx);
       }
+      // Whole units, but for one line of a loan that carries the part-unit still
+      // out on a loan made before the rule, so what is left becomes whole.
+      await checkWholeUnits(lines.map((l) => ({ materialId: byId.get(l.loanId)!.materialId, quantity: l.qty, group: l.loanId, remainder: outOf.get(l.loanId)! })), tx);
 
       // Whether the lost tools wait for approval is decided on everything lost
       // of a tool from one location on this check-in, as one write-off would

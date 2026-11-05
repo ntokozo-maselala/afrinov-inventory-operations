@@ -106,7 +106,8 @@ function makePrisma(): unknown {
         return gr;
       },
     },
-    $executeRaw: async () => { steps.push('numbering lock'); },
+    // The hold on the items' units (holdUnits) is left out: this is the numbering lock.
+    $executeRaw: async (strings: TemplateStringsArray) => { if (!strings.join('').includes('FOR SHARE')) steps.push('numbering lock'); },
     // The highest number among receipts already numbered.
     $queryRaw: async () => [{ last: highestNumber ?? (db.goodsReceipts.filter((g) => !g.number.startsWith('PENDING-')).length || null) }],
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
@@ -235,13 +236,17 @@ describe('GoodsReceiptService', () => {
       it('takes exactly what is still owed of a counted item, but no other part of one', async () => {
         countedItems.add('mat-1');
         const line = db.purchaseOrders.get('po-1')!.lines![0]!;
-        // 12.5 ordered, 10 received: 2.5 still owed.
+        // 12.5 ordered, 10 received: 2.5 still owed. A delivery may carry its half, with any whole ones.
         line.orderedQty = new Prisma.Decimal(12.5);
-        await expect(receive([{ materialId: 'mat-1', quantity: 0.5, purchaseOrderLineId: 'pol-1' }]))
-          .rejects.toMatchObject({ message: 'M16 x 40 8.8 BLACK HEX SET SCREW is counted in whole numbers (each). Enter 1, 2, 3 …' });
-        // 12 received since: 0.5 still owed, which closes the line.
-        line.receivedQty = new Prisma.Decimal(12);
-        await expect(receive([{ materialId: 'mat-1', quantity: 0.5, purchaseOrderLineId: 'pol-1' }])).resolves.toMatchObject({ purchaseOrderId: 'po-1' });
+        const message = 'M16 x 40 8.8 BLACK HEX SET SCREW is counted in whole numbers (each). Enter 1, 2, 3 …';
+        await expect(receive([{ materialId: 'mat-1', quantity: 0.25, purchaseOrderLineId: 'pol-1' }])).rejects.toMatchObject({ message });
+        // Two halves on two lines for one order line are two part-units.
+        await expect(receive([{ materialId: 'mat-1', quantity: 0.5, purchaseOrderLineId: 'pol-1' }, { materialId: 'mat-1', quantity: 0.5, purchaseOrderLineId: 'pol-1' }]))
+          .rejects.toMatchObject({ message });
+        await expect(receive([{ materialId: 'mat-1', quantity: 1.5, purchaseOrderLineId: 'pol-1' }])).resolves.toMatchObject({ purchaseOrderId: 'po-1' });
+        // A whole amount owed takes no part-unit at all.
+        line.orderedQty = new Prisma.Decimal(13);
+        await expect(receive([{ materialId: 'mat-1', quantity: 2.5, purchaseOrderLineId: 'pol-1' }])).rejects.toMatchObject({ message });
       });
 
       it("refuses another supplier's delivery against the order", async () => {

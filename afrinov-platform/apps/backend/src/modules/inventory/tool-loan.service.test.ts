@@ -56,7 +56,8 @@ const withRelations = (r: Row) => ({
 });
 
 const client = {
-  $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => { db.locks.push(key); return 0; }),
+  // The hold on the items' units (holdUnits) is left out: these are the tool locks.
+  $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => { if (!strings.join('').includes('FOR SHARE')) db.locks.push(key); return 0; }),
   material: {
     findUnique: async ({ where }: { where: { id: string } }) => db.materials.find((m) => m.id === where.id) ?? null,
     findMany: async ({ where }: { where: { category?: string; id?: { in: string[] } } }) => (where.id
@@ -441,13 +442,25 @@ describe('ToolLoanService and whole units', () => {
   });
 
   // Qodo, PR #153: a loan of 1.5 from before the rule could never be checked in in full.
-  it('takes back what is left of a loan made in part-units, but no new part of one', async () => {
+  it('takes back the part-unit of a loan made in part-units, but no other part of one', async () => {
     const loanId = loanOf(1.5);
-    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'GOOD' }] }))
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.25, condition: 'GOOD' }] }))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
-    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 1, condition: 'GOOD' }] });
     await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'DAMAGED', note: 'Half a set' }] });
-    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN').map((r) => r.quantity.toString())).toEqual(['1', '0.5']);
+    // What is left is whole now, so it comes back whole.
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 0.5, condition: 'GOOD' }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId, quantity: 1, condition: 'GOOD' }] });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN').map((r) => r.quantity.toString())).toEqual(['0.5', '1']);
+  });
+
+  // Qodo, PR #153: lines adding up to a whole loan could still split it into part-tools.
+  it('refuses to split a whole loan into part-tools, however the lines add up', async () => {
+    const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-bukho', actorId: 'u-1', lines: [{ materialId: 'm-scraper', locationId: 'l-store', quantity: 2 }] });
+    await expect(ToolLoanService.checkIn({ actorId: 'u-1', lines: [
+      { loanId: loanId!, quantity: 1.5, condition: 'GOOD' }, { loanId: loanId!, quantity: 0.5, condition: 'LOST', note: 'Half went missing' },
+    ] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Scraper is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(db.ledger.filter((r) => r.type === 'LOAN_RETURN' || r.type === 'ADJUSTMENT')).toEqual([]);
   });
 
   it('takes the whole of a part-unit loan in one go, split over lines', async () => {

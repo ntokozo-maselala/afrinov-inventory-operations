@@ -17,6 +17,17 @@ export interface UnitOfMeasure {
 
 export const QUANTITY_DECIMALS = 4;
 
+/** In ten-thousandths, as the server stores quantities: 10 - 9.7 is 0.3, not 0.3000000000000007. */
+const tenThousandths = (n: number) => Math.round(n * 10 ** QUANTITY_DECIMALS);
+
+/** Whether a part-unit quantity carries exactly the part-unit of what is left. */
+function carriesRemainderPart(value: number, remainder: number | undefined): boolean {
+  if (remainder === undefined) return false;
+  const whole = 10 ** QUANTITY_DECIMALS;
+  const part = tenThousandths(remainder) % whole;
+  return part !== 0 && tenThousandths(value) % whole === part;
+}
+
 /**
  * The kind of an item's unit. Until the list has loaded, or for a unit not on
  * it, a quantity is taken as measured: the server still refuses part of a
@@ -35,8 +46,9 @@ interface ParseOptions {
   allowZero?: boolean;
   /**
    * What is still left to close off (owed on an order, out on an issue or a
-   * loan). A counted item may take exactly this even in part-units, so stock
-   * booked that way before the rule can be finished; as the server allows.
+   * loan). When it is part of a unit, a counted item may carry exactly that
+   * part (0.5 or 2.5 out of 2.5), so stock booked that way before the rule can
+   * be finished, as the server's fitsRemainder allows.
    */
   remainder?: number;
 }
@@ -76,7 +88,7 @@ export function parseQuantity(text: string, kind: UnitKind, unit: string, opts: 
   const plain = t.replace(',', '.');
   if (!/^(\d+(\.\d*)?|\.\d+)$/.test(plain)) return { ok: false, empty: false, error: 'Enter a number, for example 12.' };
   const decimals = (plain.split('.')[1] ?? '').replace(/0+$/, '').length;
-  if (kind === 'COUNTED' && decimals > 0 && Number(plain) !== opts.remainder) {
+  if (kind === 'COUNTED' && decimals > 0 && !carriesRemainderPart(Number(plain), opts.remainder)) {
     return { ok: false, empty: false, error: `Counted in whole ${unit}: enter 1, 2, 3 …` };
   }
   if (decimals > QUANTITY_DECIMALS) return { ok: false, empty: false, error: `At most ${QUANTITY_DECIMALS} decimal places.` };

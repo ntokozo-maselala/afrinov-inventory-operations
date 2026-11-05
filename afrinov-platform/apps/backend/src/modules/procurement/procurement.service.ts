@@ -489,17 +489,6 @@ export const PurchaseOrderService = {
     // that rule may still hold Stores items, and its award keeps them.
     if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), lineMaterials);
     refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), lineMaterials);
-    // An award is checked too: an RFQ sent before the rule may ask for part of
-    // a counted item, and a sent RFQ's lines can no longer be changed.
-    try {
-      await checkWholeUnits(input.lines.map((l) => ({ materialId: l.materialId, quantity: l.orderedQty })), db);
-    } catch (e) {
-      if (opts.fromRfq && e instanceof ApiError) {
-        throw Errors.validation(`${e.message} ${opts.fromRfq.number} asks for part of one, so it can't be awarded: cancel it and raise the request for quotation again.`, e.details);
-      }
-      throw e;
-    }
-
     // Details left out are filled as the template fills them: payment terms
     // from the supplier, the delivery block from Settings (unless the goods
     // are collected), the Afrinov contact from whoever raises the order.
@@ -538,6 +527,17 @@ export const PurchaseOrderService = {
       const held = await lineMaterialsOf(ids, tx);
       if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), held);
       refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), held);
+      // Whole units of a counted item, read under the same hold, so a change of
+      // unit waits for this order. An award is checked too: an RFQ sent before
+      // the rule may ask for part of one, and a sent RFQ's lines can't change.
+      try {
+        await checkWholeUnits(input.lines.map((l) => ({ materialId: l.materialId, quantity: l.orderedQty })), tx);
+      } catch (e) {
+        if (opts.fromRfq && e instanceof ApiError) {
+          throw Errors.validation(`${e.message} ${opts.fromRfq.number} asks for part of one, so it can't be awarded: cancel it and raise the request for quotation again.`, e.details);
+        }
+        throw e;
+      }
       // Serialize PO-number generation so two concurrent creates cannot
       // collide on the same sequential number. The advisory lock is scoped
       // to this transaction and auto-released on commit/rollback.

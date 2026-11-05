@@ -1459,20 +1459,31 @@ describe('whole units and the direction of an adjustment', () => {
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message });
     const { transactionId } = await issueOne({ materialId: 'washer-1', locationId: 'loc-1', quantity: 80, actorId: 'u' });
     await expect(InventoryService.returnToStock({ issueTransactionId: transactionId, quantity: 0.5, actorId: 'u' }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Material is counted in whole numbers (each). Enter 1, 2, 3 …' });
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message });
     expect(getBalance('washer-1', 'loc-1').toString()).toBe('670');
     expect(trxRows.filter((r) => r.type === 'RETURN' || r.type === 'TRANSFER_OUT')).toHaveLength(0);
   });
 
   // Qodo, PR #153: half an issued washer from before the rule could never come back.
-  it('takes back what is left of an issue made in part-units, but no new part of one', async () => {
+  it('takes back the part-unit of an issue made in part-units, but no other part of one', async () => {
+    const message = 'Item washer-1 is counted in whole numbers (each). Enter 1, 2, 3 …';
     await InventoryService.adjust({ materialId: 'washer-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
     trxRows.push({ id: 'iss-old', materialId: 'washer-1', locationId: 'loc-1', type: 'ISSUE', quantity: new Prisma.Decimal(-2.5), actorId: 'u', recipientId: 'user-3', postedAt: new Date() });
-    await expect(InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.5, actorId: 'u' }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Material is counted in whole numbers (each). Enter 1, 2, 3 …' });
-    await InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 2, actorId: 'u' });
-    const last = await InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.5, actorId: 'u' });
+    await expect(InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.25, actorId: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message });
+    await InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.5, actorId: 'u' });
+    // What is left is whole now, so it comes back whole.
+    await expect(InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 0.5, actorId: 'u' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message });
+    const last = await InventoryService.returnToStock({ issueTransactionId: 'iss-old', quantity: 2, actorId: 'u' });
     expect(last).toMatchObject({ returnedQuantity: '2.5', returnableQuantity: '0' });
+  });
+
+  // Qodo, PR #153: parts adding up to a whole issue could still split it into part-units.
+  it('refuses to split a whole issue into part-units, however the parts add up', async () => {
+    await InventoryService.adjust({ materialId: 'washer-1', locationId: 'loc-1', quantity: 10, reasonCode: 'COUNT_VARIANCE', actorId: 'u' });
+    const { transactionId } = await issueOne({ materialId: 'washer-1', locationId: 'loc-1', quantity: 1, actorId: 'u' });
+    await expect(InventoryService.returnMany({ actorId: 'u', lines: [{ issueTransactionId: transactionId, quantity: 0.5 }, { issueTransactionId: transactionId, quantity: 0.5 }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'Item washer-1 is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    expect(trxRows.filter((r) => r.type === 'RETURN')).toHaveLength(0);
   });
 
   it('still takes a fraction of a measured item', async () => {

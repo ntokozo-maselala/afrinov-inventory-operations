@@ -22,7 +22,7 @@ import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
 import { checkWriteOff, writeOffRule } from './write-off-limit.js';
-import { checkWholeUnits, fitsUnitKind, wholeUnitsMessage } from '../../shared/units.js';
+import { checkWholeUnits } from '../../shared/units.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -251,7 +251,7 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   const restocking = gtZero(input.qty);
   const issue = await tx.inventoryTransaction.findUnique({
     where: { id: input.issueTransactionId },
-    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true, name: true, trackUse: true, unitOfMeasure: true, unit: { select: { kind: true } } } } },
+    include: { reversedBy: { select: { id: true } }, material: { select: { sku: true, trackUse: true } } },
   });
   if (!issue) throw Errors.notFound('InventoryTransaction');
   if (issue.type !== InventoryTransactionType.ISSUE || issue.reversesId) {
@@ -276,11 +276,10 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   const closedOff = closedTotal((await closedOffAgainst(tx, [issue.id])).get(issue.id));
   const returnable = issued.minus(alreadyReturned).minus(closedOff);
   const total = input.qty.plus(usedUp).plus(broken);
-  // Whole units, unless this closes off exactly what is left of an issue made
-  // in part-units before the rule.
-  if (![input.qty, usedUp, broken].every((q) => fitsUnitKind(issue.material.unit.kind, q)) && !total.equals(returnable)) {
-    throw Errors.validation(wholeUnitsMessage(issue.material.name, issue.material.unitOfMeasure));
-  }
+  // Whole units, but for one part that carries the part-unit still out on an
+  // issue made before the rule, so what is left becomes whole.
+  await checkWholeUnits([input.qty, usedUp, broken].filter(gtZero).map((quantity) => (
+    { materialId: issue.materialId, quantity, group: issue.id, remainder: returnable })), tx);
   if (total.gt(returnable)) {
     const what = marking ? `take back ${total.toString()} × ${issue.material.sku}` : `return ${input.qty.toString()} × ${issue.material.sku}`;
     throw Errors.validation(

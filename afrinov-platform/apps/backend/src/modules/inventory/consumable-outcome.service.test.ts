@@ -30,7 +30,8 @@ const live = (o: Outcome) => !o.withdrawsId && !db.outcomes.some((w) => w.withdr
 
 function client(): unknown {
   return {
-    $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => { db.locks.push(String(values[0])); return 1; },
+    // The hold on the items' units (holdUnits) is left out: these are the balance locks.
+    $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => { if (!strings.join('').includes('FOR SHARE')) db.locks.push(String(values[0])); return 1; },
     inventoryTransaction: {
       // A reversal of the issue, looked for again under the lock.
       findFirst: async ({ where }: { where: { reversesId: string } }) => db.txns.find((x) => x.reversesId === where.reversesId) ?? null,

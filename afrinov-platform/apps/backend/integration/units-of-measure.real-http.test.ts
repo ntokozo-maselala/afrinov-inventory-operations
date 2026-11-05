@@ -5,7 +5,9 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, ledgerAndBalance, login, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { holdUnits } from '../src/shared/units.js';
+import { recomputeBalance, storesStock } from '../src/shared/inventory/balances.js';
 
 interface Unit { code: string; label: string; kind: 'COUNTED' | 'MEASURED'; needsReview: boolean; active: boolean }
 type Failure = { error?: { code: string; message: string } };
@@ -90,5 +92,34 @@ describe('units of measure over real HTTP', () => {
     expect((await adjust({ quantity: -80, reasonCode: 'DAMAGE', recipientId: null })).status).toBe(201);
     expect((await adjust({ quantity: 5, reasonCode: 'FOUND', reasonNote: 'Behind rack B' })).status).toBe(201);
     expect(await onHand(washerId)).toBe('675');
+  });
+
+  // Qodo, PR #153: a movement adding a part-unit, and a change to a counted unit,
+  // each checked before the other committed, left half a unit on a counted item.
+  it('makes a change to a counted unit wait for a movement under way, and see what it left', async () => {
+    const rod = await api<{ id: string }>('POST', '/materials', { sku: `IT-UOM-ROD-${run}`, name: `Threaded rod ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'm' });
+    const admin = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
+    let held!: () => void;
+    let release!: () => void;
+    const isHeld = new Promise<void>((r) => { held = r; });
+    const gate = new Promise<void>((r) => { release = r; });
+    // A movement, as a service makes one: the unit checked under the hold, then 0.5 m booked.
+    const movement = prisma.$transaction(async (tx) => {
+      await holdUnits([rod.body.id], tx);
+      held();
+      await gate;
+      await tx.inventoryTransaction.create({ data: { materialId: rod.body.id, locationId: rackId, type: 'RECEIPT', quantity: 0.5, actorId: admin.id } });
+      await recomputeBalance(storesStock(rod.body.id, rackId), tx);
+    }, { timeout: 20_000 });
+    await isHeld;
+    const change = api<Failure>('PATCH', `/materials/${rod.body.id}`, { unitOfMeasure: 'each' });
+    // The change waits on the movement's hold; let the movement finish.
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await movement;
+    const res = await change;
+    expect(res.status).toBe(400);
+    expect(res.body.error?.message).toMatch(/holds part of a unit \(0\.5 at /);
+    expect((await prisma.material.findUniqueOrThrow({ where: { id: rod.body.id } })).unitOfMeasure).toBe('m');
   });
 });

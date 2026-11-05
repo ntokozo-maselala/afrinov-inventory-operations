@@ -53,6 +53,27 @@ async function checkSerial(serialNumber: string, category: string, exceptId?: st
   if (holder) throw Errors.conflict(`Serial number "${serialNumber}" is already on ${holder.sku}`);
 }
 
+/**
+ * Refuses a move to a counted unit while the item holds part of one on hand: it
+ * could then never be moved. The item's row is held FOR UPDATE first; every
+ * movement checked against the unit holds it FOR SHARE (holdUnits), so a
+ * movement that adds a part-unit either commits before this looks, and is
+ * seen, or waits and is checked against the counted unit.
+ */
+async function refusePartUnits(materialId: string, name: string, unit: string, tx: Prisma.TransactionClient) {
+  await tx.$executeRaw`SELECT 1 FROM materials WHERE id = ${materialId} FOR UPDATE`;
+  const parts = (await tx.inventoryBalance.findMany({
+    where: { materialId, quantity: { not: 0 } },
+    select: { quantity: true, location: { select: { name: true } } },
+  })).filter((b) => !b.quantity.isInteger());
+  if (parts.length > 0) {
+    throw Errors.validation(
+      `${name} holds part of a unit (${parts.slice(0, 3).map((b) => `${b.quantity.toString()} at ${b.location.name}`).join(', ')}), so it can't be counted in whole ${unit} yet. Count it to a whole number on Count stock first.`,
+      { field: 'unitOfMeasure' },
+    );
+  }
+}
+
 /** Tools are lent and come back, so there is nothing to mark used up or broken. */
 function checkTrackUse(trackUse: boolean | undefined, category: string) {
   if (trackUse && category === 'TOOLS') throw Errors.validation('Tools are lent and checked back in, so they do not track use after issue');
@@ -140,21 +161,10 @@ export const MaterialService = {
       ? await checkUnitOfMeasure(input.unitOfMeasure, prisma)
       : null;
     if (newUnit) data.unitOfMeasure = newUnit.code;
-    // Moved to a counted unit, the item must not hold part-units it could
-    // then never move: they are counted to a whole number first.
-    if (newUnit?.kind === 'COUNTED') {
-      const name = input.name ?? before.name;
-      const parts = (await prisma.inventoryBalance.findMany({
-        where: { materialId: before.id, quantity: { not: 0 } },
-        select: { quantity: true, location: { select: { name: true } } },
-      })).filter((b) => !b.quantity.isInteger());
-      if (parts.length > 0) {
-        throw Errors.validation(
-          `${name} holds part of a unit (${parts.slice(0, 3).map((b) => `${b.quantity.toString()} at ${b.location.name}`).join(', ')}), so it can't be counted in whole ${newUnit.code} yet. Count it to a whole number on Count stock first.`,
-          { field: 'unitOfMeasure' },
-        );
-      }
-      if (input.requiredStock === undefined) checkQuantityForUnit(name, newUnit, before.requiredStock, 'requiredStock');
+    // Moved to a counted unit, a part-unit Required Stock is made whole first;
+    // the stock on hand is checked under the lock, below.
+    if (newUnit?.kind === 'COUNTED' && input.requiredStock === undefined) {
+      checkQuantityForUnit(input.name ?? before.name, newUnit, before.requiredStock, 'requiredStock');
     }
     if (input.requiredStock !== undefined) {
       const unit = newUnit ?? await prisma.unitOfMeasure.findUniqueOrThrow({ where: { code: before.unitOfMeasure }, select: { code: true, kind: true } });
@@ -174,6 +184,7 @@ export const MaterialService = {
     }
 
     const after = await prisma.$transaction(async (tx) => {
+      if (newUnit?.kind === 'COUNTED') await refusePartUnits(before.id, input.name ?? before.name, newUnit.code, tx);
       const material = await tx.material.update({ where: { id: input.id }, data, include: withProject });
       await tx.auditLogEntry.create({
         data: {

@@ -24,9 +24,12 @@ describe('the lines of a delivery against an order', () => {
 describe('checkReceiptLines and counted items', () => {
   const counted = () => 'COUNTED' as const;
   const line = { materialId: 'm-1', locationId: 'loc-1', purchaseOrderLineId: 'pl-1', outstanding: 2.5, label: 'WSH-1 — Washer', unit: 'each' };
-  it('takes exactly what is still owed, but no other part of one', () => {
+  it('takes the part-unit still owed, with any whole ones, but no other part of one', () => {
     expect(checkReceiptLines([{ ...line, quantity: '2,5' }], true, counted)).toMatchObject({ lines: [{ quantity: '2,5' }] });
+    expect(checkReceiptLines([{ ...line, quantity: '1,5' }], true, counted)).toMatchObject({ lines: [{ quantity: '1,5' }] });
     expect(checkReceiptLines([{ ...line, quantity: '2' }], true, counted)).toMatchObject({ lines: [{ quantity: '2' }] });
-    expect(checkReceiptLines([{ ...line, quantity: '1,5' }], true, counted)).toEqual({ problem: 'WSH-1 — Washer: Counted in whole each: enter 1, 2, 3 …' });
+    expect(checkReceiptLines([{ ...line, quantity: '1,25' }], true, counted)).toEqual({ problem: 'WSH-1 — Washer: Counted in whole each: enter 1, 2, 3 …' });
+    // A whole amount owed takes no part-unit (Qodo, PR #153).
+    expect(checkReceiptLines([{ ...line, outstanding: 3, quantity: '2,5' }], true, counted)).toEqual({ problem: 'WSH-1 — Washer: Counted in whole each: enter 1, 2, 3 …' });
   });
 });

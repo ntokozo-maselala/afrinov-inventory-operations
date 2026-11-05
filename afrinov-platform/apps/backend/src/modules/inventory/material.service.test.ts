@@ -39,6 +39,7 @@ function makePrisma(): unknown {
         .filter((b) => b.materialId === where.materialId && b.quantity !== 0)
         .map((b) => ({ quantity: new Prisma.Decimal(b.quantity), location: { name: b.location } })),
     },
+    $executeRaw: async () => 1,
     unitOfMeasure: {
       findUnique: async ({ where }: { where: { code: string } }) => UNITS[where.code] ?? null,
       findUniqueOrThrow: async ({ where }: { where: { code: string } }) => UNITS[where.code]!,
@@ -161,11 +162,11 @@ describe('MaterialService moving an item to a counted unit', () => {
   it('refuses while it holds part of a unit, or keeps a part-unit Required Stock', async () => {
     const m = await MaterialService.create({ sku: 'CBL-1', name: 'Welding cable', category: 'CONSUMABLES', unitOfMeasure: 'm', requiredStock: 2.5 }, 'admin');
     db.balances.push({ materialId: m.id, quantity: 7.5, location: 'Rack A' });
-    await expect(MaterialService.update({ id: m.id, unitOfMeasure: 'each' }, 'admin')).rejects.toMatchObject({
+    await expect(MaterialService.update({ id: m.id, unitOfMeasure: 'each' }, 'admin')).rejects.toMatchObject({ message: 'Welding cable is counted in whole numbers (each). Enter 1, 2, 3 …' });
+    await expect(MaterialService.update({ id: m.id, unitOfMeasure: 'each', requiredStock: 3 }, 'admin')).rejects.toMatchObject({
       code: 'VALIDATION_ERROR', message: 'Welding cable holds part of a unit (7.5 at Rack A), so it can\'t be counted in whole each yet. Count it to a whole number on Count stock first.',
     });
     db.balances[0]!.quantity = 8;
-    await expect(MaterialService.update({ id: m.id, unitOfMeasure: 'each' }, 'admin')).rejects.toMatchObject({ message: 'Welding cable is counted in whole numbers (each). Enter 1, 2, 3 …' });
     expect((await MaterialService.update({ id: m.id, unitOfMeasure: 'each', requiredStock: 3 }, 'admin')).unitOfMeasure).toBe('each');
   });
 });

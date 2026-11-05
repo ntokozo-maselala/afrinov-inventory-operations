@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { COUNTED_AT_RELEASE, UNIT_ALIASES, unitCode, fitsUnitKind, checkWholeUnits, checkUnitOfMeasure, checkQuantityForUnit } from './units.js';
+import { COUNTED_AT_RELEASE, UNIT_ALIASES, unitCode, fitsUnitKind, fitsRemainder, checkWholeUnits, checkUnitOfMeasure, checkQuantityForUnit } from './units.js';
 
 const D = (v: number | string) => new Prisma.Decimal(v);
 
@@ -39,20 +39,38 @@ describe('fitsUnitKind', () => {
     expect(fitsUnitKind('COUNTED', D('2.5'))).toBe(false);
   });
 
-  it('takes exactly the remainder of a counted item, so part-units from before the rule can be closed off', () => {
-    expect(fitsUnitKind('COUNTED', D('0.5'), D('0.5'))).toBe(true);
-    expect(fitsUnitKind('COUNTED', D('0.5'), D('2.5'))).toBe(false);
-    expect(fitsUnitKind('COUNTED', D('2'), D('2.5'))).toBe(true);
-  });
-
   it('takes fractions for a measured unit', () => {
     expect(fitsUnitKind('MEASURED', D('2.5'))).toBe(true);
     expect(fitsUnitKind('MEASURED', D('0.0001'))).toBe(true);
   });
 });
 
+// Qodo, PR #153: a whole issue or loan must not be split into part-units.
+describe('fitsRemainder', () => {
+  it('takes from a part-unit remainder one part carrying its part-unit, the rest whole', () => {
+    expect(fitsRemainder('COUNTED', [D('2.5')], D('2.5'))).toBe(true);
+    expect(fitsRemainder('COUNTED', [D('0.5')], D('2.5'))).toBe(true);
+    expect(fitsRemainder('COUNTED', [D('1.5'), D('1')], D('2.5'))).toBe(true);
+    expect(fitsRemainder('COUNTED', [D('0.25')], D('2.5'))).toBe(false);
+    expect(fitsRemainder('COUNTED', [D('0.25'), D('0.25')], D('2.5'))).toBe(false);
+  });
+
+  it('takes nothing but whole units from a whole remainder, however it is split', () => {
+    expect(fitsRemainder('COUNTED', [D('2'), D('1')], D('3'))).toBe(true);
+    expect(fitsRemainder('COUNTED', [D('2.5'), D('0.5')], D('3'))).toBe(false);
+    expect(fitsRemainder('COUNTED', [D('1.5'), D('0.5')], D('2'))).toBe(false);
+    expect(fitsRemainder('COUNTED', [D('0.5'), D('0.5')], D('1'))).toBe(false);
+  });
+
+  it('takes any fraction of a measured unit', () => {
+    expect(fitsRemainder('MEASURED', [D('0.25'), D('2.75')], D('3'))).toBe(true);
+  });
+});
+
 describe('checkWholeUnits', () => {
+  const held: string[] = [];
   const db = {
+    $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => { held.push(strings.join('?') + JSON.stringify(values)); return 1; },
     material: {
       findMany: async () => [
         { id: 'washer', name: 'M16 flat washer', unitOfMeasure: 'each', unit: { kind: 'COUNTED' as const } },
@@ -68,6 +86,19 @@ describe('checkWholeUnits', () => {
 
   it('passes whole counted quantities and fractions of measured ones', async () => {
     await expect(checkWholeUnits([{ materialId: 'washer', quantity: 80 }, { materialId: 'cable', quantity: 2.5 }], db)).resolves.toBeUndefined();
+  });
+
+  it('holds the items for the rest of the transaction, so a change of unit waits', async () => {
+    held.length = 0;
+    await checkWholeUnits([{ materialId: 'washer', quantity: 2 }], db);
+    expect(held).toHaveLength(1);
+    expect(held[0]).toMatch(/FOR SHARE/);
+  });
+
+  it('checks lines taking from one remainder together', async () => {
+    const line = (quantity: number) => ({ materialId: 'washer', quantity, group: 'pol-1', remainder: D('2.5') });
+    await expect(checkWholeUnits([line(2), line(0.5)], db)).resolves.toBeUndefined();
+    await expect(checkWholeUnits([line(0.5), line(0.5)], db)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('leaves an item it cannot find to the caller', async () => {

@@ -70,14 +70,34 @@ async function main(): Promise<void> {
       AND (pl.ordered_qty - pl.received_qty) <> trunc(pl.ordered_qty - pl.received_qty)
     ORDER BY po.number, m.sku`).filter((r) => counted(r.unit));
 
-  // Issued or lent in part-units and not reversed: what is left of them may be part of one.
+  // What is still out on each unreversed issue and tool loan, as the services
+  // work it out: an issue less what came back and its live used-up and broken
+  // marks (a withdrawn mark, or a withdrawal, doesn't count); a loan less what
+  // was checked in and any lost write-off waiting for approval. Listed only
+  // when that remainder is part of a unit.
   const out = (await prisma.$queryRaw<Row[]>`
-    SELECT m.sku, m.unit_of_measure AS unit, (-t.quantity)::text AS quantity,
-      lower(t.type::text) || ' of ' || to_char(t.posted_at, 'YYYY-MM-DD') AS at
-    FROM inventory_transactions t JOIN materials m ON m.id = t.material_id
-    WHERE t.type IN ('ISSUE', 'LOAN') AND t.reverses_id IS NULL AND t.quantity <> trunc(t.quantity)
-      AND NOT EXISTS (SELECT 1 FROM inventory_transactions r WHERE r.reverses_id = t.id)
-    ORDER BY t.posted_at`).filter((r) => counted(r.unit));
+    WITH open_out AS (
+      SELECT t.id, t.material_id, t.type, t.posted_at,
+        -t.quantity
+        - COALESCE((SELECT SUM(r.quantity) FROM inventory_transactions r
+            WHERE r.reference_id = t.id
+              AND ((t.type = 'ISSUE' AND r.type = 'RETURN' AND r.reference_type = 'Return')
+                OR (t.type = 'LOAN' AND r.type = 'LOAN_RETURN' AND r.reference_type = 'ToolLoan'))), 0)
+        - CASE WHEN t.type = 'ISSUE' THEN COALESCE((SELECT SUM(o.quantity) FROM consumable_outcomes o
+            WHERE o.issue_transaction_id = t.id AND o.withdraws_id IS NULL
+              AND NOT EXISTS (SELECT 1 FROM consumable_outcomes w WHERE w.withdraws_id = o.id)), 0) ELSE 0 END
+        - CASE WHEN t.type = 'LOAN' THEN COALESCE((SELECT -SUM(q.quantity) FROM adjustment_requests q
+            WHERE q.status = 'PENDING' AND q.reference_type = 'ToolLoan' AND q.reference_id = t.id), 0) ELSE 0 END
+        AS remaining
+      FROM inventory_transactions t
+      WHERE t.type IN ('ISSUE', 'LOAN') AND t.reverses_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM inventory_transactions x WHERE x.reverses_id = t.id)
+    )
+    SELECT m.sku, m.unit_of_measure AS unit, o.remaining::text AS quantity,
+      'still out on the ' || lower(o.type::text) || ' of ' || to_char(o.posted_at, 'YYYY-MM-DD') AS at
+    FROM open_out o JOIN materials m ON m.id = o.material_id
+    WHERE o.remaining > 0 AND o.remaining <> trunc(o.remaining)
+    ORDER BY o.posted_at`).filter((r) => counted(r.unit));
 
   const blocking = [
     section('Counted items holding part of a unit on hand: count them on Count stock', onHand, true),
@@ -85,7 +105,7 @@ async function main(): Promise<void> {
     section('Open RFQs asking for part of a counted item: change a draft; cancel and raise a sent one again', rfqs, true),
   ].some(Boolean);
   section('Part-units still owed on open orders: receive exactly that to finish them', owed, false);
-  section('Issues and tool loans made in part-units: take back exactly what is left to close them', out, false);
+  section('Part-units still out on issues and tool loans: take back the part-unit (with any whole ones) to close them', out, false);
 
   if (unlisted.length === 0 && !blocking) {
     console.log('\nEvery unit maps onto the list, and nothing will be blocked by the whole-unit rule.');

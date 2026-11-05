@@ -296,7 +296,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
       {canReturn && (
         <ReturnSection
           transaction={transaction}
-          returnable={issued - returned - usedUp - broken}
+          returnable={round4(issued - returned - usedUp - broken)}
           onReturned={() => onReturned?.()}
           onError={onError}
         />

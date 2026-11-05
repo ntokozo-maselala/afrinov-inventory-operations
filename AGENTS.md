@@ -141,13 +141,17 @@ Use these forms; the older spellings still work but are deprecated or removed.
 - **Quantities follow the item's unit.** Units live in `units_of_measure`;
   a COUNTED unit (each, pair, box) takes whole numbers, a MEASURED one (m, kg, l)
   up to 4 decimals. Every service that takes a quantity a person typed calls
-  `checkWholeUnits` (`src/shared/units.ts`); figures the system works out are
-  not checked again. Where something is left to close off (owed on an order,
-  out on an issue or a tool loan), pass it as the `remainder`: exactly that is
-  taken even in part-units, so stock booked that way before the rule can be
-  finished. On the frontend, use `QuantityInput` and `parseQuantity`
-  (`src/lib/quantity.ts`, with the same `remainder` option), never
-  `type="number"`, for a stock quantity. A new spelling of a unit goes in
+  `checkWholeUnits` (`src/shared/units.ts`) inside the transaction that
+  writes; figures the system works out are not checked again. Where something
+  is left to close off (owed on an order line, out on an issue or a tool loan),
+  pass it as the `remainder`, with the lines taking from it in one `group`
+  (`fitsRemainder`): each is whole, except one may carry exactly the
+  remainder's part-unit, so stock booked in part-units before the rule can be
+  finished and none is started. `checkWholeUnits` holds the items' rows
+  `FOR SHARE`, and a change to a counted unit takes them `FOR UPDATE`, so the
+  two can't interleave. On the frontend, use `QuantityInput` and
+  `parseQuantity` (`src/lib/quantity.ts`, with the same `remainder` option),
+  never `type="number"`, for a stock quantity. A new spelling of a unit goes in
   `UNIT_ALIASES`.
 - **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
   stock, Found only adds it, Other goes either way; Found and Other need a note
