@@ -61,9 +61,9 @@ export interface PoDocumentOrder {
   deliveryContactPhone?: string | null;
   afrinovContact?: string | null;
   createdBy?: { name: string } | null;
-  approvedBy?: { name: string } | null;
+  approvedBy?: { id?: string; name: string } | null;
   /** Who signed it, oldest first; the Authorization box prints each. Older orders have only approvedBy. */
-  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { name: string } | null }>;
+  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { id?: string; name: string } | null }>;
   approvedAt?: string | null;
   /** The small print as it was when the order was approved; null before. */
   printedTerms?: Partial<PoSmallPrintWording> | null;
@@ -344,10 +344,7 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
   ensure(34);
   y += 2;
   const signed = po.signatures ?? [];
-  // Someone who approved it without signing, as when the threshold was raised
-  // part-way and the signatures it had were then enough. Older orders, with none
-  // recorded, have only their approver.
-  const finishedBy = signed.length > 0 && po.approvedAt && po.approvedBy && !signed.some((s) => s.signedBy?.name === po.approvedBy!.name) ? po.approvedBy : null;
+  const finishedBy = approvedWithoutSigning(po);
   // A fourth box when two signed, as an order from the Director's value up is.
   const boxes = signed.length > 1 || finishedBy ? 4 : 3;
   const third = (width - 4 * (boxes - 1)) / boxes;
@@ -359,24 +356,25 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(...INK);
-    doc.text(pdfText(title), x + 2, y + 4.5);
+    // Cut to the box, so a long name can't run into the one beside it.
+    doc.text(fitLine(doc, pdfText(title), third - 4), x + 2, y + 4.5);
     doc.setFont('helvetica', 'normal');
-    doc.text(pdfText(name), x + 2, y + 10);
+    doc.text(fitLine(doc, pdfText(name), third - 4), x + 2, y + 10);
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    doc.text(pdfText(note), x + 2, y + 14.5);
+    doc.text(fitLine(doc, pdfText(note), third - 4), x + 2, y + 14.5);
     doc.line(x + 2, y + 22, x + third - 2, y + 22);
     doc.text('Signature and date', x + 2, y + 25);
   };
   signature('Originator', po.createdBy?.name ?? dash, formatDate(po.createdAt), 0);
   if (signed.length > 1 || finishedBy) {
     signed.slice(0, 2).forEach((s, i) => signature(
-      s.step === 'DIRECTOR' ? 'Authorization (Director)' : 'Authorization (Procurement)',
+      s.step === 'DIRECTOR' ? 'Director' : 'Procurement Manager',
       s.signedBy?.name ?? dash,
       `${s.standIn ? 'Stood in, signed' : 'Signed'} ${formatDate(s.signedAt)}`,
       i + 1,
     ));
-    if (finishedBy) signature('Authorization (approved)', finishedBy.name, `Approved ${formatDate(po.approvedAt!)}`, 2);
+    if (finishedBy) signature('Final approval', finishedBy.name, `Approved ${formatDate(po.approvedAt!)}`, 2);
   } else if (signed.length === 1) {
     // Part-signed, it isn't approved yet; the stamp across the page says so too.
     const only = signed[0]!;
@@ -390,6 +388,17 @@ export async function buildPoDocument(po: PoDocumentOrder, company: PoCompany, g
 
   finishPages(doc, documentStamp(po.status), `${po.number} ${revisionLabel(po.revision)} · ${company.name} · Printed ${formatDate(generatedAt.toISOString())}`);
   return doc.output('arraybuffer');
+}
+
+/**
+ * Whoever approved the order without signing it, as when the threshold was raised
+ * part-way and the signatures it had were then enough. By id, as two people can
+ * share a name. Null when the approver signed, or on an older order with none recorded.
+ */
+export function approvedWithoutSigning(po: Pick<PoDocumentOrder, 'signatures' | 'approvedBy' | 'approvedAt'>): { name: string } | null {
+  const signed = po.signatures ?? [];
+  if (signed.length === 0 || !po.approvedAt || !po.approvedBy) return null;
+  return signed.some((s) => s.signedBy?.id === po.approvedBy!.id) ? null : po.approvedBy;
 }
 
 /** The text cut to `width` with an ellipsis, so a long name can't run into what is beside it. */

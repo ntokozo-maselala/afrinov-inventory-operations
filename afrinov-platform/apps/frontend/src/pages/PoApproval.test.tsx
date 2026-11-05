@@ -135,8 +135,8 @@ describe('the record of who signed', () => {
     current.po = {
       ...order('APPROVED'), approvedAt: '2026-11-03T09:00:00Z', approvedBy: { id: 'u-c', name: 'Chief Executive' },
       signatures: [
-        { step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { name: 'Ona Moloane' } },
-        { step: 'DIRECTOR', signedAt: '2026-11-03T09:00:00Z', standIn: true, signedBy: { name: 'Chief Executive' } },
+        { step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { id: 'u-o', name: 'Ona Moloane' } },
+        { step: 'DIRECTOR', signedAt: '2026-11-03T09:00:00Z', standIn: true, signedBy: { id: 'u-c', name: 'Chief Executive' } },
       ],
     } as typeof current.po;
     page(['PROCUREMENT']);
@@ -146,7 +146,7 @@ describe('the record of who signed', () => {
   it('names whoever approved it without signing, as well as who signed', async () => {
     current.po = {
       ...order('APPROVED'), approvedAt: '2026-11-03T09:00:00Z', approvedBy: { id: 'u-2', name: 'Second Person' },
-      signatures: [{ step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { name: 'Ona Moloane' } }],
+      signatures: [{ step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { id: 'u-o', name: 'Ona Moloane' } }],
     } as typeof current.po;
     page(['PROCUREMENT']);
     expect(await screen.findByText('by Ona Moloane, approved by Second Person')).toBeInTheDocument();

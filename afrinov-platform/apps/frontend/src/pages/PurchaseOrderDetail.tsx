@@ -17,7 +17,7 @@ import { Field, Textarea } from '../components/Field';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney, formatRate, type PoTotals } from '../lib/poMoney';
 import { usePermissions } from '../hooks/usePermissions';
-import { PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
+import { approvedWithoutSigning, PO_DOCUMENT_SETTINGS, companyFromSettings, documentStamp, downloadPoDocument, revisionLabel } from '../lib/poDocument';
 import type { OrderDetails } from '../components/PurchaseOrderDetailsFields';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { ORDER_PERMISSION, ORDER_SECTION, kindOfPath, orderKindOf, orderPath, receivePath } from '../lib/orderKind';
@@ -65,7 +65,7 @@ interface PO extends OrderDetails {
   approvedAt?: string | null;
   approvedBy?: POUser | null;
   /** Who signed it, oldest first. */
-  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { name: string } | null }>;
+  signatures?: Array<{ step: string; signedAt: string; standIn?: boolean; signedBy?: { id?: string; name: string } | null }>;
   deliveredAt?: string | null;
   deliveredBy?: POUser | null;
   deliveryNotes?: string | null;
@@ -120,8 +120,8 @@ function approvedByLine(po: PO): string {
   const signatures = po.signatures ?? [];
   if (signatures.length === 0) return po.approvedBy?.name ?? '—';
   const names = signatures.map((s) => `${s.signedBy?.name ?? 'A removed user'}${s.standIn ? ' (standing in)' : ''}`);
-  const approver = po.approvedBy?.name;
-  if (approver && !signatures.some((s) => s.signedBy?.name === approver)) names.push(`approved by ${approver}`);
+  const finishedBy = approvedWithoutSigning(po);
+  if (finishedBy) names.push(`approved by ${finishedBy.name}`);
   return names.join(', ');
 }
 
