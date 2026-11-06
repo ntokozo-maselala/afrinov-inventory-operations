@@ -164,6 +164,10 @@ export function Tools() {
         </Field>
       </FilterBar>
 
+      <p className="text-sm text-surface-500 mb-3">
+        Active tools only. <Link to="/materials?section=TOOLS" className="btn-link">Every tool is on Materials</Link>, and so is the Tooling, PPE &amp; Electrical category, which isn&rsquo;t checked out.
+      </p>
+
       {tools.error && !tools.stale && <ErrorState error={tools.error} onRetry={tools.reload} />}
       {tools.stale && <StaleDataNotice error={tools.error} onRetry={tools.reload} />}
       {(!tools.error || tools.stale) && (

@@ -244,4 +244,11 @@ describe('Tools page', () => {
     expect(screen.queryByRole('button', { name: /Check (out|in)/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Extend/ })).not.toBeInTheDocument();
   });
+
+  // Tools lists active tools, in the Tools category only (ADR-031).
+  it('says what it counts, and links to every tool on Materials', async () => {
+    renderPage();
+    expect(await screen.findByRole('link', { name: 'Every tool is on Materials' })).toHaveAttribute('href', '/materials?section=TOOLS');
+    expect(screen.getByText(/Tooling, PPE & Electrical category/)).toBeInTheDocument();
+  });
 });

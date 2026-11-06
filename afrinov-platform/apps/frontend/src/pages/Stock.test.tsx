@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+const { mockGet, summary } = vi.hoisted(() => ({ mockGet: vi.fn(), summary: { states: { NEVER_RECEIVED: 0 } } }));
 vi.mock('../api/client', () => ({
-  api: { get: mockGet },
+  api: { get: (path: string) => (path === '/materials/summary' ? Promise.resolve(summary) : mockGet(path)) },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 vi.mock('../components/RoleGuard', () => ({ RoleGuard: () => null }));
@@ -77,7 +77,7 @@ describe('Stock page: Stores stock only', () => {
     const discs = within(table).getAllByText('Cutting disc');
     expect(discs).toHaveLength(1);
     expect(within(discs[0]!.closest('tr')!).getByText('30')).toBeInTheDocument();
-    expect(screen.getByText('3 of 3 lines')).toBeInTheDocument();
+    expect(screen.getByText(/^3 of 3 lines/)).toBeInTheDocument();
   });
 });
 
@@ -129,5 +129,43 @@ describe('Stock page: a room link while the locations are unavailable', () => {
     expect(await screen.findByText('ELSEWHERE')).toBeInTheDocument();
     expect(screen.queryByText('ON-RACK')).toBeNull();
     expect((screen.getByLabelText('Room') as HTMLSelectElement).value).toBe('boiler');
+  });
+});
+
+// Stock counts lines, an item at a location, so it says how many items that is
+// and which it can't list (ADR-031).
+describe('Stock page: lines and items', () => {
+  const line = (over: Record<string, unknown>) => ({
+    materialSku: 'DISC', materialName: 'Disc', category: 'CONSUMABLES', locationName: 'A-1', quantity: '5', unitOfMeasure: 'each',
+    requiredStock: '10', stockStatus: 'OK', percentOfRequired: 50, heldForProject: null, ...over,
+  });
+  const rows = [
+    line({ materialId: 'm-1', locationId: 'l-1' }),
+    line({ materialId: 'm-1', locationId: 'l-2', locationName: 'A-2' }),
+    line({ materialId: 't-1', locationId: 'l-1', materialSku: 'DRILL', materialName: 'Drill', category: 'TOOLS' }),
+  ];
+  const open = () => render(<MemoryRouter initialEntries={['/stock']}><ToastProvider><Stock /></ToastProvider></MemoryRouter>);
+
+  beforeEach(() => {
+    summary.states.NEVER_RECEIVED = 0;
+    mockGet.mockReset().mockImplementation(async (path: string) => (path === '/locations' ? [] : rows));
+  });
+
+  it('counts an item in two locations once, and says how many tools are among the items', async () => {
+    open();
+    expect(await screen.findByText('3 of 3 lines · 2 items, 1 tool among them')).toBeInTheDocument();
+  });
+
+  it('links to the items it cannot list', async () => {
+    summary.states.NEVER_RECEIVED = 3;
+    open();
+    expect(await screen.findByRole('link', { name: '3 items' })).toHaveAttribute('href', '/materials?stock=never');
+    expect(screen.getByText(/never received, so not listed here/)).toBeInTheDocument();
+  });
+
+  it('says nothing when every item has been received', async () => {
+    open();
+    await screen.findByText('3 of 3 lines · 2 items, 1 tool among them');
+    expect(screen.queryByText(/never received/)).not.toBeInTheDocument();
   });
 });
