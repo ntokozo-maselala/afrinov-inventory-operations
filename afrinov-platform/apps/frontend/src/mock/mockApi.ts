@@ -1170,6 +1170,8 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (p === '/materials/no-project/leftovers/move' && method === 'POST') {
     return mockMoveLeftovers(null, (body as { items?: Array<{ materialId: string; category: string }> })?.items ?? []);
   }
+  const deactivationCheck = method === 'GET' ? /^\/materials\/([^/]+)\/deactivation-check$/.exec(p) : null;
+  if (deactivationCheck) return { blockers: deactivationBlockers(deactivationCheck[1]!) };
   if (method === 'GET' && p.startsWith('/materials/')) {
     const id = p.slice('/materials/'.length);
     const m = findMaterial(id);
@@ -4183,6 +4185,28 @@ function outcomeEventRow(o: MockConsumableOutcome): MockMovementRow {
 }
 
 /** A due date change as a Movements row: its loan's item, place, person and project, and no quantity. */
+/** As the server's blockersOf: what stands between an item and being deactivated. */
+function deactivationBlockers(id: string) {
+  const m = findMaterial(id);
+  if (!m) throw err('NOT_FOUND', 'Material not found');
+  const lines = state.transactions.filter((t) => t.materialId === id);
+  const onHand = lines.reduce((n, t) => n + Number(t.quantity), 0);
+  const onLoan = -lines.filter((t) => t.type === 'LOAN' || t.type === 'LOAN_RETURN').reduce((n, t) => n + Number(t.quantity), 0);
+  const waiting = state.adjustmentRequests.filter((r) => r.status === 'PENDING' && r.materialId === id).length;
+  const blockers: Array<{ kind: string; text: string; orderId?: string; projectNumber?: string | null }> = [];
+  if (onHand > 0) blockers.push({ kind: 'STOCK', text: `${onHand} ${m.unitOfMeasure} on hand` });
+  if (onLoan > 0) blockers.push({ kind: 'LOAN', text: `${onLoan} ${m.unitOfMeasure} out on loan` });
+  if (waiting > 0) blockers.push({ kind: 'APPROVAL', text: `${waiting} adjustment${waiting === 1 ? '' : 's'} waiting for approval` });
+  for (const po of state.purchaseOrders) {
+    if (!['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'].includes(po.status)) continue;
+    for (const l of po.lines) {
+      const owed = Number(l.orderedQty) - Number(l.receivedQty ?? 0);
+      if (l.materialId === id && owed > 0) blockers.push({ kind: 'ORDER', text: `Order ${po.number}: ${owed} ${m.unitOfMeasure} still owed`, orderId: po.id, projectNumber: po.projectNumber ?? null });
+    }
+  }
+  return blockers;
+}
+
 /** As the server's setStatus: a change to the status it already has does nothing. */
 function setMaterialStatus(id: string, b: { active: boolean; reasonCode: string; note?: string }) {
   const m = findMaterial(id);
@@ -4190,6 +4214,10 @@ function setMaterialStatus(id: string, b: { active: boolean; reasonCode: string;
   const note = b.note?.trim() || null;
   if (b.reasonCode === 'OTHER' && !note) throw err('VALIDATION_ERROR', 'Add a note saying why');
   if (m.active === b.active) return m;
+  if (!b.active) {
+    const blockers = deactivationBlockers(id);
+    if (blockers.length > 0) throw err('CONFLICT', `${m.sku} is not clear yet: ${blockers.map((x) => x.text).join('; ')}`);
+  }
   m.active = b.active;
   state.materialStatusChanges.push({ id: nextId('status'), materialId: m.id, active: b.active, reasonCode: b.reasonCode, note, actorId: 'user-1', createdAt: new Date().toISOString() });
   return m;

@@ -3,6 +3,12 @@
 // on Movements, and says why from a short list, so the reasons can be reported on.
 import { Errors } from '../../shared/errors.js';
 
+/**
+ * Inactive means nothing moves (ADR-032). Said the same way on every refusal,
+ * with who can put it right, so stock that turns up can always be booked.
+ */
+export const inactiveMessage = (sku: string) => `${sku} is inactive. Ask a Store Controller to reactivate it first.`;
+
 /** What a status change's Movements row points at. */
 export const STATUS_CHANGE_REFERENCE = 'MaterialStatusChange';
 

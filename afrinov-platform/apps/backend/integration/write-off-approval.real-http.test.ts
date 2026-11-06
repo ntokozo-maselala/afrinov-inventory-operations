@@ -5,7 +5,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, retireAsBefore, runId, startServer, type TestServer } from './helpers.js';
 
 interface Outcome { status: 'POSTED' | 'PENDING_APPROVAL'; transactionId?: string; requestId?: string; value?: string | null; limit?: string; error?: { code: string; message: string } }
 interface Request { id: string; status: string; quantity: string; value: string | null; requestedBy: { name: string }; decidedBy: { name: string } | null; transactionId: string | null; decisionNote: string | null }
@@ -286,9 +286,13 @@ describe('write-off approval over real HTTP', () => {
     const [loanId] = out.body.loanIds;
     const lost = await storeman<{ writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST', note: 'Dropped in the dam' }] });
     const [requestId] = lost.body.writeOffRequestIds;
-    expect((await api('PATCH', `/materials/${level.body.id}/status`, { active: false, reasonCode: 'OBSOLETE' })).status).toBe(200);
+    // Deactivating is refused while it waits, so only an item from before that rule gets here.
+    const refusedDeactivate = await api('PATCH', `/materials/${level.body.id}/status`, { active: false, reasonCode: 'OBSOLETE' });
+    expect(refusedDeactivate.status).toBe(409);
+    await retireAsBefore(level.body.id);
     const refused = await api<{ error: { code: string; message: string } }>('POST', `/adjustment-requests/${requestId}/approve`);
-    expect([refused.status, refused.body.error.message]).toEqual([400, 'Material is inactive']);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.message).toMatch(/is inactive\. Ask a Store Controller to reactivate it first\.$/);
     expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: requestId! } })).status).toBe('PENDING');
     expect(await prisma.inventoryTransaction.count({ where: { type: 'LOAN_RETURN', referenceId: loanId } })).toBe(0);
   });

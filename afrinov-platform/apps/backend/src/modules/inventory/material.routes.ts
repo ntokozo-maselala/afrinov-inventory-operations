@@ -132,6 +132,11 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
     return MaterialService.update({ id, ...parsed.data }, actorId);
   });
 
+  app.get('/materials/:id/deactivation-check', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.EditMaterial);
+    return MaterialService.deactivationCheck((req.params as { id: string }).id);
+  });
+
   app.patch('/materials/:id/status', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.EditMaterial);
     const id = (req.params as { id: string }).id;

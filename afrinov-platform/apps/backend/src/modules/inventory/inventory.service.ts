@@ -23,7 +23,7 @@ import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates 
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
 import { checkWriteOff, writeOffRule } from './write-off-limit.js';
 import { checkWholeUnits, holdUnits } from '../../shared/units.js';
-import { STATUS_CHANGE_REFERENCE } from './material-status.js';
+import { STATUS_CHANGE_REFERENCE, inactiveMessage } from './material-status.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -191,7 +191,7 @@ export async function checkMaterialActive(materialId: string, tx: Prisma.Transac
   await holdUnits([materialId], tx);
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
-  if (!m.active) throw Errors.validation('Material is inactive');
+  if (!m.active) throw Errors.validation(inactiveMessage(m.sku));
   return m;
 }
 
@@ -272,6 +272,8 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   // Returns and outcomes against this issue share what is still out, so both take this lock.
   const back = { materialId: issue.materialId, locationId, heldForProject: issue.heldForProject };
   await lockInventoryBalances([{ ...back, locationId: issue.locationId }, back], tx);
+  // Stock coming back is a movement; used up and broken move none, so they can still be booked.
+  if (gtZero(input.qty)) await checkMaterialActive(issue.materialId, tx);
   // A reversal may have committed while this waited for the lock.
   if (await tx.inventoryTransaction.findFirst({ where: { reversesId: issue.id }, select: { id: true } })) {
     throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
@@ -1151,6 +1153,7 @@ export const InventoryService = {
 
         // A reversal must not take any balance below zero.
         await lockInventoryBalances(legs, tx);
+        await checkMaterialActive(original.materialId, tx);
         // Checked under the lock that returns and used up or broken marks take,
         // so one booked at the same moment cannot slip past.
         if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
@@ -1618,6 +1621,7 @@ export const InventoryService = {
       // be received again. Checked before anything is written (it is also
       // checked when the receipt is recorded).
       for (const line of gr.lines) {
+        await checkMaterialActive(line.materialId, tx);
         if (gr.purchaseOrderId && !line.purchaseOrderLineId) {
           throw Errors.validation('Every line of a receipt against a purchase order must name the order line it is for.');
         }

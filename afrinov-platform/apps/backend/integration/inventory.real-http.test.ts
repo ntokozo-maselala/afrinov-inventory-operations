@@ -11,6 +11,7 @@ import {
   login,
   prisma,
   requireAdminPassword,
+  retireAsBefore,
   runId,
   startServer,
   type TestServer,
@@ -199,8 +200,7 @@ describe('stock movements over real HTTP', () => {
   });
 
   it('refuses movements on an inactive material', async () => {
-    const deactivate = await api('PATCH', `/materials/${materialId}/status`, { active: false, reasonCode: 'OBSOLETE' });
-    expect(deactivate.status).toBe(200);
+    await retireAsBefore(materialId);
     try {
       const res = await api('POST', '/inventory-issues', issueBody(storeA, 1));
       expect(res.status).toBe(400);
