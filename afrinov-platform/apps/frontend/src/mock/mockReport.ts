@@ -104,15 +104,16 @@ interface ReportInput {
 
 export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
   // Filter materials
-  let materials = input.materials.slice();
-  if (q.itemStatus === 'ACTIVE') materials = materials.filter((m) => m.active);
-  if (q.itemStatus === 'INACTIVE') materials = materials.filter((m) => !m.active);
-  if (q.category.length > 0) materials = materials.filter((m) => q.category.includes(m.category));
-  if (q.materialId.length > 0) materials = materials.filter((m) => q.materialId.includes(m.id));
+  let chosen = input.materials.slice();
+  if (q.category.length > 0) chosen = chosen.filter((m) => q.category.includes(m.category));
+  if (q.materialId.length > 0) chosen = chosen.filter((m) => q.materialId.includes(m.id));
   if (q.search) {
     const needle = q.search.toLowerCase();
-    materials = materials.filter((m) => m.sku.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle));
+    chosen = chosen.filter((m) => m.sku.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle));
   }
+  let materials = chosen;
+  if (q.itemStatus === 'ACTIVE') materials = materials.filter((m) => m.active);
+  if (q.itemStatus === 'INACTIVE') materials = materials.filter((m) => !m.active);
 
   // Build balance map: per item, location and holder ('' for Stores, else the project it is held for).
   const balanceMap = new Map<string, number>();
@@ -249,12 +250,14 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
 
   // Movements
   const { from, to } = resolveDateWindow(q);
-  const matIdSet = new Set(materials.map((m) => m.id));
+  // Never by itemStatus: a movement happened whatever became of its item.
+  const matIdSet = new Set(chosen.map((m) => m.id));
   let trx = input.transactions.filter((t) => matIdSet.has(t.materialId));
   if (from) trx = trx.filter((t) => new Date(t.postedAt) >= from);
   if (to) trx = trx.filter((t) => new Date(t.postedAt) < to);
   if (q.movementType) trx = trx.filter((t) => t.type === q.movementType);
   trx.sort((a, b) => b.postedAt.localeCompare(a.postedAt));
+  const movementCount = trx.length;
   trx = trx.slice(0, 1000);
 
   const movements: ReportMovementRow[] = trx.map((t) => {
@@ -422,7 +425,7 @@ export function buildReport(q: ReportQuery, input: ReportInput): ReportResult {
     categoryCount: categorySet.size,
     locationCount: locationSet.size,
     supplierCount: supplierMap.size,
-    movementCount: movements.length,
+    movementCount,
     currency: CURRENCY,
     generatedAt: new Date().toISOString(),
     rangeLabel: rangeLabel(q),

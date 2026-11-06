@@ -19,6 +19,9 @@ import { heldForOf } from '../../shared/inventory/balances.js';
 type Decimal = Prisma.Decimal;
 type MaterialCategory = PrismaMaterialCategory;
 
+/** The most movements the report lists, newest first; its totals still cover every one. */
+export const REPORT_MOVEMENT_LIMIT = 1000;
+
 export type StockStatus = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
 export type ItemStatus = 'ALL' | 'ACTIVE' | 'INACTIVE';
 
@@ -222,10 +225,9 @@ interface BalanceRow {
   updatedAt: Date;
 }
 
-async function loadMaterials(q: ReportQuery): Promise<MaterialRow[]> {
+/** The items a report's filters choose, whether or not they are active today. */
+function itemWhere(q: ReportQuery): Prisma.MaterialWhereInput {
   const where: Prisma.MaterialWhereInput = {};
-  if (q.itemStatus === 'ACTIVE') where.active = true;
-  if (q.itemStatus === 'INACTIVE') where.active = false;
   if (q.category.length > 0) {
     where.category = { in: q.category as MaterialCategory[] };
   }
@@ -236,7 +238,62 @@ async function loadMaterials(q: ReportQuery): Promise<MaterialRow[]> {
       { name: { contains: q.search, mode: 'insensitive' } },
     ];
   }
+  return where;
+}
+
+async function loadMaterials(q: ReportQuery): Promise<MaterialRow[]> {
+  const where = itemWhere(q);
+  if (q.itemStatus === 'ACTIVE') where.active = true;
+  if (q.itemStatus === 'INACTIVE') where.active = false;
   return prisma.material.findMany({ where, include: { project: { select: { name: true, status: true } } }, orderBy: [{ name: 'asc' }] });
+}
+
+/**
+ * The items the report's movements are limited to, or null for all of them.
+ * Never by itemStatus: a movement happened whatever became of its item, so
+ * deactivating an item leaves its history in the report. A filter that matches
+ * nothing gives an empty list, and so no movements.
+ */
+async function movementItems(q: ReportQuery): Promise<string[] | null> {
+  if (q.category.length === 0 && q.materialId.length === 0 && !q.search) return null;
+  const rows = await prisma.material.findMany({ where: itemWhere(q), select: { id: true } });
+  return rows.map((m) => m.id);
+}
+
+/**
+ * Totals of every movement the report selects, not only those it lists. A
+ * reversed movement and its reversal cancel out, so the summary leaves both
+ * out; they stay in the movements list.
+ */
+async function summariseMovements(where: Prisma.InventoryTransactionWhereInput): Promise<ReportMovementSummary> {
+  const effective: Prisma.InventoryTransactionWhereInput = { ...where, reversesId: null, reversedBy: { is: null } };
+  // Each direction on its own, as a transfer's two legs would otherwise sum to nothing.
+  const [incoming, outgoing] = await Promise.all([
+    prisma.inventoryTransaction.groupBy({ by: ['type'], where: { ...effective, quantity: { gte: 0 } }, _count: { _all: true }, _sum: { quantity: true } }),
+    prisma.inventoryTransaction.groupBy({ by: ['type'], where: { ...effective, quantity: { lt: 0 } }, _count: { _all: true }, _sum: { quantity: true } }),
+  ]);
+  const summary: ReportMovementSummary = {
+    receipts: { count: 0, quantity: 0 },
+    issues: { count: 0, quantity: 0 },
+    transfers: { count: 0, quantity: 0 },
+    adjustments: { count: 0, quantity: 0 },
+    returns: { count: 0, quantity: 0 },
+    total: { count: 0, quantity: 0 },
+  };
+  const buckets: Partial<Record<string, Exclude<keyof ReportMovementSummary, 'total'>>> = {
+    RECEIPT: 'receipts', ISSUE: 'issues', TRANSFER_IN: 'transfers', TRANSFER_OUT: 'transfers', RETURN: 'returns', ADJUSTMENT: 'adjustments',
+  };
+  for (const g of [...incoming, ...outgoing]) {
+    const quantity = Math.abs(toNum(g._sum.quantity));
+    summary.total.count += g._count._all;
+    summary.total.quantity += quantity;
+    const bucket = buckets[g.type];
+    if (bucket) {
+      summary[bucket].count += g._count._all;
+      summary[bucket].quantity += quantity;
+    }
+  }
+  return summary;
 }
 
 async function loadBalances(q: ReportQuery): Promise<BalanceRow[]> {
@@ -453,9 +510,10 @@ export const ReportService = {
     if (from) trxWhere.postedAt = { gte: from };
     if (to) trxWhere.postedAt = { ...(trxWhere.postedAt as object | undefined), lt: to };
     if (q.movementType) trxWhere.type = q.movementType;
-    if (materials.length > 0) trxWhere.materialId = { in: materials.map((m) => m.id) };
+    const scope = await movementItems(q);
+    if (scope) trxWhere.materialId = { in: scope };
 
-    const trx = await prisma.inventoryTransaction.findMany({
+    const [trx, movementCount, movementSummary] = await Promise.all([prisma.inventoryTransaction.findMany({
       where: trxWhere,
       include: {
         material: { select: { sku: true, name: true, category: true } },
@@ -464,8 +522,8 @@ export const ReportService = {
         reversedBy: { select: { id: true } },
       },
       orderBy: { postedAt: 'desc' },
-      take: 1000,
-    });
+      take: REPORT_MOVEMENT_LIMIT,
+    }), prisma.inventoryTransaction.count({ where: trxWhere }), summariseMovements(trxWhere)]);
 
     const movements: ReportMovementRow[] = trx.map((t) => ({
       id: t.id,
@@ -490,43 +548,6 @@ export const ReportService = {
       reversesId: t.reversesId ?? null,
       reversedById: t.reversedBy?.id ?? null,
     }));
-
-    // A reversed movement and its reversal cancel out, so the summary
-    // leaves both out; they stay in the movements list.
-    const effective = movements.filter((m) => !m.reversesId && !m.reversedById);
-    const movementSummary: ReportMovementSummary = {
-      receipts: { count: 0, quantity: 0 },
-      issues: { count: 0, quantity: 0 },
-      transfers: { count: 0, quantity: 0 },
-      adjustments: { count: 0, quantity: 0 },
-      returns: { count: 0, quantity: 0 },
-      total: { count: effective.length, quantity: effective.reduce((a, m) => a + Math.abs(m.quantity), 0) },
-    };
-    for (const m of effective) {
-      switch (m.type) {
-        case 'RECEIPT':
-          movementSummary.receipts.count++;
-          movementSummary.receipts.quantity += m.quantity;
-          break;
-        case 'ISSUE':
-          movementSummary.issues.count++;
-          movementSummary.issues.quantity += Math.abs(m.quantity);
-          break;
-        case 'TRANSFER_IN':
-        case 'TRANSFER_OUT':
-          movementSummary.transfers.count++;
-          movementSummary.transfers.quantity += Math.abs(m.quantity);
-          break;
-        case 'RETURN':
-          movementSummary.returns.count++;
-          movementSummary.returns.quantity += m.quantity;
-          break;
-        case 'ADJUSTMENT':
-          movementSummary.adjustments.count++;
-          movementSummary.adjustments.quantity += Math.abs(m.quantity);
-          break;
-      }
-    }
 
     // Status breakdown
     const byStatus: ReportStatusRow[] = (['IN_STOCK', 'LOW_STOCK', 'OUT_OF_STOCK'] as StockStatus[]).map((status) => {
@@ -707,7 +728,7 @@ export const ReportService = {
       categoryCount: categorySet.size,
       locationCount: locationSet.size,
       supplierCount,
-      movementCount: movements.length,
+      movementCount,
       currency: CURRENCY,
       generatedAt: new Date().toISOString(),
       rangeLabel: safeRangeLabel(q),
