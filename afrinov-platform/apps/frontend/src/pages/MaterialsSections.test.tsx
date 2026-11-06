@@ -1,8 +1,9 @@
-// The Materials screens in two sections (materials sections roadmap, Phase 2):
-// Stores and Projects tabs, the item form asking the section first, and an
-// item's page saying where it belongs. A Projects item has no project of its
-// own: the order it is bought on says which (Project on the Order Roadmap,
-// Phase 3), so nothing asks for, filters by or warns about one.
+// The Materials screens (materials sections roadmap, Phase 2; ADR-031): All
+// items, with Stores, Tools and Projects tabs that add up to it, the item form
+// asking the section first, and an item's page saying where it belongs. A
+// Projects item has no project of its own: the order it is bought on says which
+// (Project on the Order Roadmap, Phase 3), so nothing asks for, filters by or
+// warns about one.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -31,6 +32,12 @@ const item = (sku: string, over: Record<string, unknown> = {}) => ({
 const projectItem = (sku: string, projectNumber: string | null, name = 'Plant upgrade') =>
   item(sku, { category: 'PROJECT_MATERIAL', requiredStock: '0', projectNumber, project: projectNumber ? { projectNumber, name } : null });
 const ITEMS = [item('DISC'), item('DRILL', { category: 'TOOLS' }), projectItem('1369-PIPE', '1369'), projectItem('1402-BOLT', '1402', 'Silo'), projectItem('OLD-PLATE', null)];
+const STOCK_PATH = '/reports/stock-status?section=ALL&includeInactive=true';
+const SUMMARY = {
+  items: 5, active: 5, inactive: 0, tabs: { STORES: 1, TOOLS: 1, PROJECTS: 3 },
+  stock: { lines: 3, items: 1, tools: 0 }, notOnStock: { items: 1, tools: 1 },
+  states: { IN_STOCK: 1, HELD_FOR_PROJECT: 0, OUT_OF_STOCK: 0, NEVER_RECEIVED: 1 }, toolsListed: 1,
+};
 const PROJECTS = [
   { projectNumber: '1369', name: 'Plant upgrade', status: 'ACTIVE', active: true },
   { projectNumber: '1402', name: 'Silo', status: 'PLANNING', active: true },
@@ -40,6 +47,7 @@ const PROJECTS = [
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
     if (path === '/materials') return ITEMS;
+    if (path === '/materials/summary') return SUMMARY;
     if (path.startsWith('/materials/')) return ITEMS.find((m) => m.id === path.slice('/materials/'.length));
     if (path.startsWith('/projects')) return PROJECTS;
     if (path.startsWith('/settings/values')) return {};
@@ -55,13 +63,108 @@ const list = (url = '/materials') => render(
 // The item codes in the table, in order.
 const skus = () => within(screen.getByRole('table')).getAllByRole('link').map((a) => a.textContent).filter((t) => t && /^[A-Z0-9-]+$/.test(t));
 
-describe('Materials: Stores and Projects tabs', () => {
-  it('opens on Stores, with only Stores items', async () => {
+const tab = (name: RegExp) => screen.getByRole('tab', { name });
+const stockRow = (sku: string, stockState: string, over: Record<string, unknown> = {}) => ({
+  materialId: `m-${sku}`, sku, onHand: '0', onLoan: '0', heldForProjects: '0', status: 'NOT_SET', percentOfRequired: null, locations: [], stockState, ...over,
+});
+const withStock = (rows: unknown[]) => {
+  const base = mockGet.getMockImplementation()!;
+  mockGet.mockImplementation(async (path: string) => (path === STOCK_PATH ? rows : base(path)));
+};
+
+describe('Materials: All items, Stores, Tools and Projects tabs', () => {
+  it('opens on every item, Projects material and tools included', async () => {
     list();
     await screen.findByText('DISC');
-    expect(screen.getByRole('tab', { name: /Stores/ })).toHaveAttribute('aria-selected', 'true');
-    expect(skus()).toEqual(['DISC', 'DRILL']);
+    expect(tab(/All items/)).toHaveAttribute('aria-selected', 'true');
+    expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT', 'DISC', 'DRILL', 'OLD-PLATE']);
+  });
+
+  it('has tabs that add up to the whole, with no item under two of them', async () => {
+    list();
+    await screen.findByText('DISC');
+    expect(tab(/All items/)).toHaveTextContent('5');
+    expect(tab(/Stores/)).toHaveTextContent('1');
+    expect(tab(/Tools/)).toHaveTextContent('1');
+    expect(tab(/Projects/)).toHaveTextContent('3');
+    expect(screen.getByText(/5 items = 1 Stores \+ 1 Tools \+ 3 Projects/)).toBeInTheDocument();
+  });
+
+  it('says what type each item is on All items, and links to what was never received', async () => {
+    list();
+    const row = (await screen.findByText('1369-PIPE')).closest('tr')!;
+    expect(within(row).getByText('Projects')).toBeInTheDocument();
+    expect(within(screen.getByText('DRILL').closest('tr')!).getByText('Tools')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '1 never received' })).toHaveAttribute('href', '/materials?stock=never');
+  });
+
+  it('keeps tools off the Stores tab, and Project Material out of its categories', async () => {
+    list('/materials?section=STORES');
+    await screen.findByText('DISC');
+    expect(skus()).toEqual(['DISC']);
     expect(screen.queryByRole('option', { name: 'Project Material' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Tools' })).not.toBeInTheDocument();
+  });
+
+  it('lists tools on their own tab, and adds one there as a tool', async () => {
+    list('/materials?section=TOOLS');
+    await screen.findByText('DRILL');
+    expect(skus()).toEqual(['DRILL']);
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    const drawer = screen.getByRole('dialog');
+    expect(within(drawer).getByRole('radio', { name: /Stores/ })).toBeChecked();
+    expect(within(drawer).getByLabelText(/^Category/)).toHaveValue('TOOLS');
+  });
+
+  it('shows where each item stands, and calls unreceived Projects material bought per order', async () => {
+    withStock([
+      stockRow('DISC', 'IN_STOCK', { onHand: '8', locations: [{ locationId: 'a', locationName: 'A', quantity: '5' }, { locationId: 'b', locationName: 'B', quantity: '3' }] }),
+      stockRow('DRILL', 'NEVER_RECEIVED'),
+      stockRow('1369-PIPE', 'NEVER_RECEIVED'),
+      stockRow('1402-BOLT', 'HELD_FOR_PROJECT', { heldForProjects: '4' }),
+    ]);
+    list();
+    const row = async (sku: string) => (await screen.findByText(sku)).closest('tr')!;
+    expect(await within(await row('DISC')).findByText('In stock')).toBeInTheDocument();
+    expect(within(await row('DRILL')).getByText('Never received')).toBeInTheDocument();
+    expect(within(await row('1369-PIPE')).getByText('Bought per order')).toBeInTheDocument();
+    expect(within(await row('1402-BOLT')).getByText('Held for a project')).toBeInTheDocument();
+    expect(within(await row('1402-BOLT')).getByText('+4 held for projects')).toBeInTheDocument();
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect((await row('DISC')).querySelectorAll('td')[headers.indexOf('On hand')]).toHaveTextContent('2 locations');
+    // Projects material has no Required Stock.
+    expect((await row('1369-PIPE')).querySelectorAll('td')[headers.indexOf('Required')]).toHaveTextContent('—');
+  });
+
+  it('filters by stock from the address, leaving out Projects material never meant to be stock', async () => {
+    withStock([stockRow('DISC', 'IN_STOCK', { onHand: '8' }), stockRow('DRILL', 'NEVER_RECEIVED'), stockRow('1369-PIPE', 'NEVER_RECEIVED')]);
+    list('/materials?stock=never');
+    await screen.findByText('DRILL');
+    expect(skus()).toEqual(['DRILL']);
+    expect(screen.getByLabelText('Stock')).toHaveValue('never');
+  });
+
+  it('drops the stock filter on the Projects tab, where nothing is stock', async () => {
+    withStock([stockRow('DRILL', 'NEVER_RECEIVED')]);
+    list('/materials?stock=never');
+    await screen.findByText('DRILL');
+    fireEvent.click(tab(/Projects/));
+    await screen.findByText('1369-PIPE');
+    expect(screen.queryByLabelText('Stock')).not.toBeInTheDocument();
+    expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
+  });
+
+  it('shows the list, with no stock filter, when stock could not be loaded', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === STOCK_PATH) throw Object.assign(new Error('down'), { code: 'SERVICE_UNAVAILABLE' });
+      return base(path);
+    });
+    list('/materials?stock=never');
+    await screen.findByText('DISC');
+    expect(await screen.findByText('Stock figures could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Stock')).not.toBeInTheDocument();
+    expect(skus()).toContain('DISC');
   });
 
   it('shows Projects items with no Project column or filter, and no "needs a project" step', async () => {
@@ -96,7 +199,7 @@ describe('Materials: Stores and Projects tabs', () => {
   it('reloads stock on hand with the list once a Stores item is added', async () => {
     list();
     await screen.findByText('DISC');
-    const stockLoads = () => mockGet.mock.calls.filter(([path]) => path === '/reports/stock-status').length;
+    const stockLoads = () => mockGet.mock.calls.filter(([path]) => path === STOCK_PATH).length;
     expect(stockLoads()).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     const drawer = screen.getByRole('dialog');

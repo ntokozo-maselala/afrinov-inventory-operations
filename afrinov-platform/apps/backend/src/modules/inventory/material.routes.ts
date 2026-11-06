@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { MaterialService } from './material.service.js';
+import { CatalogueService } from './catalogue.service.js';
 import { LocationService } from './location.service.js';
 import { LEFTOVER_CATEGORIES, ProjectLeftoversService } from './project-leftovers.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
@@ -76,6 +77,13 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
       section: q.section,
       projectNumber: q.projectNumber,
     });
+  });
+
+  // How the catalogue adds up against Stock and Tools (ADR-031). It says what is
+  // in stock, so it takes the permission Stock does.
+  app.get('/materials/summary', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return CatalogueService.summary();
   });
 
   // The units an item can have, and whether each is counted or measured.

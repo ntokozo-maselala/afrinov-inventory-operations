@@ -837,3 +837,32 @@ nobody signed for the new amount; it stays approved when its value falls. Migrat
 `src/shared/permissions.ts`, `src/modules/settings/settings.service.ts`,
 `afrinov-platform/apps/frontend/src/pages/PurchaseOrderDetail.tsx`,
 `src/lib/poDocument.ts`, `src/pages/SettingsSections.tsx`.
+
+### ADR-031 — Materials counts items; Stock counts lines; one definition relates them
+**Date:** 2026-11-06 · **Status:** Accepted
+
+**Context:** Stock plus Tools never matched Materials, so items looked missing
+from the catalogue. Nothing was: all three read the same table. They count
+different things. Stock counts lines, an item at a location, so an item in two
+places is two; it can't list an item never received, which has no balance.
+Tools counts active tools only. The Stores tab already included tools, so a
+received tool was counted on both pages, and Materials opened on Stores, so
+Project Material was out of sight.
+
+**Decision:** Materials is the one page that counts every item. It opens on All
+items, with Stores, Tools and Projects tabs that add up to it, and each item
+shows its stock state: in stock, held for a project, out of stock or never
+received. One definition serves everything: `catalogueTabOf`, `stockStateOf` and
+`summarise` in `modules/inventory/catalogue.service.ts`, read by
+`GET /materials/summary`, the rows of `GET /reports/stock-status` and
+`check:catalogue`. Stock shows both its lines and the items they make up, and
+links to what it can't list.
+
+**Consequences:** A tool's own tab is a view only. `sectionOf` still puts tools
+in Stores, so order rules, stock rules and reports are unchanged, and
+`?section=STORES` on `GET /materials` still includes them. Stock status keeps
+its defaults (active Stores items) and takes `?section=ALL&includeInactive=true`
+for Materials, which now shows what an inactive item still holds. An item whose
+only stock is held for a project is not "never received", though Stock doesn't
+list it, so `notOnStock` and `states.NEVER_RECEIVED` can differ. Add a new way of
+counting items here, not on a page. No schema change.

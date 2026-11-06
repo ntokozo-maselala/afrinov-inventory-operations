@@ -42,6 +42,8 @@ To check that balances and issued stock add up in a database, run
 To see how a database's units of measure map onto the list, and which counted
 items hold part of a unit, run `npm run check:units --workspace=@afrinov/backend`
 (read-only; works before and after the units migration).
+To see how Materials adds up against Stock and Tools, run
+`npm run check:catalogue --workspace=@afrinov/backend` (read-only).
 
 Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`
@@ -153,6 +155,13 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `parseQuantity` (`src/lib/quantity.ts`, with the same `remainder` option),
   never `type="number"`, for a stock quantity. A new spelling of a unit goes in
   `UNIT_ALIASES`.
+- **Materials counts items; Stock counts lines.** A line is an item at a location,
+  so an item in two places is two lines, and an item never received has none.
+  Tools lists active tools only. Don't add these totals together, and don't count
+  items on a page: `catalogueTabOf`, `stockStateOf` and `summarise`
+  (`src/modules/inventory/catalogue.service.ts`) are the one definition, read by
+  `GET /materials/summary` and `check:catalogue` (ADR-031). The Tools tab is a
+  view: `sectionOf` still puts tools in Stores for orders and stock rules.
 - **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
   stock, Found only adds it, Other goes either way; Found and Other need a note
   (`checkRequestedAdjustment`). The API still takes the signed quantity.

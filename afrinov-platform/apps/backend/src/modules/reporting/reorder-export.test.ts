@@ -6,7 +6,7 @@ import type { StockStatusRow } from './reporting.service.js';
 
 const row = (sku: string, category: string, status: 'URGENT' | 'WARNING', onHand: number, required: number, unitCost: string | null, extra: Partial<StockStatusRow> = {}): StockStatusRow => ({
   materialId: `m-${sku}`, sku, name: `Item ${sku}`, category, unitOfMeasure: 'each',
-  requiredStock: String(required), onHand: String(onHand), onLoan: '0', onOrder: '0', orders: [], percentOfRequired: Math.round((onHand / required) * 1000) / 10,
+  requiredStock: String(required), onHand: String(onHand), onLoan: '0', heldForProjects: '0', stockState: 'IN_STOCK', active: true, onOrder: '0', orders: [], percentOfRequired: Math.round((onHand / required) * 1000) / 10,
   status, reorderQuantity: String(required - onHand), unitCost,
   locations: onHand > 0 ? [{ locationId: 'l-1', locationName: 'A-1', quantity: String(onHand) }] : [],
   lastSupplier: null, projectNumber: null, project: null, ...extra,

@@ -10,7 +10,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
 vi.mock('../api/client', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api/client')>(),
-  api: { get: mockGet },
+  api: { get: (path: string) => (path === '/materials/summary' ? Promise.resolve({ states: { NEVER_RECEIVED: 0 } }) : mockGet(path)) },
 }));
 vi.mock('../components/RoleGuard', () => ({ RoleGuard: () => null }));
 vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: ['STORE_CONTROLLER'] } }) }));
@@ -62,7 +62,7 @@ describe('Stock: the store\u2019s stock, Stores only', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
     expect(within(screen.getByRole('table')).getByText('Required')).toBeInTheDocument();
-    expect(screen.getByText('1 of 1 lines')).toBeInTheDocument();
+    expect(screen.getByText('1 of 1 lines · 1 item')).toBeInTheDocument();
   });
 
   it('lists project material still in the store by project, apart from the stock', async () => {

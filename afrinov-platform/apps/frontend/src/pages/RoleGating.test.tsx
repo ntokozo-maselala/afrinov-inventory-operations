@@ -8,7 +8,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet, signedIn } = vi.hoisted(() => ({ mockGet: vi.fn(), signedIn: { roles: [] as string[] } }));
 vi.mock('../api/client', () => ({
-  api: { get: mockGet, post: vi.fn(), patch: vi.fn(), del: vi.fn() },
+  api: { get: (path: string) => (path === '/materials/summary' ? Promise.resolve({ states: { NEVER_RECEIVED: 0 } }) : mockGet(path)), post: vi.fn(), patch: vi.fn(), del: vi.fn() },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: signedIn.roles } }) }));

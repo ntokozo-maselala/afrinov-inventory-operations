@@ -69,7 +69,15 @@ export async function reportingRoutes(app: FastifyInstance, opts: { procurementE
     const status = (q['status'] ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
     const allowed = ['URGENT', 'WARNING', 'OK', 'NOT_SET'];
     if (status.some((x) => !allowed.includes(x))) throw Errors.validation(`status must be one or more of ${allowed.join(', ')}`);
-    return forViewer(req, await ReportingService.stockStatus({ status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>, category: q['category'], orders }));
+    const section = q['section'] || undefined;
+    if (section && !['STORES', 'PROJECTS', 'ALL'].includes(section)) throw Errors.validation('section must be STORES, PROJECTS or ALL');
+    return forViewer(req, await ReportingService.stockStatus({
+      status: status as Array<'URGENT' | 'WARNING' | 'OK' | 'NOT_SET'>,
+      category: q['category'],
+      section: section as 'STORES' | 'PROJECTS' | 'ALL' | undefined,
+      includeInactive: q['includeInactive'] === 'true',
+      orders,
+    }));
   });
 
   // The stock report: the workbook's Summary and Stock Report sheets, as at the end of

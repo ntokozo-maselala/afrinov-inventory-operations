@@ -2,7 +2,7 @@
 // sections roadmap, Phase 1), so frontend-only mode behaves like the real one.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createMockApi, resetMockState } from './mockApi';
-import type { Material } from '../api/types';
+import type { CatalogueSummary, Material } from '../api/types';
 
 const api = createMockApi();
 const codeOf = (p: Promise<unknown>) => p.then(() => undefined, (e: { code?: string }) => e.code);
@@ -141,5 +141,45 @@ describe('mock: a closed project\'s leftovers move to Stores (Phase 7)', () => {
     expect(await move()).toEqual({ moved: 1 });
     expect(await api.get<Material>(`/materials/${pipe.id}`)).toMatchObject({ section: 'STORES', category: 'CONSUMABLES', projectNumber: null });
     expect((await api.get<{ items: unknown[] }>('/projects/AFRI-1402/leftovers')).items).toEqual([]);
+  });
+});
+
+// As the server (ADR-031): frontend-only mode counts the catalogue the same way.
+describe('mock catalogue summary', () => {
+  it('has tabs that add up to the catalogue, and stock that makes up Stores and Tools', async () => {
+    const s = await api.get<CatalogueSummary>('/materials/summary');
+    const all = await api.get<Material[]>('/materials');
+    expect(s.items).toBe(all.length);
+    expect(s.tabs.STORES + s.tabs.TOOLS + s.tabs.PROJECTS).toBe(s.items);
+    expect(s.stock.items + s.notOnStock.items).toBe(s.tabs.STORES + s.tabs.TOOLS);
+    expect(Object.values(s.states).reduce((a, b) => a + b, 0)).toBe(s.tabs.STORES + s.tabs.TOOLS);
+  });
+
+  it('counts a new item as never received until stock comes in', async () => {
+    const before = await api.get<CatalogueSummary>('/materials/summary');
+    await api.post('/materials', { sku: 'NEW-TOOL', name: 'Press', category: 'TOOLS', unitOfMeasure: 'each' });
+    const after = await api.get<CatalogueSummary>('/materials/summary');
+    expect(after.states.NEVER_RECEIVED).toBe(before.states.NEVER_RECEIVED + 1);
+    expect(after.notOnStock.tools).toBe(before.notOnStock.tools + 1);
+    expect(after.tabs.TOOLS).toBe(before.tabs.TOOLS + 1);
+  });
+});
+
+describe('mock stock status for the catalogue', () => {
+  type Row = { materialId: string; stockState: string; heldForProjects: string; active: boolean };
+
+  it('stays Stores and active by default, and takes every item when asked', async () => {
+    const all = await api.get<Material[]>('/materials');
+    const first = all[0]!;
+    await api.patch(`/materials/${first.id}`, { active: false });
+    const stores = await api.get<Row[]>('/reports/stock-status');
+    expect(stores.map((r) => r.materialId)).not.toContain(first.id);
+    const every = await api.get<Row[]>('/reports/stock-status?section=ALL&includeInactive=true');
+    expect(every).toHaveLength(all.length);
+    expect(every.find((r) => r.materialId === first.id)).toMatchObject({ active: false });
+  });
+
+  it('refuses a section it does not know', async () => {
+    expect(await codeOf(api.get('/reports/stock-status?section=NOPE'))).toBe('VALIDATION_ERROR');
   });
 });

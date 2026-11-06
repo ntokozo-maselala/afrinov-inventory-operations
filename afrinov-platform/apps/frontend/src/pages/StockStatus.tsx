@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useApi } from '../hooks/useApi';
+import type { StockState } from '../api/types';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
 import { Button } from '../components/Button';
@@ -47,6 +48,10 @@ export interface StockStatusItem {
   onHand: string;
   /** Tools: out on loan, still owned; the status counts it with what is on hand. */
   onLoan?: string;
+  /** Held for projects, across every location: not part of on hand. */
+  heldForProjects?: string;
+  /** Where the item stands, from all its stock lines. */
+  stockState?: StockState;
   /** Still to come on approved Stores orders. */
   onOrder?: string;
   /** The Stores orders it is on, soonest due first. */

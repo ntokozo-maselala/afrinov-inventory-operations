@@ -20,6 +20,19 @@ export type MaterialSection = 'STORES' | 'PROJECTS';
 
 export const PROJECTS_CATEGORY = 'PROJECT_MATERIAL';
 
+// The Materials tabs (ADR-031): they split the catalogue so they add up to it.
+// A tool is in the Stores section for orders and stock rules, as sectionOf
+// says, but has a tab of its own, so nothing is counted under two tabs.
+export type CatalogueTab = 'STORES' | 'TOOLS' | 'PROJECTS';
+
+export const TOOLS_CATEGORY = 'TOOLS';
+
+/** The Materials tab an item is on. */
+export function catalogueTabOf(category: string): CatalogueTab {
+  if (category === PROJECTS_CATEGORY) return 'PROJECTS';
+  return category === TOOLS_CATEGORY ? 'TOOLS' : 'STORES';
+}
+
 /** The categories a Stores item can be in. */
 export const STORES_CATEGORIES = CATEGORIES.filter((c) => c.value !== PROJECTS_CATEGORY);
 

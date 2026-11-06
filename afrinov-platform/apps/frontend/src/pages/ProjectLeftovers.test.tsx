@@ -58,7 +58,7 @@ describe('ProjectLeftovers page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move 1 item to Stores' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/projects/1369/leftovers/move', { items: [{ materialId: 'p-1', category: 'CONSUMABLES' }] }));
     // Said in the toast, and kept on the page with where they went.
-    expect(await screen.findByRole('link', { name: 'Stores tab of Materials' })).toHaveAttribute('href', '/materials');
+    expect(await screen.findByRole('link', { name: 'Stores tab of Materials' })).toHaveAttribute('href', '/materials?section=STORES');
   });
 
   // Project Material Through the Store Roadmap, Phase 5: stock held for the

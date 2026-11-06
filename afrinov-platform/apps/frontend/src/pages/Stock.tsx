@@ -15,8 +15,8 @@ import { RoleGuard } from '../components/RoleGuard';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatNumber } from '../lib/format';
 import { StockActionForm, type StockActionKind } from '../components/StockActionForm';
-import { STORES_CATEGORIES, categoryLabel, sectionOf } from '../lib/categories';
-import type { CurrentStockRow } from '../api/types';
+import { STORES_CATEGORIES, TOOLS_CATEGORY, categoryLabel, sectionOf } from '../lib/categories';
+import type { CatalogueSummary, CurrentStockRow } from '../api/types';
 import { balanceKey, isStoresStock } from '../lib/heldFor';
 import { ProjectStockNotice } from '../components/LeftoversNotice';
 import { locationLabel, type NamedLocation } from '../lib/locations';
@@ -34,6 +34,8 @@ const STATUS_OPTIONS = [
 
 export function Stock() {
   const stock = useApi<CurrentStockRow[]>('/reports/current-stock');
+  // What Stock can't list: an item with no stock line has no row here (ADR-031).
+  const summary = useApi<CatalogueSummary>('/materials/summary');
   // Which room each location stands in: for the Room filter and the Location column.
   const locations = useApi<Array<{ id: string; parentId?: string | null } & NamedLocation>>('/locations');
   // Other pages link here with ?q=, ?category= or ?status= (an item's page sends
@@ -88,6 +90,12 @@ export function Stock() {
     return true;
   });
 
+  // A line is an item at a location, so an item in two places is two lines.
+  const shownItems = new Set(filtered.map((r) => r.materialId));
+  const shownTools = new Set(filtered.filter((r) => r.category === TOOLS_CATEGORY).map((r) => r.materialId));
+  const lineCount = `${filtered.length} of ${stores.length} lines · ${plural(shownItems.size, 'item')}${shownTools.size > 0 ? `, ${plural(shownTools.size, 'tool')} among them` : ''}`;
+  const neverReceived = summary.data?.states.NEVER_RECEIVED ?? 0;
+
   const activeFilters = (category ? 1 : 0) + (status ? 1 : 0) + (q ? 1 : 0) + (room ? 1 : 0);
 
   return (
@@ -111,7 +119,7 @@ export function Stock() {
 
       <FilterBar
         onClear={activeFilters > 0 ? () => { setQ(''); setCategory(''); setStatus(''); writeParams({ q: '', category: '', status: '', room: '' }); } : undefined}
-        count={stock.loading || roomPending ? 'Loading…' : `${filtered.length} of ${stores.length} lines`}
+        count={stock.loading || roomPending ? 'Loading…' : lineCount}
       >
         <SearchField id="stock-search" value={q} onChange={changeQ} placeholder="SKU, material or location…" />
         {(rooms.length > 0 || room) && (
@@ -136,6 +144,12 @@ export function Stock() {
           </Select>
         </Field>
       </FilterBar>
+
+      {neverReceived > 0 && (
+        <p className="text-sm text-surface-500 mb-3">
+          <Link to="/materials?stock=never" className="btn-link">{plural(neverReceived, 'item')}</Link> never received, so not listed here.
+        </p>
+      )}
 
       {stock.error && !stock.stale && <ErrorState error={stock.error} onRetry={stock.reload} />}
       {stock.stale && <StaleDataNotice error={stock.error} onRetry={stock.reload} />}
@@ -179,6 +193,8 @@ export function Stock() {
     </div>
   );
 }
+
+const plural = (n: number, word: string) => `${formatNumber(n)} ${word}${n === 1 ? '' : 's'}`;
 
 function actionTitle(kind: StockActionKind, row: CurrentStockRow): string {
   return {

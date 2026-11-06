@@ -33,7 +33,8 @@ permission is required (see `authorization.md`).
 | Recipient | `recipients` | `GET /recipients` (q, type, active), `GET /recipients/:id` — auth; `POST`, `PATCH /:id` (incl. active) — manage:recipients |
 | Report: CurrentStock | derived | `GET /reports/current-stock` (category, locationId, materialId) — view:reports |
 | Report: MovementHistory | derived | `GET /reports/movement-history` (materialId, type, from, to, projectNumber, limit) — view:reports |
-| Report: StockStatus | derived | `GET /reports/stock-status` (status, category) — view:reports |
+| Report: StockStatus | derived | `GET /reports/stock-status` (status, category, section, includeInactive) — view:reports |
+| Report: CatalogueSummary | derived | `GET /materials/summary`: how the catalogue adds up against Stock and Tools (ADR-031) — view:reports |
 | Report: StockValue | derived | `GET /reports/stock-value` — view:reports |
 | Report: LowStock | derived | `GET /reports/low-stock` — view:reports (empty when stock alerts are off) |
 | Report: ReorderList | derived | `GET /reports/reorder-list/export` (.xlsx) — view:reports |
