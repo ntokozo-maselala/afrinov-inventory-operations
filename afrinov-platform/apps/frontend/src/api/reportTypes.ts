@@ -222,3 +222,52 @@ export function heldProjects(r: MonthEndReport): NonNullable<MonthEndReport['pro
 
 export const NO_PROJECT = '__none__';
 export const NO_RECIPIENT = '__none__';
+
+// ── Procurement savings ──────────────────────────────────────────────────
+export interface SavingsPrice { supplier: string; currency: string; unitPrice: string; lineTotal: string }
+
+export interface SavingsRow {
+  rfqId: string;
+  rfqNumber: string;
+  rfqStatus: string;
+  projectNumber: string | null;
+  projectName: string | null;
+  lineNo: number;
+  sku: string;
+  material: string;
+  unitOfMeasure: string;
+  quantity: string;
+  sales: {
+    rfqNumber: string; lineNo: number; description: string; unitOfMeasure: string; quantity: string; cancelled: boolean;
+    prices: SavingsPrice[];
+    /** The lowest rand line total. */
+    lowest: string | null;
+  } | null;
+  procurement: { prices: SavingsPrice[]; lowest: string | null };
+  order: {
+    number: string; status: string; supplier: string; currency: string; quantity: string; unitPrice: string | null;
+    /** Before the line's discount. */
+    lineTotal: string | null;
+    discountPercent: string;
+    discount: string | null;
+  } | null;
+  /** Each positive where the second figure is the lower. Null where they can't be compared. */
+  salesVsProcurement: string | null;
+  procurementVsOrder: string | null;
+  salesVsOrder: string | null;
+  /** Why a figure is blank or left out, in words. */
+  notes: string[];
+}
+
+export interface SavingsReport {
+  from: string;
+  to: string;
+  currency: string;
+  rows: SavingsRow[];
+  total: {
+    sales: string; procurement: string; order: string; discount: string;
+    salesVsProcurement: string; procurementVsOrder: string; salesVsOrder: string;
+    lines: number;
+    linked: number;
+  };
+}

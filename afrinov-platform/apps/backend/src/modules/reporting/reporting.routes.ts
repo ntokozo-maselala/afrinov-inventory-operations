@@ -8,6 +8,8 @@ import { ConsumptionService, NO_PROJECT, NO_RECIPIENT, type ConsumptionQuery } f
 import { buildConsumptionXlsx, consumptionFilename } from './consumption-export.js';
 import { MonthEndService, type StockReportQuery } from './month-end.service.js';
 import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
+import { ProcurementSavingsService } from './procurement-savings.service.js';
+import { buildSavingsXlsx, savingsFilename } from './procurement-savings-export.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
@@ -136,6 +138,31 @@ export async function reportingRoutes(app: FastifyInstance, opts: { procurementE
       .header('Cache-Control', 'no-store')
       .send(buf);
   });
+
+  // What Sales was quoted beside what buyers were and what was ordered, so only
+  // for those who may see Sales' prices, and only with procurement on.
+  if (orders) {
+    const savingsQuery = (req: FastifyRequest) => {
+      const q = req.query as Record<string, string | undefined>;
+      return { from: q['from'], to: q['to'], projectNumber: q['projectNumber'] || undefined };
+    };
+    app.get('/reports/procurement-savings', { preHandler: [app.authenticate] }, async (req) => {
+      await requirePermission(req, PermissionCode.ViewSalesRfq);
+      return ProcurementSavingsService.report(savingsQuery(req));
+    });
+    app.get('/reports/procurement-savings/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+      await requirePermission(req, PermissionCode.ViewSalesRfq);
+      const q = savingsQuery(req);
+      const report = await ProcurementSavingsService.report(q);
+      const buf = await buildSavingsXlsx(report, { scope: q.projectNumber ? `Project ${q.projectNumber}` : 'All projects' });
+      return reply
+        .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        .header('Content-Disposition', `attachment; filename="${savingsFilename(report, q.projectNumber)}"`)
+        .header('Content-Length', String(buf.length))
+        .header('Cache-Control', 'no-store')
+        .send(buf);
+    });
+  }
 
   // The items to re-order (URGENT and WARNING) as an Excel file for the buyer.
   app.get('/reports/reorder-list/export', { preHandler: [app.authenticate] }, async (req, reply) => {

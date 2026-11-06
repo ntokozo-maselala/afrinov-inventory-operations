@@ -5,6 +5,8 @@
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
 | 2026-11-06 | `00-governance/decision-log.md`, `08-api/resource-model.md`, `09-frontend/page-inventory.md` | ADR-031: Materials counts every item, on All items with Stores, Tools and Projects tabs that add up; Stock counts lines and says how many items they are; `GET /materials/summary` and `check:catalogue` | Engineering |
+| 2026-11-05 | `08-api/authorization.md`, `09-frontend/page-inventory.md`, `09-frontend/information-architecture.md` | The Procurement savings report, the third step | Engineering |
+| 2026-11-05 | `07-data/database-schema.md`, `08-api/authorization.md` | Buyers link Procurement RFQ lines to Sales lines, the second step of the Procurement savings report | Engineering |
 | 2026-11-05 | `07-data/database-schema.md`, `08-api/authorization.md`, `09-frontend/page-inventory.md`, `09-frontend/information-architecture.md` | Sales RFQs and the Sales role, the first step of the Procurement savings report | Engineering |
 | 2026-09-01 | All (`00`–`14`) | Initial documentation set created from AS-IS analysis of `07__July_2026_Report.xlsm` and product-scope discussion with business owner | Engineering |
 | 2026-10-09 | `00-governance/assumptions-register.md` | Extended: A-10 to A-20 for claims that cannot be verified in the repository | Engineering (reconciliation against code at 4e6d76f) |

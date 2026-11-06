@@ -332,6 +332,8 @@ export interface MockRfqLine {
   /** Typed as the sheet has it, on a Sales RFQ, whose lines have no catalogue item. */
   description?: string;
   unitOfMeasure?: string;
+  /** What Sales asked for, as the buyer matched it, on a Procurement RFQ. */
+  salesRfqLineId?: string | null;
 }
 
 /** A supplier asked to quote, and their quote once it is recorded. */

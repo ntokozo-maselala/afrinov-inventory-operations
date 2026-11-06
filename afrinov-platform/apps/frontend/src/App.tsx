@@ -32,6 +32,7 @@ const Rfqs = importPage(() => import('./pages/Rfqs').then(m => ({ default: m.Rfq
 const RfqDetail = importPage(() => import('./pages/RfqDetail').then(m => ({ default: m.RfqDetail })));
 const NewRfq = importPage(() => import('./pages/RfqForm').then(m => ({ default: m.NewRfq })));
 const EditRfq = importPage(() => import('./pages/RfqForm').then(m => ({ default: m.EditRfq })));
+const ProcurementSavings = importPage(() => import('./pages/ProcurementSavings').then(m => ({ default: m.ProcurementSavings })));
 const SalesRfqs = importPage(() => import('./pages/SalesRfqs').then(m => ({ default: m.SalesRfqs })));
 const SalesRfqDetail = importPage(() => import('./pages/SalesRfqs').then(m => ({ default: m.SalesRfqDetail })));
 const NewSalesRfq = importPage(() => import('./pages/SalesRfqForm').then(m => ({ default: m.NewSalesRfq })));
@@ -160,6 +161,7 @@ export function App() {
             <Route path="/rfqs/new" element={<RouteBoundary name="New request for quotation"><NewRfq /></RouteBoundary>} />
             <Route path="/rfqs/:id" element={<RouteBoundary name="Request for quotation"><RfqDetail /></RouteBoundary>} />
             <Route path="/rfqs/:id/edit" element={<RouteBoundary name="Edit request for quotation"><EditRfq /></RouteBoundary>} />
+            <Route path="/reports/procurement-savings" element={<RouteBoundary name="Procurement savings report"><ProcurementSavings /></RouteBoundary>} />
             <Route path="/sales-rfqs" element={<RouteBoundary name="Sales RFQs"><SalesRfqs /></RouteBoundary>} />
             <Route path="/sales-rfqs/new" element={<RouteBoundary name="New Sales RFQ"><NewSalesRfq /></RouteBoundary>} />
             <Route path="/sales-rfqs/:id" element={<RouteBoundary name="Sales RFQ"><SalesRfqDetail /></RouteBoundary>} />

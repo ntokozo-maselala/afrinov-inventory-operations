@@ -59,6 +59,8 @@ What Sales asks suppliers to price when costing a job. Apart from Procurement's 
 | `sales_rfq_quote_prices` (SalesRfqQuotePrice) | sales_rfq_supplier_id, sales_rfq_line_id, unit_price | composite PK; excluding VAT, in the quote's currency |
 | `sales_rfq_quote_files` (SalesRfqQuoteFile) | sales_rfq_supplier_id, file_name, size, data, uploaded_at, uploaded_by_id | one PDF per supplier, up to 10 MB |
 
+A buyer matches a Procurement RFQ line to the Sales line it answers, for the savings report: `rfq_lines.sales_rfq_line_id`, optional and shared by as many lines as need it, set to null if the Sales line is deleted. It must be on a Sales RFQ sent for the same project. It follows its item when a draft's lines are edited, and is cleared when a draft moves to another project.
+
 ## Inventory ledger
 | Table (model) | Key columns | Constraints and notes |
 |---|---|---|

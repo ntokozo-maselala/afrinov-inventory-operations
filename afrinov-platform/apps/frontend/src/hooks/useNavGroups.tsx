@@ -67,6 +67,8 @@ export function useNavGroups(): NavGroup[] {
         { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
         { to: '/reports/consumption', label: 'Stock used', icon: <Icon.Cash /> },
         { to: '/reports/stock-report', label: 'Stock report', icon: <Icon.Doc /> },
+        // Sets what Sales was quoted beside what buyers were, so only for those who may see it.
+        ...(PROCUREMENT_ENABLED ? [{ to: '/reports/procurement-savings', label: 'Procurement savings', icon: <Icon.Cash />, permissions: ['sales:view'] }] : []),
         // The history of every movement, as reports with downloads; mistakes are reversed from here.
         { to: '/movements', label: 'Movements', icon: <Icon.Activity /> },
       ],
