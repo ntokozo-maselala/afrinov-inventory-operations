@@ -32,7 +32,7 @@ ALTER TABLE "material_status_changes" ADD CONSTRAINT "material_status_changes_ac
 -- Past changes, from the audit log, which has recorded every one as an update
 -- of the item. They keep their audit entry's id, time and actor; they have no
 -- reason, as none was asked for. A change made by no known user stops this
--- migration: run the pre-flight query in the release notes first.
+-- migration: run the pre-flight query in docs/engineering/DATABASE_ASSURANCE.md first.
 INSERT INTO "material_status_changes" ("id", "material_id", "active", "actor_id", "created_at")
 SELECT a."id", a."entity_id", (a."after"->>'active')::boolean, a."actor_id", a."created_at"
 FROM "audit_log_entries" a
