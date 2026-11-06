@@ -12,6 +12,9 @@ and the recovery considerations for the migration added in this workstream.
   `(material_id, location_id)` pair, recomputed after every movement. The
   integration helper `ledgerAndBalance()` asserts the ledger sum equals the
   stored balance after each workflow.
+- Materials reconciles with Stock and Tools (ADR-031): `npm run check:catalogue`
+  prints how the pages relate, and fails if an item on either isn't on Materials
+  or the tabs don't add up to the catalogue, read-only.
 - An issue's figures add up (ADR-026): issued = returned + used up + broken +
   still out, with still out never negative. `npm run check:issued-stock`
   (`src/modules/inventory/issued-stock-check.ts`) checks that, and the
