@@ -31,6 +31,9 @@
     },
     "fast-json-stringify": {
       "fast-uri": "^4.2.3"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.5"
     }
   },
   "allowScripts": {
