@@ -6,6 +6,7 @@ import { classifyItem, getStatusBands, needsAttention, type StatusBands, type St
 import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
 import { heldForOf } from '../../shared/inventory/balances.js';
 import { categoryWhere, sectionOf, type MaterialSection } from '../inventory/material-section.js';
+import { stockStateOf, type StockState } from '../inventory/catalogue.service.js';
 
 export interface StockStatusRow {
   materialId: string;
@@ -18,6 +19,12 @@ export interface StockStatusRow {
   onHand: string;
   /** Tools only: out on loan, still owned; the status counts it with what is on hand. */
   onLoan: string;
+  /** Held for projects, across every location: not part of `onHand`. */
+  heldForProjects: string;
+  /** Where the item stands, from all its stock lines (catalogue.service.ts). */
+  stockState: StockState;
+  /** False only when inactive items were asked for. */
+  active: boolean;
   /** Still to come on approved Stores orders (ordered less received). */
   onOrder: string;
   /** The Stores orders it is on, soonest due first. */
@@ -271,7 +278,8 @@ export const ReportingService = {
   },
 
   /**
-   * Stock status of every active item: on hand across all locations against
+   * Stock status of every active item (every item with `includeInactive`, for
+   * the catalogue, which lists them): on hand across all locations against
    * Required Stock, URGENT / WARNING / OK by the setting bands, or NOT_SET.
    * Most urgent first, then lowest percentage.
    */
@@ -279,7 +287,7 @@ export const ReportingService = {
    * `orders` counts what is on approved Stores orders: only when procurement is
    * on, as with it off those orders can't be received or cancelled (Qodo, PR #134).
    */
-  async stockStatus(filter: { status?: StockStatus[]; category?: string; section?: MaterialSection | 'ALL'; orders?: boolean } = {}): Promise<StockStatusRow[]> {
+  async stockStatus(filter: { status?: StockStatus[]; category?: string; section?: MaterialSection | 'ALL'; orders?: boolean; includeInactive?: boolean } = {}): Promise<StockStatusRow[]> {
     // Re-ordering is for Stores: Projects material is bought per job, so it is
     // left out unless asked for (materials sections roadmap, Phase 4).
     const section = filter.section ?? 'STORES';
@@ -289,7 +297,7 @@ export const ReportingService = {
       ? filter.category as Prisma.MaterialWhereInput['category']
       : section === 'ALL' ? undefined : categoryWhere(section);
     const materials = await prisma.material.findMany({
-      where: { active: true, ...(category ? { category } : {}) },
+      where: { ...(filter.includeInactive ? {} : { active: true }), ...(category ? { category } : {}) },
       include: { project: { select: { name: true, status: true } } },
       orderBy: { name: 'asc' },
     });
@@ -309,8 +317,10 @@ export const ReportingService = {
       // issue (Qodo, PR #142), and Projects leftovers, which are Stores stock
       // with the item's project. Stock held for a project is that project's:
       // it gets its own views (Project Material Through the Store Roadmap, Phase 4).
-      const mine = (byMaterial.get(m.id) ?? []).filter((b) => b.heldForProject === '');
+      const lines = byMaterial.get(m.id) ?? [];
+      const mine = lines.filter((b) => b.heldForProject === '');
       const onHand = mine.reduce((a, b) => a.add(b.quantity), new Prisma.Decimal(0));
+      const heldForProjects = lines.filter((b) => b.heldForProject !== '').reduce((a, b) => a.add(b.quantity), new Prisma.Decimal(0));
       // A tool out on loan is still owned, so it counts towards Required Stock.
       const onLoan = loans.get(m.id) ?? new Prisma.Decimal(0);
       const item = statusFor(m.requiredStock, onHand.plus(onLoan), bands);
@@ -327,6 +337,9 @@ export const ReportingService = {
         requiredStock: m.requiredStock.toString(),
         onHand: onHand.toString(),
         onLoan: onLoan.toString(),
+        heldForProjects: heldForProjects.toString(),
+        stockState: stockStateOf(lines),
+        active: m.active,
         onOrder: ordered.toString(),
         orders,
         percentOfRequired: item.percentOfRequired,

@@ -190,6 +190,12 @@ export const OPERATIONS: Operation[] = [
     }),
     errors: [400],
   },
+  {
+    method: 'get', path: '/materials/summary', tag: 'Materials', summary: 'How the catalogue adds up against Stock and Tools',
+    description: 'Items per Materials tab (Stores, Tools, Projects), which add up to the catalogue; the lines and items on Stock; '
+      + 'Stores and Tools items with no line on Stock and by stock state; and the tools the Tools page lists.',
+    permissions: [P.ViewReports],
+  },
   { method: 'get', path: '/materials/:id', tag: 'Materials', summary: 'Get a material', errors: [404] },
   {
     method: 'get', path: '/units-of-measure', tag: 'Materials', summary: 'List units of measure',
@@ -788,8 +794,13 @@ export const OPERATIONS: Operation[] = [
       + 'inventory.urgentBelowPercent (default 20), WARNING below inventory.warningBelowPercent (default 40), '
       + 'otherwise OK; NOT_SET when the item has no Required Stock. With what is on order (still to come on approved '
       + 'or partly received Stores orders, per order with its due date), the re-order quantity (Required Stock '
-      + 'less on hand and on order) and stock per location. Optional ?status=URGENT,WARNING and ?category= filters. '
-      + 'Most urgent first.',
+      + 'less on hand and on order), stock per location, what is held for projects and the stock state (IN_STOCK, '
+      + 'HELD_FOR_PROJECT, OUT_OF_STOCK or NEVER_RECEIVED). Optional ?status=URGENT,WARNING and ?category= filters. '
+      + 'Stores items only unless ?section=PROJECTS or ALL; ?includeInactive=true adds inactive items. Most urgent first.',
+    query: z.object({
+      status: z.string().optional(), category: materialCategorySchema.optional(),
+      section: z.enum(['STORES', 'PROJECTS', 'ALL']).optional(), includeInactive: yesNo.optional(),
+    }),
     permissions: [P.ViewReports], errors: [400],
   },
   {

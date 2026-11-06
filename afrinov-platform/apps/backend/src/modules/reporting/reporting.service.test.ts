@@ -290,6 +290,30 @@ describe('ReportingService', () => {
       expect(all.find((r) => r.sku === '1369-PIPE')).toMatchObject({ projectNumber: '1369', project: { name: 'Plant upgrade', status: 'ACTIVE' } });
     });
 
+    // ADR-031: Materials lists inactive items, so it asks for them; everyone else keeps to active ones.
+    it('adds inactive items only when asked, with the stock they still hold', async () => {
+      seedMaterials();
+      db.materials.push({ id: 'm-9', sku: 'SKU-009', name: 'Old part', category: 'CONSUMABLES', unitOfMeasure: 'each', requiredStock: DEC(0), unitCost: null, active: false });
+      db.balances = [{ materialId: 'm-9', locationId: 'l-1', quantity: DEC(4), updatedAt: new Date() }];
+      const { ReportingService } = await import('./reporting.service.js');
+      expect((await ReportingService.stockStatus()).map((r) => r.sku)).not.toContain('SKU-009');
+      const row = (await ReportingService.stockStatus({ includeInactive: true })).find((r) => r.sku === 'SKU-009');
+      expect(row).toMatchObject({ onHand: '4', active: false, stockState: 'IN_STOCK' });
+    });
+
+    it('says where each item stands, and keeps what is held for a project apart from on hand', async () => {
+      seedMaterials();
+      db.balances = [
+        { materialId: 'm-1', locationId: 'l-1', quantity: DEC(0), updatedAt: new Date() },
+        { materialId: 'm-2', locationId: 'l-1', quantity: DEC(6), updatedAt: new Date(), heldForProject: '1369' },
+      ];
+      const { ReportingService } = await import('./reporting.service.js');
+      const rows = await ReportingService.stockStatus();
+      expect(rows.find((r) => r.materialId === 'm-1')).toMatchObject({ onHand: '0', heldForProjects: '0', stockState: 'OUT_OF_STOCK' });
+      expect(rows.find((r) => r.materialId === 'm-2')).toMatchObject({ onHand: '0', heldForProjects: '6', stockState: 'HELD_FOR_PROJECT' });
+      expect(rows.find((r) => r.materialId === 'm-3')).toMatchObject({ stockState: 'NEVER_RECEIVED' });
+    });
+
     it('grades every active item by on hand as a share of Required Stock, most urgent first', async () => {
       seedMaterials();
       db.materials.push(
