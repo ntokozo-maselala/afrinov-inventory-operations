@@ -38,7 +38,7 @@ describe('inventory report movements over real HTTP', () => {
 
   it('keeps an item\'s movements after it is deactivated, whatever the item status filter', async () => {
     expect(ofItem(await report('search=' + sku))).toHaveLength(2);
-    expect((await api('PATCH', `/materials/${materialId}`, { active: false })).status).toBe(200);
+    expect((await api('PATCH', `/materials/${materialId}/status`, { active: false, reasonCode: 'OBSOLETE' })).status).toBe(200);
 
     const active = await report(`search=${sku}&itemStatus=ACTIVE`);
     expect(active.inventory).toEqual([]);

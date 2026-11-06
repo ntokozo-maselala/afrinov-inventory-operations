@@ -199,14 +199,14 @@ describe('stock movements over real HTTP', () => {
   });
 
   it('refuses movements on an inactive material', async () => {
-    const deactivate = await api('PATCH', `/materials/${materialId}`, { active: false });
+    const deactivate = await api('PATCH', `/materials/${materialId}/status`, { active: false, reasonCode: 'OBSOLETE' });
     expect(deactivate.status).toBe(200);
     try {
       const res = await api('POST', '/inventory-issues', issueBody(storeA, 1));
       expect(res.status).toBe(400);
       await expectLedgerMatches(storeA, '45');
     } finally {
-      await api('PATCH', `/materials/${materialId}`, { active: true });
+      await api('PATCH', `/materials/${materialId}/status`, { active: true, reasonCode: 'BACK_IN_USE' });
     }
   });
 
@@ -231,7 +231,7 @@ describe('stock movements over real HTTP', () => {
     );
     expect(res.status).toBe(200);
     expect(res.body.map((t) => t.type).sort()).toEqual(
-      ['ADJUSTMENT', 'ADJUSTMENT', 'ISSUE', 'TRANSFER_IN', 'TRANSFER_OUT'].sort(),
+      ['ADJUSTMENT', 'ADJUSTMENT', 'ISSUE', 'ITEM_DEACTIVATED', 'ITEM_REACTIVATED', 'TRANSFER_IN', 'TRANSFER_OUT'].sort(),
     );
   });
 

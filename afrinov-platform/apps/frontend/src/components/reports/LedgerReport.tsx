@@ -3,7 +3,8 @@
 // stock (each return linked to the issue it came back from). Paged from
 // GET /inventory-transactions; a row opens its detail to reverse or return.
 // All movements and tool loans also list each change of a tool's due date
-// (DUE_DATE_CHANGE): it moves no stock, so it has no quantity.
+// (DUE_DATE_CHANGE), and all movements each item deactivated or reactivated
+// (ITEM_DEACTIVATED, ITEM_REACTIVATED): they move no stock, so have no quantity.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';

@@ -83,6 +83,7 @@ interface State {
   salesRfqs: MockRfq[];
   /** Later due dates given to tool loans, as the backend's tool_loan_extensions. */
   toolLoanExtensions: Array<{ id: string; loanId: string; dueOn: string; reason: string; actorId: string; createdAt: string }>;
+  materialStatusChanges: Array<{ id: string; materialId: string; active: boolean; reasonCode: string; note: string | null; actorId: string; createdAt: string }>;
   /** Used up or broken against issue lines of tracked consumables, as the backend's consumable_outcomes. */
   consumableOutcomes: MockConsumableOutcome[];
 }
@@ -119,6 +120,7 @@ function freshState(): State {
     rfqs: [],
     salesRfqs: [],
     toolLoanExtensions: [],
+    materialStatusChanges: [],
     consumableOutcomes: [],
     adjustmentRequests: [],
   };
@@ -1209,10 +1211,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     state.materials.push(created);
     return withSection(created);
   }
+  const materialStatus = method === 'PATCH' ? /^\/materials\/([^/]+)\/status$/.exec(p) : null;
+  if (materialStatus) return withSection(setMaterialStatus(materialStatus[1]!, body as { active: boolean; reasonCode: string; note?: string }));
   if (method === 'PATCH' && p.startsWith('/materials/')) {
     const id = p.slice('/materials/'.length);
     const m = findMaterial(id);
     if (!m) throw err('NOT_FOUND', 'Material not found');
+    if ((body as { active?: unknown }).active !== undefined) throw err('VALIDATION_ERROR', 'An item is deactivated or reactivated on its status route, with a reason');
     // As the server: null clears the description or the unit cost.
     const b = body as Omit<Partial<MockMaterial>, 'description' | 'unitCost'> & { description?: string | null; unitCost?: number | string | null };
     const projects = sectionOf(m.category) === 'PROJECTS';
@@ -1232,7 +1237,6 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.unitOfMeasure !== undefined && b.unitOfMeasure !== m.unitOfMeasure) m.unitOfMeasure = mockUnitCode(b.unitOfMeasure);
     if (b.requiredStock !== undefined) m.requiredStock = String(b.requiredStock);
     if (b.unitCost !== undefined) m.unitCost = b.unitCost === null ? undefined : String(b.unitCost);
-    if (b.active !== undefined) m.active = b.active;
     if (b.trackUse !== undefined) {
       checkTrackUse(b.trackUse, m.category);
       m.trackUse = b.trackUse;
@@ -1851,12 +1855,14 @@ function route(method: string, path: string, body?: unknown): unknown {
   // Inventory transactions
   if (method === 'GET' && p === '/inventory-transactions') {
     const limit = Math.min(qs.limit ? Number(qs.limit) : 200, 1000);
-    // As the server: tool loan due date changes, and used up or broken marks of
-    // their own and their withdrawals, are listed among the movements, newest first, on one cursor.
+    // As the server: tool loan due date changes, used up or broken marks of their
+    // own and their withdrawals, and items deactivated or reactivated, are listed
+    // among the movements, newest first, on one cursor.
     const rows = [
       ...filterHistory(qs).map((t) => ({ id: t.id, postedAt: t.postedAt, row: () => enrichMovement(t) })),
       ...filterDueDateChanges(qs).map((c) => ({ id: c.id, postedAt: c.createdAt, row: () => dueDateChangeRow(c) })),
       ...filterOutcomeEvents(qs).map((o) => ({ id: o.id, postedAt: o.createdAt, row: () => outcomeEventRow(o) })),
+      ...filterStatusChanges(qs).map((c) => ({ id: c.id, postedAt: c.createdAt, row: () => statusChangeRow(c) })),
     ].sort((a, b) => b.postedAt.localeCompare(a.postedAt) || b.id.localeCompare(a.id));
     return olderThan(rows, qs.before, (r) => r.postedAt).slice(0, limit).map((r) => r.row());
   }
@@ -1871,11 +1877,16 @@ function route(method: string, path: string, body?: unknown): unknown {
       const type = o.withdrawsId ? 'OUTCOME_WITHDRAWN' : o.outcome;
       byType[type] = (byType[type] ?? 0) + 1;
     }
-    return { total: list.length + changes + events.length, byType };
+    const statuses = filterStatusChanges(qs);
+    for (const c of statuses) {
+      const type = c.active ? 'ITEM_REACTIVATED' : 'ITEM_DEACTIVATED';
+      byType[type] = (byType[type] ?? 0) + 1;
+    }
+    return { total: list.length + changes + events.length + statuses.length, byType };
   }
   if (method === 'GET' && p === '/inventory-transactions/writeoffs-by-responsible') return writeoffsByResponsible(qs);
   if (method === 'GET' && p === '/inventory-transactions/actors') {
-    const ids = new Set([...state.transactions, ...state.toolLoanExtensions, ...state.consumableOutcomes].map((t) => t.actorId));
+    const ids = new Set([...state.transactions, ...state.toolLoanExtensions, ...state.consumableOutcomes, ...state.materialStatusChanges].map((t) => t.actorId));
     return mockUsers.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, name: u.name })).sort((a, b) => a.name.localeCompare(b.name));
   }
   // Mirrors StockReceiptService.receive: a posted goods receipt with no
@@ -4172,6 +4183,45 @@ function outcomeEventRow(o: MockConsumableOutcome): MockMovementRow {
 }
 
 /** A due date change as a Movements row: its loan's item, place, person and project, and no quantity. */
+/** As the server's setStatus: a change to the status it already has does nothing. */
+function setMaterialStatus(id: string, b: { active: boolean; reasonCode: string; note?: string }) {
+  const m = findMaterial(id);
+  if (!m) throw err('NOT_FOUND', 'Material not found');
+  const note = b.note?.trim() || null;
+  if (b.reasonCode === 'OTHER' && !note) throw err('VALIDATION_ERROR', 'Add a note saying why');
+  if (m.active === b.active) return m;
+  m.active = b.active;
+  state.materialStatusChanges.push({ id: nextId('status'), materialId: m.id, active: b.active, reasonCode: b.reasonCode, note, actorId: 'user-1', createdAt: new Date().toISOString() });
+  return m;
+}
+
+/** As the server's listsStatusChanges and statusChangeWhere. */
+function filterStatusChanges(qs: Record<string, string>) {
+  if (qs.type || qs.report || qs.locationId || qs.recipientId) return [];
+  const inRange = inDayRange(qs);
+  const needle = qs.q?.trim().toLowerCase();
+  return state.materialStatusChanges.filter((c) => {
+    const m = findMaterial(c.materialId);
+    if (qs.materialId && c.materialId !== qs.materialId) return false;
+    if (qs.projectNumber && m?.projectNumber !== qs.projectNumber) return false;
+    if (qs.actorId && c.actorId !== qs.actorId) return false;
+    if (!inRange(c.createdAt)) return false;
+    return !needle || [m?.sku, m?.name, m?.projectNumber].filter(Boolean).join(' ').toLowerCase().includes(needle);
+  });
+}
+
+function statusChangeRow(c: State['materialStatusChanges'][number]): MockMovementRow {
+  const m = findMaterial(c.materialId)!;
+  return {
+    id: c.id, cursor: `${c.createdAt}_${c.id}`, postedAt: c.createdAt, type: c.active ? 'ITEM_REACTIVATED' : 'ITEM_DEACTIVATED',
+    materialId: m.id, materialSku: m.sku, materialName: m.name, unitOfMeasure: m.unitOfMeasure,
+    locationId: null, locationName: 'All locations', quantity: null,
+    actorId: c.actorId, actorName: mockUsers.find((u) => u.id === c.actorId)?.name ?? 'Unknown',
+    reasonCode: c.reasonCode, reasonNote: c.note ?? undefined, referenceType: 'MaterialStatusChange', referenceId: c.id,
+    projectNumber: m.projectNumber ?? undefined, returnedQuantity: null, usedUpQuantity: null, brokenQuantity: null, otherLocationName: null, returnOf: null,
+  };
+}
+
 function dueDateChangeRow(c: State['toolLoanExtensions'][number]): MockMovementRow {
   const loan = state.transactions.find((t) => t.id === c.loanId)!;
   return {

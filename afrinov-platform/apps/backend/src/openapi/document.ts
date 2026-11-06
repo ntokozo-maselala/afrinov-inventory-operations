@@ -26,6 +26,7 @@ import {
   createMaterialSchema,
   moveLeftoversSchema,
   updateMaterialSchema,
+  materialStatusSchema,
   createLocationSchema,
   updateLocationSchema,
   locationStatusSchema,
@@ -207,7 +208,14 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/materials/:id', tag: 'Materials', summary: 'Update a material',
+    description: 'Not its status: sending active is refused, as an item is deactivated or reactivated with a reason on /materials/:id/status.',
     permissions: [P.EditMaterial], body: updateMaterialSchema, errors: [404],
+  },
+  {
+    method: 'patch', path: '/materials/:id/status', tag: 'Materials', summary: 'Deactivate or reactivate a material',
+    description: 'Takes a reason from the list for that change, and a note when the reason is OTHER. Adds a row to Movements (type ITEM_DEACTIVATED or ITEM_REACTIVATED, quantity null); no stock moves. '
+      + 'Changing an item to the status it already has does nothing, so a retry is safe.',
+    permissions: [P.EditMaterial], body: materialStatusSchema, errors: [404],
   },
   {
     method: 'post', path: '/stock-items', tag: 'Materials', summary: 'Create a material with its opening stock',

@@ -5,7 +5,8 @@
 // adjustments under Write-offs (with who was responsible), tools lent and back under Tool loans,
 // catalogue and user changes under Other changes
 // (Admin and Store Controller); All movements is the full ledger, with tool
-// due date changes among it (they move no stock). The report,
+// due date changes and items deactivated or reactivated among it (they move no
+// stock). The report,
 // day and filters live in the address, so a report can be bookmarked or shared.
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';

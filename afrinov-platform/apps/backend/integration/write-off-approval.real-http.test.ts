@@ -286,7 +286,7 @@ describe('write-off approval over real HTTP', () => {
     const [loanId] = out.body.loanIds;
     const lost = await storeman<{ writeOffRequestIds: string[] }>('POST', '/tools/check-in', { lines: [{ loanId, quantity: 1, condition: 'LOST', note: 'Dropped in the dam' }] });
     const [requestId] = lost.body.writeOffRequestIds;
-    expect((await api('PATCH', `/materials/${level.body.id}`, { active: false })).status).toBe(200);
+    expect((await api('PATCH', `/materials/${level.body.id}/status`, { active: false, reasonCode: 'OBSOLETE' })).status).toBe(200);
     const refused = await api<{ error: { code: string; message: string } }>('POST', `/adjustment-requests/${requestId}/approve`);
     expect([refused.status, refused.body.error.message]).toEqual([400, 'Material is inactive']);
     expect((await prisma.adjustmentRequest.findUniqueOrThrow({ where: { id: requestId! } })).status).toBe('PENDING');

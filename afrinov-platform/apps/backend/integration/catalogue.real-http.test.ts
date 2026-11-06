@@ -52,7 +52,7 @@ describe('catalogue counts over real HTTP', () => {
     await stock(ids.twoPlaces, rackB, 3);
     await stock(ids.tool, rackA, 2);
     await stock(ids.inactive, rackA, 4);
-    expect((await api('PATCH', `/materials/${ids.inactive}`, { active: false })).status).toBe(200);
+    expect((await api('PATCH', `/materials/${ids.inactive}/status`, { active: false, reasonCode: 'OBSOLETE' })).status).toBe(200);
 
     const admin = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
     await prisma.inventoryTransaction.create({ data: { materialId: ids.held, locationId: rackA, type: 'RECEIPT', quantity: 6, heldForProject: projectNumber, actorId: admin.id } });

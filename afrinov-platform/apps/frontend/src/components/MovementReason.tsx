@@ -7,6 +7,7 @@
 import { Badge } from './Badge';
 import { formatNumber } from '../lib/format';
 import { counterparty, reasonLabel, stillOutOn, visitFigures, type ReasonRow } from '../lib/movementReason';
+import { STATUS_TYPES } from '../lib/itemStatus';
 
 function Figure({ label, value }: { label: string; value: number }) {
   return (
@@ -22,7 +23,7 @@ export function MovementReason({ movement: m, withWho = false }: { movement: Rea
   const out = stillOutOn(m);
   const v = visitFigures(m);
   const code = reasonLabel(m.reasonCode);
-  if (!who && out === null && !v && !code) return <span className="text-surface-300">—</span>;
+  if (!who && out === null && !v && !code && !m.reasonNote) return <span className="text-surface-300">—</span>;
 
   const status = out !== null && (out > 0
     ? <Badge tone="warning" className="whitespace-nowrap">{formatNumber(out)} still out</Badge>
@@ -32,8 +33,8 @@ export function MovementReason({ movement: m, withWho = false }: { movement: Rea
     v.usedUp > 0 && <Figure key="used" label="Used up" value={v.usedUp} />,
     v.broken > 0 && <Figure key="broken" label="Broken" value={v.broken} />,
   ].filter(Boolean) : [];
-  // A visit's note, or why a mark was withdrawn.
-  const note = v && m.reasonNote;
+  // A visit's note, why a mark was withdrawn, or why an item's status changed.
+  const note = (v || STATUS_TYPES.has(m.type)) && m.reasonNote;
 
   return (
     <div className="flex flex-col gap-1">

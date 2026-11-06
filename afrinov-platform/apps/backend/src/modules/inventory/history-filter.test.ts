@@ -4,21 +4,22 @@
 // up and broken marks that have no return to show them, and their withdrawals.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { findMany, changeFindMany, outcomeFindMany, outcomeGroupBy } = vi.hoisted(() => ({
-  findMany: vi.fn(), changeFindMany: vi.fn(), outcomeFindMany: vi.fn(), outcomeGroupBy: vi.fn(),
+const { findMany, changeFindMany, outcomeFindMany, outcomeGroupBy, statusFindMany } = vi.hoisted(() => ({
+  findMany: vi.fn(), changeFindMany: vi.fn(), outcomeFindMany: vi.fn(), outcomeGroupBy: vi.fn(), statusFindMany: vi.fn(async () => [] as unknown[]),
 }));
 vi.mock('../../shared/db.js', () => ({
   prisma: {
     inventoryTransaction: { findMany, groupBy: vi.fn(async () => []) },
     toolLoanExtension: { findMany: changeFindMany },
     consumableOutcome: { findMany: outcomeFindMany, groupBy: outcomeGroupBy },
+    materialStatusChange: { findMany: statusFindMany },
     goodsReceipt: { findMany: vi.fn(async () => []) },
   },
 }));
 vi.mock('../settings/settings.service.js', () => ({ SettingsService: { getValues: async () => ({}) } }));
 
 const {
-  historyWhere, historyCursor, InventoryService, listsDueDateChanges, dueDateChangeWhere, mergeNewestFirst, listsOutcomeEvents, outcomeEventWhere,
+  historyWhere, historyCursor, InventoryService, listsStatusChanges, statusChangeWhere, listsDueDateChanges, dueDateChangeWhere, mergeNewestFirst, listsOutcomeEvents, outcomeEventWhere,
 } = await import('./inventory.service.js');
 
 describe('historyWhere', () => {
@@ -88,6 +89,71 @@ describe('historyWhere', () => {
     expect(writeoffs.type).toBe('ADJUSTMENT');
     // Unreferenced adjustments must stay in: NULL <> 'StockCount' is not true in SQL.
     expect(writeoffs.AND).toEqual([{ OR: [{ referenceType: null }, { referenceType: { not: 'StockCount' } }] }, expect.objectContaining({ OR: expect.any(Array) })]);
+  });
+});
+
+describe('item status changes among the movements', () => {
+  const material = { sku: 'CON-1', name: 'Glove', unitOfMeasure: 'pair', projectNumber: null, trackUse: false };
+  const change = (id: string, at: string, active: boolean, reasonCode: string | null, note: string | null = null) => (
+    { id, materialId: 'm-1', active, reasonCode, note, actorId: 'u-1', createdAt: new Date(at), actor: { name: 'Thandi' }, material }
+  );
+
+  beforeEach(() => {
+    findMany.mockReset().mockResolvedValue([]);
+    changeFindMany.mockReset().mockResolvedValue([]);
+    outcomeFindMany.mockReset().mockResolvedValue([]);
+    outcomeGroupBy.mockReset().mockResolvedValue([]);
+    statusFindMany.mockReset().mockResolvedValue([]);
+  });
+
+  it('are listed unless a report, type or slip asks for one kind, or a location or person asks for what they lack', () => {
+    expect(listsStatusChanges({})).toBe(true);
+    expect(listsStatusChanges({ materialId: 'm-1', actorId: 'u-1', q: 'glove', from: '2026-10-01' })).toBe(true);
+    expect(listsStatusChanges({ report: 'issued' })).toBe(false);
+    expect(listsStatusChanges({ type: 'ISSUE' })).toBe(false);
+    expect(listsStatusChanges({ issueIds: ['i-1'] })).toBe(false);
+    expect(listsStatusChanges({ locationId: 'l-1' })).toBe(false);
+    expect(listsStatusChanges({ locationIds: ['l-1'] })).toBe(false);
+    expect(listsStatusChanges({ recipientId: 'r-1' })).toBe(false);
+  });
+
+  it('are chosen by when, who, the item, its project and the search', () => {
+    const where = statusChangeWhere({ from: '2026-10-01', to: '2026-10-01', materialId: 'm-1', actorId: 'u-1', projectNumber: '1369', q: 'glove' });
+    expect(where).toMatchObject({ materialId: 'm-1', actorId: 'u-1' });
+    expect(where.createdAt).toEqual({ gte: new Date('2026-10-01T00:00:00.000Z'), lt: new Date('2026-10-02T00:00:00.000Z') });
+    expect(where.material).toMatchObject({ projectNumber: '1369' });
+    expect(where.material?.OR).toHaveLength(3);
+    expect(statusChangeWhere({}).material).toBeUndefined();
+  });
+
+  it('are rows with no quantity, at all locations, in date order among the rest', async () => {
+    statusFindMany.mockResolvedValue([
+      change('s-2', '2026-10-05T09:00:00.000Z', true, 'BACK_IN_USE'),
+      change('s-1', '2026-10-04T09:00:00.000Z', false, 'SUPERSEDED', 'By CON-2'),
+    ]);
+    const rows = await InventoryService.queryHistory({});
+    expect(rows.map((r) => r.type)).toEqual(['ITEM_REACTIVATED', 'ITEM_DEACTIVATED']);
+    expect(rows[1]).toMatchObject({
+      quantity: null, locationId: null, locationName: 'All locations', materialSku: 'CON-1', actorName: 'Thandi',
+      reasonCode: 'SUPERSEDED', reasonNote: 'By CON-2', referenceType: 'MaterialStatusChange',
+    });
+  });
+
+  it('say so when a change from before reasons has none', async () => {
+    statusFindMany.mockResolvedValue([change('s-1', '2026-10-04T09:00:00.000Z', false, null)]);
+    const [row] = await InventoryService.queryHistory({});
+    expect(row).toMatchObject({ reasonCode: null, reasonNote: 'Reason not recorded' });
+  });
+
+  it('continue from the same cursor as the rest', async () => {
+    const before = historyCursor({ postedAt: new Date('2026-10-05T08:00:00.000Z'), id: 'tx-9' });
+    await InventoryService.queryHistory({ before });
+    expect(statusFindMany.mock.calls[0]).toMatchObject([{ where: { AND: [{}, { OR: [{ createdAt: { lt: new Date('2026-10-05T08:00:00.000Z') } }, { createdAt: new Date('2026-10-05T08:00:00.000Z'), id: { lt: 'tx-9' } }] }] } }]);
+  });
+
+  it('are not asked for at all when the filter leaves them out', async () => {
+    await InventoryService.queryHistory({ locationId: 'l-1' });
+    expect(statusFindMany).not.toHaveBeenCalled();
   });
 });
 

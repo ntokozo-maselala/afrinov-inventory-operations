@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { MaterialService } from './material.service.js';
+import { STATUS_REASONS, type MaterialStatusReasonCode } from './material-status.js';
 import { CatalogueService } from './catalogue.service.js';
 import { LocationService } from './location.service.js';
 import { LEFTOVER_CATEGORIES, ProjectLeftoversService } from './project-leftovers.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { prisma } from '../../shared/db.js';
+import { Errors } from '../../shared/errors.js';
 import { listUnits } from '../../shared/units.js';
 
 export const createMaterialSchema = z.object({
@@ -33,13 +35,20 @@ export const updateMaterialSchema = z.object({
   requiredStock: z.number().nonnegative().optional(),
   /** null clears it: the item then has no price. */
   unitCost: z.number().nonnegative().nullable().optional(),
-  active: z.boolean().optional(),
   /** Tools only; null clears it. */
   serialNumber: z.string().trim().min(1).max(64).nullable().optional(),
   /** Project Material only: assigns its project. */
   projectNumber: z.string().trim().min(1).max(64).optional(),
   /** Never on a tool. Switching it off keeps the outcomes already recorded. */
   trackUse: z.boolean().optional(),
+});
+
+export const materialStatusSchema = z.object({
+  active: z.boolean(),
+  /** From the list for that change (material-status.ts). */
+  reasonCode: z.enum(STATUS_REASONS),
+  /** Required when the reason is OTHER. */
+  note: z.string().trim().max(500).optional(),
 });
 
 export const listMaterialsQuerySchema = z.object({
@@ -109,6 +118,10 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/materials/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.EditMaterial);
     const id = (req.params as { id: string }).id;
+    // Refused rather than ignored: an item's status changes only with a reason, on its own route.
+    if ((req.body as { active?: unknown } | null)?.active !== undefined) {
+      throw Errors.validation('An item is deactivated or reactivated on its status route, with a reason', { field: 'active' });
+    }
     const parsed = updateMaterialSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -117,6 +130,19 @@ export async function materialRoutes(app: FastifyInstance): Promise<void> {
     }
     const actorId = (req as unknown as { user: { id: string } }).user.id;
     return MaterialService.update({ id, ...parsed.data }, actorId);
+  });
+
+  app.patch('/materials/:id/status', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.EditMaterial);
+    const id = (req.params as { id: string }).id;
+    const parsed = materialStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Choose a reason for the change', details: parsed.error.flatten() },
+      });
+    }
+    const actorId = (req as unknown as { user: { id: string } }).user.id;
+    return MaterialService.setStatus({ id, ...parsed.data, reasonCode: parsed.data.reasonCode as MaterialStatusReasonCode }, actorId);
   });
 
   // Projects items with no project still in stock: they aren't issued, so they

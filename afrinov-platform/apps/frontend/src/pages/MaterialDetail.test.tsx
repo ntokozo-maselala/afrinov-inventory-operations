@@ -105,20 +105,41 @@ describe('MaterialDetail editing', () => {
     expect(screen.getByLabelText(/Unit cost/)).toHaveValue(null);
   });
 
-  it('warns about stock on hand before deactivating', async () => {
+  it('asks why before deactivating, and sends the reason', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
-    expect((await screen.findAllByText(/30 each is still on hand/)).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' }).at(-1)!);
-    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1', { active: false }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    expect(await within(dialog).findByText('Choose a reason.')).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'SUPERSEDED' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1/status', { active: false, reasonCode: 'SUPERSEDED' }));
     expect(await screen.findByText('DISC-115 deactivated')).toBeInTheDocument();
   });
 
-  it('reactivates an inactive item without asking', async () => {
+  it('asks for a note when the reason is Other', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'OTHER' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    expect(await within(dialog).findByText('Add a note saying why.')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/Note/), { target: { value: 'Range withdrawn' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1/status', { active: false, reasonCode: 'OTHER', note: 'Range withdrawn' }));
+  });
+
+  it('asks why before reactivating too, with the reasons for that', async () => {
     material = { ...DISC, active: false };
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Reactivate' }));
-    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1', { active: true }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('option', { name: 'Stock came back' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('option', { name: 'Obsolete' })).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'BACK_IN_USE' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1/status', { active: true, reasonCode: 'BACK_IN_USE' }));
   });
 
   it('offers no changes to someone who cannot manage materials', async () => {

@@ -6,6 +6,7 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { categoryWhere, checkMaterialChange, projectForNewMaterial, sectionOf, type MaterialSection } from './material-section.js';
 import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js';
+import { checkStatusReason, type MaterialStatusReasonCode } from './material-status.js';
 
 export interface CreateMaterialInput {
   sku: string;
@@ -22,6 +23,13 @@ export interface CreateMaterialInput {
   trackUse?: boolean;
 }
 
+export interface SetMaterialStatusInput {
+  id: string;
+  active: boolean;
+  reasonCode: MaterialStatusReasonCode;
+  note?: string;
+}
+
 export interface UpdateMaterialInput {
   id: string;
   name?: string;
@@ -31,7 +39,6 @@ export interface UpdateMaterialInput {
   requiredStock?: number;
   /** null clears it. */
   unitCost?: number | null;
-  active?: boolean;
   serialNumber?: string | null;
   /** Projects material only: assigns its project. */
   projectNumber?: string;
@@ -172,7 +179,6 @@ export const MaterialService = {
       data.requiredStock = input.requiredStock;
     }
     if (input.unitCost !== undefined) data.unitCost = input.unitCost;
-    if (input.active !== undefined) data.active = input.active;
     if (input.trackUse !== undefined) {
       checkTrackUse(input.trackUse, before.category);
       data.trackUse = input.trackUse;
@@ -194,6 +200,40 @@ export const MaterialService = {
           entityId: input.id,
           before: before as unknown as Prisma.InputJsonValue,
           after: material as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return material;
+    });
+    return shape(after);
+  },
+
+  /**
+   * The one way an item changes status (ADR-032). Its row is held FOR UPDATE
+   * first; every movement holds it FOR SHARE (checkMaterialActive), so a
+   * movement finishes before this looks, or waits and is refused. The status
+   * record and the audit entry commit with the change. A change to the status
+   * it already has does nothing, so a retry adds no second row.
+   */
+  async setStatus(input: SetMaterialStatusInput, actorId: string) {
+    const note = input.note?.trim() || null;
+    checkStatusReason(input.active, input.reasonCode, note);
+    const after = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT 1 FROM materials WHERE id = ${input.id} FOR UPDATE`;
+      const before = await tx.material.findUnique({ where: { id: input.id }, include: withProject });
+      if (!before) throw Errors.notFound('Material');
+      if (before.active === input.active) return before;
+      const material = await tx.material.update({ where: { id: input.id }, data: { active: input.active }, include: withProject });
+      await tx.materialStatusChange.create({
+        data: { materialId: input.id, active: input.active, reasonCode: input.reasonCode, note, actorId },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: input.active ? 'ACTIVATE' : 'DEACTIVATE',
+          entityType: 'Material',
+          entityId: input.id,
+          before: { sku: before.sku, name: before.name, active: before.active },
+          after: { sku: before.sku, name: before.name, active: input.active, reasonCode: input.reasonCode, note },
         },
       });
       return material;
