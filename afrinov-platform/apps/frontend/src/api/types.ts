@@ -239,3 +239,19 @@ export interface CountRecord {
   /** Every item counted, matched or not, with what the system had. Empty for counts posted before sheets were kept. */
   lines: Array<{ materialId: string; sku: string; name: string; unitOfMeasure: string; expected: string; counted: string; note?: string | null }>;
 }
+
+/** Where an item stands: see stockStateOf on the server (catalogue.service.ts). */
+export type StockState = 'IN_STOCK' | 'HELD_FOR_PROJECT' | 'OUT_OF_STOCK' | 'NEVER_RECEIVED';
+
+/** GET /materials/summary: how the catalogue adds up against Stock and Tools. */
+export interface CatalogueSummary {
+  items: number;
+  active: number;
+  inactive: number;
+  tabs: Record<'STORES' | 'TOOLS' | 'PROJECTS', number>;
+  stock: { lines: number; items: number; tools: number };
+  notOnStock: { items: number; tools: number };
+  /** Stores and Tools items by stock state. */
+  states: Record<StockState, number>;
+  toolsListed: number;
+}

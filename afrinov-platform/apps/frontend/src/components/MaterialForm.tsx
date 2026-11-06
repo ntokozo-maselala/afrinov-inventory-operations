@@ -34,11 +34,13 @@ const asInput = (v: string | null | undefined) => (v === null || v === undefined
  * Render a catalog item form that creates an item or edits `initial`.
  * Editing fixes the SKU, section, and category. Saves call `onSaved`; save errors call `onError`.
  */
-export function MaterialForm({ initial, section: startSection = 'STORES', fixedBy, onCancel, onSaved, onError }: {
+export function MaterialForm({ initial, section: startSection = 'STORES', category: startCategory, fixedBy, onCancel, onSaved, onError }: {
   /** The item to edit. Leave it out to add a new item. */
   initial?: Material;
   /** For a new item: the section it starts in, e.g. the Materials tab it was added from. */
   section?: MaterialSection;
+  /** For a new Stores item: the category it starts in, e.g. Tools from the Tools tab. */
+  category?: string;
   /**
    * What fixes the section for a new item, e.g. "the purchase order": the
    * section given is used as it is, and its field is left off the form.
@@ -50,7 +52,7 @@ export function MaterialForm({ initial, section: startSection = 'STORES', fixedB
   const [section, setSection] = useState<MaterialSection>(initial ? sectionOf(initial.category) : startSection);
   const [sku, setSku] = useState(initial?.sku ?? '');
   const [name, setName] = useState(initial?.name ?? '');
-  const [category, setCategory] = useState(initial && sectionOf(initial.category) === 'STORES' ? initial.category : STORES_CATEGORIES[0]!.value);
+  const [category, setCategory] = useState(initial && sectionOf(initial.category) === 'STORES' ? initial.category : startCategory ?? STORES_CATEGORIES[0]!.value);
   const [unitOfMeasure, setUom] = useState(initial?.unitOfMeasure ?? 'each');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [requiredStock, setRequiredStock] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');

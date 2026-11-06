@@ -46,7 +46,8 @@ import type {
   MockConsumableOutcome,
 } from './types';
 import type { ApiError } from '../api/client';
-import type { IssueOutcomes, ReturnableLine } from '../api/types';
+import type { CatalogueSummary, IssueOutcomes, ReturnableLine, StockState } from '../api/types';
+import { catalogueTabOf } from '../lib/categories';
 
 /** As the server: with procurement on, a delivery is always against an approved Stores order. */
 const COUNTER_RECEIPTS_OFF = 'Deliveries to the store are booked against an approved Stores order: choose the order on Receive stock.';
@@ -144,7 +145,8 @@ function nextId(prefix: string): string {
   return `${prefix}-${++idCounter}`;
 }
 
-function computeBalances(): Balance[] {
+// Every stock line, as the server keeps them: a line used up to nothing stays.
+function computeStockLines(): Balance[] {
   const map = new Map<string, Balance>();
   for (const t of state.transactions) {
     // As the server: one balance per item, location and project held for.
@@ -153,7 +155,11 @@ function computeBalances(): Balance[] {
     existing.quantity += Number(t.quantity);
     map.set(key, existing);
   }
-  return Array.from(map.values()).filter((b) => b.quantity !== 0);
+  return Array.from(map.values());
+}
+
+function computeBalances(): Balance[] {
+  return computeStockLines().filter((b) => b.quantity !== 0);
 }
 
 /** Mirrors parseReceivedAt: the delivery date, refused if invalid or still to come (Qodo, PR #123). */
@@ -1083,6 +1089,7 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
   };
   if (method === 'GET' && p === '/units-of-measure') return MOCK_UNITS;
+  if (method === 'GET' && p === '/materials/summary') return computeCatalogueSummary();
   if (method === 'GET' && p === '/materials') {
     let list = [...state.materials].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
     const q = qs.q?.toLowerCase();
@@ -2058,7 +2065,9 @@ function route(method: string, path: string, body?: unknown): unknown {
   }
   if (method === 'GET' && p === '/reports/stock-status') {
     const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
-    return computeStockStatus({ status: wanted as StockStatus[], category: qs.category });
+    const section = qs.section as 'STORES' | 'PROJECTS' | 'ALL' | undefined;
+    if (section && !['STORES', 'PROJECTS', 'ALL'].includes(section)) throw err('VALIDATION_ERROR', 'section must be STORES, PROJECTS or ALL');
+    return computeStockStatus({ status: wanted as StockStatus[], category: qs.category, section, includeInactive: qs.includeInactive === 'true' });
   }
   if (method === 'GET' && p === '/reports/low-stock') {
     // Same shape as the backend's ReportingService.lowStock(): the URGENT and WARNING items.
@@ -3563,19 +3572,62 @@ function onOrderOf(materialId: string) {
     .sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') || a.number.localeCompare(b.number));
 }
 
-function computeStockStatus(filter: { status?: StockStatus[]; category?: string; section?: 'STORES' | 'PROJECTS' | 'ALL' }) {
+type MockStockLine = { quantity: number; heldForProject?: string | null };
+
+// As the server (catalogue.service.ts).
+function mockStockState(lines: MockStockLine[]): StockState {
+  const total = (held: boolean) => lines.filter((l) => !!l.heldForProject === held).reduce((a, l) => a + l.quantity, 0);
+  if (total(false) > 0) return 'IN_STOCK';
+  if (total(true) > 0) return 'HELD_FOR_PROJECT';
+  return lines.length > 0 ? 'OUT_OF_STOCK' : 'NEVER_RECEIVED';
+}
+
+// Mirrors summarise in catalogue.service.ts.
+function computeCatalogueSummary(): CatalogueSummary {
+  const lines = computeStockLines();
+  const tabs = { STORES: 0, TOOLS: 0, PROJECTS: 0 };
+  const states: Record<StockState, number> = { IN_STOCK: 0, HELD_FOR_PROJECT: 0, OUT_OF_STOCK: 0, NEVER_RECEIVED: 0 };
+  const stock = { lines: 0, items: 0, tools: 0 };
+  const notOnStock = { items: 0, tools: 0 };
+  for (const m of state.materials) {
+    const tab = catalogueTabOf(m.category);
+    tabs[tab] += 1;
+    if (tab === 'PROJECTS') continue;
+    const mine = lines.filter((b) => b.materialId === m.id);
+    const onStock = mine.filter((b) => !b.heldForProject).length;
+    const tool = tab === 'TOOLS' ? 1 : 0;
+    states[mockStockState(mine)] += 1;
+    stock.lines += onStock;
+    if (onStock > 0) {
+      stock.items += 1;
+      stock.tools += tool;
+    } else {
+      notOnStock.items += 1;
+      notOnStock.tools += tool;
+    }
+  }
+  const active = state.materials.filter((m) => m.active).length;
+  return {
+    items: state.materials.length, active, inactive: state.materials.length - active, tabs, stock, notOnStock, states,
+    toolsListed: state.materials.filter((m) => m.category === 'TOOLS' && m.active).length,
+  };
+}
+
+function computeStockStatus(filter: { status?: StockStatus[]; category?: string; section?: 'STORES' | 'PROJECTS' | 'ALL'; includeInactive?: boolean }) {
   // As the server: status, reorder and value count Stores stock, not stock held for a project.
-  const balances = computeBalances().filter((b) => !b.heldForProject);
+  const allLines = computeStockLines();
+  const balances = allLines.filter((b) => !b.heldForProject);
   const bands = mockBands();
   const order: Record<StockStatus, number> = { URGENT: 0, WARNING: 1, OK: 2, NOT_SET: 3 };
   // As the server: re-ordering is for Stores, so Projects material is left out unless asked for.
   const section = filter.section ?? 'STORES';
   const inSection = (category: string) => section === 'ALL' || (category === 'PROJECT_MATERIAL') === (section === 'PROJECTS');
   return state.materials
-    .filter((m) => m.active && (!filter.category || m.category === filter.category) && inSection(m.category))
+    .filter((m) => (filter.includeInactive || m.active) && (!filter.category || m.category === filter.category) && inSection(m.category))
     .map((m) => {
       const mine = balances.filter((b) => b.materialId === m.id);
       const onHand = mine.reduce((a, b) => a + b.quantity, 0);
+      const lines = allLines.filter((b) => b.materialId === m.id);
       const lent = onLoanOf(m.id);
       const item = classifyItem(onHand + lent, Number(m.requiredStock), bands);
       const orders = onOrderOf(m.id);
@@ -3583,11 +3635,14 @@ function computeStockStatus(filter: { status?: StockStatus[]; category?: string;
       return {
         materialId: m.id, sku: m.sku, name: m.name, category: m.category, unitOfMeasure: m.unitOfMeasure,
         requiredStock: String(Number(m.requiredStock)), onHand: String(onHand), onLoan: String(lent),
+        heldForProjects: String(lines.filter((b) => b.heldForProject).reduce((a, b) => a + b.quantity, 0)),
+        stockState: mockStockState(lines), active: m.active,
         onOrder: String(ordered), orders,
         percentOfRequired: item.percentOfRequired, status: item.status,
         reorderQuantity: String(Math.max(0, Math.round((item.reorderQuantity - ordered) * 10000) / 10000)),
         unitCost: m.unitCost === undefined || m.unitCost === null ? null : String(m.unitCost),
         locations: mine
+          .filter((b) => b.quantity !== 0)
           .map((b) => ({ locationId: b.locationId, locationName: findLocation(b.locationId)?.name ?? '—', quantity: String(b.quantity) }))
           .sort((a, b) => a.locationName.localeCompare(b.locationName)),
         lastSupplier: lastSupplierOf(m.id),

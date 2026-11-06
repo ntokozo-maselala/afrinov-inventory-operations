@@ -24,6 +24,13 @@ const ITEMS = [
   item('OLD', { active: false, unitCost: null }),
 ];
 
+const STOCK_PATH = '/reports/stock-status?section=ALL&includeInactive=true';
+const SUMMARY = {
+  items: 4, active: 3, inactive: 1, tabs: { STORES: 4, TOOLS: 0, PROJECTS: 0 },
+  stock: { lines: 5, items: 3, tools: 0 }, notOnStock: { items: 1, tools: 0 },
+  states: { IN_STOCK: 3, HELD_FOR_PROJECT: 0, OUT_OF_STOCK: 0, NEVER_RECEIVED: 1 }, toolsListed: 0,
+};
+
 function Where() {
   const { search } = useLocation();
   return <output data-testid="search">{search}</output>;
@@ -35,7 +42,10 @@ function renderAt(url: string) {
 
 describe('Materials page', () => {
   beforeEach(() => {
-    mockGet.mockReset().mockResolvedValue(ITEMS);
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/materials/summary') return SUMMARY;
+      return path === STOCK_PATH ? [] : ITEMS;
+    });
   });
 
   it('lists every item by default, with its unit cost', async () => {
@@ -73,11 +83,11 @@ describe('Materials page', () => {
   // On hand beside Required Stock, coloured as Stock status grades it.
   describe('On hand', () => {
     const status = (sku: string, onHand: string, over: Record<string, unknown> = {}) => ({
-      materialId: `m-${sku}`, sku, onHand, onLoan: '0', status: 'OK', percentOfRequired: 100, ...over,
+      materialId: `m-${sku}`, sku, onHand, onLoan: '0', status: 'OK', percentOfRequired: 100, locations: [], ...over,
     });
     const withStock = (rows: unknown[] | Error) => mockGet.mockImplementation(async (path: string) => {
-      if (path === '/reports/stock-status') { if (rows instanceof Error) throw rows; return rows; }
-      return ITEMS;
+      if (path === STOCK_PATH) { if (rows instanceof Error) throw rows; return rows; }
+      return path === '/materials/summary' ? SUMMARY : ITEMS;
     });
     const onHandOf = (sku: string) => {
       const row = screen.getByText(`Item ${sku}`).closest('tr')!;
@@ -90,13 +100,14 @@ describe('Materials page', () => {
         status('PRICED', '25'),
         status('NOPRICE', '1', { status: 'URGENT', percentOfRequired: 10 }),
         status('NOREQ', '4', { status: 'NOT_SET', percentOfRequired: null, onLoan: '2' }),
+        status('OLD', '7'),
       ]);
       renderAt('/materials');
       await screen.findByText('Item PRICED');
       const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
       expect(headers.indexOf('On hand')).toBe(headers.indexOf('Required') - 1);
       expect(headers).not.toContain('Reorder');
-      expect(mockGet).toHaveBeenCalledWith('/reports/stock-status');
+      expect(mockGet).toHaveBeenCalledWith(STOCK_PATH);
 
       expect(onHandOf('PRICED')).toHaveTextContent('25');
       expect(onHandOf('NOPRICE')).toHaveTextContent('1');
@@ -104,7 +115,8 @@ describe('Materials page', () => {
       expect(onHandOf('NOPRICE').querySelector('.text-danger-600')).not.toBeNull();
       // A tool on loan is still owned: shown with what is on the shelf.
       expect(onHandOf('NOREQ')).toHaveTextContent('+2 checked out');
-      // Stock status lists active items only.
+      // Inactive, but it still holds stock, and Stock lists that stock too.
+      expect(onHandOf('OLD')).toHaveTextContent('7');
       expect(onHandOf('OLD').querySelector('[title="Inactive item"]')).not.toBeNull();
     });
 
@@ -113,13 +125,21 @@ describe('Materials page', () => {
       renderAt('/materials');
       expect(await screen.findByText('Item PRICED')).toBeInTheDocument();
       expect(onHandOf('PRICED')).toHaveTextContent('—');
+      expect(await screen.findByText('Stock figures could not be loaded')).toBeInTheDocument();
+    });
+
+    it('offers no warning to someone who may not see stock: the dash is all there is', async () => {
+      withStock(Object.assign(new Error('no'), { code: 'FORBIDDEN' }));
+      renderAt('/materials');
+      expect(await screen.findByText('Item PRICED')).toBeInTheDocument();
+      expect(screen.queryByText('Stock figures could not be loaded')).not.toBeInTheDocument();
     });
 
     it('isn\'t on the Projects tab: Projects material isn\'t held in the store', async () => {
       renderAt('/materials?section=PROJECTS');
       await screen.findByRole('tab', { name: /Projects/, selected: true });
       expect(screen.queryByRole('columnheader', { name: 'On hand' })).not.toBeInTheDocument();
-      expect(mockGet).not.toHaveBeenCalledWith('/reports/stock-status');
+      expect(mockGet).not.toHaveBeenCalledWith(STOCK_PATH);
     });
   });
 });

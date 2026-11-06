@@ -97,7 +97,7 @@ export function ProjectLeftovers() {
 
       {moved !== null && (
         <Alert tone="success" title={`Moved ${moved} item${moved === 1 ? '' : 's'} to Stores`} className="mb-4 max-w-4xl">
-          They are on the <Link to="/materials" className="btn-link">Stores tab of Materials</Link>, with no Required Stock until you set it.
+          They are on the <Link to="/materials?section=STORES" className="btn-link">Stores tab of Materials</Link>, with no Required Stock until you set it.
         </Alert>
       )}
 
