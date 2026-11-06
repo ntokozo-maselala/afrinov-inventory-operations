@@ -19,9 +19,11 @@ interface DataTableProps<T> {
   loadingRows?: number;
   compact?: boolean;
   ariaLabel?: string;
+  /** A totals row or two, under the rows. */
+  footer?: ReactNode;
 }
 
-export function DataTable<T>({ columns, rows, rowKey, onRowClick, emptyState, isLoading, loadingRows = 6, compact, ariaLabel }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, onRowClick, emptyState, isLoading, loadingRows = 6, compact, ariaLabel, footer }: DataTableProps<T>) {
   return (
     <div className="surface-card overflow-hidden">
       <div className="overflow-x-auto">
@@ -69,6 +71,7 @@ export function DataTable<T>({ columns, rows, rowKey, onRowClick, emptyState, is
               </tr>
             ))}
           </tbody>
+          {footer && <tfoot>{footer}</tfoot>}
         </table>
       </div>
     </div>

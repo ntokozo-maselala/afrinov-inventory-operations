@@ -12,6 +12,8 @@ export interface RfqArea {
   managePermission: Permission;
   /** A sent one can be awarded, raising a purchase order. */
   canAward: boolean;
+  /** Its lines can be matched to what Sales asked for, for the savings report. */
+  linksSalesLines: boolean;
   title: string;
   listTitle: string;
   listDescription: string;
@@ -25,6 +27,7 @@ export const PROCUREMENT_RFQS: RfqArea = {
   path: '/rfqs',
   managePermission: 'procurement:manage',
   canAward: true,
+  linksSalesLines: true,
   title: 'Request for quotation',
   listTitle: 'Requests for quotation',
   listDescription: 'Ask suppliers to price what you need, as on the RFQ sheet, before raising the order.',
@@ -38,6 +41,7 @@ export const SALES_RFQS: RfqArea = {
   path: '/sales-rfqs',
   managePermission: 'sales:manage',
   canAward: false,
+  linksSalesLines: false,
   title: 'Sales RFQ',
   listTitle: 'Sales RFQs',
   listDescription: 'Ask suppliers to price a job while costing it, as on the RFQ sheet. Only Sales and senior managers see these prices.',

@@ -254,6 +254,136 @@ describe('mock: award currency', () => {
   });
 });
 
+// The savings report, as procurement-savings.service.ts.
+describe('mock: Procurement savings report', () => {
+  type Row = { sales: { lowest: string | null; cancelled: boolean } | null; procurement: { lowest: string | null }; order: { lineTotal: string | null; discount: string | null } | null; salesVsProcurement: string | null; procurementVsOrder: string | null; salesVsOrder: string | null; notes: string[] };
+  type Report = { rows: Row[]; total: Record<string, string | number> };
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+  const report = (query = `from=${today}&to=${today}`) => api.get<Report>(`/reports/procurement-savings?${query}`);
+
+  const sentSales = async (quantity = 24) => {
+    const s = await api.post<{ id: string; lines: Array<{ id: string }> }>('/sales-rfqs', { projectNumber: 'AFRI-1325', lines: [{ description: 'Plate', unitOfMeasure: 'kg', quantity }], supplierIds: ['sup-1', 'sup-2'] });
+    await api.post(`/sales-rfqs/${s.id}/send`, {});
+    const line = s.lines[0]!.id;
+    await api.put(`/sales-rfqs/${s.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: line, unitPrice: 100 }] });
+    await api.put(`/sales-rfqs/${s.id}/suppliers/sup-2/quote`, { prices: [{ rfqLineId: line, unitPrice: 90 }] });
+    return { id: s.id, line };
+  };
+  const quotedRfq = async (quantity = 24, materialId = 'mat-9') => {
+    const r = await api.post<{ id: string; lines: Array<{ id: string }> }>('/rfqs', { projectNumber: 'AFRI-1325', lines: [{ materialId, quantity }], supplierIds: ['sup-1', 'sup-2'] });
+    await api.post(`/rfqs/${r.id}/send`, {});
+    const line = r.lines[0]!.id;
+    await api.put(`/rfqs/${r.id}/suppliers/sup-1/quote`, { prices: [{ rfqLineId: line, unitPrice: 95 }] });
+    await api.put(`/rfqs/${r.id}/suppliers/sup-2/quote`, { prices: [{ rfqLineId: line, unitPrice: 88 }] });
+    return { id: r.id, line };
+  };
+  const unitOf = async (materialId: string) => (await api.get<{ unitOfMeasure: string }>(`/materials/${materialId}`)).unitOfMeasure;
+
+  beforeEach(async () => {
+    // The Sales lines are in kg, so the items they are compared with need to be too.
+    for (const id of ['mat-9', 'mat-10']) await api.patch(`/materials/${id}`, { unitOfMeasure: 'kg' });
+  });
+
+  it('compares the lowest on each side with the order, once linked and awarded', async () => {
+    expect(await unitOf('mat-9')).toBe('kg');
+    const sales = await sentSales();
+    const r = await quotedRfq();
+    expect((await report()).rows[0]).toMatchObject({ sales: null, salesVsProcurement: null, notes: ['Not linked to a Sales line', 'Not awarded yet, so there is no order to compare'] });
+    await api.put(`/rfqs/${r.id}/lines/${r.line}/sales-line`, { salesRfqLineId: sales.line });
+    await api.post(`/rfqs/${r.id}/award`, { supplierId: 'sup-2' });
+    const { rows, total } = await report();
+    expect(rows[0]).toMatchObject({
+      sales: { lowest: '2160.00' }, procurement: { lowest: '2112.00' }, order: { lineTotal: '2112.00' },
+      salesVsProcurement: '48.00', procurementVsOrder: '0.00', salesVsOrder: '48.00', notes: [],
+    });
+    expect(total).toMatchObject({ sales: '2160.00', procurement: '2112.00', order: '2112.00', salesVsOrder: '48.00', lines: 1, linked: 1 });
+  });
+
+  it('leaves out a quantity that differs and a cancelled Sales RFQ, saying why', async () => {
+    const sales = await sentSales();
+    const r = await quotedRfq(20);
+    await api.put(`/rfqs/${r.id}/lines/${r.line}/sales-line`, { salesRfqLineId: sales.line });
+    const differs = await report();
+    expect(differs.rows[0]!.salesVsProcurement).toBeNull();
+    expect(differs.rows[0]!.notes[0]).toMatch(/Sales asked for 24 kg.*come to 20 kg/);
+    expect(differs.total).toMatchObject({ sales: '0.00' });
+    await api.post(`/sales-rfqs/${sales.id}/cancel`, { reason: 'Lost the job' });
+    const gone = await report();
+    expect(gone.rows[0]!.sales).toMatchObject({ cancelled: true });
+    expect(gone.rows[0]!.notes[0]).toMatch(/was cancelled/);
+  });
+
+  it('adds up lines sharing a Sales line, comparing them once', async () => {
+    const sales = await sentSales();
+    const a = await quotedRfq(20);
+    const b = await quotedRfq(4, 'mat-10');
+    for (const r of [a, b]) await api.put(`/rfqs/${r.id}/lines/${r.line}/sales-line`, { salesRfqLineId: sales.line });
+    const { rows, total } = await report();
+    // Sales 2160 against 20 x 88 + 4 x 88.
+    expect(rows.map((x) => x.salesVsProcurement)).toEqual(['48.00', null]);
+    expect(rows[1]!.notes[0]).toMatch(/on the first of them/);
+    expect(total).toMatchObject({ sales: '2160.00', procurement: '2112.00', salesVsProcurement: '48.00', linked: 2 });
+  });
+
+  it('filters by project and period, leaves out drafts, and refuses a backward period', async () => {
+    await quotedRfq();
+    await api.post('/rfqs', { projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 1 }] });
+    expect((await report()).rows).toHaveLength(1);
+    expect((await report(`from=${today}&to=${today}&projectNumber=AFRI-1402`)).rows).toEqual([]);
+    expect((await report('from=2020-01-01&to=2020-01-31')).rows).toEqual([]);
+    await expect(report('from=2020-02-01&to=2020-01-01')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+});
+
+// A buyer matching lines to what Sales asked for, as rfq.service.ts.
+describe('mock: linking a line to its Sales line', () => {
+  type Linked = { id: string; materialId: string; salesRfqLine: { id: string; description: string; rfq: { number: string; status: string } } | null };
+  type LinkRfq = { id: string; lines: Linked[] };
+  const asked = [{ description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: 24 }];
+  const sentSales = async (projectNumber = 'AFRI-1325') => {
+    const s = await api.post<{ id: string; lines: Array<{ id: string }> }>('/sales-rfqs', { projectNumber, lines: asked, supplierIds: ['sup-1'] });
+    await api.post(`/sales-rfqs/${s.id}/send`, {});
+    return s;
+  };
+  const buy = () => api.post<LinkRfq>('/rfqs', { projectNumber: 'AFRI-1325', lines: [{ materialId: 'mat-9', quantity: 24 }, { materialId: 'mat-10', quantity: 1 }] });
+  const link = (r: LinkRfq, i: number, salesRfqLineId: string | null) => api.put<LinkRfq>(`/rfqs/${r.id}/lines/${r.lines[i]!.id}/sales-line`, { salesRfqLineId });
+
+  it('offers only sent lines of the same project, without prices or suppliers', async () => {
+    const sales = await sentSales();
+    const elsewhere = await sentSales('AFRI-1402');
+    const draft = await api.post<{ lines: Array<{ id: string }> }>('/sales-rfqs', { projectNumber: 'AFRI-1325', lines: asked });
+    const r = await buy();
+    const offered = await api.get<Array<{ id: string }>>(`/rfqs/${r.id}/sales-lines`);
+    expect(offered.map((l) => l.id)).toEqual([sales.lines[0]!.id]);
+    expect(JSON.stringify(offered)).not.toMatch(/price|supplier/i);
+    await expect(link(r, 0, elsewhere.lines[0]!.id)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(link(r, 0, draft.lines[0]!.id)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('links, shares, unlinks and records each, and stops once cancelled', async () => {
+    const sales = await sentSales();
+    const r = await buy();
+    const id = sales.lines[0]!.id;
+    expect((await link(r, 0, id)).lines[0]!.salesRfqLine).toMatchObject({ description: '200NB pipes x 3m', rfq: { status: 'SENT' } });
+    expect((await link(r, 1, id)).lines.map((l) => l.salesRfqLine?.id)).toEqual([id, id]);
+    expect((await link(r, 1, null)).lines[1]!.salesRfqLine).toBeNull();
+    const history = await api.get<Array<{ action: string }>>(`/rfqs/${r.id}/history`);
+    expect(history.filter((e) => e.action === 'RFQ_SALES_LINK')).toHaveLength(3);
+    await api.post(`/rfqs/${r.id}/cancel`, { reason: 'Not needed' });
+    await expect(link(r, 0, null)).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+
+  it("follows the item through a draft's edit, and clears when it moves project", async () => {
+    const sales = await sentSales();
+    const r = await buy();
+    await link(r, 0, sales.lines[0]!.id);
+    const edited = await api.patch<LinkRfq>(`/rfqs/${r.id}`, { lines: [{ materialId: 'mat-10', quantity: 2 }, { materialId: 'mat-9', quantity: 30 }] });
+    expect(edited.lines.map((l) => [l.materialId, l.salesRfqLine?.id ?? null])).toEqual([['mat-10', null], ['mat-9', sales.lines[0]!.id]]);
+    const moved = await api.patch<LinkRfq>(`/rfqs/${r.id}`, { projectNumber: 'AFRI-1402', lines: [{ materialId: otherItem, quantity: 1 }] });
+    expect(moved.lines.every((l) => l.salesRfqLine === null)).toBe(true);
+  });
+});
+
 // Sales RFQs: typed lines, numbered apart from Procurement's, and nothing to award.
 describe('mock: Sales requests for quotation', () => {
   type SalesRfq = { id: string; number: string; status: string; lines: Array<{ id: string; description: string }>; suppliers: Array<{ supplierId: string; declined: boolean; totals: { subtotal: string } | null; quoteFile?: unknown }> };

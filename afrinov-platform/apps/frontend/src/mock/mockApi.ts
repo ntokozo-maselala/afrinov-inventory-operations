@@ -27,6 +27,7 @@ import { priceLines } from '../lib/poMoney';
 import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
+import { computeProcurementSavings } from './mockProcurementSavings';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
@@ -688,6 +689,19 @@ function rfqFields(r: MockRfq): Omit<MockRfq, 'history'> & { closed: boolean } {
   return { ...(copy as Omit<MockRfq, 'history'>), closed };
 }
 
+/** As the server's SALES_LINE: what was asked for, never a price or a supplier. */
+function mockSalesLine(r: MockRfq, l: MockRfq['lines'][number]) {
+  return { id: l.id, lineNo: l.lineNo, description: l.description, unitOfMeasure: l.unitOfMeasure, quantity: l.quantity, rfq: { number: r.number, status: r.status } };
+}
+
+function mockSalesLineById(id: string | null | undefined) {
+  for (const r of state.salesRfqs) {
+    const line = r.lines.find((l) => l.id === id);
+    if (line) return { sales: r, line };
+  }
+  return null;
+}
+
 /** The RFQ as the server's detail returns it: names, items, and each supplier's VAT rate and quote totals. */
 function rfqView(r: MockRfq) {
   const vatSetting = Number(MOCK_SETTINGS['purchaseOrders.vatRate']?.value ?? 15);
@@ -700,7 +714,10 @@ function rfqView(r: MockRfq) {
     sentBy: r.sentAt ? { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] } : null,
     purchaseOrder: order ? { id: order.id, number: order.number, status: order.status, supplierId: order.supplierId } : null,
     awardedBy: r.awardedAt ? { id: 'u-admin', name: MOCK_ACTOR_NAMES['u-admin'] } : null,
-    lines: r.lines.map((l) => ({ ...l, material: findMaterial(l.materialId) })),
+    lines: r.lines.map((l) => {
+      const linked = mockSalesLineById(l.salesRfqLineId);
+      return { ...l, material: findMaterial(l.materialId), salesRfqLine: linked ? mockSalesLine(linked.sales, linked.line) : null };
+    }),
     suppliers: r.suppliers.map((s) => {
       const supplier = findSupplier(s.supplierId);
       // As the server: VAT at the currency the quote was given in, not the supplier's now.
@@ -776,6 +793,37 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     });
     state.rfqs.push(created);
     return rfqView(created);
+  }
+  // Matching lines to what Sales asked for, as the server.
+  if (method === 'GET' && rfq && p === `/rfqs/${rfq.id}/sales-lines`) {
+    return state.salesRfqs
+      .filter((s) => s.status === 'SENT' && s.projectNumber === rfq.projectNumber)
+      .sort((a, b) => a.number.localeCompare(b.number))
+      .flatMap((s) => s.lines.map((l) => mockSalesLine(s, l)));
+  }
+  const linkMatch = /^\/rfqs\/[^/]+\/lines\/([^/]+)\/sales-line$/.exec(p);
+  if (method === 'PUT' && rfq && linkMatch) {
+    if (rfq.status === 'CANCELLED') throw err('INVALID_STATE', `Request for quotation ${rfq.number} is cancelled, so its lines can no longer be linked`);
+    const line = rfq.lines.find((l) => l.id === decodeURIComponent(linkMatch[1]!));
+    if (!line) throw err('NOT_FOUND', 'Line on this request for quotation not found');
+    const salesRfqLineId = ((body ?? {}) as { salesRfqLineId?: string | null }).salesRfqLineId ?? null;
+    if ((line.salesRfqLineId ?? null) === salesRfqLineId) return rfqView(rfq);
+    const found = salesRfqLineId ? mockSalesLineById(salesRfqLineId) : null;
+    if (salesRfqLineId && (found?.sales.status !== 'SENT' || found.sales.projectNumber !== rfq.projectNumber)) {
+      throw err('VALIDATION_ERROR', `That isn't a line of a Sales RFQ sent for ${rfq.projectNumber}`);
+    }
+    const now = new Date().toISOString();
+    const next: MockRfq = {
+      ...rfq, updatedAt: now,
+      lines: rfq.lines.map((l) => (l.id === line.id ? { ...l, salesRfqLineId } : l)),
+      history: [...rfq.history, {
+        id: nextId('audit'), action: 'RFQ_SALES_LINK', actorId: 'u-admin', createdAt: now,
+        before: { lineNo: line.lineNo, salesRfqLineId: line.salesRfqLineId ?? null },
+        after: { lineNo: line.lineNo, salesRfqLineId, salesRfqNumber: found?.sales.number ?? null, salesLineNo: found?.line.lineNo ?? null },
+      }],
+    };
+    state.rfqs = state.rfqs.map((r) => (r.id === rfq.id ? next : r));
+    return rfqView(next);
   }
   // Quotes (Phase 4), as the server: only while the RFQ is sent, for a supplier it asked.
   const quoteMatch = /^\/rfqs\/[^/]+\/suppliers\/([^/]+)\/(quote|decline|quote-file)$/.exec(p);
@@ -983,10 +1031,23 @@ function routeRfq(method: string, p: string, qs: Record<string, string>, body: u
     if (b.lines !== undefined || 'projectNumber' in after) {
       checkRfqLines(b.lines ?? rfq.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity) })), projectNumber);
     }
+    // As the server: links follow their item through an edit, but not to another project.
+    const moved = 'projectNumber' in after;
     if (b.lines !== undefined && JSON.stringify(rfqLinesForLog(b.lines)) !== JSON.stringify(rfqLinesForLog(rfq.lines))) {
-      next.lines = rfqLineRows(b.lines);
+      const left = [...rfq.lines];
+      next.lines = rfqLineRows(b.lines).map((l) => {
+        const i = left.findIndex((o) => o.materialId === l.materialId);
+        const kept = i < 0 ? null : left.splice(i, 1)[0]!.salesRfqLineId ?? null;
+        return { ...l, salesRfqLineId: moved ? null : kept };
+      });
       before.lines = rfqLinesForLog(rfq.lines);
       after.lines = rfqLinesForLog(b.lines);
+    }
+    const linked = rfq.lines.filter((l) => l.salesRfqLineId).length;
+    if (moved && linked > 0) {
+      next.lines = next.lines.map((l) => ({ ...l, salesRfqLineId: null }));
+      before.salesLinks = linked;
+      after.salesLinks = 0;
     }
     if (b.supplierIds !== undefined) {
       const had = rfq.suppliers.map((s) => s.supplierId);
@@ -2055,6 +2116,19 @@ function route(method: string, path: string, body?: unknown): unknown {
       currency: String(MOCK_SETTINGS['general.defaultCurrency']?.value ?? 'ZAR'),
       userName: (id) => mockUsers.find((u) => u.id === id)?.name ?? 'Unknown',
     });
+  }
+  if (method === 'GET' && p === '/reports/procurement-savings') {
+    const now = new Date();
+    const from = qs.from || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+    const to = qs.to || new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    if (from > to) throw err('VALIDATION_ERROR', 'The start date is after the end date');
+    const savings = computeProcurementSavings({ from, to, projectNumber: qs.projectNumber || undefined }, {
+      rfqs: state.rfqs, salesRfqs: state.salesRfqs, purchaseOrders: state.purchaseOrders,
+      material: findMaterial, supplier: findSupplier, projectName: (n) => projectRef(n)?.name,
+    });
+    // As the server's MAX_SAVINGS_LINES.
+    if (savings.rows.length > 2000) throw err('VALIDATION_ERROR', `That is ${savings.rows.length} lines, more than the 2000 this report can show at once. Choose a shorter period or one project.`);
+    return savings;
   }
   if (method === 'GET' && p === '/reports/stock-status') {
     const wanted = (qs.status ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);

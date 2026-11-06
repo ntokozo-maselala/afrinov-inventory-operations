@@ -534,19 +534,24 @@ model Rfq {
 }
 
 model RfqLine {
-  id         String  @id @default(uuid())
-  rfqId      String  @map("rfq_id")
+  id             String  @id @default(uuid())
+  rfqId          String  @map("rfq_id")
   // The sheet's ITEM column: 1, 2, 3, … in the order the lines were entered.
-  lineNo     Int     @map("line_no")
-  materialId String  @map("material_id")
-  quantity   Decimal @db.Decimal(18, 4)
+  lineNo         Int     @map("line_no")
+  materialId     String  @map("material_id")
+  quantity       Decimal @db.Decimal(18, 4)
+  // What Sales asked suppliers to price for this line, as the buyer matched it,
+  // for the savings report. Several lines can share one Sales line.
+  salesRfqLineId String? @map("sales_rfq_line_id")
 
-  rfq      Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  material Material        @relation(fields: [materialId], references: [id])
-  prices   RfqQuotePrice[]
+  rfq          Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  material     Material        @relation(fields: [materialId], references: [id])
+  prices       RfqQuotePrice[]
+  salesRfqLine SalesRfqLine?   @relation(fields: [salesRfqLineId], references: [id], onDelete: SetNull)
 
   @@unique([rfqId, lineNo])
   @@index([materialId])
+  @@index([salesRfqLineId])
   @@map("rfq_lines")
 }
 
@@ -652,9 +657,10 @@ model SalesRfqLine {
   unitOfMeasure String  @map("unit_of_measure")
   quantity      Decimal @db.Decimal(18, 4)
 
-  rfq    SalesRfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  unit   UnitOfMeasure        @relation(fields: [unitOfMeasure], references: [code])
-  prices SalesRfqQuotePrice[]
+  rfq              SalesRfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  unit             UnitOfMeasure        @relation(fields: [unitOfMeasure], references: [code])
+  prices           SalesRfqQuotePrice[]
+  procurementLines RfqLine[]
 
   @@unique([rfqId, lineNo])
   @@map("sales_rfq_lines")

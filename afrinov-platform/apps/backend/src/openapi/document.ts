@@ -46,7 +46,7 @@ import {
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
 import {
-  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
+  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, linkSalesLineSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
 } from '../modules/procurement/rfq.routes.js';
 import { createSalesRfqSchema, listSalesRfqQuerySchema, updateSalesRfqSchema } from '../modules/sales/sales-rfq.routes.js';
 import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
@@ -726,6 +726,16 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
   },
   {
+    method: 'get', path: '/rfqs/:id/sales-lines', tag: 'Requests for quotation', summary: 'The Sales lines its lines can be linked to',
+    description: "The lines of Sales RFQs sent for this RFQ's project: what was asked for, never a price or a supplier.",
+    procurement: true, permissions: [P.CreatePurchaseOrder], errors: [404],
+  },
+  {
+    method: 'put', path: '/rfqs/:id/lines/:lineId/sales-line', tag: 'Requests for quotation', summary: 'Link a line to a Sales line, or take the link off',
+    description: 'For the savings report. Several lines can share a Sales line, which must be on a Sales RFQ sent for the same project. Can be corrected at any point until the RFQ is cancelled (409).',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: linkSalesLineSchema, errors: [404, 409],
+  },
+  {
     method: 'patch', path: '/rfqs/:id', tag: 'Requests for quotation', summary: 'Change a draft request for quotation',
     description: "On a draft, lines and suppliers, when sent, replace the draft's, and a new project gives it that project's next number. Once sent, only the closing date changes and suppliers are added, none taken off (409 otherwise).",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: updateRfqSchema, errors: [404, 409],
@@ -814,6 +824,17 @@ export const OPERATIONS: Operation[] = [
       + 'the number of items URGENT, WARNING, OK, NOT_SET and out of stock. Projects material is also totalled per project, '
       + 'stock held for a project under that project, with `leftovers`: the items Move to Stores takes once it is closed (its leftovers, and items held for it).',
     permissions: [P.ViewReports],
+  },
+  {
+    method: 'get', path: '/reports/procurement-savings', tag: 'Reports', summary: 'Sales, Procurement and order prices compared',
+    description: 'Each line of a Procurement RFQ sent between ?from and ?to (YYYY-MM-DD, both included; default this month), optionally for one ?projectNumber=. '
+      + 'Line totals excl. VAT: every quote by supplier, each side compared at its lowest, the order before line discounts. Only rand is compared; a figure that cannot be compared is null, with a note, and out of the totals. A selection of more than 2000 lines is refused (400).',
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
+  },
+  {
+    method: 'get', path: '/reports/procurement-savings/export', tag: 'Reports', summary: 'Download Procurement savings as Excel',
+    description: 'The Procurement savings report, same query, one row per RFQ line with a total row.',
+    procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
   },
   {
     method: 'get', path: '/reports/consumption', tag: 'Reports', summary: 'Stock used in a date range',
