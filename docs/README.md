@@ -32,7 +32,8 @@ audits, project entry points, and code-adjacent guides.
 - Current specialist plans: [materials sections](../afrinov-docs/docs/13-project-management/roadmaps/materials-sections-roadmap.md),
   [procurement alignment](../afrinov-docs/docs/13-project-management/roadmaps/procurement-alignment-roadmap.md),
   [procurement workflow](../afrinov-docs/docs/13-project-management/roadmaps/procurement-workflow-roadmap.md),
-  and [requests for quotation](../afrinov-docs/docs/13-project-management/roadmaps/rfq-roadmap.md).
+  [requests for quotation](../afrinov-docs/docs/13-project-management/roadmaps/rfq-roadmap.md),
+  and [project tracking](../afrinov-docs/docs/13-project-management/roadmaps/project-tracking-roadmap.md).
 - UAT, acceptance, stakeholder review, and readiness records are in
   [`14-validation`](../afrinov-docs/docs/14-validation/).
 - Repository orientation and the main workbook replacement plan remain at

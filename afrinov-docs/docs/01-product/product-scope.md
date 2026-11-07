@@ -24,7 +24,12 @@
 - **Project reference** — recording which project (`AFRI-####`) a movement
   relates to, without building full project management. *Built as a project
   master (name, status, manager, client, dates) with CRUD — more than a
-  reference, still no planning or budgeting.*
+  reference, still no budgeting.*
+- **Job tracking** — each project's schedules of steps (Kick-off, Engineering,
+  Procurement, Manufacturing and so on) with baseline, forecast and actual
+  dates, the user assigned, progress, a chart and a board of open jobs,
+  replacing ClickUp and the retired *03 Projects Tracking Schedule* workbook.
+  *Planned (ADR-032, `13-project-management/roadmaps/project-tracking-roadmap.md`).*
 - **Reporting** — current stock, movement history, low-stock/reorder alerts,
   stock value, category summaries (replacing `*Stock Summary`/`*Stock
   Report` sheets and the Dashboard).
@@ -37,9 +42,12 @@
 - **Payroll / HR** — the Employees list is used only as an issue/receive
   actor reference, not an HR record.
 - **CRM / sales order management.**
-- **Manufacturing execution / production scheduling.**
-- **Full project management** — projects are referenced by number, not
-  planned or budgeted in this system.
+- **Manufacturing execution / production scheduling** — machine loading,
+  work orders and shop-floor sequencing. Job tracking (above) records a job's
+  steps and dates; it does not schedule the workshop.
+- **Full project management** — budgets, step dependencies and resource
+  levelling stay out; job tracking (ADR-032) covers a job's steps and dates
+  only.
 - **Office/fixed-asset register** (`Office Device List`) — different lifecycle
   (insurance, employee assignment, depreciation) from consumable stock;
   candidate for a later Asset Management module, not v1.
