@@ -12,6 +12,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { RolePermissions } from '../../shared/permissions.js';
+import { parseClosedDays } from '../../shared/working-days.js';
+import { parseStepTemplates } from '../operations/project-schedule.rules.js';
 
 const SETTINGS_CACHE_TTL_MS = 60_000;
 const settingsCache = new Map<string, { value: unknown; expires: number }>();
@@ -113,7 +115,7 @@ async function cachedGetValues(keys: readonly string[], tx?: Prisma.TransactionC
 export type SettingTypeLiteral = 'string' | 'number' | 'boolean' | 'enum';
 export type SettingCategoryLiteral =
   | 'general' | 'inventory' | 'purchase_orders' | 'notifications'
-  | 'users' | 'appearance' | 'security' | 'system' | 'data';
+  | 'users' | 'appearance' | 'security' | 'system' | 'data' | 'projects';
 
 export interface SettingDefinition<T = unknown> {
   key: string;
@@ -166,6 +168,22 @@ async function checkReference(key: string, value: unknown, db: Prisma.Transactio
   const location = await db.location.findUnique({ where: { id: String(value) }, select: { active: true } });
   if (!location?.active) throw Errors.validation('Choose an active location for project deliveries.');
 }
+
+/** Turns a parser's problems into a setting's error: the first two, and how many more. */
+const parsed = (read: (text: string) => { problems: string[] }) => (v: unknown) => {
+  if (typeof v !== 'string') return 'Must be text.';
+  if (v.length > 10_000) return 'Must be at most 10000 characters.';
+  const { problems } = read(v);
+  if (problems.length === 0) return null;
+  return problems.slice(0, 2).join(' ') + (problems.length > 2 ? ` (and ${problems.length - 2} more)` : '');
+};
+
+export const DEFAULT_STEP_TEMPLATES = [
+  'Workshop job: Kick-off, Engineering, Procurement, Manufacturing, FAT, Packaging, Data Pack, Delivery, Postmortem, Closure',
+  'Site job: Kick-off, Site induction and safety file, Engineering, Procurement, Manufacturing, FAT, Delivery, Site installation, Commissioning, Postmortem, Closure',
+  'Buy and deliver: Kick-off, Procurement, Packaging, Data Pack, Delivery, Closure',
+  'Maintenance visit: Site induction and safety file, Site inspection, Oil testing, Site report, Closure',
+].join('\n');
 
 const CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP'] as const;
 const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'] as const;
@@ -245,6 +263,11 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
 
   // ── Security ──────────────────────────────────────────────────────────
   { key: 'security.sessionTimeoutMinutes', type: 'number', category: 'security', description: 'Inactivity time before a session is signed out.', default: 60, validate: POS_INT(5, 720) },
+
+  // ── Projects (job tracking, ADR-032) ───────────────────────────────────
+  // Last, as the category is last in the schema's SettingCategory, which lists sort by.
+  { key: 'projects.stepTemplates', type: 'string', category: 'projects', description: "The step lists a new schedule can start from, one per line: the template's name, a colon, then its steps separated by commas. A schedule's steps can be changed after it starts from one.", default: DEFAULT_STEP_TEMPLATES, validate: parsed(parseStepTemplates) },
+  { key: 'projects.closedDays', type: 'string', category: 'projects', description: 'Days the business is closed, such as public holidays and shutdowns, one per line as YYYY-MM-DD with an optional note after it. Weekends are always left out. Durations and lateness are counted in working days.', default: '', validate: parsed(parseClosedDays) },
 ] as const;
 
 const CATALOG_BY_KEY: Map<string, SettingDefinition> = new Map(SETTING_CATALOG.map((s) => [s.key, s]));
@@ -335,7 +358,7 @@ export const SettingsService = {
           // exactly mirrors the literal types above, but the enum re-export
           // can drop out of the namespace typing.
           type: def.type as 'string' | 'number' | 'boolean' | 'enum',
-          category: def.category as 'general' | 'inventory' | 'purchase_orders' | 'notifications' | 'users' | 'appearance' | 'security' | 'system' | 'data',
+          category: def.category as 'general' | 'inventory' | 'purchase_orders' | 'notifications' | 'users' | 'appearance' | 'security' | 'system' | 'data' | 'projects',
           description: def.description,
           isEditable: def.isEditable ?? true,
           enumOptions: (def.enumOptions as Prisma.InputJsonValue) ?? Prisma.JsonNull,

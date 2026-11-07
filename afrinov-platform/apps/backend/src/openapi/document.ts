@@ -31,7 +31,10 @@ import {
   locationStatusSchema,
 } from '../modules/inventory/material.routes.js';
 import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
-import { createProjectSchema, updateProjectSchema } from '../modules/operations/project.routes.js';
+import {
+  createProjectSchema, updateProjectSchema,
+  createScheduleSchema, updateScheduleSchema, nextMonthSchema, replanSchema, addStepSchema, updateStepSchema,
+} from '../modules/operations/project.routes.js';
 import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
 import {
   createSupplierSchema,
@@ -511,6 +514,64 @@ export const OPERATIONS: Operation[] = [
     method: 'delete', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Archive a project',
     description: 'Archives rather than deletes, and returns the archived project.',
     permissions: [P.ManageProjects], errors: [404],
+  },
+  // Job tracking (ADR-032). Anyone signed in may read; only the project's manager,
+  // or a holder of manage:project_schedule (Admin), may change. Each change
+  // answers with the whole schedule, its steps and totals.
+  {
+    method: 'get', path: '/project-step-templates', tag: 'Projects', summary: 'List the step templates a schedule can start from',
+    description: 'Read from the projects.stepTemplates setting: each template’s name and its steps in order.',
+  },
+  {
+    method: 'get', path: '/projects/:projectNumber/schedules', tag: 'Projects', summary: "List a project's schedules",
+    description: 'Open schedules first. Each has its steps and its totals, worked out from the steps: start, planned and forecast end, '
+      + 'progress weighted by planned working days, daysLate (working days the forecast end is after the planned end; negative when early), '
+      + 'daysPastDue, the current step and the first late step. `totals` covers the open schedules.',
+    errors: [404],
+  },
+  {
+    method: 'post', path: '/projects/:projectNumber/schedules', tag: 'Projects', summary: 'Add a schedule to a project',
+    description: 'Starts Planning, with the steps of the named template (if any) and no dates. Refused (409 INVALID_STATE) on a closed project. '
+      + "alsoCovers names the other projects a joint job covers. Only the project's manager or Admin. Retry-safe with an Idempotency-Key header.",
+    permissions: [P.ManageProjectSchedule], body: createScheduleSchema, success: 201, errors: [403, 404, 409],
+  },
+  { method: 'get', path: '/project-schedules/:id', tag: 'Projects', summary: 'Get a schedule', errors: [404] },
+  {
+    method: 'patch', path: '/project-schedules/:id', tag: 'Projects', summary: 'Change a schedule, or move it on',
+    description: 'Status: Planning to Active once every step has its planned start and end (the plan is then locked, and each step’s '
+      + 'expected dates start as its plan); Active to Done once every step is at 100%; Done back to Active; Planning or Active to Cancelled. '
+      + 'A done or cancelled schedule is otherwise read-only (409 INVALID_STATE).',
+    permissions: [P.ManageProjectSchedule], body: updateScheduleSchema, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/project-schedules/:id/next-month', tag: 'Projects', summary: "Start a recurring job's next month",
+    description: 'A new Planning schedule on the same project with this one’s steps at 0%, their plan and due date moved on a month, '
+      + 'named after its month unless a name is given. This one is unchanged. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ManageProjectSchedule], body: nextMonthSchema, success: 201, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/project-schedules/:id/replan', tag: 'Projects', summary: 'Re-plan a started schedule',
+    description: 'New planned dates for the steps given, with the reason. The old plan is kept in the audit log. Active schedules only.',
+    permissions: [P.ManageProjectSchedule], body: replanSchema, errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/project-schedules/:id/steps', tag: 'Projects', summary: 'Add a step to a schedule',
+    description: 'At the position given (the end by default). Once the schedule has started, the step needs its planned dates and a reason. '
+      + 'Assigned only to an active user. Retry-safe with an Idempotency-Key header.',
+    permissions: [P.ManageProjectSchedule], body: addStepSchema, success: 201, errors: [403, 404, 409],
+  },
+  {
+    method: 'patch', path: '/project-steps/:id', tag: 'Projects', summary: 'Update a step',
+    description: 'While planning: name, position, planned dates, assignee and notes. Once started: expected dates, progress, actual dates, '
+      + 'name, position, assignee and notes; the plan changes only by a re-plan. An actual end goes with progress 100 and an actual start. '
+      + 'shiftLaterBy moves the expected dates of the unfinished steps after this one by that many working days.',
+    permissions: [P.ManageProjectSchedule], body: updateStepSchema, errors: [403, 404, 409],
+  },
+  {
+    method: 'delete', path: '/project-steps/:id', tag: 'Projects', summary: 'Remove a step',
+    description: 'Once the schedule has started, needs ?reason= and keeps at least one step.',
+    query: z.object({ reason: z.string().optional() }),
+    permissions: [P.ManageProjectSchedule], errors: [403, 404, 409],
   },
   {
     method: 'get', path: '/projects/:projectNumber/leftovers', tag: 'Projects', summary: 'List the project material still in stock',

@@ -202,6 +202,18 @@ describe('stock held for a project (project material through the store roadmap, 
   });
 });
 
+describe('project schedules (project tracking roadmap, Phase 1)', () => {
+  it('only adds, keeps a project with schedules from being deleted or renumbered, and gives Admin the permission', () => {
+    const sql = readMigration('20260101000052_project_schedules');
+    expect(sql).not.toMatch(/\b(DROP|ALTER COLUMN|DELETE FROM)\b/i);
+    expect(sql).toContain('REFERENCES "projects"("project_number") ON DELETE RESTRICT ON UPDATE RESTRICT');
+    expect(sql).toMatch(/'manage:project_schedule'[\s\S]*r\."name" = 'ADMIN'/);
+    // The new category is added on its own: Postgres can't use an enum value in the transaction that adds it.
+    expect(readMigration('20260101000051_projects_setting_category').trim().split('\n').filter((l) => !l.startsWith('--')))
+      .toEqual([`ALTER TYPE "SettingCategory" ADD VALUE IF NOT EXISTS 'projects';`]);
+  });
+});
+
 // A new setting needs its row on databases that already exist: the seed adds
 // rows only where it runs, and Settings can neither show nor save a setting
 // without one (Project Material Through the Store Roadmap, Phase 4).

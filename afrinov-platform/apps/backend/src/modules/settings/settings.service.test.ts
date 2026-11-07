@@ -205,7 +205,7 @@ describe('SettingsService', () => {
     // Each returned row is in strictly non-decreasing category order.
     const ordinals = new Map<string, number>([
       ['general', 0], ['inventory', 1], ['purchase_orders', 2],
-      ['notifications', 3], ['appearance', 4], ['security', 5],
+      ['notifications', 3], ['appearance', 4], ['security', 5], ['projects', 6],
     ]);
     const indices = list.map((l) => ordinals.get(l.category) ?? -1);
     for (let i = 1; i < indices.length; i++) {

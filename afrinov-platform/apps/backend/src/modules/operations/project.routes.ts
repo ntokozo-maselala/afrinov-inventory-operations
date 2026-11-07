@@ -1,8 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ProjectService, PROJECT_STATUSES, type ProjectStatus } from './project.service.js';
+import { ProjectScheduleService, type ScheduleActor } from './project-schedule.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
-import { requirePermission } from '../../shared/authorization.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
+import { Errors } from '../../shared/errors.js';
+import { idempotentMutation } from '../../shared/idempotency.js';
 
 const projectStatusEnum = z.enum(PROJECT_STATUSES as [ProjectStatus, ...ProjectStatus[]]);
 
@@ -32,6 +35,68 @@ export const updateProjectSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   active: z.boolean().optional(),
 });
+
+// ── Job tracking (ADR-032, Project Tracking Roadmap, Phase 1) ─────────────
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'A date as YYYY-MM-DD');
+const scheduleStatusEnum = z.enum(['PLANNING', 'ACTIVE', 'DONE', 'CANCELLED']);
+
+export const createScheduleSchema = z.object({
+  name: z.string().min(1).max(120),
+  template: z.string().max(120).optional(),
+  dueDate: day.nullable().optional(),
+  alsoCovers: z.array(z.string().max(64)).max(10).optional(),
+});
+
+export const updateScheduleSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  dueDate: day.nullable().optional(),
+  alsoCovers: z.array(z.string().max(64)).max(10).optional(),
+  status: scheduleStatusEnum.optional(),
+});
+
+export const nextMonthSchema = z.object({ name: z.string().min(1).max(120).optional() });
+
+export const replanSchema = z.object({
+  reason: z.string().min(1).max(500),
+  steps: z.array(z.object({ id: z.string().min(1), baselineStart: day, baselineEnd: day })).min(1).max(60),
+});
+
+export const addStepSchema = z.object({
+  name: z.string().min(1).max(100),
+  position: z.number().int().min(1).optional(),
+  baselineStart: day.nullable().optional(),
+  baselineEnd: day.nullable().optional(),
+  assigneeId: z.uuid().nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  reason: z.string().max(500).optional(),
+});
+
+export const updateStepSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  position: z.number().int().min(1).optional(),
+  baselineStart: day.nullable().optional(),
+  baselineEnd: day.nullable().optional(),
+  forecastStart: day.nullable().optional(),
+  forecastEnd: day.nullable().optional(),
+  actualStart: day.nullable().optional(),
+  actualEnd: day.nullable().optional(),
+  progress: z.number().int().min(0).max(100).optional(),
+  assigneeId: z.uuid().nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  shiftLaterBy: z.number().int().min(-260).max(260).optional(),
+});
+
+/** The body as the schema reads it, or a validation error through the shared envelope. */
+function parse<T>(schema: z.ZodType<T>, body: unknown, what: string): T {
+  const parsed = schema.safeParse(body ?? {});
+  if (!parsed.success) throw Errors.validation(`Invalid ${what}`, parsed.error.flatten() as unknown as Record<string, unknown>);
+  return parsed.data;
+}
+
+/** Who is asking: Admin (manage:project_schedule) changes any project's schedules, a project's manager only that project's. */
+async function scheduleActor(req: FastifyRequest): Promise<ScheduleActor> {
+  return { id: actorId(req), manageAll: await userHasPermission(req, PermissionCode.ManageProjectSchedule) };
+}
 
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
@@ -81,5 +146,68 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
     const after = await ProjectService.archive(projectNumber, actorId(req));
     return reply.send(after);
+  });
+
+  // ── Schedules and steps ────────────────────────────────────────────────
+  // Anyone signed in can see them; only the project's manager and Admin change them.
+  app.get('/project-step-templates', { preHandler: [app.authenticate] }, async () => ProjectScheduleService.templates());
+
+  app.get('/projects/:projectNumber/schedules', { preHandler: [app.authenticate] }, async (req) => {
+    const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+    return ProjectScheduleService.listForProject(projectNumber);
+  });
+
+  app.post('/projects/:projectNumber/schedules', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+    const body = parse(createScheduleSchema, req.body, 'schedule');
+    const actor = await scheduleActor(req);
+    return idempotentMutation(req, reply, 'POST /projects/:projectNumber/schedules', async (tx) => ({
+      statusCode: 201,
+      body: await ProjectScheduleService.create(projectNumber, body, actor, tx),
+    }));
+  });
+
+  app.get('/project-schedules/:id', { preHandler: [app.authenticate] }, async (req) => {
+    return ProjectScheduleService.get((req.params as { id: string }).id);
+  });
+
+  app.patch('/project-schedules/:id', { preHandler: [app.authenticate] }, async (req) => {
+    const body = parse(updateScheduleSchema, req.body, 'schedule');
+    return ProjectScheduleService.update((req.params as { id: string }).id, body, await scheduleActor(req));
+  });
+
+  app.post('/project-schedules/:id/next-month', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const body = parse(nextMonthSchema, req.body, 'next month');
+    const actor = await scheduleActor(req);
+    return idempotentMutation(req, reply, 'POST /project-schedules/:id/next-month', async (tx) => ({
+      statusCode: 201,
+      body: await ProjectScheduleService.nextMonth(id, body, actor, tx),
+    }));
+  });
+
+  app.post('/project-schedules/:id/replan', { preHandler: [app.authenticate] }, async (req) => {
+    const body = parse(replanSchema, req.body, 're-plan');
+    return ProjectScheduleService.replan((req.params as { id: string }).id, body, await scheduleActor(req));
+  });
+
+  app.post('/project-schedules/:id/steps', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const body = parse(addStepSchema, req.body, 'step');
+    const actor = await scheduleActor(req);
+    return idempotentMutation(req, reply, 'POST /project-schedules/:id/steps', async (tx) => ({
+      statusCode: 201,
+      body: await ProjectScheduleService.addStep(id, body, actor, tx),
+    }));
+  });
+
+  app.patch('/project-steps/:id', { preHandler: [app.authenticate] }, async (req) => {
+    const body = parse(updateStepSchema, req.body, 'step');
+    return ProjectScheduleService.updateStep((req.params as { id: string }).id, body, await scheduleActor(req));
+  });
+
+  app.delete('/project-steps/:id', { preHandler: [app.authenticate] }, async (req) => {
+    const reason = (req.query as { reason?: string }).reason;
+    return ProjectScheduleService.removeStep((req.params as { id: string }).id, { reason }, await scheduleActor(req));
   });
 }
