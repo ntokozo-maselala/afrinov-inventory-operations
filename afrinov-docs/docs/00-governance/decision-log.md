@@ -867,56 +867,36 @@ only stock is held for a project is not "never received", though Stock doesn't
 list it, so `notOnStock` and `states.NEVER_RECEIVED` can differ. Add a new way of
 counting items here, not on a page. No schema change.
 
----
+### ADR-032 — Job tracking moves into the platform
+**Date:** 2026-11-07 · **Status:** Accepted · **Amends:** the product scope (full project management and production scheduling out of scope)
 
-### ADR-032 — An item's status is on Movements, an item is cleared before it is deactivated, and on an inactive item nothing moves
-**Date:** 2026-11-06 · **Status:** Accepted
+**Context:** Afrinov tracks each job's progress in ClickUp. Before that it used
+the *03 Projects Tracking Schedule* workbook: one sheet per month, each job
+broken into steps with planned and actual dates, the person assigned, % complete
+and a chart. The business says ClickUp holds the same things, and plans to move
+away from it. The workbook's layout was sound but its rules were not: "Actual
+End" held the expected finish until a step was done; the baseline was worked out
+from gaps, so editing a step moved the plan; variance compared durations, not
+dates; completed jobs were marked by strikethrough; and unfinished jobs fell off
+when a month's sheet was rolled over.
 
-**Context:** Deactivating an item moved no stock, so it reached only the audit
-log. All movements had no row for it, and Other changes is limited to Admin and
-Store Controller with no download. The inventory report also limited its
-movements to the items it showed, active ones by default, so deactivating an
-item took its past movements out of the Settings > Data export. An item could be
-deactivated with stock on hand: that stock could not be issued, adjusted or
-written off, and it dropped out of the default stock value with no approval,
-which made deactivating a way round the write-off limit (ADR-028). Deliveries on
-an order, returns, reversals, tool check-ins, count differences and order lines
-did not check the item at all, so a cleared item could fill up again.
+**Decision:** Job tracking is in scope. A project holds one or more schedules,
+each a named list of steps from a template, with a locked baseline, a forecast
+and an actual date per step, progress and the user assigned. A split job has a
+schedule per part, a recurring job a new schedule each month on the same
+project, and a joint job is tracked on one of its projects, naming the others it
+covers. Only the project's manager and Admin change its schedules. Durations and
+variance are counted in working days (Monday to Friday, less closed days kept in
+Settings), variance by end date, and progress weighted by planned working days.
+The Procurement step reads the project's orders and deliveries. Jobs in ClickUp
+are not imported. Budgets, step dependencies, resource levelling and workshop
+scheduling stay out.
 
-**Decision:**
-- The ledger stays the truth for quantities (ADR-002). A status change is not a
-  ledger line: it moves no stock and belongs to no one location. It has its own
-  append-only record, `material_status_changes`, written in the same transaction
-  as the change, and a row on Movements with a null quantity, as a due date
-  change has. All movements, an item's history and the downloads show it.
-- A status change takes a reason from a list, with a note when the reason is
-  Other: Obsolete, Superseded, Supplier discontinued, Created in error to
-  deactivate; Back in use, Stock came back, Deactivated in error to reactivate.
-  Coded, so the reasons can be reported on. Changes from before this record are
-  copied from the audit log with no reason.
-- `PATCH /materials/:id/status` is the only way to change status. `active` is
-  refused on the general update, not ignored, so nothing can skip the record.
-  Changing an item to the status it has does nothing, so a retry is safe.
-- An item is deactivated only when clear: no stock on hand anywhere, held for a
-  project included; no tool out on loan; no adjustment waiting for approval; no
-  draft, pending, approved or part-received order still owing some. There is no
-  override: it would reopen the way round the write-off limit. Stock issued to
-  someone does not count, as most of it is used and never comes back.
-- Inactive means nothing moves: every path that moves stock, and raising or
-  sending an order, is refused until the item is reactivated, in the same words,
-  naming who to ask. Reactivating needs only a reason, so stock that turns up can
-  always be booked. Used up and broken move no stock, so they can still be booked.
-- The item's row is the lock: `checkMaterialActive` holds it `FOR SHARE` and a
-  status change `FOR UPDATE`, so a movement finishes first and is seen by the
-  check, or waits and is refused. Every path takes its balance lock first.
+**Consequences:** `01-product/product-scope.md`, `capability-map.md` and
+`product-roadmap.md` list job tracking as planned. The work follows
+`13-project-management/roadmaps/project-tracking-roadmap.md` in six phases; its
+Decisions table records the choices and which of them engineering made and may
+change. Until Phase 5's cut-over date, ClickUp stays the record.
 
-**Consequences:** An inactive item holds no stock unless it did before this rule,
-and `check:item-status` lists those; each is reactivated, cleared and deactivated
-again. It also confirms each item's flag agrees with its newest status change.
-Other changes still names a status change, as the audit trail. A store person
-needs someone who can reactivate to hand when a return comes in for an inactive
-item. Locations, projects, recipients and suppliers keep their status under
-Other changes; this pattern can extend to them. A later lifecycle with a phasing
-out stage, no new orders but stock still issued, would replace the active flag.
-Migration `20260101000051_material_status_changes` adds the table and only adds;
-the pre-flight query is in `docs/engineering/DATABASE_ASSURANCE.md`.
+**Evidence:** `afrinov-docs/docs/13-project-management/roadmaps/project-tracking-roadmap.md`
+(Decisions, Field map, Workbook faults not to copy).

@@ -75,6 +75,8 @@ model User {
   materialStatusChanges   MaterialStatusChange[]
   requestedAdjustments    AdjustmentRequest[]      @relation("AdjustmentRequestedBy")
   decidedAdjustments      AdjustmentRequest[]      @relation("AdjustmentDecidedBy")
+  createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
+  assignedProjectSteps    ProjectStep[]            @relation("ProjectStepAssignee")
 
   @@map("users")
 }
@@ -301,10 +303,78 @@ model Project {
   materials             Material[]
   rfqs                  Rfq[]
   salesRfqs             SalesRfq[]
+  schedules             ProjectSchedule[]
 
   @@index([status])
   @@index([active])
   @@map("projects")
+}
+
+// ── Job tracking (ADR-032, Project Tracking Roadmap) ─────────────────────
+// A project's work as one or more schedules of steps, replacing the
+// 03 Projects Tracking Schedule workbook and ClickUp. Most projects have one
+// schedule; a split job has one per part, a recurring job one per month.
+enum ProjectScheduleStatus {
+  // Steps and their baseline dates are being planned.
+  PLANNING
+  // Started: the baseline is locked, and steps carry a forecast and progress.
+  ACTIVE
+  // Every step is done.
+  DONE
+  CANCELLED
+}
+
+model ProjectSchedule {
+  id            String                @id @default(uuid())
+  projectNumber String                @map("project_number")
+  name          String
+  status        ProjectScheduleStatus @default(PLANNING)
+  // The date promised to the client, if one was. Optional.
+  dueDate       DateTime?             @map("due_date") @db.Date
+  // A joint job is tracked on one of its projects; these are the others it
+  // covers, so their orders count towards its Procurement step.
+  alsoCovers    String[]              @default([]) @map("also_covers")
+  createdById   String                @map("created_by_id")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  project   Project       @relation(fields: [projectNumber], references: [projectNumber], onDelete: Restrict, onUpdate: Restrict)
+  createdBy User          @relation("ProjectScheduleCreatedBy", fields: [createdById], references: [id])
+  steps     ProjectStep[]
+
+  @@index([projectNumber])
+  @@index([status])
+  @@map("project_schedules")
+}
+
+model ProjectStep {
+  id            String    @id @default(uuid())
+  scheduleId    String    @map("schedule_id")
+  // Order within the schedule, from 1.
+  position      Int
+  name          String
+  // The plan, locked when the schedule starts; changed only by a re-plan.
+  baselineStart DateTime? @map("baseline_start") @db.Date
+  baselineEnd   DateTime? @map("baseline_end") @db.Date
+  // When the step is now expected, while it is under way.
+  forecastStart DateTime? @map("forecast_start") @db.Date
+  forecastEnd   DateTime? @map("forecast_end") @db.Date
+  // Set once it happened; the actual end only with progress at 100.
+  actualStart   DateTime? @map("actual_start") @db.Date
+  actualEnd     DateTime? @map("actual_end") @db.Date
+  // 0 to 100.
+  progress      Int       @default(0)
+  assigneeId    String?   @map("assignee_id")
+  notes         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  schedule ProjectSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  assignee User?           @relation("ProjectStepAssignee", fields: [assigneeId], references: [id])
+
+  @@index([scheduleId, position])
+  @@index([assigneeId])
+  @@map("project_steps")
 }
 
 // Who stock is issued to. The workbook's "Issued To" list mixed workers with
@@ -1091,6 +1161,7 @@ enum SettingCategory {
   security
   system
   data
+  projects
 }
 
 model Setting {

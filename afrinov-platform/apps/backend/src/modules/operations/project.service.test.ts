@@ -23,6 +23,7 @@ const db = {
   projects: new Map<string, Proj>(),
   users: new Map<string, User>(),
   audit: [] as AuditRow[],
+  schedules: [] as Array<{ projectNumber: string; status: string }>,
 };
 
 vi.mock('../../shared/db.js', () => ({
@@ -91,6 +92,10 @@ function makePrisma(): unknown {
     auditLogEntry: {
       create: async ({ data }: { data: AuditRow }) => { db.audit.push(data); return data; },
     },
+    projectSchedule: {
+      count: async ({ where }: { where: { projectNumber: string; status: { in: string[] } } }) =>
+        db.schedules.filter((s) => s.projectNumber === where.projectNumber && where.status.in.includes(s.status)).length,
+    },
     // The service wraps each mutation and its audit write in one transaction;
     // the mock runs the callback against the same in-memory client.
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
@@ -101,6 +106,7 @@ beforeEach(() => {
   db.projects.clear();
   db.users.clear();
   db.audit.length = 0;
+  db.schedules.length = 0;
   db.users.set('user-1', { id: 'user-1', name: 'Alice', email: 'alice@example.com' });
   db.users.set('user-2', { id: 'user-2', name: 'Bob', email: 'bob@example.com' });
 });
@@ -148,6 +154,15 @@ describe('ProjectService', () => {
     const archived = await ProjectService.archive('P-4', 'user-1');
     expect(archived.active).toBe(false);
     expect(archived.status).toBe('CANCELLED');
+  });
+
+  it('refuses Completed while a schedule is open, and allows it once every schedule is closed', async () => {
+    const { ProjectService } = await import('./project.service.js');
+    await ProjectService.create({ projectNumber: 'P-7', name: 'X', status: 'ACTIVE' }, 'user-1');
+    db.schedules.push({ projectNumber: 'P-7', status: 'DONE' }, { projectNumber: 'P-7', status: 'ACTIVE' });
+    await expect(ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).rejects.toThrow(/1 open schedule/);
+    db.schedules[1]!.status = 'CANCELLED';
+    expect((await ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).status).toBe('COMPLETED');
   });
 
   it('disconnects manager when null passed', async () => {

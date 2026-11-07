@@ -54,6 +54,14 @@ prior monthly workbooks; parallel-run period; sign-off; retire the
 spreadsheets.
 *Status:* import, dry run and reconciliation tooling built; cutover not evidenced in the repository (Phase 4 in the root roadmap). The importer reads `AFRI-03A-08-IAM-02 - Stock Inventory1.xlsm`, not `07__July_2026_Report.xlsm`.
 
+## Job tracking
+Each project's schedules of steps, with baseline, forecast and actual dates,
+the user assigned, progress, a chart and a board of open jobs, replacing
+ClickUp and the retired *03 Projects Tracking Schedule* workbook.
+*Status:* planned, not started (ADR-032). Six phases in
+`13-project-management/roadmaps/project-tracking-roadmap.md`.
+
 ## Future / candidate modules (not scheduled)
 Document management, fixed-asset register (Office Device List), scrap
-tracking, finance/GL integration, full project management, sales/CRM.
+tracking, finance/GL integration, full project management (budgets, step
+dependencies, resource levelling), sales/CRM.
