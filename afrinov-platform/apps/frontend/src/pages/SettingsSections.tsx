@@ -359,6 +359,36 @@ export function SettingsPurchaseOrders() {
   );
 }
 
+// ── Projects (job tracking, ADR-032) ──────────────────────────────────
+// Both are text, one entry per line; the server checks each line and says
+// which one it can't read.
+export function SettingsProjects() {
+  const { draft, setDraft, errors, save, saving } = useSettings();
+  const toast = useToast();
+  const items = useCategorySettings('projects');
+  if (items.length === 0) return <PanelSkeleton />;
+  const templates = items.find((s) => s.key === 'projects.stepTemplates');
+  const closedDays = items.find((s) => s.key === 'projects.closedDays');
+  return (
+    <SectionPanel title="Projects" description="What a project's schedules start from, and which days don't count as working days. Changes apply to schedules from now on.">
+      {templates && (
+        <TextField def={templates} value={(draft[templates.key] as string) ?? ''} onChange={(v) => setDraft(templates.key, v)} error={errors[templates.key] ?? null} multiline />
+      )}
+      <p className="text-xs text-surface-500 -mt-2">For example: <code>Workshop job: Kick-off, Engineering, Procurement, Manufacturing</code></p>
+      {closedDays && (
+        <TextField def={closedDays} value={(draft[closedDays.key] as string) ?? ''} onChange={(v) => setDraft(closedDays.key, v)} error={errors[closedDays.key] ?? null} multiline />
+      )}
+      <p className="text-xs text-surface-500 -mt-2">For example: <code>2026-12-25 Christmas Day</code>. Weekends are always left out.</p>
+      <SaveBar items={items} onSave={async () => {
+        try {
+          const r = await save();
+          toast.success('Settings saved', `${r.updated} setting(s) updated.`);
+        } catch (e) { toast.error('Save failed', (e as ApiError).message); }
+      }} saving={saving} />
+    </SectionPanel>
+  );
+}
+
 // ── Notifications ─────────────────────────────────────────────────────
 // "Alert when purchase orders need approval or reach a new state"
 // (notifications.enablePurchaseOrderNotifications) is not shown: nothing sends

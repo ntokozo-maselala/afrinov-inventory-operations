@@ -99,6 +99,12 @@ describe('Project schedules over real HTTP', () => {
     }
     expect((await technician('GET', `/projects/${projectNumber}/schedules`)).status).toBe(200);
     expect((await admin('PATCH', `/project-schedules/${templated.id}`, { name: 'Main job' })).status).toBe(200);
+
+    // The manager holds no view:users, yet can list who to assign steps to; others can't.
+    const people = await manager<Array<{ id: string; name: string }>>('GET', `/projects/${projectNumber}/assignees`);
+    expect(people.status).toBe(200);
+    expect(people.body.some((u) => u.id === technicianId)).toBe(true);
+    expect((await otherManager('GET', `/projects/${projectNumber}/assignees`)).status).toBe(403);
   });
 
   it('refuses an unknown template, a project that does not exist and covering a project that does not', async () => {
@@ -153,12 +159,14 @@ describe('Project schedules over real HTTP', () => {
     expect((await manager('PATCH', `/project-steps/${step(1).id}`, { progress: 60, actualStart: '2026-03-02', actualEnd: '2026-03-06' })).status).toBe(400);
   });
 
-  it('finishes a step late and moves the later steps by the same working days', async () => {
-    const res = await manager<Schedule>('PATCH', `/project-steps/${step(1).id}`, {
-      progress: 100, actualStart: '2026-03-02', actualEnd: '2026-03-10', shiftLaterBy: 2,
-    });
+  it('finishes a step late and moves the later steps by the same working days, once even if retried', async () => {
+    const change = { progress: 100, actualStart: '2026-03-02', actualEnd: '2026-03-10', shiftLaterBy: 2 };
+    const key = { 'Idempotency-Key': `shift-${run}` };
+    const res = await manager<Schedule>('PATCH', `/project-steps/${step(1).id}`, change, key);
     expect(res.status).toBe(200);
-    sched = res.body;
+    const retry = await manager<Schedule>('PATCH', `/project-steps/${step(1).id}`, change, key);
+    expect(retry.headers.get('idempotency-replayed')).toBe('true');
+    sched = (await manager<Schedule>('GET', `/project-schedules/${res.body.id}`)).body;
     expect(step(1)).toMatchObject({ done: true, actualEnd: '2026-03-10' });
     expect([step(2).forecastStart, step(2).forecastEnd]).toEqual(['2026-03-11', '2026-03-17']);
     expect([step(3).forecastStart, step(3).forecastEnd]).toEqual(['2026-03-18', '2026-03-24']);

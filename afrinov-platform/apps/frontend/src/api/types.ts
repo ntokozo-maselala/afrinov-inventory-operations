@@ -255,3 +255,61 @@ export interface CatalogueSummary {
   states: Record<StockState, number>;
   toolsListed: number;
 }
+
+// ── Job tracking (ADR-032, Project Tracking Roadmap) ─────────────────────
+// As the server's project-schedule.service.ts answers. Days are YYYY-MM-DD.
+
+export type ScheduleStatus = 'PLANNING' | 'ACTIVE' | 'DONE' | 'CANCELLED';
+
+export interface ScheduleStep {
+  id: string;
+  position: number;
+  name: string;
+  baselineStart: string | null;
+  baselineEnd: string | null;
+  forecastStart: string | null;
+  forecastEnd: string | null;
+  actualStart: string | null;
+  actualEnd: string | null;
+  progress: number;
+  done: boolean;
+  assignee: { id: string; name: string } | null;
+  notes: string | null;
+}
+
+/** Worked out by the server from the steps, in working days. */
+export interface ScheduleTotals {
+  start: string | null;
+  baselineEnd: string | null;
+  forecastEnd: string | null;
+  /** 0 to 100, weighted by each step's planned working days. */
+  progress: number;
+  /** Working days the forecast end is after the planned end; negative when early. */
+  daysLate: number | null;
+  /** Working days the forecast end is after the due date; null when on time or no due date. */
+  daysPastDue: number | null;
+  currentStep: { id: string; name: string } | null;
+  lateStep: { id: string; name: string } | null;
+}
+
+export interface ProjectSchedule {
+  id: string;
+  projectNumber: string;
+  name: string;
+  status: ScheduleStatus;
+  dueDate: string | null;
+  alsoCovers: string[];
+  createdAt: string;
+  updatedAt: string;
+  steps: ScheduleStep[];
+  totals: ScheduleTotals;
+}
+
+/** GET /projects/:projectNumber/schedules */
+export interface ProjectSchedules {
+  schedules: ProjectSchedule[];
+  totals: { openSchedules: number; progress: number | null; forecastEnd: string | null; daysLate: number | null; daysPastDue: number | null };
+}
+
+/** GET /project-step-templates */
+export interface StepTemplate { name: string; steps: string[] }

@@ -8,13 +8,13 @@ Six phases that bring job tracking into the platform, aligned with the **03 Proj
 
 This goes against the current scope: `01-product/product-scope.md` lists production scheduling and full project management as out of scope, and `01-product/capability-map.md` lists project management as "Future or never". Phase 0 changes both and records the decision as **ADR-032**. It stays job tracking: no budgets, step dependencies or resource levelling.
 
-**Status:** Phase 0 built on `feature/project-tracking-0`, Phase 1 on `feature/project-tracking-1` (branched from it); Phases 2 to 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
+**Status:** Phase 0 built on `feature/project-tracking-0`, Phase 1 on `feature/project-tracking-1` (branched from it), Phase 2 on `feature/project-tracking-2` (branched from Phase 1); Phases 3 to 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 0 | Scope change and ADR | S | Built |
 | 1 | A project has schedules and steps | L | Built |
-| 2 | The project page | M | Not started |
+| 2 | The project page | M | Built |
 | 3 | The chart and the board of open jobs | M | Not started |
 | 4 | The Procurement step reads the orders | S–M | Not started |
 | 5 | Moving off ClickUp | S | Not started |
@@ -130,18 +130,26 @@ Size M. Frontend.
 
 **Where it shows:** Projects → a project's number → its page.
 
-- [ ] **2.1 A page for one project.** `/projects/:projectNumber`: its details as today, its schedules (open ones first, each with its steps in order), and the links the Projects list already has (Stock used, Orders).
+*Built on `feature/project-tracking-2` (branched from Phase 1).* Two additions to Phase 1's API, found while building the page:
+- **`GET /projects/:projectNumber/assignees`:** the active users a step can be assigned to, for the project's manager and Admin. `/users/lookup` needs `view:users`, which a manager in another role (Procurement, say) doesn't hold.
+- **`PATCH /project-steps/:id` is retry-safe** with an `Idempotency-Key`: moving the later steps adds days, so a replay after a lost answer must not move them twice.
+
+The step form works out how many working days a step slipped (`lib/workingDays.ts`, the server's count, with the closed days from Settings) and offers to move the later steps by that much; it is never done unasked.
+
+- [x] **2.1 A page for one project.** `/projects/:projectNumber`: its details as today, its schedules (open ones first, each with its steps in order), and the links the Projects list already has (Stock used, Orders).
   Files: a new `frontend/src/pages/ProjectDetail.tsx`, `App.tsx`, `pages/Projects.tsx`
-- [ ] **2.2 Adding a schedule.** Pick a template, name the schedule and give it a due date. For a joint job, pick the other projects it covers. On a recurring job, **New month** starts the next one.
-- [ ] **2.3 Updating a step.** Progress, forecast dates, the user assigned and a note. Marking a step done asks for its actual end, today by default. When a forecast end moves later, the form offers to move the later steps by the same number of working days. Only the project's manager and Admin see these controls.
+- [x] **2.2 Adding a schedule.** Pick a template, name the schedule and give it a due date. For a joint job, pick the other projects it covers. On a recurring job, **New month** starts the next one.
+- [x] **2.3 Updating a step.** Progress, forecast dates, the user assigned and a note. Marking a step done asks for its actual end, today by default. When a forecast end moves later, the form offers to move the later steps by the same number of working days. Only the project's manager and Admin see these controls.
   Files: a new `frontend/src/components/ProjectStepForm.tsx`
-- [ ] **2.4 Planning and re-planning.** While a schedule is Planning, its baseline dates are edited in place. Once Active, **Re-plan** asks for the new dates and a reason.
-- [ ] **2.5 Settings → Projects.** A panel for the step templates and the closed days (both multi-line text), for Admin.
+- [x] **2.4 Planning and re-planning.** While a schedule is Planning, its baseline dates are edited in place. Once Active, **Re-plan** asks for the new dates and a reason.
+- [x] **2.5 Settings → Projects.** A panel for the step templates and the closed days (both multi-line text), for Admin.
   Files: `pages/Settings.tsx`, `pages/SettingsSections.tsx`
-- [ ] **2.6 The mock API.** The Phase 1 routes in `mock/mockApi.ts`, with the same rules, and the two Projects settings rows, so the page works in frontend-only mode (moved here from Phase 1).
+- [x] **2.6 The mock API.** The Phase 1 routes in `mock/mockApi.ts`, with the same rules, and the two Projects settings rows, so the page works in frontend-only mode (moved here from Phase 1).
   Files: `frontend/src/mock/mockApi.ts`
 
 Tests: schedules listed open first; someone who isn't the manager sees no controls; marking a step done asks for its actual end; moving later steps when one slips; re-plan needs a reason. The mock serves the page in frontend-only mode.
+
+Built with: `ProjectDetail.test.tsx` (7), `SettingsProjects.test.tsx`, `mockSchedules.test.ts` (6), `workingDays.test.ts`, and two more real-HTTP checks (the assignees list, and a retried step update moving the later steps once). Frontend 1380 tests, backend 1148 unit and 273 integration.
 
 **Done when:**
 - A project manager sets up a job from a template, keeps its steps up to date, and the project's progress and variance follow.

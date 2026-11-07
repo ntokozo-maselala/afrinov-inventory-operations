@@ -167,6 +167,11 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }));
   });
 
+  app.get('/projects/:projectNumber/assignees', { preHandler: [app.authenticate] }, async (req) => {
+    const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+    return ProjectScheduleService.assignees(projectNumber, await scheduleActor(req));
+  });
+
   app.get('/project-schedules/:id', { preHandler: [app.authenticate] }, async (req) => {
     return ProjectScheduleService.get((req.params as { id: string }).id);
   });
@@ -201,9 +206,14 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }));
   });
 
-  app.patch('/project-steps/:id', { preHandler: [app.authenticate] }, async (req) => {
+  app.patch('/project-steps/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
     const body = parse(updateStepSchema, req.body, 'step');
-    return ProjectScheduleService.updateStep((req.params as { id: string }).id, body, await scheduleActor(req));
+    const actor = await scheduleActor(req);
+    return idempotentMutation(req, reply, 'PATCH /project-steps/:id', async (tx) => ({
+      statusCode: 200,
+      body: await ProjectScheduleService.updateStep(id, body, actor, tx),
+    }));
   });
 
   app.delete('/project-steps/:id', { preHandler: [app.authenticate] }, async (req) => {

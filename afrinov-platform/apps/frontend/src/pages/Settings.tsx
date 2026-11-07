@@ -17,6 +17,7 @@ const SECTIONS: Section[] = [
   { to: '/settings', label: 'General', description: 'Company info, currency, and language defaults.', category: 'general' },
   { to: '/settings/inventory', label: 'Inventory', description: 'Low-stock thresholds and adjustment policy.', category: 'inventory', adminOnly: true },
   { to: '/settings/purchase-orders', label: 'Purchase orders', description: 'Approval, cancellation, and numbering rules.', category: 'purchase_orders', adminOnly: true },
+  { to: '/settings/projects', label: 'Projects', description: 'Step templates for schedules, and the days the business is closed.', category: 'projects', adminOnly: true },
   { to: '/settings/notifications', label: 'Notifications', description: 'In-app and system alert preferences.', category: 'notifications' },
   { to: '/settings/appearance', label: 'Appearance', description: 'Theme and display density.', category: 'appearance' },
   { to: '/settings/users', label: 'Users & permissions', description: 'Role-based access and session policies.', category: 'users', adminOnly: true },

@@ -312,6 +312,17 @@ export const ProjectScheduleService = {
     return scheduleView(row, todayInSouthAfrica(), await closedDays());
   },
 
+  /**
+   * Who a step can be assigned to: every active user, by name. For those who may
+   * change the project's schedules, who don't all hold view:users.
+   */
+  async assignees(projectNumber: string, actor: ScheduleActor): Promise<Array<{ id: string; name: string }>> {
+    return inTx(undefined, async (tx) => {
+      await projectFor(tx, projectNumber, actor);
+      return tx.user.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+    });
+  },
+
   /** The step templates a new schedule can start from. */
   async templates(): Promise<Array<{ name: string; steps: string[] }>> {
     const text = await SettingsService.getValue<string>('projects.stepTemplates');
@@ -519,8 +530,8 @@ export const ProjectScheduleService = {
     });
   },
 
-  async updateStep(stepId: string, input: UpdateStepInput, actor: ScheduleActor): Promise<ScheduleView> {
-    return inTx(undefined, async (tx) => {
+  async updateStep(stepId: string, input: UpdateStepInput, actor: ScheduleActor, tx?: Tx): Promise<ScheduleView> {
+    return inTx(tx, async (tx) => {
       const found = await tx.projectStep.findUnique({ where: { id: stepId }, select: { scheduleId: true } });
       if (!found) throw Errors.notFound('Step');
       const schedule = await lockSchedule(tx, found.scheduleId, actor);

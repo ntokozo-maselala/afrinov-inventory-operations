@@ -28,6 +28,7 @@ import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { computeProcurementSavings } from './mockProcurementSavings';
+import { mockOpenSchedules, resetMockSchedules, routeSchedules } from './mockSchedules';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
@@ -136,6 +137,7 @@ export function resetMockState(): void {
   mockUsers = JSON.parse(JSON.stringify(SEED_USERS));
   MOCK_AUDIT.length = 0;
   MOCK_COUNT_LINES.length = 0;
+  resetMockSchedules();
 }
 
 let idCounter = 1000;
@@ -2008,6 +2010,17 @@ function route(method: string, path: string, body?: unknown): unknown {
     return r;
   }
 
+  // Job tracking: a project's schedules and steps (mockSchedules.ts), before the
+  // /projects/:projectNumber handlers below would take their paths.
+  const scheduled = routeSchedules(method, p, qs, body, {
+    project: (n) => state.projects.find((x) => x.projectNumber === n),
+    users: () => mockUsers.map((u) => ({ id: u.id, name: u.name, active: u.active })),
+    setting: (key) => MOCK_SETTINGS[key]?.value,
+    err,
+    today: () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }),
+  });
+  if (scheduled !== undefined) return scheduled;
+
   // Projects
   // As the server (project-leftovers.service.ts): a project's material still in
   // stock, and, once it is completed or cancelled, moving it to Stores.
@@ -2079,6 +2092,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     if (b.startDate !== undefined && b.startDate && proj.endDate && new Date(proj.endDate) < new Date(b.startDate)) {
       throw err('VALIDATION_ERROR', 'End date cannot be earlier than start date');
+    }
+    // As the server (ADR-032): a job is completed when every schedule is done or cancelled.
+    if (b.status === 'COMPLETED' && proj.status !== 'COMPLETED') {
+      const open = mockOpenSchedules(projectNumber);
+      if (open > 0) throw err('INVALID_STATE', `This project has ${open} open schedule${open === 1 ? '' : 's'}: finish or cancel ${open === 1 ? 'it' : 'them'} before marking the project Completed.`);
     }
     Object.assign(proj, b);
     proj.updatedAt = new Date().toISOString();
@@ -2342,6 +2360,15 @@ function buildMockSettings(): Record<string, MockSetting> {
     'appearance.density': row('appearance.density', 'comfortable', 'enum', 'appearance', 'Default table density.', ['comfortable', 'compact']),
 
     'security.sessionTimeoutMinutes': row('security.sessionTimeoutMinutes', 60, 'number', 'security', 'Inactivity time before a session is signed out.'),
+
+    // Job tracking (ADR-032), as the server's settings catalog.
+    'projects.stepTemplates': row('projects.stepTemplates', [
+      'Workshop job: Kick-off, Engineering, Procurement, Manufacturing, FAT, Packaging, Data Pack, Delivery, Postmortem, Closure',
+      'Site job: Kick-off, Site induction and safety file, Engineering, Procurement, Manufacturing, FAT, Delivery, Site installation, Commissioning, Postmortem, Closure',
+      'Buy and deliver: Kick-off, Procurement, Packaging, Data Pack, Delivery, Closure',
+      'Maintenance visit: Site induction and safety file, Site inspection, Oil testing, Site report, Closure',
+    ].join('\n'), 'string', 'projects', "The step lists a new schedule can start from, one per line: the template's name, a colon, then its steps separated by commas. A schedule's steps can be changed after it starts from one."),
+    'projects.closedDays': row('projects.closedDays', '', 'string', 'projects', 'Days the business is closed, such as public holidays and shutdowns, one per line as YYYY-MM-DD with an optional note after it. Weekends are always left out. Durations and lateness are counted in working days.'),
   };
 }
 

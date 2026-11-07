@@ -361,7 +361,8 @@ function stockUsedLink(p: Project): string {
  */
 function columns({ canManage, canSeeOrders, onEdit, onArchive }: { canManage: boolean; canSeeOrders: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
   return [
-    { key: 'num', header: 'Number', render: (p) => <span className="font-mono">{p.projectNumber}</span>, width: '10rem' },
+    // A project's page holds its schedules (Project Tracking Roadmap, Phase 2).
+    { key: 'num', header: 'Number', render: (p) => <Link to={`/projects/${encodeURIComponent(p.projectNumber)}`} className="font-mono btn-link">{p.projectNumber}</Link>, width: '10rem' },
     { key: 'name', header: 'Name', render: (p) => <span className="font-medium">{p.name ?? <span className="text-surface-300">—</span>}</span> },
     { key: 'code', header: 'Code', render: (p) => p.code ? <span className="font-mono">{p.code}</span> : <span className="text-surface-300">—</span>, width: '10rem' },
     { key: 'client', header: 'Client', render: (p) => p.client ?? <span className="text-surface-300">—</span>, width: '12rem' },
