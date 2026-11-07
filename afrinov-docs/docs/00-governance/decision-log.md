@@ -866,3 +866,37 @@ for Materials, which now shows what an inactive item still holds. An item whose
 only stock is held for a project is not "never received", though Stock doesn't
 list it, so `notOnStock` and `states.NEVER_RECEIVED` can differ. Add a new way of
 counting items here, not on a page. No schema change.
+
+### ADR-032 — Job tracking moves into the platform
+**Date:** 2026-11-07 · **Status:** Accepted · **Amends:** the product scope (full project management and production scheduling out of scope)
+
+**Context:** Afrinov tracks each job's progress in ClickUp. Before that it used
+the *03 Projects Tracking Schedule* workbook: one sheet per month, each job
+broken into steps with planned and actual dates, the person assigned, % complete
+and a chart. The business says ClickUp holds the same things, and plans to move
+away from it. The workbook's layout was sound but its rules were not: "Actual
+End" held the expected finish until a step was done; the baseline was worked out
+from gaps, so editing a step moved the plan; variance compared durations, not
+dates; completed jobs were marked by strikethrough; and unfinished jobs fell off
+when a month's sheet was rolled over.
+
+**Decision:** Job tracking is in scope. A project holds one or more schedules,
+each a named list of steps from a template, with a locked baseline, a forecast
+and an actual date per step, progress and the user assigned. A split job has a
+schedule per part, a recurring job a new schedule each month on the same
+project, and a joint job is tracked on one of its projects, naming the others it
+covers. Only the project's manager and Admin change its schedules. Durations and
+variance are counted in working days (Monday to Friday, less closed days kept in
+Settings), variance by end date, and progress weighted by planned working days.
+The Procurement step reads the project's orders and deliveries. Jobs in ClickUp
+are not imported. Budgets, step dependencies, resource levelling and workshop
+scheduling stay out.
+
+**Consequences:** `01-product/product-scope.md`, `capability-map.md` and
+`product-roadmap.md` list job tracking as planned. The work follows
+`13-project-management/roadmaps/project-tracking-roadmap.md` in six phases; its
+Decisions table records the choices and which of them engineering made and may
+change. Until Phase 5's cut-over date, ClickUp stays the record.
+
+**Evidence:** `afrinov-docs/docs/13-project-management/roadmaps/project-tracking-roadmap.md`
+(Decisions, Field map, Workbook faults not to copy).

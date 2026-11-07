@@ -10,9 +10,9 @@
    PROCUREMENT          INVENTORY            OPERATIONS
         |                  |                     |
    Supplier mgmt      Material master      Project reference
-   Purchase orders    Location mgmt        Workshop consumption
-   Goods receipt      Stock balances       Tool check-out/in
-                       Stock movements
+   Purchase orders    Location mgmt        Job tracking
+   Goods receipt      Stock balances       Workshop consumption
+                       Stock movements      Tool check-out/in
                        Reorder alerts
         |                  |                     |
         +---------+--------+---------------------+
@@ -42,7 +42,8 @@
 | Fixed asset / office equipment register | Strategic (adjacent) | Future | Not built |
 | Scrap sales tracking | Strategic (adjacent) | Future | Not built |
 | Finance/GL integration | Strategic | Future | Not built |
-| Full project management | External / not this system | Future or never | Not built |
+| Job tracking (schedules, steps, chart, board of open jobs) | Supporting | Yes | Planned (ADR-032, `13-project-management/roadmaps/project-tracking-roadmap.md`) |
+| Full project management (budgets, step dependencies, resource levelling) | External / not this system | Future or never | Not built |
 | Payroll/HR | External | Never (this system) | Not built |
 
 Status per `03-domain/business-transactions.md` and
