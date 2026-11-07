@@ -9,13 +9,12 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { Drawer } from '../components/Modal';
 import { Button } from '../components/Button';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ItemStatusDialog } from '../components/ItemStatusDialog';
 import { Icon } from '../components/Icon';
 import { MaterialForm } from '../components/MaterialForm';
 import { useToast } from '../components/Toast';
 import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
 import { canReceiveStock } from '../lib/orderKind';
-import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { daysAgo, today } from '../lib/dates';
 import { TransactionDrawer } from '../components/TransactionDrawer';
@@ -56,8 +55,8 @@ export function MaterialDetail() {
   const moves = useApi<MovementRow[]>(id ? `/inventory-transactions?materialId=${id}&limit=50` : null);
   const [selected, setSelected] = useState<MovementRow | null>(null);
   const [editing, setEditing] = useState(false);
-  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
-  const [toggling, setToggling] = useState(false);
+  /** The status being changed to, while its dialog is open. */
+  const [changingTo, setChangingTo] = useState<boolean | null>(null);
   const canManage = useCanManageMaterials();
   // The same permissions as the Receive, Issue and Check out buttons elsewhere.
   const { hasPermission } = usePermissions();
@@ -105,21 +104,6 @@ export function MaterialDetail() {
     stock.reload();
   }
 
-  async function setActive(active: boolean) {
-    if (!material.data) return;
-    setToggling(true);
-    try {
-      await api.patch(`/materials/${material.data.id}`, { active });
-      toast.success(active ? `${material.data.sku} reactivated` : `${material.data.sku} deactivated`);
-      setConfirmDeactivate(false);
-      reloadItem();
-    } catch (err) {
-      toast.error(active ? 'Could not reactivate item' : 'Could not deactivate item', (err as ApiError).message);
-    } finally {
-      setToggling(false);
-    }
-  }
-
   return (
     <div>
       <PageHeader
@@ -139,8 +123,8 @@ export function MaterialDetail() {
             {active && storesTotal > 0 && isTool && canLend && <Link to={`/tools?q=${encodeURIComponent(material.data.sku)}`} className="btn-secondary btn-sm">Check out</Link>}
             {active && issuable && !isTool && canIssue && <Link to={`/stock/issue?materialId=${encodeURIComponent(material.data.id)}`} className="btn-secondary btn-sm">Issue</Link>}
             {canManage && (material.data.active
-              ? <Button variant="ghost" size="sm" onClick={() => setConfirmDeactivate(true)}>Deactivate</Button>
-              : <Button variant="secondary" size="sm" onClick={() => void setActive(true)} loading={toggling}>Reactivate</Button>)}
+              ? <Button variant="ghost" size="sm" onClick={() => setChangingTo(false)}>Deactivate</Button>
+              : <Button variant="secondary" size="sm" onClick={() => setChangingTo(true)}>Reactivate</Button>)}
             {canManage && <Button variant="primary" size="sm" leadingIcon={<Icon.Edit size={12} />} onClick={() => setEditing(true)}>Edit</Button>}
           </>
         )}
@@ -327,18 +311,12 @@ export function MaterialDetail() {
         </Drawer>
       )}
 
-      {confirmDeactivate && material.data && (
-        <ConfirmDialog
-          open
-          onClose={() => setConfirmDeactivate(false)}
-          onConfirm={() => void setActive(false)}
-          title={`Deactivate ${material.data.sku}?`}
-          description={total > 0
-            ? `${formatNumber(total)} ${material.data.unitOfMeasure} is still on hand. While the item is inactive, that stock cannot be received, issued, transferred or adjusted, and the item drops off Stock status. You can reactivate it at any time.`
-            : 'While the item is inactive it cannot be received, issued, transferred or adjusted, and it drops off Stock status. Its history stays. You can reactivate it at any time.'}
-          confirmLabel="Deactivate"
-          destructive
-          loading={toggling}
+      {changingTo !== null && material.data && (
+        <ItemStatusDialog
+          material={material.data}
+          active={changingTo}
+          onClose={() => setChangingTo(null)}
+          onChanged={() => { setChangingTo(null); reloadItem(); moves.reload(); }}
         />
       )}
 

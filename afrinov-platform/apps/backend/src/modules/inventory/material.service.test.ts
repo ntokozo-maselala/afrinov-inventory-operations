@@ -5,8 +5,9 @@ import { Prisma } from '@prisma/client';
 
 type Material = { id: string; sku: string; name: string; category: string; serialNumber: string | null; [k: string]: unknown };
 type SerialFilter = { equals: string; mode?: string };
+type StatusChange = { active: boolean; reasonCode: string; note: string | null; actorId: string };
 
-const db = { materials: new Map<string, Material>(), audit: [] as Array<{ action: string; entityId: string }>, balances: [] as Array<{ materialId: string; quantity: number; location: string }> };
+const db = { materials: new Map<string, Material>(), audit: [] as Array<{ action: string; entityId: string }>, statusChanges: [] as StatusChange[], onLoan: [] as Array<{ materialId: string; quantity: number }>, waiting: [] as string[], orderLines: [] as Array<{ materialId: string; ordered: number; received: number }>, balances: [] as Array<{ materialId: string; quantity: number; location: string }> };
 let seq = 0;
 // Some of the listed units (units_of_measure), and one taken off the list.
 const UNITS: Record<string, { code: string; kind: 'COUNTED' | 'MEASURED'; active: boolean }> = {
@@ -25,6 +26,7 @@ function makePrisma(): unknown {
         [...db.materials.values()].find((m) => m.serialNumber?.toLowerCase() === where.serialNumber.equals.toLowerCase() && m.id !== where.id?.not) ?? null,
       create: async ({ data }: { data: Omit<Material, 'id'> }) => {
         const m = { ...data, id: `mat-${++seq}` } as Material;
+        m['active'] ??= true;
         db.materials.set(m.id, m);
         return m;
       },
@@ -37,9 +39,23 @@ function makePrisma(): unknown {
     inventoryBalance: {
       findMany: async ({ where }: { where: { materialId: string } }) => db.balances
         .filter((b) => b.materialId === where.materialId && b.quantity !== 0)
-        .map((b) => ({ quantity: new Prisma.Decimal(b.quantity), location: { name: b.location } })),
+        .map((b) => ({ quantity: new Prisma.Decimal(b.quantity), heldForProject: '', location: { name: b.location } })),
     },
     $executeRaw: async () => 1,
+    materialStatusChange: {
+      create: async ({ data }: { data: StatusChange }) => { db.statusChanges.push(data); return data; },
+    },
+    inventoryTransaction: {
+      groupBy: async () => db.onLoan.map(({ materialId, quantity }) => ({ materialId, _sum: { quantity: new Prisma.Decimal(-quantity) } })),
+    },
+    adjustmentRequest: {
+      count: async ({ where }: { where: { materialId: string } }) => db.waiting.filter((id) => id === where.materialId).length,
+    },
+    purchaseOrderLine: {
+      findMany: async ({ where }: { where: { materialId: string } }) => db.orderLines
+        .filter((l) => l.materialId === where.materialId)
+        .map((l) => ({ orderedQty: new Prisma.Decimal(l.ordered), receivedQty: new Prisma.Decimal(l.received), purchaseOrder: { id: 'po-1', number: 'PO-7', projectNumber: null } })),
+    },
     unitOfMeasure: {
       findUnique: async ({ where }: { where: { code: string } }) => UNITS[where.code] ?? null,
       findUniqueOrThrow: async ({ where }: { where: { code: string } }) => UNITS[where.code]!,
@@ -60,6 +76,11 @@ const tool = (sku: string, serialNumber?: string) => MaterialService.create({ sk
 beforeEach(() => {
   db.materials.clear();
   db.audit.length = 0;
+  db.statusChanges.length = 0;
+  db.balances.length = 0;
+  db.onLoan.length = 0;
+  db.waiting.length = 0;
+  db.orderLines.length = 0;
   seq = 0;
 });
 
@@ -122,8 +143,66 @@ describe('MaterialService update', () => {
 
   it('deactivates and reactivates an item', async () => {
     const m = await MaterialService.create({ sku: 'CON-2', name: 'Glove', category: 'CONSUMABLES', unitOfMeasure: 'pair' }, 'admin');
-    expect((await MaterialService.update({ id: m.id, active: false }, 'admin')).active).toBe(false);
-    expect((await MaterialService.update({ id: m.id, active: true }, 'admin')).active).toBe(true);
+    expect((await MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OBSOLETE' }, 'admin')).active).toBe(false);
+    expect((await MaterialService.setStatus({ id: m.id, active: true, reasonCode: 'BACK_IN_USE' }, 'admin')).active).toBe(true);
+    expect(db.statusChanges.map((c) => [c.active, c.reasonCode, c.actorId])).toEqual([[false, 'OBSOLETE', 'admin'], [true, 'BACK_IN_USE', 'admin']]);
+    expect(db.audit.filter((a) => a.entityId === m.id).map((a) => a.action)).toEqual(['CREATE', 'DEACTIVATE', 'ACTIVATE']);
+  });
+
+  it('adds nothing when the item already has that status, so a retry is safe', async () => {
+    const m = await MaterialService.create({ sku: 'CON-3', name: 'Mask', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    await MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OBSOLETE' }, 'admin');
+    await MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OBSOLETE' }, 'admin');
+    expect(db.statusChanges).toHaveLength(1);
+  });
+
+  it('keeps a note, trimmed, and asks for one when the reason is Other', async () => {
+    const m = await MaterialService.create({ sku: 'CON-4', name: 'Tape', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    await expect(MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OTHER', note: '   ' }, 'admin')).rejects.toThrow(/note saying why/);
+    await MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OTHER', note: ' Stolen range ' }, 'admin');
+    expect(db.statusChanges.at(-1)).toMatchObject({ reasonCode: 'OTHER', note: 'Stolen range' });
+  });
+
+  it('refuses a reason that belongs to the other change', async () => {
+    const m = await MaterialService.create({ sku: 'CON-5', name: 'Rag', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    await expect(MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'BACK_IN_USE' }, 'admin')).rejects.toThrow(/not one for deactivating/);
+    expect(db.statusChanges).toHaveLength(0);
+  });
+
+  it('lists all that stands in the way, and refuses to deactivate until it is cleared', async () => {
+    const m = await MaterialService.create({ sku: 'CON-6', name: 'Rope', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    db.balances.push({ materialId: m.id, quantity: 7, location: 'Rack A' });
+    db.onLoan.push({ materialId: m.id, quantity: 2 });
+    db.waiting.push(m.id);
+    db.orderLines.push({ materialId: m.id, ordered: 20, received: 5 });
+    const { blockers } = await MaterialService.deactivationCheck(m.id);
+    expect(blockers.map((b) => [b.kind, b.text])).toEqual([
+      ['STOCK', '7 each on hand at Rack A'],
+      ['LOAN', '2 each out on loan'],
+      ['APPROVAL', '1 adjustment waiting for approval'],
+      ['ORDER', 'Order PO-7: 15 each still owed'],
+    ]);
+    await expect(MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OBSOLETE' }, 'admin')).rejects.toThrow(/CON-6 is not clear yet/);
+    expect(db.statusChanges).toHaveLength(0);
+    expect((await MaterialService.getById(m.id)).active).toBe(true);
+  });
+
+  it('counts an order line received in full as clear', async () => {
+    const m = await MaterialService.create({ sku: 'CON-7', name: 'Wire', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    db.orderLines.push({ materialId: m.id, ordered: 5, received: 5 });
+    expect((await MaterialService.deactivationCheck(m.id)).blockers).toEqual([]);
+    expect((await MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OBSOLETE' }, 'admin')).active).toBe(false);
+  });
+
+  it('reactivates whatever the item holds, so stock that turned up can be booked', async () => {
+    const m = await MaterialService.create({ sku: 'CON-8', name: 'Cord', category: 'CONSUMABLES', unitOfMeasure: 'each' }, 'admin');
+    await MaterialService.setStatus({ id: m.id, active: false, reasonCode: 'OBSOLETE' }, 'admin');
+    db.balances.push({ materialId: m.id, quantity: 3, location: 'Rack A' });
+    expect((await MaterialService.setStatus({ id: m.id, active: true, reasonCode: 'STOCK_CAME_BACK' }, 'admin')).active).toBe(true);
+  });
+
+  it('refuses an item it cannot find', async () => {
+    await expect(MaterialService.setStatus({ id: 'nope', active: false, reasonCode: 'OBSOLETE' }, 'admin')).rejects.toThrow(/not found/i);
   });
 });
 

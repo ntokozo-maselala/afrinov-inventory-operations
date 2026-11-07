@@ -18,6 +18,7 @@ import { checkWholeUnits } from '../../shared/units.js';
 import { getCurrentBalance, recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { dispatchDomainEvents, type DomainEvent } from '../../shared/events.js';
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
+import { checkMaterialActive } from './inventory.service.js';
 
 export const STOCK_COUNT_REFERENCE = 'StockCount';
 
@@ -184,6 +185,8 @@ export const StockCountService = {
       // An item with an adjustment already waiting for approval here would be
       // corrected twice if both were approved: that one is decided first.
       const differing = lines.filter((l) => !variances.get(l.materialId)!.isZero()).map((l) => l.materialId);
+      // A difference is a movement; an inactive item counted as it stands is not.
+      for (const materialId of differing) await checkMaterialActive(materialId, tx);
       const waiting = differing.length === 0 ? [] : await tx.adjustmentRequest.findMany({
         where: { status: 'PENDING', locationId: input.locationId, heldForProject: null, materialId: { in: differing } },
         select: { materialId: true },

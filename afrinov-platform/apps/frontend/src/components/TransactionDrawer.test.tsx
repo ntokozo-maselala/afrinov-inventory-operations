@@ -49,6 +49,16 @@ describe('TransactionDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
   });
 
+  it('shows an item status change as no stock moved, with why, and offers nothing to reverse or return', () => {
+    render(<TransactionDrawer transaction={{ ...issue, type: 'ITEM_DEACTIVATED', quantity: null, locationId: null, locationName: 'All locations', reasonCode: 'SUPERSEDED', reasonNote: 'Replaced by the new range', referenceType: 'MaterialStatusChange' }} onClose={() => {}} onReversed={() => {}} onError={() => {}} />);
+    expect(screen.getByText('Item deactivated (no stock moved)')).toBeInTheDocument();
+    expect(screen.getByText('No stock moved')).toBeInTheDocument();
+    expect(screen.getByText('All locations')).toBeInTheDocument();
+    expect(screen.getByText('Why').nextElementSibling).toHaveTextContent('Replaced by the new range');
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Return/ })).not.toBeInTheDocument();
+  });
+
   it('names the project the stock is held for, apart from the project it was used for', () => {
     render(<TransactionDrawer transaction={{ ...issue, type: 'TRANSFER_OUT', quantity: '-2', projectNumber: null, heldForProject: 'AFRI-1325' }} onClose={() => {}} onReversed={vi.fn()} onError={vi.fn()} />);
     expect(screen.getByText('Held for').nextElementSibling).toHaveTextContent('AFRI-1325');

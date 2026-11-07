@@ -257,23 +257,26 @@ export interface MockMovementRow {
   postedAt: string;
   /**
    * DUE_DATE_CHANGE: a tool loan's due date changed. USED_UP, BROKEN: a mark
-   * booked with nothing back on the shelf; OUTCOME_WITHDRAWN: a mark withdrawn.
-   * Listed among the movements; no stock moved.
+   * booked with nothing back on the shelf; OUTCOME_WITHDRAWN: a mark withdrawn;
+   * ITEM_DEACTIVATED, ITEM_REACTIVATED: an item's status changed. Listed among
+   * the movements; no stock moved.
    */
-  type: InventoryTransactionType | 'DUE_DATE_CHANGE' | 'USED_UP' | 'BROKEN' | 'OUTCOME_WITHDRAWN';
+  type: InventoryTransactionType | 'DUE_DATE_CHANGE' | 'USED_UP' | 'BROKEN' | 'OUTCOME_WITHDRAWN' | 'ITEM_DEACTIVATED' | 'ITEM_REACTIVATED';
   materialId: string;
   materialSku: string;
   materialName: string;
   unitOfMeasure: string;
   issueId?: string | null;
-  locationId: string;
+  /** Null on an item's status change: it belongs to no one location. */
+  locationId: string | null;
   locationName: string;
   /** Null on a due date change. */
   quantity: string | null;
   actorId: string;
   actorName: string;
   recipientId?: string;
-  reasonCode?: AdjustmentReasonCode;
+  /** An adjustment's reason, or why an item's status changed. */
+  reasonCode?: AdjustmentReasonCode | string;
   reasonNote?: string;
   projectNumber?: string;
   /** Whose stock moved: the project it is held for, or null for Stores stock. */

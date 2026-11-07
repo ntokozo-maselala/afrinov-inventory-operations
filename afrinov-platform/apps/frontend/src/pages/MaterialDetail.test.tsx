@@ -24,11 +24,14 @@ const STOCK = [{ materialId: 'm-1', materialSku: 'DISC-115', materialName: 'Cutt
 
 let material: Record<string, unknown>;
 let stock: unknown[];
+/** What the deactivation check finds; none unless a test says so. */
+let blockers: unknown[] = [];
 // The active projects, which say whether stock held for one can still be issued.
 let projects: unknown[] = [{ projectNumber: 'AFRI-1325', status: 'ACTIVE' }];
 
 function renderPage() {
   mockGet.mockImplementation(async (path: string) => {
+    if (path.endsWith('/deactivation-check')) return { blockers };
     if (path.startsWith('/materials/')) return material;
     if (path.startsWith('/reports/current-stock')) return stock;
     if (path.startsWith('/projects')) return projects;
@@ -51,6 +54,7 @@ describe('MaterialDetail editing', () => {
     perms.manage = true;
     material = { ...DISC };
     stock = STOCK;
+    blockers = [];
     mockGet.mockReset();
     mockPatch.mockReset().mockImplementation(async (_path: string, body: Record<string, unknown>) => ({ ...material, ...body }));
   });
@@ -105,20 +109,69 @@ describe('MaterialDetail editing', () => {
     expect(screen.getByLabelText(/Unit cost/)).toHaveValue(null);
   });
 
-  it('warns about stock on hand before deactivating', async () => {
+  it('asks why before deactivating, and sends the reason', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
-    expect((await screen.findAllByText(/30 each is still on hand/)).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Deactivate' }).at(-1)!);
-    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1', { active: false }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    expect(await within(dialog).findByText('Choose a reason.')).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'SUPERSEDED' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1/status', { active: false, reasonCode: 'SUPERSEDED' }));
     expect(await screen.findByText('DISC-115 deactivated')).toBeInTheDocument();
   });
 
-  it('reactivates an inactive item without asking', async () => {
+  it('lists what is in the way instead of asking why, with no way round it', async () => {
+    blockers = [
+      { kind: 'STOCK', text: '30 each on hand at Rack A' },
+      { kind: 'ORDER', text: 'Order PO-7: 20 each still owed', orderId: 'po-7', projectNumber: null },
+    ];
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('DISC-115 is not clear yet')).toBeInTheDocument();
+    expect(within(dialog).getByText('30 each on hand at Rack A')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'Open order' })).toHaveAttribute('href', '/stock/orders/po-7');
+    expect(within(dialog).getByRole('link', { name: 'See stock' })).toHaveAttribute('href', '/stock?q=DISC-115');
+    expect(within(dialog).queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Reason/)).not.toBeInTheDocument();
+  });
+
+  it('shows why a refused deactivation failed, and lists the items again', async () => {
+    mockPatch.mockRejectedValueOnce({ code: 'CONFLICT', message: 'DISC-115 is not clear yet: 1 each on hand at Rack A' });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(await within(dialog).findByLabelText(/Reason/), { target: { value: 'OBSOLETE' } });
+    blockers = [{ kind: 'STOCK', text: '1 each on hand at Rack A' }];
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    expect(await screen.findByText('DISC-115 is not clear yet: 1 each on hand at Rack A')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'See stock' })).toBeInTheDocument();
+  });
+
+  it('asks for a note when the reason is Other', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'OTHER' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    expect(await within(dialog).findByText('Add a note saying why.')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/Note/), { target: { value: 'Range withdrawn' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1/status', { active: false, reasonCode: 'OTHER', note: 'Range withdrawn' }));
+  });
+
+  it('asks why before reactivating too, with the reasons for that', async () => {
     material = { ...DISC, active: false };
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Reactivate' }));
-    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1', { active: true }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('option', { name: 'Stock came back' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('option', { name: 'Obsolete' })).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'BACK_IN_USE' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/materials/m-1/status', { active: true, reasonCode: 'BACK_IN_USE' }));
   });
 
   it('offers no changes to someone who cannot manage materials', async () => {
@@ -137,6 +190,7 @@ describe('MaterialDetail links', () => {
     perms.manage = true;
     material = { ...DISC };
     stock = STOCK;
+    blockers = [];
     mockGet.mockReset();
     mockPatch.mockReset();
   });

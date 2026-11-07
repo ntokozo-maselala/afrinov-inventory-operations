@@ -16,6 +16,7 @@ import { InventoryTransactionType, Prisma, type MaterialCategory, type PurchaseO
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { PROJECTS_CATEGORY } from './material-section.js';
+import { checkMaterialActive } from './inventory.service.js';
 import { lockInventoryBalances, recomputeBalance } from '../../shared/inventory/balances.js';
 
 /**
@@ -211,6 +212,7 @@ export const ProjectLeftoversService = {
           { materialId: b.materialId, locationId: b.locationId, heldForProject: projectNumber },
           { materialId: b.materialId, locationId: b.locationId, heldForProject: null },
         ]), tx);
+        if (heldHere.length > 0) await checkMaterialActive(item.materialId, tx);
         let movedQty = new Prisma.Decimal(0);
         for (const b of heldHere) {
           // Read again under the lock: an issue may have taken some since.

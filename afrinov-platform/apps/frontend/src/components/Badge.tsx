@@ -51,6 +51,8 @@ const movementTone: Record<string, Tone> = {
   USED_UP: 'neutral',
   BROKEN: 'danger',
   OUTCOME_WITHDRAWN: 'neutral',
+  ITEM_DEACTIVATED: 'warning',
+  ITEM_REACTIVATED: 'neutral',
 };
 
 const movementLabel: Record<string, string> = {
@@ -68,6 +70,9 @@ const movementLabel: Record<string, string> = {
   USED_UP: 'Used up',
   BROKEN: 'Broken',
   OUTCOME_WITHDRAWN: 'Withdrawn',
+  // An item's status changed (ADR-032): listed among the movements, but no stock moved.
+  ITEM_DEACTIVATED: 'Item deactivated',
+  ITEM_REACTIVATED: 'Item reactivated',
 };
 
 export function MovementBadge({ type }: MovementBadgeProps) {

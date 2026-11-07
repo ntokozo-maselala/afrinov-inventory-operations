@@ -11,6 +11,7 @@ import { formatDay, lateBy } from '../lib/toolLoans';
 import { LoanHistory } from './LoanHistory';
 import { ConsumableOutcomes } from './ConsumableOutcomes';
 import { round4 } from '../lib/movementReason';
+import { STATUS_TYPES } from '../lib/itemStatus';
 import { QuantityInput } from './QuantityInput';
 import { useUnits } from '../hooks/useUnits';
 import { parseQuantity } from '../lib/quantity';
@@ -33,6 +34,8 @@ const TYPE_TEXT: Record<string, string> = {
   USED_UP: 'Used up (no stock moved)',
   BROKEN: 'Broken (no stock moved)',
   OUTCOME_WITHDRAWN: 'Used up or broken withdrawn (no stock moved)',
+  ITEM_DEACTIVATED: 'Item deactivated (no stock moved)',
+  ITEM_REACTIVATED: 'Item reactivated (no stock moved)',
 };
 
 /** What the recipient was to a movement: who it was issued to, unless the movement says otherwise. */
@@ -75,6 +78,8 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
   const isDueDateChange = transaction.type === 'DUE_DATE_CHANGE';
   // A used up or broken mark of its own, or its withdrawal: no stock moved; put right on the issue.
   const isMark = transaction.referenceType === 'ConsumableOutcome';
+  // An item's status change: no stock moved; put right by changing the status back.
+  const isStatusChange = STATUS_TYPES.has(transaction.type);
   const loanId = loanOf(transaction);
   // A receipt against a purchase order also moved the order's received
   // quantities, so the server only lets it be put right on the order: a goods
@@ -109,6 +114,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
     && !fromPurchaseOrder
     && !needsApproval
     && !isMark
+    && !isStatusChange
     // Tool loans are put right by checking the tool in or out again.
     && transaction.type !== 'LOAN' && transaction.type !== 'LOAN_RETURN' && transaction.referenceType !== 'ToolLoan'
     // A closed project's stock moved to Stores changed its item too (Qodo, PR #149).
@@ -235,7 +241,7 @@ export function TransactionDrawer({ transaction, onClose: _onClose, onReversed, 
           )}
           {transaction.reasonNote && (
             <>
-              <dt className="text-surface-500">{isDueDateChange || transaction.type === 'OUTCOME_WITHDRAWN' ? 'Why' : 'Note'}</dt>
+              <dt className="text-surface-500">{isDueDateChange || isStatusChange || transaction.type === 'OUTCOME_WITHDRAWN' ? 'Why' : 'Note'}</dt>
               <dd className="col-span-2">{transaction.reasonNote}</dd>
             </>
           )}
@@ -351,7 +357,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
 }) {
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState('');
-  const [locationId, setLocationId] = useState(transaction.locationId);
+  const [locationId, setLocationId] = useState(transaction.locationId ?? '');
   const [reason, setReason] = useState('');
   const locations = useApi<Array<{ id: string; name: string; active: boolean; parent?: { name: string } | null }>>(open ? '/locations' : null);
   const [busy, setBusy] = useState(false);
@@ -404,7 +410,7 @@ function ReturnSection({ transaction, returnable, onReturned, onError }: {
             </Field>
             <Field label="Back into" htmlFor="return-loc" error={locations.error ? "Couldn't load locations. Close and reopen to try again." : null}>
               <Select id="return-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <option value={transaction.locationId}>{locationLabel((locations.data ?? []).find((l) => l.id === transaction.locationId) ?? { name: transaction.locationName })}</option>
+                <option value={transaction.locationId ?? ''}>{locationLabel((locations.data ?? []).find((l) => l.id === transaction.locationId) ?? { name: transaction.locationName })}</option>
                 {(locations.data ?? []).filter((l) => l.active && l.id !== transaction.locationId).map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
               </Select>
             </Field>

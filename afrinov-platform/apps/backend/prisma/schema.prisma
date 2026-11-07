@@ -72,6 +72,7 @@ model User {
   idempotencyKeys         IdempotencyKey[]
   toolLoanExtensions      ToolLoanExtension[]
   consumableOutcomes      ConsumableOutcome[]
+  materialStatusChanges   MaterialStatusChange[]
   requestedAdjustments    AdjustmentRequest[]      @relation("AdjustmentRequestedBy")
   decidedAdjustments      AdjustmentRequest[]      @relation("AdjustmentDecidedBy")
   createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
@@ -188,6 +189,7 @@ model Material {
   stockCountLines       StockCountLine[]
   rfqLines              RfqLine[]
   adjustmentRequests    AdjustmentRequest[]
+  statusChanges         MaterialStatusChange[]
   project               Project?               @relation(fields: [projectNumber], references: [projectNumber])
   unit                  UnitOfMeasure          @relation(fields: [unitOfMeasure], references: [code])
 
@@ -1044,6 +1046,41 @@ model ToolLoanExtension {
   @@index([loanId])
   @@index([createdAt])
   @@map("tool_loan_extensions")
+}
+
+// Why an item was deactivated or reactivated (ADR-032). OTHER needs a note.
+enum MaterialStatusReason {
+  OBSOLETE
+  SUPERSEDED
+  SUPPLIER_DISCONTINUED
+  CREATED_IN_ERROR
+  BACK_IN_USE
+  STOCK_CAME_BACK
+  DEACTIVATED_IN_ERROR
+  OTHER
+}
+
+// An item deactivated or reactivated (ADR-032). It moves no stock and belongs
+// to no location, so it is not a ledger line; Movements lists it with no
+// quantity, as it does a due date change. Only ever added to: a mistake is put
+// right by changing the status back. reasonCode is null only on changes from
+// before this record, copied from the audit log.
+model MaterialStatusChange {
+  id         String                @id @default(uuid())
+  materialId String                @map("material_id")
+  // The status it changed to.
+  active     Boolean
+  reasonCode MaterialStatusReason? @map("reason_code")
+  note       String?
+  actorId    String                @map("actor_id")
+  createdAt  DateTime              @default(now()) @map("created_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+  actor    User     @relation(fields: [actorId], references: [id])
+
+  @@index([materialId, createdAt])
+  @@index([createdAt])
+  @@map("material_status_changes")
 }
 
 enum ConsumableOutcomeKind {

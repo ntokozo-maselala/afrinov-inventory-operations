@@ -80,6 +80,14 @@ the issue, the return, the actor and the withdrawn outcome; indexes on
 issue_transaction_id, return_transaction_id and created_at. Added to only; it
 holds no stock.
 
+`material_status_changes` (MaterialStatusChange, ADR-032): id, material_id,
+active (the status it changed to), reason_code (`MaterialStatusReason`
+OBSOLETE, SUPERSEDED, SUPPLIER_DISCONTINUED, CREATED_IN_ERROR, BACK_IN_USE,
+STOCK_CAME_BACK, DEACTIVATED_IN_ERROR, OTHER), note, actor_id, created_at. FKs
+to the material and the actor; indexes on (material_id, created_at) and
+created_at. reason_code is null only on changes copied from the audit log. Added
+to only; it holds no stock, so it is never in a ledger sum.
+
 `reference_type` values written by the code: `GoodsReceipt` (receipts),
 `PurchaseOrder` (receive-all on an order), `Project` (issues with a
 project), `Return` (returns; `reference_id` = the issue), `StockCount`,

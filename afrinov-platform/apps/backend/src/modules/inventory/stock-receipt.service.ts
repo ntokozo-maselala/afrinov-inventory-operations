@@ -13,6 +13,7 @@ import { generateGRNumber, parseReceivedAt } from '../procurement/goods-receipt.
 import { dayRange, pageCursor, parseCursor } from '../../shared/dates.js';
 import { sectionOf } from './material-section.js';
 import { checkWholeUnits } from '../../shared/units.js';
+import { inactiveMessage } from './material-status.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -139,7 +140,7 @@ export const StockReceiptService = {
         if (!checked.has(`m:${l.materialId}`)) {
           const m = await tx.material.findUnique({ where: { id: l.materialId } });
           if (!m) throw Errors.notFound('Material');
-          if (!m.active) throw Errors.validation(`Material ${m.sku} is inactive`);
+          if (!m.active) throw Errors.validation(inactiveMessage(m.sku));
           // A Projects item with no project isn't issued (refuseUnassigned), so
           // it isn't received into the store either: as /stock-items requires
           // (Project on the Order Roadmap; Qodo, PR #131).
