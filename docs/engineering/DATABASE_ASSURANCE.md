@@ -15,7 +15,7 @@ and the recovery considerations for the migration added in this workstream.
 - Materials reconciles with Stock and Tools (ADR-031): `npm run check:catalogue`
   prints how the pages relate, and fails if an item on either isn't on Materials
   or the tabs don't add up to the catalogue, read-only.
-- An item's status is one record (ADR-032): `npm run check:item-status` fails if
+- An item's status is one record (ADR-033): `npm run check:item-status` fails if
   an item's active flag disagrees with its newest `material_status_changes` row,
   and lists inactive items still holding stock, read-only. A status change is
   never a ledger line, so it cannot affect a balance.
@@ -37,7 +37,7 @@ and the recovery considerations for the migration added in this workstream.
   committed migrations reproduce the schema exactly. This is now enforced in CI
   (`backend-ci.yml`, `migration-drift` job).
 
-## Item status record (ADR-032)
+## Item status record (ADR-033)
 
 Migration `20260101000051_material_status_changes` only adds: a table, its
 indexes and enum, then a copy of past status changes from the audit log. It

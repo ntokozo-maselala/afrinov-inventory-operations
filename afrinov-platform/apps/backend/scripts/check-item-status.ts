@@ -1,5 +1,5 @@
 // Checks items against their status records in the database DATABASE_URL points
-// at (ADR-032), and lists inactive items still holding stock. Read-only.
+// at (ADR-033), and lists inactive items still holding stock. Read-only.
 //
 // Exits 1 when an item's active flag disagrees with its newest status change.
 // That should never happen: it would be a bug, or a change made around the API.

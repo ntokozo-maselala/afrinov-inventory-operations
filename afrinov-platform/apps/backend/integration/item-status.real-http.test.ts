@@ -1,4 +1,4 @@
-// Real-HTTP + real-database tests for an item's status (ADR-032): a change is on
+// Real-HTTP + real-database tests for an item's status (ADR-033): a change is on
 // Movements with no quantity and a reason, moves no stock, happens only on its
 // own route, and agrees with the record the check reads.
 //

@@ -1,4 +1,4 @@
-// Why an item is deactivated or reactivated (ADR-032), as the server takes it
+// Why an item is deactivated or reactivated (ADR-033), as the server takes it
 // (backend material-status.ts). A status change moves no stock: it is a row of
 // its own on Movements, with no quantity.
 import { orderPath } from './orderKind';

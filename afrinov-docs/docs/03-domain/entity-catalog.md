@@ -102,7 +102,7 @@ detail is in `07-data/database-schema.md`.
 - **Auditable:** `CONSUMABLE_OUTCOME`, `CONSUMABLE_OUTCOME_WITHDRAW`.
 
 ## MaterialStatusChange
-- **Purpose:** an item deactivated or reactivated, and why (ADR-032). Moves no
+- **Purpose:** an item deactivated or reactivated, and why (ADR-033). Moves no
   stock; Movements lists it with no quantity.
 - **Attributes:** id, material, active (the status it changed to), reasonCode,
   note, actor, createdAt. reasonCode is null only on changes from before this

@@ -1,10 +1,10 @@
-// Why an item was deactivated or reactivated (ADR-032). A status change moves no
+// Why an item was deactivated or reactivated (ADR-033). A status change moves no
 // stock, so it is kept out of the ledger; it has its own record and its own row
 // on Movements, and says why from a short list, so the reasons can be reported on.
 import { Errors } from '../../shared/errors.js';
 
 /**
- * Inactive means nothing moves (ADR-032). Said the same way on every refusal,
+ * Inactive means nothing moves (ADR-033). Said the same way on every refusal,
  * with who can put it right, so stock that turns up can always be booked.
  */
 export const inactiveMessage = (sku: string) => `${sku} is inactive. Ask a Store Controller to reactivate it first.`;
