@@ -8,12 +8,12 @@ Six phases that bring job tracking into the platform, aligned with the **03 Proj
 
 This goes against the current scope: `01-product/product-scope.md` lists production scheduling and full project management as out of scope, and `01-product/capability-map.md` lists project management as "Future or never". Phase 0 changes both and records the decision as **ADR-032**. It stays job tracking: no budgets, step dependencies or resource levelling.
 
-**Status:** Phase 0 built on `feature/project-tracking-0`; Phases 1 to 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
+**Status:** Phase 0 built on `feature/project-tracking-0`, Phase 1 on `feature/project-tracking-1` (branched from it); Phases 2 to 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 0 | Scope change and ADR | S | Built |
-| 1 | A project has schedules and steps | L | Not started |
+| 1 | A project has schedules and steps | L | Built |
 | 2 | The project page | M | Not started |
 | 3 | The chart and the board of open jobs | M | Not started |
 | 4 | The Procurement step reads the orders | S–M | Not started |
@@ -88,17 +88,25 @@ Size S. Docs only.
 
 Size L. Backend, with a migration, and the mock API.
 
-- [ ] **1.1 Schedules.** A new `project_schedules` table: project, name ("Main", "Frame modification", "January 2026"), status (`PLANNING`, `ACTIVE`, `DONE`, `CANCELLED`), an optional due date, and the other project numbers it covers, for a joint job. A project can hold any number. Deleting a project that has schedules is refused, as for a project holding stock.
+*Built on `feature/project-tracking-1` (migrations `20260101000051_projects_setting_category` and `20260101000052_project_schedules`).* Changes from the plan:
+- **Routes by id.** A schedule and a step are addressed by their own id (`/project-schedules/:id`, `/project-steps/:id`), not under the project, so a step can't be named under the wrong project; each change answers with the whole schedule. `GET /project-step-templates` lists the templates for the form.
+- **Templates and closed days are text settings**, in a new Settings category, Projects: one template per line ("Workshop job: Kick-off, Engineering, …") and one closed day per line ("2026-12-25 Christmas Day"). Settings stores only text, numbers, yes/no or a fixed choice, so no new table or admin screen was needed. The Settings panel that shows them comes with Phase 2's screens.
+- **The mock API moves to Phase 2**, with the page that calls these routes: nothing on screen calls them yet, and the page's tests are what exercise the mock.
+- **A started schedule's plan** changes through a re-plan, adding a step (with its planned dates) or removing one, each with a reason; a planning schedule records no progress, expected or actual dates. Done goes back to Active (reopening); a done or cancelled schedule is otherwise read-only.
+
+Tests: 23 unit tests for working days and the rules, one for completing a project, a migration test, and 13 over real HTTP (`project-schedules.real-http.test.ts`). The whole suite passes on a clean database (backend 1148 unit, 273 integration), and the migrations match the schema.
+
+- [x] **1.1 Schedules.** A new `project_schedules` table: project, name ("Main", "Frame modification", "January 2026"), status (`PLANNING`, `ACTIVE`, `DONE`, `CANCELLED`), an optional due date, and the other project numbers it covers, for a joint job. A project can hold any number. Deleting a project that has schedules is refused, as for a project holding stock.
   Files: `backend/prisma/schema.prisma`, a new migration
-- [ ] **1.2 Steps.** A new `project_steps` table: schedule, position, name, baseline start and end, forecast start and end, actual start and end, progress (0 to 100), the user assigned (referencing `users`), notes.
+- [x] **1.2 Steps.** A new `project_steps` table: schedule, position, name, baseline start and end, forecast start and end, actual start and end, progress (0 to 100), the user assigned (referencing `users`), notes.
   Files: `backend/prisma/schema.prisma`, the same migration
-- [ ] **1.3 Step templates.** Standard step lists kept in Settings: workshop job (Kick-off, Engineering, Procurement, Manufacturing, FAT, Packaging, Data Pack, Delivery, Postmortem, Closure), site job (adds Site induction and safety file, Site installation, Commissioning), buy-and-deliver (no Engineering or Manufacturing) and maintenance visit (Site induction, Site inspection, Oil testing, Site report, Closure). A new schedule starts from one, and its steps can then be changed.
+- [x] **1.3 Step templates.** Standard step lists kept in Settings: workshop job (Kick-off, Engineering, Procurement, Manufacturing, FAT, Packaging, Data Pack, Delivery, Postmortem, Closure), site job (adds Site induction and safety file, Site installation, Commissioning), buy-and-deliver (no Engineering or Manufacturing) and maintenance visit (Site induction, Site inspection, Oil testing, Site report, Closure). A new schedule starts from one, and its steps can then be changed.
   Files: `backend/src/modules/settings/settings.service.ts`, a new `backend/src/modules/operations/project-schedule.service.ts`
-- [ ] **1.4 New month.** For a recurring job, adds a schedule with the previous month's steps at 0%, dates moved on a month and still editable. The previous month's schedule stays as it was.
+- [x] **1.4 New month.** For a recurring job, adds a schedule with the previous month's steps at 0%, dates moved on a month and still editable. The previous month's schedule stays as it was.
   Files: `project-schedule.service.ts`
-- [ ] **1.5 Working days.** One shared function counts working days between two dates and adds working days to a date: Monday to Friday, less the closed days in a new setting (`projects.closedDays`). Everything that counts days uses it.
+- [x] **1.5 Working days.** One shared function counts working days between two dates and adds working days to a date: Monday to Friday, less the closed days in a new setting (`projects.closedDays`). Everything that counts days uses it.
   Files: a new `backend/src/shared/working-days.ts`, `settings.service.ts`
-- [ ] **1.6 The rules, on the server.**
+- [x] **1.6 The rules, on the server.**
   - Only the project's manager and Admin change its schedules and steps: a new permission, `manage:project_schedule`, held by Admin, or being the project's manager. Everyone signed in can see them.
   - A schedule's baseline is edited only while it is Planning. Re-planning an Active one sets a new baseline, needs a reason, and keeps the old dates in the audit log.
   - An actual end is set only with progress at 100%, and progress at 100% needs an actual end.
@@ -106,10 +114,10 @@ Size L. Backend, with a migration, and the mock API.
   - A step is assigned only to an active user.
   - Every change is written to the audit log in the same transaction, as `project.service.ts` does for projects.
   Files: `project-schedule.service.ts`, `backend/src/modules/operations/project.service.ts`, `backend/src/shared/permissions.ts`
-- [ ] **1.7 The totals.** Worked out on the server from the schedule's own steps, never stored: start (earliest), forecast end (latest), progress (weighted by planned working days), variance in working days (forecast or actual end against baseline end), working days past the due date if forecast to miss it, and the step that is late. A project's totals cover its open schedules.
+- [x] **1.7 The totals.** Worked out on the server from the schedule's own steps, never stored: start (earliest), forecast end (latest), progress (weighted by planned working days), variance in working days (forecast or actual end against baseline end), working days past the due date if forecast to miss it, and the step that is late. A project's totals cover its open schedules.
   Files: `project-schedule.service.ts`
-- [ ] **1.8 Routes.** `GET`/`POST /projects/:projectNumber/schedules`, `PATCH` a schedule, `POST` its `/next-month` and `/replan`, and `POST`/`PATCH`/`DELETE` its steps. A step update can move the later steps' forecasts by a number of working days, in the same transaction. Writes take an `Idempotency-Key`, as inventory writes do.
-  Files: `backend/src/modules/operations/project.routes.ts`, `backend/src/openapi/document.ts`, `frontend/src/mock/mockApi.ts`
+- [x] **1.8 Routes.** `GET /project-step-templates`; `GET`/`POST /projects/:projectNumber/schedules`; `GET`/`PATCH /project-schedules/:id`, `POST /project-schedules/:id/next-month`, `/replan` and `/steps`; `PATCH`/`DELETE /project-steps/:id` (`?reason=` once started). A step update can move the later steps' forecasts by a number of working days (`shiftLaterBy`), in the same transaction. The POSTs that create take an `Idempotency-Key`, as inventory writes do.
+  Files: `backend/src/modules/operations/project.routes.ts`, `backend/src/openapi/document.ts`, `backend/src/shared/idempotency.ts`
 
 Tests: working days (weekends, closed days, a span over a month end); totals (weighted progress, variance by end date, a late start that finishes on time showing none); a locked baseline; New month copying at 0%; and over real HTTP, who may change what (the project's manager and Admin may; another user's manager, Procurement and a technician are refused). A migration test, and the existing suites unchanged.
 
@@ -128,6 +136,10 @@ Size M. Frontend.
 - [ ] **2.3 Updating a step.** Progress, forecast dates, the user assigned and a note. Marking a step done asks for its actual end, today by default. When a forecast end moves later, the form offers to move the later steps by the same number of working days. Only the project's manager and Admin see these controls.
   Files: a new `frontend/src/components/ProjectStepForm.tsx`
 - [ ] **2.4 Planning and re-planning.** While a schedule is Planning, its baseline dates are edited in place. Once Active, **Re-plan** asks for the new dates and a reason.
+- [ ] **2.5 Settings → Projects.** A panel for the step templates and the closed days (both multi-line text), for Admin.
+  Files: `pages/Settings.tsx`, `pages/SettingsSections.tsx`
+- [ ] **2.6 The mock API.** The Phase 1 routes in `mock/mockApi.ts`, with the same rules, and the two Projects settings rows, so the page works in frontend-only mode (moved here from Phase 1).
+  Files: `frontend/src/mock/mockApi.ts`
 
 Tests: schedules listed open first; someone who isn't the manager sees no controls; marking a step done asks for its actual end; moving later steps when one slips; re-plan needs a reason. The mock serves the page in frontend-only mode.
 

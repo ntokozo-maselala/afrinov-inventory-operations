@@ -45,7 +45,10 @@ export type IdempotencyEndpoint =
   | 'POST /consumable-outcomes/:id/withdrawal'
   | 'POST /tools/loans/:id/due-date'
   | 'POST /adjustment-requests/:id/approve'
-  | 'POST /adjustment-requests/:id/reject';
+  | 'POST /adjustment-requests/:id/reject'
+  | 'POST /projects/:projectNumber/schedules'
+  | 'POST /project-schedules/:id/next-month'
+  | 'POST /project-schedules/:id/steps';
 
 /**
  * Stable hash of the request, so a reused key with a different payload is

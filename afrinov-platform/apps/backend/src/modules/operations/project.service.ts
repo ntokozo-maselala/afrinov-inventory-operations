@@ -142,6 +142,16 @@ export const ProjectService = {
     const before = await prisma.project.findUnique({ where: { projectNumber: input.projectNumber } });
     if (!before) throw Errors.notFound('Project');
 
+    // A job is completed when its work is: every schedule done or cancelled (ADR-032).
+    if (input.status === 'COMPLETED' && before.status !== 'COMPLETED') {
+      const open = await prisma.projectSchedule.count({
+        where: { projectNumber: input.projectNumber, status: { in: ['PLANNING', 'ACTIVE'] } },
+      });
+      if (open > 0) {
+        throw Errors.invalidState(`This project has ${open} open schedule${open === 1 ? '' : 's'}: finish or cancel ${open === 1 ? 'it' : 'them'} before marking the project Completed.`);
+      }
+    }
+
     if (input.endDate !== undefined && input.startDate !== undefined) {
       validateDates(input.startDate, input.endDate);
     } else if (input.endDate !== undefined && input.endDate && before.startDate) {

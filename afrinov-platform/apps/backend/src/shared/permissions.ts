@@ -39,6 +39,9 @@ export const PermissionCode = {
   ViewReports: 'view:reports',
   ViewAuditLog: 'view:audit_log',
   ManageProjects: 'manage:projects',
+  // Changing any project's schedules and steps (ADR-032). Admin only for now: a
+  // project's own manager changes that project's without it.
+  ManageProjectSchedule: 'manage:project_schedule',
   ManageRecipients: 'manage:recipients',
   ManageSettings: 'manage:settings',
   // The prices Sales is quoted can give away the margin on a job, so seeing
