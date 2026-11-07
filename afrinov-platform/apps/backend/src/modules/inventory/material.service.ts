@@ -24,7 +24,7 @@ export interface CreateMaterialInput {
   trackUse?: boolean;
 }
 
-/** Something to deal with before an item can be deactivated (ADR-032). */
+/** Something to deal with before an item can be deactivated (ADR-033). */
 export interface DeactivationBlocker {
   kind: 'STOCK' | 'LOAN' | 'APPROVAL' | 'ORDER';
   text: string;
@@ -262,7 +262,7 @@ export const MaterialService = {
   },
 
   /**
-   * The one way an item changes status (ADR-032). Its row is held FOR UPDATE
+   * The one way an item changes status (ADR-033). Its row is held FOR UPDATE
    * first; every movement holds it FOR SHARE (checkMaterialActive), so a
    * movement finishes before this looks, or waits and is refused. The status
    * record and the audit entry commit with the change. A change to the status

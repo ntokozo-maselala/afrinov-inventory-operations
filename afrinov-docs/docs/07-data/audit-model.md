@@ -18,7 +18,7 @@ Two records answer "who changed what, when":
 | Area | Actions (`action` value) |
 |---|---|
 | Users | CREATE, UPDATE (name, active, roles; before and after) |
-| Materials | CREATE (also via POST /stock-items), UPDATE, ACTIVATE / DEACTIVATE (with the reason; before ADR-032 a status change was an UPDATE) |
+| Materials | CREATE (also via POST /stock-items), UPDATE, ACTIVATE / DEACTIVATE (with the reason; before ADR-033 a status change was an UPDATE) |
 | Locations | CREATE, UPDATE, ACTIVATE / DEACTIVATE, DELETE |
 | Racks | CREATE, UPDATE, ARCHIVE (until Phase 3.2 retired the Racks page); MOVE_TO_LOCATION and DISCARD by racks to locations, each carrying the rack's full record |
 | Projects | CREATE, UPDATE, ARCHIVE |

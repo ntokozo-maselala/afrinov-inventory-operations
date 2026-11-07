@@ -1,4 +1,4 @@
-// Real-HTTP + real-database tests for what an item's status holds to (ADR-032):
+// Real-HTTP + real-database tests for what an item's status holds to (ADR-033):
 // it is deactivated only when clear, with no override, and on an inactive item
 // nothing moves until someone reactivates it. An inactive item never holds stock
 // unless it did before the rule, so those tests start from one that did.

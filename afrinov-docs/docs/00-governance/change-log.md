@@ -4,7 +4,9 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-07 | `00-governance/decision-log.md`, `03-domain/business-transactions.md`, `03-domain/entity-catalog.md`, `07-data/audit-model.md`, `07-data/database-schema.md`, `08-api/resource-model.md`, `09-frontend/page-inventory.md` | The item status decision, lost when two records both took ADR-032, restored as ADR-033; its references renumbered. Job tracking keeps ADR-032. | Engineering |
 | 2026-11-07 | `00-governance/decision-log.md`, `01-product/product-scope.md`, `01-product/capability-map.md`, `01-product/product-roadmap.md`, `13-project-management/roadmaps/project-tracking-roadmap.md` | ADR-032: job tracking moves into scope, replacing ClickUp and the *03 Projects Tracking Schedule* workbook; the Project Tracking Roadmap | Engineering |
+| 2026-11-06 | `00-governance/decision-log.md`, `03-domain/business-transactions.md`, `03-domain/entity-catalog.md`, `07-data/audit-model.md`, `07-data/database-schema.md`, `08-api/resource-model.md`, `09-frontend/page-inventory.md` | ADR-033: an item's status is on Movements with a reason, an item is cleared before it is deactivated, and on an inactive item nothing moves. The inventory report keeps a deactivated item's movements. | Engineering |
 | 2026-11-06 | `00-governance/decision-log.md`, `08-api/resource-model.md`, `09-frontend/page-inventory.md` | ADR-031: Materials counts every item, on All items with Stores, Tools and Projects tabs that add up; Stock counts lines and says how many items they are; `GET /materials/summary` and `check:catalogue` | Engineering |
 | 2026-11-05 | `08-api/authorization.md`, `09-frontend/page-inventory.md`, `09-frontend/information-architecture.md` | The Procurement savings report, the third step | Engineering |
 | 2026-11-05 | `07-data/database-schema.md`, `08-api/authorization.md` | Buyers link Procurement RFQ lines to Sales lines, the second step of the Procurement savings report | Engineering |

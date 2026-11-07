@@ -187,7 +187,7 @@ export interface GoodsReceiptPostInput {
 
 export async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
   // Held for the rest of the transaction, so a deactivation waits for this
-  // movement or this movement waits for it and is refused (ADR-032).
+  // movement or this movement waits for it and is refused (ADR-033).
   await holdUnits([materialId], tx);
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
@@ -498,7 +498,7 @@ export const BROKEN = 'BROKEN' as const;
 export const OUTCOME_WITHDRAWN = 'OUTCOME_WITHDRAWN' as const;
 
 /**
- * An item deactivated or reactivated, as a row on Movements (ADR-032): no
+ * An item deactivated or reactivated, as a row on Movements (ADR-033): no
  * stock moves and it belongs to no one location, so its quantity is null and
  * its location says so. Never a ledger line, so never in a stock total.
  */

@@ -171,7 +171,7 @@ Use these forms; the older spellings still work but are deprecated or removed.
   clear, with no override: no stock, no tool on loan, no adjustment waiting, no
   order still owing. A new path that moves stock calls `checkMaterialActive`
   after its balance lock: it holds the item's row, so a deactivation waits for
-  the movement or the movement is refused (ADR-032).
+  the movement or the movement is refused (ADR-033).
 - **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
   stock, Found only adds it, Other goes either way; Found and Other need a note
   (`checkRequestedAdjustment`). The API still takes the signed quantity.

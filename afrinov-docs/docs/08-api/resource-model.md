@@ -35,7 +35,7 @@ permission is required (see `authorization.md`).
 | Report: MovementHistory | derived | `GET /reports/movement-history` (materialId, type, from, to, projectNumber, limit) — view:reports |
 | Report: StockStatus | derived | `GET /reports/stock-status` (status, category, section, includeInactive) — view:reports |
 | Report: CatalogueSummary | derived | `GET /materials/summary`: how the catalogue adds up against Stock and Tools (ADR-031) — view:reports |
-| MaterialStatusChange | `material_status_changes` | `PATCH /materials/:id/status` (active, reasonCode, note; 409 lists what stands in the way), `GET /materials/:id/deactivation-check` — edit:material (ADR-032) |
+| MaterialStatusChange | `material_status_changes` | `PATCH /materials/:id/status` (active, reasonCode, note; 409 lists what stands in the way), `GET /materials/:id/deactivation-check` — edit:material (ADR-033) |
 | Report: StockValue | derived | `GET /reports/stock-value` — view:reports |
 | Report: LowStock | derived | `GET /reports/low-stock` — view:reports (empty when stock alerts are off) |
 | Report: ReorderList | derived | `GET /reports/reorder-list/export` (.xlsx) — view:reports |

@@ -1,4 +1,4 @@
-// Whether items and their status records agree (ADR-032), across a whole
+// Whether items and their status records agree (ADR-033), across a whole
 // database, read-only. An item's active flag must match its newest status
 // change, and an item with none must be active. Those are the rule. Inactive
 // items that still hold stock are listed for clearing: they date from before

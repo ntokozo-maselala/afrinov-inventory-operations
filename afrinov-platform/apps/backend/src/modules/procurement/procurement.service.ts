@@ -277,7 +277,7 @@ function lineMaterialsOf(materialIds: string[], client: Prisma.TransactionClient
   });
 }
 
-/** Inactive means nothing moves, and that starts with not ordering it (ADR-032). */
+/** Inactive means nothing moves, and that starts with not ordering it (ADR-033). */
 function refuseInactiveMaterial(materials: Array<{ sku: string; active: boolean }>): void {
   const inactive = materials.find((m) => !m.active);
   if (inactive) throw Errors.validation(inactiveMessage(inactive.sku));

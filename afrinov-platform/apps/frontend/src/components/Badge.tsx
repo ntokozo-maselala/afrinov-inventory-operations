@@ -70,7 +70,7 @@ const movementLabel: Record<string, string> = {
   USED_UP: 'Used up',
   BROKEN: 'Broken',
   OUTCOME_WITHDRAWN: 'Withdrawn',
-  // An item's status changed (ADR-032): listed among the movements, but no stock moved.
+  // An item's status changed (ADR-033): listed among the movements, but no stock moved.
   ITEM_DEACTIVATED: 'Item deactivated',
   ITEM_REACTIVATED: 'Item reactivated',
 };

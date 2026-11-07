@@ -1,4 +1,4 @@
-// Deactivating or reactivating an item (ADR-032): the change takes a reason from
+// Deactivating or reactivating an item (ADR-033): the change takes a reason from
 // the list, and a note when the reason is Other. It adds its own row to Movements.
 // An item is deactivated only when it is clear, so anything in the way is listed
 // first, each with where to deal with it. There is no override.

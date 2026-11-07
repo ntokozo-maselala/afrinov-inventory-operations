@@ -1048,7 +1048,7 @@ model ToolLoanExtension {
   @@map("tool_loan_extensions")
 }
 
-// Why an item was deactivated or reactivated (ADR-032). OTHER needs a note.
+// Why an item was deactivated or reactivated (ADR-033). OTHER needs a note.
 enum MaterialStatusReason {
   OBSOLETE
   SUPERSEDED
@@ -1060,7 +1060,7 @@ enum MaterialStatusReason {
   OTHER
 }
 
-// An item deactivated or reactivated (ADR-032). It moves no stock and belongs
+// An item deactivated or reactivated (ADR-033). It moves no stock and belongs
 // to no location, so it is not a ledger line; Movements lists it with no
 // quantity, as it does a due date change. Only ever added to: a mistake is put
 // right by changing the status back. reasonCode is null only on changes from
