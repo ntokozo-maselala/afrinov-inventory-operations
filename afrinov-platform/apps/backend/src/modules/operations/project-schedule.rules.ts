@@ -133,9 +133,9 @@ export interface ScheduleTotals {
 /** A schedule's totals, worked out from its own steps (never stored). */
 export function scheduleTotals(
   steps: readonly StepFacts[],
-  opts: { dueDate: Date | null; today: Date; closed: ClosedDays },
+  opts: { dueDate: Date | null; today: Date; closed: ClosedDays; /** Under way; only then can a step be behind. Default true. */ started?: boolean },
 ): ScheduleTotals {
-  const { dueDate, today, closed } = opts;
+  const { dueDate, today, closed, started = true } = opts;
   const ordered = [...steps].sort((a, b) => a.position - b.position);
   const start = earliest(ordered.map((s) => s.baselineStart ?? s.forecastStart ?? s.actualStart));
   const baselineEnd = latest(ordered.map((s) => s.baselineEnd));
@@ -155,7 +155,7 @@ export function scheduleTotals(
 
   const open = ordered.filter((s) => !isDone(s));
   const current = open[0] ?? null;
-  const late = open.find((s) => {
+  const late = !started ? undefined : open.find((s) => {
     const end = expectedEnd(s);
     if (!end) return false;
     return (s.baselineEnd !== null && end > s.baselineEnd) || end < today;

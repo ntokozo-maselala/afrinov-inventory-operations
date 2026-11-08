@@ -568,24 +568,24 @@ export const OPERATIONS: Operation[] = [
     method: 'patch', path: '/project-schedules/:id', tag: 'Projects', summary: 'Change a schedule, or move it on',
     description: 'Status: Planning to Active once every step has its planned start and end (the plan is then locked, and each step’s '
       + 'expected dates start as its plan); Active to Done once every step is at 100%; Done back to Active; Planning or Active to Cancelled. '
-      + 'A done or cancelled schedule is otherwise read-only (409 INVALID_STATE).',
+      + 'A done or cancelled schedule is otherwise read-only (409 INVALID_STATE). Admin (manage:project_schedule) or the project’s own manager.',
     permissions: [P.ManageProjectSchedule], body: updateScheduleSchema, errors: [403, 404, 409],
   },
   {
     method: 'post', path: '/project-schedules/:id/next-month', tag: 'Projects', summary: "Start a recurring job's next month",
     description: 'A new Planning schedule on the same project with this one’s steps at 0%, their plan and due date moved on a month, '
-      + 'named after its month unless a name is given. This one is unchanged. Retry-safe with an Idempotency-Key header.',
+      + 'named after its month unless a name is given. This one is unchanged. Retry-safe with an Idempotency-Key header. Admin (manage:project_schedule) or the project’s own manager.',
     permissions: [P.ManageProjectSchedule], body: nextMonthSchema, success: 201, errors: [403, 404, 409],
   },
   {
     method: 'post', path: '/project-schedules/:id/replan', tag: 'Projects', summary: 'Re-plan a started schedule',
-    description: 'New planned dates for the steps given, with the reason. The old plan is kept in the audit log. Active schedules only.',
+    description: 'New planned dates for the steps given, with the reason. The old plan is kept in the audit log. Active schedules only. Admin (manage:project_schedule) or the project’s own manager.',
     permissions: [P.ManageProjectSchedule], body: replanSchema, errors: [403, 404, 409],
   },
   {
     method: 'post', path: '/project-schedules/:id/steps', tag: 'Projects', summary: 'Add a step to a schedule',
     description: 'At the position given (the end by default). Once the schedule has started, the step needs its planned dates and a reason. '
-      + 'Assigned only to an active user. Retry-safe with an Idempotency-Key header.',
+      + 'Assigned only to an active user. Retry-safe with an Idempotency-Key header. Admin (manage:project_schedule) or the project’s own manager.',
     permissions: [P.ManageProjectSchedule], body: addStepSchema, success: 201, errors: [403, 404, 409],
   },
   {
@@ -593,12 +593,12 @@ export const OPERATIONS: Operation[] = [
     description: 'While planning: name, position, planned dates, assignee and notes. Once started: expected dates, progress, actual dates, '
       + 'name, position, assignee and notes; the plan changes only by a re-plan. An actual end goes with progress 100 and an actual start. '
       + 'shiftLaterBy moves the expected dates of the unfinished steps after this one by that many working days. '
-      + 'Retry-safe with an Idempotency-Key header, so a replay never moves them twice.',
+      + 'Retry-safe with an Idempotency-Key header, so a replay never moves them twice. Admin (manage:project_schedule) or the project’s own manager.',
     permissions: [P.ManageProjectSchedule], body: updateStepSchema, errors: [403, 404, 409],
   },
   {
     method: 'delete', path: '/project-steps/:id', tag: 'Projects', summary: 'Remove a step',
-    description: 'Once the schedule has started, needs ?reason= and keeps at least one step.',
+    description: 'Once the schedule has started, needs ?reason= and keeps at least one step. Admin (manage:project_schedule) or the project’s own manager.',
     query: z.object({ reason: z.string().optional() }),
     permissions: [P.ManageProjectSchedule], errors: [403, 404, 409],
   },

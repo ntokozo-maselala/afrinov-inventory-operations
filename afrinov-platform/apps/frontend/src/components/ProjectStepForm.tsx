@@ -88,6 +88,8 @@ export function ProjectStepForm({ schedule, step, users, closedDays, onCancel, o
     if (!adding && started) {
       const p = Number(progress);
       if (!Number.isInteger(p) || p < 0 || p > 100) return 'Progress is a whole number from 0 to 100.';
+      // 100% is a finished step, with the days it started and finished: never quietly saved as 99%.
+      if (!finished && p === 100) return 'To set 100%, tick “This step is finished” and give the days it started and finished.';
       if (finished && (!actualStart || !actualEnd)) return 'A finished step needs the days it started and finished.';
     }
     return null;
