@@ -243,5 +243,34 @@ describe('Project schedules over real HTTP', () => {
 
     // A closed project takes no new schedules.
     expect((await manager('POST', `/projects/${projectNumber}/schedules`, { name: 'Late addition' })).status).toBe(409);
+
+    // Nor are its schedules reopened or changed: the project stays Completed with nothing open.
+    const reopen = await manager<ApiErrorBody>('PATCH', `/project-schedules/${sched.id}`, { status: 'ACTIVE' });
+    expect(reopen.status).toBe(409);
+    expect(reopen.body.error.message).toMatch(/project is closed/);
+    expect((await manager('PATCH', `/project-schedules/${sched.id}`, { name: 'Renamed' })).status).toBe(409);
+    expect((await admin('POST', `/project-schedules/${sched.id}/next-month`, {})).status).toBe(409);
+  });
+
+  it('refuses dates outside 2000 to 2100, which would make every read of the schedule slow', async () => {
+    const res = await admin<ApiErrorBody>('POST', `/projects/${otherProject}/schedules`, { name: 'Far off', dueDate: '9999-12-31' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/between 2000 and 2100/);
+  });
+
+  it('says nothing is behind on a schedule still being planned', async () => {
+    const made = await admin<Schedule>('POST', `/projects/${otherProject}/schedules`, { name: 'Not started' });
+    const planned = await admin<Schedule>('POST', `/project-schedules/${made.body.id}/steps`, { name: 'Engineering', baselineStart: '2026-01-05', baselineEnd: '2026-01-09' });
+    expect(planned.body.status).toBe('PLANNING');
+    // Its end has passed, but it hasn't started, so it can't be behind.
+    expect(planned.body.totals.lateStep).toBeNull();
+
+    // A cancelled schedule is not repeated into a new month.
+    expect((await admin('PATCH', `/project-schedules/${made.body.id}`, { status: 'CANCELLED' })).status).toBe(200);
+    const again = await admin<ApiErrorBody>('POST', `/project-schedules/${made.body.id}/next-month`, {});
+    expect(again.status).toBe(409);
+    // Nor edited: it can't be reopened, so it says so rather than "reopen it first".
+    const edit = await admin<ApiErrorBody>('PATCH', `/project-schedules/${made.body.id}`, { name: 'x' });
+    expect(edit.body.error.message).toBe("This schedule is cancelled, so it can't be changed.");
   });
 });

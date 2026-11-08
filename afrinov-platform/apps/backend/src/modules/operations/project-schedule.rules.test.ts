@@ -104,6 +104,11 @@ describe('a schedule’s totals', () => {
     expect(scheduleTotals(steps, { dueDate: d('2026-01-30'), today, closed: none }).daysPastDue).toBeNull();
   });
 
+  it('says nothing is behind on a schedule not yet started, whatever the dates', () => {
+    const steps = [step({ position: 1, baselineStart: d('2026-01-12'), baselineEnd: d('2026-01-16') })];
+    expect(scheduleTotals(steps, { dueDate: null, today, closed: none, started: false }).lateStep).toBeNull();
+  });
+
   it('flags a step past its expected end that is not done, even if on plan', () => {
     const steps = [step({ position: 1, baselineStart: d('2026-01-12'), baselineEnd: d('2026-01-16'), progress: 50 })];
     expect(scheduleTotals(steps, { dueDate: null, today, closed: none }).lateStep).toEqual({ id: 's1', name: 'Step 1' });

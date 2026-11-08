@@ -156,6 +156,36 @@ describe('ProjectDetail', () => {
     ));
   });
 
+  it('asks to tick finished rather than quietly saving 100% as 99%', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Update Engineering' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Progress/), { target: { value: '100' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save step' }));
+    expect(await within(dialog).findByText(/To set 100%, tick/)).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
+  });
+
+  it('never offers Next month on a cancelled schedule', async () => {
+    const cancelled = { ...planning(), id: 'sch-9', name: 'Called off', status: 'CANCELLED' };
+    scheduleList = [active(), cancelled];
+    renderPage();
+    const off = await screen.findByRole('region', { name: 'Schedule Called off' });
+    expect(within(off).queryByRole('button', { name: 'Next month' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Schedule Main' })).getByRole('button', { name: 'Next month' })).toBeInTheDocument();
+  });
+
+  it('offers only Cancel on the schedules of a closed project', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path === '/projects/AFRI-1086' ? { ...PROJECT, status: 'COMPLETED' } : base(path)));
+    renderPage();
+    const card = await screen.findByRole('region', { name: 'Schedule Main' });
+    expect(within(card).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    for (const name of ['Re-plan', 'Add step', 'Edit', 'Next month']) expect(within(card).queryByRole('button', { name })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Update Engineering/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add schedule' })).not.toBeInTheDocument();
+  });
+
   it('asks why a step is removed from a schedule under way', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Remove FAT' }));

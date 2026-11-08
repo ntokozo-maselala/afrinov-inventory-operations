@@ -8,6 +8,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { ProjectScheduleService } from './project-schedule.service.js';
 
 export type ProjectStatus = 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED';
 
@@ -142,16 +143,6 @@ export const ProjectService = {
     const before = await prisma.project.findUnique({ where: { projectNumber: input.projectNumber } });
     if (!before) throw Errors.notFound('Project');
 
-    // A job is completed when its work is: every schedule done or cancelled (ADR-032).
-    if (input.status === 'COMPLETED' && before.status !== 'COMPLETED') {
-      const open = await prisma.projectSchedule.count({
-        where: { projectNumber: input.projectNumber, status: { in: ['PLANNING', 'ACTIVE'] } },
-      });
-      if (open > 0) {
-        throw Errors.invalidState(`This project has ${open} open schedule${open === 1 ? '' : 's'}: finish or cancel ${open === 1 ? 'it' : 'them'} before marking the project Completed.`);
-      }
-    }
-
     if (input.endDate !== undefined && input.startDate !== undefined) {
       validateDates(input.startDate, input.endDate);
     } else if (input.endDate !== undefined && input.endDate && before.startDate) {
@@ -184,6 +175,17 @@ export const ProjectService = {
     if (input.active !== undefined) data.active = input.active;
 
     const after = await prisma.$transaction(async (tx) => {
+      // A job is completed when its work is: every schedule done or cancelled
+      // (ADR-032). The project's row is held FOR UPDATE while it is counted, and
+      // a change to its schedules holds it FOR SHARE, so a schedule can't be
+      // added or reopened between the count and this commit.
+      if (input.status === 'COMPLETED' && before.status !== 'COMPLETED') {
+        await tx.$queryRaw`SELECT 1 FROM "projects" WHERE "project_number" = ${input.projectNumber} FOR UPDATE`;
+        const open = await ProjectScheduleService.openCount(input.projectNumber, tx);
+        if (open > 0) {
+          throw Errors.invalidState(`This project has ${open} open schedule${open === 1 ? '' : 's'}: finish or cancel ${open === 1 ? 'it' : 'them'} before marking the project Completed.`);
+        }
+      }
       const project = await tx.project.update({
         where: { projectNumber: input.projectNumber },
         data,

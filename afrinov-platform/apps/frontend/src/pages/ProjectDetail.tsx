@@ -172,6 +172,7 @@ export function ProjectDetail() {
             key={s.id}
             schedule={s}
             canChange={canChange}
+            projectClosed={closed}
             onAction={setDialog}
           />
         ))}
@@ -223,7 +224,14 @@ export function ProjectDetail() {
 }
 
 /** One schedule: its totals, what can be done with it, and its steps. */
-function ScheduleCard({ schedule: s, canChange, onAction }: { schedule: ProjectSchedule; canChange: boolean; onAction: (d: Dialog) => void }) {
+function ScheduleCard({ schedule: s, canChange, projectClosed, onAction }: {
+  schedule: ProjectSchedule; canChange: boolean;
+  /** Completed, cancelled or archived: its schedules are only cancelled, never repeated. */
+  projectClosed: boolean;
+  onAction: (d: Dialog) => void;
+}) {
+  // On a closed project the server only lets a schedule be cancelled.
+  const editable = canChange && !projectClosed;
   const open = isOpenSchedule(s.status);
   const started = s.status === 'ACTIVE';
   const late = latenessOf(s.totals.daysLate);
@@ -253,26 +261,26 @@ function ScheduleCard({ schedule: s, canChange, onAction }: { schedule: ProjectS
         </div>
         {canChange && (
           <div className="flex flex-wrap gap-1">
-            {s.status === 'PLANNING' && (
+            {editable && s.status === 'PLANNING' && (
               <Button size="sm" variant="primary" disabled={s.steps.length === 0 || unplanned.length > 0}
                 title={unplanned.length ? 'Plan every step’s start and end first' : undefined}
                 onClick={() => onAction({ kind: 'status', schedule: s, to: 'ACTIVE' })}>Start</Button>
             )}
-            {started && <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'replan', schedule: s })}>Re-plan</Button>}
-            {started && (
+            {editable && started && <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'replan', schedule: s })}>Re-plan</Button>}
+            {editable && started && (
               <Button size="sm" variant="secondary" disabled={!allDone} title={allDone ? undefined : 'Every step must be finished first'}
                 onClick={() => onAction({ kind: 'status', schedule: s, to: 'DONE' })}>Mark done</Button>
             )}
-            {s.status === 'DONE' && <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'status', schedule: s, to: 'ACTIVE' })}>Reopen</Button>}
-            {open && <Button size="sm" variant="secondary" leadingIcon={<Icon.Plus size={12} />} onClick={() => onAction({ kind: 'step', schedule: s, step: null })}>Add step</Button>}
-            {open && <Button size="sm" variant="ghost" leadingIcon={<Icon.Edit size={12} />} onClick={() => onAction({ kind: 'edit-schedule', schedule: s })}>Edit</Button>}
-            <Button size="sm" variant="ghost" onClick={() => onAction({ kind: 'next-month', schedule: s })}>Next month</Button>
+            {editable && s.status === 'DONE' && <Button size="sm" variant="secondary" onClick={() => onAction({ kind: 'status', schedule: s, to: 'ACTIVE' })}>Reopen</Button>}
+            {editable && open && <Button size="sm" variant="secondary" leadingIcon={<Icon.Plus size={12} />} onClick={() => onAction({ kind: 'step', schedule: s, step: null })}>Add step</Button>}
+            {editable && open && <Button size="sm" variant="ghost" leadingIcon={<Icon.Edit size={12} />} onClick={() => onAction({ kind: 'edit-schedule', schedule: s })}>Edit</Button>}
+            {editable && s.status !== 'CANCELLED' && <Button size="sm" variant="ghost" onClick={() => onAction({ kind: 'next-month', schedule: s })}>Next month</Button>}
             {open && <Button size="sm" variant="ghost" onClick={() => onAction({ kind: 'status', schedule: s, to: 'CANCELLED' })}>Cancel</Button>}
           </div>
         )}
       </header>
 
-      {s.status === 'PLANNING' && unplanned.length > 0 && canChange && (
+      {s.status === 'PLANNING' && unplanned.length > 0 && editable && (
         <Alert tone="info" title="Plan the dates, then start" className="mb-3">
           {unplanned.length === s.steps.length ? 'No step has its planned dates yet.' : `${unplanned.length} step${unplanned.length === 1 ? ' still needs its' : 's still need their'} planned start and end.`}
         </Alert>
@@ -291,11 +299,11 @@ function ScheduleCard({ schedule: s, canChange, onAction }: { schedule: ProjectS
                 <th className="py-2 pr-2">Planned</th>
                 <th className="py-2 pr-2">{started || s.status === 'DONE' ? 'Expected or actual' : ''}</th>
                 <th className="py-2 pr-2 w-36">Progress</th>
-                {canChange && open && <th className="py-2 w-32" />}
+                {editable && open && <th className="py-2 w-32" />}
               </tr>
             </thead>
             <tbody>
-              {s.steps.map((st) => <StepRow key={st.id} schedule={s} step={st} canChange={canChange && open} onAction={onAction} />)}
+              {s.steps.map((st) => <StepRow key={st.id} schedule={s} step={st} canChange={editable && open} onAction={onAction} />)}
             </tbody>
           </table>
         </div>
@@ -321,7 +329,7 @@ function StepRow({ schedule, step: st, canChange, onAction }: { schedule: Projec
       <td className="py-2 pr-2 whitespace-nowrap">
         {showActual && (st.done
           ? <span>Finished {formatDay(st.actualEnd)}</span>
-          : <span className={overdue || slipped ? 'text-warning-700' : ''}>{formatSpan(st.forecastStart, st.forecastEnd)}{overdue ? ' (overdue)' : ''}</span>)}
+          : <span className={overdue || slipped ? 'text-warning-600 font-medium' : ''}>{formatSpan(st.forecastStart, st.forecastEnd)}{overdue ? ' (overdue)' : ''}</span>)}
       </td>
       <td className="py-2 pr-2">
         <div className="flex items-center gap-2">
