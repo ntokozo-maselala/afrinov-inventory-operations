@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseDay } from '../../shared/working-days.js';
 import {
   addOneMonth,
+  boardOrder,
   monthName,
   parseStepTemplates,
   scheduleTotals,
@@ -119,6 +120,25 @@ describe('a schedule’s totals', () => {
     expect(scheduleTotals([step({ position: 1 })], { dueDate: null, today, closed: none })).toMatchObject({
       start: null, forecastEnd: null, progress: 0, daysLate: null, daysPastDue: null, lateStep: null,
     });
+  });
+});
+
+describe('the board’s order', () => {
+  const row = (projectNumber: string, over: Record<string, number | string | null>) => ({
+    projectNumber, name: 'Main',
+    totals: { start: null, baselineEnd: null, forecastEnd: null, progress: 0, daysLate: null, daysPastDue: null, currentStep: null, lateStep: null, ...over },
+  });
+
+  it('puts past the due date first, then late against plan, then the soonest finish, then no dates', () => {
+    const rows = [
+      row('A', { daysLate: 0, forecastEnd: '2026-03-30' }),
+      row('B', {}),
+      row('C', { daysLate: 3, forecastEnd: '2026-03-20' }),
+      row('D', { daysLate: 1, daysPastDue: 1, forecastEnd: '2026-04-02' }),
+      row('E', { daysLate: -2, forecastEnd: '2026-03-10' }),
+      row('F', { daysLate: 0, forecastEnd: '2026-03-12' }),
+    ];
+    expect([...rows].sort(boardOrder).map((r) => r.projectNumber)).toEqual(['D', 'C', 'F', 'A', 'E', 'B']);
   });
 });
 

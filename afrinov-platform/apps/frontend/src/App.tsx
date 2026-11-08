@@ -43,6 +43,7 @@ const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ defaul
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ProjectLeftovers = importPage(() => import('./pages/ProjectLeftovers').then(m => ({ default: m.ProjectLeftovers })));
 const ProjectDetail = importPage(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
+const ProjectBoard = importPage(() => import('./pages/ProjectBoard').then(m => ({ default: m.ProjectBoard })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
 const IssueStock = importPage(() => import('./pages/IssueStock').then(m => ({ default: m.IssueStock })));
 const ReturnStock = importPage(() => import('./pages/ReturnStock').then(m => ({ default: m.ReturnStock })));
@@ -192,6 +193,7 @@ export function App() {
         <Route path="/racks" element={<Navigate to="/locations?type=RACK" replace />} />
         <Route path="/locations" element={<RouteBoundary name="Locations"><Locations /></RouteBoundary>} />
         <Route path="/projects" element={<RouteBoundary name="Projects"><Projects /></RouteBoundary>} />
+        <Route path="/projects/board" element={<RouteBoundary name="Project board"><ProjectBoard /></RouteBoundary>} />
         <Route path="/projects/:projectNumber" element={<RouteBoundary name="Project"><ProjectDetail /></RouteBoundary>} />
         <Route path="/projects/:projectNumber/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
         <Route path="/materials/no-project/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />

@@ -17,3 +17,11 @@ export const daysAgo = (n: number) => {
   d.setDate(d.getDate() - n);
   return isoDay(d);
 };
+
+/** The Sunday that ends the week (Monday to Sunday) a YYYY-MM-DD day falls in. */
+export function endOfWeek(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const toSunday = (7 - d.getUTCDay()) % 7;
+  d.setUTCDate(d.getUTCDate() + toSunday);
+  return d.toISOString().slice(0, 10);
+}

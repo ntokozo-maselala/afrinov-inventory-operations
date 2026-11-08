@@ -87,7 +87,9 @@ export function useNavGroups(): NavGroup[] {
       // The jobs the business wins and works on for its clients.
       title: 'Sales',
       items: [
-        { to: '/projects', label: 'Projects', icon: <Icon.Tag /> },
+        { to: '/projects', label: 'Projects', icon: <Icon.Tag />, excludes: ['/projects/board'] },
+        // Every open job, most at risk first, and each user's own steps (ADR-032).
+        { to: '/projects/board', label: 'Project board', icon: <Icon.Chart /> },
         // What suppliers quote Sales can give away a job's margin, so buyers and the store don't see it.
         ...(PROCUREMENT_ENABLED ? [{ to: '/sales-rfqs', label: 'Sales RFQ', icon: <Icon.Doc />, permissions: ['sales:view'] }] : []),
       ],

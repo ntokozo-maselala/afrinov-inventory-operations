@@ -208,6 +208,26 @@ describe('Project schedules over real HTTP', () => {
     expect(sched.steps.map((s) => [s.position, s.name])).toEqual([[1, 'Engineering'], [2, 'Manufacturing'], [3, 'FAT']]);
   });
 
+  it('puts the open schedules on the board, and each user’s unfinished steps on My steps', async () => {
+    interface BoardRow { scheduleId: string; status: string; projectNumber: string; manager: { id: string } | null; steps: number; stepsDone: number; totals: { forecastEnd: string | null } }
+    const board = await technician<BoardRow[]>('GET', `/project-board?managerId=${managerId}`);
+    expect(board.status).toBe(200);
+    // Under way with dates first; the templated one, still being planned with no dates, last.
+    expect(board.body.map((r) => r.scheduleId)).toEqual([sched.id, templated.id]);
+    expect(board.body[0]).toMatchObject({ projectNumber, status: 'ACTIVE', manager: { id: managerId }, steps: 3, stepsDone: 1, totals: { forecastEnd: '2026-03-24' } });
+    expect((await technician<BoardRow[]>('GET', `/project-board?assigneeId=${technicianId}`)).body.map((r) => r.scheduleId)).toContain(sched.id);
+    expect((await technician('GET', '/project-board?managerId=not-a-uuid')).status).toBe(400);
+
+    interface MyStep { name: string; projectNumber: string; expectedEnd: string | null; late: boolean }
+    const mine = await technician<MyStep[]>('GET', '/my-project-steps');
+    expect(mine.status).toBe(200);
+    // Engineering is finished; the two left, soonest first, both past their expected end by now.
+    expect(mine.body.filter((s) => s.projectNumber === projectNumber).map((s) => [s.name, s.expectedEnd, s.late])).toEqual([
+      ['Manufacturing', '2026-03-17', true], ['FAT', '2026-03-24', true],
+    ]);
+    expect((await manager<MyStep[]>('GET', '/my-project-steps')).body).toEqual([]);
+  });
+
   it("starts a recurring job's next month with the steps at 0% and the plan a month on", async () => {
     const key = `next-${run}`;
     const res = await manager<Schedule>('POST', `/project-schedules/${sched.id}/next-month`, {}, { 'Idempotency-Key': key });

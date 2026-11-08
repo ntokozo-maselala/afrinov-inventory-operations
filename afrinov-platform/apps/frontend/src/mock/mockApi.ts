@@ -2027,6 +2027,7 @@ function route(method: string, path: string, body?: unknown): unknown {
   // /projects/:projectNumber handlers below would take their paths.
   const scheduled = routeSchedules(method, p, qs, body, {
     project: (n) => state.projects.find((x) => x.projectNumber === n),
+    userId: () => devUser().id,
     users: () => mockUsers.map((u) => ({ id: u.id, name: u.name, active: u.active })),
     setting: (key) => MOCK_SETTINGS[key]?.value,
     err,

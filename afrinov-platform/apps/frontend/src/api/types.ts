@@ -316,3 +316,33 @@ export interface ProjectSchedules {
 
 /** GET /project-step-templates */
 export interface StepTemplate { name: string; steps: string[] }
+
+/** GET /project-board: one open schedule, most at risk first. */
+export interface BoardRow {
+  scheduleId: string;
+  name: string;
+  status: ScheduleStatus;
+  projectNumber: string;
+  projectName: string | null;
+  manager: { id: string; name: string } | null;
+  dueDate: string | null;
+  steps: number;
+  stepsDone: number;
+  totals: ScheduleTotals;
+}
+
+/** GET /my-project-steps: an unfinished step assigned to the signed-in user. */
+export interface MyStep {
+  stepId: string;
+  name: string;
+  scheduleId: string;
+  scheduleName: string;
+  scheduleStatus: ScheduleStatus;
+  projectNumber: string;
+  projectName: string | null;
+  expectedStart: string | null;
+  expectedEnd: string | null;
+  progress: number;
+  /** Under way and past its expected end. */
+  late: boolean;
+}

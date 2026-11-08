@@ -8,14 +8,14 @@ Six phases that bring job tracking into the platform, aligned with the **03 Proj
 
 This goes against the current scope: `01-product/product-scope.md` lists production scheduling and full project management as out of scope, and `01-product/capability-map.md` lists project management as "Future or never". Phase 0 changes both and records the decision as **ADR-032**. It stays job tracking: no budgets, step dependencies or resource levelling.
 
-**Status:** Phase 0 built on `feature/project-tracking-0`, Phase 1 on `feature/project-tracking-1` (branched from it), Phase 2 on `feature/project-tracking-2` (branched from Phase 1); Phases 3 to 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
+**Status:** Phases 0 and 1 merged (#163, #164). Phase 2 on `feature/project-tracking-2`, Phase 3 on `feature/project-tracking-3` (branched from Phase 2); Phases 4 and 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
 | 0 | Scope change and ADR | S | Built |
 | 1 | A project has schedules and steps | L | Built |
 | 2 | The project page | M | Built |
-| 3 | The chart and the board of open jobs | M | Not started |
+| 3 | The chart and the board of open jobs | M | Built |
 | 4 | The Procurement step reads the orders | S–M | Not started |
 | 5 | Moving off ClickUp | S | Not started |
 
@@ -160,14 +160,23 @@ Size M. Frontend, and one report endpoint.
 
 **Where it shows:** a project's page (the chart); Projects → **Board** (open jobs and My steps); the Dashboard.
 
-- [ ] **3.1 The chart.** One per schedule, a line per step: the baseline as one bar, the forecast or actual as another, progress filled in. Weekends and closed days shaded, a line for today and a marker for the due date. Built in CSS, with no chart library.
+*Built on `feature/project-tracking-3` (branched from Phase 2).* Changes from the plan:
+- **Two read routes in the schedule service**, not the reporting service, as they share its totals: `GET /project-board` (`?managerId=`, `?assigneeId=`) and `GET /my-project-steps`. The board's order is `boardOrder` in `project-schedule.rules.ts`: past the due date first, then late against plan, then the soonest finish.
+- **The board is its own menu entry**, Project board under Sales (`/projects/board`, with My steps at `?view=mine`), rather than a tab on Projects.
+- **The chart is a Steps / Chart switch** on each schedule. It stretches to today only when today is within a month of the plan, so an old job isn't squeezed, and stops shading weekends beyond 200 days.
+- **The user filter is "Only jobs with steps assigned to me"**, not a picker of every user: listing users needs `view:users`, which most people on the board don't hold.
+- **The Dashboard gets a notice, not a card,** shown only when the user has steps late or due this week. The top row is a fixed grid of cards, and a notice says more.
+
+- [x] **3.1 The chart.** One per schedule, a line per step: the baseline as one bar, the forecast or actual as another, progress filled in. Weekends and closed days shaded, a line for today and a marker for the due date. Built in CSS, with no chart library.
   Files: a new `frontend/src/components/ProjectGantt.tsx`
-- [ ] **3.2 The board.** Every open schedule (not Done or Cancelled) with its project, progress, forecast end, variance, due date and the step it is on, sorted by how late it is forecast to finish. One forecast to miss its due date is flagged. Filters by manager and by user assigned.
+- [x] **3.2 The board.** Every open schedule (not Done or Cancelled) with its project, progress, forecast end, variance, due date and the step it is on, sorted by how late it is forecast to finish. One forecast to miss its due date is flagged. Filters by manager and by user assigned.
   Files: a new `frontend/src/pages/ProjectBoard.tsx`, `backend/src/modules/reporting/reporting.service.ts`, `hooks/useNavGroups.tsx`
-- [ ] **3.3 My steps.** The steps assigned to the signed-in user, due first, and a count on the Dashboard of those due this week or late. This stands in for reminders.
+- [x] **3.3 My steps.** The steps assigned to the signed-in user, due first, and a count on the Dashboard of those due this week or late. This stands in for reminders.
   Files: `pages/ProjectBoard.tsx`, `pages/Dashboard.tsx`
 
 Tests: bars drawn from the right dates, closed days shaded, the due-date marker; only open schedules on the board, sorted by lateness, with the flag and filters; the Dashboard count; the board endpoint.
+
+Built with: `ProjectGantt.test.tsx` (6), `ProjectBoard.test.tsx` (3), two Dashboard tests, the chart switch on the project page, the sidebar entries, `boardOrder` in the rules tests, the mock, and a real-HTTP check of the board and My steps. Frontend 1406 tests, backend 1168 unit and 304 integration.
 
 **Done when:**
 - A manager sees on one page which open jobs are late and why, and no open job drops off.
