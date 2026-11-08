@@ -57,7 +57,7 @@ const latest = (xs: Array<string | null>) => xs.reduce<string | null>((m, x) => 
 const earliest = (xs: Array<string | null>) => xs.reduce<string | null>((m, x) => (x && (!m || x < m) ? x : m), null);
 const endOf = (s: Step) => (s.progress >= 100 ? s.actualEnd : (s.forecastEnd ?? s.baselineEnd));
 
-function totals(steps: Step[], dueDate: string | null, ctx: Ctx): ScheduleTotals {
+function totals(steps: Step[], dueDate: string | null, ctx: Ctx, started = true): ScheduleTotals {
   const closed = closedOf(ctx);
   const ordered = [...steps].sort((a, b) => a.position - b.position);
   const baselineEnd = latest(ordered.map((s) => s.baselineEnd));
@@ -70,7 +70,8 @@ function totals(steps: Step[], dueDate: string | null, ctx: Ctx): ScheduleTotals
   }
   const pastDue = dueDate && forecastEnd ? workingDaysBetween(dueDate, forecastEnd, closed) : null;
   const open = ordered.filter((s) => s.progress < 100);
-  const late = open.find((s) => { const e = endOf(s); return !!e && ((!!s.baselineEnd && e > s.baselineEnd) || e < ctx.today()); });
+  // Only a schedule under way can be behind.
+  const late = !started ? undefined : open.find((s) => { const e = endOf(s); return !!e && ((!!s.baselineEnd && e > s.baselineEnd) || e < ctx.today()); });
   return {
     start: earliest(ordered.map((s) => s.baselineStart ?? s.forecastStart ?? s.actualStart)),
     baselineEnd, forecastEnd,
@@ -92,7 +93,7 @@ function view(s: Schedule, ctx: Ctx): ProjectSchedule {
       ...st, done: st.progress >= 100,
       assignee: assigneeId ? { id: assigneeId, name: users.find((u) => u.id === assigneeId)?.name ?? assigneeId } : null,
     })),
-    totals: totals(steps, s.dueDate, ctx),
+    totals: totals(steps, s.dueDate, ctx, s.status === 'ACTIVE'),
   };
 }
 
@@ -102,8 +103,17 @@ function find(id: string, ctx: Ctx): Schedule {
   return s;
 }
 
+/** As the server: a closed project’s schedules are only cancelled. */
+function refuseClosed(s: Schedule, ctx: Ctx): void {
+  const project = ctx.project(s.projectNumber);
+  if (project && (project.active === false || project.status === 'COMPLETED' || project.status === 'CANCELLED')) {
+    throw ctx.err('INVALID_STATE', "This project is closed, so it can't have its schedules changed.");
+  }
+}
+
 function openOnly(s: Schedule, ctx: Ctx): void {
-  if (!OPEN.includes(s.status)) throw ctx.err('INVALID_STATE', `This schedule is ${s.status === 'DONE' ? 'done' : 'cancelled'}, so it can't be changed. Reopen it first.`);
+  if (s.status === 'DONE') throw ctx.err('INVALID_STATE', "This schedule is done, so it can't be changed. Reopen it first.");
+  if (s.status === 'CANCELLED') throw ctx.err('INVALID_STATE', "This schedule is cancelled, so it can't be changed.");
 }
 
 function stepProblem(s: Step): string | null {
@@ -163,7 +173,7 @@ export function routeSchedules(method: string, p: string, qs: Record<string, str
           scheduleId: s.id, name: s.name, status: s.status, projectNumber: s.projectNumber,
           projectName: project?.name ?? null, manager: project?.manager ?? null, dueDate: s.dueDate,
           steps: s.steps.length, stepsDone: s.steps.filter((st) => st.progress >= 100).length,
-          totals: totals(s.steps, s.dueDate, ctx),
+          totals: totals(s.steps, s.dueDate, ctx, s.status === 'ACTIVE'),
         };
       });
     const by = (x: number | null) => (x === null ? -Infinity : x);
@@ -203,8 +213,8 @@ export function routeSchedules(method: string, p: string, qs: Record<string, str
       const own = schedules.filter((s) => s.projectNumber === projectNumber);
       const sorted = [...own.filter((s) => OPEN.includes(s.status)), ...own.filter((s) => !OPEN.includes(s.status))];
       const open = own.filter((s) => OPEN.includes(s.status));
-      const each = open.map((s) => totals(s.steps, s.dueDate, ctx));
-      const all = totals(open.flatMap((s) => s.steps), null, ctx);
+      const each = open.map((s) => totals(s.steps, s.dueDate, ctx, s.status === 'ACTIVE'));
+      const all = totals(open.flatMap((s) => s.steps), null, ctx, false);
       const worst = (xs: Array<number | null>) => xs.reduce<number | null>((m, x) => (x !== null && (m === null || x > m) ? x : m), null);
       const result: ProjectSchedules = {
         schedules: sorted.map((s) => view(s, ctx)),
@@ -240,6 +250,9 @@ export function routeSchedules(method: string, p: string, qs: Record<string, str
   const sched = /^\/project-schedules\/([^/]+)(?:\/(next-month|replan|steps))?$/.exec(p);
   if (sched) {
     const s = find(sched[1]!, ctx);
+    const onlyCancelling = method === 'PATCH' && !sched[2] && b.status === 'CANCELLED' && b.name === undefined && b.dueDate === undefined && b.alsoCovers === undefined;
+    if (method !== 'GET' && !onlyCancelling) refuseClosed(s, ctx);
+    if (method === 'POST' && sched[2] === 'next-month' && s.status === 'CANCELLED') throw ctx.err('INVALID_STATE', 'A cancelled schedule is not repeated: start the next month from one that went ahead.');
     const action = sched[2];
     if (method === 'GET' && !action) return view(s, ctx);
     if (method === 'PATCH' && !action) {
@@ -317,6 +330,7 @@ export function routeSchedules(method: string, p: string, qs: Record<string, str
   if (stepPath) {
     const s = schedules.find((x) => x.steps.some((st) => st.id === stepPath[1]));
     if (!s) throw ctx.err('NOT_FOUND', 'Step not found');
+    refuseClosed(s, ctx);
     openOnly(s, ctx);
     const step = s.steps.find((st) => st.id === stepPath[1])!;
     const started = s.status === 'ACTIVE';

@@ -59,7 +59,7 @@ export function ProjectGantt({ schedule, closedDays, today }: Props) {
     const start = s.forecastStart ?? s.actualStart; const end = s.forecastEnd;
     if (schedule.status === 'PLANNING' || !start || !end) return null;
     const late = (!!s.baselineEnd && end > s.baselineEnd) || end < today;
-    return { start, end, what: `expected ${formatSpan(start, end)}, ${s.progress}% done`, tone: late ? 'bg-warning-500' : 'bg-brand-500' };
+    return { start, end, what: `expected ${formatSpan(start, end)}, ${s.progress}% done`, tone: late ? 'bg-warning-500' : 'bg-info-500' };
   };
 
   return (
@@ -76,7 +76,7 @@ export function ProjectGantt({ schedule, closedDays, today }: Props) {
         {/* Weekends, closed days, today and the due date run down every row. */}
         <div className="absolute inset-y-0 left-40 right-0 pointer-events-none" aria-hidden="true">
           {offDays.map((d) => <div key={d} className="absolute inset-y-0 bg-surface-100" style={bar(d, d)} />)}
-          {showToday && <div className="absolute inset-y-0 w-px bg-brand-600" style={{ left: `${pct(today)}%` }} title="Today" />}
+          {showToday && <div className="absolute inset-y-0 w-px bg-surface-700" style={{ left: `${pct(today)}%` }} title="Today" />}
           {showDue && <div className="absolute inset-y-0 border-l-2 border-dashed border-danger-500" style={{ left: `${pct(schedule.dueDate!) + 100 / span.days}%` }} title={`Due ${formatDay(schedule.dueDate)}`} />}
         </div>
         {schedule.steps.map((s) => {
@@ -92,8 +92,10 @@ export function ProjectGantt({ schedule, closedDays, today }: Props) {
                 )}
                 {f && (
                   <div role="img" aria-label={`${s.name}: ${f.what}`}
-                    className={`absolute top-4 h-3 rounded-sm ${f.tone} opacity-40 overflow-hidden`} style={bar(f.start, f.end)}>
-                    <div className={`h-full ${f.tone}`} style={{ width: `${s.progress}%` }} />
+                    className="absolute top-4 h-3 rounded-sm overflow-hidden" style={bar(f.start, f.end)}>
+                    {/* The whole bar faded, and the part done on top of it at full strength. */}
+                    <div className={`absolute inset-0 ${f.tone} opacity-30`} />
+                    <div className={`relative h-full ${f.tone}`} style={{ width: `${s.progress}%` }} />
                   </div>
                 )}
               </div>
@@ -103,10 +105,10 @@ export function ProjectGantt({ schedule, closedDays, today }: Props) {
       </div>
       <figcaption className="flex flex-wrap gap-4 mt-2 text-surface-500">
         <span className="flex items-center gap-1"><span className="inline-block w-4 h-1.5 rounded-sm bg-surface-400" />Planned</span>
-        {schedule.status !== 'PLANNING' && <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-brand-500" />Expected (filled: done)</span>}
+        {schedule.status !== 'PLANNING' && <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-info-500" />Expected (filled: done)</span>}
         {schedule.status !== 'PLANNING' && <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-warning-500" />Behind plan</span>}
         <span className="flex items-center gap-1"><span className="inline-block w-4 h-3 rounded-sm bg-success-500" />Finished</span>
-        {showToday && <span className="flex items-center gap-1"><span className="inline-block w-px h-3 bg-brand-600" />Today</span>}
+        {showToday && <span className="flex items-center gap-1"><span className="inline-block w-px h-3 bg-surface-700" />Today</span>}
         {showDue && <span className="flex items-center gap-1"><span className="inline-block h-3 border-l-2 border-dashed border-danger-500" />Due {formatDay(schedule.dueDate)}</span>}
       </figcaption>
     </figure>

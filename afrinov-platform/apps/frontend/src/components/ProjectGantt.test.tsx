@@ -35,12 +35,15 @@ describe('ProjectGantt', () => {
   it('draws each step’s plan, and its actual or expected dates with how it stands', () => {
     render(<ProjectGantt schedule={schedule()} closedDays={new Set()} today="2026-03-12" />);
     expect(screen.getByRole('img', { name: 'Engineering: planned 02 Mar 2026 – 06 Mar 2026' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Engineering: finished 02 Mar 2026 – 10 Mar 2026' })).toHaveClass('bg-success-500');
+    expect(screen.getByRole('img', { name: 'Engineering: finished 02 Mar 2026 – 10 Mar 2026' }).lastElementChild).toHaveClass('bg-success-500');
     // Expected after its plan: drawn as behind.
     const manufacturing = screen.getByRole('img', { name: 'Manufacturing: expected 11 Mar 2026 – 17 Mar 2026, 40% done' });
-    expect(manufacturing).toHaveClass('bg-warning-500');
-    expect(manufacturing.firstElementChild).toHaveStyle({ width: '40%' });
-    expect(screen.getByRole('img', { name: /^FAT: expected/ })).toHaveClass('bg-brand-500');
+    expect(manufacturing.lastElementChild).toHaveClass('bg-warning-500');
+    // The faded track, then the part done at full strength on top of it.
+    expect(manufacturing.firstElementChild).toHaveClass('opacity-30');
+    expect(manufacturing.lastElementChild).toHaveStyle({ width: '40%' });
+    expect(manufacturing.lastElementChild).not.toHaveClass('opacity-30');
+    expect(screen.getByRole('img', { name: /^FAT: expected/ }).lastElementChild).toHaveClass('bg-info-500');
     expect(screen.getByTitle('Today')).toBeInTheDocument();
     expect(screen.getByTitle('Due 20 Mar 2026')).toBeInTheDocument();
   });

@@ -104,10 +104,20 @@ async function closedDays(tx?: Tx): Promise<ClosedDays> {
   return parseClosedDays(typeof text === 'string' ? text : '').days;
 }
 
+/**
+ * Dates a schedule may hold. Working days are counted day by day, so a date
+ * centuries away would make every read of the schedule slow; nothing Afrinov
+ * plans falls outside this.
+ */
+const FIRST_YEAR = 2000;
+const LAST_YEAR = 2100;
+
 function day(value: DayInput, what: string): Date | null | undefined {
   if (value === undefined || value === null) return value;
   const d = parseDay(value);
   if (!d) throw Errors.validation(`The ${what} must be a date as YYYY-MM-DD.`);
+  const year = d.getUTCFullYear();
+  if (year < FIRST_YEAR || year > LAST_YEAR) throw Errors.validation(`The ${what} must be between ${FIRST_YEAR} and ${LAST_YEAR}.`);
   return d;
 }
 
@@ -156,6 +166,10 @@ export interface ScheduleView {
   totals: ScheduleTotals;
 }
 
+/** A schedule's totals; only one under way can be behind (a planned one hasn't started). */
+const totalsOf = (s: ScheduleRow, today: Date, closed: ClosedDays) =>
+  scheduleTotals(s.steps.map(facts), { dueDate: s.dueDate, today, closed, started: s.status === 'ACTIVE' });
+
 function scheduleView(s: ScheduleRow, today: Date, closed: ClosedDays): ScheduleView {
   return {
     id: s.id,
@@ -167,7 +181,7 @@ function scheduleView(s: ScheduleRow, today: Date, closed: ClosedDays): Schedule
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
     steps: s.steps.map(stepView),
-    totals: scheduleTotals(s.steps.map(facts), { dueDate: s.dueDate, today, closed }),
+    totals: totalsOf(s, today, closed),
   };
 }
 
@@ -180,11 +194,12 @@ export interface ProjectScheduleTotals {
   daysPastDue: number | null;
 }
 
-function projectTotals(schedules: ScheduleRow[], today: Date, closed: ClosedDays): ProjectScheduleTotals {
+/** Over the open schedules' views already worked out, plus one pass for progress over all their steps. */
+function projectTotals(schedules: ScheduleRow[], views: ScheduleView[], today: Date, closed: ClosedDays): ProjectScheduleTotals {
   const open = schedules.filter((s) => OPEN.includes(s.status));
   if (open.length === 0) return { openSchedules: 0, progress: null, forecastEnd: null, daysLate: null, daysPastDue: null };
-  const all = scheduleTotals(open.flatMap((s) => s.steps.map(facts)), { dueDate: null, today, closed });
-  const each = open.map((s) => scheduleTotals(s.steps.map(facts), { dueDate: s.dueDate, today, closed }));
+  const all = scheduleTotals(open.flatMap((s) => s.steps.map(facts)), { dueDate: null, today, closed, started: false });
+  const each = views.filter((v) => OPEN.includes(v.status)).map((v) => v.totals);
   const worst = (xs: Array<number | null>) => xs.reduce<number | null>((m, x) => (x !== null && (m === null || x > m) ? x : m), null);
   return {
     openSchedules: open.length,
@@ -278,8 +293,16 @@ async function audit(tx: Tx, actorId: string, scheduleId: string, action: string
   });
 }
 
-/** The project, refused unless the actor may change its schedules. */
-async function projectFor(tx: Tx, projectNumber: string, actor: ScheduleActor) {
+type ProjectRef = { projectNumber: string; managerId: string | null; status: string; active: boolean };
+
+/**
+ * The project, refused unless the actor may change its schedules. Its row is
+ * held FOR SHARE until the transaction ends, so marking the project Completed
+ * (which takes it FOR UPDATE, project.service.ts) waits for this change, and
+ * this change sees the project as it is once that has committed.
+ */
+async function projectFor(tx: Tx, projectNumber: string, actor: ScheduleActor): Promise<ProjectRef> {
+  await tx.$queryRaw`SELECT 1 FROM "projects" WHERE "project_number" = ${projectNumber} FOR SHARE`;
   const project = await tx.project.findUnique({ where: { projectNumber }, select: { projectNumber: true, managerId: true, status: true, active: true } });
   if (!project) throw Errors.notFound('Project');
   if (!actor.manageAll && project.managerId !== actor.id) {
@@ -288,26 +311,37 @@ async function projectFor(tx: Tx, projectNumber: string, actor: ScheduleActor) {
   return project;
 }
 
-function refuseClosedProject(project: { status: string; active: boolean }): void {
-  if (!project.active || CLOSED_PROJECT.includes(project.status)) {
-    throw Errors.invalidState('This project is closed, so it takes no new schedules.');
-  }
+const isClosedProject = (project: { status: string; active: boolean }) => !project.active || CLOSED_PROJECT.includes(project.status);
+
+function refuseClosedProject(project: { status: string; active: boolean }, doing = 'takes no new schedules'): void {
+  if (isClosedProject(project)) throw Errors.invalidState(`This project is closed, so it ${doing}.`);
 }
 
 /** Locks the schedule's row for the rest of the transaction, then checks who is asking. */
-async function lockSchedule(tx: Tx, scheduleId: string, actor: ScheduleActor): Promise<ScheduleRow> {
+async function lockSchedule(tx: Tx, scheduleId: string, actor: ScheduleActor): Promise<{ schedule: ScheduleRow; project: ProjectRef }> {
   await tx.$queryRaw`SELECT "id" FROM "project_schedules" WHERE "id" = ${scheduleId} FOR UPDATE`;
   const schedule = await tx.projectSchedule.findUnique({ where: { id: scheduleId }, include: SCHEDULE_INCLUDE });
   if (!schedule) throw Errors.notFound('Schedule');
-  await projectFor(tx, schedule.projectNumber, actor);
-  return schedule;
+  const project = await projectFor(tx, schedule.projectNumber, actor);
+  return { schedule, project };
+}
+
+/** A step's schedule locked, and the step as it is now: gone if it was removed while this waited for the lock. */
+async function lockStep(tx: Tx, stepId: string, actor: ScheduleActor): Promise<{ schedule: ScheduleRow; project: ProjectRef; step: StepRow }> {
+  const found = await tx.projectStep.findUnique({ where: { id: stepId }, select: { scheduleId: true } });
+  if (!found) throw Errors.notFound('Step');
+  const locked = await lockSchedule(tx, found.scheduleId, actor);
+  const step = locked.schedule.steps.find((s) => s.id === stepId);
+  if (!step) throw Errors.notFound('Step');
+  return { ...locked, step };
 }
 
 function refuseUnlessOpen(schedule: { status: ProjectScheduleStatus }): void {
-  if (!OPEN.includes(schedule.status)) {
-    throw Errors.invalidState(`This schedule is ${schedule.status === 'DONE' ? 'done' : 'cancelled'}, so it can't be changed. Reopen it first.`);
-  }
+  if (schedule.status === 'DONE') throw Errors.invalidState("This schedule is done, so it can't be changed. Reopen it first.");
+  if (schedule.status === 'CANCELLED') throw Errors.invalidState("This schedule is cancelled, so it can't be changed.");
 }
+
+const CHANGES_NOTHING = "can't have its schedules changed";
 
 async function checkAssignee(tx: Tx, assigneeId: string | null | undefined): Promise<void> {
   if (!assigneeId) return;
@@ -370,7 +404,8 @@ export const ProjectScheduleService = {
     // Open schedules first, then the rest, each in the order they were added.
     const rank = (s: ScheduleRow) => (OPEN.includes(s.status) ? 0 : 1);
     const sorted = [...rows].sort((a, b) => rank(a) - rank(b));
-    return { schedules: sorted.map((s) => scheduleView(s, today, closed)), totals: projectTotals(rows, today, closed) };
+    const views = sorted.map((s) => scheduleView(s, today, closed));
+    return { schedules: views, totals: projectTotals(rows, views, today, closed) };
   },
 
   async get(scheduleId: string): Promise<ScheduleView> {
@@ -384,10 +419,12 @@ export const ProjectScheduleService = {
    * change the project's schedules, who don't all hold view:users.
    */
   async assignees(projectNumber: string, actor: ScheduleActor): Promise<Array<{ id: string; name: string }>> {
-    return inTx(undefined, async (tx) => {
-      await projectFor(tx, projectNumber, actor);
-      return tx.user.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
-    });
+    const project = await prisma.project.findUnique({ where: { projectNumber }, select: { managerId: true } });
+    if (!project) throw Errors.notFound('Project');
+    if (!actor.manageAll && project.managerId !== actor.id) {
+      throw Errors.forbidden("Only the project's manager or an administrator can change its schedules.");
+    }
+    return prisma.user.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
   },
 
   /** The step templates a new schedule can start from. */
@@ -427,13 +464,20 @@ export const ProjectScheduleService = {
 
   async update(scheduleId: string, input: UpdateScheduleInput, actor: ScheduleActor): Promise<ScheduleView> {
     return inTx(undefined, async (tx) => {
-      const schedule = await lockSchedule(tx, scheduleId, actor);
+      const { schedule, project } = await lockSchedule(tx, scheduleId, actor);
       const data: Prisma.ProjectScheduleUpdateInput = {};
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
 
       const editing = input.name !== undefined || input.dueDate !== undefined || input.alsoCovers !== undefined;
-      if (editing) refuseUnlessOpen(schedule);
+      const reopening = schedule.status === 'DONE' && input.status === 'ACTIVE';
+      // A closed project's schedules can still be cancelled, and nothing else.
+      const onlyCancelling = !editing && input.status === 'CANCELLED';
+      if (!onlyCancelling && (editing || (input.status !== undefined && input.status !== schedule.status))) {
+        refuseClosedProject(project, CHANGES_NOTHING);
+      }
+      // Reopening and renaming in one go is fine; editing a done or cancelled schedule otherwise isn't.
+      if (editing && !reopening) refuseUnlessOpen(schedule);
       if (input.name !== undefined) {
         data.name = cleanName(input.name, 'schedule');
         before.name = schedule.name; after.name = data.name;
@@ -492,9 +536,9 @@ export const ProjectScheduleService = {
    */
   async nextMonth(scheduleId: string, input: { name?: string }, actor: ScheduleActor, tx?: Tx): Promise<ScheduleView> {
     return inTx(tx, async (tx) => {
-      const source = await lockSchedule(tx, scheduleId, actor);
-      const project = await projectFor(tx, source.projectNumber, actor);
+      const { schedule: source, project } = await lockSchedule(tx, scheduleId, actor);
       refuseClosedProject(project);
+      if (source.status === 'CANCELLED') throw Errors.invalidState('A cancelled schedule is not repeated: start the next month from one that went ahead.');
       const firstStart = source.steps.map((s) => s.baselineStart).filter((d): d is Date => d !== null).sort((a, b) => a.getTime() - b.getTime())[0];
       const name = input.name !== undefined
         ? cleanName(input.name, 'schedule')
@@ -532,7 +576,8 @@ export const ProjectScheduleService = {
   /** A new plan for a started schedule, with the reason. The old plan stays in the audit log. */
   async replan(scheduleId: string, input: ReplanInput, actor: ScheduleActor): Promise<ScheduleView> {
     return inTx(undefined, async (tx) => {
-      const schedule = await lockSchedule(tx, scheduleId, actor);
+      const { schedule, project } = await lockSchedule(tx, scheduleId, actor);
+      refuseClosedProject(project, CHANGES_NOTHING);
       if (schedule.status !== 'ACTIVE') {
         throw Errors.invalidState('Only a started schedule is re-planned; while it is being planned, change the dates directly.');
       }
@@ -556,7 +601,8 @@ export const ProjectScheduleService = {
 
   async addStep(scheduleId: string, input: AddStepInput, actor: ScheduleActor, tx?: Tx): Promise<ScheduleView> {
     return inTx(tx, async (tx) => {
-      const schedule = await lockSchedule(tx, scheduleId, actor);
+      const { schedule, project } = await lockSchedule(tx, scheduleId, actor);
+      refuseClosedProject(project, CHANGES_NOTHING);
       refuseUnlessOpen(schedule);
       if (schedule.steps.length >= MAX_STEPS) throw Errors.validation(`A schedule can have at most ${MAX_STEPS} steps.`);
       const started = schedule.status === 'ACTIVE';
@@ -599,11 +645,9 @@ export const ProjectScheduleService = {
 
   async updateStep(stepId: string, input: UpdateStepInput, actor: ScheduleActor, tx?: Tx): Promise<ScheduleView> {
     return inTx(tx, async (tx) => {
-      const found = await tx.projectStep.findUnique({ where: { id: stepId }, select: { scheduleId: true } });
-      if (!found) throw Errors.notFound('Step');
-      const schedule = await lockSchedule(tx, found.scheduleId, actor);
+      const { schedule, project, step } = await lockStep(tx, stepId, actor);
+      refuseClosedProject(project, CHANGES_NOTHING);
       refuseUnlessOpen(schedule);
-      const step = schedule.steps.find((s) => s.id === stepId)!;
       const started = schedule.status === 'ACTIVE';
 
       const next: StepFacts = { ...facts(step) };
@@ -677,14 +721,12 @@ export const ProjectScheduleService = {
 
   async removeStep(stepId: string, input: { reason?: string }, actor: ScheduleActor): Promise<ScheduleView> {
     return inTx(undefined, async (tx) => {
-      const found = await tx.projectStep.findUnique({ where: { id: stepId }, select: { scheduleId: true } });
-      if (!found) throw Errors.notFound('Step');
-      const schedule = await lockSchedule(tx, found.scheduleId, actor);
+      const { schedule, project, step } = await lockStep(tx, stepId, actor);
+      refuseClosedProject(project, CHANGES_NOTHING);
       refuseUnlessOpen(schedule);
       const started = schedule.status === 'ACTIVE';
       const reason = started ? cleanReason(input.reason, 'removing a step from a started schedule changes its plan') : null;
       if (started && schedule.steps.length === 1) throw Errors.invalidState('A started schedule keeps at least one step.');
-      const step = schedule.steps.find((s) => s.id === stepId)!;
       await tx.projectStep.delete({ where: { id: stepId } });
       await renumber(tx, schedule.steps.filter((s) => s.id !== stepId));
       await audit(tx, actor.id, schedule.id, 'STEP_REMOVE', { stepId, ...stepView(step) }, { reason });
@@ -698,7 +740,8 @@ export const ProjectScheduleService = {
    * by a user assigned to any of its steps.
    */
   async board(filter: { managerId?: string; assigneeId?: string } = {}): Promise<BoardRow[]> {
-    const rows = await prisma.projectSchedule.findMany({
+    // The schedules and the closed days don't depend on each other: read them together.
+    const [rows, closed] = await Promise.all([prisma.projectSchedule.findMany({
       where: {
         status: { in: OPEN },
         ...(filter.managerId ? { project: { managerId: filter.managerId } } : {}),
@@ -708,9 +751,8 @@ export const ProjectScheduleService = {
         ...SCHEDULE_INCLUDE,
         project: { select: { name: true, manager: { select: { id: true, name: true } } } },
       },
-    });
+    }), closedDays()]);
     const today = todayInSouthAfrica();
-    const closed = await closedDays();
     return rows
       .map((s) => ({
         scheduleId: s.id,
@@ -722,7 +764,7 @@ export const ProjectScheduleService = {
         dueDate: iso(s.dueDate),
         steps: s.steps.length,
         stepsDone: s.steps.filter((st) => st.progress >= 100).length,
-        totals: scheduleTotals(s.steps.map(facts), { dueDate: s.dueDate, today, closed }),
+        totals: totalsOf(s, today, closed),
       }))
       .sort(boardOrder);
   },

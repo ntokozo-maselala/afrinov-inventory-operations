@@ -20,6 +20,7 @@ import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/c
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
 import { formatDateTime } from '../lib/format';
+import { errorToast } from '../lib/errorPresentation';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
 // Hide "Purchase orders" as a landing page while procurement is off, unless it
@@ -383,7 +384,7 @@ export function SettingsProjects() {
         try {
           const r = await save();
           toast.success('Settings saved', `${r.updated} setting(s) updated.`);
-        } catch (e) { toast.error('Save failed', (e as ApiError).message); }
+        } catch (e) { const t = errorToast(e); toast.error(t.title, t.description); }
       }} saving={saving} />
     </SectionPanel>
   );

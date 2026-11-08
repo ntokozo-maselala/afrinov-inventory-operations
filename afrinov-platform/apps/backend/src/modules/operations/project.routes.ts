@@ -61,7 +61,7 @@ export const boardQuerySchema = z.object({
   assigneeId: z.uuid().optional(),
 });
 
-export const nextMonthSchema =z.object({ name: z.string().min(1).max(120).optional() });
+export const nextMonthSchema = z.object({ name: z.string().min(1).max(120).optional() });
 
 export const replanSchema = z.object({
   reason: z.string().min(1).max(500),

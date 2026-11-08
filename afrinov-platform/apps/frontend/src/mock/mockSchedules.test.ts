@@ -84,6 +84,13 @@ describe('mock project schedules', () => {
     await expect(api.get('/projects/NOPE/procurement')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
+  it('says nothing is behind before a schedule starts, and repeats no cancelled schedule', async () => {
+    const s = await plannedSchedule();
+    expect(s.totals.lateStep).toBeNull();
+    await api.patch(`/project-schedules/${s.id}`, { status: 'CANCELLED' });
+    await expect(api.post(`/project-schedules/${s.id}/next-month`, {})).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+
   it('keeps a project from being completed while a schedule is open', async () => {
     const s = await plannedSchedule();
     await expect(api.patch(`/projects/${PROJECT}`, { status: 'COMPLETED' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
