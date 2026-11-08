@@ -30,7 +30,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="absolute inset-0 bg-surface-900/50" aria-hidden="true" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="modal-title" className={`relative w-full ${sizes[size]} surface-card shadow-popover overflow-hidden flex flex-col max-h-[90vh]`}>
         <div className="px-5 py-4 border-b border-surface-200">
           <h2 id="modal-title" className="text-h2 text-surface-900">{title}</h2>
@@ -70,7 +70,7 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-surface-900/50" aria-hidden="true" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={onClose} />
       <aside role="dialog" aria-modal="true" aria-labelledby="drawer-title" className={`relative w-full ${drawerWidth[width]} bg-surface-0 shadow-popover flex flex-col`}>
         <div className="px-5 py-4 border-b border-surface-200 flex items-start justify-between gap-3">
           <div>
