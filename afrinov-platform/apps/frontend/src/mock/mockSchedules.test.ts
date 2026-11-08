@@ -82,6 +82,8 @@ describe('mock project schedules', () => {
     expect(res.orders.every((o) => ['AFRI-1325', 'AFRI-1402'].includes(o.projectNumber as string) && o.status !== 'CANCELLED')).toBe(true);
     expect(JSON.stringify(res)).not.toMatch(/unitPrice|total/);
     await expect(api.get('/projects/NOPE/procurement')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    // As the server: another project's schedule is not found.
+    await expect(api.get(`/projects/AFRI-1402/procurement?scheduleId=${s.id}`)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('says nothing is behind before a schedule starts, and repeats no cancelled schedule', async () => {

@@ -195,6 +195,32 @@ describe('ProjectDetail', () => {
     expect(mockPatch).not.toHaveBeenCalled();
   });
 
+  it('marks the Procurement step done no later than it started, when the orders came in before its planned start', async () => {
+    const withProcurement = active();
+    withProcurement.steps[1] = step('s2', 2, 'Procurement', '2026-03-09', '2026-03-13', { forecastStart: '2026-03-09', forecastEnd: '2026-03-13' });
+    scheduleList = [withProcurement];
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path.endsWith('/procurement?scheduleId=sch-1')
+      ? { projects: ['AFRI-1086'], orders: [], summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, lastReceivedOn: '2026-03-05', latestExpected: null } }
+      : base(path)));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark this step done' }));
+    const dialog = await screen.findByRole('dialog');
+    // Planned to start the 9th, but everything arrived the 5th: it started by then.
+    expect(within(dialog).getByLabelText('Started on')).toHaveValue('2026-03-05');
+    expect(within(dialog).getByLabelText('Finished on')).toHaveValue('2026-03-05');
+  });
+
+  it("doesn't ask a done schedule's Procurement step for today's orders", async () => {
+    const done = { ...active(), status: 'DONE' };
+    done.steps = done.steps.map((s) => ({ ...s, progress: 100, done: true }));
+    done.steps[1] = { ...done.steps[1]!, name: 'Procurement' };
+    scheduleList = [done];
+    renderPage();
+    await screen.findByRole('region', { name: 'Schedule Main' });
+    expect(mockGet).not.toHaveBeenCalledWith(expect.stringContaining('/procurement'));
+  });
+
   it("doesn't ask for the Procurement step's orders for someone who may not see them", async () => {
     auth.user = { id: 'u-other', roles: ['TECHNICIAN'] };
     const withProcurement = active();

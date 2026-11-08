@@ -249,37 +249,53 @@ describe('Project schedules over real HTTP', () => {
     const supplier = (await admin<{ id: string }>('POST', '/suppliers', { name: `Steel ${run}` })).body.id;
     const material = (await admin<{ id: string }>('POST', '/materials', { sku: `IT-SCHED-PLATE-${run}`, name: `Plate ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' })).body.id;
     const createdById = (await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } })).id;
-    const order = (suffix: string, project: string, status: 'APPROVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED', ordered: number, received: number, expected: string) =>
+    const at = (d: string) => new Date(`${d}T00:00:00Z`);
+    const order = (suffix: string, project: string, status: 'APPROVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED', expected: string,
+      lines: Array<{ ordered: number; received: number; due?: string }>, deliveredAt?: Date) =>
       prisma.purchaseOrder.create({
         data: {
           number: `IT-PT-${run}-${suffix}`, supplierId: supplier, createdById, projectNumber: project, status,
-          expectedDeliveryDate: new Date(`${expected}T00:00:00Z`),
-          lines: { create: [{ materialId: material, orderedQty: ordered, receivedQty: received, unitPrice: 4321.8765 }] },
+          expectedDeliveryDate: at(expected), deliveredAt,
+          lines: { create: lines.map((l) => ({ materialId: material, orderedQty: l.ordered, receivedQty: l.received, unitPrice: 4321.8765, deliveryDate: l.due ? at(l.due) : null })) },
         },
       });
-    const delivered = await order('A', projectNumber, 'RECEIVED', 5, 5, '2026-03-06');
+    // A: delivered on the 7th, by its delivery note, though the receipt was booked on the 9th.
+    const delivered = await order('A', projectNumber, 'RECEIVED', '2026-03-06', [{ ordered: 5, received: 5 }], new Date('2026-03-09T10:00:00Z'));
     await prisma.goodsReceipt.create({
-      data: { number: `IT-GR-${run}-A`, supplierId: supplier, receivedById: createdById, purchaseOrderId: delivered.id, status: 'POSTED', postedAt: new Date('2026-03-09T10:00:00Z') },
+      data: { number: `IT-GR-${run}-A`, supplierId: supplier, receivedById: createdById, purchaseOrderId: delivered.id, status: 'POSTED', receivedAt: new Date('2026-03-07T08:00:00Z'), postedAt: new Date('2026-03-09T10:00:00Z') },
     });
-    await order('B', otherProject, 'APPROVED', 4, 1, '2026-03-05');
-    await order('C', projectNumber, 'CLOSED', 3, 2, '2026-03-04');
-    await order('D', projectNumber, 'CANCELLED', 1, 0, '2026-03-04');
+    // B: on the covered project, one line overdue since the 5th and one due on the 20th.
+    await order('B', otherProject, 'APPROVED', '2026-03-05', [{ ordered: 4, received: 1 }, { ordered: 2, received: 0, due: '2026-03-20' }]);
+    // C: closed short; its owed line was due the 2nd, the order the 4th.
+    await order('C', projectNumber, 'CLOSED', '2026-03-04', [{ ordered: 3, received: 2, due: '2026-03-02' }]);
+    await order('D', projectNumber, 'CANCELLED', '2026-03-04', [{ ordered: 1, received: 0 }]);
+    // E: received in one go (POST /purchase-orders/:id/receive), so no goods receipt: delivered the 12th.
+    await order('E', projectNumber, 'RECEIVED', '2026-03-10', [{ ordered: 2, received: 2 }], new Date('2026-03-12T08:00:00Z'));
 
     interface Procurement { projects: string[]; orders: Array<Record<string, unknown>>; summary: Record<string, unknown> }
-    const covered = await manager<Procurement>('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`);
+    const covered = await buyer<Procurement>('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`);
     expect(covered.status).toBe(200);
     expect(covered.body.projects).toEqual([projectNumber, otherProject]);
-    expect(covered.body.orders.map((o) => [o.number, o.status, o.linesOwed, o.overdue])).toEqual([
-      [`IT-PT-${run}-A`, 'RECEIVED', 0, false], [`IT-PT-${run}-B`, 'APPROVED', 1, true], [`IT-PT-${run}-C`, 'CLOSED', 0, false],
+    expect(covered.body.orders.map((o) => [o.number, o.status, o.linesOwed, o.overdue, o.expectedDelivery, o.lastReceivedOn])).toEqual([
+      [`IT-PT-${run}-A`, 'RECEIVED', 0, false, '2026-03-06', '2026-03-07'],
+      [`IT-PT-${run}-B`, 'APPROVED', 2, true, '2026-03-05', null],
+      [`IT-PT-${run}-C`, 'CLOSED', 0, false, '2026-03-04', null],
+      [`IT-PT-${run}-E`, 'RECEIVED', 0, false, '2026-03-10', '2026-03-12'],
     ]);
-    expect(covered.body.orders[0]).toMatchObject({ supplierName: `Steel ${run}`, lastReceivedOn: '2026-03-09' });
+    expect(covered.body.orders[0]).toMatchObject({ supplierName: `Steel ${run}` });
     expect(JSON.stringify(covered.body)).not.toMatch(/4321|price|total/i);
-    expect(covered.body.summary).toMatchObject({ orders: 3, owing: 1, overdue: 1, allReceived: false, lastReceivedOn: '2026-03-09', latestExpected: '2026-03-05' });
+    // The latest owed line, the 20th, not B's earliest.
+    expect(covered.body.summary).toMatchObject({ orders: 4, owing: 1, overdue: 1, allReceived: false, lastReceivedOn: '2026-03-12', latestExpected: '2026-03-20' });
 
-    // The project's own orders: one received, one closed short, so nothing more is coming.
+    // The project's own orders: received, closed short, and received in one go, so all in.
     const own = await buyer<Procurement>('GET', `/projects/${projectNumber}/procurement`);
-    expect(own.status).toBe(200);
-    expect(own.body.summary).toMatchObject({ orders: 2, allReceived: true });
+    expect(own.body.summary).toMatchObject({ orders: 3, allReceived: true, lastReceivedOn: '2026-03-12' });
+
+    // The manager doesn't see project orders, nor manage the covered project: covering it shows none of its orders.
+    const asManager = await manager<Procurement>('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`);
+    expect(asManager.status).toBe(200);
+    expect(asManager.body.projects).toEqual([projectNumber]);
+    expect(asManager.body.orders.map((o) => o.projectNumber)).not.toContain(otherProject);
 
     expect((await technician('GET', `/projects/${projectNumber}/procurement`)).status).toBe(403);
     expect((await otherManager('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`)).status).toBe(403);

@@ -808,19 +808,27 @@ export const ProjectScheduleService = {
   async procurementFor(projectNumber: string, scheduleId: string | undefined, actor: ScheduleActor & { seesOrders: boolean }): Promise<StepProcurement> {
     const project = await prisma.project.findUnique({ where: { projectNumber }, select: { managerId: true } });
     if (!project) throw Errors.notFound('Project');
-    if (!actor.manageAll && !actor.seesOrders && project.managerId !== actor.id) {
+    const seesAll = actor.manageAll || actor.seesOrders;
+    if (!seesAll && project.managerId !== actor.id) {
       throw Errors.forbidden("Only the project's manager, an administrator or those who see project orders can see its orders here.");
     }
     let projects = [projectNumber];
     if (scheduleId) {
       const schedule = await prisma.projectSchedule.findUnique({ where: { id: scheduleId }, select: { projectNumber: true, alsoCovers: true } });
       if (!schedule || schedule.projectNumber !== projectNumber) throw Errors.notFound('Schedule');
-      projects = [projectNumber, ...schedule.alsoCovers];
+      let covered = schedule.alsoCovers;
+      // A manager who doesn't see project orders sees only those of projects they manage too:
+      // covering a project on their own schedule must not show them its orders.
+      if (!seesAll && covered.length) {
+        const own = await prisma.project.findMany({ where: { projectNumber: { in: covered }, managerId: actor.id }, select: { projectNumber: true } });
+        covered = covered.filter((n) => own.some((p) => p.projectNumber === n));
+      }
+      projects = [projectNumber, ...covered];
     }
     const rows = await prisma.purchaseOrder.findMany({
       where: { projectNumber: { in: projects }, status: { not: 'CANCELLED' } },
       select: {
-        id: true, number: true, status: true, projectNumber: true, expectedDeliveryDate: true,
+        id: true, number: true, status: true, projectNumber: true, expectedDeliveryDate: true, deliveredAt: true,
         supplier: { select: { name: true } },
         lines: { select: { orderedQty: true, receivedQty: true, deliveryDate: true } },
         goodsReceipts: { where: { status: 'POSTED' }, select: { postedAt: true, receivedAt: true } },
@@ -828,17 +836,26 @@ export const ProjectScheduleService = {
       orderBy: [{ createdAt: 'asc' }],
     });
     const today = dayKey(todayInSouthAfrica());
+    /** The day an instant falls on in South Africa. */
+    const saDay = (at: Date) => dayKey(todayInSouthAfrica(at));
+    const owedDates: string[] = [];
     const orders = rows.map((o): StepOrder => {
-      const owed = o.lines.filter((l) => l.receivedQty.lessThan(l.orderedQty));
-      const expected = owed
-        .map((l) => iso(l.deliveryDate ?? o.expectedDeliveryDate))
-        .filter((d): d is string => d !== null)
-        .sort()[0] ?? (owed.length ? null : iso(o.expectedDeliveryDate));
-      const receipts = o.goodsReceipts.map((r) => r.postedAt ?? r.receivedAt).filter((d): d is Date => d !== null);
-      const lastReceived = receipts.length ? new Date(Math.max(...receipts.map((d) => d.getTime()))) : null;
       // An order closed short is finished with: nothing more is coming.
       const finished = o.status === 'RECEIVED' || o.status === 'CLOSED';
       const placed = o.status === 'APPROVED' || o.status === 'PARTIALLY_RECEIVED';
+      const owed = finished ? [] : o.lines.filter((l) => l.receivedQty.lessThan(l.orderedQty));
+      const owedOn = owed.map((l) => iso(l.deliveryDate ?? o.expectedDeliveryDate)).filter((d): d is string => d !== null).sort();
+      owedDates.push(...owedOn);
+      // When what it still owes is expected; once nothing is owed, the order's own date.
+      const expected = owed.length ? (owedOn[0] ?? null) : iso(o.expectedDeliveryDate);
+      // A receipt's delivery note date, not the day it was booked. An order received in one go
+      // (POST /purchase-orders/:id/receive) has no receipt for that delivery: its deliveredAt is
+      // the day, when it came after every receipt was booked.
+      const notes = o.goodsReceipts.map((r) => r.receivedAt.getTime());
+      const lastBooked = Math.max(0, ...o.goodsReceipts.map((r) => (r.postedAt ?? r.receivedAt).getTime()));
+      const wholeOrder = o.deliveredAt && o.deliveredAt.getTime() > lastBooked + 60_000 ? o.deliveredAt.getTime() : 0;
+      const lastAt = Math.max(0, ...notes, wholeOrder);
+      const lastReceived = lastAt ? new Date(lastAt) : null;
       return {
         id: o.id,
         number: o.number,
@@ -848,7 +865,7 @@ export const ProjectScheduleService = {
         lines: o.lines.length,
         linesOwed: finished ? 0 : owed.length,
         expectedDelivery: expected,
-        lastReceivedOn: lastReceived ? lastReceived.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }) : null,
+        lastReceivedOn: lastReceived ? saDay(lastReceived) : null,
         overdue: placed && owed.length > 0 && expected !== null && expected < today,
       };
     });
@@ -863,7 +880,8 @@ export const ProjectScheduleService = {
         notPlaced: orders.filter((o) => o.status === 'DRAFT' || o.status === 'PENDING_APPROVAL').length,
         allReceived: orders.length > 0 && orders.every((o) => o.status === 'RECEIVED' || o.status === 'CLOSED'),
         lastReceivedOn: received.length ? received[received.length - 1]! : null,
-        latestExpected: orders.filter((o) => o.linesOwed > 0).map((o) => o.expectedDelivery).filter((d): d is string => d !== null).sort().pop() ?? null,
+        // The latest of every line still owed, not each order's earliest.
+        latestExpected: owedDates.sort().pop() ?? null,
       },
     };
   },

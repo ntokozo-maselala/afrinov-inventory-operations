@@ -43,7 +43,11 @@ export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, o
   const finishing = !!finishOn && !!step && !step.done;
   const [progress, setProgress] = useState(finishing ? '100' : String(step?.progress ?? 0));
   const [finished, setFinished] = useState(finishing || (step?.done ?? false));
-  const [actualStart, setActualStart] = useState(step?.actualStart ?? (finishing ? (step?.forecastStart ?? step?.baselineStart ?? finishOn) : ''));
+  // Finishing on a given day: started no later than it (orders can arrive before the step's planned start).
+  const startBy = (d: string | null | undefined) => (d && finishOn && d > finishOn ? finishOn : d);
+  const [actualStart, setActualStart] = useState(finishing
+    ? (startBy(step?.actualStart ?? step?.forecastStart ?? step?.baselineStart) ?? finishOn!)
+    : (step?.actualStart ?? ''));
   const [actualEnd, setActualEnd] = useState(step?.actualEnd ?? (finishing ? finishOn : ''));
   const [assigneeId, setAssigneeId] = useState(step?.assignee?.id ?? '');
   const [notes, setNotes] = useState(step?.notes ?? '');
