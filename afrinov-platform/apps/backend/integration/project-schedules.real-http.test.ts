@@ -52,7 +52,7 @@ describe('Project schedules over real HTTP', () => {
   }
 
   beforeAll(async () => {
-    server = await startServer();
+    server = await startServer({ procurementEnabled: true });
     admin = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
     ({ api: manager, id: managerId } = await user('manager', 'VIEWER'));
     const other = await user('other-manager', 'VIEWER');
@@ -243,6 +243,46 @@ describe('Project schedules over real HTTP', () => {
     const list = await technician<{ schedules: Schedule[]; totals: { openSchedules: number } }>('GET', `/projects/${projectNumber}/schedules`);
     expect(list.body.totals.openSchedules).toBe(3);
     expect((await manager('PATCH', `/project-schedules/${res.body.id}`, { status: 'CANCELLED' })).status).toBe(200);
+  });
+
+  it("shows the Procurement step the project's orders and those of the projects it covers, without prices, to those who may see them", async () => {
+    const supplier = (await admin<{ id: string }>('POST', '/suppliers', { name: `Steel ${run}` })).body.id;
+    const material = (await admin<{ id: string }>('POST', '/materials', { sku: `IT-SCHED-PLATE-${run}`, name: `Plate ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' })).body.id;
+    const createdById = (await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } })).id;
+    const order = (suffix: string, project: string, status: 'APPROVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED', ordered: number, received: number, expected: string) =>
+      prisma.purchaseOrder.create({
+        data: {
+          number: `IT-PT-${run}-${suffix}`, supplierId: supplier, createdById, projectNumber: project, status,
+          expectedDeliveryDate: new Date(`${expected}T00:00:00Z`),
+          lines: { create: [{ materialId: material, orderedQty: ordered, receivedQty: received, unitPrice: 4321.8765 }] },
+        },
+      });
+    const delivered = await order('A', projectNumber, 'RECEIVED', 5, 5, '2026-03-06');
+    await prisma.goodsReceipt.create({
+      data: { number: `IT-GR-${run}-A`, supplierId: supplier, receivedById: createdById, purchaseOrderId: delivered.id, status: 'POSTED', postedAt: new Date('2026-03-09T10:00:00Z') },
+    });
+    await order('B', otherProject, 'APPROVED', 4, 1, '2026-03-05');
+    await order('C', projectNumber, 'CLOSED', 3, 2, '2026-03-04');
+    await order('D', projectNumber, 'CANCELLED', 1, 0, '2026-03-04');
+
+    interface Procurement { projects: string[]; orders: Array<Record<string, unknown>>; summary: Record<string, unknown> }
+    const covered = await manager<Procurement>('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`);
+    expect(covered.status).toBe(200);
+    expect(covered.body.projects).toEqual([projectNumber, otherProject]);
+    expect(covered.body.orders.map((o) => [o.number, o.status, o.linesOwed, o.overdue])).toEqual([
+      [`IT-PT-${run}-A`, 'RECEIVED', 0, false], [`IT-PT-${run}-B`, 'APPROVED', 1, true], [`IT-PT-${run}-C`, 'CLOSED', 0, false],
+    ]);
+    expect(covered.body.orders[0]).toMatchObject({ supplierName: `Steel ${run}`, lastReceivedOn: '2026-03-09' });
+    expect(JSON.stringify(covered.body)).not.toMatch(/4321|price|total/i);
+    expect(covered.body.summary).toMatchObject({ orders: 3, owing: 1, overdue: 1, allReceived: false, lastReceivedOn: '2026-03-09', latestExpected: '2026-03-05' });
+
+    // The project's own orders: one received, one closed short, so nothing more is coming.
+    const own = await buyer<Procurement>('GET', `/projects/${projectNumber}/procurement`);
+    expect(own.status).toBe(200);
+    expect(own.body.summary).toMatchObject({ orders: 2, allReceived: true });
+
+    expect((await technician('GET', `/projects/${projectNumber}/procurement`)).status).toBe(403);
+    expect((await otherManager('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`)).status).toBe(403);
   });
 
   it('is done only when every step is, and the project completes only when every schedule is closed', async () => {

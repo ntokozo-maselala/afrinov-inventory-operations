@@ -23,11 +23,13 @@ interface Props {
   step: ScheduleStep | null;
   users: Array<{ id: string; name: string; active?: boolean }>;
   closedDays: ReadonlySet<string>;
+  /** Opens the step as finished on this day (the Procurement step once everything has arrived); still to be saved. */
+  finishOn?: string;
   onCancel: () => void;
   onSaved: (schedule: ProjectSchedule, message: string) => void;
 }
 
-export function ProjectStepForm({ schedule, step, users, closedDays, onCancel, onSaved }: Props) {
+export function ProjectStepForm({ schedule, step, users, closedDays, finishOn, onCancel, onSaved }: Props) {
   const started = schedule.status === 'ACTIVE';
   const adding = step === null;
   const idemAdd = useIdempotencyKey('add-project-step');
@@ -38,10 +40,11 @@ export function ProjectStepForm({ schedule, step, users, closedDays, onCancel, o
   const [baselineEnd, setBaselineEnd] = useState(step?.baselineEnd ?? '');
   const [forecastStart, setForecastStart] = useState(step?.forecastStart ?? step?.baselineStart ?? '');
   const [forecastEnd, setForecastEnd] = useState(step?.forecastEnd ?? step?.baselineEnd ?? '');
-  const [progress, setProgress] = useState(String(step?.progress ?? 0));
-  const [finished, setFinished] = useState(step?.done ?? false);
-  const [actualStart, setActualStart] = useState(step?.actualStart ?? '');
-  const [actualEnd, setActualEnd] = useState(step?.actualEnd ?? '');
+  const finishing = !!finishOn && !!step && !step.done;
+  const [progress, setProgress] = useState(finishing ? '100' : String(step?.progress ?? 0));
+  const [finished, setFinished] = useState(finishing || (step?.done ?? false));
+  const [actualStart, setActualStart] = useState(step?.actualStart ?? (finishing ? (step?.forecastStart ?? step?.baselineStart ?? finishOn) : ''));
+  const [actualEnd, setActualEnd] = useState(step?.actualEnd ?? (finishing ? finishOn : ''));
   const [assigneeId, setAssigneeId] = useState(step?.assignee?.id ?? '');
   const [notes, setNotes] = useState(step?.notes ?? '');
   const [position, setPosition] = useState(String(schedule.steps.length + 1));

@@ -73,6 +73,17 @@ describe('mock project schedules', () => {
     expect(mine.map((s) => [s.name, s.late])).toEqual([['Manufacturing', true]]);
   });
 
+  it("lists a project's orders for its Procurement step, without prices", async () => {
+    interface P { projects: string[]; orders: Array<Record<string, unknown>>; summary: { orders: number; allReceived: boolean } }
+    const s = await api.post<ProjectSchedule>(`/projects/${PROJECT}/schedules`, { name: 'Joint', alsoCovers: ['AFRI-1402'] });
+    const res = await api.get<P>(`/projects/${PROJECT}/procurement?scheduleId=${s.id}`);
+    expect(res.projects).toEqual([PROJECT, 'AFRI-1402']);
+    expect(res.summary.orders).toBe(res.orders.length);
+    expect(res.orders.every((o) => ['AFRI-1325', 'AFRI-1402'].includes(o.projectNumber as string) && o.status !== 'CANCELLED')).toBe(true);
+    expect(JSON.stringify(res)).not.toMatch(/unitPrice|total/);
+    await expect(api.get('/projects/NOPE/procurement')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('keeps a project from being completed while a schedule is open', async () => {
     const s = await plannedSchedule();
     await expect(api.patch(`/projects/${PROJECT}`, { status: 'COMPLETED' })).rejects.toMatchObject({ code: 'INVALID_STATE' });

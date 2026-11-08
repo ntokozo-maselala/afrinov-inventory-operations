@@ -19,6 +19,7 @@ import { StaleDataNotice } from '../components/StaleDataNotice';
 import { useToast } from '../components/Toast';
 import { ProjectStepForm } from '../components/ProjectStepForm';
 import { ProjectGantt } from '../components/ProjectGantt';
+import { ProcurementOrdersDialog, ProcurementStepNote, procurementStepOf } from '../components/ProcurementStep';
 import { RemoveStepDialog, ReplanDialog, ScheduleForm } from '../components/ProjectScheduleDialogs';
 import { api } from '../api/client';
 import { errorToast } from '../lib/errorPresentation';
@@ -30,7 +31,7 @@ import {
 import { parseClosedDays } from '../lib/workingDays';
 import { today } from '../lib/dates';
 import { PROCUREMENT_ENABLED } from '../config/features';
-import type { ProjectSchedule, ProjectSchedules, ScheduleStatus, ScheduleStep, StepTemplate } from '../api/types';
+import type { ProjectSchedule, ProjectSchedules, ScheduleStatus, ScheduleStep, StepProcurement, StepTemplate } from '../api/types';
 
 interface Project {
   projectNumber: string;
@@ -48,7 +49,8 @@ type Dialog =
   | { kind: 'add-schedule' }
   | { kind: 'edit-schedule'; schedule: ProjectSchedule }
   | { kind: 'replan'; schedule: ProjectSchedule }
-  | { kind: 'step'; schedule: ProjectSchedule; step: ScheduleStep | null }
+  | { kind: 'step'; schedule: ProjectSchedule; step: ScheduleStep | null; finishOn?: string }
+  | { kind: 'orders'; procurement: StepProcurement }
   | { kind: 'remove-step'; schedule: ProjectSchedule; step: ScheduleStep }
   | { kind: 'status'; schedule: ProjectSchedule; to: ScheduleStatus }
   | { kind: 'next-month'; schedule: ProjectSchedule };
@@ -80,6 +82,8 @@ export function ProjectDetail() {
   const idemNextMonth = useIdempotencyKey('project-schedule-next-month');
   const toast = useToast();
   const canSeeOrders = PROCUREMENT_ENABLED && hasPermission('orders:view');
+  // The Procurement step's orders (Phase 4): for the project's manager and Admin, and those who see or receive project orders.
+  const canSeeProcurement = PROCUREMENT_ENABLED && (canChange || hasPermission('orders:view') || hasPermission('orders:receive'));
 
   function saved(_schedule: ProjectSchedule, message: string) {
     setDialog(null);
@@ -176,6 +180,7 @@ export function ProjectDetail() {
             schedule={s}
             canChange={canChange}
             closedDays={closedSet}
+            procurementPath={canSeeProcurement ? `/projects/${enc}/procurement?scheduleId=${encodeURIComponent(s.id)}` : null}
             onAction={setDialog}
           />
         ))}
@@ -194,9 +199,13 @@ export function ProjectDetail() {
           step={dialog.step}
           users={assignees.data ?? []}
           closedDays={closedSet}
+          finishOn={dialog.finishOn}
           onCancel={() => setDialog(null)}
           onSaved={saved}
         />
+      )}
+      {dialog?.kind === 'orders' && (
+        <ProcurementOrdersDialog procurement={dialog.procurement} canOpenOrders={canSeeOrders} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'remove-step' && <RemoveStepDialog schedule={dialog.schedule} step={dialog.step} onCancel={() => setDialog(null)} onSaved={saved} />}
       {dialog?.kind === 'status' && (
@@ -227,10 +236,15 @@ export function ProjectDetail() {
 }
 
 /** One schedule: its totals, what can be done with it, and its steps. */
-function ScheduleCard({ schedule: s, canChange, closedDays, onAction }: {
-  schedule: ProjectSchedule; canChange: boolean; closedDays: ReadonlySet<string>; onAction: (d: Dialog) => void;
+function ScheduleCard({ schedule: s, canChange, closedDays, procurementPath, onAction }: {
+  schedule: ProjectSchedule; canChange: boolean; closedDays: ReadonlySet<string>;
+  /** Where the Procurement step's orders come from; none for those who may not see them. */
+  procurementPath: string | null;
+  onAction: (d: Dialog) => void;
 }) {
   const [view, setView] = useState<'steps' | 'chart'>('steps');
+  const procurementStep = procurementStepOf(s.steps);
+  const procurement = useApi<StepProcurement>(procurementStep && s.status !== 'CANCELLED' ? procurementPath : null);
   const open = isOpenSchedule(s.status);
   const started = s.status === 'ACTIVE';
   const late = latenessOf(s.totals.daysLate);
@@ -311,7 +325,10 @@ function ScheduleCard({ schedule: s, canChange, closedDays, onAction }: {
               </tr>
             </thead>
             <tbody>
-              {s.steps.map((st) => <StepRow key={st.id} schedule={s} step={st} canChange={canChange && open} onAction={onAction} />)}
+              {s.steps.map((st) => (
+                <StepRow key={st.id} schedule={s} step={st} canChange={canChange && open} onAction={onAction}
+                  procurement={st === procurementStep ? procurement.data : null} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -320,7 +337,11 @@ function ScheduleCard({ schedule: s, canChange, closedDays, onAction }: {
   );
 }
 
-function StepRow({ schedule, step: st, canChange, onAction }: { schedule: ProjectSchedule; step: ScheduleStep; canChange: boolean; onAction: (d: Dialog) => void }) {
+function StepRow({ schedule, step: st, canChange, onAction, procurement }: {
+  schedule: ProjectSchedule; step: ScheduleStep; canChange: boolean; onAction: (d: Dialog) => void;
+  /** For the Procurement step: the orders it stands on. */
+  procurement?: StepProcurement | null;
+}) {
   const showActual = schedule.status !== 'PLANNING';
   const end = st.done ? st.actualEnd : (st.forecastEnd ?? st.baselineEnd);
   const slipped = !st.done && !!st.baselineEnd && !!end && end > st.baselineEnd;
@@ -331,6 +352,16 @@ function StepRow({ schedule, step: st, canChange, onAction }: { schedule: Projec
       <td className="py-2 pr-2">
         <div className="font-medium text-surface-900">{st.name}</div>
         {st.notes && <div className="text-xs text-surface-500 mt-0.5">{st.notes}</div>}
+        {procurement && (
+          <ProcurementStepNote
+            procurement={procurement}
+            stepEnd={st.done ? null : (st.forecastEnd ?? st.baselineEnd)}
+            onOpen={() => onAction({ kind: 'orders', procurement })}
+            onMarkDone={canChange && schedule.status === 'ACTIVE' && !st.done && procurement.summary.allReceived && procurement.summary.lastReceivedOn
+              ? () => onAction({ kind: 'step', schedule, step: st, finishOn: procurement.summary.lastReceivedOn! })
+              : undefined}
+          />
+        )}
       </td>
       <td className="py-2 pr-2">{st.assignee?.name ?? <span className="text-surface-400">Nobody yet</span>}</td>
       <td className="py-2 pr-2 whitespace-nowrap">{formatSpan(st.baselineStart, st.baselineEnd)}</td>

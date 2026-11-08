@@ -225,6 +225,42 @@ export interface MyStep {
   late: boolean;
 }
 
+/** One purchase order behind a Procurement step: what it owes and when, with no prices. */
+export interface StepOrder {
+  id: string;
+  number: string;
+  status: string;
+  projectNumber: string;
+  supplierName: string;
+  lines: number;
+  /** Lines still to come; 0 once received or closed. */
+  linesOwed: number;
+  /** When what it still owes is expected (the earliest owed line); the order's date once nothing is owed. */
+  expectedDelivery: string | null;
+  /** The day of its last delivery, in South Africa. */
+  lastReceivedOn: string | null;
+  /** Placed, still owing, and past its expected delivery. */
+  overdue: boolean;
+}
+
+export interface StepProcurement {
+  /** The project and any others the schedule covers. */
+  projects: string[];
+  orders: StepOrder[];
+  summary: {
+    orders: number;
+    owing: number;
+    overdue: number;
+    /** Drafts and orders waiting to be signed: nothing is coming yet. */
+    notPlaced: number;
+    /** Every order received, or closed with nothing more coming. */
+    allReceived: boolean;
+    lastReceivedOn: string | null;
+    /** The latest expected delivery of what is still owed. */
+    latestExpected: string | null;
+  };
+}
+
 async function inTx<T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return tx ? fn(tx) : prisma.$transaction(fn);
 }
@@ -719,6 +755,75 @@ export const ProjectScheduleService = {
         };
       })
       .sort((a, b) => (a.expectedEnd ?? '9999').localeCompare(b.expectedEnd ?? '9999') || a.projectNumber.localeCompare(b.projectNumber));
+  },
+
+  /**
+   * What the Procurement step stands on (Phase 4): the project's purchase
+   * orders, and those of the other projects a joint schedule covers, with what
+   * each still owes and when it is expected. No prices. Seen by the project's
+   * manager, Admin, and those who see or receive project orders.
+   */
+  async procurementFor(projectNumber: string, scheduleId: string | undefined, actor: ScheduleActor & { seesOrders: boolean }): Promise<StepProcurement> {
+    const project = await prisma.project.findUnique({ where: { projectNumber }, select: { managerId: true } });
+    if (!project) throw Errors.notFound('Project');
+    if (!actor.manageAll && !actor.seesOrders && project.managerId !== actor.id) {
+      throw Errors.forbidden("Only the project's manager, an administrator or those who see project orders can see its orders here.");
+    }
+    let projects = [projectNumber];
+    if (scheduleId) {
+      const schedule = await prisma.projectSchedule.findUnique({ where: { id: scheduleId }, select: { projectNumber: true, alsoCovers: true } });
+      if (!schedule || schedule.projectNumber !== projectNumber) throw Errors.notFound('Schedule');
+      projects = [projectNumber, ...schedule.alsoCovers];
+    }
+    const rows = await prisma.purchaseOrder.findMany({
+      where: { projectNumber: { in: projects }, status: { not: 'CANCELLED' } },
+      select: {
+        id: true, number: true, status: true, projectNumber: true, expectedDeliveryDate: true,
+        supplier: { select: { name: true } },
+        lines: { select: { orderedQty: true, receivedQty: true, deliveryDate: true } },
+        goodsReceipts: { where: { status: 'POSTED' }, select: { postedAt: true, receivedAt: true } },
+      },
+      orderBy: [{ createdAt: 'asc' }],
+    });
+    const today = dayKey(todayInSouthAfrica());
+    const orders = rows.map((o): StepOrder => {
+      const owed = o.lines.filter((l) => l.receivedQty.lessThan(l.orderedQty));
+      const expected = owed
+        .map((l) => iso(l.deliveryDate ?? o.expectedDeliveryDate))
+        .filter((d): d is string => d !== null)
+        .sort()[0] ?? (owed.length ? null : iso(o.expectedDeliveryDate));
+      const receipts = o.goodsReceipts.map((r) => r.postedAt ?? r.receivedAt).filter((d): d is Date => d !== null);
+      const lastReceived = receipts.length ? new Date(Math.max(...receipts.map((d) => d.getTime()))) : null;
+      // An order closed short is finished with: nothing more is coming.
+      const finished = o.status === 'RECEIVED' || o.status === 'CLOSED';
+      const placed = o.status === 'APPROVED' || o.status === 'PARTIALLY_RECEIVED';
+      return {
+        id: o.id,
+        number: o.number,
+        status: o.status,
+        projectNumber: o.projectNumber!,
+        supplierName: o.supplier.name,
+        lines: o.lines.length,
+        linesOwed: finished ? 0 : owed.length,
+        expectedDelivery: expected,
+        lastReceivedOn: lastReceived ? lastReceived.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }) : null,
+        overdue: placed && owed.length > 0 && expected !== null && expected < today,
+      };
+    });
+    const received = orders.map((o) => o.lastReceivedOn).filter((d): d is string => d !== null).sort();
+    return {
+      projects,
+      orders,
+      summary: {
+        orders: orders.length,
+        owing: orders.filter((o) => o.linesOwed > 0).length,
+        overdue: orders.filter((o) => o.overdue).length,
+        notPlaced: orders.filter((o) => o.status === 'DRAFT' || o.status === 'PENDING_APPROVAL').length,
+        allReceived: orders.length > 0 && orders.every((o) => o.status === 'RECEIVED' || o.status === 'CLOSED'),
+        lastReceivedOn: received.length ? received[received.length - 1]! : null,
+        latestExpected: orders.filter((o) => o.linesOwed > 0).map((o) => o.expectedDelivery).filter((d): d is string => d !== null).sort().pop() ?? null,
+      },
+    };
   },
 
   /** How many open schedules a project has: it can't be marked Completed while any are. */
