@@ -704,7 +704,8 @@ export const ProjectScheduleService = {
    * by a user assigned to any of its steps.
    */
   async board(filter: { managerId?: string; assigneeId?: string } = {}): Promise<BoardRow[]> {
-    const rows = await prisma.projectSchedule.findMany({
+    // The schedules and the closed days don't depend on each other: read them together.
+    const [rows, closed] = await Promise.all([prisma.projectSchedule.findMany({
       where: {
         status: { in: OPEN },
         ...(filter.managerId ? { project: { managerId: filter.managerId } } : {}),
@@ -714,9 +715,8 @@ export const ProjectScheduleService = {
         ...SCHEDULE_INCLUDE,
         project: { select: { name: true, manager: { select: { id: true, name: true } } } },
       },
-    });
+    }), closedDays()]);
     const today = todayInSouthAfrica();
-    const closed = await closedDays();
     return rows
       .map((s) => ({
         scheduleId: s.id,
@@ -728,7 +728,7 @@ export const ProjectScheduleService = {
         dueDate: iso(s.dueDate),
         steps: s.steps.length,
         stepsDone: s.steps.filter((st) => st.progress >= 100).length,
-        totals: scheduleTotals(s.steps.map(facts), { dueDate: s.dueDate, today, closed }),
+        totals: totalsOf(s, today, closed),
       }))
       .sort(boardOrder);
   },

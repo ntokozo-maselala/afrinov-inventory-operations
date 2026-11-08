@@ -168,7 +168,7 @@ export function routeSchedules(method: string, p: string, qs: Record<string, str
           scheduleId: s.id, name: s.name, status: s.status, projectNumber: s.projectNumber,
           projectName: project?.name ?? null, manager: project?.manager ?? null, dueDate: s.dueDate,
           steps: s.steps.length, stepsDone: s.steps.filter((st) => st.progress >= 100).length,
-          totals: totals(s.steps, s.dueDate, ctx),
+          totals: totals(s.steps, s.dueDate, ctx, s.status === 'ACTIVE'),
         };
       });
     const by = (x: number | null) => (x === null ? -Infinity : x);
