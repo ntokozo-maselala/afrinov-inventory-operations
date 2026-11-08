@@ -165,14 +165,19 @@ export function DashboardLocationDonut({ locations, currency, roomOf }: { locati
   // By room adds each rack's value into the room it stands in; offered once a rack has a room.
   const [byRoom, setByRoom] = useState(false);
   const canGroup = !!roomOf && roomOf.size > 0;
-  const slices = getLocationSlices(canGroup && byRoom ? groupByRoom(locations, roomOf!) : locations);
+  const rows = canGroup && byRoom ? groupByRoom(locations, roomOf!) : locations;
+  const slices = getLocationSlices(rows);
+  // A location whose stock nets below zero has no slice to draw. It is listed
+  // under the slices and still counted in the total, so the total matches the
+  // stock value card instead of silently leaving it out.
+  const negative = rows.filter((location) => location.inventoryValue < 0);
   const grouping = canGroup && (
     <div className="flex gap-2 mb-3" role="group" aria-label="Show value by">
       <Button size="sm" variant={byRoom ? 'ghost' : 'secondary'} aria-pressed={!byRoom} onClick={() => setByRoom(false)}>By location</Button>
       <Button size="sm" variant={byRoom ? 'secondary' : 'ghost'} aria-pressed={byRoom} onClick={() => setByRoom(true)}>By room</Button>
     </div>
   );
-  const total = slices.reduce((sum, slice) => sum + slice.value, 0);
+  const total = rows.reduce((sum, location) => sum + location.inventoryValue, 0);
   const radius = 65;
   const circumference = 2 * Math.PI * radius;
   const chartSegments = slices.map((slice, index) => ({
@@ -184,7 +189,10 @@ export function DashboardLocationDonut({ locations, currency, roomOf }: { locati
     return <>{grouping}<div className="dashboard-chart-empty">No priced stock is available for location comparison.</div></>;
   }
 
-  const description = slices.map((slice) => `${slice.name} ${Math.round(slice.share * 100)}%`).join('; ');
+  const description = [
+    ...slices.map((slice) => `${slice.name} ${Math.round(slice.share * 100)}%`),
+    ...negative.map((location) => `${location.locationName} negative stock`),
+  ].join('; ');
   return (
     <>
     {grouping}
@@ -225,6 +233,14 @@ export function DashboardLocationDonut({ locations, currency, roomOf }: { locati
               <span className="dashboard-donut-name" title={slice.name}>{slice.name}</span>
               <span className="dashboard-donut-share">{slice.share < 0.01 ? '<1%' : `${Math.round(slice.share * 100)}%`}</span>
               <strong>{formatCurrency(slice.value, currency)}</strong>
+            </li>
+          ))}
+          {negative.map((location) => (
+            <li key={location.locationId} className="dashboard-donut-negative">
+              <span className="dashboard-donut-key" aria-hidden="true" />
+              <span className="dashboard-donut-name" title={location.locationName}>{location.locationName}</span>
+              <span className="dashboard-donut-share">negative stock</span>
+              <strong>{formatCurrency(location.inventoryValue, currency)}</strong>
             </li>
           ))}
         </ul>

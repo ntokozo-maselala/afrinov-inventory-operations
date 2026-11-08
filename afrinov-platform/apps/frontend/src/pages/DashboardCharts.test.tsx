@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { DashboardLocationDonut, groupByRoom, type RoomOf } from './DashboardCharts';
 import type { ReportLocationRow } from '../api/reportTypes';
+import { formatCurrency } from '../lib/currency';
 
 const at = (locationId: string, locationName: string, inventoryValue: number, locationType = 'RACK'): ReportLocationRow =>
   ({ locationId, locationName, locationType, quantity: 1, inventoryValue, share: 0 });
@@ -36,6 +37,16 @@ describe('DashboardLocationDonut', () => {
     expect(screen.getAllByText('Main Storeroom').length).toBeGreaterThan(0);
     expect(screen.getByRole('img', { name: /^Share of priced stock value by room:/ })).toBeInTheDocument();
     expect(screen.queryByText('D-1')).toBeNull();
+  });
+
+  it('lists a location with negative stock and counts it in the total', () => {
+    render(<DashboardLocationDonut locations={[at('store', 'Main Storeroom', 1000, 'STOREROOM'), at('boiler', 'Boiler Shop', -300, 'SHOP_FLOOR_AREA')]} currency="ZAR" />);
+    expect(screen.getByText('negative stock')).toBeInTheDocument();
+    // Testing Library collapses the non-breaking spaces currency formatting uses.
+    const money = (value: number) => formatCurrency(value, 'ZAR').replace(/\s+/g, ' ');
+    expect(screen.getByText(money(-300))).toBeInTheDocument();
+    expect(screen.getByText(money(700))).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Boiler Shop negative stock/ })).toBeInTheDocument();
   });
 
   it('offers no grouping while no location stands in a room', () => {
