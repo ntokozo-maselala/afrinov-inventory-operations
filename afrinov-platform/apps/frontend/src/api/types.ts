@@ -346,3 +346,31 @@ export interface MyStep {
   /** Under way and past its expected end. */
   late: boolean;
 }
+
+/** GET /projects/:projectNumber/procurement: the orders behind a Procurement step, without prices. */
+export interface StepOrder {
+  id: string;
+  number: string;
+  status: string;
+  projectNumber: string;
+  supplierName: string;
+  lines: number;
+  linesOwed: number;
+  expectedDelivery: string | null;
+  lastReceivedOn: string | null;
+  overdue: boolean;
+}
+
+export interface StepProcurement {
+  projects: string[];
+  orders: StepOrder[];
+  summary: {
+    orders: number;
+    owing: number;
+    overdue: number;
+    notPlaced: number;
+    allReceived: boolean;
+    lastReceivedOn: string | null;
+    latestExpected: string | null;
+  };
+}

@@ -28,7 +28,7 @@ import { awardConcerns, fourDecimals } from '../lib/rfq';
 import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { computeProcurementSavings } from './mockProcurementSavings';
-import { mockOpenSchedules, resetMockSchedules, routeSchedules } from './mockSchedules';
+import { mockOpenSchedules, mockScheduleCovers, resetMockSchedules, routeSchedules } from './mockSchedules';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
@@ -2034,6 +2034,47 @@ function route(method: string, path: string, body?: unknown): unknown {
     today: () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }),
   });
   if (scheduled !== undefined) return scheduled;
+
+  // As the server (procurementFor): the orders behind a Procurement step, without prices.
+  const procurementPath = /^\/projects\/([^/]+)\/procurement$/.exec(p);
+  if (procurementPath && method === 'GET') {
+    if (!PROCUREMENT_ENABLED) throw err('NOT_FOUND', 'Route not found');
+    const projectNumber = decodeURIComponent(procurementPath[1]!);
+    if (!state.projects.some((x) => x.projectNumber === projectNumber)) throw err('NOT_FOUND', 'Project not found');
+    const projects = [projectNumber, ...(qs.scheduleId ? mockScheduleCovers(qs.scheduleId) : [])];
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const orders = state.purchaseOrders
+      .filter((po) => po.projectNumber && projects.includes(po.projectNumber) && po.status !== 'CANCELLED')
+      .map((po) => {
+        const owed = po.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty));
+        const expected = owed.map((l) => l.deliveryDate ?? po.expectedDeliveryDate ?? null).filter((d): d is string => !!d).map((d) => d.slice(0, 10)).sort()[0]
+          ?? (owed.length ? null : po.expectedDeliveryDate?.slice(0, 10) ?? null);
+        const receipts = state.goodsReceipts.filter((g) => g.purchaseOrderId === po.id && g.status === 'POSTED').map((g) => g.receivedAt.slice(0, 10)).sort();
+        const finished = po.status === 'RECEIVED' || po.status === 'CLOSED';
+        const placed = po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED';
+        return {
+          id: po.id, number: po.number, status: po.status, projectNumber: po.projectNumber!,
+          supplierName: state.suppliers.find((s) => s.id === po.supplierId)?.name ?? '',
+          lines: po.lines.length, linesOwed: finished ? 0 : owed.length, expectedDelivery: expected,
+          lastReceivedOn: receipts.length ? receipts[receipts.length - 1]! : null,
+          overdue: placed && owed.length > 0 && expected !== null && expected < today,
+        };
+      });
+    const received = orders.map((o) => o.lastReceivedOn).filter((d): d is string => !!d).sort();
+    return {
+      projects,
+      orders,
+      summary: {
+        orders: orders.length,
+        owing: orders.filter((o) => o.linesOwed > 0).length,
+        overdue: orders.filter((o) => o.overdue).length,
+        notPlaced: orders.filter((o) => o.status === 'DRAFT' || o.status === 'PENDING_APPROVAL').length,
+        allReceived: orders.length > 0 && orders.every((o) => o.status === 'RECEIVED' || o.status === 'CLOSED'),
+        lastReceivedOn: received.length ? received[received.length - 1]! : null,
+        latestExpected: orders.filter((o) => o.linesOwed > 0).map((o) => o.expectedDelivery).filter((d): d is string => !!d).sort().pop() ?? null,
+      },
+    };
+  }
 
   // Projects
   // As the server (project-leftovers.service.ts): a project's material still in

@@ -54,6 +54,8 @@ export const updateScheduleSchema = z.object({
   status: scheduleStatusEnum.optional(),
 });
 
+export const procurementQuerySchema = z.object({ scheduleId: z.string().min(1).optional() });
+
 export const boardQuerySchema = z.object({
   managerId: z.uuid().optional(),
   assigneeId: z.uuid().optional(),
@@ -107,7 +109,19 @@ function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
 }
 
-export async function projectRoutes(app: FastifyInstance): Promise<void> {
+export async function projectRoutes(app: FastifyInstance, opts: { procurementEnabled?: boolean } = {}): Promise<void> {
+  // What a Procurement step stands on (Phase 4): the project's orders, without
+  // prices. Only while purchase orders are switched on, as their own routes.
+  if (opts.procurementEnabled) {
+    app.get('/projects/:projectNumber/procurement', { preHandler: [app.authenticate] }, async (req) => {
+      const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
+      const q = parse(procurementQuerySchema, req.query, 'query');
+      const seesOrders = await userHasPermission(req, PermissionCode.ViewPurchaseOrder)
+        || await userHasPermission(req, PermissionCode.ReceivePurchaseOrder);
+      return ProjectScheduleService.procurementFor(projectNumber, q.scheduleId, { ...(await scheduleActor(req)), seesOrders });
+    });
+  }
+
   app.get('/projects', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as Record<string, string | undefined>;
     return ProjectService.list({

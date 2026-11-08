@@ -34,7 +34,7 @@ import {
 import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
 import {
   createProjectSchema, updateProjectSchema,
-  createScheduleSchema, updateScheduleSchema, nextMonthSchema, boardQuerySchema, replanSchema, addStepSchema, updateStepSchema,
+  createScheduleSchema, updateScheduleSchema, nextMonthSchema, boardQuerySchema, procurementQuerySchema, replanSchema, addStepSchema, updateStepSchema,
 } from '../modules/operations/project.routes.js';
 import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
 import {
@@ -540,6 +540,14 @@ export const OPERATIONS: Operation[] = [
     description: 'Every schedule being planned or under way, with its project, manager, due date, steps done and totals: past the due date first, '
       + 'then late against plan, then the soonest expected finish. managerId filters by the project’s manager, assigneeId by a user assigned to any of its steps.',
     query: boardQuerySchema,
+  },
+  {
+    method: 'get', path: '/projects/:projectNumber/procurement', tag: 'Projects', summary: "List the orders behind a project's Procurement step",
+    description: 'The project’s purchase orders (and, with scheduleId, those of the other projects the schedule covers), not cancelled: each one’s status, supplier, '
+      + 'lines still owed, expected delivery, last delivery and whether it is overdue, with no prices; and a summary, including allReceived. '
+      + 'For the project’s manager, Admin, and holders of view:purchase_order or receive:purchase_order.',
+    procurement: true, query: procurementQuerySchema,
+    permissions: [P.ViewPurchaseOrder, P.ReceivePurchaseOrder, P.ManageProjectSchedule], errors: [403, 404],
   },
   {
     method: 'get', path: '/my-project-steps', tag: 'Projects', summary: 'List my unfinished steps',

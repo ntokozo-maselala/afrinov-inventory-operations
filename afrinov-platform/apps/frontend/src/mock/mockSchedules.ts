@@ -31,6 +31,11 @@ export function resetMockSchedules(): void {
   schedules = [];
 }
 
+/** The other projects a joint schedule covers, for its Procurement step. */
+export function mockScheduleCovers(scheduleId: string): string[] {
+  return schedules.find((s) => s.id === scheduleId)?.alsoCovers ?? [];
+}
+
 /** How many open schedules a project has: it can't be marked Completed while any are. */
 export function mockOpenSchedules(projectNumber: string): number {
   return schedules.filter((s) => s.projectNumber === projectNumber && OPEN.includes(s.status)).length;

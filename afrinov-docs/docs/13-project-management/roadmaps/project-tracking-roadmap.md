@@ -8,7 +8,7 @@ Six phases that bring job tracking into the platform, aligned with the **03 Proj
 
 This goes against the current scope: `01-product/product-scope.md` lists production scheduling and full project management as out of scope, and `01-product/capability-map.md` lists project management as "Future or never". Phase 0 changes both and records the decision as **ADR-032**. It stays job tracking: no budgets, step dependencies or resource levelling.
 
-**Status:** Phases 0 and 1 merged (#163, #164). Phase 2 on `feature/project-tracking-2`, Phase 3 on `feature/project-tracking-3` (branched from Phase 2); Phases 4 and 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
+**Status:** Phases 0 and 1 merged (#163, #164). Phase 2 on `feature/project-tracking-2`, Phase 3 on `feature/project-tracking-3` (branched from Phase 2), Phase 4 on `feature/project-tracking-4` (branched from Phase 3); Phase 5 not started. Every question was decided on 7 Nov 2026: the business answered the main ones and left the rest to engineering (marked "Engineering" under Decisions). Progress is tracked in the **Project Tracking — Implementation Tracker** Claude doc.
 
 | Phase | What | Size | Status |
 |---|---|---|---|
@@ -16,7 +16,7 @@ This goes against the current scope: `01-product/product-scope.md` lists product
 | 1 | A project has schedules and steps | L | Built |
 | 2 | The project page | M | Built |
 | 3 | The chart and the board of open jobs | M | Built |
-| 4 | The Procurement step reads the orders | S–M | Not started |
+| 4 | The Procurement step reads the orders | S–M | Built |
 | 5 | Moving off ClickUp | S | Not started |
 
 Sizes used below: **S** is about a day, **M** is 2 to 4 days, **L** is a week or more.
@@ -187,12 +187,20 @@ Size S–M. Backend and frontend. No migration: orders and receipts already reco
 
 **Where it shows:** a project's page → the Procurement step.
 
-- [ ] **4.1 What is ordered and what has arrived.** The purchase orders of the project, and of any other projects its schedule covers: each one's expected delivery date and what is still owed.
+*Built on `feature/project-tracking-4` (branched from Phase 3).* How it came out:
+- **`GET /projects/:projectNumber/procurement`** (`?scheduleId=` adds the projects a joint schedule covers), registered only while purchase orders are switched on, as their own routes are. Each order not cancelled: status, supplier, lines still owed, expected delivery (the earliest owed line's date, else the order's), last delivery and whether it is overdue; and a summary. **No prices.**
+- **Who sees it:** the project's manager, Admin, and those who see or receive project orders (`view:purchase_order`, `receive:purchase_order`). Project orders stay Procurement's, as the Stores and Procurement Separation Roadmap kept them; anyone else sees the step without its orders.
+- **"All received"** means every order is Received, or Closed with nothing more coming (closed short). A draft or an order waiting to be signed counts as not placed, and is warned about.
+- **The Procurement step** is the first step whose name says Procurement. Its line on the page says how the orders stand, warns when one is overdue, when material is expected after the step's own expected end, or when orders aren't placed, and opens the list. Once everything has arrived, **Mark this step done** opens the step form finished on the last delivery's day, to be checked and saved: nothing happens on its own.
+
+- [x] **4.1 What is ordered and what has arrived.** The purchase orders of the project, and of any other projects its schedule covers: each one's expected delivery date and what is still owed.
   Files: `project-schedule.service.ts`, `pages/ProjectDetail.tsx`
-- [ ] **4.2 A warning when the dates disagree.** The step says so when an order is overdue, or expected after the step's forecast end.
-- [ ] **4.3 Finishing the step.** Once every order line is received, the step offers **Mark done**, with the last receipt's date as its actual end. The manager confirms; nothing happens on its own.
+- [x] **4.2 A warning when the dates disagree.** The step says so when an order is overdue, or expected after the step's forecast end.
+- [x] **4.3 Finishing the step.** Once every order line is received, the step offers **Mark done**, with the last receipt's date as its actual end. The manager confirms; nothing happens on its own.
 
 Tests: orders of the project and of the projects a joint schedule covers; what is owed; an overdue order and one expected after the step; the offer appearing only when everything has arrived.
+
+Built with: a real-HTTP check (covered projects, owed and overdue, closed short counting as done, cancelled left out, no prices, and who may see it), `ProcurementStep.test.tsx` (4), two project-page tests (the step's line and orders, Mark this step done opening the form finished on the last delivery, and no request for someone who may not see orders), and the mock. Frontend 1412 tests, backend 1168 unit and 305 integration.
 
 **Done when:**
 - Nobody has to ask Procurement whether a job's material is in.

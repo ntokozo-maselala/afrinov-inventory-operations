@@ -168,6 +168,43 @@ describe('ProjectDetail', () => {
     expect(mockGet).toHaveBeenCalledWith('/settings/projects.closedDays');
   });
 
+  it("shows the Procurement step its orders, and offers to mark it done once everything has arrived", async () => {
+    const withProcurement = active();
+    withProcurement.steps[1] = step('s2', 2, 'Procurement', '2026-03-09', '2026-03-13', { forecastStart: '2026-03-09', forecastEnd: '2026-03-13' });
+    scheduleList = [withProcurement];
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path === '/projects/AFRI-1086/procurement?scheduleId=sch-1'
+      ? {
+        projects: ['AFRI-1086'],
+        orders: [{ id: 'po-1', number: 'AFRI-0101', status: 'RECEIVED', projectNumber: 'AFRI-1086', supplierName: 'Steel Co', lines: 2, linesOwed: 0, expectedDelivery: '2026-03-06', lastReceivedOn: '2026-03-11', overdue: false }],
+        summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, lastReceivedOn: '2026-03-11', latestExpected: null },
+      }
+      : base(path)));
+    renderPage();
+    expect(await screen.findByText('All delivered, last 11 Mar 2026')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
+    expect(within(await screen.findByRole('dialog')).getByText('AFRI-0101')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+
+    // Offered, not done: it opens the step finished on the last delivery, to be saved.
+    fireEvent.click(screen.getByRole('button', { name: 'Mark this step done' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('This step is finished')).toBeChecked();
+    expect(within(dialog).getByLabelText('Finished on')).toHaveValue('2026-03-11');
+    expect(within(dialog).getByLabelText('Started on')).toHaveValue('2026-03-09');
+    expect(mockPatch).not.toHaveBeenCalled();
+  });
+
+  it("doesn't ask for the Procurement step's orders for someone who may not see them", async () => {
+    auth.user = { id: 'u-other', roles: ['TECHNICIAN'] };
+    const withProcurement = active();
+    withProcurement.steps[1] = step('s2', 2, 'Procurement', '2026-03-09', '2026-03-13');
+    scheduleList = [withProcurement];
+    renderPage();
+    await screen.findByRole('region', { name: 'Schedule Main' });
+    expect(mockGet).not.toHaveBeenCalledWith(expect.stringContaining('/procurement'));
+  });
+
   it('asks why a step is removed from a schedule under way', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Remove FAT' }));
