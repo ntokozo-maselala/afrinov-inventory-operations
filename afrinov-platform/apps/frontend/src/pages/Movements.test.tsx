@@ -351,6 +351,17 @@ describe('Movements page', () => {
     expect(screen.getByText('Damaged')).toBeInTheDocument();
   });
 
+  it('lists an item deactivated among the movements, with no stock moved, at all locations, and why', async () => {
+    const lines = [{ ...row(1), type: 'ITEM_DEACTIVATED', quantity: null, locationName: 'All locations', reasonCode: 'SUPERSEDED', reasonNote: 'Replaced by the new range', referenceType: 'MaterialStatusChange' }];
+    renderAt('/movements?from=2026-10-05', [lines]);
+    const line = (await screen.findByText('Item deactivated')).closest('tr')!;
+    expect(within(line).getByText('No stock moved')).toBeInTheDocument();
+    expect(within(line).getByText('All locations')).toBeInTheDocument();
+    expect(within(line).getByText('superseded')).toBeInTheDocument();
+    expect(within(line).getByText('Replaced by the new range')).toBeInTheDocument();
+    expect(within(line).queryByText('MaterialStatusChange')).not.toBeInTheDocument();
+  });
+
   it('lists due date changes among the loans, with no stock moved, when each tool is due and why', async () => {
     const lines = [
       { ...row(3), type: 'DUE_DATE_CHANGE', quantity: null, recipientName: 'Khodani', reasonNote: 'Pour delayed.', referenceType: 'ToolLoan', referenceId: 'loan-1',

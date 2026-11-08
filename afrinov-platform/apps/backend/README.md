@@ -170,6 +170,7 @@ Run from `apps/backend`.
 | `npm run import:workbook -- --file <workbook.xlsm> --reconcile` | After the import: compares the database in `DATABASE_URL` with the workbook plan (item count, units and rand value per category, and every item that differs) and writes a reconciliation report to `import-reports/`. Read-only |
 | `npm run check:issued-stock` | Check that the numbers agree in `DATABASE_URL`: every stored balance equals its ledger sum and none is negative; every issue's returned, used up, broken and still out add up to what was issued, with nothing negative; used up and broken marks and their withdrawals point at the right records. Prints what does not add up and exits 1; read-only |
 | `npm run check:catalogue` | Reconcile Materials with Stock and Tools in `DATABASE_URL`: Stock's lines down to items, the items never received, and the Materials tabs up to the catalogue. Lists what was never received, and exits 1 if an item on Stock or Tools is not on Materials or the tabs do not add up; read-only |
+| `npm run check:item-status` | Confirm each item's active flag agrees with its status record, and list inactive items still holding stock (read-only) |
 | `npm run diag:login` | Log in as the seed admin through the full server and print the result. Needs `.env` with `SEED_ADMIN_PASSWORD` |
 | `npm run diag:admin` | Print whether the seed admin exists, is active, its roles, and every user's email and status. Needs `.env` |
 

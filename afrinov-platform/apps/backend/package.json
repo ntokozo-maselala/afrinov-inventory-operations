@@ -26,6 +26,7 @@
     "check:issued-stock": "tsx --env-file-if-exists=.env scripts/check-issued-stock.ts",
     "check:units": "tsx --env-file-if-exists=.env scripts/check-units.ts",
     "check:catalogue": "tsx --env-file-if-exists=.env scripts/check-catalogue.ts",
+    "check:item-status": "tsx --env-file-if-exists=.env scripts/check-item-status.ts",
     "import:workbook": "tsx --env-file-if-exists=.env scripts/import-workbook.ts",
     "import:suppliers": "tsx --env-file-if-exists=.env scripts/import-suppliers.ts",
     "diag:login": "tsx --env-file=.env scripts/diag-login.ts",

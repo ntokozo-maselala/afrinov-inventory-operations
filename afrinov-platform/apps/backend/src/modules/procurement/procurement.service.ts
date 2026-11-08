@@ -27,6 +27,8 @@ import { defaultVatRate, orderTotals, withTotals } from './po-pricing.js';
 import { OWN_ORDER, STEP_LABEL, approvalState, exchangeRateOf, isStandIn, listSigners, loadApprovalSettings, noRateMessage, signRefusal, signsOrdersOfKind, whoToAsk } from './po-approval.js';
 import { currentPrintedTerms } from './po-terms.js';
 import { refuseProjectMaterialOnStoresOrder, refuseStoresOnProjectOrder } from '../inventory/material-section.js';
+import { checkMaterialActive } from '../inventory/inventory.service.js';
+import { inactiveMessage } from '../inventory/material-status.js';
 
 export interface CreateSupplierInput {
   name: string;
@@ -271,8 +273,14 @@ export async function assertProjectOpen(projectNumber: string, client: Prisma.Tr
 function lineMaterialsOf(materialIds: string[], client: Prisma.TransactionClient | typeof prisma) {
   return client.material.findMany({
     where: { id: { in: [...new Set(materialIds)] } },
-    select: { sku: true, category: true, projectNumber: true },
+    select: { sku: true, category: true, projectNumber: true, active: true },
   });
+}
+
+/** Inactive means nothing moves, and that starts with not ordering it (ADR-033). */
+function refuseInactiveMaterial(materials: Array<{ sku: string; active: boolean }>): void {
+  const inactive = materials.find((m) => !m.active);
+  if (inactive) throw Errors.validation(inactiveMessage(inactive.sku));
 }
 
 const dayOf = (d: Date | null | undefined): string | null => (d ? d.toISOString().slice(0, 10) : null);
@@ -525,6 +533,7 @@ export const PurchaseOrderService = {
       const ids = [...new Set(input.lines.map((l) => l.materialId))];
       await tx.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
       const held = await lineMaterialsOf(ids, tx);
+      refuseInactiveMaterial(held);
       if (!opts.fromRfq) refuseStoresOnProjectOrder(cleanText(input.projectNumber), held);
       refuseProjectMaterialOnStoresOrder(cleanText(input.projectNumber), held);
       // Whole units of a counted item, read under the same hold, so a change of
@@ -726,7 +735,9 @@ export const PurchaseOrderService = {
       }
       // A draft is checked again as it goes out: its project may have closed
       // since, and a Stores draft from before may hold project material.
-      refuseProjectMaterialOnStoresOrder(po.projectNumber, await lineMaterialsOf(po.lines.map((l) => l.materialId), tx));
+      const lineMaterials = await lineMaterialsOf(po.lines.map((l) => l.materialId), tx);
+      refuseInactiveMaterial(lineMaterials);
+      refuseProjectMaterialOnStoresOrder(po.projectNumber, lineMaterials);
       if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
       const now = new Date();
       // The rate locks here, so who has to sign can't move with today's rate.
@@ -927,6 +938,7 @@ export const PurchaseOrderService = {
         // receipts (e.g. via GoodsReceipt posting) are not double-counted.
         const toReceive = orderedQty.minus(alreadyReceived);
         if (gtZero(toReceive)) {
+          await checkMaterialActive(line.materialId, tx);
           await tx.inventoryTransaction.create({
             data: {
               materialId: line.materialId,

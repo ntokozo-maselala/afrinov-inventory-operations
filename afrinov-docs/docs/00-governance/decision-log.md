@@ -900,3 +900,60 @@ change. Until Phase 5's cut-over date, ClickUp stays the record.
 
 **Evidence:** `afrinov-docs/docs/13-project-management/roadmaps/project-tracking-roadmap.md`
 (Decisions, Field map, Workbook faults not to copy).
+
+### ADR-033 — An item's status is on Movements, an item is cleared before it is deactivated, and on an inactive item nothing moves
+**Date:** 2026-11-06 · **Status:** Accepted
+
+**Context:** Deactivating an item moved no stock, so it reached only the audit
+log. All movements had no row for it, and Other changes is limited to Admin and
+Store Controller with no download. The inventory report also limited its
+movements to the items it showed, active ones by default, so deactivating an
+item took its past movements out of the Settings > Data export. An item could be
+deactivated with stock on hand: that stock could not be issued, adjusted or
+written off, and it dropped out of the default stock value with no approval,
+which made deactivating a way round the write-off limit (ADR-028). Deliveries on
+an order, returns, reversals, tool check-ins, count differences and order lines
+did not check the item at all, so a cleared item could fill up again.
+
+**Decision:**
+- The ledger stays the truth for quantities (ADR-002). A status change is not a
+  ledger line: it moves no stock and belongs to no one location. It has its own
+  append-only record, `material_status_changes`, written in the same transaction
+  as the change, and a row on Movements with a null quantity, as a due date
+  change has. All movements, an item's history and the downloads show it.
+- A status change takes a reason from a list, with a note when the reason is
+  Other: Obsolete, Superseded, Supplier discontinued, Created in error to
+  deactivate; Back in use, Stock came back, Deactivated in error to reactivate.
+  Coded, so the reasons can be reported on. Changes from before this record are
+  copied from the audit log with no reason.
+- `PATCH /materials/:id/status` is the only way to change status. `active` is
+  refused on the general update, not ignored, so nothing can skip the record.
+  Changing an item to the status it has does nothing, so a retry is safe.
+- An item is deactivated only when clear: no stock on hand anywhere, held for a
+  project included; no tool out on loan; no adjustment waiting for approval; no
+  draft, pending, approved or part-received order still owing some. There is no
+  override: it would reopen the way round the write-off limit. Stock issued to
+  someone does not count, as most of it is used and never comes back.
+- Inactive means nothing moves: every path that moves stock, and raising or
+  sending an order, is refused until the item is reactivated, in the same words,
+  naming who to ask. Reactivating needs only a reason, so stock that turns up can
+  always be booked. Used up and broken move no stock, so they can still be booked.
+- The item's row is the lock: `checkMaterialActive` holds it `FOR SHARE` and a
+  status change `FOR UPDATE`, so a movement finishes first and is seen by the
+  check, or waits and is refused. Every path takes its balance lock first.
+
+**Consequences:** An inactive item holds no stock unless it did before this rule,
+and `check:item-status` lists those; each is reactivated, cleared and deactivated
+again. It also confirms each item's flag agrees with its newest status change.
+Other changes still names a status change, as the audit trail. A store person
+needs someone who can reactivate to hand when a return comes in for an inactive
+item. Locations, projects, recipients and suppliers keep their status under
+Other changes; this pattern can extend to them. A later lifecycle with a phasing
+out stage, no new orders but stock still issued, would replace the active flag.
+Migration `20260101000051_material_status_changes` adds the table and only adds;
+the pre-flight query is in `docs/engineering/DATABASE_ASSURANCE.md`.
+
+**Numbering:** Recorded first as ADR-032, a number job tracking took at the same
+time, and lost from this log when the two merged. Restored here as ADR-033 on
+2026-11-07. The comment in that migration still says ADR-032: a migration already
+applied is not edited, as its checksum would change.

@@ -15,6 +15,10 @@ and the recovery considerations for the migration added in this workstream.
 - Materials reconciles with Stock and Tools (ADR-031): `npm run check:catalogue`
   prints how the pages relate, and fails if an item on either isn't on Materials
   or the tabs don't add up to the catalogue, read-only.
+- An item's status is one record (ADR-033): `npm run check:item-status` fails if
+  an item's active flag disagrees with its newest `material_status_changes` row,
+  and lists inactive items still holding stock, read-only. A status change is
+  never a ledger line, so it cannot affect a balance.
 - An issue's figures add up (ADR-026): issued = returned + used up + broken +
   still out, with still out never negative. `npm run check:issued-stock`
   (`src/modules/inventory/issued-stock-check.ts`) checks that, and the
@@ -32,6 +36,28 @@ and the recovery considerations for the migration added in this workstream.
   returns an **empty** diff against a freshly migrated database, i.e. the
   committed migrations reproduce the schema exactly. This is now enforced in CI
   (`backend-ci.yml`, `migration-drift` job).
+
+## Item status record (ADR-033)
+
+Migration `20260101000051_material_status_changes` only adds: a table, its
+indexes and enum, then a copy of past status changes from the audit log. It
+changes no existing row. Before deploying it, run this on the target database:
+
+```sql
+SELECT count(*) FROM audit_log_entries
+WHERE entity_type = 'Material' AND action = 'UPDATE'
+  AND ("after" ? 'active')
+  AND ("before"->>'active') IS DISTINCT FROM ("after"->>'active')
+  AND (actor_id IS NULL OR actor_id NOT IN (SELECT id FROM users));
+```
+
+It must return 0: `actor_id` is required, so a change made by no known user
+stops the migration. After deploying, run `check:item-status`,
+`check:catalogue` and `check:issued-stock`, and clear any inactive item the
+first one lists: reactivate it, issue or write off what it holds, and deactivate
+it again. Run `check:item-status` before the rule goes live, so the size of that
+job is known. To roll back, redeploy the previous version and leave the table:
+the old code ignores it, and `check:item-status` lists any change made meanwhile.
 
 ## DATA-03 — missing foreign keys (fixed)
 

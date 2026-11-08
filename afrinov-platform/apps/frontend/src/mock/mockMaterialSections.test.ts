@@ -9,6 +9,9 @@ const codeOf = (p: Promise<unknown>) => p.then(() => undefined, (e: { code?: str
 
 beforeEach(() => resetMockState());
 
+/** An item with nothing on it, so it can be deactivated. */
+const newItem = () => api.post<Material>('/materials', { sku: 'STATUS-1', name: 'Nothing on it', category: 'CONSUMABLES', unitOfMeasure: 'each' });
+
 describe('mock Stores and Projects materials', () => {
   it('keeps a Projects material with its project, and lists by section and project', async () => {
     const created = await api.post<Material>('/materials', { sku: 'AFRI-1325-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1325' });
@@ -169,14 +172,37 @@ describe('mock stock status for the catalogue', () => {
   type Row = { materialId: string; stockState: string; heldForProjects: string; active: boolean };
 
   it('stays Stores and active by default, and takes every item when asked', async () => {
+    const first = await newItem();
     const all = await api.get<Material[]>('/materials');
-    const first = all[0]!;
-    await api.patch(`/materials/${first.id}`, { active: false });
+    await api.patch(`/materials/${first.id}/status`, { active: false, reasonCode: 'OBSOLETE' });
     const stores = await api.get<Row[]>('/reports/stock-status');
     expect(stores.map((r) => r.materialId)).not.toContain(first.id);
     const every = await api.get<Row[]>('/reports/stock-status?section=ALL&includeInactive=true');
     expect(every).toHaveLength(all.length);
     expect(every.find((r) => r.materialId === first.id)).toMatchObject({ active: false });
+  });
+
+  it('lists a status change among the movements, with no quantity, and only once', async () => {
+    const first = await newItem();
+    await api.patch(`/materials/${first.id}/status`, { active: false, reasonCode: 'SUPERSEDED', note: 'New range' });
+    await api.patch(`/materials/${first.id}/status`, { active: false, reasonCode: 'SUPERSEDED', note: 'New range' });
+    const rows = (await api.get<Array<{ type: string; quantity: string | null; locationName: string; reasonNote?: string }>>(`/inventory-transactions?materialId=${first.id}`))
+      .filter((r) => r.type === 'ITEM_DEACTIVATED');
+    expect(rows).toEqual([expect.objectContaining({ quantity: null, locationName: 'All locations', reasonNote: 'New range' })]);
+    expect((await api.get<unknown[]>(`/inventory-transactions?materialId=${first.id}&report=issued`)).some((r) => (r as { type: string }).type === 'ITEM_DEACTIVATED')).toBe(false);
+  });
+
+  it('takes an item\'s status only on its own route, and a note for Other', async () => {
+    const [first] = await api.get<Material[]>('/materials');
+    expect(await codeOf(api.patch(`/materials/${first!.id}`, { active: false }))).toBe('VALIDATION_ERROR');
+    expect(await codeOf(api.patch(`/materials/${first!.id}/status`, { active: false, reasonCode: 'OTHER' }))).toBe('VALIDATION_ERROR');
+  });
+
+  it('refuses to deactivate an item with stock on hand, and says so first', async () => {
+    const all = await api.get<Material[]>('/materials');
+    const held = (await Promise.all(all.map(async (m) => ({ m, check: await api.get<{ blockers: Array<{ kind: string }> }>(`/materials/${m.id}/deactivation-check`) }))))
+      .find((x) => x.check.blockers.some((b) => b.kind === 'STOCK'))!;
+    expect(await codeOf(api.patch(`/materials/${held.m.id}/status`, { active: false, reasonCode: 'OBSOLETE' }))).toBe('CONFLICT');
   });
 
   it('refuses a section it does not know', async () => {

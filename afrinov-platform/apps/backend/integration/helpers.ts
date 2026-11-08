@@ -23,6 +23,17 @@ export function requireAdminPassword(): string {
   return password;
 }
 
+/**
+ * An item made inactive before it had to be clear first, holding what it holds:
+ * the API refuses this now, so it is written straight to the database, with the
+ * status record such an item has.
+ */
+export async function retireAsBefore(materialId: string): Promise<void> {
+  const admin = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
+  await prisma.material.update({ where: { id: materialId }, data: { active: false } });
+  await prisma.materialStatusChange.create({ data: { materialId, active: false, actorId: admin.id } });
+}
+
 /** Short random suffix that keeps this run's rows apart from earlier runs. */
 export function runId(): string {
   return randomBytes(4).toString('hex');

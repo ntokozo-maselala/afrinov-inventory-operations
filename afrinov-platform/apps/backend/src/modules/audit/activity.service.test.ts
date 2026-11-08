@@ -55,6 +55,10 @@ describe('describeActivity', () => {
       .toBe('Edited item DISC-125 Grinding disc');
     expect(say({ action: 'UPDATE', before: { sku: 'WSHR-16', name: 'Flat washer', requiredStock: '10', active: true }, after: { sku: 'WSHR-16', name: 'Flat washer', requiredStock: '20', active: false } }).summary)
       .toBe('Edited item WSHR-16 Flat washer: deactivated it; changed required stock');
+    expect(say({ entityType: 'Material', entityId: 'm-1', action: 'DEACTIVATE', after: { sku: 'WSHR-16', name: 'Flat washer', active: false } }).summary)
+      .toBe('Deactivated item WSHR-16 Flat washer');
+    expect(say({ entityType: 'Material', entityId: 'm-1', action: 'ACTIVATE', after: { sku: 'WSHR-16', name: 'Flat washer', active: true } }).summary)
+      .toBe('Reactivated item WSHR-16 Flat washer');
   });
 
   it('describes locations, racks, projects, recipients and suppliers', () => {

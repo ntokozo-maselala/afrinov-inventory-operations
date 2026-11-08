@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 894, frontend 978)
+npm test               # both workspaces (backend 1142, frontend 1372)
 npm run build          # both workspaces
 ```
 
@@ -44,6 +44,9 @@ items hold part of a unit, run `npm run check:units --workspace=@afrinov/backend
 (read-only; works before and after the units migration).
 To see how Materials adds up against Stock and Tools, run
 `npm run check:catalogue --workspace=@afrinov/backend` (read-only).
+To confirm each item's active flag agrees with its status record, and list
+inactive items still holding stock, run
+`npm run check:item-status --workspace=@afrinov/backend` (read-only).
 
 Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`
@@ -162,6 +165,13 @@ Use these forms; the older spellings still work but are deprecated or removed.
   (`src/modules/inventory/catalogue.service.ts`) are the one definition, read by
   `GET /materials/summary` and `check:catalogue` (ADR-031). The Tools tab is a
   view: `sectionOf` still puts tools in Stores for orders and stock rules.
+- **Inactive means nothing moves.** An item's status changes only on
+  `PATCH /materials/:id/status`, with a reason, and is a row of its own on
+  Movements with no quantity, never a ledger line. It is deactivated only when
+  clear, with no override: no stock, no tool on loan, no adjustment waiting, no
+  order still owing. A new path that moves stock calls `checkMaterialActive`
+  after its balance lock: it holds the item's row, so a deactivation waits for
+  the movement or the movement is refused (ADR-033).
 - **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
   stock, Found only adds it, Other goes either way; Found and Other need a note
   (`checkRequestedAdjustment`). The API still takes the signed quantity.

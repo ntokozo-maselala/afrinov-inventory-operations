@@ -22,7 +22,8 @@ import { loanDatesFor, loanTerms } from './tool-loan-dates.js';
 import { currentDueOn, dayOf, daysBetween, dueOnAt, dueOnBefore, type LoanDates } from './tool-loan-terms.js';
 import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './consumable-outcomes.js';
 import { checkWriteOff, writeOffRule } from './write-off-limit.js';
-import { checkWholeUnits } from '../../shared/units.js';
+import { checkWholeUnits, holdUnits } from '../../shared/units.js';
+import { STATUS_CHANGE_REFERENCE, inactiveMessage } from './material-status.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -185,9 +186,12 @@ export interface GoodsReceiptPostInput {
 }
 
 export async function checkMaterialActive(materialId: string, tx: Prisma.TransactionClient) {
+  // Held for the rest of the transaction, so a deactivation waits for this
+  // movement or this movement waits for it and is refused (ADR-033).
+  await holdUnits([materialId], tx);
   const m = await tx.material.findUnique({ where: { id: materialId } });
   if (!m) throw Errors.notFound('Material');
-  if (!m.active) throw Errors.validation('Material is inactive');
+  if (!m.active) throw Errors.validation(inactiveMessage(m.sku));
   return m;
 }
 
@@ -268,6 +272,8 @@ async function bookReturn(tx: Prisma.TransactionClient, input: {
   // Returns and outcomes against this issue share what is still out, so both take this lock.
   const back = { materialId: issue.materialId, locationId, heldForProject: issue.heldForProject };
   await lockInventoryBalances([{ ...back, locationId: issue.locationId }, back], tx);
+  // Stock coming back is a movement; used up and broken move none, so they can still be booked.
+  if (gtZero(input.qty)) await checkMaterialActive(issue.materialId, tx);
   // A reversal may have committed while this waited for the lock.
   if (await tx.inventoryTransaction.findFirst({ where: { reversesId: issue.id }, select: { id: true } })) {
     throw Errors.invalidState(`This issue of ${issue.material.sku} has been reversed, so there is nothing to return.`);
@@ -491,8 +497,17 @@ export const USED_UP = 'USED_UP' as const;
 export const BROKEN = 'BROKEN' as const;
 export const OUTCOME_WITHDRAWN = 'OUTCOME_WITHDRAWN' as const;
 
+/**
+ * An item deactivated or reactivated, as a row on Movements (ADR-033): no
+ * stock moves and it belongs to no one location, so its quantity is null and
+ * its location says so. Never a ledger line, so never in a stock total.
+ */
+export const ITEM_DEACTIVATED = 'ITEM_DEACTIVATED' as const;
+export const ITEM_REACTIVATED = 'ITEM_REACTIVATED' as const;
+export const ALL_LOCATIONS = 'All locations';
+
 /** The type of a Movements row: a ledger line, or a record that moved no stock. */
-export type HistoryRowType = InventoryTransactionType | typeof DUE_DATE_CHANGE | typeof USED_UP | typeof BROKEN | typeof OUTCOME_WITHDRAWN;
+export type HistoryRowType = InventoryTransactionType | typeof DUE_DATE_CHANGE | typeof USED_UP | typeof BROKEN | typeof OUTCOME_WITHDRAWN | typeof ITEM_DEACTIVATED | typeof ITEM_REACTIVATED;
 
 /**
  * Whether a history filter also lists those marks: all movements and the
@@ -516,6 +531,39 @@ export function outcomeEventWhere(filter: Omit<HistoryFilter, 'before' | 'limit'
   if (createdAt) where.createdAt = createdAt;
   if (filter.actorId) where.actorId = filter.actorId;
   return where;
+}
+
+/**
+ * Whether a history filter also lists item status changes: all movements,
+ * unless it asks for one movement type or for the lines of issue slips. Not
+ * for one location or person: a status change has neither.
+ */
+export function listsStatusChanges(filter: Omit<HistoryFilter, 'before' | 'limit'>): boolean {
+  return !filter.type && !filter.issueIds && filter.report === undefined
+    && !filter.locationId && !filter.locationIds && !filter.recipientId;
+}
+
+/** The status changes a history filter selects: by when, who, the item, its project or the search. */
+export function statusChangeWhere(filter: Omit<HistoryFilter, 'before' | 'limit'>): Prisma.MaterialStatusChangeWhereInput {
+  const where: Prisma.MaterialStatusChangeWhereInput = {};
+  if (filter.materialId) where.materialId = filter.materialId;
+  if (filter.actorId) where.actorId = filter.actorId;
+  const createdAt = dayRange(filter.from, filter.to);
+  if (createdAt) where.createdAt = createdAt;
+  const item: Prisma.MaterialWhereInput = {};
+  if (filter.projectNumber) item.projectNumber = filter.projectNumber;
+  const q = filter.q?.trim();
+  if (q) {
+    const contains = { contains: q, mode: 'insensitive' as const };
+    item.OR = [{ sku: contains }, { name: contains }, { projectNumber: contains }];
+  }
+  if (Object.keys(item).length > 0) where.material = item;
+  return where;
+}
+
+function statusChangesOlderThan(cursor: string): Prisma.MaterialStatusChangeWhereInput {
+  const { at, id } = parseCursor(cursor);
+  return { OR: [{ createdAt: { lt: at } }, { createdAt: at, id: { lt: id } }] };
 }
 
 function outcomesOlderThan(cursor: string): Prisma.ConsumableOutcomeWhereInput {
@@ -660,6 +708,51 @@ function outcomeEventRow(
   };
 }
 
+/** An item's status change as a Movements row: its item and who changed it, with why; no quantity, no one location. */
+function statusChangeRow(
+  c: Prisma.MaterialStatusChangeGetPayload<{ include: { actor: { select: { name: true } }; material: true } }>,
+) {
+  return {
+    id: c.id,
+    cursor: pageCursor(c.createdAt, c.id),
+    postedAt: c.createdAt.toISOString(),
+    type: (c.active ? ITEM_REACTIVATED : ITEM_DEACTIVATED) as HistoryRowType,
+    materialId: c.materialId,
+    materialSku: c.material.sku,
+    materialName: c.material.name,
+    unitOfMeasure: c.material.unitOfMeasure,
+    issueId: null,
+    locationId: null as string | null,
+    locationName: ALL_LOCATIONS,
+    quantity: null as string | null,
+    actorId: c.actorId,
+    actorName: c.actor.name,
+    recipientId: null,
+    recipientName: null,
+    recipientType: null,
+    reasonCode: c.reasonCode,
+    // A change from before the reason was asked for has none to show.
+    reasonNote: c.note ?? (c.reasonCode ? null : 'Reason not recorded'),
+    projectNumber: c.material.projectNumber,
+    referenceType: STATUS_CHANGE_REFERENCE,
+    referenceId: c.id,
+    reversesId: null,
+    reversedById: null,
+    returnedQuantity: null,
+    trackUse: c.material.trackUse,
+    usedUpQuantity: null as string | null,
+    brokenQuantity: null as string | null,
+    bookedMarksLive: null as boolean | null,
+    otherLocationName: null,
+    returnOf: null as { id: string; postedAt: string; issueId: string | null; locationName: string } | null,
+    receiptNumber: null,
+    supplierName: null,
+    deliveryRef: null,
+    fromPurchaseOrder: false,
+    ...NO_LOAN_FIELDS,
+  };
+}
+
 /**
  * Two lists already newest first, as one, newest first, cut to `take`. Each
  * list keeps its own order (the database's), so the cursor of the last row
@@ -690,7 +783,8 @@ export const InventoryService = {
     const take = Math.min(filter.limit ?? 200, maxRows);
     const changeWhere = listsDueDateChanges(filter) ? dueDateChangeWhere(filter) : null;
     const eventWhere = listsOutcomeEvents(filter) ? outcomeEventWhere(filter) : null;
-    const [fetched, changes, events] = await Promise.all([prisma.inventoryTransaction.findMany({
+    const statusWhere = listsStatusChanges(filter) ? statusChangeWhere(filter) : null;
+    const [fetched, changes, events, statusChanges] = await Promise.all([prisma.inventoryTransaction.findMany({
       where,
       include: {
         material: true,
@@ -717,16 +811,21 @@ export const InventoryService = {
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
+    }), statusWhere === null ? [] : prisma.materialStatusChange.findMany({
+      where: filter.before ? { AND: [statusWhere, statusChangesOlderThan(filter.before)] } : statusWhere,
+      include: { actor: { select: { name: true } }, material: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take,
     })]);
-    // One page, newest first, of movements, due date changes and marks of their own together.
-    const others = mergeNewestFirst(changes, (c) => c.createdAt, events, (e) => e.createdAt, (x) => x.id, take);
-    const page = mergeNewestFirst(
-      fetched, (t) => t.postedAt,
-      others, (o) => ('a' in o ? o.a.createdAt : o.b.createdAt),
-      (x) => ('id' in x ? x.id : 'a' in x ? x.a.id : x.b.id), take,
-    );
+    // One page, newest first, of movements and the records that moved no stock.
+    const others = [
+      ...changes.map((c) => ({ id: c.id, at: c.createdAt, change: c })),
+      ...events.map((e) => ({ id: e.id, at: e.createdAt, event: e })),
+      ...statusChanges.map((s) => ({ id: s.id, at: s.createdAt, status: s })),
+    ].sort((x, y) => y.at.getTime() - x.at.getTime() || (y.id > x.id ? 1 : -1)).slice(0, take);
+    const page = mergeNewestFirst(fetched, (t) => t.postedAt, others, (o) => o.at, (x) => x.id, take);
     const rows = page.flatMap((p) => ('a' in p ? [p.a] : []));
-    const keptChanges = page.flatMap((p) => ('b' in p && 'a' in p.b ? [p.b.a] : []));
+    const keptChanges = page.flatMap((p) => ('b' in p && 'change' in p.b ? [p.b.change] : []));
     // A tool loan's due dates: agreed on its check-out, as they stood at a
     // check-in, and before and after each change.
     const loanIds = [
@@ -837,7 +936,11 @@ export const InventoryService = {
       })(),
       ...loanFields(t, loanDates),
     }]));
-    return page.map((p) => ('a' in p ? movements.get(p.a.id)! : 'a' in p.b ? dueDateChangeRow(p.b.a, loanDates) : outcomeEventRow(p.b.b)));
+    return page.map((p) => {
+      if ('a' in p) return movements.get(p.a.id)!;
+      if ('change' in p.b) return dueDateChangeRow(p.b.change, loanDates);
+      return 'event' in p.b ? outcomeEventRow(p.b.event) : statusChangeRow(p.b.status);
+    });
   },
 
   /**
@@ -887,38 +990,43 @@ export const InventoryService = {
    */
   async historySummary(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<{ total: number; byType: Record<string, number> }> {
     const eventWhere = listsOutcomeEvents(filter) ? outcomeEventWhere(filter) : null;
-    const [groups, changes, marks, withdrawals] = await Promise.all([
+    const [groups, changes, marks, withdrawals, statuses] = await Promise.all([
       prisma.inventoryTransaction.groupBy({ by: ['type'], where: historyWhere(filter), _count: { _all: true } }),
       listsDueDateChanges(filter) ? prisma.toolLoanExtension.count({ where: dueDateChangeWhere(filter) }) : 0,
       eventWhere ? prisma.consumableOutcome.groupBy({ by: ['outcome'], where: { AND: [eventWhere, { withdrawsId: null }] }, _count: { _all: true } }) : [],
       eventWhere ? prisma.consumableOutcome.count({ where: { AND: [eventWhere, { withdrawsId: { not: null } }] } }) : 0,
+      listsStatusChanges(filter) ? prisma.materialStatusChange.groupBy({ by: ['active'], where: statusChangeWhere(filter), _count: { _all: true } }) : [],
     ]);
     const byType: Record<string, number> = Object.fromEntries(groups.map((g) => [g.type, g._count._all]));
     if (changes > 0) byType[DUE_DATE_CHANGE] = changes;
     for (const m of marks) byType[m.outcome] = m._count._all;
     if (withdrawals > 0) byType[OUTCOME_WITHDRAWN] = withdrawals;
+    for (const s of statuses) byType[s.active ? ITEM_REACTIVATED : ITEM_DEACTIVATED] = s._count._all;
     const events = marks.reduce((n, m) => n + m._count._all, 0) + withdrawals;
-    return { total: groups.reduce((n, g) => n + g._count._all, 0) + changes + events, byType };
+    const statusRows = statuses.reduce((n, s) => n + s._count._all, 0);
+    return { total: groups.reduce((n, g) => n + g._count._all, 0) + changes + events + statusRows, byType };
   },
 
   /** How many rows the filter selects, due date changes and marks of their own included (the export checks this before building). */
   async historyCount(filter: Omit<HistoryFilter, 'before' | 'limit'>): Promise<number> {
-    const [movements, changes, events] = await Promise.all([
+    const [movements, changes, events, statuses] = await Promise.all([
       prisma.inventoryTransaction.count({ where: historyWhere(filter) }),
       listsDueDateChanges(filter) ? prisma.toolLoanExtension.count({ where: dueDateChangeWhere(filter) }) : 0,
       listsOutcomeEvents(filter) ? prisma.consumableOutcome.count({ where: outcomeEventWhere(filter) }) : 0,
+      listsStatusChanges(filter) ? prisma.materialStatusChange.count({ where: statusChangeWhere(filter) }) : 0,
     ]);
-    return movements + changes + events;
+    return movements + changes + events + statuses;
   },
 
-  /** Everyone who has posted a movement, changed a due date or marked used up or broken, for the "by" filter. Names only. */
+  /** Everyone who has posted a movement, changed a due date, marked used up or broken or changed an item's status, for the "by" filter. Names only. */
   async historyActors(): Promise<Array<{ id: string; name: string }>> {
-    const [posted, changed, marked] = await Promise.all([
+    const [posted, changed, marked, statused] = await Promise.all([
       prisma.inventoryTransaction.findMany({ distinct: ['actorId'], select: { actorId: true } }),
       prisma.toolLoanExtension.findMany({ distinct: ['actorId'], select: { actorId: true } }),
       prisma.consumableOutcome.findMany({ distinct: ['actorId'], select: { actorId: true } }),
+      prisma.materialStatusChange.findMany({ distinct: ['actorId'], select: { actorId: true } }),
     ]);
-    const ids = [...new Set([...posted, ...changed, ...marked].map((r) => r.actorId))];
+    const ids = [...new Set([...posted, ...changed, ...marked, ...statused].map((r) => r.actorId))];
     const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
     return users.sort((a, b) => a.name.localeCompare(b.name));
   },
@@ -1045,6 +1153,7 @@ export const InventoryService = {
 
         // A reversal must not take any balance below zero.
         await lockInventoryBalances(legs, tx);
+        await checkMaterialActive(original.materialId, tx);
         // Checked under the lock that returns and used up or broken marks take,
         // so one booked at the same moment cannot slip past.
         if (original.type === InventoryTransactionType.ISSUE && gtZero(await returnedAgainst(original.id, tx))) {
@@ -1512,6 +1621,7 @@ export const InventoryService = {
       // be received again. Checked before anything is written (it is also
       // checked when the receipt is recorded).
       for (const line of gr.lines) {
+        await checkMaterialActive(line.materialId, tx);
         if (gr.purchaseOrderId && !line.purchaseOrderLineId) {
           throw Errors.validation('Every line of a receipt against a purchase order must name the order line it is for.');
         }

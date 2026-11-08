@@ -3,7 +3,8 @@
 // stock (each return linked to the issue it came back from). Paged from
 // GET /inventory-transactions; a row opens its detail to reverse or return.
 // All movements and tool loans also list each change of a tool's due date
-// (DUE_DATE_CHANGE): it moves no stock, so it has no quantity.
+// (DUE_DATE_CHANGE), and all movements each item deactivated or reactivated
+// (ITEM_DEACTIVATED, ITEM_REACTIVATED): they move no stock, so have no quantity.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
@@ -22,6 +23,7 @@ import { formatDay, lateBy, movedWay } from '../../lib/toolLoans';
 import { MovementReason } from '../MovementReason';
 import type { MovementRow, WriteoffsByResponsible } from '../../api/types';
 import { movementProject } from '../../lib/heldFor';
+import { STATUS_TYPES } from '../../lib/itemStatus';
 
 export type LedgerReportKind = 'all' | 'transfers' | 'writeoffs' | 'loans' | 'returned';
 
@@ -241,7 +243,7 @@ const COLUMNS: Record<LedgerReportKind, (open: (m: MovementRow) => void) => Col[
     // A mark of its own or a withdrawal names the issue it is against.
     { key: 'ref', header: 'Reference', render: (m) => m.referenceType === 'ConsumableOutcome' && m.returnOf
       ? <span className="text-meta">Issue of {formatDateTime(m.returnOf.postedAt)}</span>
-      : m.referenceType ? <span className="text-meta">{m.referenceType}</span> : none },
+      : m.referenceType && !STATUS_TYPES.has(m.type) ? <span className="text-meta">{m.referenceType}</span> : none },
     by,
   ],
   transfers: (open) => [

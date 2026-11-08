@@ -1,10 +1,11 @@
 // The Movements list as an Excel file: one row per movement, newest first,
 // for the date range and filters the user chose. Quantities stay numbers so
 // they can be summed per item in Excel; a tool loan due date change, and a
-// used up or broken mark or its withdrawal, move no stock, so their quantity
-// is left blank.
+// used up or broken mark or its withdrawal, and an item deactivated or
+// reactivated, move no stock, so their quantity is left blank.
 import ExcelJS from 'exceljs';
 import { takesResponsible, type InventoryService } from './inventory.service.js';
+import { STATUS_CHANGE_REFERENCE } from './material-status.js';
 
 type MovementRow = Awaited<ReturnType<typeof InventoryService.queryHistory>>[number];
 
@@ -24,6 +25,8 @@ const TYPE_LABEL: Record<string, string> = {
   USED_UP: 'Used up',
   BROKEN: 'Broken',
   OUTCOME_WITHDRAWN: 'Withdrawn',
+  ITEM_DEACTIVATED: 'Item deactivated',
+  ITEM_REACTIVATED: 'Item reactivated',
 };
 
 const n = (q: string | null | undefined) => Number(q ?? 0);
@@ -92,6 +95,7 @@ export function movementsFilename(from: string | undefined, to: string | undefin
 function reference(m: MovementRow): string {
   if (m.receiptNumber) return [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ');
   if (m.referenceType === 'StockCount') return 'Stock count';
+  if (m.referenceType === STATUS_CHANGE_REFERENCE) return '';
   if (m.returnOf) return `${m.type === 'RETURN' ? 'Return' : 'Mark'} on the issue of ${m.returnOf.postedAt.slice(0, 10)} from ${m.returnOf.locationName}`;
   return m.referenceType ?? '';
 }

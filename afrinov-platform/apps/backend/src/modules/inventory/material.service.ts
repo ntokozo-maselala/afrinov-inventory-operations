@@ -6,6 +6,8 @@ import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { categoryWhere, checkMaterialChange, projectForNewMaterial, sectionOf, type MaterialSection } from './material-section.js';
 import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js';
+import { onLoanByMaterial } from '../../shared/inventory/tool-loans.js';
+import { checkStatusReason, type MaterialStatusReasonCode } from './material-status.js';
 
 export interface CreateMaterialInput {
   sku: string;
@@ -22,6 +24,59 @@ export interface CreateMaterialInput {
   trackUse?: boolean;
 }
 
+/** Something to deal with before an item can be deactivated (ADR-033). */
+export interface DeactivationBlocker {
+  kind: 'STOCK' | 'LOAN' | 'APPROVAL' | 'ORDER';
+  text: string;
+  /** ORDER: which order, to link to it. */
+  orderId?: string;
+  projectNumber?: string | null;
+}
+
+/** An order that may yet bring stock in. */
+const OPEN_ORDER_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'] as const;
+
+/**
+ * What stands between an item and being deactivated: stock on hand anywhere,
+ * held for a project too; tools out on loan; adjustments waiting for approval;
+ * and orders still owing some. Stock issued to someone doesn't count: most of
+ * it is used, and what comes back is refused until the item is reactivated.
+ */
+async function blockersOf(m: { id: string; unitOfMeasure: string }, db: Prisma.TransactionClient | typeof prisma): Promise<DeactivationBlocker[]> {
+  const [balances, onLoan, waiting, lines] = await Promise.all([
+    db.inventoryBalance.findMany({
+      where: { materialId: m.id, quantity: { not: 0 } },
+      select: { quantity: true, heldForProject: true, location: { select: { name: true } } },
+    }),
+    onLoanByMaterial(db, [m.id]),
+    db.adjustmentRequest.count({ where: { materialId: m.id, status: 'PENDING' } }),
+    db.purchaseOrderLine.findMany({
+      where: { materialId: m.id, purchaseOrder: { status: { in: [...OPEN_ORDER_STATUSES] } } },
+      select: { orderedQty: true, receivedQty: true, purchaseOrder: { select: { id: true, number: true, projectNumber: true } } },
+    }),
+  ]);
+  const blockers: DeactivationBlocker[] = balances.map((b) => ({
+    kind: 'STOCK',
+    text: `${b.quantity.toString()} ${m.unitOfMeasure} on hand at ${b.location.name}${b.heldForProject ? `, held for project ${b.heldForProject}` : ''}`,
+  }));
+  const out = onLoan.get(m.id);
+  if (out) blockers.push({ kind: 'LOAN', text: `${out.toString()} ${m.unitOfMeasure} out on loan` });
+  if (waiting > 0) blockers.push({ kind: 'APPROVAL', text: `${waiting} adjustment${waiting === 1 ? '' : 's'} waiting for approval` });
+  for (const l of lines) {
+    const owed = l.orderedQty.minus(l.receivedQty);
+    if (!owed.gt(0)) continue;
+    blockers.push({ kind: 'ORDER', text: `Order ${l.purchaseOrder.number}: ${owed.toString()} ${m.unitOfMeasure} still owed`, orderId: l.purchaseOrder.id, projectNumber: l.purchaseOrder.projectNumber });
+  }
+  return blockers;
+}
+
+export interface SetMaterialStatusInput {
+  id: string;
+  active: boolean;
+  reasonCode: MaterialStatusReasonCode;
+  note?: string;
+}
+
 export interface UpdateMaterialInput {
   id: string;
   name?: string;
@@ -31,7 +86,6 @@ export interface UpdateMaterialInput {
   requiredStock?: number;
   /** null clears it. */
   unitCost?: number | null;
-  active?: boolean;
   serialNumber?: string | null;
   /** Projects material only: assigns its project. */
   projectNumber?: string;
@@ -172,7 +226,6 @@ export const MaterialService = {
       data.requiredStock = input.requiredStock;
     }
     if (input.unitCost !== undefined) data.unitCost = input.unitCost;
-    if (input.active !== undefined) data.active = input.active;
     if (input.trackUse !== undefined) {
       checkTrackUse(input.trackUse, before.category);
       data.trackUse = input.trackUse;
@@ -194,6 +247,56 @@ export const MaterialService = {
           entityId: input.id,
           before: before as unknown as Prisma.InputJsonValue,
           after: material as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return material;
+    });
+    return shape(after);
+  },
+
+  /** What must be dealt with before the item can be deactivated, for the screen to show first. */
+  async deactivationCheck(id: string): Promise<{ blockers: DeactivationBlocker[] }> {
+    const m = await prisma.material.findUnique({ where: { id }, select: { id: true, unitOfMeasure: true } });
+    if (!m) throw Errors.notFound('Material');
+    return { blockers: await blockersOf(m, prisma) };
+  },
+
+  /**
+   * The one way an item changes status (ADR-033). Its row is held FOR UPDATE
+   * first; every movement holds it FOR SHARE (checkMaterialActive), so a
+   * movement finishes before this looks, or waits and is refused. The status
+   * record and the audit entry commit with the change. A change to the status
+   * it already has does nothing, so a retry adds no second row. An item is
+   * deactivated only when it is clear, and with no override: a write-off over
+   * the limit takes someone's approval, so leaving stock on an inactive item
+   * must not be a way round it.
+   */
+  async setStatus(input: SetMaterialStatusInput, actorId: string) {
+    const note = input.note?.trim() || null;
+    checkStatusReason(input.active, input.reasonCode, note);
+    const after = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT 1 FROM materials WHERE id = ${input.id} FOR UPDATE`;
+      const before = await tx.material.findUnique({ where: { id: input.id }, include: withProject });
+      if (!before) throw Errors.notFound('Material');
+      if (before.active === input.active) return before;
+      if (!input.active) {
+        const blockers = await blockersOf(before, tx);
+        if (blockers.length > 0) {
+          throw Errors.conflict(`${before.sku} is not clear yet: ${blockers.map((b) => b.text).join('; ')}`, { blockers });
+        }
+      }
+      const material = await tx.material.update({ where: { id: input.id }, data: { active: input.active }, include: withProject });
+      await tx.materialStatusChange.create({
+        data: { materialId: input.id, active: input.active, reasonCode: input.reasonCode, note, actorId },
+      });
+      await tx.auditLogEntry.create({
+        data: {
+          actorId,
+          action: input.active ? 'ACTIVATE' : 'DEACTIVATE',
+          entityType: 'Material',
+          entityId: input.id,
+          before: { sku: before.sku, name: before.name, active: before.active },
+          after: { sku: before.sku, name: before.name, active: input.active, reasonCode: input.reasonCode, note },
         },
       });
       return material;

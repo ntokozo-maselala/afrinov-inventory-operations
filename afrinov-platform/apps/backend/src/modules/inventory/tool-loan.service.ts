@@ -454,6 +454,7 @@ export const ToolLoanService = {
           throw Errors.validation(`Cannot check in ${qty.toString()} × ${loan.material.sku}: only ${out.toString()} still checked out${held}.`, { loanId: id, out: out.toString() });
         }
         outOf.set(id, out);
+        await checkMaterialActive(loan.materialId, tx);
         await checkLocationActive(loan.locationId, tx);
       }
       // Whole units, but for one line of a loan that carries the part-unit still

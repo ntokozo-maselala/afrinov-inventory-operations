@@ -10,6 +10,7 @@
 //   - filter propagation
 //   - export generation
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import ExcelJS from 'exceljs';
 
 // Each test sets `__stubState` to a fresh State; the hoisted mock below
 // reads it and dispatches the appropriate fake response.
@@ -34,7 +35,7 @@ vi.mock('../../shared/db.js', () => ({
 
 // Import the SUT after the mock is in place. The import is module-level so
 // it picks up the vi.mock at hoist time.
-import { ReportService } from './report.service.js';
+import { REPORT_MOVEMENT_LIMIT, ReportService } from './report.service.js';
 import { buildInventoryXlsx, buildInventoryPdf } from './report-export.js';
 
 type Category = 'FASTENERS_SLUGS_INSULATION' | 'TOOLING_PPE_ELECTRICAL' | 'PROJECT_MATERIAL' | 'CONSUMABLES' | 'TOOLS';
@@ -50,10 +51,30 @@ interface TxWhere {
   materialId?: { in: string[] };
   postedAt?: { gte?: Date; lt?: Date };
   type?: Tx['type'];
+  /** The movement summary: left out are reversals, reversed movements, and the other direction. */
+  reversesId?: null;
+  reversedBy?: { is: null };
+  quantity?: { gte?: number; lt?: number };
 }
 interface POLWhere {
   materialId?: { in: string[] };
   purchaseOrder?: { supplierId?: { in: string[] } };
+}
+
+/** The transactions a where selects, by item, date and type. */
+function selectedTx(s: State, where?: TxWhere): Tx[] {
+  let list = s.transactions.slice();
+  if (where?.materialId?.in) {
+    const ids = where.materialId.in;
+    list = list.filter((t) => ids.includes(t.materialId));
+  }
+  const postedAt = where?.postedAt;
+  if (postedAt) {
+    if (postedAt.gte) list = list.filter((t) => t.postedAt >= postedAt.gte!);
+    if (postedAt.lt) list = list.filter((t) => t.postedAt < postedAt.lt!);
+  }
+  if (where?.type) list = list.filter((t) => t.type === where.type);
+  return list;
 }
 
 interface FakeDecimal { toNumber(): number; toString(): string }
@@ -116,7 +137,22 @@ function makePrismaStub(s: State) {
       },
     },
     inventoryTransaction: {
-      groupBy: async ({ where }: { where: TxWhere }) => {
+      count: async ({ where }: { where?: TxWhere }) => selectedTx(s, where).length,
+      groupBy: async ({ by, where }: { by: string[]; where: TxWhere }) => {
+        if (by.includes('type')) {
+          const rows = selectedTx(s, where).filter((t) => {
+            if (where.reversesId === null && t.reversesId) return false;
+            if (where.reversedBy && s.transactions.some((r) => r.reversesId === t.id)) return false;
+            const q = t.quantity.toNumber();
+            if (where.quantity?.gte !== undefined && q < where.quantity.gte) return false;
+            return where.quantity?.lt === undefined || q < where.quantity.lt;
+          });
+          const types = [...new Set(rows.map((t) => t.type))];
+          return types.map((type) => {
+            const of = rows.filter((t) => t.type === type);
+            return { type, _count: { _all: of.length }, _sum: { quantity: dec(of.reduce((n, t) => n + t.quantity.toNumber(), 0)) } };
+          });
+        }
         const set = new Map<string, Date>();
         const ids = where.materialId?.in ?? [];
         for (const t of s.transactions) {
@@ -130,17 +166,7 @@ function makePrismaStub(s: State) {
         }));
       },
       findMany: async ({ where, take }: { where?: TxWhere; take?: number }) => {
-        let list = s.transactions.slice();
-        if (where?.materialId?.in) {
-          const ids = where.materialId.in;
-          list = list.filter((t) => ids.includes(t.materialId));
-        }
-        const postedAt = where?.postedAt;
-        if (postedAt) {
-          if (postedAt.gte) list = list.filter((t) => t.postedAt >= postedAt.gte!);
-          if (postedAt.lt) list = list.filter((t) => t.postedAt < postedAt.lt!);
-        }
-        if (where?.type) list = list.filter((t) => t.type === where.type);
+        let list = selectedTx(s, where);
         list.sort((a, b) => b.postedAt.getTime() - a.postedAt.getTime());
         if (take) list = list.slice(0, take);
         return list.map((t) => {
@@ -722,6 +748,92 @@ describe('report export builders', () => {
     const r = await ReportService.inventory({ ...baseQuery, page: 1, pageSize: 5 });
     expect(r.inventory).toHaveLength(5);
     expect(r.inventoryTotal).toBe(20);
+  });
+
+  it('keeps the movements of an item deactivated since, whatever the item status filter', async () => {
+    const retired = { ...makeMat('m-old', 'A-2', 'Retired', 0, 1), active: false };
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1), retired],
+      balances: [makeBal('m-1', 'l-1', 5)],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [],
+      purchaseOrders: [],
+      purchaseOrderLines: [],
+      transactions: [
+        { id: 't-1', postedAt: new Date('2026-09-01'), type: 'RECEIPT', materialId: 'm-old', locationId: 'l-1', quantity: dec(5), actorId: 'u-1' },
+      ],
+      users: [],
+    };
+    const r = await ReportService.inventory({ ...baseQuery, itemStatus: 'ACTIVE' });
+    expect(r.inventory.map((l) => l.materialId)).toEqual(['m-1']);
+    expect(r.movements.map((m) => m.id)).toEqual(['t-1']);
+    expect(r.kpis.movementCount).toBe(1);
+    expect(r.movementSummary.receipts).toEqual({ count: 1, quantity: 5 });
+  });
+
+  it('lists no movements when the filters match no item', async () => {
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1)],
+      balances: [makeBal('m-1', 'l-1', 5)],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [],
+      purchaseOrders: [],
+      purchaseOrderLines: [],
+      transactions: [
+        { id: 't-1', postedAt: new Date('2026-09-01'), type: 'RECEIPT', materialId: 'm-1', locationId: 'l-1', quantity: dec(5), actorId: 'u-1' },
+      ],
+      users: [],
+    };
+    const r = await ReportService.inventory({ ...baseQuery, search: 'no such item' });
+    expect(r.movements).toEqual([]);
+    expect(r.kpis.movementCount).toBe(0);
+    expect(r.movementSummary.total).toEqual({ count: 0, quantity: 0 });
+  });
+
+  it('counts every movement past the ones it lists, and says the list is cut short', async () => {
+    const transactions = Array.from({ length: REPORT_MOVEMENT_LIMIT + 5 }, (_, i): Tx => (
+      { id: `t-${i}`, postedAt: new Date(Date.UTC(2026, 8, 1, 0, 0, i)), type: 'RECEIPT', materialId: 'm-1', locationId: 'l-1', quantity: dec(2), actorId: 'u-1' }
+    ));
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1)],
+      balances: [makeBal('m-1', 'l-1', 5)],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [],
+      purchaseOrders: [],
+      purchaseOrderLines: [],
+      transactions,
+      users: [],
+    };
+    const r = await ReportService.inventory(baseQuery);
+    expect(r.movements).toHaveLength(REPORT_MOVEMENT_LIMIT);
+    expect(r.kpis.movementCount).toBe(REPORT_MOVEMENT_LIMIT + 5);
+    expect(r.movementSummary.receipts).toEqual({ count: REPORT_MOVEMENT_LIMIT + 5, quantity: (REPORT_MOVEMENT_LIMIT + 5) * 2 });
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildInventoryXlsx(r) as unknown as ArrayBuffer);
+    const cells = wb.worksheets[0]!.getSheetValues().flat().map(String);
+    expect(cells.some((c) => c.includes(`Latest ${REPORT_MOVEMENT_LIMIT} of ${REPORT_MOVEMENT_LIMIT + 5}.`))).toBe(true);
+  });
+
+  it('adds up a transfer in both directions, and adjustments either way, without netting them off', async () => {
+    __stubState.current = {
+      materials: [makeMat('m-1', 'A-1', 'A', 0, 1)],
+      balances: [makeBal('m-1', 'l-1', 5)],
+      locations: [makeLoc('l-1', 'Main')],
+      suppliers: [],
+      purchaseOrders: [],
+      purchaseOrderLines: [],
+      transactions: [
+        { id: 't-1', postedAt: new Date('2026-09-01'), type: 'TRANSFER_OUT', materialId: 'm-1', locationId: 'l-1', quantity: dec(-3), actorId: 'u-1' },
+        { id: 't-2', postedAt: new Date('2026-09-01'), type: 'TRANSFER_IN', materialId: 'm-1', locationId: 'l-1', quantity: dec(3), actorId: 'u-1' },
+        { id: 't-3', postedAt: new Date('2026-09-01'), type: 'ADJUSTMENT', materialId: 'm-1', locationId: 'l-1', quantity: dec(-2), actorId: 'u-1' },
+        { id: 't-4', postedAt: new Date('2026-09-01'), type: 'ADJUSTMENT', materialId: 'm-1', locationId: 'l-1', quantity: dec(1), actorId: 'u-1' },
+      ],
+      users: [],
+    };
+    const r = await ReportService.inventory(baseQuery);
+    expect(r.movementSummary.transfers).toEqual({ count: 2, quantity: 6 });
+    expect(r.movementSummary.adjustments).toEqual({ count: 2, quantity: 3 });
   });
 
   it('includes movementType filter in movement queries', async () => {

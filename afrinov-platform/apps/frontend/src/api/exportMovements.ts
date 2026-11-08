@@ -8,6 +8,7 @@ import { movementProject } from '../lib/heldFor';
 import { downloadPdf, type PdfAbout, type PdfColumn } from '../lib/pdf';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { movementReason, figureColumns } from '../lib/movementReason';
+import { STATUS_TYPES } from '../lib/itemStatus';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const LIMIT = 10_000;
@@ -18,6 +19,8 @@ const TYPE_LABEL: Record<string, string> = {
   USED_UP: 'Used up',
   BROKEN: 'Broken',
   OUTCOME_WITHDRAWN: 'Withdrawn',
+  ITEM_DEACTIVATED: 'Item deactivated',
+  ITEM_REACTIVATED: 'Item reactivated',
 };
 
 /** When a tool loan is due, as its row tells it, in the backend download's words. */
@@ -87,7 +90,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
       m.reversesId ? `${type} (reversal)` : m.reversedById ? `${type} (reversed)` : type,
       m.materialSku, m.materialName, m.locationName, m.quantity === null ? null : Number(m.quantity), m.unitOfMeasure ?? '',
       m.recipientName ?? notKnown(m), movementProject(m) ?? '', dueText(m), movementReason(m), noteText(m),
-      m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : m.referenceType ?? '',
+      m.receiptNumber ? [m.receiptNumber, m.supplierName, m.deliveryRef].filter(Boolean).join(' · ') : m.referenceType === 'StockCount' ? 'Stock count' : STATUS_TYPES.has(m.type) ? '' : m.referenceType ?? '',
       m.actorName,
       ...figureColumns(m),
     ]);

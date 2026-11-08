@@ -7,6 +7,16 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import type { ReportResult, ReportMovementRow, ReportInventoryLine } from './report.service.js';
 
+/** Whether the report lists fewer movements than it counted. */
+function movementsCutShort(report: ReportResult): boolean {
+  return report.movements.length < report.kpis.movementCount;
+}
+
+/** Says so, so a shortened list is never read as the whole record. */
+function movementsListed(report: ReportResult): string {
+  return `Latest ${report.movements.length} of ${report.kpis.movementCount}. The totals cover all of them; the full list is on the Movements page.`;
+}
+
 /** Where a line's stock is, naming the project when it is held for one. */
 function placeCell(l: Pick<ReportInventoryLine, 'locationName' | 'heldForProject'>): string {
   return l.heldForProject ? `${l.locationName} · held for ${l.heldForProject}` : l.locationName;
@@ -93,6 +103,7 @@ export async function buildInventoryXlsx(report: ReportResult): Promise<Buffer> 
   kpiRow('Locations', String(report.kpis.locationCount));
   kpiRow('Suppliers', String(report.kpis.supplierCount));
   kpiRow('Movements (in period)', String(report.kpis.movementCount));
+  if (movementsCutShort(report)) kpiRow('Movements listed', movementsListed(report));
   summary.addRow([]);
 
   // Status breakdown (Stores: Projects material is never low or out of stock)
@@ -461,6 +472,10 @@ function drawMovementsTable(doc: PDFKit.PDFDocument, report: ReportResult): void
   if (report.movements.length === 0) return;
   ensureSpace(doc, 60);
   sectionTitle(doc, `Inventory movements (${report.movements.length})`);
+  if (movementsCutShort(report)) {
+    doc.font('Helvetica').fontSize(9).fillColor('#475569').text(movementsListed(report), { width: CONTENT_WIDTH });
+    doc.moveDown(0.3);
+  }
   drawTable(doc,
     ['Date', 'Type', 'Material', 'Location', 'Qty', 'User'],
     report.movements.map((m: ReportMovementRow) => [

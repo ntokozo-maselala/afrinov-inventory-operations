@@ -100,6 +100,8 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
       const link = `/materials/${e.entityId}`;
       if (e.action === 'CREATE') return { summary: `Added item ${label}`, link };
       if (e.action === 'UPDATE') return { summary: editSentence('item', label, e.before, e.after), link };
+      if (e.action === 'ACTIVATE') return { summary: `Reactivated item ${label}`, link };
+      if (e.action === 'DEACTIVATE') return { summary: `Deactivated item ${label}`, link };
       break;
     }
     case 'Location': {

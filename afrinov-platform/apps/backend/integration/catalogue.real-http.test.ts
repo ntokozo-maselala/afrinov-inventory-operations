@@ -6,7 +6,7 @@
 //
 // Run with: npm run test:integration
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ADMIN_EMAIL, client, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+import { ADMIN_EMAIL, client, login, prisma, requireAdminPassword, retireAsBefore, runId, startServer, type TestServer } from './helpers.js';
 import { recomputeBalancesFor } from '../src/modules/inventory/balances.js';
 import type { CatalogueSummary } from '../src/modules/inventory/catalogue.service.js';
 
@@ -52,7 +52,7 @@ describe('catalogue counts over real HTTP', () => {
     await stock(ids.twoPlaces, rackB, 3);
     await stock(ids.tool, rackA, 2);
     await stock(ids.inactive, rackA, 4);
-    expect((await api('PATCH', `/materials/${ids.inactive}`, { active: false })).status).toBe(200);
+    await retireAsBefore(ids.inactive);
 
     const admin = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
     await prisma.inventoryTransaction.create({ data: { materialId: ids.held, locationId: rackA, type: 'RECEIPT', quantity: 6, heldForProject: projectNumber, actorId: admin.id } });

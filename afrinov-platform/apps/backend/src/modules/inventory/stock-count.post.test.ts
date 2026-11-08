@@ -7,7 +7,7 @@ const { tx } = vi.hoisted(() => ({
   tx: {
     $executeRaw: vi.fn(async () => 0),
     location: { findUnique: vi.fn() },
-    material: { findMany: vi.fn() },
+    material: { findMany: vi.fn(), findUnique: vi.fn(async () => ({ sku: 'S', active: true })) },
     inventoryTransaction: { create: vi.fn() },
     stockCountLine: { createMany: vi.fn() },
     auditLogEntry: { create: vi.fn() },

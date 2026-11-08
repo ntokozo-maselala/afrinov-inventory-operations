@@ -128,13 +128,16 @@ export interface MovementRow {
   materialId: string; materialSku: string; materialName: string; unitOfMeasure?: string;
   /** Issues: the slip this line belongs to. */
   issueId?: string | null;
-  locationId: string; locationName: string;
+  /** Null, with locationName saying so, on an item's status change: it belongs to no one location. */
+  locationId: string | null; locationName: string;
   /**
    * Null on a row that moved no stock: a tool loan due date change
-   * (DUE_DATE_CHANGE), or a used up or broken mark of its own or its
+   * (DUE_DATE_CHANGE), a used up or broken mark of its own or its
    * withdrawal (USED_UP, BROKEN, OUTCOME_WITHDRAWN; usedUpQuantity or
-   * brokenQuantity says how many). On a RETURN, usedUpQuantity and
-   * brokenQuantity are what the same counter visit marked.
+   * brokenQuantity says how many), or an item deactivated or reactivated
+   * (ITEM_DEACTIVATED, ITEM_REACTIVATED; reasonCode and reasonNote say why).
+   * On a RETURN, usedUpQuantity and brokenQuantity are what the same counter
+   * visit marked.
    */
   quantity: string | null; actorId: string; actorName: string;
   projectNumber?: string | null; reasonCode?: string | null; reasonNote?: string | null;

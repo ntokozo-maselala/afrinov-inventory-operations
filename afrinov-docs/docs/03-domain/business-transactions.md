@@ -27,7 +27,7 @@ registered unless `PROCUREMENT_ENABLED=false`.
 | Create material | `POST /materials` |
 | Create material with opening stock | `POST /stock-items` |
 | Update material (name, description, unit, required stock, unit cost) | `PATCH /materials/:id` |
-| Deactivate material | `PATCH /materials/:id` with `active: false` |
+| Deactivate or reactivate material, with a reason (ADR-033) | `PATCH /materials/:id/status`; `GET /materials/:id/deactivation-check` lists what must be cleared first |
 | Create / update location | `POST /locations`, `PATCH /locations/:id` |
 | Activate / deactivate location | `PATCH /locations/:id/status` |
 | Delete unused location | `DELETE /locations/:id` |

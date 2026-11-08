@@ -18,6 +18,17 @@ describe('MovementReason', () => {
     expect(screen.queryByText('Used up')).not.toBeInTheDocument();
   });
 
+  it('says why an item was deactivated, with its note', () => {
+    render(<MovementReason movement={{ type: 'ITEM_DEACTIVATED', quantity: null, reasonCode: 'SUPPLIER_DISCONTINUED', reasonNote: 'Range withdrawn' }} />);
+    expect(screen.getByText('supplier discontinued')).toBeInTheDocument();
+    expect(screen.getByText('Range withdrawn')).toBeInTheDocument();
+  });
+
+  it('says so when a status change has no reason on record', () => {
+    render(<MovementReason movement={{ type: 'ITEM_REACTIVATED', quantity: null, reasonCode: null, reasonNote: 'Reason not recorded' }} />);
+    expect(screen.getByText('Reason not recorded')).toBeInTheDocument();
+  });
+
   it('warns on an issue when some is still out', () => {
     render(<MovementReason movement={{ ...issue, returnedQuantity: '0', brokenQuantity: '0' }} />);
     expect(screen.getByText('3 still out')).toBeInTheDocument();
