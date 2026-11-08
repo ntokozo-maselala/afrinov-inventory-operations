@@ -24,6 +24,7 @@ const db = {
   users: new Map<string, User>(),
   audit: [] as AuditRow[],
   schedules: [] as Array<{ projectNumber: string; status: string }>,
+  locks: 0,
 };
 
 vi.mock('../../shared/db.js', () => ({
@@ -99,6 +100,8 @@ function makePrisma(): unknown {
     // The service wraps each mutation and its audit write in one transaction;
     // the mock runs the callback against the same in-memory client.
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
+    // The row lock taken before counting open schedules.
+    $queryRaw: async () => { db.locks += 1; return []; },
   };
 }
 
@@ -107,6 +110,7 @@ beforeEach(() => {
   db.users.clear();
   db.audit.length = 0;
   db.schedules.length = 0;
+  db.locks = 0;
   db.users.set('user-1', { id: 'user-1', name: 'Alice', email: 'alice@example.com' });
   db.users.set('user-2', { id: 'user-2', name: 'Bob', email: 'bob@example.com' });
 });
@@ -161,6 +165,8 @@ describe('ProjectService', () => {
     await ProjectService.create({ projectNumber: 'P-7', name: 'X', status: 'ACTIVE' }, 'user-1');
     db.schedules.push({ projectNumber: 'P-7', status: 'DONE' }, { projectNumber: 'P-7', status: 'ACTIVE' });
     await expect(ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).rejects.toThrow(/1 open schedule/);
+    // Counted with the project's row locked, inside the update's transaction.
+    expect(db.locks).toBe(1);
     db.schedules[1]!.status = 'CANCELLED';
     expect((await ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).status).toBe('COMPLETED');
   });

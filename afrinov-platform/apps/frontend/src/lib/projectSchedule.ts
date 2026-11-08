@@ -26,9 +26,11 @@ export const isOpenSchedule = (status: ScheduleStatus) => status === 'PLANNING' 
  * Whether the signed-in user may change a project's schedules: Admin (who holds
  * manage:project_schedule) or the project's own manager, as the server decides.
  */
-export function canChangeSchedules(user: { id?: string; roles?: string[] } | null | undefined, managerId: string | null | undefined): boolean {
+export function canChangeSchedules(user: { id?: string; roles?: string[]; permissions?: string[] } | null | undefined, managerId: string | null | undefined): boolean {
   if (!user) return false;
+  // Admin holds every permission; any other role given manage:project_schedule counts too, as on the server.
   if ((user.roles ?? []).some((r) => r.toUpperCase() === 'ADMIN')) return true;
+  if (user.permissions?.includes('manage:project_schedule')) return true;
   return !!managerId && user.id === managerId;
 }
 

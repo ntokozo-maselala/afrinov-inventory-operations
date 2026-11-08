@@ -55,6 +55,12 @@ describe('ProjectBoard', () => {
     expect(screen.getByText('3 open · 1 late · 1 past the due date')).toBeInTheDocument();
   });
 
+  it('asks for the unfiltered board once, taking its managers from the same answer', async () => {
+    renderAt('/projects/board');
+    await within(await screen.findByLabelText('Manager')).findByRole('option', { name: 'Zola N' });
+    expect(mockGet.mock.calls.filter(([p]) => String(p).startsWith('/project-board'))).toEqual([['/project-board']]);
+  });
+
   it('filters by manager and by jobs with steps assigned to me', async () => {
     renderAt('/projects/board');
     const manager = await screen.findByLabelText('Manager');

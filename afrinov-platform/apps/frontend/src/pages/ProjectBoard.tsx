@@ -41,16 +41,20 @@ export function ProjectBoard() {
   const query = new URLSearchParams();
   if (managerId) query.set('managerId', managerId);
   if (onlyMine && user?.id) query.set('assigneeId', user.id);
-  const board = useApi<BoardRow[]>(view === 'board' ? `/project-board${query.size ? `?${query.toString()}` : ''}` : null);
-  // Every manager, from the unfiltered board, so choosing one doesn't empty the list of others.
-  const everyone = useApi<BoardRow[]>(view === 'board' ? '/project-board' : null);
+  // "Only mine" waits for the signed-in user, rather than showing every job under a ticked box.
+  const waiting = onlyMine && !user?.id;
+  const board = useApi<BoardRow[]>(view === 'board' && !waiting ? `/project-board${query.size ? `?${query.toString()}` : ''}` : null);
+  // Every manager, from the unfiltered board, so choosing one doesn't empty the list of others;
+  // asked for only when a filter is on, as the unfiltered board already is that list.
+  const everyone = useApi<BoardRow[]>(view === 'board' && query.size > 0 ? '/project-board' : null);
+  const allRows = query.size > 0 ? everyone.data : board.data;
   const mine = useApi<MyStep[]>(view === 'mine' ? '/my-project-steps' : null);
 
   const managers = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const r of everyone.data ?? []) if (r.manager) seen.set(r.manager.id, r.manager.name);
+    for (const r of allRows ?? []) if (r.manager) seen.set(r.manager.id, r.manager.name);
     return [...seen].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [everyone.data]);
+  }, [allRows]);
 
   function set(key: string, value: string | null) {
     const next = new URLSearchParams(params);

@@ -36,7 +36,10 @@ export function ScheduleForm({ projectNumber, schedule, templates, onCancel, onS
   const adding = !schedule;
   const idem = useIdempotencyKey('add-project-schedule');
   const [name, setName] = useState(schedule?.name ?? (adding ? 'Main' : ''));
-  const [template, setTemplate] = useState(templates[0]?.name ?? '');
+  // Null until the user picks, so templates arriving after the form opens still give the first one;
+  // '' is the user choosing No template.
+  const [chosen, setTemplate] = useState<string | null>(null);
+  const template = chosen ?? templates[0]?.name ?? '';
   const [dueDate, setDueDate] = useState(schedule?.dueDate ?? '');
   const [covers, setCovers] = useState((schedule?.alsoCovers ?? []).join(', '));
   const [busy, setBusy] = useState(false);

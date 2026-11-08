@@ -195,6 +195,32 @@ describe('ProjectDetail', () => {
     expect(mockPatch).not.toHaveBeenCalled();
   });
 
+  it('marks the Procurement step done no later than it started, when the orders came in before its planned start', async () => {
+    const withProcurement = active();
+    withProcurement.steps[1] = step('s2', 2, 'Procurement', '2026-03-09', '2026-03-13', { forecastStart: '2026-03-09', forecastEnd: '2026-03-13' });
+    scheduleList = [withProcurement];
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path.endsWith('/procurement?scheduleId=sch-1')
+      ? { projects: ['AFRI-1086'], orders: [], summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, lastReceivedOn: '2026-03-05', latestExpected: null } }
+      : base(path)));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark this step done' }));
+    const dialog = await screen.findByRole('dialog');
+    // Planned to start the 9th, but everything arrived the 5th: it started by then.
+    expect(within(dialog).getByLabelText('Started on')).toHaveValue('2026-03-05');
+    expect(within(dialog).getByLabelText('Finished on')).toHaveValue('2026-03-05');
+  });
+
+  it("doesn't ask a done schedule's Procurement step for today's orders", async () => {
+    const done = { ...active(), status: 'DONE' };
+    done.steps = done.steps.map((s) => ({ ...s, progress: 100, done: true }));
+    done.steps[1] = { ...done.steps[1]!, name: 'Procurement' };
+    scheduleList = [done];
+    renderPage();
+    await screen.findByRole('region', { name: 'Schedule Main' });
+    expect(mockGet).not.toHaveBeenCalledWith(expect.stringContaining('/procurement'));
+  });
+
   it("doesn't ask for the Procurement step's orders for someone who may not see them", async () => {
     auth.user = { id: 'u-other', roles: ['TECHNICIAN'] };
     const withProcurement = active();
@@ -203,6 +229,36 @@ describe('ProjectDetail', () => {
     renderPage();
     await screen.findByRole('region', { name: 'Schedule Main' });
     expect(mockGet).not.toHaveBeenCalledWith(expect.stringContaining('/procurement'));
+  });
+
+  it('asks to tick finished rather than quietly saving 100% as 99%', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Update Engineering' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Progress/), { target: { value: '100' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save step' }));
+    expect(await within(dialog).findByText(/To set 100%, tick/)).toBeInTheDocument();
+    expect(mockPatch).not.toHaveBeenCalled();
+  });
+
+  it('never offers Next month on a cancelled schedule', async () => {
+    const cancelled = { ...planning(), id: 'sch-9', name: 'Called off', status: 'CANCELLED' };
+    scheduleList = [active(), cancelled];
+    renderPage();
+    const off = await screen.findByRole('region', { name: 'Schedule Called off' });
+    expect(within(off).queryByRole('button', { name: 'Next month' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Schedule Main' })).getByRole('button', { name: 'Next month' })).toBeInTheDocument();
+  });
+
+  it('offers only Cancel on the schedules of a closed project', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => (path === '/projects/AFRI-1086' ? { ...PROJECT, status: 'COMPLETED' } : base(path)));
+    renderPage();
+    const card = await screen.findByRole('region', { name: 'Schedule Main' });
+    expect(within(card).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    for (const name of ['Re-plan', 'Add step', 'Edit', 'Next month']) expect(within(card).queryByRole('button', { name })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Update Engineering/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add schedule' })).not.toBeInTheDocument();
   });
 
   it('asks why a step is removed from a schedule under way', async () => {

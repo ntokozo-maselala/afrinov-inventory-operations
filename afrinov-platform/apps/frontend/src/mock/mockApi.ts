@@ -2041,17 +2041,26 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!PROCUREMENT_ENABLED) throw err('NOT_FOUND', 'Route not found');
     const projectNumber = decodeURIComponent(procurementPath[1]!);
     if (!state.projects.some((x) => x.projectNumber === projectNumber)) throw err('NOT_FOUND', 'Project not found');
-    const projects = [projectNumber, ...(qs.scheduleId ? mockScheduleCovers(qs.scheduleId) : [])];
+    // As the server: a schedule of another project is not found.
+    const covers = qs.scheduleId ? mockScheduleCovers(qs.scheduleId, projectNumber) : [];
+    if (covers === null) throw err('NOT_FOUND', 'Schedule not found');
+    const projects = [projectNumber, ...covers];
+    const saDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+    const owedDates: string[] = [];
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
     const orders = state.purchaseOrders
       .filter((po) => po.projectNumber && projects.includes(po.projectNumber) && po.status !== 'CANCELLED')
       .map((po) => {
-        const owed = po.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty));
-        const expected = owed.map((l) => l.deliveryDate ?? po.expectedDeliveryDate ?? null).filter((d): d is string => !!d).map((d) => d.slice(0, 10)).sort()[0]
-          ?? (owed.length ? null : po.expectedDeliveryDate?.slice(0, 10) ?? null);
-        const receipts = state.goodsReceipts.filter((g) => g.purchaseOrderId === po.id && g.status === 'POSTED').map((g) => g.receivedAt.slice(0, 10)).sort();
+        // As the server: closed short owes nothing; the delivery note's date; an order received in one go by its deliveredAt.
         const finished = po.status === 'RECEIVED' || po.status === 'CLOSED';
         const placed = po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED';
+        const owed = finished ? [] : po.lines.filter((l) => Number(l.receivedQty) < Number(l.orderedQty));
+        const owedOn = owed.map((l) => l.deliveryDate ?? po.expectedDeliveryDate ?? null).filter((d): d is string => !!d).map((d) => d.slice(0, 10)).sort();
+        owedDates.push(...owedOn);
+        const expected = owed.length ? (owedOn[0] ?? null) : po.expectedDeliveryDate?.slice(0, 10) ?? null;
+        const receipts = state.goodsReceipts.filter((g) => g.purchaseOrderId === po.id && g.status === 'POSTED').map((g) => saDay(g.receivedAt));
+        if (receipts.length === 0 && po.deliveredAt) receipts.push(saDay(po.deliveredAt));
+        receipts.sort();
         return {
           id: po.id, number: po.number, status: po.status, projectNumber: po.projectNumber!,
           supplierName: state.suppliers.find((s) => s.id === po.supplierId)?.name ?? '',
@@ -2071,7 +2080,7 @@ function route(method: string, path: string, body?: unknown): unknown {
         notPlaced: orders.filter((o) => o.status === 'DRAFT' || o.status === 'PENDING_APPROVAL').length,
         allReceived: orders.length > 0 && orders.every((o) => o.status === 'RECEIVED' || o.status === 'CLOSED'),
         lastReceivedOn: received.length ? received[received.length - 1]! : null,
-        latestExpected: orders.filter((o) => o.linesOwed > 0).map((o) => o.expectedDelivery).filter((d): d is string => !!d).sort().pop() ?? null,
+        latestExpected: owedDates.sort().pop() ?? null,
       },
     };
   }
