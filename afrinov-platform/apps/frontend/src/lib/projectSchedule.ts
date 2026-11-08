@@ -2,8 +2,9 @@
 // schedule's status and lateness read, and who may change it. The server
 // enforces every rule; these only keep the screens from offering what it would
 // refuse.
-import type { ScheduleStatus, ScheduleStep } from '../api/types';
+import type { MyStep, ScheduleStatus, ScheduleStep } from '../api/types';
 import { formatDate } from './format';
+import { endOfWeek, today } from './dates';
 
 export const SCHEDULE_STATUS_LABEL: Record<ScheduleStatus, string> = {
   PLANNING: 'Planning',
@@ -51,6 +52,14 @@ export function latenessOf(daysLate: number | null): { text: string; tone: 'succ
   if (daysLate > 0) return { text: `${days(daysLate)} late`, tone: daysLate > 5 ? 'danger' : 'warning' };
   if (daysLate < 0) return { text: `${days(-daysLate)} early`, tone: 'success' };
   return { text: 'On plan', tone: 'success' };
+}
+
+/** When a step of mine is due: late, this week (to Sunday), or later. */
+export function dueOf(step: Pick<MyStep, 'late' | 'expectedEnd' | 'scheduleStatus'>, now = today()): { text: string; tone: 'danger' | 'warning' | 'neutral' } {
+  if (step.late) return { text: 'Late', tone: 'danger' };
+  if (step.scheduleStatus === 'ACTIVE' && step.expectedEnd && step.expectedEnd <= endOfWeek(now)) return { text: 'Due this week', tone: 'warning' };
+  if (step.scheduleStatus === 'PLANNING') return { text: 'Being planned', tone: 'neutral' };
+  return { text: step.expectedEnd ? `Due ${formatDay(step.expectedEnd)}` : 'No date yet', tone: 'neutral' };
 }
 
 /** When the step is now expected to end: its actual end once done, else its forecast, else its plan. */

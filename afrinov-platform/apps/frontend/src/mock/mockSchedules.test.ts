@@ -58,6 +58,21 @@ describe('mock project schedules', () => {
     expect(next.steps[0]).toMatchObject({ baselineStart: '2026-04-02', progress: 0 });
   });
 
+  it('puts open schedules on the board, most at risk first, and assigned steps on My steps', async () => {
+    const late = await api.patch<ProjectSchedule>(`/project-schedules/${(await plannedSchedule()).id}`, { status: 'ACTIVE' });
+    await api.patch(`/project-steps/${late.steps[0]!.id}`, { progress: 100, actualStart: '2026-03-02', actualEnd: '2026-03-10', shiftLaterBy: 2, assigneeId: 'user-1' });
+    await api.patch(`/project-steps/${late.steps[1]!.id}`, { assigneeId: 'user-1' });
+    const planning = await api.post<ProjectSchedule>(`/projects/${PROJECT}/schedules`, { name: 'Next job', template: 'Buy and deliver' });
+
+    const board = await api.get<Array<{ scheduleId: string; manager: { id: string } | null; stepsDone: number }>>('/project-board');
+    expect(board.map((r) => r.scheduleId)).toEqual([late.id, planning.id]);
+    expect(board[0]).toMatchObject({ manager: { id: 'user-1' }, stepsDone: 1 });
+    expect(await api.get('/project-board?managerId=nobody')).toEqual([]);
+
+    const mine = await api.get<Array<{ name: string; late: boolean }>>('/my-project-steps');
+    expect(mine.map((s) => [s.name, s.late])).toEqual([['Manufacturing', true]]);
+  });
+
   it('keeps a project from being completed while a schedule is open', async () => {
     const s = await plannedSchedule();
     await expect(api.patch(`/projects/${PROJECT}`, { status: 'COMPLETED' })).rejects.toMatchObject({ code: 'INVALID_STATE' });

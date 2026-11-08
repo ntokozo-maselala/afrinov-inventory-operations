@@ -34,7 +34,7 @@ import {
 import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
 import {
   createProjectSchema, updateProjectSchema,
-  createScheduleSchema, updateScheduleSchema, nextMonthSchema, replanSchema, addStepSchema, updateStepSchema,
+  createScheduleSchema, updateScheduleSchema, nextMonthSchema, boardQuerySchema, replanSchema, addStepSchema, updateStepSchema,
 } from '../modules/operations/project.routes.js';
 import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
 import {
@@ -534,6 +534,16 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/project-step-templates', tag: 'Projects', summary: 'List the step templates a schedule can start from',
     description: 'Read from the projects.stepTemplates setting: each template’s name and its steps in order.',
+  },
+  {
+    method: 'get', path: '/project-board', tag: 'Projects', summary: 'List the open schedules, most at risk first',
+    description: 'Every schedule being planned or under way, with its project, manager, due date, steps done and totals: past the due date first, '
+      + 'then late against plan, then the soonest expected finish. managerId filters by the project’s manager, assigneeId by a user assigned to any of its steps.',
+    query: boardQuerySchema,
+  },
+  {
+    method: 'get', path: '/my-project-steps', tag: 'Projects', summary: 'List my unfinished steps',
+    description: 'The steps assigned to the signed-in user that aren’t finished, on schedules being planned or under way, the soonest expected end first. `late`: under way and past its expected end.',
   },
   {
     method: 'get', path: '/projects/:projectNumber/schedules', tag: 'Projects', summary: "List a project's schedules",

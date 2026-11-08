@@ -2,11 +2,16 @@
 // server's schedule routes (project-schedule.service.ts), with its rules, so
 // the project page refuses here what it would refuse there. The mock signs in
 // as Admin, who may change every project's schedules.
-import type { ProjectSchedule, ProjectSchedules, ScheduleStatus, ScheduleStep, ScheduleTotals, StepTemplate } from '../api/types';
+import type { BoardRow, MyStep, ProjectSchedule, ProjectSchedules, ScheduleStatus, ScheduleStep, ScheduleTotals, StepTemplate } from '../api/types';
 import { addWorkingDays, parseClosedDays, workingDaysBetween } from '../lib/workingDays';
 
 interface Ctx {
-  project: (projectNumber: string) => { projectNumber: string; status: string; active?: boolean } | undefined;
+  project: (projectNumber: string) => {
+    projectNumber: string; status: string; active?: boolean; name?: string | null;
+    manager?: { id: string; name: string } | null;
+  } | undefined;
+  /** The signed-in user, for My steps. */
+  userId: () => string;
   users: () => Array<{ id: string; name: string; active: boolean }>;
   setting: (key: string) => unknown;
   /** The mock's ApiError, thrown as the client would receive it. */
@@ -140,6 +145,46 @@ export function routeSchedules(method: string, p: string, qs: Record<string, str
   const touch = (s: Schedule) => { s.updatedAt = new Date().toISOString(); return view(s, ctx); };
 
   if (method === 'GET' && p === '/project-step-templates') return mockTemplates(ctx);
+
+  // The board of open jobs, most at risk first, as the server's boardOrder.
+  if (method === 'GET' && p === '/project-board') {
+    const rows: BoardRow[] = schedules
+      .filter((s) => OPEN.includes(s.status))
+      .filter((s) => !qs.managerId || ctx.project(s.projectNumber)?.manager?.id === qs.managerId)
+      .filter((s) => !qs.assigneeId || s.steps.some((st) => st.assigneeId === qs.assigneeId))
+      .map((s) => {
+        const project = ctx.project(s.projectNumber);
+        return {
+          scheduleId: s.id, name: s.name, status: s.status, projectNumber: s.projectNumber,
+          projectName: project?.name ?? null, manager: project?.manager ?? null, dueDate: s.dueDate,
+          steps: s.steps.length, stepsDone: s.steps.filter((st) => st.progress >= 100).length,
+          totals: totals(s.steps, s.dueDate, ctx),
+        };
+      });
+    const by = (x: number | null) => (x === null ? -Infinity : x);
+    return rows.sort((a, b) => by(b.totals.daysPastDue) - by(a.totals.daysPastDue)
+      || by(b.totals.daysLate) - by(a.totals.daysLate)
+      || (a.totals.forecastEnd ?? '9999').localeCompare(b.totals.forecastEnd ?? '9999')
+      || a.projectNumber.localeCompare(b.projectNumber) || a.name.localeCompare(b.name));
+  }
+
+  // The signed-in user's unfinished steps on open schedules, soonest first.
+  if (method === 'GET' && p === '/my-project-steps') {
+    const me = ctx.userId();
+    const today = ctx.today();
+    const mine: MyStep[] = schedules.filter((s) => OPEN.includes(s.status)).flatMap((s) => s.steps
+      .filter((st) => st.assigneeId === me && st.progress < 100)
+      .map((st) => {
+        const end = st.forecastEnd ?? st.baselineEnd;
+        return {
+          stepId: st.id, name: st.name, scheduleId: s.id, scheduleName: s.name, scheduleStatus: s.status,
+          projectNumber: s.projectNumber, projectName: ctx.project(s.projectNumber)?.name ?? null,
+          expectedStart: st.forecastStart ?? st.baselineStart, expectedEnd: end, progress: st.progress,
+          late: s.status === 'ACTIVE' && !!end && end < today,
+        };
+      }));
+    return mine.sort((a, b) => (a.expectedEnd ?? '9999').localeCompare(b.expectedEnd ?? '9999') || a.projectNumber.localeCompare(b.projectNumber));
+  }
 
   const forProject = /^\/projects\/([^/]+)\/(schedules|assignees)$/.exec(p);
   if (forProject) {

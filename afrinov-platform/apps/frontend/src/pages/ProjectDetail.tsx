@@ -2,7 +2,7 @@
 // links the Projects list has, and its schedules of steps. Anyone can see them;
 // the project's manager and Admin plan them, start them, keep their steps up to
 // date and re-plan them, as the server allows.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../auth';
@@ -18,6 +18,7 @@ import { Skeleton } from '../components/Skeleton';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { useToast } from '../components/Toast';
 import { ProjectStepForm } from '../components/ProjectStepForm';
+import { ProjectGantt } from '../components/ProjectGantt';
 import { RemoveStepDialog, ReplanDialog, ScheduleForm } from '../components/ProjectScheduleDialogs';
 import { api } from '../api/client';
 import { errorToast } from '../lib/errorPresentation';
@@ -71,7 +72,9 @@ export function ProjectDetail() {
   const closed = project.data ? project.data.status === 'COMPLETED' || project.data.status === 'CANCELLED' || !project.data.active : false;
   const templates = useApi<StepTemplate[]>(canChange ? '/project-step-templates' : null);
   const assignees = useApi<Array<{ id: string; name: string }>>(canChange ? `/projects/${enc}/assignees` : null);
-  const closedDays = useApi<{ value: unknown }>(canChange ? '/settings/projects.closedDays' : null);
+  // Everyone sees the chart, which shades the closed days; the step form counts working days with them.
+  const closedDays = useApi<{ value: unknown }>('/settings/projects.closedDays');
+  const closedSet = useMemo(() => parseClosedDays(closedDays.data?.value), [closedDays.data]);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState(false);
   const idemNextMonth = useIdempotencyKey('project-schedule-next-month');
@@ -172,6 +175,7 @@ export function ProjectDetail() {
             key={s.id}
             schedule={s}
             canChange={canChange}
+            closedDays={closedSet}
             onAction={setDialog}
           />
         ))}
@@ -189,7 +193,7 @@ export function ProjectDetail() {
           schedule={dialog.schedule}
           step={dialog.step}
           users={assignees.data ?? []}
-          closedDays={parseClosedDays(closedDays.data?.value)}
+          closedDays={closedSet}
           onCancel={() => setDialog(null)}
           onSaved={saved}
         />
@@ -223,7 +227,10 @@ export function ProjectDetail() {
 }
 
 /** One schedule: its totals, what can be done with it, and its steps. */
-function ScheduleCard({ schedule: s, canChange, onAction }: { schedule: ProjectSchedule; canChange: boolean; onAction: (d: Dialog) => void }) {
+function ScheduleCard({ schedule: s, canChange, closedDays, onAction }: {
+  schedule: ProjectSchedule; canChange: boolean; closedDays: ReadonlySet<string>; onAction: (d: Dialog) => void;
+}) {
+  const [view, setView] = useState<'steps' | 'chart'>('steps');
   const open = isOpenSchedule(s.status);
   const started = s.status === 'ACTIVE';
   const late = latenessOf(s.totals.daysLate);
@@ -278,8 +285,17 @@ function ScheduleCard({ schedule: s, canChange, onAction }: { schedule: ProjectS
         </Alert>
       )}
 
+      {s.steps.length > 0 && (
+        <div className="flex gap-1 mb-3" role="group" aria-label={`Show ${s.name} as`}>
+          <Button size="sm" variant={view === 'steps' ? 'primary' : 'ghost'} aria-pressed={view === 'steps'} onClick={() => setView('steps')}>Steps</Button>
+          <Button size="sm" variant={view === 'chart' ? 'primary' : 'ghost'} aria-pressed={view === 'chart'} onClick={() => setView('chart')}>Chart</Button>
+        </div>
+      )}
+
       {s.steps.length === 0 ? (
         <p className="text-sm text-surface-500">No steps yet.</p>
+      ) : view === 'chart' ? (
+        <ProjectGantt schedule={s} closedDays={closedDays} today={today()} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm" aria-label={`Steps of ${s.name}`}>

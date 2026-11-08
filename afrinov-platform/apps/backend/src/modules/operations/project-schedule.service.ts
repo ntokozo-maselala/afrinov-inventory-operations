@@ -18,6 +18,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import {
   MAX_STEPS,
   addOneMonth,
+  boardOrder,
   monthName,
   parseStepTemplates,
   scheduleTotals,
@@ -192,6 +193,36 @@ function projectTotals(schedules: ScheduleRow[], today: Date, closed: ClosedDays
     daysLate: worst(each.map((t) => t.daysLate)),
     daysPastDue: worst(each.map((t) => t.daysPastDue)),
   };
+}
+
+/** One open schedule on the board. */
+export interface BoardRow {
+  scheduleId: string;
+  name: string;
+  status: ProjectScheduleStatus;
+  projectNumber: string;
+  projectName: string | null;
+  manager: { id: string; name: string } | null;
+  dueDate: string | null;
+  steps: number;
+  stepsDone: number;
+  totals: ScheduleTotals;
+}
+
+/** One unfinished step assigned to the signed-in user. */
+export interface MyStep {
+  stepId: string;
+  name: string;
+  scheduleId: string;
+  scheduleName: string;
+  scheduleStatus: ProjectScheduleStatus;
+  projectNumber: string;
+  projectName: string | null;
+  expectedStart: string | null;
+  expectedEnd: string | null;
+  progress: number;
+  /** Under way and past its expected end. */
+  late: boolean;
 }
 
 async function inTx<T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -623,6 +654,71 @@ export const ProjectScheduleService = {
       await audit(tx, actor.id, schedule.id, 'STEP_REMOVE', { stepId, ...stepView(step) }, { reason });
       return view(tx, schedule.id);
     });
+  },
+
+  /**
+   * The board of open jobs (Phase 3.2): every schedule being planned or under
+   * way, most at risk first (boardOrder). Filtered by the project's manager, or
+   * by a user assigned to any of its steps.
+   */
+  async board(filter: { managerId?: string; assigneeId?: string } = {}): Promise<BoardRow[]> {
+    const rows = await prisma.projectSchedule.findMany({
+      where: {
+        status: { in: OPEN },
+        ...(filter.managerId ? { project: { managerId: filter.managerId } } : {}),
+        ...(filter.assigneeId ? { steps: { some: { assigneeId: filter.assigneeId } } } : {}),
+      },
+      include: {
+        ...SCHEDULE_INCLUDE,
+        project: { select: { name: true, manager: { select: { id: true, name: true } } } },
+      },
+    });
+    const today = todayInSouthAfrica();
+    const closed = await closedDays();
+    return rows
+      .map((s) => ({
+        scheduleId: s.id,
+        name: s.name,
+        status: s.status,
+        projectNumber: s.projectNumber,
+        projectName: s.project.name,
+        manager: s.project.manager,
+        dueDate: iso(s.dueDate),
+        steps: s.steps.length,
+        stepsDone: s.steps.filter((st) => st.progress >= 100).length,
+        totals: scheduleTotals(s.steps.map(facts), { dueDate: s.dueDate, today, closed }),
+      }))
+      .sort(boardOrder);
+  },
+
+  /**
+   * The steps assigned to a user that aren't finished, on schedules being
+   * planned or under way, the soonest expected end first (Phase 3.3).
+   */
+  async mySteps(userId: string): Promise<MyStep[]> {
+    const steps = await prisma.projectStep.findMany({
+      where: { assigneeId: userId, progress: { lt: 100 }, schedule: { status: { in: OPEN } } },
+      include: { schedule: { select: { id: true, name: true, status: true, projectNumber: true, project: { select: { name: true } } } } },
+    });
+    const today = dayKey(todayInSouthAfrica());
+    return steps
+      .map((st) => {
+        const end = iso(st.forecastEnd ?? st.baselineEnd);
+        return {
+          stepId: st.id,
+          name: st.name,
+          scheduleId: st.schedule.id,
+          scheduleName: st.schedule.name,
+          scheduleStatus: st.schedule.status,
+          projectNumber: st.schedule.projectNumber,
+          projectName: st.schedule.project.name,
+          expectedStart: iso(st.forecastStart ?? st.baselineStart),
+          expectedEnd: end,
+          progress: st.progress,
+          late: st.schedule.status === 'ACTIVE' && end !== null && end < today,
+        };
+      })
+      .sort((a, b) => (a.expectedEnd ?? '9999').localeCompare(b.expectedEnd ?? '9999') || a.projectNumber.localeCompare(b.projectNumber));
   },
 
   /** How many open schedules a project has: it can't be marked Completed while any are. */

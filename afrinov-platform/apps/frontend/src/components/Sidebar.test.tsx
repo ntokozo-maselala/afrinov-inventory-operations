@@ -90,14 +90,15 @@ describe('useNavGroups', () => {
   );
 
   // Sales prices can give away a job's margin (Procurement savings report, step 1).
+  // Everyone sees the Project board (ADR-032): any job's schedules are readable by all.
   it.each([
-    ['SALES', ['Projects', 'Sales RFQ']],
-    ['DIRECTOR', ['Projects', 'Sales RFQ']],
-    ['CEO', ['Projects', 'Sales RFQ']],
-    ['PROCUREMENT_MANAGER', ['Projects', 'Sales RFQ']],
-    ['PROCUREMENT', ['Projects']],
-    ['STORE_CONTROLLER', ['Projects']],
-    ['VIEWER', ['Projects']],
+    ['SALES', ['Projects', 'Project board', 'Sales RFQ']],
+    ['DIRECTOR', ['Projects', 'Project board', 'Sales RFQ']],
+    ['CEO', ['Projects', 'Project board', 'Sales RFQ']],
+    ['PROCUREMENT_MANAGER', ['Projects', 'Project board', 'Sales RFQ']],
+    ['PROCUREMENT', ['Projects', 'Project board']],
+    ['STORE_CONTROLLER', ['Projects', 'Project board']],
+    ['VIEWER', ['Projects', 'Project board']],
   ])('shows %s the Sales entries they may see', (role, expected) => {
     signedIn.roles = [role];
     expect(useLabelsIn('Sales')).toEqual(expected);
@@ -105,13 +106,21 @@ describe('useNavGroups', () => {
 
   it('offers no Sales RFQ with procurement off', () => {
     features.procurement = false;
-    expect(useLabelsIn('Sales')).toEqual(['Projects']);
+    expect(useLabelsIn('Sales')).toEqual(['Projects', 'Project board']);
   });
 
   it('puts Projects under Sales, after Operations', () => {
-    expect(useLabelsIn('Sales')).toEqual(['Projects', 'Sales RFQ']);
+    expect(useLabelsIn('Sales')).toEqual(['Projects', 'Project board', 'Sales RFQ']);
     const titles = useNavGroups().map((g) => g.title);
     expect(titles.indexOf('Sales')).toBe(titles.indexOf('Operations') + 1);
+  });
+
+  it('lights only Project board on the board, and Projects on a project’s page', () => {
+    const items = useNavGroups().flatMap((g) => g.items);
+    const projects = items.find((i) => i.to === '/projects')!;
+    const board = items.find((i) => i.to === '/projects/board')!;
+    expect([isNavItemActive(projects, '/projects/board'), isNavItemActive(board, '/projects/board')]).toEqual([false, true]);
+    expect([isNavItemActive(projects, '/projects/AFRI-1086'), isNavItemActive(board, '/projects/AFRI-1086')]).toEqual([true, false]);
   });
 
   it('marks Stock as an exact match, so it is not lit on /stock/issue', () => {

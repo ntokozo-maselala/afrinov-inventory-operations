@@ -54,7 +54,12 @@ export const updateScheduleSchema = z.object({
   status: scheduleStatusEnum.optional(),
 });
 
-export const nextMonthSchema = z.object({ name: z.string().min(1).max(120).optional() });
+export const boardQuerySchema = z.object({
+  managerId: z.uuid().optional(),
+  assigneeId: z.uuid().optional(),
+});
+
+export const nextMonthSchema =z.object({ name: z.string().min(1).max(120).optional() });
 
 export const replanSchema = z.object({
   reason: z.string().min(1).max(500),
@@ -151,6 +156,14 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
   // ── Schedules and steps ────────────────────────────────────────────────
   // Anyone signed in can see them; only the project's manager and Admin change them.
   app.get('/project-step-templates', { preHandler: [app.authenticate] }, async () => ProjectScheduleService.templates());
+
+  // The board of open jobs, and the signed-in user's own steps (Phase 3).
+  app.get('/project-board', { preHandler: [app.authenticate] }, async (req) => {
+    const q = parse(boardQuerySchema, req.query, 'board filter');
+    return ProjectScheduleService.board(q);
+  });
+
+  app.get('/my-project-steps', { preHandler: [app.authenticate] }, async (req) => ProjectScheduleService.mySteps(actorId(req)));
 
   app.get('/projects/:projectNumber/schedules', { preHandler: [app.authenticate] }, async (req) => {
     const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);

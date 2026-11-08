@@ -156,6 +156,18 @@ describe('ProjectDetail', () => {
     ));
   });
 
+  it('switches a schedule between its steps and its chart, for anyone', async () => {
+    auth.user = { id: 'u-other', roles: ['TECHNICIAN'] };
+    renderPage();
+    const card = await screen.findByRole('region', { name: 'Schedule Main' });
+    expect(within(card).getByRole('table', { name: 'Steps of Main' })).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Chart' }));
+    expect(within(card).getByRole('button', { name: 'Chart' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(card).queryByRole('table')).not.toBeInTheDocument();
+    expect(within(card).getByRole('img', { name: 'FAT: planned 16 Mar 2026 – 20 Mar 2026' })).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith('/settings/projects.closedDays');
+  });
+
   it('asks why a step is removed from a schedule under way', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Remove FAT' }));

@@ -174,6 +174,20 @@ export function scheduleTotals(
 }
 
 /**
+ * The board's order: the schedules most at risk first. Past the client's due
+ * date before late against plan, the most working days first; then the
+ * soonest expected finish; schedules with no dates last.
+ */
+export function boardOrder(a: { totals: ScheduleTotals; projectNumber: string; name: string }, b: { totals: ScheduleTotals; projectNumber: string; name: string }): number {
+  const by = (x: number | null) => (x === null ? -Infinity : x);
+  return by(b.totals.daysPastDue) - by(a.totals.daysPastDue)
+    || by(b.totals.daysLate) - by(a.totals.daysLate)
+    || (a.totals.forecastEnd ?? '9999').localeCompare(b.totals.forecastEnd ?? '9999')
+    || a.projectNumber.localeCompare(b.projectNumber)
+    || a.name.localeCompare(b.name);
+}
+
+/**
  * Moves a step's expected dates by `n` working days. A step with no forecast yet
  * moves from its plan. A finished step doesn't move.
  */
