@@ -48,7 +48,9 @@ export type IdempotencyEndpoint =
   | 'POST /adjustment-requests/:id/reject'
   | 'POST /projects/:projectNumber/schedules'
   | 'POST /project-schedules/:id/next-month'
-  | 'POST /project-schedules/:id/steps';
+  | 'POST /project-schedules/:id/steps'
+  // Not a POST, but moving the later steps adds days: a replay must not move them twice.
+  | 'PATCH /project-steps/:id';
 
 /**
  * Stable hash of the request, so a reused key with a different payload is

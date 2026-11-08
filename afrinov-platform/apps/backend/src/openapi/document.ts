@@ -548,6 +548,11 @@ export const OPERATIONS: Operation[] = [
       + "alsoCovers names the other projects a joint job covers. Only the project's manager or Admin. Retry-safe with an Idempotency-Key header.",
     permissions: [P.ManageProjectSchedule], body: createScheduleSchema, success: 201, errors: [403, 404, 409],
   },
+  {
+    method: 'get', path: '/projects/:projectNumber/assignees', tag: 'Projects', summary: 'List who a step can be assigned to',
+    description: "Every active user's id and name, for those who may change the project's schedules (its manager or Admin), who don't all hold view:users.",
+    permissions: [P.ManageProjectSchedule], errors: [403, 404],
+  },
   { method: 'get', path: '/project-schedules/:id', tag: 'Projects', summary: 'Get a schedule', errors: [404] },
   {
     method: 'patch', path: '/project-schedules/:id', tag: 'Projects', summary: 'Change a schedule, or move it on',
@@ -577,7 +582,8 @@ export const OPERATIONS: Operation[] = [
     method: 'patch', path: '/project-steps/:id', tag: 'Projects', summary: 'Update a step',
     description: 'While planning: name, position, planned dates, assignee and notes. Once started: expected dates, progress, actual dates, '
       + 'name, position, assignee and notes; the plan changes only by a re-plan. An actual end goes with progress 100 and an actual start. '
-      + 'shiftLaterBy moves the expected dates of the unfinished steps after this one by that many working days.',
+      + 'shiftLaterBy moves the expected dates of the unfinished steps after this one by that many working days. '
+      + 'Retry-safe with an Idempotency-Key header, so a replay never moves them twice.',
     permissions: [P.ManageProjectSchedule], body: updateStepSchema, errors: [403, 404, 409],
   },
   {

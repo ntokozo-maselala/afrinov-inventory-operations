@@ -11,7 +11,7 @@ import { applyDensity, getStoredThemePreference, setAppearance as setGlobalAppea
 export type SettingType = 'string' | 'number' | 'boolean' | 'enum';
 export type SettingCategory =
   | 'general' | 'inventory' | 'purchase_orders' | 'notifications'
-  | 'users' | 'appearance' | 'security' | 'system' | 'data';
+  | 'users' | 'appearance' | 'security' | 'system' | 'data' | 'projects';
 
 export interface SettingValue {
   key: string;

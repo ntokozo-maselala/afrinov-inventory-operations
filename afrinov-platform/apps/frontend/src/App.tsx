@@ -42,6 +42,7 @@ const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ 
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
 const Projects = importPage(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ProjectLeftovers = importPage(() => import('./pages/ProjectLeftovers').then(m => ({ default: m.ProjectLeftovers })));
+const ProjectDetail = importPage(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
 const ReceiveStock = importPage(() => import('./pages/ReceiveStock').then(m => ({ default: m.ReceiveStock })));
 const IssueStock = importPage(() => import('./pages/IssueStock').then(m => ({ default: m.IssueStock })));
 const ReturnStock = importPage(() => import('./pages/ReturnStock').then(m => ({ default: m.ReturnStock })));
@@ -56,6 +57,7 @@ const SettingsNotifications = importPage(() => import('./pages/SettingsSections'
 const SettingsInventory = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsInventory })));
 const SettingsSecurity = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsSecurity })));
 const SettingsPurchaseOrders = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsPurchaseOrders })));
+const SettingsProjects = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsProjects })));
 const SettingsAppearance = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsAppearance })));
 const SettingsUsers = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsUsers })));
 const SettingsSystem = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsSystem })));
@@ -190,6 +192,7 @@ export function App() {
         <Route path="/racks" element={<Navigate to="/locations?type=RACK" replace />} />
         <Route path="/locations" element={<RouteBoundary name="Locations"><Locations /></RouteBoundary>} />
         <Route path="/projects" element={<RouteBoundary name="Projects"><Projects /></RouteBoundary>} />
+        <Route path="/projects/:projectNumber" element={<RouteBoundary name="Project"><ProjectDetail /></RouteBoundary>} />
         <Route path="/projects/:projectNumber/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
         <Route path="/materials/no-project/leftovers" element={<RouteBoundary name="Project leftovers"><ProjectLeftovers /></RouteBoundary>} />
         <Route path="/recipients" element={<RouteBoundary name="Recipients"><Recipients /></RouteBoundary>} />
@@ -201,6 +204,7 @@ export function App() {
           {PROCUREMENT_ENABLED
             ? <Route path="purchase-orders" element={<RouteBoundary name="Settings: purchase orders"><SettingsPurchaseOrders /></RouteBoundary>} />
             : <Route path="purchase-orders" element={<Navigate to="/settings" replace />} />}
+          <Route path="projects" element={<RouteBoundary name="Settings: projects"><SettingsProjects /></RouteBoundary>} />
           <Route path="appearance" element={<RouteBoundary name="Settings: appearance"><SettingsAppearance /></RouteBoundary>} />
           <Route path="users" element={<RouteBoundary name="Settings: users"><SettingsUsers /></RouteBoundary>} />
           <Route path="security" element={<RouteBoundary name="Settings: security"><SettingsSecurity /></RouteBoundary>} />
