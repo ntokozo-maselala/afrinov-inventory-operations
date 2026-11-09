@@ -14,19 +14,24 @@ const againstNote = ({ comparedWith: c }: Pick<SavingsRow, 'comparedWith'>) => {
   return parts.length ? [`Sales compared against ${parts.join(' and ')} for ${Number(c.quantity)} ${c.unitOfMeasure} on ${c.lines} lines`] : [];
 };
 
-export async function downloadProcurementSavings(query: string): Promise<void> {
+/** The PDF is made by the server only, so frontend-only mode offers Excel alone. */
+export const SAVINGS_PDF_AVAILABLE = !FRONTEND_ONLY;
+
+export async function downloadProcurementSavings(query: string, format: 'xlsx' | 'pdf' = 'xlsx'): Promise<void> {
   const params = new URLSearchParams(query);
   const project = params.get('projectNumber');
-  const fallback = `afrinov-procurement-savings${project ? `-${project.replace(/[^A-Za-z0-9-]+/g, '-')}` : ''}-${params.get('from') ?? ''}-to-${params.get('to') ?? ''}.xlsx`;
+  const fallback = `afrinov-procurement-savings${project ? `-${project.replace(/[^A-Za-z0-9-]+/g, '-')}` : ''}-${params.get('from') ?? ''}-to-${params.get('to') ?? ''}.${format}`;
   if (FRONTEND_ONLY) {
+    if (format === 'pdf') throw new Error('The PDF is not available in demo mode. Download Excel instead.');
     triggerDownload(new Blob([await buildInBrowser(query)], { type: XLSX }), fallback);
     return;
   }
   const token = getToken();
+  const type = format === 'pdf' ? 'application/pdf' : XLSX;
   let res: Response;
   try {
-    res = await fetch(`/api/v1/reports/procurement-savings/export?${query}`, {
-      headers: { Accept: XLSX, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    res = await fetch(`/api/v1/reports/procurement-savings/export?${query}${format === 'pdf' ? '&format=pdf' : ''}`, {
+      headers: { Accept: type, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
   } catch {
     throw new Error('Unable to reach the server. Check your connection and try again.');

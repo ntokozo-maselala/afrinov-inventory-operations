@@ -14,7 +14,7 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { StaleDataNotice } from '../components/StaleDataNotice';
-import { downloadProcurementSavings } from '../api/exportProcurementSavings';
+import { downloadProcurementSavings, SAVINGS_PDF_AVAILABLE } from '../api/exportProcurementSavings';
 import type { SavingsPrice, SavingsReport, SavingsRow } from '../api/reportTypes';
 import { formatNumber } from '../lib/format';
 import { formatMoney } from '../lib/poMoney';
@@ -100,7 +100,7 @@ export function ProcurementSavings() {
     : range.from > range.to ? 'The start date is after the end date.'
       : null;
   const project = params.get('projectNumber') ?? '';
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<'xlsx' | 'pdf' | null>(null);
   const toast = useToast();
 
   function setDate(key: 'from' | 'to', value: string) {
@@ -133,14 +133,14 @@ export function ProcurementSavings() {
   const r = report.data;
   const currency = r?.currency ?? 'ZAR';
 
-  async function download() {
-    setDownloading(true);
+  async function download(format: 'xlsx' | 'pdf') {
+    setDownloading(format);
     try {
-      await downloadProcurementSavings(query);
+      await downloadProcurementSavings(query, format);
     } catch (e) {
       toast.error('Download failed', (e as Error).message);
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   }
 
@@ -152,7 +152,14 @@ export function ProcurementSavings() {
       <PageHeader
         title="Procurement savings"
         description="What suppliers quoted Sales and the buyers, and what the order was placed at. Line totals excl. VAT, each side at its lowest, the order before line discounts."
-        actions={<Button variant="secondary" leadingIcon={<Icon.Download size={14} />} loading={downloading} disabled={!!problem || !r} onClick={() => void download()}>Download Excel</Button>}
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            {SAVINGS_PDF_AVAILABLE && (
+              <Button variant="secondary" leadingIcon={<Icon.Download size={14} />} loading={downloading === 'pdf'} disabled={!!problem || !r || downloading !== null} onClick={() => void download('pdf')}>Download PDF</Button>
+            )}
+            <Button variant="secondary" leadingIcon={<Icon.Download size={14} />} loading={downloading === 'xlsx'} disabled={!!problem || !r || downloading !== null} onClick={() => void download('xlsx')}>Download Excel</Button>
+          </div>
+        )}
       />
 
       <FilterBar onClear={project ? () => setProject('') : undefined}>

@@ -354,6 +354,16 @@ describe('Sales requests for quotation over real HTTP', () => {
       expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
     });
 
+    it('downloads as a PDF, and refuses a format it does not make', async () => {
+      const token = await login(server.port, ADMIN_EMAIL, requireAdminPassword());
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/reports/procurement-savings/export?${query}&format=pdf`, { headers: { Authorization: `Bearer ${token}` } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('application/pdf');
+      expect(res.headers.get('content-disposition')).toMatch(new RegExp(`afrinov-procurement-savings-${job}.*\\.pdf`));
+      expect(Buffer.from(await res.arrayBuffer()).subarray(0, 4).toString()).toBe('%PDF');
+      expect((await admin('GET', `/reports/procurement-savings/export?${query}&format=csv`)).status).toBe(400);
+    });
+
     it('is for those who may see Sales prices, not buyers or the store', async () => {
       for (const role of ['PROCUREMENT', 'STORE_CONTROLLER'] as const) {
         const other = await as(role);

@@ -947,8 +947,8 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
   },
   {
-    method: 'get', path: '/reports/procurement-savings/export', tag: 'Reports', summary: 'Download Procurement savings as Excel',
-    description: 'The Procurement savings report, same query, one row per RFQ line with a total row.',
+    method: 'get', path: '/reports/procurement-savings/export', tag: 'Reports', summary: 'Download Procurement savings as Excel or PDF',
+    description: 'The Procurement savings report, same query, one row per RFQ line with a total row. ?format=xlsx (default) or pdf (A4 landscape, with the totals above the table); any other format is refused (400).',
     procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
   },
   {

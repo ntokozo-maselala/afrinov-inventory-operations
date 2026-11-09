@@ -17,9 +17,9 @@ const againstNote = ({ comparedWith: c }: Pick<SavingsRow, 'comparedWith'>) => {
   return parts.length ? [`Sales compared against ${parts.join(' and ')} for ${Number(c.quantity)} ${c.unitOfMeasure} on ${c.lines} lines`] : [];
 };
 
-export function savingsFilename(r: Pick<SavingsReport, 'from' | 'to'>, projectNumber?: string): string {
+export function savingsFilename(r: Pick<SavingsReport, 'from' | 'to'>, projectNumber?: string, extension: 'xlsx' | 'pdf' = 'xlsx'): string {
   const project = projectNumber ? `-${projectNumber.replace(/[^A-Za-z0-9-]+/g, '-')}` : '';
-  return `afrinov-procurement-savings${project}-${r.from}-to-${r.to}.xlsx`;
+  return `afrinov-procurement-savings${project}-${r.from}-to-${r.to}.${extension}`;
 }
 
 export async function buildSavingsXlsx(r: SavingsReport, meta: { scope: string }): Promise<Buffer> {

@@ -10,6 +10,7 @@ import { MonthEndService, type StockReportQuery } from './month-end.service.js';
 import { buildMonthEndXlsx, monthEndFilename } from './month-end-export.js';
 import { ProcurementSavingsService } from './procurement-savings.service.js';
 import { buildSavingsXlsx, savingsFilename } from './procurement-savings-export.js';
+import { buildSavingsPdf } from './procurement-savings-pdf.js';
 import { getStatusBands } from '../../shared/inventory/stock-status.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { requirePermission, userHasPermission } from '../../shared/authorization.js';
@@ -152,12 +153,15 @@ export async function reportingRoutes(app: FastifyInstance, opts: { procurementE
     });
     app.get('/reports/procurement-savings/export', { preHandler: [app.authenticate] }, async (req, reply) => {
       await requirePermission(req, PermissionCode.ViewSalesRfq);
+      const format = ((req.query as Record<string, string | undefined>)['format'] ?? 'xlsx').toLowerCase();
+      if (format !== 'xlsx' && format !== 'pdf') throw Errors.validation('Unsupported export format', { format });
       const q = savingsQuery(req);
       const report = await ProcurementSavingsService.report(q);
-      const buf = await buildSavingsXlsx(report, { scope: q.projectNumber ? `Project ${q.projectNumber}` : 'All projects' });
+      const meta = { scope: q.projectNumber ? `Project ${q.projectNumber}` : 'All projects' };
+      const buf = format === 'pdf' ? await buildSavingsPdf(report, meta) : await buildSavingsXlsx(report, meta);
       return reply
-        .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        .header('Content-Disposition', `attachment; filename="${savingsFilename(report, q.projectNumber)}"`)
+        .header('Content-Type', format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        .header('Content-Disposition', `attachment; filename="${savingsFilename(report, q.projectNumber, format)}"`)
         .header('Content-Length', String(buf.length))
         .header('Cache-Control', 'no-store')
         .send(buf);
