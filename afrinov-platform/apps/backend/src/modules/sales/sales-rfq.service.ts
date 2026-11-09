@@ -19,8 +19,8 @@ import { checkQuantityForUnit, checkUnitOfMeasure } from '../../shared/units.js'
 import { SettingsService } from '../settings/settings.service.js';
 import { cleanText } from '../procurement/supplier-fields.js';
 import {
-  DEFAULT_CLOSING_DAYS, addDays, asDate, askedInOrder, checkClosingDate, checkDay, checkSuppliers, cleanFileName, dayOf, isClosed,
-  nextRfqNumber, openProjectName, person, quoteForLog, rfqActivity, rfqNumberPrefix, todayInSouthAfrica, withQuoteTotals,
+  DEFAULT_CLOSING_DAYS, addDays, asDate, askedInOrder, checkClosingDate, checkDay, checkSuppliers, cleanFileName, dayOf, generateRfqNumber, isClosed,
+  openProjectName, person, quoteForLog, rfqActivity, todayInSouthAfrica, withQuoteTotals,
   type RecordQuoteInput,
 } from '../procurement/rfq.service.js';
 
@@ -68,12 +68,6 @@ async function checkedLines(lines: SalesRfqLineInput[], tx: Prisma.TransactionCl
 
 const linesForLog = (lines: Array<{ description: string; unitOfMeasure: string; quantity: Prisma.Decimal | number }>) =>
   lines.map((l) => ({ description: l.description, unitOfMeasure: l.unitOfMeasure, quantity: String(l.quantity) }));
-
-/** Callers hold the afrinov:sales-rfq-number advisory lock, so two RFQs never get the same number. */
-async function generateNumber(tx: Prisma.TransactionClient, projectNumber: string): Promise<string> {
-  const issued = await tx.salesRfq.findMany({ where: { number: { startsWith: rfqNumberPrefix(projectNumber) } }, select: { number: true } });
-  return nextRfqNumber(projectNumber, issued.map((r) => r.number));
-}
 
 /**
  * The sent RFQ and the supplier asked, held for the change: quotes are recorded
@@ -177,11 +171,11 @@ export const SalesRfqService = {
     const projectNumber = cleanText(input.projectNumber);
     if (!projectNumber) throw Errors.validation('A Sales RFQ is for one project: choose its project.');
     const id = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:sales-rfq-number'))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
       const projectName = await openProjectName(projectNumber, tx);
       const lines = await checkedLines(input.lines, tx);
       const supplierIds = await checkSuppliers(input.supplierIds ?? [], tx);
-      const number = await generateNumber(tx, projectNumber);
+      const number = await generateRfqNumber(tx, projectNumber);
       const rfq = await tx.salesRfq.create({
         data: {
           number,
@@ -223,7 +217,7 @@ export const SalesRfqService = {
   async update(input: UpdateSalesRfqInput, actorId: string) {
     await prisma.$transaction(async (tx) => {
       // The number lock first, then the row, as create takes them.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:sales-rfq-number'))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:rfq-number'))`;
       await tx.$executeRaw`SELECT id FROM sales_rfqs WHERE id = ${input.id} FOR UPDATE`;
       const rfq = await tx.salesRfq.findUnique({ where: { id: input.id }, include: { lines: { orderBy: { lineNo: 'asc' } }, suppliers: true } });
       if (!rfq) throw Errors.notFound('Sales RFQ');
@@ -249,7 +243,7 @@ export const SalesRfqService = {
         if (projectNumber !== rfq.projectNumber) {
           const projectName = await openProjectName(projectNumber, tx);
           change('projectNumber', projectNumber);
-          change('number', await generateNumber(tx, projectNumber));
+          change('number', await generateRfqNumber(tx, projectNumber));
           // A description that was the old project's name follows the project; one Sales wrote stays.
           if (input.description === undefined) {
             const oldName = cleanText((await tx.project.findUnique({ where: { projectNumber: rfq.projectNumber }, select: { name: true } }))?.name);

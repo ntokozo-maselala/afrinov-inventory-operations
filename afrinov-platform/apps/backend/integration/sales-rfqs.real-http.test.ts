@@ -96,12 +96,14 @@ describe('Sales requests for quotation over real HTTP', () => {
     expect(none.status).toBe(400);
   });
 
-  it('numbers apart from Procurement, so both can hold the sheet\'s first number', async () => {
+  it('counts up with Procurement, so a number names one RFQ on the savings report', async () => {
     const material = await admin<{ id: string }>('POST', '/materials', { sku: `IT-SRFQ-${run}`, name: 'Plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'kg', projectNumber: otherProject });
     expect(material.status).toBe(200);
-    const procurement = await admin<{ number: string }>('POST', '/rfqs', { projectNumber: otherProject, lines: [{ materialId: material.body.id, quantity: 1 }] });
-    const sales = await admin<SalesRfq>('POST', '/sales-rfqs', { projectNumber: otherProject, lines });
-    expect(procurement.body.number).toBe(sales.body.number);
+    const procurementRfq = () => admin<{ number: string }>('POST', '/rfqs', { projectNumber: otherProject, lines: [{ materialId: material.body.id, quantity: 1 }] });
+    const prefix = `AFRI-02A-${parseInt(run, 16) + 1}-02-`;
+    expect((await procurementRfq()).body.number).toBe(`${prefix}01`);
+    expect((await admin<SalesRfq>('POST', '/sales-rfqs', { projectNumber: otherProject, lines })).body.number).toBe(`${prefix}02`);
+    expect((await procurementRfq()).body.number).toBe(`${prefix}03`);
   });
 
   it('takes a draft through sending, quotes, a decline and a PDF, with totals excluding and including VAT', async () => {
