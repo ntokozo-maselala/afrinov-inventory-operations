@@ -71,11 +71,23 @@ describe('Stock report page', () => {
   });
 
   it('opens on the dates in the address, and says when stock is as it stands now', async () => {
-    renderPage('/reports/stock-report?from=2026-10-05&to=2026-10-11');
+    renderPage('/reports/stock-report?from=2026-10-05&to=2026-10-09');
     await screen.findByLabelText('Stock report overview');
-    expect(mockGet).toHaveBeenCalledWith('/reports/month-end?from=2026-10-05&to=2026-10-11');
+    expect(mockGet).toHaveBeenCalledWith('/reports/month-end?from=2026-10-05&to=2026-10-09');
     expect(screen.getByLabelText('From')).toHaveValue('2026-10-05');
-    expect(screen.getByText('Stock as it stands now; stock used from 2026-10-05 to 2026-10-11.')).toBeInTheDocument();
+    expect(screen.getByText('Stock as it stands now; stock used from 2026-10-05 to 2026-10-09.')).toBeInTheDocument();
+  });
+
+  // Nothing has happened after today (9 October here), so neither date goes past it.
+  it('stops both dates at today, in an older link and when a later date is typed in', async () => {
+    renderPage('/reports/stock-report?from=2026-10-05&to=2026-10-31');
+    await screen.findByLabelText('Stock report overview');
+    expect(mockGet).toHaveBeenCalledWith('/reports/month-end?from=2026-10-05&to=2026-10-09');
+    expect(screen.getByLabelText('To')).toHaveValue('2026-10-09');
+    expect(screen.getByLabelText('To')).toHaveAttribute('max', '2026-10-09');
+    expect(screen.getByLabelText('From')).toHaveAttribute('max', '2026-10-09');
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-12-01' } });
+    await waitFor(() => expect(mockGet).toHaveBeenLastCalledWith('/reports/month-end?from=2026-10-09&to=2026-10-09'));
   });
 
   it('lets the user choose the dates with From and To, as on Movements', async () => {
@@ -95,7 +107,6 @@ describe('Stock report page', () => {
 
   it.each([
     [{ From: '2026-09-20', To: '2026-09-13' }, 'The start date is after the end date.'],
-    [{ From: '2026-10-10', To: '2026-10-16' }, 'Choose a period that has started.'],
     [{ From: '', To: '2026-09-30' }, 'Choose a start and an end date.'],
   ])('will not ask for %j', async (dates, message) => {
     renderPage();

@@ -6,10 +6,18 @@ export const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1
 /** Today, the default range on Movements. */
 export const today = () => isoDay(new Date());
 
-/** The first and last day of the month `today` is in. */
-export function thisMonth(today = new Date()): { from: string; to: string } {
-  return { from: isoDay(new Date(today.getFullYear(), today.getMonth(), 1)), to: isoDay(new Date(today.getFullYear(), today.getMonth() + 1, 0)) };
+/** This month so far: its first day to today. */
+export function monthToDate(today = new Date()): { from: string; to: string } {
+  return { from: isoDay(new Date(today.getFullYear(), today.getMonth(), 1)), to: isoDay(today) };
 }
+
+/**
+ * A day no later than `limit` (today, on the reports): nothing has happened
+ * after today, so a later day can only add nothing. The date pickers stop at
+ * today; this also catches a later day typed in, which some browsers let past
+ * `max`, or one in an older link. An empty value is left for the page to ask for.
+ */
+export const notAfter = (day: string, limit: string): string => (day && day > limit ? limit : day);
 
 /** The day `n` days before today. */
 export const daysAgo = (n: number) => {

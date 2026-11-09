@@ -23,7 +23,7 @@ const ROW = {
 };
 const UNLINKED = { ...ROW, rfqId: 'r-2', rfqNumber: 'AFRI-02A-1404-02-03', sales: null, order: null, salesVsProcurement: null, procurementVsOrder: null, salesVsOrder: null, notes: ['Not linked to a Sales line'] };
 const REPORT = {
-  from: '2026-11-01', to: '2026-11-30', currency: 'ZAR', rows: [ROW, UNLINKED],
+  from: '2026-10-01', to: '2026-10-31', currency: 'ZAR', rows: [ROW, UNLINKED],
   total: { sales: '2160.00', procurement: '4224.00', order: '2280.00', discount: '228.00', salesVsProcurement: '48.00', procurementVsOrder: '-168.00', salesVsOrder: '-120.00', lines: 2, linked: 1 },
 };
 
@@ -31,7 +31,7 @@ const lastReportCall = () => mockGet.mock.calls.map((c) => String(c[0])).filter(
 function Address() {
   return <output data-testid="address">{useLocation().search}</output>;
 }
-const renderPage = (url = '/reports/procurement-savings?from=2026-11-01&to=2026-11-30') => render(
+const renderPage = (url = '/reports/procurement-savings?from=2026-10-01&to=2026-10-31') => render(
   <MemoryRouter initialEntries={[url]}><ToastProvider><ProcurementSavings /><Address /></ToastProvider></MemoryRouter>,
 );
 
@@ -85,9 +85,9 @@ describe('Procurement savings page', () => {
   it('asks for the period in the address, and for one project once chosen', async () => {
     renderPage();
     await screen.findByRole('table', { name: 'Procurement savings' });
-    expect(lastReportCall()).toBe('/reports/procurement-savings?from=2026-11-01&to=2026-11-30');
+    expect(lastReportCall()).toBe('/reports/procurement-savings?from=2026-10-01&to=2026-10-31');
     fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1404' } });
-    await waitFor(() => expect(lastReportCall()).toBe('/reports/procurement-savings?from=2026-11-01&to=2026-11-30&projectNumber=AFRI-1404'));
+    await waitFor(() => expect(lastReportCall()).toBe('/reports/procurement-savings?from=2026-10-01&to=2026-10-31&projectNumber=AFRI-1404'));
   });
 
   it('keeps the project in the address, so a reload or shared link keeps it (Qodo, PR #159)', async () => {
@@ -95,20 +95,20 @@ describe('Procurement savings page', () => {
     const select = await screen.findByLabelText('Project');
     await screen.findByRole('option', { name: /AFRI-1404/ });
     fireEvent.change(select, { target: { value: 'AFRI-1404' } });
-    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent('?from=2026-11-01&to=2026-11-30&projectNumber=AFRI-1404'));
+    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent('?from=2026-10-01&to=2026-10-31&projectNumber=AFRI-1404'));
     fireEvent.change(select, { target: { value: '' } });
-    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent(/^\?from=2026-11-01&to=2026-11-30$/));
+    await waitFor(() => expect(screen.getByTestId('address')).toHaveTextContent(/^\?from=2026-10-01&to=2026-10-31$/));
   });
 
   it('opens on the project in the address', async () => {
-    renderPage('/reports/procurement-savings?from=2026-11-01&to=2026-11-30&projectNumber=AFRI-1404');
+    renderPage('/reports/procurement-savings?from=2026-10-01&to=2026-10-31&projectNumber=AFRI-1404');
     await screen.findByRole('option', { name: /AFRI-1404/ });
     expect(screen.getByLabelText('Project')).toHaveValue('AFRI-1404');
     await waitFor(() => expect(lastReportCall()).toContain('projectNumber=AFRI-1404'));
   });
 
   it('asks nothing of the server for a period that runs backwards', async () => {
-    renderPage('/reports/procurement-savings?from=2026-11-30&to=2026-11-01');
+    renderPage('/reports/procurement-savings?from=2026-10-31&to=2026-10-01');
     expect(await screen.findByText('The start date is after the end date.')).toBeInTheDocument();
     expect(mockGet.mock.calls.some((c) => String(c[0]).startsWith('/reports/procurement-savings'))).toBe(false);
   });
@@ -124,7 +124,7 @@ describe('Procurement savings page', () => {
     renderPage();
     await screen.findByRole('table', { name: 'Procurement savings' });
     fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('from=2026-11-01&to=2026-11-30'));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('from=2026-10-01&to=2026-10-31'));
     mockDownload.mockRejectedValue(new Error('The file was empty'));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Download Excel' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }));

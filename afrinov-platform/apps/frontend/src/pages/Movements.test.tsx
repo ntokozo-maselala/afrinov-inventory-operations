@@ -127,6 +127,28 @@ describe('Movements page', () => {
     await waitFor(() => expect(listCalls().at(-1)).toBe('/inventory-transactions?from=2026-09-01&to=2026-09-01&limit=100'));
   });
 
+  // Nothing has moved after today, so neither date goes past it.
+  it('stops both dates at today, and takes a later date typed in as today', async () => {
+    const day = todayIso();
+    renderAt('/movements?from=2026-09-01&to=2026-09-30');
+    await screen.findByText('SKU-1');
+    expect(screen.getByLabelText('To')).toHaveAttribute('max', day);
+    expect(screen.getByLabelText('To')).toHaveAttribute('min', '2026-09-01');
+    // From stops at To while To is before today.
+    expect(screen.getByLabelText('From')).toHaveAttribute('max', '2026-09-30');
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2999-01-01' } });
+    await waitFor(() => expect(listCalls().at(-1)).toBe(`/inventory-transactions?from=2026-09-01&to=${day}&limit=100`));
+    expect(screen.getByLabelText('From')).toHaveAttribute('max', day);
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2999-01-01' } });
+    await waitFor(() => expect(listCalls().at(-1)).toBe(`/inventory-transactions?from=${day}&to=${day}&limit=100`));
+  });
+
+  it('stops a single day at today', async () => {
+    renderAt('/movements');
+    await screen.findByText('SKU-1');
+    expect(screen.getByLabelText('Date')).toHaveAttribute('max', todayIso());
+  });
+
   it('sends only the filters the chosen report has', async () => {
     renderAt('/movements?report=writeoffs&from=2026-09-01&to=2026-09-30&locationId=l-1&actorId=u-1&q=disc&supplierId=s-1');
     await screen.findByText('SKU-1');

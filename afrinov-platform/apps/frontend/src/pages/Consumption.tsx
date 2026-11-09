@@ -18,7 +18,7 @@ import { formatCurrency } from '../lib/currency';
 import { downloadConsumption, downloadConsumptionPdf } from '../api/exportConsumption';
 import { NO_PROJECT, NO_RECIPIENT, showsTrackedUse, type ConsumptionItem, type ConsumptionReport } from '../api/reportTypes';
 import { CATEGORIES, categoryLabel } from '../lib/categories';
-import { thisMonth, today as todayIso } from '../lib/dates';
+import { monthToDate, notAfter, today as todayIso } from '../lib/dates';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 
 interface Project { projectNumber: string; name?: string | null }
@@ -27,15 +27,15 @@ interface Recipient { id: string; name: string; type: string; active: boolean }
 const typeLabel = (t: string | null) => (t ? t.charAt(0) + t.slice(1).toLowerCase() : '');
 
 export function Consumption() {
-  // The period lives in the address, as on the Stock report; it opens on this month.
+  // The period lives in the address, as on the Stock report; it opens on this month so far.
   const [params, setParams] = useSearchParams();
   const today = useMemo(() => todayIso(), []);
-  const fallback = useMemo(() => thisMonth(), []);
-  const range = { from: params.get('from') ?? fallback.from, to: params.get('to') ?? fallback.to };
+  const fallback = useMemo(() => monthToDate(), []);
+  // Neither end goes past today, in an older link too: nothing has happened after it.
+  const range = { from: notAfter(params.get('from') ?? fallback.from, today), to: notAfter(params.get('to') ?? fallback.to, today) };
   const problem = !range.from || !range.to ? 'Choose a start and an end date.'
     : range.from > range.to ? 'The start date is after the end date.'
-      : range.from > today ? 'Choose a period that has started.'
-        : null;
+      : null;
   // The Projects and Recipients pages link here with ?projectNumber= or ?recipientId=.
   const [project, setProject] = useState(() => params.get('projectNumber') ?? '');
   const [category, setCategory] = useState(() => params.get('category') ?? '');
@@ -47,7 +47,7 @@ export function Consumption() {
       const next = new URLSearchParams(p);
       next.set('from', range.from);
       next.set('to', range.to);
-      next.set(key, value);
+      next.set(key, notAfter(value, today));
       return next;
     }, { replace: true });
   }
@@ -130,10 +130,10 @@ export function Consumption() {
 
       <FilterBar onClear={project || category || recipient ? () => { setProject(''); setCategory(''); setRecipient(''); } : undefined}>
         <Field label="From" htmlFor="su-from" className={DATE_WIDTH}>
-          <Input id="su-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+          <Input id="su-from" type="date" value={range.from} max={range.to && range.to < today ? range.to : today} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
         </Field>
         <Field label="To" htmlFor="su-to" className={DATE_WIDTH}>
-          <Input id="su-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+          <Input id="su-to" type="date" value={range.to} min={range.from || undefined} max={today} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
         </Field>
         <Field label="Project" htmlFor="su-project" className="w-full sm:w-72">
           <Select id="su-project" value={project} onChange={(e) => setProject(e.target.value)}>

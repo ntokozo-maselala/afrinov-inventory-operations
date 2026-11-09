@@ -32,7 +32,7 @@ import {
 } from '../api/exportReports';
 import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
-import { today } from '../lib/dates';
+import { notAfter, today } from '../lib/dates';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
 
@@ -198,12 +198,12 @@ export function Movements() {
           </Field>
           <div className="flex flex-wrap items-end gap-2">
             <Field label={ranged ? 'From' : 'Date'} htmlFor="movements-from">
-              <Input id="movements-from" type="date" className="sm:w-44" value={from} max={ranged ? to : undefined} onChange={(e) => setParam('from', e.target.value || day)} invalid={badRange} />
+              <Input id="movements-from" type="date" className="sm:w-44" value={from} max={ranged && to < day ? to : day} onChange={(e) => setParam('from', notAfter(e.target.value || day, day))} invalid={badRange} />
             </Field>
             {ranged ? (
               <>
                 <Field label="To" htmlFor="movements-to">
-                  <Input id="movements-to" type="date" className="sm:w-44" value={to} min={from} onChange={(e) => setParam('to', e.target.value || from)} invalid={badRange} />
+                  <Input id="movements-to" type="date" className="sm:w-44" value={to} min={from} max={day} onChange={(e) => setParam('to', notAfter(e.target.value || from, day))} invalid={badRange} />
                 </Field>
                 <Button variant="ghost" size="sm" onClick={() => setParam('to', null)}>Single day</Button>
               </>

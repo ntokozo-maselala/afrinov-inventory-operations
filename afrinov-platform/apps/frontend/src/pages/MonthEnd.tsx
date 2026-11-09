@@ -11,6 +11,7 @@ import { FilterBar, DATE_WIDTH } from '../components/FilterBar';
 import { ErrorState } from '../components/EmptyState';
 import { DownloadMenu } from '../components/DownloadMenu';
 import { formatNumber } from '../lib/format';
+import { notAfter } from '../lib/dates';
 import { formatCurrency } from '../lib/currency';
 import { downloadMonthEnd, downloadMonthEndPdf } from '../api/exportMonthEnd';
 import { heldProjects as projectsHeld } from '../api/reportTypes';
@@ -45,11 +46,11 @@ export function MonthEnd() {
   const [params, setParams] = useSearchParams();
   const today = useMemo(() => iso(new Date()), []);
   const fallback = useMemo(() => lastMonth(), []);
-  const range = { from: params.get('from') ?? fallback.from, to: params.get('to') ?? fallback.to };
+  // Neither end goes past today, in an older link too: nothing has happened after it.
+  const range = { from: notAfter(params.get('from') ?? fallback.from, today), to: notAfter(params.get('to') ?? fallback.to, today) };
   const problem = !range.from || !range.to ? 'Choose a start and an end date.'
     : range.from > range.to ? 'The start date is after the end date.'
-      : range.from > today ? 'Choose a period that has started.'
-        : null;
+      : null;
   const report = useApi<MonthEndReport>(problem ? null : `/reports/month-end?from=${range.from}&to=${range.to}`);
 
   /** Set one end of the period, keeping the other where it is. */
@@ -58,7 +59,7 @@ export function MonthEnd() {
       const next = new URLSearchParams(p);
       next.set('from', range.from);
       next.set('to', range.to);
-      next.set(key, value);
+      next.set(key, notAfter(value, today));
       return next;
     }, { replace: true });
   }
@@ -85,10 +86,10 @@ export function MonthEnd() {
           : `Stock as at the end of ${range.to}; stock used from ${range.from} to ${range.to}.`}
       >
         <Field label="From" htmlFor="me-from" className={DATE_WIDTH}>
-          <Input id="me-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+          <Input id="me-from" type="date" value={range.from} max={range.to && range.to < today ? range.to : today} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
         </Field>
         <Field label="To" htmlFor="me-to" className={DATE_WIDTH}>
-          <Input id="me-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+          <Input id="me-to" type="date" value={range.to} min={range.from || undefined} max={today} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
         </Field>
       </FilterBar>
 
