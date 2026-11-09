@@ -365,6 +365,8 @@ export interface StepOrder {
   expectedDelivery: string | null;
   lastReceivedOn: string | null;
   overdue: boolean;
+  /** Closed with lines not fully received. */
+  closedShort: boolean;
 }
 
 export interface StepProcurement {
@@ -376,6 +378,8 @@ export interface StepProcurement {
     overdue: number;
     notPlaced: number;
     allReceived: boolean;
+    /** Orders closed short: counted as done, but not everything came. */
+    closedShort: number;
     lastReceivedOn: string | null;
     latestExpected: string | null;
   };

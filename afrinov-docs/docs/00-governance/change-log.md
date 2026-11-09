@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-09 | `13-project-management/roadmaps/project-tracking-roadmap.md` | The Procurement step no longer says "All delivered" when an order was closed short: it says nothing more is coming, flags the order and warns that part of it never came (D-43) | Engineering |
 | 2026-11-09 | `09-frontend/page-inventory.md` | Procurement savings downloads as a PDF too, A4 landscape with the totals above the table | Engineering |
 | 2026-11-09 | `07-data/database-schema.md` | Sales and Procurement RFQs share one number sequence per project, so a number names one RFQ on the Procurement savings report; numbers already on both are left as they are | Engineering |
 | 2026-11-07 | `00-governance/decision-log.md`, `03-domain/business-transactions.md`, `03-domain/entity-catalog.md`, `07-data/audit-model.md`, `07-data/database-schema.md`, `08-api/resource-model.md`, `09-frontend/page-inventory.md` | The item status decision, lost when two records both took ADR-032, restored as ADR-033; its references renumbered. Job tracking keeps ADR-032. | Engineering |

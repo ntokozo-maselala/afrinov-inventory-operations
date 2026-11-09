@@ -21,14 +21,25 @@ export function procurementWarnings(p: StepProcurement, stepEnd: string | null):
   if (stepEnd && p.summary.latestExpected && p.summary.latestExpected > stepEnd) {
     out.push(`Material is expected ${formatDay(p.summary.latestExpected)}, after this step is expected to end (${formatDay(stepEnd)}).`);
   }
+  if (p.summary.closedShort > 0) {
+    const n = p.summary.closedShort;
+    out.push(`${n} order${n === 1 ? ' was' : 's were'} closed short: part of what ${n === 1 ? 'it' : 'they'} ordered never came. Check whether it is still needed before marking this step done.`);
+  }
   if (p.summary.notPlaced > 0) out.push(`${p.summary.notPlaced} order${p.summary.notPlaced === 1 ? ' is' : 's are'} not placed yet (draft or waiting to be signed).`);
   return out;
 }
 
-/** "3 orders · 1 owing", "All delivered, last 9 Mar 2026", or "No orders yet". */
+/**
+ * "3 orders · 1 owing", "All delivered, last 9 Mar 2026", or "No orders yet". When an order
+ * was closed short nothing more is coming, but not everything came, so it never says "All delivered".
+ */
 export function procurementSummary(p: StepProcurement): string {
   const s = p.summary;
   if (s.orders === 0) return 'No orders yet';
+  if (s.allReceived && s.closedShort > 0) {
+    const short = `${s.closedShort} closed short`;
+    return s.lastReceivedOn ? `Nothing more coming (${short}), last delivery ${formatDay(s.lastReceivedOn)}` : `Nothing more coming (${short})`;
+  }
   if (s.allReceived) return s.lastReceivedOn ? `All delivered, last ${formatDay(s.lastReceivedOn)}` : 'All delivered';
   return `${s.orders} order${s.orders === 1 ? '' : 's'} · ${s.owing} owing`;
 }
@@ -45,7 +56,7 @@ export function ProcurementStepNote({ procurement: p, stepEnd, onOpen, onMarkDon
   return (
     <div className="mt-1 text-xs space-y-0.5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={p.summary.allReceived ? 'text-success-700' : 'text-surface-600'}>{procurementSummary(p)}</span>
+        <span className={!p.summary.allReceived ? 'text-surface-600' : p.summary.closedShort > 0 ? 'text-warning-700' : 'text-success-700'}>{procurementSummary(p)}</span>
         {p.summary.orders > 0 && <button type="button" className="btn-link text-xs" onClick={onOpen}>Orders</button>}
         {onMarkDone && <button type="button" className="btn-link text-xs" onClick={onMarkDone}>Mark this step done</button>}
       </div>
@@ -89,7 +100,7 @@ export function ProcurementOrdersDialog({ procurement: p, canOpenOrders, onClose
                   {formatDay(o.expectedDelivery)}
                   {o.overdue && <> <Badge tone="danger">Overdue</Badge></>}
                 </td>
-                <td className="py-2 pr-2 text-num">{o.linesOwed === 0 ? '—' : `${o.linesOwed} of ${o.lines} line${o.lines === 1 ? '' : 's'}`}</td>
+                <td className="py-2 pr-2 text-num">{o.closedShort ? <Badge tone="warning">Closed short</Badge> : o.linesOwed === 0 ? '—' : `${o.linesOwed} of ${o.lines} line${o.lines === 1 ? '' : 's'}`}</td>
                 <td className="py-2 whitespace-nowrap">{formatDay(o.lastReceivedOn)}</td>
               </tr>
             ))}
