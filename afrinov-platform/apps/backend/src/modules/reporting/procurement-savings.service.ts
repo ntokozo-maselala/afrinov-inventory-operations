@@ -79,6 +79,11 @@ export interface SavingsRow {
   salesVsProcurement: string | null;
   procurementVsOrder: string | null;
   salesVsOrder: string | null;
+  /**
+   * On the first row of a Sales line other lines share, when it is compared:
+   * what the Sales price was set against, all of those lines together.
+   */
+  comparedWith: { lines: number; quantity: string; unitOfMeasure: string; procurement: string | null; order: string | null } | null;
   /** Why a figure is blank or left out, in words. */
   notes: string[];
 }
@@ -199,6 +204,7 @@ export function buildSavingsReport(rfqs: SavingsRfq[], others: SavingsRfq[], ran
     let sales: SavingsRow['sales'] = null;
     let salesVsProcurement: string | null = null;
     let salesVsOrder: string | null = null;
+    let comparedWith: SavingsRow['comparedWith'] = null;
     const asked = line.salesRfqLine;
     if (!asked) {
       notes.push('Not linked to a Sales line');
@@ -220,19 +226,31 @@ export function buildSavingsReport(rfqs: SavingsRfq[], others: SavingsRfq[], ran
       else if (!matches) notes.push(`Sales asked for ${qtyLabel(asked.quantity, asked.unitOfMeasure)}, so it is not compared: the lines linked to it come to ${units ? qtyLabel(group.reduce((sum, l) => sum.plus(l.quantity), D(0)), asked.unitOfMeasure) : 'a different unit'}`);
       else if (quoted.foreignOnly) notes.push('Sales quotes are not in rand, so they are not compared');
       else if (!quoted.lowest) notes.push('No Sales quote recorded yet');
-      if (group.length > 1) notes.push(`Shares its Sales line with ${group.length - 1} other line${group.length === 2 ? '' : 's'}: compared together${first ? ' here' : ', on the first of them'}`);
+      // Only a comparison that is made is said to be made together.
+      const compared = !cancelled && matches && !!quoted.lowest;
+      if (group.length > 1) notes.push(`Shares its Sales line with ${group.length - 1} other line${group.length === 2 ? '' : 's'}${compared ? `: compared together${first ? ' here' : ', on the first of them'}` : ''}`);
 
-      if (!cancelled && matches && quoted.lowest && first) {
+      if (compared && quoted.lowest && first) {
         totals.sales.push(quoted.lowest);
+        let procurementTogether: string | null = null;
+        let orderTogether: string | null = null;
         const lows = group.map((l) => worked.get(l.id)!.procurement.lowest);
         if (lows.every((v): v is string => v !== null)) {
-          salesVsProcurement = D(quoted.lowest).minus(add(lows)).toFixed(2);
+          procurementTogether = add(lows).toFixed(2);
+          salesVsProcurement = D(quoted.lowest).minus(procurementTogether).toFixed(2);
           totals.salesVsProcurement.push(salesVsProcurement);
         }
         const placed = group.map((l) => worked.get(l.id)!.comparable);
         if (placed.every((v): v is string => v !== null)) {
-          salesVsOrder = D(quoted.lowest).minus(add(placed)).toFixed(2);
+          orderTogether = add(placed).toFixed(2);
+          salesVsOrder = D(quoted.lowest).minus(orderTogether).toFixed(2);
           totals.salesVsOrder.push(salesVsOrder);
+        }
+        if (group.length > 1) {
+          comparedWith = {
+            lines: group.length, quantity: asked.quantity.toString(), unitOfMeasure: asked.unitOfMeasure,
+            procurement: procurementTogether, order: orderTogether,
+          };
         }
       }
     }
@@ -248,7 +266,7 @@ export function buildSavingsReport(rfqs: SavingsRfq[], others: SavingsRfq[], ran
       rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.project?.name ?? null,
       lineNo: line.lineNo, sku: line.material.sku, material: line.material.name, unitOfMeasure: line.material.unitOfMeasure, quantity: line.quantity.toString(),
       sales, procurement: { prices: own.procurement.prices, lowest: procurementLow }, order: own.order,
-      salesVsProcurement, procurementVsOrder, salesVsOrder, notes,
+      salesVsProcurement, procurementVsOrder, salesVsOrder, comparedWith, notes,
     };
   }));
 

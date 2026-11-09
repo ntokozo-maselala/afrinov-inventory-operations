@@ -3,9 +3,16 @@
 // sheet here from the mock report.
 import { api, FRONTEND_ONLY, getToken } from './client';
 import { errorMessage, filenameFromDisposition, triggerDownload } from './exportReport';
-import type { SavingsPrice, SavingsReport } from './reportTypes';
+import type { SavingsPrice, SavingsReport, SavingsRow } from './reportTypes';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/** What a shared Sales line's price was set against, for the Notes column. */
+const againstNote = ({ comparedWith: c }: Pick<SavingsRow, 'comparedWith'>) => {
+  if (!c) return [];
+  const parts = [c.procurement && `Procurement ${Number(c.procurement).toFixed(2)}`, c.order && `orders ${Number(c.order).toFixed(2)}`].filter(Boolean);
+  return parts.length ? [`Sales compared against ${parts.join(' and ')} for ${Number(c.quantity)} ${c.unitOfMeasure} on ${c.lines} lines`] : [];
+};
 
 export async function downloadProcurementSavings(query: string): Promise<void> {
   const params = new URLSearchParams(query);
@@ -48,7 +55,7 @@ async function buildInBrowser(query: string): Promise<ArrayBuffer> {
     ws.addRow([
       row.projectNumber ?? '', row.rfqNumber, row.sales ? `${row.sales.rfqNumber} line ${row.sales.lineNo}` : '', `${row.sku} ${row.material}`, row.unitOfMeasure, Number(row.quantity),
       list(row.sales?.prices), n(row.sales?.lowest), list(row.procurement.prices), n(row.procurement.lowest),
-      row.order?.number ?? '', n(row.order?.lineTotal), n(row.order?.discount), n(row.salesVsProcurement), n(row.procurementVsOrder), n(row.salesVsOrder), row.notes.join('\n'),
+      row.order?.number ?? '', n(row.order?.lineTotal), n(row.order?.discount), n(row.salesVsProcurement), n(row.procurementVsOrder), n(row.salesVsOrder), [...row.notes, ...againstNote(row)].join('\n'),
     ]);
   }
   if (r.rows.length === 0) ws.addRow(['No Procurement RFQ was sent for this selection in this period.']);

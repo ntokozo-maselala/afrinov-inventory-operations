@@ -1,7 +1,7 @@
 // The Procurement savings report as Excel: one row for each RFQ line, each
 // supplier's price in its cell, and a total row.
 import ExcelJS from 'exceljs';
-import type { SavingsPrice, SavingsReport } from './procurement-savings.service.js';
+import type { SavingsPrice, SavingsReport, SavingsRow } from './procurement-savings.service.js';
 
 const QTY = '#,##0.####';
 const MONEY = '#,##0.00;[Red]-#,##0.00';
@@ -9,6 +9,13 @@ const MONEY = '#,##0.00;[Red]-#,##0.00';
 const priceList = (prices: SavingsPrice[] | undefined) =>
   (prices ?? []).map((p) => `${p.supplier}: ${p.currency} ${Number(p.lineTotal).toFixed(2)}`).join('\n');
 const amount = (value: string | null | undefined) => (value === null || value === undefined ? null : Number(value));
+
+/** What a shared Sales line's price was set against, for the Notes column. */
+const againstNote = ({ comparedWith: c }: Pick<SavingsRow, 'comparedWith'>) => {
+  if (!c) return [];
+  const parts = [c.procurement && `Procurement ${Number(c.procurement).toFixed(2)}`, c.order && `orders ${Number(c.order).toFixed(2)}`].filter(Boolean);
+  return parts.length ? [`Sales compared against ${parts.join(' and ')} for ${Number(c.quantity)} ${c.unitOfMeasure} on ${c.lines} lines`] : [];
+};
 
 export function savingsFilename(r: Pick<SavingsReport, 'from' | 'to'>, projectNumber?: string): string {
   const project = projectNumber ? `-${projectNumber.replace(/[^A-Za-z0-9-]+/g, '-')}` : '';
@@ -48,7 +55,7 @@ export async function buildSavingsXlsx(r: SavingsReport, meta: { scope: string }
       salesPrices: priceList(row.sales?.prices), salesLowest: amount(row.sales?.lowest), procurementPrices: priceList(row.procurement.prices), procurementLowest: amount(row.procurement.lowest),
       orderNo: row.order?.number ?? '', order: amount(row.order?.lineTotal), discount: amount(row.order?.discount),
       salesVsProcurement: amount(row.salesVsProcurement), procurementVsOrder: amount(row.procurementVsOrder), salesVsOrder: amount(row.salesVsOrder),
-      notes: row.notes.join('\n'),
+      notes: [...row.notes, ...againstNote(row)].join('\n'),
     });
     added.alignment = { wrapText: true, vertical: 'top' };
     added.getCell('qty').numFmt = QTY;

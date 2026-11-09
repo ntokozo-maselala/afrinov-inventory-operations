@@ -253,10 +253,18 @@ export function nextRfqNumber(projectNumber: string | null | undefined, issued: 
   return `${prefix}${String(highest + 1).padStart(projectNumber ? 2 : 4, '0')}`;
 }
 
-/** Callers hold the afrinov:rfq-number advisory lock, so two RFQs never get the same number. */
-async function generateRfqNumber(tx: Prisma.TransactionClient, projectNumber: string | null): Promise<string> {
-  const issued = await tx.rfq.findMany({ where: { number: { startsWith: rfqNumberPrefix(projectNumber) } }, select: { number: true } });
-  return nextRfqNumber(projectNumber, issued.map((r) => r.number));
+/**
+ * Procurement and Sales RFQs count up together for a project, so a number names
+ * one RFQ wherever it appears (the savings report shows both). Callers hold the
+ * afrinov:rfq-number advisory lock, so two RFQs never get the same number.
+ */
+export async function generateRfqNumber(tx: Prisma.TransactionClient, projectNumber: string | null): Promise<string> {
+  const where = { number: { startsWith: rfqNumberPrefix(projectNumber) } };
+  const [procurement, sales] = await Promise.all([
+    tx.rfq.findMany({ where, select: { number: true } }),
+    tx.salesRfq.findMany({ where, select: { number: true } }),
+  ]);
+  return nextRfqNumber(projectNumber, [...procurement, ...sales].map((r) => r.number));
 }
 
 /**

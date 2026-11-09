@@ -41,7 +41,23 @@ function Prices({ prices, lowest }: { prices: SavingsPrice[]; lowest: string | n
 
 function Difference({ value, currency }: { value: string | null; currency: string }) {
   if (value === null) return dash;
-  return <span className={`font-mono ${Number(value) < 0 ? 'text-danger-700' : ''}`}>{formatMoney(value, currency)}</span>;
+  // On one line, so a minus sign is never left on its own above the amount.
+  return <span className={`font-mono whitespace-nowrap ${Number(value) < 0 ? 'text-danger-700' : ''}`}>{formatMoney(value, currency)}</span>;
+}
+
+/** A Sales difference, with what it was set against where other lines share the Sales line. */
+function SalesDifference({ value, against, row, currency }: { value: string | null; against: string | null | undefined; row: SavingsRow; currency: string }) {
+  const shared = row.comparedWith;
+  return (
+    <>
+      <Difference value={value} currency={currency} />
+      {shared && against && value !== null && (
+        <div className="text-meta whitespace-nowrap">
+          Against {formatMoney(against, currency)} for {formatNumber(Number(shared.quantity))} {shared.unitOfMeasure} on {shared.lines} lines
+        </div>
+      )}
+    </>
+  );
 }
 
 function columns(currency: string): DataTableColumn<SavingsRow>[] {
@@ -67,9 +83,9 @@ function columns(currency: string): DataTableColumn<SavingsRow>[] {
       ? <div className="whitespace-nowrap"><span className="font-mono">{formatMoney(r.order.lineTotal, r.order.currency)}</span><div className="text-meta">{r.order.supplier}</div></div>
       : dash) },
     { key: 'discount', header: 'Line discount', align: 'right', render: (r) => (r.order?.discount && Number(r.order.discount) > 0 ? <span className="font-mono">{formatMoney(r.order.discount, r.order.currency)}</span> : dash) },
-    { key: 'salesVsProcurement', header: 'Sales vs Procurement', align: 'right', render: (r) => <Difference value={r.salesVsProcurement} currency={currency} /> },
+    { key: 'salesVsProcurement', header: 'Sales vs Procurement', align: 'right', render: (r) => <SalesDifference value={r.salesVsProcurement} against={r.comparedWith?.procurement} row={r} currency={currency} /> },
     { key: 'procurementVsOrder', header: 'Procurement vs PO', align: 'right', render: (r) => <Difference value={r.procurementVsOrder} currency={currency} /> },
-    { key: 'salesVsOrder', header: 'Sales vs PO', align: 'right', render: (r) => <Difference value={r.salesVsOrder} currency={currency} /> },
+    { key: 'salesVsOrder', header: 'Sales vs PO', align: 'right', render: (r) => <SalesDifference value={r.salesVsOrder} against={r.comparedWith?.order} row={r} currency={currency} /> },
   ];
 }
 

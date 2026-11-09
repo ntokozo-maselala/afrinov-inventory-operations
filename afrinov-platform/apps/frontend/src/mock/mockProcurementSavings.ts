@@ -105,6 +105,7 @@ export function computeProcurementSavings(q: { from: string; to: string; project
     let sales: SavingsRow['sales'] = null;
     let salesVsProcurement: string | null = null;
     let salesVsOrder: string | null = null;
+    let comparedWith: SavingsRow['comparedWith'] = null;
     const salesRfq = data.salesRfqs.find((s) => s.lines.some((l) => l.id === line.salesRfqLineId));
     const asked = salesRfq?.lines.find((l) => l.id === line.salesRfqLineId);
     if (!salesRfq || !asked) {
@@ -128,18 +129,29 @@ export function computeProcurementSavings(q: { from: string; to: string; project
       else if (!matches) notes.push(`Sales asked for ${label}, so it is not compared: the lines linked to it come to ${units ? `${qty(together)} ${asked.unitOfMeasure}` : 'a different unit'}`);
       else if (quoted.foreignOnly) notes.push('Sales quotes are not in rand, so they are not compared');
       else if (!quoted.lowest) notes.push('No Sales quote recorded yet');
-      if (group.length > 1) notes.push(`Shares its Sales line with ${group.length - 1} other line${group.length === 2 ? '' : 's'}: compared together${first ? ' here' : ', on the first of them'}`);
-      if (!cancelled && matches && quoted.lowest && first) {
+      const compared = !cancelled && matches && !!quoted.lowest;
+      if (group.length > 1) notes.push(`Shares its Sales line with ${group.length - 1} other line${group.length === 2 ? '' : 's'}${compared ? `: compared together${first ? ' here' : ', on the first of them'}` : ''}`);
+      if (compared && quoted.lowest && first) {
         totals.sales.push(quoted.lowest);
+        let procurementTogether: string | null = null;
+        let orderTogether: string | null = null;
         const lows = group.map((l) => worked.get(l.id)!.procurement.lowest);
         if (lows.every((v): v is string => v !== null)) {
+          procurementTogether = money(addUp(lows));
           salesVsProcurement = money(Number(quoted.lowest) - addUp(lows));
           totals.salesVsProcurement.push(salesVsProcurement);
         }
         const placed = group.map((l) => worked.get(l.id)!.comparable);
         if (placed.every((v): v is string => v !== null)) {
+          orderTogether = money(addUp(placed));
           salesVsOrder = money(Number(quoted.lowest) - addUp(placed));
           totals.salesVsOrder.push(salesVsOrder);
+        }
+        if (group.length > 1) {
+          comparedWith = {
+            lines: group.length, quantity: qty(asked.quantity), unitOfMeasure: asked.unitOfMeasure ?? '',
+            procurement: procurementTogether, order: orderTogether,
+          };
         }
       }
     }
@@ -151,7 +163,7 @@ export function computeProcurementSavings(q: { from: string; to: string; project
     return {
       rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.projectNumber ? data.projectName(rfq.projectNumber) ?? null : null,
       lineNo: line.lineNo, sku: material?.sku ?? line.materialId, material: material?.name ?? line.materialId, unitOfMeasure: material?.unitOfMeasure ?? '', quantity: qty(line.quantity),
-      sales, procurement: { prices: own.procurement.prices, lowest: low }, order: own.order, salesVsProcurement, procurementVsOrder, salesVsOrder, notes,
+      sales, procurement: { prices: own.procurement.prices, lowest: low }, order: own.order, salesVsProcurement, procurementVsOrder, salesVsOrder, comparedWith, notes,
     };
   }));
 
