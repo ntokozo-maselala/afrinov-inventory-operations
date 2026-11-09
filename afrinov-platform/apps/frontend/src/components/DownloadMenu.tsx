@@ -13,10 +13,12 @@ const FORMATS: Array<{ format: DownloadFormat; label: string }> = [
   { format: 'pdf', label: 'PDF (.pdf)' },
 ];
 
-export function DownloadMenu({ label = 'Download', onDownload, disabled }: {
+export function DownloadMenu({ label = 'Download', onDownload, disabled, formats = ['xlsx', 'pdf'] }: {
   label?: string;
   onDownload: (format: DownloadFormat) => Promise<void>;
   disabled?: boolean;
+  /** The files on offer, where a report can't make both. */
+  formats?: DownloadFormat[];
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,7 +64,7 @@ export function DownloadMenu({ label = 'Download', onDownload, disabled }: {
       </Button>
       {open && (
         <div role="menu" aria-label={label} className="absolute right-0 z-30 mt-1 min-w-full w-max rounded border border-surface-200 bg-surface-0 shadow-lg py-1">
-          {FORMATS.map((f) => (
+          {FORMATS.filter((f) => formats.includes(f.format)).map((f) => (
             <button
               key={f.format}
               type="button"

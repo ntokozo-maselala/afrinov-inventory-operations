@@ -2,16 +2,14 @@
 // suppliers quoted Sales, what they quoted the buyers, and what the order was
 // placed at (GET /reports/procurement-savings). The server works out every
 // figure; what can't be compared comes back blank, with a note saying why.
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { PageHeader } from '../components/PageHeader';
 import { FilterBar, DATE_WIDTH } from '../components/FilterBar';
 import { Field, Input, Select } from '../components/Field';
 import { DataTable, type DataTableColumn } from '../components/DataTable';
-import { Button } from '../components/Button';
-import { Icon } from '../components/Icon';
-import { useToast } from '../components/Toast';
+import { DownloadMenu } from '../components/DownloadMenu';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { downloadProcurementSavings, SAVINGS_PDF_AVAILABLE } from '../api/exportProcurementSavings';
@@ -100,8 +98,6 @@ export function ProcurementSavings() {
     : range.from > range.to ? 'The start date is after the end date.'
       : null;
   const project = params.get('projectNumber') ?? '';
-  const [downloading, setDownloading] = useState<'xlsx' | 'pdf' | null>(null);
-  const toast = useToast();
 
   function setDate(key: 'from' | 'to', value: string) {
     setParams((p) => {
@@ -133,17 +129,6 @@ export function ProcurementSavings() {
   const r = report.data;
   const currency = r?.currency ?? 'ZAR';
 
-  async function download(format: 'xlsx' | 'pdf') {
-    setDownloading(format);
-    try {
-      await downloadProcurementSavings(query, format);
-    } catch (e) {
-      toast.error('Download failed', (e as Error).message);
-    } finally {
-      setDownloading(null);
-    }
-  }
-
   const total = r?.total;
   const money = (value: string | undefined) => <span className="font-mono">{formatMoney(value ?? '0', currency)}</span>;
 
@@ -153,12 +138,12 @@ export function ProcurementSavings() {
         title="Procurement savings"
         description="What suppliers quoted Sales and the buyers, and what the order was placed at. Line totals excl. VAT, each side at its lowest, the order before line discounts."
         actions={(
-          <div className="flex flex-wrap gap-2">
-            {SAVINGS_PDF_AVAILABLE && (
-              <Button variant="secondary" leadingIcon={<Icon.Download size={14} />} loading={downloading === 'pdf'} disabled={!!problem || !r || downloading !== null} onClick={() => void download('pdf')}>Download PDF</Button>
-            )}
-            <Button variant="secondary" leadingIcon={<Icon.Download size={14} />} loading={downloading === 'xlsx'} disabled={!!problem || !r || downloading !== null} onClick={() => void download('xlsx')}>Download Excel</Button>
-          </div>
+          <DownloadMenu
+            label="Download savings report"
+            onDownload={(format) => downloadProcurementSavings(query, format)}
+            formats={SAVINGS_PDF_AVAILABLE ? ['xlsx', 'pdf'] : ['xlsx']}
+            disabled={!!problem || !r}
+          />
         )}
       />
 
