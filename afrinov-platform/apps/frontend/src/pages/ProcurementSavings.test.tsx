@@ -19,7 +19,7 @@ const ROW = {
   sales: { rfqNumber: 'AFRI-02A-1404-02-01', lineNo: 1, description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: '24', cancelled: false, prices: [price('Fasteners', '2160.00'), price('Local Steel', '2400.00')], lowest: '2160.00' },
   procurement: { prices: [price('EMV', '2280.00'), price('Macsteel', '2112.00')], lowest: '2112.00' },
   order: { number: 'PO-1', status: 'APPROVED', supplier: 'EMV', currency: 'ZAR', quantity: '24', unitPrice: '95', lineTotal: '2280.00', discountPercent: '10', discount: '228.00' },
-  salesVsProcurement: '48.00', procurementVsOrder: '-168.00', salesVsOrder: '-120.00', notes: [],
+  salesVsProcurement: '48.00', procurementVsOrder: '-168.00', salesVsOrder: '-120.00', comparedWith: null, notes: [],
 };
 const UNLINKED = { ...ROW, rfqId: 'r-2', rfqNumber: 'AFRI-02A-1404-02-03', sales: null, order: null, salesVsProcurement: null, procurementVsOrder: null, salesVsOrder: null, notes: ['Not linked to a Sales line'] };
 const REPORT = {
@@ -59,6 +59,27 @@ describe('Procurement savings page', () => {
     const row = within(table).getByRole('link', { name: 'AFRI-02A-1404-02-02' }).closest('tr')!;
     expect(within(row).getByText(/Macsteel/).closest('li')).toHaveClass('font-semibold');
     expect(within(row).getAllByText(/EMV/).find((e) => e.tagName === 'LI')).not.toHaveClass('font-semibold');
+  });
+
+  it('says what a shared Sales line was set against, under each Sales difference', async () => {
+    const shared = {
+      ...ROW, salesVsProcurement: '-2610.00', salesVsOrder: '-3430.00',
+      comparedWith: { lines: 2, quantity: '62', unitOfMeasure: 'm', procurement: '7880.00', order: '8700.00' },
+    };
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/projects') ? [] : { ...REPORT, rows: [shared] }));
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Procurement savings' });
+    const row = within(table).getByRole('link', { name: 'AFRI-02A-1404-02-02' }).closest('tr')!;
+    expect(within(row).getByText(/Against .*7.880.* for 62 m on 2 lines/)).toBeInTheDocument();
+    expect(within(row).getByText(/Against .*8.700.* for 62 m on 2 lines/)).toBeInTheDocument();
+    // The minus stays with its amount.
+    expect(within(row).getByText(/2.610/)).toHaveClass('whitespace-nowrap');
+  });
+
+  it('adds nothing under the differences of a line with its own Sales line', async () => {
+    renderPage();
+    await screen.findByRole('table', { name: 'Procurement savings' });
+    expect(screen.queryByText(/^Against /)).not.toBeInTheDocument();
   });
 
   it('keeps an unlinked line, saying so', async () => {

@@ -109,7 +109,22 @@ describe('Procurement savings report', () => {
     expect(r.rows[0]).toMatchObject({ salesVsProcurement: '160.00', salesVsOrder: '160.00' });
     expect(r.rows[1]).toMatchObject({ salesVsProcurement: null, salesVsOrder: null });
     expect(r.rows[1]!.notes[0]).toMatch(/on the first of them/);
+    // What Sales was set against, on the row that shows the comparison only.
+    expect(r.rows[0]!.comparedWith).toEqual({ lines: 2, quantity: '24', unitOfMeasure: r.rows[0]!.sales!.unitOfMeasure, procurement: '2000.00', order: '2000.00' });
+    expect(r.rows[1]!.comparedWith).toBeNull();
     expect(r.total).toMatchObject({ sales: '2160.00', procurement: '2000.00', salesVsProcurement: '160.00', salesVsOrder: '160.00', linked: 2 });
+  });
+
+  it('does not say lines sharing a Sales line are compared together when they are not', () => {
+    const a = line({ quantity: D(20), prices: [quote('EMV', 80)] });
+    const b = line({ id: 'l-2', lineNo: 2, materialId: 'm-2', quantity: D(10), prices: [quote('EMV', 100)] });
+    const r = build([rfq([a, b])]);
+    for (const row of r.rows) {
+      expect(row.salesVsProcurement).toBeNull();
+      expect(row.notes).toContain('Shares its Sales line with 1 other line');
+      expect(row.notes.join(' ')).not.toMatch(/compared together/);
+      expect(row.comparedWith).toBeNull();
+    }
   });
 
   it('counts a line sharing the Sales line on an RFQ outside the selection', () => {

@@ -255,6 +255,11 @@ export interface SavingsRow {
   salesVsProcurement: string | null;
   procurementVsOrder: string | null;
   salesVsOrder: string | null;
+  /**
+   * On the first row of a Sales line other lines share, when it is compared:
+   * what the Sales price was set against, all of those lines together.
+   */
+  comparedWith: { lines: number; quantity: string; unitOfMeasure: string; procurement: string | null; order: string | null } | null;
   /** Why a figure is blank or left out, in words. */
   notes: string[];
 }
