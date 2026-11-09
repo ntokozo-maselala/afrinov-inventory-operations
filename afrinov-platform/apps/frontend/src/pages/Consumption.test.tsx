@@ -93,6 +93,29 @@ describe('Consumption page', () => {
     expect(lastReportCall()).toMatch(/^\/reports\/consumption\?from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}$/);
   });
 
+  // Nothing has happened after today, so the period opens on this month so far
+  // and neither date goes past today, in an older link too.
+  it('opens on this month so far, and stops both dates at today', async () => {
+    const now = new Date();
+    const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = day(now);
+    const first = day(new Date(now.getFullYear(), now.getMonth(), 1));
+    renderPage();
+    await screen.findByText('Pipe');
+    expect(lastReportCall()).toBe(`/reports/consumption?from=${first}&to=${today}`);
+    expect(screen.getByLabelText('To')).toHaveAttribute('max', today);
+    expect(screen.getByLabelText('From')).toHaveAttribute('max', today);
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2999-12-31' } });
+    expect(screen.getByLabelText('To')).toHaveValue(today);
+  });
+
+  it('takes an older link that runs past today up to today', async () => {
+    renderPage('/reports/consumption?from=2026-03-01&to=2999-12-31');
+    await screen.findByText('Pipe');
+    expect(lastReportCall()).toMatch(/^\/reports\/consumption\?from=2026-03-01&to=\d{4}-\d{2}-\d{2}$/);
+    expect(lastReportCall()).not.toContain('2999');
+  });
+
   it('narrows to a project when its row is clicked', async () => {
     renderPage();
     await screen.findByText('Pipe');

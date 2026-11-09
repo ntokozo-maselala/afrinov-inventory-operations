@@ -18,7 +18,7 @@ import { downloadProcurementSavings } from '../api/exportProcurementSavings';
 import type { SavingsPrice, SavingsReport, SavingsRow } from '../api/reportTypes';
 import { formatNumber } from '../lib/format';
 import { formatMoney } from '../lib/poMoney';
-import { thisMonth, today as todayIso } from '../lib/dates';
+import { monthToDate, notAfter, today as todayIso } from '../lib/dates';
 
 interface Project { projectNumber: string; name?: string | null }
 
@@ -74,15 +74,15 @@ function columns(currency: string): DataTableColumn<SavingsRow>[] {
 }
 
 export function ProcurementSavings() {
-  // The period lives in the address, as on Stock used; it opens on this month.
+  // The period lives in the address, as on Stock used; it opens on this month so far.
   const [params, setParams] = useSearchParams();
   const today = useMemo(() => todayIso(), []);
-  const fallback = useMemo(() => thisMonth(), []);
-  const range = { from: params.get('from') ?? fallback.from, to: params.get('to') ?? fallback.to };
+  const fallback = useMemo(() => monthToDate(), []);
+  // Neither end goes past today, in an older link too: nothing has happened after it.
+  const range = { from: notAfter(params.get('from') ?? fallback.from, today), to: notAfter(params.get('to') ?? fallback.to, today) };
   const problem = !range.from || !range.to ? 'Choose a start and an end date.'
     : range.from > range.to ? 'The start date is after the end date.'
-      : range.from > today ? 'Choose a period that has started.'
-        : null;
+      : null;
   const project = params.get('projectNumber') ?? '';
   const [downloading, setDownloading] = useState(false);
   const toast = useToast();
@@ -92,7 +92,7 @@ export function ProcurementSavings() {
       const next = new URLSearchParams(p);
       next.set('from', range.from);
       next.set('to', range.to);
-      next.set(key, value);
+      next.set(key, notAfter(value, today));
       return next;
     }, { replace: true });
   }
@@ -141,10 +141,10 @@ export function ProcurementSavings() {
 
       <FilterBar onClear={project ? () => setProject('') : undefined}>
         <Field label="From" htmlFor="ps-from" className={DATE_WIDTH}>
-          <Input id="ps-from" type="date" value={range.from} max={range.to || undefined} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
+          <Input id="ps-from" type="date" value={range.from} max={range.to && range.to < today ? range.to : today} onChange={(e) => setDate('from', e.target.value)} invalid={!!problem} />
         </Field>
         <Field label="To" htmlFor="ps-to" className={DATE_WIDTH}>
-          <Input id="ps-to" type="date" value={range.to} min={range.from || undefined} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
+          <Input id="ps-to" type="date" value={range.to} min={range.from || undefined} max={today} onChange={(e) => setDate('to', e.target.value)} invalid={!!problem} />
         </Field>
         <Field label="Project" htmlFor="ps-project" className="w-full sm:w-72">
           <Select id="ps-project" value={project} onChange={(e) => setProject(e.target.value)}>

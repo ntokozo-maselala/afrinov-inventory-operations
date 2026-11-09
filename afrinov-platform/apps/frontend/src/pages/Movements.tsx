@@ -32,7 +32,7 @@ import {
 } from '../api/exportReports';
 import type { Material } from '../api/types';
 import { useCanViewActivity } from '../hooks/usePermissions';
-import { today } from '../lib/dates';
+import { notAfter, today } from '../lib/dates';
 import { formatDate } from '../lib/format';
 import { locationLabel } from '../lib/locations';
 
@@ -60,13 +60,6 @@ const SEARCH_HINT: Partial<Record<ReportId, string>> = {
 };
 
 interface Option { id: string; name: string }
-
-/**
- * A date no later than the limit (today): nothing has moved after today, so a
- * later day can only show an empty report. Pickers stop at today; this also
- * catches a later date typed in, which some browsers let past `max`.
- */
-const notAfter = (date: string, limit: string): string => (date > limit ? limit : date);
 
 export function Movements() {
   const [params, setParams] = useSearchParams();
