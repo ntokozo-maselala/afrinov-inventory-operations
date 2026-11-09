@@ -304,10 +304,14 @@ const STATE_BADGE: Record<StockState, { tone: 'success' | 'info' | 'danger' | 'w
 
 const isProjects = (m: Material) => sectionOf(m.category) === 'PROJECTS';
 
-/** The item's stock state, or null for Projects material with none: it was never meant to be stock. */
+/**
+ * The item's stock state, or null for Projects material with none on hand: it
+ * was never meant to be stock. It passes through the store to the workshop
+ * floor, so a line left at nothing is the usual end, not "out of stock".
+ */
 function stateOf(m: Material, r: StockStatusItem | undefined): StockState | null {
   const state = r?.stockState ?? null;
-  return isProjects(m) && state === 'NEVER_RECEIVED' ? null : state;
+  return isProjects(m) && (state === 'NEVER_RECEIVED' || state === 'OUT_OF_STOCK') ? null : state;
 }
 
 function stockCell(m: Material, r: StockStatusItem | undefined) {
