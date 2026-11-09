@@ -29,7 +29,8 @@ import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 import { CATEGORIES, STORES_CATEGORIES, TOOLS_CATEGORY, catalogueTabOf, categoryLabel, sectionOf, type CatalogueTab } from '../lib/categories';
-import type { CatalogueSummary, Material, OrderedFor, StockState } from '../api/types';
+import type { CatalogueSummary, CurrentStockRow, Material, OrderedFor, StockState } from '../api/types';
+import { isStoresStock } from '../lib/heldFor';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { STATUS_LABEL, type StockStatus } from '../lib/stockStatus';
@@ -63,7 +64,7 @@ const DESCRIPTIONS: Record<Tab, string> = {
   ALL: 'Every item in the catalogue, whether or not it has ever been received. Stock lists what is on the shelf, one line per location.',
   STORES: 'Stores material: kept on the shelf and topped up. Each item has a category, unit of measure and required stock (the level to keep on hand).',
   TOOLS: 'Tools: kept in the store, ordered like Stores material, and checked in and out on the Tools page.',
-  PROJECTS: 'Projects material: bought for a project on its purchase order, which says which project it is for. Never re-ordered, and not held in the store.',
+  PROJECTS: 'Projects material: bought for a project on its purchase order, which says which project it is for. Never re-ordered. It comes through the store and is issued to its project as soon as it is received.',
 };
 
 const EMPTY: Record<Tab, { title: string; description: string }> = {
@@ -87,6 +88,11 @@ const STOCK_VIEWS: Array<{ value: string; label: string; state?: StockState }> =
 const STOCK_PATH = '/reports/stock-status?section=ALL&includeInactive=true';
 
 const ORDERED_FOR_PATH = '/purchase-orders/projects-by-material';
+// Projects material in the store, for "Waiting to issue": what is held for a project.
+const HELD_PATH = '/reports/current-stock?category=PROJECT_MATERIAL';
+
+/** Received for a project and not yet issued: how much, and whether Issue stock would take it now. */
+interface Waiting { projectNumber: string; quantity: number; issuable: boolean }
 /** ?orderedFor= for Projects material on no order yet; any other value is a project number. */
 const NOT_ORDERED = 'none';
 
@@ -121,6 +127,31 @@ export function Materials() {
     return [...all].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
   }, [orders.data]);
   const orderedForView = showOrders ? params.get('orderedFor') ?? '' : '';
+  // What was received for a project and not yet issued. It should only be in the
+  // store between receiving and issuing, so the tab flags it with a way to issue.
+  // Someone who may not see stock gets no column; a failure says so.
+  const held = useApi<CurrentStockRow[]>(tab === 'PROJECTS' ? HELD_PATH : null);
+  const heldFailed = !!held.error && held.error.code !== 'FORBIDDEN' && held.error.code !== 'UNAUTHENTICATED';
+  const canIssue = hasPermission('inventory:issue');
+  const heldRows = useMemo(() => (held.data ?? []).filter((r) => !isStoresStock(r) && Number(r.quantity) > 0), [held.data]);
+  // Issue stock takes a project's stock only while the project is active and
+  // neither completed nor cancelled, so Issue is offered on the same terms.
+  const projectList = useApi<Array<{ projectNumber: string; status?: string; active?: boolean }>>(heldRows.length > 0 && canIssue ? '/projects' : null);
+  const waiting = useMemo(() => {
+    const open = new Set((projectList.data ?? []).filter((p) => p.active !== false && p.status !== 'COMPLETED' && p.status !== 'CANCELLED').map((p) => p.projectNumber));
+    const byItem = new Map<string, Map<string, Waiting>>();
+    for (const r of heldRows) {
+      const project = r.heldForProject!;
+      const items = byItem.get(r.materialId) ?? new Map<string, Waiting>();
+      const w = items.get(project) ?? { projectNumber: project, quantity: 0, issuable: false };
+      w.quantity += Number(r.quantity);
+      w.issuable ||= canIssue && open.has(project) && r.locationActive !== false && r.materialActive !== false;
+      items.set(project, w);
+      byItem.set(r.materialId, items);
+    }
+    return new Map([...byItem].map(([id, items]) => [id, [...items.values()].sort((a, b) => a.projectNumber.localeCompare(b.projectNumber, undefined, { numeric: true }))]));
+  }, [heldRows, projectList.data, canIssue]);
+  const showWaiting = tab === 'PROJECTS' && !!held.data;
   const views = VIEWS.filter((v) => tab !== 'PROJECTS' || !v.stores);
   const view = views.find((v) => v.value === (params.get('view') ?? '')) ?? views[0]!;
   const categories = tab === 'ALL' ? CATEGORIES : STORES_CATEGORIES.filter((c) => c.value !== TOOLS_CATEGORY);
@@ -263,6 +294,8 @@ export function Materials() {
       {!mats.error && status.stale && <StaleDataNotice error={status.error} onRetry={status.reload} label="Stock figures could not be refreshed" />}
       {!mats.error && ordersFailed && !orders.stale && <ErrorState title="Orders could not be loaded" error={orders.error} onRetry={orders.reload} />}
       {!mats.error && orders.stale && <StaleDataNotice error={orders.error} onRetry={orders.reload} label="Orders could not be refreshed" />}
+      {!mats.error && heldFailed && !held.stale && <ErrorState title="Stock waiting to be issued could not be loaded" error={held.error} onRetry={held.reload} />}
+      {!mats.error && held.stale && <StaleDataNotice error={held.error} onRetry={held.reload} label="Stock waiting to be issued could not be refreshed" />}
 
       {(!mats.error || mats.stale) && (
         <DataTable
@@ -270,7 +303,7 @@ export function Materials() {
           isLoading={mats.loading || (!!stockView.state && tab !== 'PROJECTS' && status.loading)}
           rowKey={(m) => m.id}
           rows={filtered}
-          columns={tab === 'PROJECTS' ? projectsColumns(showOrders ? orderedFor : null) : stockColumns(tab, stock)}
+          columns={tab === 'PROJECTS' ? projectsColumns(showOrders ? orderedFor : null, showWaiting ? waiting : null) : stockColumns(tab, stock)}
           emptyState={(
             <EmptyState
               title={filtering ? 'No materials match' : EMPTY[tab].title}
@@ -414,15 +447,37 @@ function orderedForCell(projects: OrderedFor['projects'] | undefined) {
 }
 
 /**
+ * What was received for each project and not yet issued, with Issue when Issue
+ * stock would take it now (starting on that item and project), or a dash.
+ */
+function waitingCell(m: Material, items: Waiting[] | undefined) {
+  if (!items?.length) return <span className="text-surface-400" title="Nothing waiting to be issued">—</span>;
+  return (
+    <ul className="space-y-0.5">
+      {items.map((w) => (
+        <li key={w.projectNumber} className="text-sm">
+          <span className="font-mono">{formatNumber(w.quantity)}</span> {m.unitOfMeasure} for {w.projectNumber}
+          {w.issuable && (
+            <> · <Link to={`/stock/issue?materialId=${encodeURIComponent(m.id)}&project=${encodeURIComponent(w.projectNumber)}`} className="btn-link" aria-label={`Issue ${m.sku} to ${w.projectNumber}`}>Issue</Link></>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
  * Return Projects table columns. The item has no project of its own, as the
  * order says which (Project on the Order Roadmap); "Ordered for" shows the
- * projects of its orders, when those could be loaded and may be seen (null).
+ * projects of its orders, and "Waiting to issue" what was received for them and
+ * not yet issued, each when it could be loaded and may be seen (null).
  */
-function projectsColumns(orderedFor: Map<string, OrderedFor['projects']> | null): DataTableColumn<Material>[] {
+function projectsColumns(orderedFor: Map<string, OrderedFor['projects']> | null, waiting: Map<string, Waiting[]> | null): DataTableColumn<Material>[] {
   return [
     skuColumn,
     nameColumn,
     ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '12rem' }] : []),
+    ...(waiting ? [{ key: 'waiting', header: 'Waiting to issue', render: (m: Material) => waitingCell(m, waiting.get(m.id)), width: '13rem' }] : []),
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     ...tailColumns,
   ];

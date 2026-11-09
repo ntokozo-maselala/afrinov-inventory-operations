@@ -266,6 +266,75 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
     });
   });
 
+  describe('Waiting to issue: received for a project and not yet issued', () => {
+    const HELD_PATH = '/reports/current-stock?category=PROJECT_MATERIAL';
+    const held = (sku: string, project: string | null, quantity: string, over: Record<string, unknown> = {}) => ({
+      materialId: `m-${sku}`, materialSku: sku, materialName: `Item ${sku}`, category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', requiredStock: '0',
+      heldForProject: project, locationId: 'floor', locationName: 'Workshop floor', locationType: 'STOREROOM',
+      materialActive: true, locationActive: true, quantity, belowThreshold: false, ...over,
+    });
+    const withHeld = (answer: () => unknown) => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path === HELD_PATH ? answer() : base(path)));
+    };
+    const row = async (sku: string) => (await screen.findByText(sku)).closest('tr')!;
+
+    it('says how much is waiting for each project, across locations, and links to issue it', async () => {
+      withHeld(() => [
+        held('1369-PIPE', '1369', '8'), held('1369-PIPE', '1369', '4', { locationId: 'bay', locationName: 'Bay' }), held('1369-PIPE', '1402', '2'),
+        // Leftovers are Stores stock, and nothing left isn't waiting.
+        held('OLD-PLATE', null, '5'), held('1402-BOLT', '1402', '0'),
+      ]);
+      list('/materials?section=PROJECTS');
+      const pipe = await row('1369-PIPE');
+      expect(await within(pipe).findByText(/each for 1369/)).toHaveTextContent('12 each for 1369');
+      expect(within(pipe).getByText(/each for 1402/)).toHaveTextContent('2 each for 1402');
+      expect(within(pipe).getByRole('link', { name: 'Issue 1369-PIPE to 1369' })).toHaveAttribute('href', '/stock/issue?materialId=m-1369-PIPE&project=1369');
+      expect(screen.getByRole('columnheader', { name: 'Waiting to issue' })).toBeInTheDocument();
+      expect(within(await row('OLD-PLATE')).queryByText(/for /)).not.toBeInTheDocument();
+      expect(within(await row('1402-BOLT')).queryByText(/each for/)).not.toBeInTheDocument();
+    });
+
+    it('offers no Issue for a project that takes no more issues', async () => {
+      withHeld(() => [held('1369-PIPE', '1200', '3')]);
+      list('/materials?section=PROJECTS');
+      const pipe = await row('1369-PIPE');
+      expect(await within(pipe).findByText(/each for 1200/)).toBeInTheDocument();
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/projects'));
+      expect(within(pipe).queryByRole('link', { name: /^Issue/ })).not.toBeInTheDocument();
+    });
+
+    it('offers no Issue from a location no longer in use', async () => {
+      withHeld(() => [held('1369-PIPE', '1369', '3', { locationActive: false })]);
+      list('/materials?section=PROJECTS');
+      const pipe = await row('1369-PIPE');
+      expect(await within(pipe).findByText(/each for 1369/)).toBeInTheDocument();
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/projects'));
+      expect(within(pipe).queryByRole('link', { name: /^Issue/ })).not.toBeInTheDocument();
+    });
+
+    it('leaves the column out for someone who may not see stock', async () => {
+      withHeld(() => { throw Object.assign(new Error('no'), { code: 'FORBIDDEN' }); });
+      list('/materials?section=PROJECTS');
+      await screen.findByText('1369-PIPE');
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith(HELD_PATH));
+      expect(screen.queryByRole('columnheader', { name: 'Waiting to issue' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+    });
+
+    it('says so when it could not be loaded', async () => {
+      withHeld(() => { throw Object.assign(new Error('down'), { code: 'SERVICE_UNAVAILABLE' }); });
+      list('/materials?section=PROJECTS');
+      expect(await screen.findByText('Stock waiting to be issued could not be loaded')).toBeInTheDocument();
+    });
+
+    it('is only asked for on the Projects tab', async () => {
+      list();
+      await screen.findByText('DISC');
+      expect(mockGet).not.toHaveBeenCalledWith(HELD_PATH);
+    });
+  });
+
   it('opens an older link to one project on the whole Projects tab', async () => {
     list('/materials?section=PROJECTS&project=1402');
     await screen.findByText('1402-BOLT');
