@@ -7,7 +7,7 @@ vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => false }));
+vi.mock('../hooks/usePermissions', () => ({ useCanManageMaterials: () => false, usePermissions: () => ({ hasPermission: () => false }) }));
 vi.mock('../components/RoleGuard', () => ({ RoleGuard: () => null }));
 
 const { Materials } = await import('./Materials');

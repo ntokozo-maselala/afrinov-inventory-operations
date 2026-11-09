@@ -60,8 +60,10 @@ beforeEach(() => {
 const list = (url = '/materials') => render(
   <MemoryRouter initialEntries={[url]}><ToastProvider><Routes><Route path="/materials" element={<Materials />} /></Routes></ToastProvider></MemoryRouter>,
 );
-// The item codes in the table, in order.
-const skus = () => within(screen.getByRole('table')).getAllByRole('link').map((a) => a.textContent).filter((t) => t && /^[A-Z0-9-]+$/.test(t));
+// The item codes in the table, in order: the links to items, not to projects.
+const skus = () => within(screen.getByRole('table')).getAllByRole('link')
+  .filter((a) => a.getAttribute('href')?.startsWith('/materials/'))
+  .map((a) => a.textContent).filter((t) => t && /^[A-Z0-9-]+$/.test(t));
 
 const tab = (name: RegExp) => screen.getByRole('tab', { name });
 const stockRow = (sku: string, stockState: string, over: Record<string, unknown> = {}) => ({
@@ -197,6 +199,71 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
     expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /Needs a project/ })).not.toBeInTheDocument();
     expect(screen.queryByText('Required')).not.toBeInTheDocument();
+  });
+
+  describe('Ordered for, from the project orders each item is on', () => {
+    const ORDERED_FOR_PATH = '/purchase-orders/projects-by-material';
+    const ORDERED = [
+      { materialId: 'm-1369-PIPE', projects: [{ projectNumber: '1369', name: 'Plant upgrade' }, { projectNumber: '1402', name: 'Silo' }] },
+      { materialId: 'm-1402-BOLT', projects: [{ projectNumber: '1402', name: 'Silo' }] },
+    ];
+    const withOrders = (answer: () => unknown) => {
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation(async (path: string) => (path === ORDERED_FOR_PATH ? answer() : base(path)));
+    };
+
+    it('lists each item’s projects, linked, and says which are on no order yet', async () => {
+      withOrders(() => ORDERED);
+      list('/materials?section=PROJECTS');
+      const row = async (sku: string) => (await screen.findByText(sku)).closest('tr')!;
+      expect(await within(await row('1369-PIPE')).findByRole('link', { name: '1369' })).toHaveAttribute('href', '/projects/1369');
+      expect(within(await row('1369-PIPE')).getByRole('link', { name: '1402' })).toHaveAttribute('href', '/projects/1402');
+      expect(within(await row('OLD-PLATE')).getByText('Not ordered yet')).toBeInTheDocument();
+      expect(screen.getByRole('columnheader', { name: 'Ordered for' })).toBeInTheDocument();
+    });
+
+    it('filters by project from the address, an item serving two projects under both', async () => {
+      withOrders(() => ORDERED);
+      list('/materials?section=PROJECTS&orderedFor=1402');
+      await screen.findByRole('link', { name: '1369' });
+      expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT']);
+      expect(screen.getByLabelText('Ordered for')).toHaveValue('1402');
+      expect(screen.getByRole('option', { name: '1369 · Plant upgrade' })).toBeInTheDocument();
+    });
+
+    it('filters to what is on no order yet', async () => {
+      withOrders(() => ORDERED);
+      list('/materials?section=PROJECTS');
+      await screen.findByRole('link', { name: '1369' });
+      fireEvent.change(screen.getByLabelText('Ordered for'), { target: { value: 'none' } });
+      expect(skus()).toEqual(['OLD-PLATE']);
+    });
+
+    it('only asks for orders on the Projects tab', async () => {
+      list();
+      await screen.findByText('DISC');
+      expect(mockGet).not.toHaveBeenCalledWith(ORDERED_FOR_PATH);
+      expect(screen.queryByRole('columnheader', { name: 'Ordered for' })).not.toBeInTheDocument();
+    });
+
+    it('leaves out the column and filter for someone who may not see orders', async () => {
+      withOrders(() => { throw Object.assign(new Error('no'), { code: 'FORBIDDEN' }); });
+      list('/materials?section=PROJECTS&orderedFor=1402');
+      await screen.findByText('1369-PIPE');
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith(ORDERED_FOR_PATH));
+      expect(screen.queryByRole('columnheader', { name: 'Ordered for' })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Ordered for')).not.toBeInTheDocument();
+      expect(screen.queryByText('Orders could not be loaded')).not.toBeInTheDocument();
+      // The filter is ignored rather than hiding everything.
+      expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
+    });
+
+    it('says so when orders could not be loaded, and still lists the items', async () => {
+      withOrders(() => { throw Object.assign(new Error('down'), { code: 'SERVICE_UNAVAILABLE' }); });
+      list('/materials?section=PROJECTS');
+      expect(await screen.findByText('Orders could not be loaded')).toBeInTheDocument();
+      expect([...skus()].sort()).toEqual(['1369-PIPE', '1402-BOLT', 'OLD-PLATE']);
+    });
   });
 
   it('opens an older link to one project on the whole Projects tab', async () => {

@@ -1447,6 +1447,20 @@ function route(method: string, path: string, body?: unknown): unknown {
         }),
       }));
   }
+  // As the server (ordered-for.ts): each item on a project order raised and not
+  // cancelled, with its projects once each, in project number order.
+  if (method === 'GET' && p === '/purchase-orders/projects-by-material') {
+    const byItem = new Map<string, Set<string>>();
+    for (const po of state.purchaseOrders) {
+      if (!po.projectNumber || po.status === 'DRAFT' || po.status === 'CANCELLED') continue;
+      for (const l of po.lines) byItem.set(l.materialId, (byItem.get(l.materialId) ?? new Set<string>()).add(po.projectNumber));
+    }
+    return [...byItem].map(([materialId, numbers]) => ({
+      materialId,
+      projects: [...numbers].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .map((projectNumber) => ({ projectNumber, name: state.projects.find((x) => x.projectNumber === projectNumber)?.name ?? null })),
+    }));
+  }
   if (method === 'GET' && p === '/purchase-orders') {
     // As the server: ?awaitingMyApproval=true is the pending orders the signed-in
     // user may approve now, oldest first.

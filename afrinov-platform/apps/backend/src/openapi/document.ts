@@ -682,6 +682,12 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.ReceiveInventory], errors: [403],
   },
   {
+    method: 'get', path: '/purchase-orders/projects-by-material', tag: 'Purchase orders', summary: 'Which projects each item was ordered for',
+    description: 'For "Ordered for" on Materials: each item on a project order that was raised and not cancelled (Pending approval to Closed), '
+      + 'with its projects, each once. Project numbers and names only, no prices. For those with `view:purchase_order` or `receive:purchase_order`.',
+    procurement: true, permissions: [P.ViewPurchaseOrder], errors: [403],
+  },
+  {
     method: 'get', path: '/purchase-orders/:id', tag: 'Purchase orders', summary: 'Get a purchase order with its lines',
     description: 'A Stores order (no project) needs `order:stores_stock`, a project order `view:purchase_order`; to anyone without it the order is not found (404), and so are its history and approval.',
     procurement: true, errors: [403, 404],

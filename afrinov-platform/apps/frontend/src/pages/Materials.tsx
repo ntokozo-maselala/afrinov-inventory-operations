@@ -4,8 +4,10 @@
 // Stock counts lines and Tools its active tools, so this is the one page that
 // counts every item. The tab is in the link (?section=PROJECTS). A Projects item
 // has no project of its own: the order it is bought on says which (Project on
-// the Order Roadmap, Phase 3), so there is no project filter, column or "needs
-// a project" step; an older ?project= link opens the Projects tab.
+// the Order Roadmap, Phase 3), and one item can serve several projects. So the
+// Projects tab shows "Ordered for", the projects of the orders it is on, and
+// filters by it (?orderedFor=), with no "needs a project" step; an older
+// ?project= link opens the whole Projects tab.
 import { useMemo, useState, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -23,10 +25,11 @@ import { RoleGuard } from '../components/RoleGuard';
 import { formatNumber } from '../lib/format';
 import { formatCurrency } from '../lib/currency';
 import { MaterialForm } from '../components/MaterialForm';
-import { useCanManageMaterials } from '../hooks/usePermissions';
+import { useCanManageMaterials, usePermissions } from '../hooks/usePermissions';
+import { PROCUREMENT_ENABLED } from '../config/features';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut';
 import { CATEGORIES, STORES_CATEGORIES, TOOLS_CATEGORY, catalogueTabOf, categoryLabel, sectionOf, type CatalogueTab } from '../lib/categories';
-import type { CatalogueSummary, Material, StockState } from '../api/types';
+import type { CatalogueSummary, Material, OrderedFor, StockState } from '../api/types';
 import { LeftoversNotice } from '../components/LeftoversNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
 import { STATUS_LABEL, type StockStatus } from '../lib/stockStatus';
@@ -83,6 +86,10 @@ const STOCK_VIEWS: Array<{ value: string; label: string; state?: StockState }> =
 // Inactive items too, and Projects items: the catalogue lists them all.
 const STOCK_PATH = '/reports/stock-status?section=ALL&includeInactive=true';
 
+const ORDERED_FOR_PATH = '/purchase-orders/projects-by-material';
+/** ?orderedFor= for Projects material on no order yet; any other value is a project number. */
+const NOT_ORDERED = 'none';
+
 /**
  * Render the catalog with tab and view filters read from the URL.
  * Defaults to All items. The add form starts on the selected tab's section and category.
@@ -100,6 +107,20 @@ export function Materials() {
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
   const tab: Tab = TABS.find((t) => t.value === params.get('section'))?.value ?? 'ALL';
+  // The projects each Projects item was ordered for, from its orders. For those
+  // who see project orders, and the store, which receives and issues them.
+  const { hasPermission } = usePermissions();
+  const seesOrders = PROCUREMENT_ENABLED && (hasPermission('orders:view') || hasPermission('orders:receive'));
+  const orders = useApi<OrderedFor[]>(tab === 'PROJECTS' && seesOrders ? ORDERED_FOR_PATH : null);
+  const orderedFor = useMemo(() => new Map((orders.data ?? []).map((o) => [o.materialId, o.projects])), [orders.data]);
+  const ordersFailed = !!orders.error && orders.error.code !== 'FORBIDDEN' && orders.error.code !== 'UNAUTHENTICATED';
+  const showOrders = tab === 'PROJECTS' && !!orders.data;
+  const orderProjects = useMemo(() => {
+    const all = new Map<string, string | null>();
+    for (const o of orders.data ?? []) for (const p of o.projects) all.set(p.projectNumber, p.name);
+    return [...all].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [orders.data]);
+  const orderedForView = showOrders ? params.get('orderedFor') ?? '' : '';
   const views = VIEWS.filter((v) => tab !== 'PROJECTS' || !v.stores);
   const view = views.find((v) => v.value === (params.get('view') ?? '')) ?? views[0]!;
   const categories = tab === 'ALL' ? CATEGORIES : STORES_CATEGORIES.filter((c) => c.value !== TOOLS_CATEGORY);
@@ -124,6 +145,7 @@ export function Materials() {
       const next = new URLSearchParams(p);
       if (value === 'ALL') next.delete('section'); else next.set('section', value);
       next.delete('project');
+      next.delete('orderedFor');
       if (value === 'PROJECTS') {
         next.delete('stock');
         if (VIEWS.find((v) => v.value === next.get('view'))?.stores) next.delete('view');
@@ -157,6 +179,10 @@ export function Materials() {
       if (!view.match(m)) return false;
       if (showCategories && category && m.category !== category) return false;
       if (showStock && stockView.state && stateOf(m, stock.get(m.id)) !== stockView.state) return false;
+      if (orderedForView) {
+        const projects = orderedFor.get(m.id) ?? [];
+        if (orderedForView === NOT_ORDERED ? projects.length > 0 : !projects.some((p) => p.projectNumber === orderedForView)) return false;
+      }
       if (needle) {
         const hay = `${m.sku} ${m.name} ${m.serialNumber ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -165,7 +191,7 @@ export function Materials() {
     });
     return rows;
   })();
-  const filtering = !!(q || category || view.value || stockView.value);
+  const filtering = !!(q || category || view.value || stockView.value || orderedForView);
 
   return (
     <div>
@@ -194,7 +220,7 @@ export function Materials() {
       {tab === 'PROJECTS' && <LeftoversNotice className="mb-4" />}
 
       <FilterBar
-        onClear={filtering ? () => { setQ(''); setCategory(''); setParams((p) => { const next = new URLSearchParams(p); next.delete('view'); next.delete('stock'); return next; }, { replace: true }); } : undefined}
+        onClear={filtering ? () => { setQ(''); setCategory(''); setParams((p) => { const next = new URLSearchParams(p); next.delete('view'); next.delete('stock'); next.delete('orderedFor'); return next; }, { replace: true }); } : undefined}
         count={mats.loading ? 'Loading…' : `${filtered.length} of ${inTab.length}`}
       >
         <SearchField id="materials-search" inputRef={searchRef} value={q} onChange={setQ} placeholder={tab === 'PROJECTS' ? 'SKU or name…' : 'SKU, name or serial number…'} />
@@ -218,6 +244,15 @@ export function Materials() {
             </Select>
           </Field>
         )}
+        {showOrders && (
+          <Field label="Ordered for" htmlFor="materials-ordered-for" className={FILTER_WIDTH}>
+            <Select id="materials-ordered-for" value={orderedForView} onChange={(e) => setParam('orderedFor', e.target.value)}>
+              <option value="">All projects</option>
+              <option value={NOT_ORDERED}>Not ordered yet</option>
+              {orderProjects.map(([n, name]) => <option key={n} value={n}>{name ? `${n} · ${name}` : n}</option>)}
+            </Select>
+          </Field>
+        )}
       </FilterBar>
 
       {summary.data && <CatalogueLine summary={summary.data} />}
@@ -226,6 +261,8 @@ export function Materials() {
       {mats.stale && <StaleDataNotice error={mats.error} onRetry={mats.reload} />}
       {!mats.error && stockFailed && !status.stale && <ErrorState title="Stock figures could not be loaded" error={status.error} onRetry={status.reload} />}
       {!mats.error && status.stale && <StaleDataNotice error={status.error} onRetry={status.reload} label="Stock figures could not be refreshed" />}
+      {!mats.error && ordersFailed && !orders.stale && <ErrorState title="Orders could not be loaded" error={orders.error} onRetry={orders.reload} />}
+      {!mats.error && orders.stale && <StaleDataNotice error={orders.error} onRetry={orders.reload} label="Orders could not be refreshed" />}
 
       {(!mats.error || mats.stale) && (
         <DataTable
@@ -233,7 +270,7 @@ export function Materials() {
           isLoading={mats.loading || (!!stockView.state && tab !== 'PROJECTS' && status.loading)}
           rowKey={(m) => m.id}
           rows={filtered}
-          columns={tab === 'PROJECTS' ? projectsColumns() : stockColumns(tab, stock)}
+          columns={tab === 'PROJECTS' ? projectsColumns(showOrders ? orderedFor : null) : stockColumns(tab, stock)}
           emptyState={(
             <EmptyState
               title={filtering ? 'No materials match' : EMPTY[tab].title}
@@ -364,11 +401,28 @@ function stockColumns(tab: Tab, stock: Map<string, StockStatusItem>): DataTableC
   ];
 }
 
-/** Return Projects table columns: no project, as the order says which (Project on the Order Roadmap). */
-function projectsColumns(): DataTableColumn<Material>[] {
+/** The projects an item was ordered for, each linked to its project, or that it is on no order yet. */
+function orderedForCell(projects: OrderedFor['projects'] | undefined) {
+  if (!projects?.length) return <span className="text-surface-400">Not ordered yet</span>;
+  return (
+    <span className="flex flex-wrap gap-x-2">
+      {projects.map((p) => (
+        <Link key={p.projectNumber} to={`/projects/${encodeURIComponent(p.projectNumber)}`} className="btn-link whitespace-nowrap" title={p.name ?? undefined}>{p.projectNumber}</Link>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Return Projects table columns. The item has no project of its own, as the
+ * order says which (Project on the Order Roadmap); "Ordered for" shows the
+ * projects of its orders, when those could be loaded and may be seen (null).
+ */
+function projectsColumns(orderedFor: Map<string, OrderedFor['projects']> | null): DataTableColumn<Material>[] {
   return [
     skuColumn,
     nameColumn,
+    ...(orderedFor ? [{ key: 'orderedFor', header: 'Ordered for', render: (m: Material) => orderedForCell(orderedFor.get(m.id)), width: '12rem' }] : []),
     { key: 'uom', header: 'UoM', render: (m) => m.unitOfMeasure, width: '5rem' },
     ...tailColumns,
   ];

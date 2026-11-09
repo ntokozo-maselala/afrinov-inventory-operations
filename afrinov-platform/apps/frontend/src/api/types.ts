@@ -246,6 +246,12 @@ export interface CountRecord {
 /** Where an item stands: see stockStateOf on the server (catalogue.service.ts). */
 export type StockState = 'IN_STOCK' | 'HELD_FOR_PROJECT' | 'OUT_OF_STOCK' | 'NEVER_RECEIVED';
 
+/** GET /purchase-orders/projects-by-material: the projects an item was ordered for, each once. */
+export interface OrderedFor {
+  materialId: string;
+  projects: Array<{ projectNumber: string; name: string | null }>;
+}
+
 /** GET /materials/summary: how the catalogue adds up against Stock and Tools. */
 export interface CatalogueSummary {
   items: number;
