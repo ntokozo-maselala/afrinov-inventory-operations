@@ -7,6 +7,7 @@ import { Errors } from '../../shared/errors.js';
 import { fourDecimals } from './rfq.routes.js';
 import { storedQuantity } from '../../shared/decimal.js';
 import { GoodsReceiptService } from './goods-receipt.service.js';
+import { listOrderedFor } from './ordered-for.js';
 import { COUNTER_RECEIPTS_OFF } from '../inventory/inventory.routes.js';
 import { EMAIL_PATTERN, SUPPLIER_CURRENCIES, cleanText } from './supplier-fields.js';
 import { PermissionCode, type PermissionCodeValue } from '../../shared/permissions.js';
@@ -329,6 +330,14 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
   app.get('/purchase-orders/receivable', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ReceiveInventory);
     return PurchaseOrderService.receivable(await kindsReceived(req));
+  });
+
+  // Which projects each item was ordered for, for "Ordered for" on Materials.
+  // Project numbers only, no prices: for those who see project orders, and the
+  // store, which receives them and issues the material to its project.
+  app.get('/purchase-orders/projects-by-material', { preHandler: [app.authenticate] }, async (req) => {
+    if (!(await userHasPermission(req, PermissionCode.ReceivePurchaseOrder))) await requirePermission(req, PermissionCode.ViewPurchaseOrder);
+    return listOrderedFor();
   });
 
   app.get('/purchase-orders/:id', { preHandler: [app.authenticate] }, async (req) => {
