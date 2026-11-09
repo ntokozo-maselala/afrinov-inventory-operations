@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
-const { mockGet, mockDownload } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn() }));
+const { mockGet, mockDownload, pdf } = vi.hoisted(() => ({ mockGet: vi.fn(), mockDownload: vi.fn(), pdf: { available: true } }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../api/exportProcurementSavings', () => ({ downloadProcurementSavings: mockDownload }));
+vi.mock('../api/exportProcurementSavings', () => ({
+  downloadProcurementSavings: mockDownload,
+  get SAVINGS_PDF_AVAILABLE() { return pdf.available; },
+}));
 
 const { ProcurementSavings } = await import('./ProcurementSavings');
 const { ToastProvider } = await import('../components/Toast');
@@ -38,6 +41,7 @@ const renderPage = (url = '/reports/procurement-savings?from=2026-10-01&to=2026-
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => (path.startsWith('/projects') ? [{ projectNumber: 'AFRI-1404', name: 'Pipe spools' }] : REPORT));
   mockDownload.mockReset().mockResolvedValue(undefined);
+  pdf.available = true;
 });
 
 describe('Procurement savings page', () => {
@@ -141,15 +145,37 @@ describe('Procurement savings page', () => {
     expect(screen.queryByText(/^Total \(/)).not.toBeInTheDocument();
   });
 
+  /** The Download menu, as on the other reports, open. */
+  const openDownloads = async () => {
+    await screen.findByRole('table', { name: 'Procurement savings' });
+    const button = screen.getByRole('button', { name: 'Download savings report' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+  };
+
   it('downloads the same selection as Excel, and says when that fails', async () => {
     renderPage();
-    await screen.findByRole('table', { name: 'Procurement savings' });
-    fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }));
-    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('from=2026-10-01&to=2026-10-31'));
+    await openDownloads();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('from=2026-10-01&to=2026-10-31', 'xlsx'));
     mockDownload.mockRejectedValue(new Error('The file was empty'));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Download Excel' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Download Excel' }));
+    await openDownloads();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
     expect(await screen.findByText('Download failed')).toBeInTheDocument();
+  });
+
+  it('downloads the same selection as a PDF', async () => {
+    renderPage('/reports/procurement-savings?from=2026-10-01&to=2026-10-31&projectNumber=AFRI-1404');
+    await openDownloads();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'PDF (.pdf)' }));
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledWith('from=2026-10-01&to=2026-10-31&projectNumber=AFRI-1404', 'pdf'));
+  });
+
+  it('offers Excel alone where the server can\'t make the PDF', async () => {
+    pdf.available = false;
+    renderPage();
+    await openDownloads();
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Excel (.xlsx)']);
   });
 
   it('shows the error when the server refuses', async () => {

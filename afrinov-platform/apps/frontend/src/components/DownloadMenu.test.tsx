@@ -38,6 +38,12 @@ describe('DownloadMenu', () => {
     expect(await screen.findByText('Unable to reach the server.')).toBeInTheDocument();
   });
 
+  it('offers only the files a report can make', () => {
+    render(<ToastProvider><DownloadMenu label="Download" onDownload={vi.fn()} formats={['xlsx']} /></ToastProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Excel (.xlsx)']);
+  });
+
   it('cannot be opened while there is nothing to download', () => {
     renderMenu(undefined, true);
     expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();

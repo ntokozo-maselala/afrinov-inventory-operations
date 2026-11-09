@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { MAX_SAVINGS_LINES, ProcurementSavingsService, buildSavingsReport, type SavingsRfq } from './procurement-savings.service.js';
 import { buildSavingsXlsx, savingsFilename } from './procurement-savings-export.js';
+import { buildSavingsPdf } from './procurement-savings-pdf.js';
 
 const { count, findMany } = vi.hoisted(() => ({ count: vi.fn(), findMany: vi.fn() }));
 vi.mock('../../shared/db.js', () => ({ prisma: { rfqLine: { count }, rfq: { findMany } } }));
@@ -210,6 +211,21 @@ describe('Procurement savings report', () => {
     expect(String(total.getCell(4).value)).toContain('Total (2 lines, 1 linked)');
     expect(total.getCell(14).value).toBe(48);
     expect(savingsFilename(r, 'AFRI-1404')).toBe('afrinov-procurement-savings-AFRI-1404-2026-11-01-to-2026-11-30.xlsx');
+  });
+
+  it('downloads as an A4 landscape PDF, running onto more pages as it needs', async () => {
+    const one = await buildSavingsPdf(build([rfq([line()])]), { scope: 'All projects' });
+    expect(one.subarray(0, 4).toString()).toBe('%PDF');
+    expect(one.toString('latin1')).toMatch(/\/MediaBox \[0 0 841\.89 595\.28\]/);
+    const pages = (pdf: Buffer) => pdf.toString('latin1').match(/\/Type \/Page\b(?!s)/g)?.length ?? 0;
+    expect(pages(one)).toBe(1);
+    const many = Array.from({ length: 40 }, (_, i) => line({ id: `l-${i}`, lineNo: i + 1, materialId: `m-${i}`, salesRfqLineId: null, salesRfqLine: null }));
+    expect(pages(await buildSavingsPdf(build([rfq(many)]), { scope: 'Project AFRI-1404' }))).toBeGreaterThan(1);
+    expect(savingsFilename({ from: '2026-11-01', to: '2026-11-09' }, undefined, 'pdf')).toBe('afrinov-procurement-savings-2026-11-01-to-2026-11-09.pdf');
+  });
+
+  it('makes a PDF that says so when nothing was sent', async () => {
+    expect((await buildSavingsPdf(build([]), { scope: 'All projects' })).subarray(0, 4).toString()).toBe('%PDF');
   });
 
   it('says so in the sheet when nothing was sent', async () => {
