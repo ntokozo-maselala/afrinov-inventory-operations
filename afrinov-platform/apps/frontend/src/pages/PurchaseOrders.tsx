@@ -135,7 +135,7 @@ export function PurchaseOrders() {
           emptyState={mine && !q && !project ? (
             <EmptyState
               title="Nothing is waiting for your approval"
-              description="Orders within your limit appear here once they are submitted and priced."
+              description="Orders appear here once they are submitted and priced, and it is your turn to sign."
             />
           ) : (pos.data?.length ?? 0) > 0 || q || project ? (
             <EmptyState

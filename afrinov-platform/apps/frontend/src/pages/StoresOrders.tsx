@@ -112,7 +112,7 @@ function StoresOrderList({ canReceive, canOrder }: { canReceive: boolean; canOrd
               description={status === ON_ORDER && !q ? 'Approved orders show here until everything on them has arrived.' : 'Try another status, or clear the filters.'}
             />
           ) : mine && !q ? (
-            <EmptyState title="Nothing is waiting for your approval" description="Stock orders within your limit appear here once they are submitted and priced." />
+            <EmptyState title="Nothing is waiting for your approval" description="Stock orders appear here once they are submitted and priced, and it is your turn to sign." />
           ) : (
             <EmptyState
               title="No stock orders yet"
