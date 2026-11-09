@@ -283,13 +283,15 @@ describe('Project schedules over real HTTP', () => {
       [`IT-PT-${run}-E`, 'RECEIVED', 0, false, '2026-03-10', '2026-03-12'],
     ]);
     expect(covered.body.orders[0]).toMatchObject({ supplierName: `Steel ${run}` });
+    // C was closed with a line not fully received: done, but flagged as short.
+    expect(covered.body.orders.map((o) => o.closedShort)).toEqual([false, false, true, false]);
     expect(JSON.stringify(covered.body)).not.toMatch(/4321|price|total/i);
     // The latest owed line, the 20th, not B's earliest.
     expect(covered.body.summary).toMatchObject({ orders: 4, owing: 1, overdue: 1, allReceived: false, lastReceivedOn: '2026-03-12', latestExpected: '2026-03-20' });
 
     // The project's own orders: received, closed short, and received in one go, so all in.
     const own = await buyer<Procurement>('GET', `/projects/${projectNumber}/procurement`);
-    expect(own.body.summary).toMatchObject({ orders: 3, allReceived: true, lastReceivedOn: '2026-03-12' });
+    expect(own.body.summary).toMatchObject({ orders: 3, allReceived: true, closedShort: 1, lastReceivedOn: '2026-03-12' });
 
     // The manager doesn't see project orders, nor manage the covered project: covering it shows none of its orders.
     const asManager = await manager<Procurement>('GET', `/projects/${projectNumber}/procurement?scheduleId=${sched.id}`);

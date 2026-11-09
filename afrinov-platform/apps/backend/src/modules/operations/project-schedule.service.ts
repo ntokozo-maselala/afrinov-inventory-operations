@@ -256,6 +256,8 @@ export interface StepOrder {
   lastReceivedOn: string | null;
   /** Placed, still owing, and past its expected delivery. */
   overdue: boolean;
+  /** Closed with lines not fully received: nothing more is coming, but not everything came. */
+  closedShort: boolean;
 }
 
 export interface StepProcurement {
@@ -270,6 +272,8 @@ export interface StepProcurement {
     notPlaced: number;
     /** Every order received, or closed with nothing more coming. */
     allReceived: boolean;
+    /** Orders closed short: allReceived counts them as done, but part of what they ordered never came. */
+    closedShort: number;
     lastReceivedOn: string | null;
     /** The latest expected delivery of what is still owed. */
     latestExpected: string | null;
@@ -867,6 +871,7 @@ export const ProjectScheduleService = {
         expectedDelivery: expected,
         lastReceivedOn: lastReceived ? saDay(lastReceived) : null,
         overdue: placed && owed.length > 0 && expected !== null && expected < today,
+        closedShort: o.status === 'CLOSED' && o.lines.some((l) => l.receivedQty.lessThan(l.orderedQty)),
       };
     });
     const received = orders.map((o) => o.lastReceivedOn).filter((d): d is string => d !== null).sort();
@@ -879,6 +884,7 @@ export const ProjectScheduleService = {
         overdue: orders.filter((o) => o.overdue).length,
         notPlaced: orders.filter((o) => o.status === 'DRAFT' || o.status === 'PENDING_APPROVAL').length,
         allReceived: orders.length > 0 && orders.every((o) => o.status === 'RECEIVED' || o.status === 'CLOSED'),
+        closedShort: orders.filter((o) => o.closedShort).length,
         lastReceivedOn: received.length ? received[received.length - 1]! : null,
         // The latest of every line still owed, not each order's earliest.
         latestExpected: owedDates.sort().pop() ?? null,

@@ -176,8 +176,8 @@ describe('ProjectDetail', () => {
     mockGet.mockImplementation(async (path: string) => (path === '/projects/AFRI-1086/procurement?scheduleId=sch-1'
       ? {
         projects: ['AFRI-1086'],
-        orders: [{ id: 'po-1', number: 'AFRI-0101', status: 'RECEIVED', projectNumber: 'AFRI-1086', supplierName: 'Steel Co', lines: 2, linesOwed: 0, expectedDelivery: '2026-03-06', lastReceivedOn: '2026-03-11', overdue: false }],
-        summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, lastReceivedOn: '2026-03-11', latestExpected: null },
+        orders: [{ id: 'po-1', number: 'AFRI-0101', status: 'RECEIVED', projectNumber: 'AFRI-1086', supplierName: 'Steel Co', lines: 2, linesOwed: 0, expectedDelivery: '2026-03-06', lastReceivedOn: '2026-03-11', overdue: false, closedShort: false }],
+        summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, closedShort: 0, lastReceivedOn: '2026-03-11', latestExpected: null },
       }
       : base(path)));
     renderPage();
@@ -201,7 +201,7 @@ describe('ProjectDetail', () => {
     scheduleList = [withProcurement];
     const base = mockGet.getMockImplementation()!;
     mockGet.mockImplementation(async (path: string) => (path.endsWith('/procurement?scheduleId=sch-1')
-      ? { projects: ['AFRI-1086'], orders: [], summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, lastReceivedOn: '2026-03-05', latestExpected: null } }
+      ? { projects: ['AFRI-1086'], orders: [], summary: { orders: 1, owing: 0, overdue: 0, notPlaced: 0, allReceived: true, closedShort: 0, lastReceivedOn: '2026-03-05', latestExpected: null } }
       : base(path)));
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Mark this step done' }));

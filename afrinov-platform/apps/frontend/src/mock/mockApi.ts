@@ -2081,6 +2081,7 @@ function route(method: string, path: string, body?: unknown): unknown {
           lines: po.lines.length, linesOwed: finished ? 0 : owed.length, expectedDelivery: expected,
           lastReceivedOn: receipts.length ? receipts[receipts.length - 1]! : null,
           overdue: placed && owed.length > 0 && expected !== null && expected < today,
+          closedShort: po.status === 'CLOSED' && po.lines.some((l) => Number(l.receivedQty) < Number(l.orderedQty)),
         };
       });
     const received = orders.map((o) => o.lastReceivedOn).filter((d): d is string => !!d).sort();
@@ -2093,6 +2094,7 @@ function route(method: string, path: string, body?: unknown): unknown {
         overdue: orders.filter((o) => o.overdue).length,
         notPlaced: orders.filter((o) => o.status === 'DRAFT' || o.status === 'PENDING_APPROVAL').length,
         allReceived: orders.length > 0 && orders.every((o) => o.status === 'RECEIVED' || o.status === 'CLOSED'),
+        closedShort: orders.filter((o) => o.closedShort).length,
         lastReceivedOn: received.length ? received[received.length - 1]! : null,
         latestExpected: owedDates.sort().pop() ?? null,
       },
