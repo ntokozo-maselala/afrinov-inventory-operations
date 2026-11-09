@@ -136,6 +136,25 @@ describe('Materials: All items, Stores, Tools and Projects tabs', () => {
     expect((await row('1369-PIPE')).querySelectorAll('td')[headers.indexOf('Required')]).toHaveTextContent('—');
   });
 
+  it('calls Projects material issued down to nothing bought per order, not out of stock', async () => {
+    withStock([
+      stockRow('DISC', 'OUT_OF_STOCK', { locations: [{ locationId: 'a', locationName: 'A', quantity: '0' }] }),
+      stockRow('1369-PIPE', 'OUT_OF_STOCK', { locations: [{ locationId: 'a', locationName: 'A', quantity: '0' }] }),
+    ]);
+    list();
+    const row = async (sku: string) => (await screen.findByText(sku)).closest('tr')!;
+    expect(await within(await row('DISC')).findByText('Out of stock')).toBeInTheDocument();
+    expect(within(await row('1369-PIPE')).getByText('Bought per order')).toBeInTheDocument();
+    expect(within(await row('1369-PIPE')).queryByText('Out of stock')).not.toBeInTheDocument();
+  });
+
+  it('leaves Projects material at nothing out of the Out of stock filter', async () => {
+    withStock([stockRow('DISC', 'OUT_OF_STOCK'), stockRow('1369-PIPE', 'OUT_OF_STOCK')]);
+    list('/materials?stock=out');
+    await screen.findByText('DISC');
+    expect(skus()).toEqual(['DISC']);
+  });
+
   it('filters by stock from the address, leaving out Projects material never meant to be stock', async () => {
     withStock([stockRow('DISC', 'IN_STOCK', { onHand: '8' }), stockRow('DRILL', 'NEVER_RECEIVED'), stockRow('1369-PIPE', 'NEVER_RECEIVED')]);
     list('/materials?stock=never');
