@@ -10,7 +10,6 @@ vi.mock('../auth', () => ({ useAuth: () => ({ user: { roles: auth.roles } }) }))
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: true }));
 
 const { Dashboard } = await import('./Dashboard');
-const { today } = await import('../lib/dates');
 
 const VALUE = {
   currency: 'ZAR',
@@ -40,26 +39,12 @@ describe('Dashboard', () => {
     });
   });
 
-  // Job tracking (ADR-032): in place of reminders, the user's steps late or due this week.
-  it('says how many of my project steps are late or due this week, and links to them', async () => {
-    const step = (name: string, over: Record<string, unknown>) => ({
-      stepId: name, name, scheduleId: 'sch-1', scheduleName: 'Main', scheduleStatus: 'ACTIVE', projectNumber: 'AFRI-1086', projectName: null,
-      expectedStart: null, expectedEnd: null, progress: 0, late: false, ...over,
-    });
-    const base = mockGet.getMockImplementation()!;
-    mockGet.mockImplementation(async (path: string) => (path === '/my-project-steps'
-      ? [step('FAT', { late: true, expectedEnd: '2026-01-02' }), step('Packaging', { expectedEnd: today() }), step('Delivery', { expectedEnd: '2099-01-01' })]
-      : base(path)));
-    render(<MemoryRouter><Dashboard /></MemoryRouter>);
-    expect(await screen.findByText('Your project steps')).toBeInTheDocument();
-    expect(screen.getByText(/1 late, 1 due this week\./)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open My steps' })).toHaveAttribute('href', '/projects/board?view=mine');
-  });
-
-  it('says nothing about project steps when none are late or due this week', async () => {
+  // The project steps notice is off for now (Project Tracking Roadmap, Later): no notice, and no request for the steps.
+  it('shows no project steps notice and does not ask for them', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await screen.findByText('Stock value');
     expect(screen.queryByText('Your project steps')).not.toBeInTheDocument();
+    expect(mockGet).not.toHaveBeenCalledWith('/my-project-steps');
   });
 
   it('shows the stock value per category, with a total, and the status counts', async () => {

@@ -165,7 +165,7 @@ Size M. Frontend, and one report endpoint.
 - **The board is its own menu entry**, Project board under Sales (`/projects/board`, with My steps at `?view=mine`), rather than a tab on Projects.
 - **The chart is a Steps / Chart switch** on each schedule. It stretches to today only when today is within a month of the plan, so an old job isn't squeezed, and stops shading weekends beyond 200 days.
 - **The user filter is "Only jobs with steps assigned to me"**, not a picker of every user: listing users needs `view:users`, which most people on the board don't hold.
-- **The Dashboard gets a notice, not a card,** shown only when the user has steps late or due this week. The top row is a fixed grid of cards, and a notice says more.
+- **The Dashboard gets a notice, not a card,** shown only when the user has steps late or due this week. The top row is a fixed grid of cards, and a notice says more. **Off since 2026-11-09:** the business asked for it to be taken off the Dashboard for now and brought back later (see Later); My steps stays on the Project board.
 
 - [x] **3.1 The chart.** One per schedule, a line per step: the baseline as one bar, the forecast or actual as another, progress filled in. Weekends and closed days shaded, a line for today and a marker for the due date. Built in CSS, with no chart library.
   Files: a new `frontend/src/components/ProjectGantt.tsx`
@@ -276,6 +276,7 @@ Found by reading all six month sheets (about 45 jobs) and confirmed with the wor
 ## Later
 
 - **Reminders** by email or in the app for steps due or late, once mail or notifications are set up on the server.
+- **The Dashboard's "Your project steps" notice,** taken off on 2026-11-09 at the business's request. To bring it back, restore it in `pages/Dashboard.tsx` and its two tests in `Dashboard.test.tsx` from commit `13a168f` (Phase 3); `GET /my-project-steps` is unchanged. Decide first whether it returns as the notice or as a card in the top row, since a full-width notice pushes the stock figures down on the store's Dashboard.
 - **People updating their own steps**, not only managers.
 - **Step dependencies, budgets and resource levelling**, if full project management is ever brought into scope.
 - **Time booked against steps**, which overlaps with the Manhours workbook.
