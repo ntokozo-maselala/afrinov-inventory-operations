@@ -91,15 +91,18 @@ export async function loadSlip(slipId: string, db: Db = prisma): Promise<Slip> {
  * nobody else's: no one confirms on their behalf (owner's answer, 10 Nov
  * 2026). A machine or site can't, so a person collecting for it does, chosen
  * from the workers and contractors.
+ *
+ * Someone who has since left (inactive) can't use a PIN or sign now, but a
+ * paper slip they signed at the time is still their evidence (edge case E4).
  */
-export async function checkSigner(slip: Slip, signerId: string, db: Db = prisma): Promise<{ name: string }> {
+export async function checkSigner(slip: Slip, signerId: string, db: Db = prisma, allowInactive = false): Promise<{ name: string }> {
   if (slip.recipientId && slip.recipientType && holdsPin(slip.recipientType) && signerId !== slip.recipientId) {
     throw Errors.signerNotRecipient(slip.recipientName ?? 'the recipient');
   }
   const signer = await db.recipient.findUnique({ where: { id: signerId }, select: { name: true, type: true, active: true } });
   if (!signer) throw Errors.notFound('Recipient');
   if (!holdsPin(signer.type)) throw Errors.validation(`${signer.name} is a ${signer.type.toLowerCase()}: choose the person who collected.`);
-  if (!signer.active) throw Errors.validation(`${signer.name} is inactive`);
+  if (!signer.active && !allowInactive) throw Errors.validation(`${signer.name} has left (inactive), so can't use a PIN or sign now. Attach the slip they signed on paper, or record why it isn't confirmed.`);
   return { name: signer.name };
 }
 
@@ -162,7 +165,9 @@ export const ReceiptConfirmationService = {
       // One confirmation of a slip at a time, so two at once can't both pass the check below.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`afrinov:receipt:${input.slipId}`}))`;
       const slip = await loadSlip(input.slipId, tx);
-      if (input.method !== 'NONE') await checkSigner(slip, input.signerId, tx);
+      // Nothing left the store: there is no hand-over to confirm (edge case E5).
+      if (slip.lines.length === 0) throw Errors.invalidState('Every line on this slip was reversed, so there is nothing to confirm.');
+      if (input.method !== 'NONE') await checkSigner(slip, input.signerId, tx, input.method === 'PAPER');
       const confirmed = await tx.receiptConfirmation.findFirst({ where: { slipId: slip.id, method: { not: 'NONE' } }, select: { id: true } });
       if (confirmed) throw Errors.alreadyConfirmed();
 
@@ -211,6 +216,23 @@ export const ReceiptConfirmationService = {
     if (slipIds.length === 0) return new Set();
     const rows = await db.receiptConfirmation.findMany({ where: { slipId: { in: slipIds }, method: { not: 'NONE' } }, select: { slipId: true } });
     return new Set(rows.map((r) => r.slipId));
+  },
+
+  /** Of these slips, the ones the person collecting said were wrong, and not confirmed since (edge case E2). */
+  async disputedOf(slipIds: string[], db: Db = prisma): Promise<Set<string>> {
+    if (slipIds.length === 0) return new Set();
+    const rows = await db.receiptConfirmation.findMany({ where: { slipId: { in: slipIds } }, select: { slipId: true, method: true, reason: true }, orderBy: { confirmedAt: 'asc' } });
+    const latest = new Map<string, { method: string; reason: string | null }>();
+    const confirmed = new Set<string>();
+    for (const r of rows) { latest.set(r.slipId, r); if (r.method !== 'NONE') confirmed.add(r.slipId); }
+    return new Set([...latest].filter(([id, r]) => !confirmed.has(id) && r.reason === 'DISPUTED').map(([id]) => id));
+  },
+
+  /** Of these slips, the ones a receipt filter keeps: confirmed, not confirmed, or disputed. */
+  async keep(filter: 'confirmed' | 'unconfirmed' | 'disputed', slipIds: string[], db: Db = prisma): Promise<Set<string>> {
+    if (filter === 'disputed') return this.disputedOf(slipIds, db);
+    const confirmed = await this.confirmedOf(slipIds, db);
+    return filter === 'confirmed' ? confirmed : new Set(slipIds.filter((id) => !confirmed.has(id)));
   },
 
   /** The signature or photo a slip was confirmed with. */

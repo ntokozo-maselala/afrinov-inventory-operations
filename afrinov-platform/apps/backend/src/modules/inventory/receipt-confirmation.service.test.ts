@@ -31,7 +31,7 @@ const client = {
   receiptConfirmation: {
     findFirst: async ({ where }: { where: { slipId: string } }) => db.confirmations.find((c) => c.slipId === where.slipId && c.method !== 'NONE') ?? null,
     findMany: async ({ where }: { where: { slipId: { in: string[] }; method?: unknown } }) =>
-      db.confirmations.filter((c) => where.slipId.in.includes(c.slipId) && (!where.method || c.method !== 'NONE')).map(withNames),
+      db.confirmations.filter((c) => where.slipId.in.includes(c.slipId) && (!where.method || c.method !== 'NONE')).sort((a, b) => a.confirmedAt.getTime() - b.confirmedAt.getTime()).map(withNames),
     create: async ({ data }: { data: Partial<Omit<Conf, 'image'>> & Pick<Conf, 'slipId' | 'method' | 'capturedById'> & { image?: { create: { size: number } } } }) => {
       const { image, ...rest } = data;
       const row: Conf = { signerId: null, reason: null, note: null, linesFingerprint: null, ...rest, id: `c-${++seq}`, confirmedAt: new Date(Date.now() + seq), imageRemovedAt: null, image: image ? { size: image.create.size } : null };
@@ -157,6 +157,43 @@ describe('ReceiptConfirmationService.confirm', () => {
     const create = vi.spyOn(client.receiptConfirmation, 'create').mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' }));
     await expect(ReceiptConfirmationService.confirm({ slipId: 's1', method: 'PIN', signerId: 'sabelo', actorId: 'u' })).rejects.toMatchObject({ code: 'ALREADY_CONFIRMED' });
     create.mockRestore();
+  });
+});
+
+describe('edge cases E4 and E5', () => {
+  it('accepts a paper slip signed by someone who has since left, but not a PIN or a signature now (E4)', async () => {
+    issue('s-gone', 'gone', [1]);
+    const slip = await loadSlip('s-gone');
+    await expect(checkSigner(slip, 'gone')).rejects.toThrow(/has left \(inactive\)/);
+    await expect(ReceiptConfirmationService.confirm({ slipId: 's-gone', method: 'SIGNATURE', signerId: 'gone', image: { contentType: 'image/png', data: PNG }, actorId: 'u' })).rejects.toThrow(/has left/);
+    await expect(ReceiptConfirmationService.confirm({ slipId: 's-gone', method: 'PAPER', signerId: 'gone', image: { contentType: 'image/png', data: PNG }, actorId: 'u' }))
+      .resolves.toMatchObject({ method: 'PAPER', signerName: 'Left Company' });
+  });
+
+  it('refuses to confirm a slip whose every line was reversed (E5)', async () => {
+    db.ledger.push({ id: 'tx-r', issueId: 's-rev', type: 'ISSUE', quantity: D(-2), recipientId: 'sabelo', reversed: true });
+    await expect(ReceiptConfirmationService.confirm({ slipId: 's-rev', method: 'PIN', signerId: 'sabelo', actorId: 'u' }))
+      .rejects.toMatchObject({ code: 'INVALID_STATE', message: 'Every line on this slip was reversed, so there is nothing to confirm.' });
+    await expect(ReceiptConfirmationService.confirm({ slipId: 's-rev', method: 'NONE', reason: 'LEFT', actorId: 'u' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+
+  it('never lets a confirmed slip become disputed, so a signature never belongs to a dispute still open (E7)', async () => {
+    issue('s-ok', 'sabelo', [1]);
+    await ReceiptConfirmationService.confirm({ slipId: 's-ok', method: 'SIGNATURE', signerId: 'sabelo', image: { contentType: 'image/png', data: PNG }, actorId: 'u' });
+    await expect(ReceiptConfirmationService.confirm({ slipId: 's-ok', method: 'NONE', reason: 'DISPUTED', note: 'Wrong', actorId: 'u' })).rejects.toMatchObject({ code: 'ALREADY_CONFIRMED' });
+  });
+
+  it('keeps the disputed slips not confirmed since, for the Disputed filter (E2)', async () => {
+    issue('d-1', 'sabelo', [1]);
+    issue('d-2', 'thabo', [1]);
+    issue('d-3', 'kts', [1]);
+    await ReceiptConfirmationService.confirm({ slipId: 'd-1', method: 'NONE', reason: 'DISPUTED', note: 'Got 3', actorId: 'u' });
+    await ReceiptConfirmationService.confirm({ slipId: 'd-2', method: 'NONE', reason: 'DISPUTED', note: 'Not mine', actorId: 'u' });
+    await ReceiptConfirmationService.confirm({ slipId: 'd-2', method: 'PIN', signerId: 'thabo', actorId: 'u' });
+    await ReceiptConfirmationService.confirm({ slipId: 'd-3', method: 'NONE', reason: 'LEFT', actorId: 'u' });
+    expect([...await ReceiptConfirmationService.keep('disputed', ['d-1', 'd-2', 'd-3'])]).toEqual(['d-1']);
+    expect([...await ReceiptConfirmationService.keep('unconfirmed', ['d-1', 'd-2', 'd-3'])]).toEqual(['d-1', 'd-3']);
+    expect([...await ReceiptConfirmationService.keep('confirmed', ['d-1', 'd-2', 'd-3'])]).toEqual(['d-2']);
   });
 });
 

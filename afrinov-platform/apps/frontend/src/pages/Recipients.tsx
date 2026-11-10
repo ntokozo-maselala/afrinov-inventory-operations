@@ -31,6 +31,8 @@ export interface Recipient {
   pinSet?: boolean;
   pinLocked?: boolean;
   pinFailedTries?: number;
+  /** Unlocks in the last 30 days: each gives more guesses (edge case E6). */
+  pinUnlocks30d?: number;
 }
 
 export const RECIPIENT_TYPE_LABEL: Record<RecipientType, string> = {
@@ -189,6 +191,7 @@ function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut, onPin }:
           <div className="flex flex-wrap items-center gap-1">
             {state}
             {!r.pinLocked && (r.pinFailedTries ?? 0) > 0 && <span className="text-xs text-surface-500">{r.pinFailedTries} wrong</span>}
+            {(r.pinUnlocks30d ?? 0) >= 3 && <Badge tone="warning" title="Each unlock allows more guesses. Check who keeps unlocking it in the activity log.">Unlocked {r.pinUnlocks30d}× in 30 days</Badge>}
             {canManage && r.active && (r.pinLocked
               ? <><Button size="sm" variant="ghost" onClick={() => onPin(r, 'unlock')}>Unlock</Button><Button size="sm" variant="ghost" onClick={() => onPin(r, 'reset')}>Reset</Button></>
               : r.pinSet
@@ -270,7 +273,15 @@ function RecipientForm({ initial, onCancel, onSaved }: {
       <Field label="Name" htmlFor="rcp-name" required>
         <Input id="rcp-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} placeholder="e.g. Sabelo, Forklift, Northam Platinum" />
       </Field>
-      <Field label="Type" htmlFor="rcp-type" required help="Worker, machine, client site or contractor.">
+      <Field
+        label="Type"
+        htmlFor="rcp-type"
+        required
+        help={type === 'CONTRACTOR'
+          // One person on every slip (edge case E9): a contractor's staff don't share one PIN.
+          ? 'Add each person who collects as their own contractor, e.g. “Sipho (KTS)”, so each has their own PIN. Set the company itself up as a Site: whoever collects for it is named.'
+          : 'Worker, machine, client site or contractor.'}
+      >
         <Select id="rcp-type" value={type} onChange={(e) => setType(e.target.value as RecipientType)}>
           {(Object.keys(RECIPIENT_TYPE_LABEL) as RecipientType[]).map((t) => <option key={t} value={t}>{RECIPIENT_TYPE_LABEL[t]}</option>)}
         </Select>

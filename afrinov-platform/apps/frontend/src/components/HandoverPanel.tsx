@@ -33,7 +33,7 @@ export interface HandoverSlip {
   note: string;
 }
 
-interface Person { id: string; name: string; type: string; pinSet?: boolean; pinLocked?: boolean }
+interface Person { id: string; name: string; type: string; active?: boolean; pinSet?: boolean; pinLocked?: boolean }
 
 type Method = 'PIN' | 'SIGN' | 'NONE' | 'PAPER';
 
@@ -47,7 +47,8 @@ export function HandoverPanel({ slip, mode, later = false, start, onClose }: {
   /** With the receipt recorded, or null when closed without recording anything. */
   onClose: (receipt: ReceiptSummary | null) => void;
 }) {
-  const people = useApi<Person[]>('/recipients?active=true');
+  // Everyone, inactive included, so the slip's own person is known after they've left (edge case E4).
+  const people = useApi<Person[]>('/recipients');
   const everyone = people.data ?? [];
   const own = holdsPin(slip.recipientType) ? slip.recipientId : null;
   const [signerId, setSignerId] = useState(own ?? '');
@@ -73,7 +74,12 @@ export function HandoverPanel({ slip, mode, later = false, start, onClose }: {
 
   // Without a PIN to use, signing is where they start.
   const noPin = !!signer && (signer.pinSet === false || locked);
-  const shown: Method = method ?? (noPin ? 'SIGN' : 'PIN');
+  // Someone who has left can't use a PIN or sign now: only the paper slip they signed, or a reason (E4).
+  const gone = !!signer && signer.active === false;
+  const shown: Method = gone ? (method === 'NONE' ? 'NONE' : 'PAPER') : (method ?? (noPin ? 'SIGN' : 'PIN'));
+  const tabs: ReadonlyArray<readonly [Method, string]> = gone
+    ? [['PAPER', 'Attach signed slip'], ['NONE', 'Not now']]
+    : [['PIN', 'Enter PIN'], ['SIGN', 'Sign'], ['NONE', 'Not now']];
 
   const firstName = (name: string) => name.split(' ')[0] ?? name;
   const first = firstName(signer?.name ?? slip.recipientName ?? 'them');
@@ -81,11 +87,12 @@ export function HandoverPanel({ slip, mode, later = false, start, onClose }: {
   const loan = slip.kind === 'LOAN';
   const canSkip = !later && mode !== 'require';
 
-  // Closing without recording: Skip when the setting is Ask, Cancel when opened later.
+  // A tap outside or Escape closes it only once there is nothing left to do. Before that,
+  // only the Skip or Cancel button does, so a stray tap at a busy counter skips nothing (edge case E3).
   const dismiss = () => {
     if (busy) return;
     if (done) onClose(done);
-    else if (later || canSkip || settled) onClose(null);
+    else if (settled) onClose(null);
   };
 
   async function send(body: Record<string, unknown>, handle: Record<string, unknown>) {
@@ -184,11 +191,31 @@ export function HandoverPanel({ slip, mode, later = false, start, onClose }: {
             <Field label={forThing ? 'Collected by' : 'Signed by'} htmlFor="handover-who" required help={forThing ? 'Only a person can confirm. The slip will say who collected.' : undefined}>
               <Select id="handover-who" value={signerId} onChange={(e) => { setSignerId(e.target.value); setPin(''); setError(null); }} disabled={people.loading}>
                 <option value="">— choose —</option>
-                {everyone.filter((p) => holdsPin(p.type)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {everyone.filter((p) => holdsPin(p.type) && p.active !== false).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </Select>
             </Field>
           )}
 
+          {gone && (
+            <Alert tone="info" title={`${signer.name} has left (inactive)`}>
+              So they can’t use a PIN or sign now. Attach the slip they signed on paper, or record why it isn’t confirmed.
+            </Alert>
+          )}
+          {(start !== 'PAPER' || gone) && (
+            <div className={cn('grid gap-1 rounded-md bg-surface-100 p-1', tabs.length === 3 ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label={`How ${first} confirms`}>
+              {tabs.map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={shown === m}
+                  onClick={() => { setMethod(m); setPin(''); setError(null); }}
+                  className={cn('rounded px-2 py-1.5 text-sm font-medium', shown === m ? 'bg-surface-0 text-surface-900 shadow-sm' : 'text-surface-600')}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {shown === 'PAPER' ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
@@ -202,20 +229,6 @@ export function HandoverPanel({ slip, mode, later = false, start, onClose }: {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-1 rounded-md bg-surface-100 p-1" role="group" aria-label={`How ${first} confirms`}>
-                {([['PIN', 'Enter PIN'], ['SIGN', 'Sign'], ['NONE', 'Not now']] as const).map(([m, label]) => (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={shown === m}
-                    onClick={() => { setMethod(m); setPin(''); setError(null); }}
-                    className={cn('rounded px-2 py-1.5 text-sm font-medium', shown === m ? 'bg-surface-0 text-surface-900 shadow-sm' : 'text-surface-600')}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
               {!signer ? (
                 <p className="text-sm text-surface-500 text-center">Choose who is collecting first.</p>
               ) : shown === 'PIN' ? (

@@ -50,7 +50,12 @@ function makePrisma(): unknown {
         return r;
       },
     },
-    auditLogEntry: { create: async ({ data }: { data: AuditRow }) => { db.audit.push(data); return data; } },
+    auditLogEntry: {
+      create: async ({ data }: { data: AuditRow }) => { db.audit.push(data); return data; },
+      // Unlocks in the last 30 days, per recipient (edge case E6).
+      groupBy: async () => Object.entries(db.audit.filter((a) => a.action === 'PIN_UNLOCK').reduce<Record<string, number>>((m, a) => ({ ...m, [a.entityId]: (m[a.entityId] ?? 0) + 1 }), {}))
+        .map(([entityId, n]) => ({ entityId, _count: { _all: n } })),
+    },
   };
   return { ...tx, $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
 }
@@ -157,6 +162,17 @@ describe('RecipientService counter PINs (ADR-034)', () => {
     await expect(RecipientService.unlockPin(r.id, 'store')).rejects.toMatchObject({ code: 'INVALID_STATE' });
     db.recipients.set(r.id, { ...db.recipients.get(r.id)!, pinFailedTries: 5, pinLockedAt: new Date() });
     expect(await RecipientService.unlockPin(r.id, 'store')).toMatchObject({ pinLocked: false, pinFailedTries: 0, pinSet: true });
+  });
+
+  it('says how often each PIN was unlocked in the last 30 days (edge case E6)', async () => {
+    const r = await worker();
+    await RecipientService.setPin(r.id, '2580', 'store');
+    for (let i = 0; i < 3; i++) {
+      db.recipients.set(r.id, { ...db.recipients.get(r.id)!, pinFailedTries: 5, pinLockedAt: new Date() });
+      await RecipientService.unlockPin(r.id, 'store');
+    }
+    expect((await RecipientService.list())[0]).toMatchObject({ pinUnlocks30d: 3 });
+    expect(await RecipientService.getById(r.id)).toMatchObject({ pinUnlocks30d: 3 });
   });
 
   it('clears the PIN when a worker becomes a machine or site', async () => {

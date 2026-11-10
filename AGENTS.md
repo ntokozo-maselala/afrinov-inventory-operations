@@ -186,7 +186,9 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `receipt_confirmations` by counter PIN, signature or a photo of the signed
   slip, or the reason it wasn't is kept; it never moves stock (ADR-034). A
   worker or contractor confirms only their own slip; a machine or site's is
-  confirmed by whoever collected. Return recipients through `publicRecipient`
+  confirmed by whoever collected, and someone who has left only by a paper
+  slip signed at the time. A slip with every line reversed can't be confirmed.
+  Return recipients through `publicRecipient`
   (`src/modules/operations/recipient-pin.ts`), never the raw row, so
   `pin_hash` never leaves the server, and check a PIN with `verifyPin`, outside
   the confirmation's transaction, so a wrong try is counted. On the frontend,

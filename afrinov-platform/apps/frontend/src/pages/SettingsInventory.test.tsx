@@ -2,7 +2,7 @@
 // Roadmap, Phase 4): project material isn't shelved, so an administrator names
 // one location, such as the workshop floor, for Receive stock to use.
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
@@ -53,5 +53,24 @@ describe('Settings: project receiving location', () => {
       'Choose on each delivery', 'Main store', 'Old shed (inactive)', 'Workshop floor',
     ]);
     expect(field).toHaveValue('loc-old');
+  });
+});
+
+describe('Settings: keep signature images for', () => {
+  it('says how many images a shorter keep period removes before it is saved (edge case E8)', async () => {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/settings') return SETTINGS;
+      if (path === '/slips/images/past-keep?months=30') return { months: 30, count: 0 };
+      if (path === '/slips/images/past-keep?months=12') return { months: 12, count: 37 };
+      return [];
+    });
+    render(<MemoryRouter><ToastProvider><SettingsProvider canEdit><Loaded /></SettingsProvider></ToastProvider></MemoryRouter>);
+    const field = await screen.findByLabelText('inventory.receiptImageKeepMonths');
+    // A longer period removes nothing, so says nothing.
+    fireEvent.change(field, { target: { value: '30' } });
+    expect(screen.queryByText(/Saving removes/)).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: '12' } });
+    expect(await screen.findByText('Saving removes 37 signatures and slip photos')).toBeInTheDocument();
+    expect(mockGet).not.toHaveBeenCalledWith('/slips/images/past-keep?months=30');
   });
 });

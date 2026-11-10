@@ -22,50 +22,75 @@ export function monthsBefore(now: Date, months: number): Date {
 export interface PendingReceipts {
   since: string;
   days: number;
-  /** Issue slips and tool check-outs with a line still standing and no confirmation. */
+  /** Issue slips and tool check-outs of the last `days` days with something still to confirm and no confirmation. */
   issues: number;
   loans: number;
-  /** Of those, how many the person collecting said were wrong. */
-  disputed: number;
   oldestAt: string | null;
+  /**
+   * Slips the person collecting said were wrong, still not confirmed, of any
+   * age: a dispute is a stock error to correct, however old (edge case E2).
+   */
+  disputed: number;
+  oldestDisputedAt: string | null;
 }
 
-interface PendingRow { kind: 'ISSUE' | 'LOAN'; slips: number; disputed: number; oldest: Date | null }
+interface PendingRow { issues: number; loans: number; oldest: Date | null; disputed: number; oldestDisputed: Date | null }
 
 /**
- * Slips posted in the last `days` days with no confirmation. A slip whose
- * every line was reversed has nothing left to confirm, so it isn't counted.
+ * Slips with something still to confirm and no confirmation. A slip whose
+ * every line was reversed has nothing left to confirm, and a tool loan whose
+ * tools are all back has its proof in the tools themselves (edge case E1), so
+ * neither is counted.
  */
 export async function pendingReceipts(now = new Date(), days = PENDING_DAYS): Promise<PendingReceipts> {
   const since = daysBefore(now, days);
-  const rows = await prisma.$queryRaw<PendingRow[]>`
-    WITH slips AS (
-      SELECT t."issue_id" AS slip_id, MIN(t."type"::text) AS kind, MIN(t."posted_at") AS posted_at
+  const [row] = await prisma.$queryRaw<PendingRow[]>`
+    WITH lines AS (
+      SELECT t."issue_id" AS slip_id, t."type"::text AS kind, t."posted_at",
+        CASE WHEN t."type" = 'LOAN'
+          THEN -t."quantity" - COALESCE((
+            SELECT SUM(b."quantity") FROM "inventory_transactions" b
+            WHERE b."type" = 'LOAN_RETURN' AND b."reference_type" = 'ToolLoan' AND b."reference_id" = t."id"), 0)
+          ELSE 1 END AS still_out
       FROM "inventory_transactions" t
       WHERE t."type" IN ('ISSUE', 'LOAN') AND t."issue_id" IS NOT NULL AND t."reverses_id" IS NULL
-        AND t."posted_at" >= ${since}
         AND NOT EXISTS (SELECT 1 FROM "inventory_transactions" r WHERE r."reverses_id" = t."id")
-      GROUP BY t."issue_id"
-    )
-    SELECT s.kind, COUNT(*)::int AS slips,
-      COUNT(*) FILTER (WHERE (
+    ), slips AS (
+      SELECT l.slip_id, MIN(l.kind) AS kind, MIN(l."posted_at") AS posted_at
+      FROM lines l WHERE l.still_out > 0 GROUP BY l.slip_id
+    ), waiting AS (
+      SELECT s.*, (
         SELECT c."reason" FROM "receipt_confirmations" c WHERE c."slip_id" = s.slip_id ORDER BY c."confirmed_at" DESC LIMIT 1
-      ) = 'DISPUTED')::int AS disputed,
-      MIN(s.posted_at) AS oldest
-    FROM slips s
-    WHERE NOT EXISTS (SELECT 1 FROM "receipt_confirmations" c WHERE c."slip_id" = s.slip_id AND c."method" <> 'NONE')
-    GROUP BY s.kind`;
-  const of = (kind: PendingRow['kind']) => rows.find((r) => r.kind === kind);
-  const oldest = rows.map((r) => r.oldest).filter((d): d is Date => d !== null).sort((a, b) => a.getTime() - b.getTime())[0];
+      ) AS reason
+      FROM slips s
+      WHERE NOT EXISTS (SELECT 1 FROM "receipt_confirmations" c WHERE c."slip_id" = s.slip_id AND c."method" <> 'NONE')
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE kind = 'ISSUE' AND posted_at >= ${since})::int AS issues,
+      COUNT(*) FILTER (WHERE kind = 'LOAN' AND posted_at >= ${since})::int AS loans,
+      MIN(posted_at) FILTER (WHERE posted_at >= ${since}) AS oldest,
+      COUNT(*) FILTER (WHERE reason = 'DISPUTED')::int AS disputed,
+      MIN(posted_at) FILTER (WHERE reason = 'DISPUTED') AS "oldestDisputed"
+    FROM waiting`;
   return {
     since: since.toISOString(),
     days,
-    issues: of('ISSUE')?.slips ?? 0,
-    loans: of('LOAN')?.slips ?? 0,
-    disputed: rows.reduce((n, r) => n + r.disputed, 0),
-    oldestAt: oldest?.toISOString() ?? null,
+    issues: row?.issues ?? 0,
+    loans: row?.loans ?? 0,
+    oldestAt: row?.oldest?.toISOString() ?? null,
+    disputed: row?.disputed ?? 0,
+    oldestDisputedAt: row?.oldestDisputed?.toISOString() ?? null,
   };
 }
+
+/** How many signatures and slip photos a keep period of `months` would remove now (edge case E8). 0: none. */
+export async function imagesPastKeep(months: number, now = new Date()): Promise<number> {
+  if (!months || months <= 0) return 0;
+  return prisma.receiptConfirmation.count({ where: { confirmedAt: { lt: monthsBefore(now, months) }, image: { isNot: null } } });
+}
+
+/** A PIN unlocked this many times in 30 days is shown on Recipients and in check:receipts (edge case E6). */
+export const UNLOCKS_TO_FLAG = 3;
 
 /**
  * Removes signatures and photos older than inventory.receiptImageKeepMonths
@@ -91,7 +116,7 @@ export async function pruneReceiptImages(now = new Date(), batch = 500): Promise
   });
 }
 
-type Client = Pick<Prisma.TransactionClient, 'inventoryTransaction' | 'receiptConfirmation' | 'setting'>;
+type Client = Pick<Prisma.TransactionClient, 'inventoryTransaction' | 'receiptConfirmation' | 'setting' | 'auditLogEntry' | 'recipient' | 'user'>;
 
 export interface ReceiptReport {
   slips: number;
@@ -101,6 +126,10 @@ export interface ReceiptReport {
   /** Who posted the slips still waiting, most first. */
   waitingByIssuer: Array<{ name: string; slips: number }>;
   disputed: string[];
+  /** Tool loans never confirmed whose tools are all back: listed, not waiting (edge case E1). */
+  returnedLoans: string[];
+  /** PINs unlocked UNLOCKS_TO_FLAG or more times in 30 days, and by whom (edge case E6). */
+  repeatedUnlocks: Array<{ name: string; unlocks: number; by: string[] }>;
   /** Confirmed, then a line was reversed. */
   changedAfter: string[];
   imagesDue: number;
@@ -111,17 +140,20 @@ export interface ReceiptReport {
 
 /** The whole database's slips and their receipts, for check:receipts. Read-only. */
 export async function checkReceipts(db: Client = prisma, now = new Date()): Promise<ReceiptReport> {
-  const [lines, confirmations, keep] = await Promise.all([
+  const [lines, confirmations, keep, returns, unlocks] = await Promise.all([
     db.inventoryTransaction.findMany({
       where: { type: { in: ['ISSUE', 'LOAN'] }, issueId: { not: null }, reversesId: null },
-      select: { id: true, issueId: true, quantity: true, postedAt: true, recipientId: true, recipient: { select: { type: true } }, actor: { select: { name: true } }, reversedBy: { select: { id: true } } },
+      select: { id: true, issueId: true, type: true, quantity: true, postedAt: true, recipientId: true, recipient: { select: { type: true } }, actor: { select: { name: true } }, reversedBy: { select: { id: true } } },
     }),
     db.receiptConfirmation.findMany({
       select: { slipId: true, method: true, reason: true, signerId: true, linesFingerprint: true, confirmedAt: true, imageRemovedAt: true, image: { select: { size: true } } },
       orderBy: { confirmedAt: 'asc' },
     }),
     db.setting.findUnique({ where: { key: 'inventory.receiptImageKeepMonths' } }),
+    db.inventoryTransaction.groupBy({ by: ['referenceId'], where: { type: 'LOAN_RETURN', referenceType: 'ToolLoan' }, _sum: { quantity: true } }),
+    db.auditLogEntry.findMany({ where: { entityType: 'Recipient', action: 'PIN_UNLOCK', createdAt: { gte: daysBefore(now, 30) } }, select: { entityId: true, actorId: true } }),
   ]);
+  const back = new Map(returns.map((r) => [r.referenceId, r._sum.quantity]));
 
   const slips = new Map<string, typeof lines>();
   for (const l of lines) slips.set(l.issueId!, [...(slips.get(l.issueId!) ?? []), l]);
@@ -134,6 +166,8 @@ export async function checkReceipts(db: Client = prisma, now = new Date()): Prom
     waiting: { today: 0, week: 0, month: 0, older: 0 },
     waitingByIssuer: [],
     disputed: [],
+    returnedLoans: [],
+    repeatedUnlocks: [],
     changedAfter: [],
     imagesDue: 0,
     orphaned: [],
@@ -157,6 +191,11 @@ export async function checkReceipts(db: Client = prisma, now = new Date()): Prom
     }
     if (standing.length === 0) continue;
     if (rows.at(-1)?.reason === 'DISPUTED') report.disputed.push(slipId);
+    // A loan whose tools are all back has nothing still out to confirm.
+    if (standing.every((l) => l.type === 'LOAN' && !l.quantity.negated().minus(back.get(l.id) ?? 0).gt(0))) {
+      report.returnedLoans.push(slipId);
+      continue;
+    }
     const days = age(own[0]!.postedAt);
     if (days < 1) report.waiting.today++;
     else if (days < 7) report.waiting.week++;
@@ -173,7 +212,21 @@ export async function checkReceipts(db: Client = prisma, now = new Date()): Prom
     const cutoff = monthsBefore(now, months);
     report.imagesDue = confirmations.filter((c) => c.image && c.confirmedAt < cutoff).length;
   }
+  const perRecipient = new Map<string, string[]>();
+  for (const u of unlocks) perRecipient.set(u.entityId, [...(perRecipient.get(u.entityId) ?? []), u.actorId ?? '']);
+  const flagged = [...perRecipient].filter(([, by]) => by.length >= UNLOCKS_TO_FLAG);
+  if (flagged.length > 0) {
+    const [people, users] = await Promise.all([
+      db.recipient.findMany({ where: { id: { in: flagged.map(([id]) => id) } }, select: { id: true, name: true } }),
+      db.user.findMany({ where: { id: { in: [...new Set(flagged.flatMap(([, by]) => by))] } }, select: { id: true, name: true } }),
+    ]);
+    const nameOf = (id: string) => users.find((x) => x.id === id)?.name ?? 'Unknown user';
+    report.repeatedUnlocks = flagged
+      .map(([id, by]) => ({ name: people.find((x) => x.id === id)?.name ?? id, unlocks: by.length, by: [...new Set(by.map(nameOf))].sort() }))
+      .sort((a, b) => b.unlocks - a.unlocks || a.name.localeCompare(b.name));
+  }
   report.disputed.sort();
+  report.returnedLoans.sort();
   report.changedAfter.sort();
   report.wrongSigner.sort();
   return report;
