@@ -194,6 +194,13 @@ const THEMES = ['system', 'light', 'dark'] as const;
 const DENSITIES = ['comfortable', 'compact'] as const;
 // Lending to someone with an overdue tool: warn (lend with a reason), or block contractors only, or block everyone.
 export const TOOL_OVERDUE_CHECKOUT = ['warn', 'block-contractors', 'block'] as const;
+// The hand-over step after an issue or check-out (ADR-034).
+export const RECEIPT_CONFIRMATION = ['off', 'ask', 'require'] as const;
+// Signature images are kept at least 24 months (owner's answer, 10 Nov 2026), or always (0).
+const KEEP_MONTHS = (v: unknown) => {
+  if (typeof v !== 'number' || !Number.isInteger(v)) return 'Must be a whole number.';
+  return v === 0 || (v >= 24 && v <= 240) ? null : 'Must be 0 (always) or between 24 and 240 months.';
+};
 
 export const SETTING_CATALOG: readonly SettingDefinition[] = [
   // ── General ────────────────────────────────────────────────────────────
@@ -219,6 +226,10 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.toolOverdueCheckout', type: 'enum', category: 'inventory', description: 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', default: 'warn', enumOptions: TOOL_OVERDUE_CHECKOUT, validate: ENUM(TOOL_OVERDUE_CHECKOUT) },
   // Project material isn't shelved: it is received and issued straight to the workshop (Project Material Through the Store Roadmap, Phase 4).
   { key: 'inventory.projectReceivingLocationId', type: 'string', category: 'inventory', description: 'Where project deliveries are booked on Receive stock, such as the workshop floor: project material is not shelved, it is issued from there. Leave blank to choose a location on each delivery.', default: '', validate: UUID_OR_BLANK },
+  // Proof of receipt (ADR-034).
+  { key: 'inventory.receiptConfirmation', type: 'enum', category: 'inventory', description: 'Whether the person collecting stock or tools confirms they took it. Off: no hand-over step. Ask: the hand-over step opens after each issue and check-out, and can be skipped. Required: skipping needs a reason, and slips not confirmed are counted on the Dashboard.', default: 'ask', enumOptions: RECEIPT_CONFIRMATION, validate: ENUM(RECEIPT_CONFIRMATION) },
+  { key: 'inventory.receiptPinTries', type: 'number', category: 'inventory', description: 'Wrong PIN tries before a counter PIN locks. A store controller unlocks it on Recipients.', default: 5, validate: POS_INT(3, 10) },
+  { key: 'inventory.receiptImageKeepMonths', type: 'number', category: 'inventory', description: 'How long signatures and photos of signed slips are kept, in months: at least 24, or 0 to keep them always. After that the image is removed and the record that the slip was signed stays.', default: 24, validate: KEEP_MONTHS },
   { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.', default: true },
 
   // ── Purchase Orders ─────────────────────────────────────────────────────

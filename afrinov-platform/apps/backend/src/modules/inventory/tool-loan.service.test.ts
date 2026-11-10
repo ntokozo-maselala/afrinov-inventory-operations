@@ -56,6 +56,8 @@ const withRelations = (r: Row) => ({
 });
 
 const client = {
+  // No slip has been confirmed (ADR-034).
+  receiptConfirmation: { findMany: async () => [] },
   // The hold on the items' units (holdUnits) is left out: these are the tool locks.
   $executeRaw: vi.fn(async (strings: TemplateStringsArray, key: string) => { if (!strings.join('').includes('FOR SHARE')) db.locks.push(key); return 0; }),
   material: {

@@ -44,6 +44,7 @@ export type IdempotencyEndpoint =
   | 'POST /inventory-transactions/:id/outcomes'
   | 'POST /consumable-outcomes/:id/withdrawal'
   | 'POST /tools/loans/:id/due-date'
+  | 'POST /slips/:slipId/confirmation'
   | 'POST /adjustment-requests/:id/approve'
   | 'POST /adjustment-requests/:id/reject'
   | 'POST /projects/:projectNumber/schedules'
@@ -215,12 +216,17 @@ export function sendIdempotent(reply: FastifyReply, result: IdempotentResult, re
  * `run` receives the transaction to use (the idempotent one when a key was
  * sent, otherwise undefined, so the service opens its own) and returns the
  * status and body to send.
+ *
+ * `requestBody`, when given, is what the reuse check hashes instead of the
+ * request's body: a body carrying a secret (a counter PIN) passes it without
+ * the secret, so no hash of it is stored.
  */
 export async function idempotentMutation(
   req: FastifyRequest,
   reply: FastifyReply,
   endpoint: IdempotencyEndpoint,
   run: (tx: Prisma.TransactionClient | undefined) => Promise<{ statusCode: number; body: unknown }>,
+  options: { requestBody?: unknown } = {},
 ): Promise<FastifyReply> {
   const read = readIdempotencyKey(req.headers as Record<string, unknown>);
   if (!read.present) {
@@ -235,7 +241,7 @@ export async function idempotentMutation(
   }
   const actorId = (req as unknown as { user: { id: string } }).user.id;
   const outcome = await withIdempotency(
-    { actorId, endpoint, key: read.key, scope: req.url, requestBody: req.body },
+    { actorId, endpoint, key: read.key, scope: req.url, requestBody: 'requestBody' in options ? options.requestBody : req.body },
     (tx) => run(tx),
   );
   return sendIdempotent(reply, outcome, outcome.replayed);

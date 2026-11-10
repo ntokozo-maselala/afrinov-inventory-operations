@@ -179,6 +179,15 @@ Use these forms; the older spellings still work but are deprecated or removed.
   stock count, takes the balance lock and is refused while any adjustment of
   that material, location and project stock is waiting for approval; approving
   both would correct the same difference twice.
+- **A slip posts first; the person collecting confirms it beside the ledger.**
+  An issue or tool loan slip (one `issueId`) is confirmed in
+  `receipt_confirmations` by counter PIN, signature or a photo of the signed
+  slip, or the reason it wasn't is kept; it never moves stock (ADR-034). A
+  worker or contractor confirms only their own slip; a machine or site's is
+  confirmed by whoever collected. Return recipients through `publicRecipient`
+  (`src/modules/operations/recipient-pin.ts`), never the raw row, so
+  `pin_hash` never leaves the server, and check a PIN with `verifyPin`, outside
+  the confirmation's transaction, so a wrong try is counted.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

@@ -135,6 +135,11 @@ export function describeActivity(e: Entry, names: Map<string, string>): { summar
       const type = str(a['type'])?.toLowerCase();
       if (e.action === 'CREATE') return { summary: `Added recipient ${label}${type ? ` (${type})` : ''}`, link: '/recipients' };
       if (e.action === 'UPDATE') return { summary: editSentence('recipient', label, e.before, e.after), link: '/recipients' };
+      // Counter PINs (ADR-034). The PIN itself is never in the log.
+      if (e.action === 'PIN_SET') return { summary: `Set a counter PIN for ${label}`, link: '/recipients' };
+      if (e.action === 'PIN_RESET') return { summary: `Reset ${label}'s counter PIN${str(a['reason']) ? `: ${a['reason']}` : ''}`, link: '/recipients' };
+      if (e.action === 'PIN_UNLOCK') return { summary: `Unlocked ${label}'s counter PIN`, link: '/recipients' };
+      if (e.action === 'PIN_LOCKED') return { summary: `${label}'s counter PIN locked after ${Number(a['pinFailedTries'] ?? 0)} wrong tries`, link: '/recipients' };
       break;
     }
     case 'Supplier':

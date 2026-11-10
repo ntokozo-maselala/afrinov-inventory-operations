@@ -957,3 +957,52 @@ the pre-flight query is in `docs/engineering/DATABASE_ASSURANCE.md`.
 time, and lost from this log when the two merged. Restored here as ADR-033 on
 2026-11-07. The comment in that migration still says ADR-032: a migration already
 applied is not edited, as its checksum would change.
+
+### ADR-034 — The person collecting a slip confirms it, by counter PIN or signature
+**Date:** 2026-11-10 · **Status:** Accepted
+
+**Context:** An issue and a tool loan record a recipient chosen by whoever is at
+the counter. Most recipients never sign in, and nothing showed that the person
+named took the stock (gap G8, process P-06 step 4 "Unsupported"). Store staff
+sign paper slips today. The owner agreed the platform should record proof of
+receipt, chose the options below on the prototype of 10 Nov 2026, and answered
+that nobody may confirm on another person's behalf.
+
+**Decision:**
+- The slip posts first, exactly as before: stock has left the shelf whether or
+  not anyone signs, so the ledger says so. A confirmation is a record of its own,
+  `receipt_confirmations`, beside the slip (one `issueId`, issue or tool loan),
+  and never moves a balance. Issue and check-out, their idempotency keys and
+  balance locks are unchanged.
+- The person collecting confirms with a counter PIN, a signature drawn on
+  screen, or a photo of the signed paper slip. Or the reason they didn't is
+  recorded (left, can't, no screen, says the slip is wrong, other), and a real
+  confirmation can follow later. A slip is confirmed once: a partial unique
+  index allows one row that is not NONE per slip.
+- A worker or contractor confirms only their own slip. A machine or site
+  can't: the worker or contractor who collected for it confirms, and the slip
+  says "collected by".
+- A confirmation stores a fingerprint of the slip's lines. A line reversed
+  afterwards makes the slip read "changed after it was confirmed".
+- A PIN is 4 to 6 digits, typed twice by its owner, kept only as a bcrypt hash
+  (cost 10) that no read or audit entry returns. Runs, repeats and repeated
+  pairs are refused. A set PIN is replaced only after a reset with a reason. A
+  wrong PIN is counted in a transaction of its own, holding the recipient's row,
+  so it stands although the confirmation is refused and tries at the same moment
+  can't pass the limit (`inventory.receiptPinTries`, 5); then it locks until a
+  store controller unlocks it. The PIN is left out of the stored idempotency hash.
+- Images sit in `receipt_images`, apart from their record, so they can be
+  removed after `inventory.receiptImageKeepMonths` (24, at least 24, or 0 for
+  always) and the fact the slip was signed stays. They are personal information
+  (POPIA): only `view:reports` sees them.
+- `inventory.receiptConfirmation` is off, ask or require; it starts at ask, to
+  move to require once the counter is ready. Capturing needs the permission that
+  posts that kind of slip; PINs need `manage:recipients`.
+
+**Consequences:** A confirmation proves the hand-over at the counter, nothing
+after it. A technician issuing to themselves still confirms with their own PIN,
+since recipients are not linked to user accounts. A PIN can be watched or shared,
+so each slip shows the method used. Returns and check-ins are not confirmed.
+Migration `20260101000053_receipt_confirmations` only adds. The screens, the
+printed slip's signature block, the Dashboard count, image removal and
+`check:receipts` follow in later steps.
