@@ -225,13 +225,43 @@ describe('Movements page', () => {
     renderAt('/movements?report=issued&from=2026-09-25');
     const table = await screen.findByRole('table', { name: 'Issued stock' });
     const disc = within(table).getByText('DISC-115').closest('tr')!;
-    expect(cells(disc).slice(1)).toEqual(['Sabelo (Worker)', 'AFRI-1325', 'DISC-115 Cutting disc', 'Boiler Shop', '3 each', '1', 'Vusi']);
+    expect(cells(disc).slice(1)).toEqual(['Sabelo (Worker)', 'AFRI-1325', 'DISC-115 Cutting disc', 'Boiler Shop', '3 each', '1', 'Vusi', 'Not confirmed']);
     const gloves = within(table).getByText('GLOVE-L').closest('tr')!;
     expect(within(gloves).getByText('Reversed')).toBeInTheDocument();
     expect(cells(gloves)[2]).toBe('AFRI-1325');
     expect(screen.getByText(/1 issue, 2 lines/)).toBeInTheDocument();
     fireEvent.click(within(disc).getAllByRole('button')[0]!);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('shows on each slip card who confirmed it, or a way to confirm it now (ADR-034)', async () => {
+    issueSlips = [
+      { ...SLIP, id: 'iss-2', recipientName: 'Thabo', receipt: {
+        method: 'PIN', signerId: 'r-2', signerName: 'Thabo', collectedFor: false, reason: null, note: null,
+        confirmedAt: '2026-09-25T08:01:00.000Z', capturedByName: 'Vusi', hasImage: false, imageRemoved: false, changed: false,
+      } },
+      { ...SLIP, receipt: {
+        method: 'NONE', signerId: null, signerName: null, collectedFor: false, reason: 'LEFT', note: null,
+        confirmedAt: '2026-09-25T08:01:00.000Z', capturedByName: 'Vusi', hasImage: false, imageRemoved: false, changed: false,
+      } },
+    ];
+    renderAt('/movements?report=issued&view=cards&from=2026-09-25');
+    const confirmed = await screen.findByRole('region', { name: 'Issue to Thabo' });
+    expect(within(confirmed).getByText('Confirmed')).toBeInTheDocument();
+    expect(within(confirmed).getByText(/Thabo, with their PIN/)).toBeInTheDocument();
+    expect(within(confirmed).queryByRole('button', { name: 'Confirm now' })).not.toBeInTheDocument();
+    const waiting = screen.getByRole('region', { name: 'Issue to Sabelo' });
+    expect(within(waiting).getByText('Not confirmed')).toBeInTheDocument();
+    expect(within(waiting).getByText(/Left before confirming/)).toBeInTheDocument();
+    fireEvent.click(within(waiting).getByRole('button', { name: 'Confirm now' }));
+    expect(await screen.findByRole('dialog', { name: 'Confirm receipt: Sabelo' })).toBeInTheDocument();
+  });
+
+  it('lists only the slips not confirmed on request', async () => {
+    renderAt('/movements?report=issued&from=2026-09-25');
+    await screen.findByRole('table', { name: 'Issued stock' });
+    fireEvent.click(screen.getByRole('button', { name: 'Not confirmed' }));
+    await waitFor(() => expect(calls('/inventory-issues').at(-1)).toMatch(/receipt=unconfirmed/));
   });
 
   it('shows what each person still has for items that track use, in the table and on the slip cards', async () => {
@@ -247,7 +277,8 @@ describe('Movements page', () => {
     renderAt('/movements?report=issued&from=2026-09-25');
     const table = await screen.findByRole('table', { name: 'Issued stock' });
     expect(within(table).getByRole('columnheader', { name: 'Still out' })).toBeInTheDocument();
-    const out = (sku: string) => cells(within(table).getByText(sku).closest('tr')!).at(-2);
+    // Before Issued by and Receipt.
+    const out = (sku: string) => cells(within(table).getByText(sku).closest('tr')!).at(-3);
     expect(out('DISC-115')).toBe('1');
     expect(out('BLADE-9')).toBe('0');
     // Gloves do not track use: nothing to say.

@@ -35,7 +35,7 @@ export interface Supplier {
 
 /** A tool lent and not yet all back (GET /tools). */
 export interface OpenLoan {
-  loanId: string; slipId: string | null; recipientId: string | null; recipientName: string | null; projectNumber: string | null;
+  loanId: string; slipId: string | null; recipientId: string | null; recipientName: string | null; recipientType?: string | null; projectNumber: string | null;
   locationId: string; locationName: string;
   /** How many were lent, and how many of them are still out. */
   quantity: string; out: string;
@@ -53,6 +53,8 @@ export interface OpenLoan {
   overdue: boolean;
   /** Due date changes, later or earlier, oldest first; previousDueOn is the date each replaced. */
   extensions: Array<{ dueOn: string; previousDueOn: string; reason: string; extendedBy: string; extendedAt: string }>;
+  /** Whether the borrower confirmed the slip it went out on (ADR-034); null when nothing is recorded. */
+  receipt?: ReceiptSummary | null;
 }
 
 /**
@@ -218,8 +220,31 @@ export interface ActivityRow {
 /** One issue slip on the issued-stock report (GET /inventory-issues): every line one issue posted. */
 export interface IssueSlip {
   id: string; cursor: string; issuedAt: string;
+  recipientId?: string | null;
   recipientName: string | null; recipientType: string | null; projectNumber: string | null; issuedByName: string;
   lines: MovementRow[];
+  /** How the person collecting confirmed it, or why not (ADR-034); null when nothing is recorded. */
+  receipt?: ReceiptSummary | null;
+}
+
+export type ReceiptMethod = 'PIN' | 'SIGNATURE' | 'PAPER' | 'NONE';
+export type ReceiptSkipReason = 'LEFT' | 'CANNOT' | 'NO_SCREEN' | 'DISPUTED' | 'OTHER';
+
+/** A slip's receipt (POST /slips/:slipId/confirmation, and on each slip and open loan). */
+export interface ReceiptSummary {
+  method: ReceiptMethod;
+  signerId: string | null;
+  signerName: string | null;
+  /** The person collected for the slip's machine or site. */
+  collectedFor: boolean;
+  reason: ReceiptSkipReason | null;
+  note: string | null;
+  confirmedAt: string;
+  capturedByName: string;
+  hasImage: boolean;
+  imageRemoved: boolean;
+  /** Confirmed, then a line was reversed. */
+  changed: boolean;
 }
 
 /** One delivery on the received-stock report (GET /stock-receipts). */

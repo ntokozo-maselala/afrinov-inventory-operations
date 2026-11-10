@@ -141,6 +141,18 @@ describe('api/client.ts — API client utilities', () => {
       });
     });
 
+    it('keeps the wording and tries left of a wrong counter PIN (ADR-034)', async () => {
+      const { api } = await withFetch(new Response(
+        JSON.stringify({ error: { code: 'PIN_MISMATCH', message: 'That PIN doesn’t match. 2 tries left.', details: { triesLeft: 2 } } }),
+        { status: 422, headers: { 'content-type': 'application/json' } },
+      ));
+      await expect(api.post('/slips/iss-1/confirmation', {})).rejects.toMatchObject({
+        code: 'PIN_MISMATCH',
+        message: 'That PIN doesn’t match. 2 tries left.',
+        details: { triesLeft: 2 },
+      });
+    });
+
     it('never exposes a raw server message for an unrecognised code', async () => {
       const { api } = await withFetch(new Response(
         JSON.stringify({ error: { code: 'WAT', message: 'PrismaClientKnownRequestError P2025' } }),

@@ -119,6 +119,10 @@ export function SettingsInventory() {
   const toolMaxLoanDays = useSetting('inventory.toolMaxLoanDays');
   const toolEscalateDays = useSetting('inventory.toolEscalateDays');
   const toolOverdueCheckout = useSetting('inventory.toolOverdueCheckout');
+  // Proof of receipt (ADR-034).
+  const receiptConfirmation = useSetting('inventory.receiptConfirmation');
+  const receiptPinTries = useSetting('inventory.receiptPinTries');
+  const receiptImageKeepMonths = useSetting('inventory.receiptImageKeepMonths');
   const projectReceiving = useSetting('inventory.projectReceivingLocationId');
   const requireWriteOffApproval = useSetting('inventory.requireWriteOffApproval');
   const writeOffApprovalAbove = useSetting('inventory.writeOffApprovalAbove');
@@ -179,6 +183,30 @@ export function SettingsInventory() {
           value={(draft['inventory.toolOverdueCheckout'] as string) ?? 'warn'}
           onChange={(v) => setDraft('inventory.toolOverdueCheckout', v)}
           error={errors['inventory.toolOverdueCheckout'] ?? null}
+        />
+      )}
+      {receiptConfirmation && (
+        <EnumField
+          def={receiptConfirmation}
+          value={(draft['inventory.receiptConfirmation'] as string) ?? 'ask'}
+          onChange={(v) => setDraft('inventory.receiptConfirmation', v)}
+          error={errors['inventory.receiptConfirmation'] ?? null}
+        />
+      )}
+      {receiptPinTries && (
+        <NumberField
+          def={receiptPinTries}
+          value={Number(draft['inventory.receiptPinTries'] ?? 5)}
+          onChange={(v) => setDraft('inventory.receiptPinTries', v)}
+          error={errors['inventory.receiptPinTries'] ?? null}
+        />
+      )}
+      {receiptImageKeepMonths && (
+        <NumberField
+          def={receiptImageKeepMonths}
+          value={Number(draft['inventory.receiptImageKeepMonths'] ?? 24)}
+          onChange={(v) => setDraft('inventory.receiptImageKeepMonths', v)}
+          error={errors['inventory.receiptImageKeepMonths'] ?? null}
         />
       )}
       <TextField

@@ -67,6 +67,16 @@ describe('errorPresentation', () => {
       },
     );
 
+    it.each(['PIN_MISMATCH', 'PIN_LOCKED', 'PIN_NOT_SET', 'WEAK_PIN', 'SIGNER_NOT_RECIPIENT', 'ALREADY_CONFIRMED'])(
+      'shows the server’s wording for %s, which names the person and what to do next (ADR-034)',
+      (code) => {
+        const p = presentError({ code, message: 'That PIN doesn’t match. 4 tries left.' });
+        expect(p.tone).toBe('warning');
+        expect(p.retryable).toBe(false);
+        expect(p.message).toBe('That PIN doesn’t match. 4 tries left.');
+      },
+    );
+
     it('never invites a blind retry of an unconfirmed mutation', () => {
       const p = presentError({ code: 'OUTCOME_UNKNOWN', message: 'x' });
       expect(p.retryable).toBe(false);

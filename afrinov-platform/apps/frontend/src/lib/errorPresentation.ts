@@ -41,6 +41,13 @@ const DOMAIN_MESSAGE_CODES = new Set([
   'CONFLICT',
   'INVALID_STATE',
   'INSUFFICIENT_BALANCE',
+  // Proof of receipt (ADR-034): the server names the person and what to do next.
+  'PIN_MISMATCH',
+  'PIN_LOCKED',
+  'PIN_NOT_SET',
+  'WEAK_PIN',
+  'SIGNER_NOT_RECIPIENT',
+  'ALREADY_CONFIRMED',
 ]);
 
 function titleFor(code: string): { title: string; message: string; tone: ErrorTone; retryable: boolean; retryLabel: string } {
@@ -145,6 +152,35 @@ function titleFor(code: string): { title: string; message: string; tone: ErrorTo
       return {
         title: 'This change needs your attention',
         message: 'This change could not be made as asked. Review the details below and adjust before trying again.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
+    // A counter PIN that didn't work (ADR-034). The server's message says how
+    // many tries are left, or that it is locked and the person can sign instead.
+    case 'PIN_MISMATCH':
+    case 'PIN_LOCKED':
+    case 'PIN_NOT_SET':
+      return {
+        title: "That PIN didn't work",
+        message: 'The PIN was not accepted. They can try again, or sign instead.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
+    case 'WEAK_PIN':
+      return {
+        title: 'Choose another PIN',
+        message: 'That PIN is too easy to guess.',
+        tone: 'warning',
+        retryable: false,
+        retryLabel: 'Back',
+      };
+    case 'SIGNER_NOT_RECIPIENT':
+    case 'ALREADY_CONFIRMED':
+      return {
+        title: 'This slip can’t be confirmed that way',
+        message: 'Check who is confirming the slip, and whether it was confirmed already.',
         tone: 'warning',
         retryable: false,
         retryLabel: 'Back',

@@ -123,6 +123,13 @@ const DOMAIN_MESSAGE_CODES = new Set([
   'CONFLICT',
   'INVALID_STATE',
   'INSUFFICIENT_BALANCE',
+  // Proof of receipt (ADR-034): the server names the person and what to do next.
+  'PIN_MISMATCH',
+  'PIN_LOCKED',
+  'PIN_NOT_SET',
+  'WEAK_PIN',
+  'SIGNER_NOT_RECIPIENT',
+  'ALREADY_CONFIRMED',
 ]);
 
 /**

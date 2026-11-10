@@ -26,6 +26,9 @@ import { issuePrefillOf } from '../lib/issuePrefill';
 import { QuantityInput } from '../components/QuantityInput';
 import { useUnits } from '../hooks/useUnits';
 import { firstLineQuantityError, readQuantity } from '../lib/quantity';
+import { HandoverPanel, type HandoverSlip } from '../components/HandoverPanel';
+import { describeReceipt, useReceiptMode } from '../lib/receipts';
+import type { ReceiptSummary } from '../api/types';
 
 
 interface Line { key: number; stockKey: string; quantity: string }
@@ -60,7 +63,10 @@ export function IssueStock() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The issue just posted, kept on the page (a toast fades) with a way to its slip.
-  const [last, setLast] = useState<{ who: string; recipientId: string; count: number } | null>(null);
+  const [last, setLast] = useState<{ who: string; recipientId: string; count: number; receipt?: ReceiptSummary | null } | null>(null);
+  // The slip just posted, while the person collecting confirms it (ADR-034).
+  const [handover, setHandover] = useState<HandoverSlip | null>(null);
+  const receiptMode = useReceiptMode();
   const toast = useToast();
   const locationName = useLocationLabel();
   const idem = useIdempotencyKey('issue-stock');
@@ -189,10 +195,28 @@ export function IssueStock() {
           return { materialId: r.materialId, locationId: r.locationId, quantity: readQuantity(l.quantity), heldForProject: r.heldForProject ?? null };
         }),
       };
-      await api.post('/inventory-issues', issueBody, { idempotencyKey: idem.keyFor(issueBody) });
-      const who = recipients.find((r) => r.id === recipientId)?.name ?? 'recipient';
-      toast.success(`Issued ${filled.length} item${filled.length === 1 ? '' : 's'} to ${who}`);
+      const posted = await api.post<{ issueId?: string }>('/inventory-issues', issueBody, { idempotencyKey: idem.keyFor(issueBody) });
+      const recipient = recipients.find((r) => r.id === recipientId);
+      const who = recipient?.name ?? 'recipient';
       setLast({ who, recipientId, count: filled.length });
+      // The slip has posted; now the person collecting confirms it, unless the setting is Off.
+      // The panel says it was issued, so no toast covers its buttons on a small screen.
+      const handingOver = !!posted?.issueId && receiptMode !== 'off';
+      if (!handingOver) toast.success(`Issued ${filled.length} item${filled.length === 1 ? '' : 's'} to ${who}`);
+      if (handingOver && posted?.issueId) {
+        setHandover({
+          id: posted.issueId,
+          kind: 'ISSUE',
+          recipientId,
+          recipientName: who,
+          recipientType: recipient?.type ?? null,
+          note: issueProject ? `For ${issueProject}` : 'No project',
+          lines: filled.map((l) => {
+            const r = byKey.get(l.stockKey)!;
+            return { key: String(l.key), sku: r.materialSku, name: r.materialName, quantity: l.quantity.trim(), unit: r.unitOfMeasure };
+          }),
+        });
+      }
       setLines([emptyLine()]);
       setProjectNumber('');
       setNotFilled(0);
@@ -228,6 +252,9 @@ export function IssueStock() {
 
       {last && (
         <Alert tone="success" title={`Issued ${last.count} item${last.count === 1 ? '' : 's'} to ${last.who}`} className="mb-4 max-w-4xl">
+          {last.receipt !== undefined && (
+            <span className="block mb-1">{last.receipt && last.receipt.method !== 'NONE' ? describeReceipt(last.receipt, last.who).text : 'Not confirmed by the person collecting. It can be confirmed later from the slip.'}</span>
+          )}
           {/* Today's issues to them, newest first, in the slip layout that prints. */}
           <Link to={`/movements?report=issued&view=cards&recipientId=${encodeURIComponent(last.recipientId)}&from=${today()}&to=${today()}`} className="btn-link">
             See the issue slip in Movements
@@ -315,6 +342,14 @@ export function IssueStock() {
             <Button type="submit" variant="primary" loading={busy}>Issue stock</Button>
           </div>
         </form>
+      )}
+
+      {handover && (
+        <HandoverPanel
+          slip={handover}
+          mode={receiptMode}
+          onClose={(receipt) => { setHandover(null); setLast((l) => (l ? { ...l, receipt } : l)); }}
+        />
       )}
     </div>
   );

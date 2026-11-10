@@ -88,6 +88,9 @@ function validate(def: SettingValue, raw: unknown): string | null {
       // An exchange rate has decimals, and the Director's threshold may have cents; as the server's checks allow.
       const decimal = def.key.startsWith('purchaseOrders.exchangeRate') || def.key === 'purchaseOrders.directorApprovalFrom';
       if (!decimal && !Number.isInteger(n)) return 'Must be a whole number.';
+      // Proof of receipt (ADR-034), as the server allows.
+      if (def.key === 'inventory.receiptPinTries' && (n < 3 || n > 10)) return 'Must be between 3 and 10.';
+      if (def.key === 'inventory.receiptImageKeepMonths' && n !== 0 && (n < 24 || n > 240)) return 'Must be 0 (always) or between 24 and 240 months.';
       const min = def.key === 'general.defaultPageSize' ? 5 : 0;
       const max = def.key === 'general.defaultPageSize' ? 200
         : def.key === 'inventory.urgentBelowPercent' ? 100

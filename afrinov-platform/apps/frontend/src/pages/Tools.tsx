@@ -21,6 +21,10 @@ import { usePermissions } from '../hooks/usePermissions';
 import { formatDate, formatNumber } from '../lib/format';
 import type { OpenLoan, ToolRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { Badge } from '../components/Badge';
+import { HandoverPanel, type HandoverSlip } from '../components/HandoverPanel';
+import { describeReceipt, isConfirmed, useReceiptMode } from '../lib/receipts';
+import { formatDay } from '../lib/toolLoans';
 
 const VIEWS: Array<{ value: string; label: string; loans?: (l: OpenLoan) => boolean }> = [
   { value: 'all', label: 'All tools' },
@@ -46,6 +50,9 @@ export function Tools() {
   const [checkingOut, setCheckingOut] = useState<{ start?: ToolRow } | null>(null);
   const [checkingIn, setCheckingIn] = useState<ToolRow | null>(null);
   const [changingDue, setChangingDue] = useState<{ tool: ToolRow; loan: OpenLoan } | null>(null);
+  // A check-out slip the borrower confirms (ADR-034): straight after it posts, or later from its loan.
+  const [handover, setHandover] = useState<{ slip: HandoverSlip; later: boolean; summary?: string } | null>(null);
+  const receiptMode = useReceiptMode();
 
   const all = useMemo(() => tools.data ?? [], [tools.data]);
   const loanFilter = VIEWS.find((v) => v.value === view)?.loans;
@@ -68,11 +75,13 @@ export function Tools() {
   const overdue = sumOut(allLoans.filter((l) => l.overdue));
   const decide = sumOut(allLoans.filter((l) => l.state === 'NEEDS_DECISION'));
 
-  function done(summary: string) {
+  function done(summary: string, slip?: HandoverSlip) {
     setCheckingOut(null);
     setCheckingIn(null);
     setChangingDue(null);
-    toast.success(summary);
+    // The hand-over step first; its toast after, so none covers the panel's buttons.
+    if (slip && receiptMode !== 'off') setHandover({ slip, later: false, summary });
+    else toast.success(summary);
     tools.reload();
   }
 
@@ -111,6 +120,7 @@ export function Tools() {
                 <span className="text-surface-500"> · {formatNumber(Number(l.out))} since {formatDate(l.checkedOutAt)}{l.projectNumber ? ` · ${l.projectNumber}` : ''}</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <LoanDue loan={l} />
+                  <LoanReceipt loan={l} canConfirm={canLend} onConfirm={() => setHandover({ slip: loanSlip(all, l), later: true })} />
                   {canChangeDue && (
                     <Button size="sm" variant="ghost" onClick={() => setChangingDue({ tool: t, loan: l })} aria-label={`Change the due date of ${t.name} for ${l.recipientName ?? 'its borrower'}`}>
                       Change due date
@@ -188,6 +198,14 @@ export function Tools() {
           <CheckOutForm tools={all} start={checkingOut.start} onCancel={() => setCheckingOut(null)} onDone={done} />
         </Drawer>
       )}
+      {handover && (
+        <HandoverPanel
+          slip={handover.slip}
+          mode={receiptMode}
+          later={handover.later}
+          onClose={() => { if (handover.summary) toast.success(handover.summary); setHandover(null); tools.reload(); }}
+        />
+      )}
       {checkingIn && (
         <Drawer open onClose={() => setCheckingIn(null)} title={`Check in: ${checkingIn.name}`} description="How many came back from each check-out, and in what condition. A lost tool is written off." width="md">
           <CheckInForm tool={checkingIn} onCancel={() => setCheckingIn(null)} onDone={done} />
@@ -199,5 +217,29 @@ export function Tools() {
         </Drawer>
       )}
     </div>
+  );
+}
+
+/** A check-out slip as the hand-over step shows it: every tool still out on it. */
+function loanSlip(tools: ToolRow[], loan: OpenLoan): HandoverSlip {
+  const lines = tools.flatMap((t) => t.loans.filter((l) => l.slipId === loan.slipId).map((l) => ({ key: l.loanId, sku: t.sku, name: t.name, quantity: l.quantity, unit: t.unitOfMeasure })));
+  return {
+    id: loan.slipId!, kind: 'LOAN', recipientId: loan.recipientId, recipientName: loan.recipientName,
+    recipientType: loan.recipientType ?? null, note: `Due back ${formatDay(loan.dueOn)}`, lines,
+  };
+}
+
+/** Whether the borrower confirmed the check-out (ADR-034), and a way to do it now. */
+function LoanReceipt({ loan, canConfirm, onConfirm }: { loan: OpenLoan; canConfirm: boolean; onConfirm: () => void }) {
+  if (!loan.slipId) return null;
+  const d = describeReceipt(loan.receipt, loan.recipientName);
+  if (isConfirmed(loan.receipt) && !loan.receipt?.changed) return <Badge tone="success" title={d.text}>Confirmed</Badge>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Badge tone={d.tone} title={d.text}>{d.badge}</Badge>
+      {canConfirm && !isConfirmed(loan.receipt) && (
+        <Button size="sm" variant="ghost" onClick={onConfirm} aria-label={`Confirm the check-out with ${loan.recipientName ?? 'the borrower'}`}>Confirm</Button>
+      )}
+    </span>
   );
 }

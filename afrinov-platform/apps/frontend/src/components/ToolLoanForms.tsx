@@ -19,6 +19,7 @@ import { LOAN_STATE, addDays, formatDay, latestDueOn, lateness, movedWay, overdu
 import { today } from '../lib/dates';
 import { useIsAdmin, usePermissions } from '../hooks/usePermissions';
 import type { OpenLoan, ToolRow } from '../api/types';
+import type { HandoverSlip } from './HandoverPanel';
 
 /** What can still come back on a loan: what is out, less any lost one waiting for its write-off to be approved. */
 const canComeBack = (l: OpenLoan) => Math.round((Number(l.out) - Number(l.lostWaiting ?? 0)) * 1e4) / 1e4;
@@ -51,7 +52,8 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
   /** The tool the drawer was opened from, at its first location with any in store. */
   start?: ToolRow;
   onCancel: () => void;
-  onDone: (summary: string) => void;
+  /** With the slip just posted, for the hand-over step (ADR-034). */
+  onDone: (summary: string, slip?: HandoverSlip) => void;
 }) {
   const { recipients, projects, loading, error: optionsError } = useIssueOptions();
   const terms = useLoanTerms();
@@ -120,7 +122,7 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
     if (needsReason && !overrideReason.trim()) { setError(`Say why tools are lent to ${recipient?.name ?? 'this person'} while they have an overdue tool.`); return; }
     setBusy(true);
     try {
-      await api.post('/tools/check-out', {
+      const posted = await api.post<{ slipId?: string }>('/tools/check-out', {
         recipientId,
         projectNumber: projectNumber || undefined,
         note: note.trim() || undefined,
@@ -132,7 +134,18 @@ export function CheckOutForm({ tools, start, onCancel, onDone }: {
         }),
       });
       const who = recipient?.name ?? 'recipient';
-      onDone(`Checked out ${filled.length} tool${filled.length === 1 ? '' : 's'} to ${who}, due back ${formatDay(due)}`);
+      onDone(`Checked out ${filled.length} tool${filled.length === 1 ? '' : 's'} to ${who}, due back ${formatDay(due)}`, posted?.slipId ? {
+        id: posted.slipId,
+        kind: 'LOAN',
+        recipientId,
+        recipientName: who,
+        recipientType: recipient?.type ?? null,
+        note: `Due back ${formatDay(due)}`,
+        lines: filled.map((l) => {
+          const a = byKey.get(l.stockKey)!;
+          return { key: String(l.key), sku: a.tool.sku, name: a.tool.name, quantity: l.quantity.trim(), unit: a.tool.unitOfMeasure };
+        }),
+      } : undefined);
     } catch (err) {
       const apiErr = err as ApiError;
       // The list on screen was older than the server's: it found an overdue tool this form did not know of.

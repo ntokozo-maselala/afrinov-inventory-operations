@@ -128,6 +128,8 @@ export interface OpenLoan {
   slipId: string | null;
   recipientId: string | null;
   recipientName: string | null;
+  /** WORKER, MACHINE, SITE or CONTRACTOR: who confirms the slip follows from it (ADR-034). */
+  recipientType: string | null;
   projectNumber: string | null;
   locationId: string;
   locationName: string;
@@ -233,7 +235,7 @@ export const ToolLoanService = {
       prisma.inventoryTransaction.findMany({
         where: { type: InventoryTransactionType.LOAN, materialId: { in: ids } },
         include: {
-          recipient: { select: { name: true } },
+          recipient: { select: { name: true, type: true } },
           location: { select: { name: true } },
           actor: { select: { name: true } },
           loanExtensions: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { actor: { select: { name: true } } } },
@@ -270,6 +272,7 @@ export const ToolLoanService = {
         slipId: l.issueId,
         recipientId: l.recipientId,
         recipientName: l.recipient?.name ?? null,
+        recipientType: l.recipient?.type ?? null,
         projectNumber: l.projectNumber,
         locationId: l.locationId,
         locationName: l.location.name,

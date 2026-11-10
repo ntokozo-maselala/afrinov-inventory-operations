@@ -29,6 +29,7 @@ import { computeConsumption, closedOffOf } from './mockConsumption';
 import { computeMonthEnd } from './mockMonthEnd';
 import { computeProcurementSavings } from './mockProcurementSavings';
 import { mockOpenSchedules, mockScheduleCovers, resetMockSchedules, routeSchedules } from './mockSchedules';
+import { mockPinFields, mockReceiptOf, resetMockReceipts, routeReceipts } from './mockReceipts';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { unitKindOf, type UnitOfMeasure } from '../lib/quantity';
 import type {
@@ -140,6 +141,7 @@ export function resetMockState(): void {
   MOCK_AUDIT.length = 0;
   MOCK_COUNT_LINES.length = 0;
   resetMockSchedules();
+  resetMockReceipts();
 }
 
 let idCounter = 1000;
@@ -2006,12 +2008,27 @@ function route(method: string, path: string, body?: unknown): unknown {
     });
   }
 
+  // Proof of receipt (mockReceipts.ts): confirming a slip, and counter PINs.
+  const receipts = routeReceipts(method, p, body, {
+    slip: (slipId) => {
+      const t = state.transactions.find((x) => (x.type === 'ISSUE' || x.type === 'LOAN') && !x.reversesId && (x.issueId ?? x.id) === slipId);
+      const r = t?.recipientId ? state.recipients.find((x) => x.id === t.recipientId) : undefined;
+      return t ? { id: slipId, kind: t.type === 'LOAN' ? 'LOAN' : 'ISSUE', recipientId: t.recipientId ?? null, recipientType: r?.type ?? null, recipientName: r?.name ?? null } : undefined;
+    },
+    recipient: (id) => state.recipients.find((x) => x.id === id),
+    userName: () => devUser().name,
+    setting: (key) => MOCK_SETTINGS[key]?.value,
+    err,
+  });
+  if (receipts !== undefined) return receipts;
+
   // Recipients ("Issued To")
   if (method === 'GET' && p === '/recipients') {
     const q = qs.q?.toLowerCase();
     return state.recipients
       .filter((r) => (!qs.type || r.type === qs.type) && (qs.active === undefined || String(r.active) === qs.active) && (!q || r.name.toLowerCase().includes(q)))
-      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name))
+      .map((r) => ({ ...r, ...mockPinFields(r.id) }));
   }
   if (method === 'POST' && p === '/recipients') {
     const b = (body as { name?: string; type?: MockRecipient['type']; notes?: string }) ?? {};
@@ -2398,6 +2415,9 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.toolOverdueDays': row('inventory.toolOverdueDays', 7, 'number', 'inventory', 'Default tool loan period, in days: a tool checked out is due back this many days later unless another due date is set at check-out. Older loans with no due date fall due this many days after they went out.'),
     'inventory.toolMaxLoanDays': row('inventory.toolMaxLoanDays', 30, 'number', 'inventory', 'The longest a tool may be lent for, in days from check-out, extensions included. Only an administrator can set a later due date.'),
     'inventory.toolEscalateDays': row('inventory.toolEscalateDays', 14, 'number', 'inventory', 'A tool this many days past its due date needs a decision: check it in, extend the loan or write it off as lost. Flagged on the Tools page and the Dashboard.'),
+    'inventory.receiptConfirmation': row('inventory.receiptConfirmation', 'ask', 'enum', 'inventory', 'Whether the person collecting stock or tools confirms they took it. Off: no hand-over step. Ask: the hand-over step opens after each issue and check-out, and can be skipped. Required: skipping needs a reason, and slips not confirmed are counted on the Dashboard.', ['off', 'ask', 'require']),
+    'inventory.receiptPinTries': row('inventory.receiptPinTries', 5, 'number', 'inventory', 'Wrong PIN tries before a counter PIN locks. A store controller unlocks it on Recipients.'),
+    'inventory.receiptImageKeepMonths': row('inventory.receiptImageKeepMonths', 24, 'number', 'inventory', 'How long signatures and photos of signed slips are kept, in months: at least 24, or 0 to keep them always. After that the image is removed and the record that the slip was signed stays.'),
     'inventory.toolOverdueCheckout': row('inventory.toolOverdueCheckout', 'warn', 'enum', 'inventory', 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', ['warn', 'block-contractors', 'block']),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
     'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
@@ -2648,7 +2668,7 @@ function handleReceiptPost(gr: MockGoodsReceipt): void {
   }
 }
 
-function handleIssue(b: IssueBody): { transactionIds: string[] } {
+function handleIssue(b: IssueBody): { issueId: string; transactionIds: string[] } {
   if (!b.recipientId) throw err('VALIDATION_ERROR', 'Choose who the stock is issued to');
   const lines = b.lines ?? [];
   if (lines.length === 0) throw err('VALIDATION_ERROR', 'Add at least one item to issue');
@@ -2700,6 +2720,7 @@ function handleIssue(b: IssueBody): { transactionIds: string[] } {
   const postedAt = new Date().toISOString();
   const issueId = nextId('iss');
   return {
+    issueId,
     transactionIds: lines.map((l) => {
       const id = nextId('t');
       state.transactions.push({
@@ -2804,6 +2825,8 @@ function listTools() {
           return {
             loanId: t.id, slipId: t.issueId ?? null, recipientId: t.recipientId ?? null,
             recipientName: state.recipients.find((r) => r.id === t.recipientId)?.name ?? null,
+            recipientType: state.recipients.find((r) => r.id === t.recipientId)?.type ?? null,
+            receipt: t.issueId ? mockReceiptOf(t.issueId) : null,
             projectNumber: t.projectNumber ?? null, locationId: t.locationId, locationName: findLocation(t.locationId)?.name ?? '—',
             quantity: String(-Number(t.quantity)), out: String(out), checkedOutAt: t.postedAt,
             // As the server: of those out, how many are waiting to be written off as lost.
@@ -4079,11 +4102,14 @@ function listIssueSlips(qs: Record<string, string>) {
       .sort((a, b) => a.materialName.localeCompare(b.materialName));
     const first = lines[0];
     return {
-      id: h.id, cursor: `${h.at}_${h.id}`, issuedAt: h.at,
+      id: h.id, cursor: `${h.at}_${h.id}`, issuedAt: h.at, recipientId: first?.recipientId ?? null,
       recipientName: first?.recipientName ?? null, recipientType: first?.recipientType ?? null,
       projectNumber: first?.projectNumber ?? null, issuedByName: first?.actorName ?? 'Unknown user', lines,
+      receipt: mockReceiptOf(h.id),
     };
-  });
+  })
+    // As the server's receipt=confirmed|unconfirmed (after paging, which is close enough for the demo).
+    .filter((s) => !qs.receipt || (qs.receipt === 'confirmed') === (!!s.receipt && s.receipt.method !== 'NONE'));
 }
 
 // Mirrors StockReceiptService.list: posted deliveries for a delivery-date range, newest first.
