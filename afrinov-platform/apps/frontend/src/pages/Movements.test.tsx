@@ -266,6 +266,13 @@ describe('Movements page', () => {
     expect(within(card).getByText('Received by (name)').parentElement).toHaveClass('hidden', 'print:grid');
   });
 
+  it('lists only the disputed slips on request (E2)', async () => {
+    renderAt('/movements?report=issued&from=2026-09-25');
+    await screen.findByRole('table', { name: 'Issued stock' });
+    fireEvent.click(screen.getByRole('button', { name: 'Disputed' }));
+    await waitFor(() => expect(calls('/inventory-issues').at(-1)).toMatch(/receipt=disputed/));
+  });
+
   it('lists only the slips not confirmed on request', async () => {
     renderAt('/movements?report=issued&from=2026-09-25');
     await screen.findByRole('table', { name: 'Issued stock' });

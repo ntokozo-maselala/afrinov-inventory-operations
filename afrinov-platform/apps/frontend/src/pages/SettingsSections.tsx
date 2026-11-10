@@ -107,6 +107,22 @@ function LocationSettingField({ def, value, onChange, error }: { def: SettingVal
   );
 }
 
+/**
+ * Before a shorter keep period is saved, how many signatures and slip photos
+ * it removes within the hour (edge case E8). Removing them can't be undone.
+ */
+function ImageRemovalWarning({ saved, next }: { saved: number; next: number }) {
+  const shorter = Number.isInteger(next) && next > 0 && (saved === 0 || next < saved);
+  const due = useApi<{ count: number }>(shorter ? `/slips/images/past-keep?months=${next}` : null);
+  const count = due.data?.count ?? 0;
+  if (!shorter || count === 0) return null;
+  return (
+    <Alert tone="warning" title={`Saving removes ${count} signature${count === 1 ? '' : 's'} and slip photo${count === 1 ? '' : 's'}`}>
+      Images older than {next} months are removed within the hour, and this can’t be undone. The records that the slips were signed stay.
+    </Alert>
+  );
+}
+
 export function SettingsInventory() {
   const { draft, setDraft, errors, save, saving } = useSettings();
   const toast = useToast();
@@ -208,6 +224,9 @@ export function SettingsInventory() {
           onChange={(v) => setDraft('inventory.receiptImageKeepMonths', v)}
           error={errors['inventory.receiptImageKeepMonths'] ?? null}
         />
+      )}
+      {receiptImageKeepMonths && (
+        <ImageRemovalWarning saved={Number(receiptImageKeepMonths.value ?? 24)} next={Number(draft['inventory.receiptImageKeepMonths'] ?? 24)} />
       )}
       <TextField
         def={defaultUnitOfMeasure}

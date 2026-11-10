@@ -51,6 +51,20 @@ function rethrowNameClash(err: unknown, name: string): never {
 
 const asJson = (r: Parameters<typeof publicRecipient>[0]) => publicRecipient(r) as unknown as Prisma.InputJsonValue;
 
+/**
+ * How many times each PIN was unlocked in the last 30 days: each unlock gives
+ * more guesses, so repeated ones are shown on Recipients (edge case E6).
+ */
+async function unlocksOf(ids: string[]): Promise<Map<string, number>> {
+  if (ids.length === 0) return new Map();
+  const groups = await prisma.auditLogEntry.groupBy({
+    by: ['entityId'],
+    where: { entityType: 'Recipient', action: 'PIN_UNLOCK', entityId: { in: ids }, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+    _count: { _all: true },
+  });
+  return new Map(groups.map((g) => [g.entityId, g._count._all]));
+}
+
 /** A PIN change: the recipient's row is held while it happens, as a PIN check holds it. */
 async function changePin(
   id: string,
@@ -85,13 +99,15 @@ export const RecipientService = {
     if (filter.active !== undefined) where.active = filter.active;
     if (filter.q) where.name = { contains: filter.q, mode: 'insensitive' };
     const rows = await prisma.recipient.findMany({ where, orderBy: [{ active: 'desc' }, { name: 'asc' }] });
-    return rows.map(publicRecipient);
+    const unlocks = await unlocksOf(rows.filter((r) => r.pinHash).map((r) => r.id));
+    return rows.map((r) => ({ ...publicRecipient(r), pinUnlocks30d: unlocks.get(r.id) ?? 0 }));
   },
 
   async getById(id: string) {
     const recipient = await prisma.recipient.findUnique({ where: { id } });
     if (!recipient) throw Errors.notFound('Recipient');
-    return publicRecipient(recipient);
+    const unlocks = await unlocksOf(recipient.pinHash ? [recipient.id] : []);
+    return { ...publicRecipient(recipient), pinUnlocks30d: unlocks.get(recipient.id) ?? 0 };
   },
 
   async create(input: CreateRecipientInput, actorId: string) {

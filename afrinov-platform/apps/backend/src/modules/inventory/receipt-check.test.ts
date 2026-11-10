@@ -50,9 +50,9 @@ describe('pruneReceiptImages', () => {
 });
 
 describe('checkReceipts', () => {
-  type Line = { id: string; issueId: string; quantity: Prisma.Decimal; postedAt: Date; recipientId: string | null; recipient: { type: string } | null; actor: { name: string }; reversedBy: { id: string } | null };
+  type Line = { id: string; issueId: string; type?: string; quantity: Prisma.Decimal; postedAt: Date; recipientId: string | null; recipient: { type: string } | null; actor: { name: string }; reversedBy: { id: string } | null };
   const line = (id: string, issueId: string, daysAgo: number, over: Partial<Line> = {}): Line => ({
-    id, issueId, quantity: D(-1), postedAt: new Date(NOW.getTime() - daysAgo * 86_400_000), recipientId: 'r-1', recipient: { type: 'WORKER' }, actor: { name: 'Vusi' }, reversedBy: null, ...over,
+    id, issueId, type: 'ISSUE', quantity: D(-1), postedAt: new Date(NOW.getTime() - daysAgo * 86_400_000), recipientId: 'r-1', recipient: { type: 'WORKER' }, actor: { name: 'Vusi' }, reversedBy: null, ...over,
   });
   const conf = (slipId: string, over: Record<string, unknown>) => ({ slipId, method: 'PIN', reason: null, signerId: 'r-1', linesFingerprint: null, confirmedAt: NOW, imageRemovedAt: null, image: null, ...over });
 
@@ -63,7 +63,8 @@ describe('checkReceipts', () => {
       line('t-7', 's-disputed', 10), line('t-8', 's-gone', 5, { reversedBy: { id: 'rev2' } }),
     ];
     const db = {
-      inventoryTransaction: { findMany: async () => lines },
+      inventoryTransaction: { findMany: async () => lines, groupBy: async () => [] },
+      auditLogEntry: { findMany: async () => [] },
       receiptConfirmation: { findMany: async () => [
         conf('s-pin', { linesFingerprint: slipFingerprint([{ id: 't-1', quantity: '-1' }]) }),
         conf('s-changed', { method: 'SIGNATURE', linesFingerprint: slipFingerprint([{ id: 't-2', quantity: '-1' }, { id: 't-3', quantity: '-1' }]), image: { size: 10 }, confirmedAt: new Date('2024-01-01') }),
@@ -85,7 +86,8 @@ describe('checkReceipts', () => {
 
   it('reports the rules broken: a confirmation with no slip, and a worker’s slip confirmed by someone else', async () => {
     const db = {
-      inventoryTransaction: { findMany: async () => [line('t-1', 's-1', 1), line('t-2', 's-machine', 1, { recipientId: 'r-9', recipient: { type: 'MACHINE' } })] },
+      inventoryTransaction: { findMany: async () => [line('t-1', 's-1', 1), line('t-2', 's-machine', 1, { recipientId: 'r-9', recipient: { type: 'MACHINE' } })], groupBy: async () => [] },
+      auditLogEntry: { findMany: async () => [] },
       receiptConfirmation: { findMany: async () => [
         conf('s-1', { signerId: 'r-2', linesFingerprint: 'x' }),
         conf('s-machine', { signerId: 'r-2', linesFingerprint: 'x' }),
@@ -96,5 +98,38 @@ describe('checkReceipts', () => {
     const r = await checkReceipts(db as never, NOW);
     expect(r.wrongSigner).toEqual(['s-1']);
     expect(r.orphaned).toEqual(['s-missing']);
+  });
+
+  it('lists a tool loan with every tool back apart from the slips still waiting (edge case E1)', async () => {
+    const db = {
+      inventoryTransaction: {
+        findMany: async () => [
+          line('l-1', 'loan-back', 3, { type: 'LOAN', quantity: D(-2) }),
+          line('l-2', 'loan-out', 3, { type: 'LOAN', quantity: D(-2) }),
+        ],
+        groupBy: async () => [{ referenceId: 'l-1', _sum: { quantity: D(2) } }, { referenceId: 'l-2', _sum: { quantity: D(1) } }],
+      },
+      receiptConfirmation: { findMany: async () => [] },
+      setting: { findUnique: async () => null },
+      auditLogEntry: { findMany: async () => [] },
+    };
+    const r = await checkReceipts(db as never, NOW);
+    expect(r.returnedLoans).toEqual(['loan-back']);
+    expect(r.waiting.week).toBe(1);
+  });
+
+  it('flags a PIN unlocked three or more times in 30 days, with who unlocked it (edge case E6)', async () => {
+    const db = {
+      inventoryTransaction: { findMany: async () => [], groupBy: async () => [] },
+      receiptConfirmation: { findMany: async () => [] },
+      setting: { findUnique: async () => null },
+      auditLogEntry: { findMany: async () => [
+        { entityId: 'r-1', actorId: 'u-1' }, { entityId: 'r-1', actorId: 'u-1' }, { entityId: 'r-1', actorId: 'u-2' }, { entityId: 'r-2', actorId: 'u-1' },
+      ] },
+      recipient: { findMany: async () => [{ id: 'r-1', name: 'Sabelo Mkhize' }] },
+      user: { findMany: async () => [{ id: 'u-1', name: 'Vusi' }, { id: 'u-2', name: 'Admin' }] },
+    };
+    const r = await checkReceipts(db as never, NOW);
+    expect(r.repeatedUnlocks).toEqual([{ name: 'Sabelo Mkhize', unlocks: 3, by: ['Admin', 'Vusi'] }]);
   });
 });

@@ -104,7 +104,7 @@ const HEALTH_SEGMENTS = [
 ] as const;
 
 /** The Stores totals the status counts belong to (the overall totals from a server without sections). */
-interface PendingReceipts { since: string; days: number; issues: number; loans: number; disputed: number; oldestAt: string | null }
+interface PendingReceipts { since: string; days: number; issues: number; loans: number; oldestAt: string | null; disputed: number; oldestDisputedAt: string | null }
 
 /** Slips of the last 30 days nobody has confirmed (ADR-034), linking to them. */
 function receiptCard(p: PendingReceipts) {
@@ -113,10 +113,23 @@ function receiptCard(p: PendingReceipts) {
   return {
     label: 'Slips not confirmed',
     value: formatNumber(total),
-    tone: p.disputed > 0 ? 'danger' as const : total > 0 ? 'warning' as const : 'neutral' as const,
-    note: total === 0 ? `none in the last ${p.days} days`
-      : `${parts.join(', ')}${p.disputed ? `, ${formatNumber(p.disputed)} disputed` : ''} · last ${p.days} days`,
+    tone: total > 0 ? 'warning' as const : 'neutral' as const,
+    note: total === 0 ? `none in the last ${p.days} days` : `${parts.join(', ')} · last ${p.days} days`,
     to: p.issues > 0 ? `/movements?report=issued&view=cards&from=${p.since.slice(0, 10)}&receipt=unconfirmed` : p.loans > 0 ? '/tools?view=out' : undefined,
+  };
+}
+
+/**
+ * Slips the person collecting said were wrong, of any age, for whoever corrects
+ * them: the store controller, with Admin as cover (edge case E2, owner's answer).
+ */
+function disputedCard(p: PendingReceipts) {
+  return {
+    label: 'Disputed slips',
+    value: formatNumber(p.disputed),
+    tone: 'danger' as const,
+    note: 'said to be wrong · check and correct',
+    to: `/movements?report=issued&view=cards&from=${(p.oldestDisputedAt ?? p.since).slice(0, 10)}&receipt=disputed`,
   };
 }
 
@@ -146,8 +159,11 @@ export function Dashboard() {
   const { data: mine, loading: mineLoading, error: mineError, reload: reloadMine } = useApi<Waiting[]>(canApprove ? '/purchase-orders?awaitingMyApproval=true' : null);
   const { data: pending, reload: reloadPending } = useApi<Waiting[]>(canApprove ? '/purchase-orders?status=PENDING_APPROVAL' : null);
   // Slips nobody has confirmed, counted here when receipt confirmation is Required (ADR-034).
-  const receiptRequired = useReceiptMode() === 'require';
-  const { data: unconfirmed } = useApi<PendingReceipts>(receiptRequired ? '/slips/unconfirmed/summary' : null);
+  const receiptMode = useReceiptMode();
+  const receiptRequired = receiptMode === 'require';
+  // Those who correct a slip (reverse:inventory_transaction) see disputes on Ask too.
+  const correctsSlips = hasPermission('inventory:reverse');
+  const { data: unconfirmed } = useApi<PendingReceipts>(receiptMode !== 'off' && (receiptRequired || correctsSlips) ? '/slips/unconfirmed/summary' : null);
   // Not essential to the dashboard: if it can't load, the notice simply doesn't show.
 
   const kpis = useMemo(() => {
@@ -171,7 +187,8 @@ export function Dashboard() {
       { label: 'Warning', value: formatNumber(status.WARNING), tone: status.WARNING > 0 ? 'warning' as const : 'neutral' as const, note: `below ${warningBelowPercent}% of required`, to: '/reports/stock-status?view=WARNING' },
       { label: 'Out of stock', value: formatNumber(status.outOfStock), tone: status.outOfStock > 0 ? 'danger' as const : 'neutral' as const, note: 'nothing on hand', to: '/reports/stock-status?view=out' },
       loanCard,
-      ...(unconfirmed && typeof unconfirmed.issues === 'number' ? [receiptCard(unconfirmed)] : []),
+      ...(unconfirmed && typeof unconfirmed.issues === 'number' && receiptRequired ? [receiptCard(unconfirmed)] : []),
+      ...(unconfirmed && correctsSlips && unconfirmed.disputed > 0 ? [disputedCard(unconfirmed)] : []),
       ...(!canApprove ? [] : mineError
         ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
         : mine
@@ -179,7 +196,7 @@ export function Dashboard() {
           ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [

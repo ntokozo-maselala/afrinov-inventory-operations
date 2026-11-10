@@ -2016,13 +2016,15 @@ function route(method: string, path: string, body?: unknown): unknown {
       return t ? { id: slipId, kind: t.type === 'LOAN' ? 'LOAN' : 'ISSUE', recipientId: t.recipientId ?? null, recipientType: r?.type ?? null, recipientName: r?.name ?? null } : undefined;
     },
     slips: () => {
-      const out = new Map<string, { id: string; kind: 'ISSUE' | 'LOAN'; postedAt: string; standing: boolean }>();
+      const out = new Map<string, { id: string; kind: 'ISSUE' | 'LOAN'; postedAt: string; standing: boolean; open: boolean }>();
       for (const t of state.transactions) {
         if ((t.type !== 'ISSUE' && t.type !== 'LOAN') || t.reversesId) continue;
         const id = t.issueId ?? t.id;
         const standing = !state.transactions.some((r) => r.reversesId === t.id);
+        // A tool loan stays open while a tool on it is still out (edge case E1).
+        const open = standing && (t.type !== 'LOAN' || -Number(t.quantity) - returnedOnLoan(t.id) > 0);
         const had = out.get(id);
-        out.set(id, { id, kind: t.type === 'LOAN' ? 'LOAN' : 'ISSUE', postedAt: t.postedAt, standing: (had?.standing ?? false) || standing });
+        out.set(id, { id, kind: t.type === 'LOAN' ? 'LOAN' : 'ISSUE', postedAt: t.postedAt, standing: (had?.standing ?? false) || standing, open: (had?.open ?? false) || open });
       }
       return [...out.values()];
     },
@@ -4120,7 +4122,9 @@ function listIssueSlips(qs: Record<string, string>) {
     };
   })
     // As the server's receipt=confirmed|unconfirmed (after paging, which is close enough for the demo).
-    .filter((s) => !qs.receipt || (qs.receipt === 'confirmed') === (!!s.receipt && s.receipt.method !== 'NONE'));
+    .filter((s) => !qs.receipt || (qs.receipt === 'disputed'
+      ? s.receipt?.method === 'NONE' && s.receipt.reason === 'DISPUTED'
+      : (qs.receipt === 'confirmed') === (!!s.receipt && s.receipt.method !== 'NONE')));
 }
 
 // Mirrors StockReceiptService.list: posted deliveries for a delivery-date range, newest first.

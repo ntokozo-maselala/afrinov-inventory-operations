@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-10 | `00-governance/decision-log.md` | ADR-034 edge cases: tool loans counted only while out, disputed slips on the Dashboard on Ask too, Skip only from its button, a paper slip accepted from someone who has left, no confirmation of a fully reversed slip, repeated PIN unlocks shown, a warning before images are removed, and the contractor naming rule | Engineering |
 | 2026-11-10 | `00-governance/decision-log.md`, `docs/engineering/DATABASE_ASSURANCE.md` | ADR-034 follow-through: signing lines on the printed slip, the Dashboard count of slips not confirmed in the last 30 days, hourly removal of images past their keep period, and `check:receipts` | Engineering |
 | 2026-11-10 | `09-frontend/page-inventory.md` | The hand-over step on Issue stock and Check out tools, the receipt on each issue slip with Confirm now and Attach signed slip, a Not confirmed filter, and counter PINs on Recipients (ADR-034) | Engineering |
 | 2026-11-10 | `00-governance/decision-log.md`, `07-data/database-schema.md`, `08-api/error-model.md` | ADR-034: the person collecting an issue or tool loan confirms the slip with a counter PIN, a signature or a photo of the signed slip; `receipt_confirmations`, `receipt_images` and counter PINs on recipients; six new error codes | Engineering |

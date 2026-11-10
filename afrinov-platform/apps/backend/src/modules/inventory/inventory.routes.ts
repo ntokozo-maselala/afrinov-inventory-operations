@@ -334,7 +334,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
     await requirePermission(req, PermissionCode.ViewReports);
     const q = req.query as Record<string, string | undefined>;
     // receipt=confirmed or unconfirmed: by whether the person collecting confirmed the slip (ADR-034).
-    const receipt = (['confirmed', 'unconfirmed'] as const).find((r) => r === q['receipt']);
+    const receipt = (['confirmed', 'unconfirmed', 'disputed'] as const).find((r) => r === q['receipt']);
     return InventoryService.issueSlips({ ...(await historyFilter(q)), receipt, before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
   });
 
