@@ -2015,6 +2015,17 @@ function route(method: string, path: string, body?: unknown): unknown {
       const r = t?.recipientId ? state.recipients.find((x) => x.id === t.recipientId) : undefined;
       return t ? { id: slipId, kind: t.type === 'LOAN' ? 'LOAN' : 'ISSUE', recipientId: t.recipientId ?? null, recipientType: r?.type ?? null, recipientName: r?.name ?? null } : undefined;
     },
+    slips: () => {
+      const out = new Map<string, { id: string; kind: 'ISSUE' | 'LOAN'; postedAt: string; standing: boolean }>();
+      for (const t of state.transactions) {
+        if ((t.type !== 'ISSUE' && t.type !== 'LOAN') || t.reversesId) continue;
+        const id = t.issueId ?? t.id;
+        const standing = !state.transactions.some((r) => r.reversesId === t.id);
+        const had = out.get(id);
+        out.set(id, { id, kind: t.type === 'LOAN' ? 'LOAN' : 'ISSUE', postedAt: t.postedAt, standing: (had?.standing ?? false) || standing });
+      }
+      return [...out.values()];
+    },
     recipient: (id) => state.recipients.find((x) => x.id === id),
     userName: () => devUser().name,
     setting: (key) => MOCK_SETTINGS[key]?.value,

@@ -47,6 +47,8 @@ To see how Materials adds up against Stock and Tools, run
 To confirm each item's active flag agrees with its status record, and list
 inactive items still holding stock, run
 `npm run check:item-status --workspace=@afrinov/backend` (read-only).
+To see how slips were confirmed by the people collecting them, and which still
+wait, run `npm run check:receipts --workspace=@afrinov/backend` (read-only).
 
 Integration tests need a real Postgres and a throwaway database. See
 `apps/backend/README.md` ("Running it locally") and `.github/workflows/backend-ci.yml`

@@ -9,6 +9,7 @@ import type { CountRecord, IssueSlip, ReceiptRecord } from './types';
 import { downloadPdf, type PdfAbout } from '../lib/pdf';
 import { formatDate, formatDateTime, formatNumber } from '../lib/format';
 import { issueStillOut, tracksUseOn } from '../lib/movementReason';
+import { describeReceipt, isConfirmed } from '../lib/receipts';
 
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 /** The most records one download fetches; the page asks for a shorter range beyond it. */
@@ -129,7 +130,8 @@ export async function downloadIssuedStockPdf(query: string, about: PdfAbout): Pr
       ? [{ columns: [], rows: [], empty: 'No stock was issued on these dates.' }]
       : slips.map((s) => ({
         heading: `${formatDateTime(s.issuedAt)}  ·  Issued to ${s.recipientName ?? 'not recorded'}${s.projectNumber ? `  ·  Project ${s.projectNumber}` : ''}`,
-        note: `Issued by ${s.issuedByName}`,
+        // Who confirmed it and how, or a line to sign on paper (ADR-034).
+        note: `Issued by ${s.issuedByName}  ·  Receipt: ${isConfirmed(s.receipt) ? describeReceipt(s.receipt, s.recipientName).text : 'not confirmed. Received by ____________  Signature ____________  Date ________'}`,
         columns: [
           { header: 'Code' }, { header: 'Item', wrap: true }, { header: 'From location', wrap: true },
           { header: 'Issued', align: 'right' as const }, { header: 'Returned', align: 'right' as const },

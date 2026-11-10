@@ -687,6 +687,11 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.IssueInventory, P.CheckOutTool], body: confirmationSchema, success: 201, errors: [404, 409, 413, 422, 423],
   },
   {
+    method: 'get', path: '/slips/unconfirmed/summary', tag: 'Reports', summary: 'Slips of the last 30 days nobody has confirmed',
+    description: 'Issue slips and tool check-outs posted in the last 30 days with a line still standing and no confirmation (ADR-034), how many of them were disputed, and when the oldest was posted. For the Dashboard when inventory.receiptConfirmation is require.',
+    permissions: [P.ViewReports],
+  },
+  {
     method: 'get', path: '/slips/:slipId/confirmation/image', tag: 'Reports', summary: 'The signature or signed-slip photo a slip was confirmed with',
     description: 'Personal information: only for those who can see issue slips. 404 when there is none, or once it was removed after inventory.receiptImageKeepMonths.',
     permissions: [P.ViewReports], produces: ['image/png', 'image/jpeg', 'image/webp'], errors: [404],
