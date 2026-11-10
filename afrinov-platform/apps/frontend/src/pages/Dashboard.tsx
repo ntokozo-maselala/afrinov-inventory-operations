@@ -13,9 +13,7 @@ import { formatCurrency } from '../lib/currency';
 import { categoryLabel } from '../lib/categories';
 import type { ReportResult, ReportInventoryLine } from '../api/reportTypes';
 import type { StockStatusItem } from './StockStatus';
-import type { MyStep, ToolRow } from '../api/types';
-import { Alert } from '../components/Alert';
-import { dueOf } from '../lib/projectSchedule';
+import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { usePermissions } from '../hooks/usePermissions';
 import { PROCUREMENT_ENABLED } from '../config/features';
@@ -131,9 +129,6 @@ export function Dashboard() {
   const { data: mine, loading: mineLoading, error: mineError, reload: reloadMine } = useApi<Waiting[]>(canApprove ? '/purchase-orders?awaitingMyApproval=true' : null);
   const { data: pending, reload: reloadPending } = useApi<Waiting[]>(canApprove ? '/purchase-orders?status=PENDING_APPROVAL' : null);
   // Not essential to the dashboard: if it can't load, the notice simply doesn't show.
-  const { data: mySteps, reload: reloadMySteps } = useApi<MyStep[]>('/my-project-steps');
-  const stepsDue = useMemo(() => (Array.isArray(mySteps) ? mySteps : []).filter((s) => dueOf(s).tone !== 'neutral'), [mySteps]);
-  const stepsLate = stepsDue.filter((s) => s.late).length;
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -193,9 +188,8 @@ export function Dashboard() {
     reloadValue();
     reloadTools();
     reloadLocations();
-    reloadMySteps();
     if (canApprove) { reloadMine(); reloadPending(); }
-  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, reloadMySteps, canApprove, reloadMine, reloadPending]);
+  }, [reload, reloadLowStock, reloadValue, reloadTools, reloadLocations, canApprove, reloadMine, reloadPending]);
 
   const inventoryRows = report?.inventory ?? [];
   const rowKey = useCallback((row: ReportInventoryLine, index: number) => `${row.materialId}-${row.locationId}-${index}`, []);
@@ -223,17 +217,8 @@ export function Dashboard() {
           </div>
         </header>
 
-        {/* Job tracking (ADR-032): the signed-in user's steps that are late or due this week, in place of reminders. */}
-        {stepsDue.length > 0 && (
-          <Alert tone={stepsLate > 0 ? 'warning' : 'info'} title="Your project steps" className="mb-4">
-            {stepsLate > 0 && `${stepsLate} late`}
-            {stepsLate > 0 && stepsDue.length > stepsLate && ', '}
-            {stepsDue.length > stepsLate && `${stepsDue.length - stepsLate} due this week`}
-            {'. '}
-            <Link to="/projects/board?view=mine" className="btn-link">Open My steps</Link>
-          </Alert>
-        )}
-
+        {/* The "Your project steps" notice (ADR-032) is off for now; the Project Tracking Roadmap's
+            Later section says how to bring it back. My steps is on the Project board. */}
         {dataError && (
           <div className="dashboard-alert" role="alert">
             <div><strong>Some dashboard data could not be loaded.</strong><span>{dataError.message || 'Check your connection and try again.'}</span></div>
