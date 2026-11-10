@@ -257,6 +257,15 @@ describe('Movements page', () => {
     expect(await screen.findByRole('dialog', { name: 'Confirm receipt: Sabelo' })).toBeInTheDocument();
   });
 
+  it('opens on the slips not confirmed from the Dashboard link, with a line to sign each when printed', async () => {
+    renderAt('/movements?report=issued&view=cards&from=2026-09-25&receipt=unconfirmed');
+    const card = await screen.findByRole('region', { name: 'Issue to Sabelo' });
+    expect(calls('/inventory-issues')[0]).toMatch(/receipt=unconfirmed/);
+    expect(screen.getByRole('button', { name: 'Not confirmed' })).toHaveAttribute('aria-pressed', 'true');
+    // Hidden on screen, printed for signing on paper.
+    expect(within(card).getByText('Received by (name)').parentElement).toHaveClass('hidden', 'print:grid');
+  });
+
   it('lists only the slips not confirmed on request', async () => {
     renderAt('/movements?report=issued&from=2026-09-25');
     await screen.findByRole('table', { name: 'Issued stock' });

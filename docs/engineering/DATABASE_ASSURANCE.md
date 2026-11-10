@@ -19,6 +19,11 @@ and the recovery considerations for the migration added in this workstream.
   an item's active flag disagrees with its newest `material_status_changes` row,
   and lists inactive items still holding stock, read-only. A status change is
   never a ledger line, so it cannot affect a balance.
+- A slip is confirmed once, by the right person (ADR-034): a partial unique
+  index allows one confirmation per slip, and `npm run check:receipts` fails if
+  a confirmation names a slip that doesn't exist or a worker's slip was
+  confirmed by someone else. It also lists slips still waiting, disputed or
+  changed after they were confirmed, read-only. A confirmation never moves stock.
 - An issue's figures add up (ADR-026): issued = returned + used up + broken +
   still out, with still out never negative. `npm run check:issued-stock`
   (`src/modules/inventory/issued-stock-check.ts`) checks that, and the
@@ -36,6 +41,17 @@ and the recovery considerations for the migration added in this workstream.
   returns an **empty** diff against a freshly migrated database, i.e. the
   committed migrations reproduce the schema exactly. This is now enforced in CI
   (`backend-ci.yml`, `migration-drift` job).
+
+## Proof of receipt (ADR-034)
+
+Migration `20260101000053_receipt_confirmations` only adds: two tables, three
+enums, four columns on `recipients` (all empty or zero), a partial unique index,
+two CHECKs and three settings rows. It changes no existing row, so it needs no
+pre-flight query. After deploying, `check:receipts` should report no slips
+confirmed and every rule kept. Signatures and slip photos older than
+`inventory.receiptImageKeepMonths` are removed hourly by the server, which marks
+`image_removed_at` and keeps the record. To roll back, redeploy the previous
+version and leave the tables: the old code ignores them.
 
 ## Item status record (ADR-033)
 

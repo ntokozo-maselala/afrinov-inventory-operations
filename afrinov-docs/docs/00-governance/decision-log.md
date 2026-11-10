@@ -1003,6 +1003,8 @@ that nobody may confirm on another person's behalf.
 after it. A technician issuing to themselves still confirms with their own PIN,
 since recipients are not linked to user accounts. A PIN can be watched or shared,
 so each slip shows the method used. Returns and check-ins are not confirmed.
-Migration `20260101000053_receipt_confirmations` only adds. The screens, the
-printed slip's signature block, the Dashboard count, image removal and
-`check:receipts` follow in later steps.
+Migration `20260101000053_receipt_confirmations` only adds. A printed slip not
+confirmed on screen carries lines to sign on paper. With the setting at require,
+the Dashboard counts slips of the last 30 days not confirmed: a window, so the
+number can't grow for ever. The server removes images past their keep period
+hourly, and `check:receipts` reports the rest, read-only.

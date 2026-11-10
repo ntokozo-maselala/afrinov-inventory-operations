@@ -220,6 +220,49 @@ describe('proof of receipt over real HTTP', () => {
     await expect(prisma.receiptConfirmation.create({ data: { slipId: issueId, slipKind: 'ISSUE', method: 'PAPER', signerId: sabelo, capturedById: admin.id, linesFingerprint: 'x' } })).rejects.toThrow();
   });
 
+  it('counts the slips of the last 30 days nobody confirmed, leaving out confirmed and fully reversed ones', async () => {
+    type Summary = { issues: number; loans: number; disputed: number; days: number };
+    const before = (await api<Summary>('GET', '/slips/unconfirmed/summary')).body;
+    const waiting = await issueTo(sabelo);
+    const disputed = await issueTo(sabelo);
+    expect((await confirm(disputed.issueId, { method: 'NONE', reason: 'DISPUTED', note: 'Got 1' })).status).toBe(201);
+    const confirmed = await issueTo(sabelo);
+    expect((await confirm(confirmed.issueId, { method: 'PIN', signerId: sabelo, pin: '2580' })).status).toBe(201);
+    const reversed = await issueTo(sabelo);
+    expect((await api('POST', `/inventory-transactions/${reversed.transactionIds[0]}/reversal`, { reason: 'Never left' })).status).toBe(201);
+    const after = (await api<Summary>('GET', '/slips/unconfirmed/summary')).body;
+    expect(after.days).toBe(30);
+    expect(after.issues - before.issues).toBe(2);
+    expect(after.disputed - before.disputed).toBe(1);
+    expect(waiting.issueId).toBeTruthy();
+    // A slip older than 30 days isn't counted.
+    await prisma.inventoryTransaction.updateMany({ where: { issueId: waiting.issueId }, data: { postedAt: new Date(Date.now() - 31 * 86_400_000) } });
+    expect((await api<Summary>('GET', '/slips/unconfirmed/summary')).body.issues - before.issues).toBe(1);
+  });
+
+  it('removes a signature past its keep period and keeps the record that the slip was signed', async () => {
+    const { issueId } = await issueTo(sabelo);
+    expect((await confirm(issueId, { method: 'SIGNATURE', signerId: sabelo, image: { contentType: 'image/png', data: PNG } })).status).toBe(201);
+    await prisma.receiptConfirmation.updateMany({ where: { slipId: issueId }, data: { confirmedAt: new Date(Date.now() - 25 * 31 * 86_400_000) } });
+    const { pruneReceiptImages } = await import('../src/modules/inventory/receipt-check.js');
+    expect(await pruneReceiptImages()).toBeGreaterThanOrEqual(1);
+    expect(await prisma.receiptImage.count({ where: { confirmation: { slipId: issueId } } })).toBe(0);
+    expect((await slip(issueId)).receipt).toMatchObject({ method: 'SIGNATURE', hasImage: false, imageRemoved: true });
+    expect((await api('GET', `/slips/${issueId}/confirmation/image`)).status).toBe(404);
+  });
+
+  it('reports this run’s slips in check:receipts, with nothing broken by the API', async () => {
+    const { checkReceipts } = await import('../src/modules/inventory/receipt-check.js');
+    const report = await checkReceipts(prisma);
+    const mine = new Set((await prisma.inventoryTransaction.findMany({ where: { materialId: { in: [materialId, toolId] }, issueId: { not: null } }, select: { issueId: true } })).map((t) => t.issueId!));
+    expect(report.slips).toBeGreaterThanOrEqual(mine.size);
+    // The reversal earlier made a confirmed slip read as changed.
+    expect(report.changedAfter.some((id) => mine.has(id))).toBe(true);
+    expect(report.disputed.some((id) => mine.has(id))).toBe(true);
+    expect(report.wrongSigner.filter((id) => mine.has(id))).toEqual([]);
+    expect(report.orphaned).toEqual([]);
+  });
+
   it('refuses an unknown slip, and a viewer setting a PIN', async () => {
     expect((await confirm(randomUUID(), { method: 'NONE', reason: 'LEFT' })).status).toBe(404);
     const viewer = await newUser('VIEWER');

@@ -9,6 +9,8 @@ interface Person { id: string; name: string; type: string; active: boolean }
 
 interface Ctx {
   slip: (slipId: string) => Slip | undefined;
+  /** Every issue and loan slip: when it was posted, and whether a line still stands. */
+  slips: () => Array<{ id: string; kind: 'ISSUE' | 'LOAN'; postedAt: string; standing: boolean }>;
   recipient: (id: string) => Person | undefined;
   userName: () => string;
   setting: (key: string) => unknown;
@@ -103,6 +105,18 @@ function confirm(slipId: string, b: Body, ctx: Ctx): ReceiptSummary {
 
 /** The receipt routes, or undefined when the path is not one of them. */
 export function routeReceipts(method: string, p: string, body: unknown, ctx: Ctx): unknown {
+  if (method === 'GET' && p === '/slips/unconfirmed/summary') {
+    // As pendingReceipts: the last 30 days, slips with a line standing and no confirmation.
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const waiting = ctx.slips().filter((s) => s.standing && s.postedAt >= since && !rows.some((r) => r.slipId === s.id && r.summary.method !== 'NONE'));
+    return {
+      since, days: 30,
+      issues: waiting.filter((s) => s.kind === 'ISSUE').length,
+      loans: waiting.filter((s) => s.kind === 'LOAN').length,
+      disputed: waiting.filter((s) => mockReceiptOf(s.id)?.reason === 'DISPUTED').length,
+      oldestAt: waiting.map((s) => s.postedAt).sort()[0] ?? null,
+    };
+  }
   const confirmation = /^\/slips\/([^/]+)\/confirmation$/.exec(p);
   if (method === 'POST' && confirmation) return confirm(decodeURIComponent(confirmation[1]!), (body as Body) ?? {}, ctx);
 

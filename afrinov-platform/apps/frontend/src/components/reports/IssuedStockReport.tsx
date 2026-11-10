@@ -3,7 +3,7 @@
 // issue slip, laid out like the Issue stock form (issued to, project, then the
 // items). A line opens its detail, to return unused stock or reverse a mistake.
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { usePagedList } from '../../hooks/usePagedList';
 import { Button } from '../Button';
 import { Badge } from '../Badge';
@@ -84,7 +84,9 @@ type ReceiptFilter = '' | 'unconfirmed' | 'confirmed';
 const RECEIPT_FILTERS: Array<[ReceiptFilter, string]> = [['', 'All slips'], ['unconfirmed', 'Not confirmed'], ['confirmed', 'Confirmed']];
 
 export function IssuedStockReport({ query, view, onView }: { query: string; view: ReportView; onView: (v: ReportView) => void }) {
-  const [receipt, setReceipt] = useState<ReceiptFilter>('');
+  // The Dashboard links here with ?receipt=unconfirmed.
+  const [params] = useSearchParams();
+  const [receipt, setReceipt] = useState<ReceiptFilter>(() => RECEIPT_FILTERS.find(([v]) => v && v === params.get('receipt'))?.[0] ?? '');
   const list = usePagedList<IssueSlip>(`/inventory-issues?${query}${receipt ? `${query ? '&' : ''}receipt=${receipt}` : ''}`, 50);
   const [selected, setSelected] = useState<MovementRow | null>(null);
   const [handover, setHandover] = useState<{ slip: HandoverSlip; start?: 'PAPER' } | null>(null);
@@ -182,6 +184,14 @@ function SlipReceipt({ s, canConfirm, onConfirm }: { s: IssueSlip; canConfirm: b
         <p className="text-xs text-surface-500 mt-0.5">{d.text}</p>
       </div>
       {image && <img src={image} alt={`${r?.method === 'PAPER' ? 'Signed slip' : 'Signature'} of ${r?.signerName ?? 'the person collecting'}`} className="h-14 max-w-[10rem] rounded border border-surface-200 bg-white object-contain" />}
+      {/* Printed, a slip nobody confirmed on screen is signed on paper, then photographed onto it. */}
+      {!isConfirmed(r) && (
+        <div className="hidden print:grid grid-cols-[1fr_1fr_8rem] gap-6 w-full pt-8 text-xs text-surface-500">
+          <div className="border-t border-surface-700 pt-1">Received by (name)</div>
+          <div className="border-t border-surface-700 pt-1">Signature</div>
+          <div className="border-t border-surface-700 pt-1">Date</div>
+        </div>
+      )}
       {canConfirm && !isConfirmed(r) && s.lines.some((l) => !l.reversedById) && (
         <div className="flex gap-2 no-print">
           <Button size="sm" onClick={() => onConfirm()}>Confirm now</Button>

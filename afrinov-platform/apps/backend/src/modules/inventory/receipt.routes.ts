@@ -7,6 +7,7 @@ import { requirePermission } from '../../shared/authorization.js';
 import { idempotentMutation } from '../../shared/idempotency.js';
 import { PIN_PATTERN, verifyPin } from '../operations/recipient-pin.js';
 import { ReceiptConfirmationService, SKIP_REASONS, checkSigner, loadSlip, type ConfirmInput, type Slip } from './receipt-confirmation.service.js';
+import { pendingReceipts } from './receipt-check.js';
 
 // A 5 MB photo as base64, with room for the rest of the body.
 const CONFIRMATION_BODY_LIMIT = 7_500_000;
@@ -64,6 +65,12 @@ export async function receiptRoutes(app: FastifyInstance): Promise<void> {
       statusCode: 201,
       body: await ReceiptConfirmationService.confirm(input, tx),
     }), { requestBody });
+  });
+
+  // Slips of the last 30 days nobody has confirmed, for the Dashboard when receipt confirmation is Required.
+  app.get('/slips/unconfirmed/summary', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return pendingReceipts();
   });
 
   // A signature is personal information (POPIA): only those who can see issue slips see it.

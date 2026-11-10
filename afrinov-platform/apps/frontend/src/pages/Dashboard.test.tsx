@@ -89,6 +89,27 @@ describe('Dashboard', () => {
     expect((await screen.findByText('Stock value')).closest('a')).toBeNull();
   });
 
+  it('counts the slips nobody confirmed when receipt confirmation is Required, and links to them (ADR-034)', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/settings/values')) return { 'inventory.receiptConfirmation': 'require' };
+      if (path === '/slips/unconfirmed/summary') return { since: '2026-10-11T08:00:00.000Z', days: 30, issues: 3, loans: 1, disputed: 1, oldestAt: '2026-10-20T08:00:00.000Z' };
+      return base(path);
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = (await screen.findByText('Slips not confirmed')).closest('a')!;
+    expect(card).toHaveAttribute('href', '/movements?report=issued&view=cards&from=2026-10-11&receipt=unconfirmed');
+    expect(card).toHaveTextContent('4');
+    expect(card).toHaveTextContent('3 issues, 1 tool loan, 1 disputed · last 30 days');
+  });
+
+  it('leaves the count out when receipt confirmation is only Ask', async () => {
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByText('Tools checked out');
+    expect(screen.queryByText('Slips not confirmed')).not.toBeInTheDocument();
+    expect(mockGet).not.toHaveBeenCalledWith('/slips/unconfirmed/summary');
+  });
+
   it('counts the tools out on loan, and links to the overdue ones', async () => {
     const loan = (out: string, overdue: boolean) => ({ loanId: out, out, overdue, daysOut: overdue ? 12 : 2, state: overdue ? 'OVERDUE' : 'ON_LOAN' });
     tools = [{ materialId: 'm-1', loans: [loan('2', false), loan('1', true)] }, { materialId: 'm-2', loans: [] }];
