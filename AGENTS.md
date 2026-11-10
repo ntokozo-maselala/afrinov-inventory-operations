@@ -187,7 +187,9 @@ Use these forms; the older spellings still work but are deprecated or removed.
   confirmed by whoever collected. Return recipients through `publicRecipient`
   (`src/modules/operations/recipient-pin.ts`), never the raw row, so
   `pin_hash` never leaves the server, and check a PIN with `verifyPin`, outside
-  the confirmation's transaction, so a wrong try is counted.
+  the confirmation's transaction, so a wrong try is counted. On the frontend,
+  open `HandoverPanel` after a slip posts; it keys the retry by a payload
+  without the PIN or image, so neither is kept in the browser.
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

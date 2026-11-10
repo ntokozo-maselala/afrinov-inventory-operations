@@ -16,6 +16,8 @@ import { Alert } from '../components/Alert';
 import { api, type ApiError } from '../api/client';
 import type { ToolRow } from '../api/types';
 import { StaleDataNotice } from '../components/StaleDataNotice';
+import { ResetPinDialog, SetPinDialog } from '../components/RecipientPinDialogs';
+import { holdsPin } from '../lib/receipts';
 
 export type RecipientType = 'WORKER' | 'MACHINE' | 'SITE' | 'CONTRACTOR';
 
@@ -25,6 +27,10 @@ export interface Recipient {
   type: RecipientType;
   notes?: string | null;
   active: boolean;
+  /** Counter PIN (ADR-034): whether one is set, and whether it locked after too many wrong tries. */
+  pinSet?: boolean;
+  pinLocked?: boolean;
+  pinFailedTries?: number;
 }
 
 export const RECIPIENT_TYPE_LABEL: Record<RecipientType, string> = {
@@ -59,6 +65,7 @@ export function Recipients() {
   const [type, setType] = useState<RecipientType | ''>('');
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Recipient | 'new' | null>(null);
+  const [pinFor, setPinFor] = useState<{ recipient: Recipient; action: 'set' | 'reset' } | null>(null);
   const toast = useToast();
 
   const all = recipients.data ?? [];
@@ -76,6 +83,16 @@ export function Recipients() {
       recipients.reload();
     } catch (err) {
       toast.error('Could not update recipient', (err as ApiError).message);
+    }
+  }
+
+  async function unlockPin(r: Recipient) {
+    try {
+      await api.post(`/recipients/${r.id}/pin/unlock`);
+      toast.success(`${r.name}’s PIN is unlocked`, 'The same PIN works again.');
+      recipients.reload();
+    } catch (err) {
+      toast.error('Could not unlock the PIN', (err as ApiError).message);
     }
   }
 
@@ -110,13 +127,23 @@ export function Recipients() {
           isLoading={recipients.loading}
           rowKey={(r) => r.id}
           rows={filtered}
-          columns={columns({ canManage, canReturn, onEdit: setEditing, onSetActive: setActive, toolsOut })}
+          columns={columns({
+            canManage, canReturn, onEdit: setEditing, onSetActive: setActive, toolsOut,
+            onPin: (recipient, action) => (action === 'unlock' ? void unlockPin(recipient) : setPinFor({ recipient, action })),
+          })}
           emptyState={<EmptyState
             title={q || type ? 'No recipients match your filters' : 'No recipients yet'}
             description={q || type ? 'Try clearing your filters.' : 'Add the workers, machines, sites and contractors stock is issued to.'}
             action={!q && !type && canManage && <Button variant="primary" onClick={() => setEditing('new')}>Add your first recipient</Button>}
           />}
         />
+      )}
+
+      {pinFor?.action === 'set' && (
+        <SetPinDialog recipient={pinFor.recipient} onClose={() => setPinFor(null)} onSaved={() => { setPinFor(null); recipients.reload(); toast.success(`PIN set for ${pinFor.recipient.name}`); }} />
+      )}
+      {pinFor?.action === 'reset' && (
+        <ResetPinDialog recipient={pinFor.recipient} onClose={() => setPinFor(null)} onSaved={() => { setPinFor(null); recipients.reload(); toast.success(`${pinFor.recipient.name}’s PIN was reset`, 'They can sign until a new PIN is set.'); }} />
       )}
 
       {editing && (
@@ -141,7 +168,8 @@ export function Recipients() {
 /** Tools a recipient has out, and how many of them are past their due date. */
 interface ToolsOut { out: number; overdue: number }
 
-function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut }: {
+function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut, onPin }: {
+  onPin: (r: Recipient, action: 'set' | 'reset' | 'unlock') => void;
   canManage: boolean;
   canReturn: boolean;
   toolsOut: Map<string, ToolsOut>;
@@ -151,6 +179,25 @@ function columns({ canManage, canReturn, onEdit, onSetActive, toolsOut }: {
   return [
     { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'type', header: 'Type', render: (r) => <Badge tone={TYPE_TONE[r.type]}>{RECIPIENT_TYPE_LABEL[r.type]}</Badge>, width: '9rem' },
+    {
+      // Workers and contractors confirm what they take with it; a machine or site, by whoever collects (ADR-034).
+      key: 'pin', header: 'Counter PIN', width: '12rem',
+      render: (r) => {
+        if (!holdsPin(r.type)) return <span className="text-surface-300" title="Whoever collects for it confirms with their own PIN">—</span>;
+        const state = r.pinLocked ? <Badge tone="danger">Locked</Badge> : r.pinSet ? <Badge tone="success">Set</Badge> : <Badge tone="warning">Not set</Badge>;
+        return (
+          <div className="flex flex-wrap items-center gap-1">
+            {state}
+            {!r.pinLocked && (r.pinFailedTries ?? 0) > 0 && <span className="text-xs text-surface-500">{r.pinFailedTries} wrong</span>}
+            {canManage && r.active && (r.pinLocked
+              ? <><Button size="sm" variant="ghost" onClick={() => onPin(r, 'unlock')}>Unlock</Button><Button size="sm" variant="ghost" onClick={() => onPin(r, 'reset')}>Reset</Button></>
+              : r.pinSet
+                ? <Button size="sm" variant="ghost" onClick={() => onPin(r, 'reset')}>Reset</Button>
+                : <Button size="sm" variant="ghost" onClick={() => onPin(r, 'set')}>Set PIN</Button>)}
+          </div>
+        );
+      },
+    },
     {
       key: 'tools', header: 'Tools checked out', align: 'right' as const, width: '9rem',
       render: (r) => {

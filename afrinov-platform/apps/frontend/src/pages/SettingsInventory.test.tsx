@@ -31,6 +31,7 @@ const SETTINGS = [
   setting('inventory.toolOverdueCheckout', 'warn', 'enum', ['warn', 'block-contractors', 'block']),
   setting('inventory.projectReceivingLocationId', 'loc-old', 'string'),
   setting('inventory.requireWriteOffApproval', true, 'boolean'), setting('inventory.writeOffApprovalAbove', 1000),
+  setting('inventory.receiptConfirmation', 'ask', 'enum', ['off', 'ask', 'require']), setting('inventory.receiptPinTries', 5), setting('inventory.receiptImageKeepMonths', 24),
 ];
 
 describe('Settings: project receiving location', () => {

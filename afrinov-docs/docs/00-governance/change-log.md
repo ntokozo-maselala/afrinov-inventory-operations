@@ -4,6 +4,8 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-10 | `09-frontend/page-inventory.md` | The hand-over step on Issue stock and Check out tools, the receipt on each issue slip with Confirm now and Attach signed slip, a Not confirmed filter, and counter PINs on Recipients (ADR-034) | Engineering |
+| 2026-11-10 | `00-governance/decision-log.md`, `07-data/database-schema.md`, `08-api/error-model.md` | ADR-034: the person collecting an issue or tool loan confirms the slip with a counter PIN, a signature or a photo of the signed slip; `receipt_confirmations`, `receipt_images` and counter PINs on recipients; six new error codes | Engineering |
 | 2026-11-09 | `13-project-management/roadmaps/project-tracking-roadmap.md` | The Dashboard's "Your project steps" notice is taken off for now and listed under Later, with how to bring it back; My steps stays on the Project board | Engineering |
 | 2026-11-09 | `13-project-management/roadmaps/project-tracking-roadmap.md` | The Procurement step no longer says "All delivered" when an order was closed short: it says nothing more is coming, flags the order and warns that part of it never came (D-43) | Engineering |
 | 2026-11-09 | `09-frontend/page-inventory.md` | Procurement savings downloads as a PDF too, A4 landscape with the totals above the table | Engineering |

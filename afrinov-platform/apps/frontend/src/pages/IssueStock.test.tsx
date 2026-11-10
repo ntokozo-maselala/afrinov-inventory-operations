@@ -89,6 +89,36 @@ describe('IssueStock page', () => {
     expect(screen.getAllByText('Issued 2 items to Sabelo').length).toBeGreaterThan(0);
   });
 
+  it('turns to the person collecting once the slip has posted, and says when they did not confirm (ADR-034)', async () => {
+    mockPost.mockResolvedValue({ issueId: 'iss-1', transactionIds: ['t-1'] });
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
+    choose('Item 1', 'DISC');
+    fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
+
+    const panel = await screen.findByRole('dialog', { name: 'Sabelo, check what you’re taking' });
+    expect(within(panel).getByText('Cutting disc')).toBeInTheDocument();
+    expect(within(panel).getByText('3 each')).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Skip' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText(/Not confirmed by the person collecting/)).toBeInTheDocument();
+  });
+
+  it('opens no hand-over step when receipt confirmation is Off', async () => {
+    mockPost.mockResolvedValue({ issueId: 'iss-1', transactionIds: ['t-1'] });
+    mockGet.mockImplementation(async (path: string) => (path.startsWith('/settings/values') ? { 'inventory.receiptConfirmation': 'off' } : respond(path)));
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByLabelText(/Issued to/), { target: { value: 'r-1' } });
+    choose('Item 1', 'DISC');
+    fireEvent.change(screen.getAllByLabelText('Quantity')[0]!, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Issue stock' }));
+    await screen.findByRole('link', { name: 'See the issue slip in Movements' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('asks for a recipient before sending anything', async () => {
     renderPage();
     await ready();
