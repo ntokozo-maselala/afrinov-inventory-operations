@@ -24,6 +24,7 @@ import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
 import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
+import { ReceiptConfirmationService, type ReceiptSummary } from './receipt-confirmation.service.js';
 import { checkWriteOff } from './write-off-limit.js';
 import { checkWholeUnits } from '../../shared/units.js';
 import { pendingLostByLoan, requestAdjustment } from './write-off-requests.js';
@@ -150,6 +151,8 @@ export interface OpenLoan {
   overdue: boolean;
   /** Later due dates given, oldest first. */
   extensions: LoanExtension[];
+  /** Whether the borrower confirmed the slip it went out on (ADR-034); null when nothing is recorded. */
+  receipt: ReceiptSummary | null;
 }
 
 export interface ToolRow {
@@ -234,6 +237,7 @@ export const ToolLoanService = {
           location: { select: { name: true } },
           actor: { select: { name: true } },
           loanExtensions: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { actor: { select: { name: true } } } },
+          reversedBy: { select: { id: true } },
         },
         orderBy: { postedAt: 'asc' },
       }),
@@ -242,6 +246,16 @@ export const ToolLoanService = {
       returnedByLoan(prisma, loans.map((l) => l.id)), loanTerms(), pendingLostByLoan(loans.map((l) => l.id), prisma),
     ]);
     const today = dayOf(now);
+    // Each slip's receipt, from all its lines: a slip may lend several tools.
+    const slipLines = new Map<string, Array<{ id: string; quantity: string; reversed: boolean }>>();
+    const slipRecipient = new Map<string, string | null>();
+    for (const l of loans) {
+      if (!l.issueId || l.reversesId) continue;
+      slipLines.set(l.issueId, [...(slipLines.get(l.issueId) ?? []), { id: l.id, quantity: l.quantity.toString(), reversed: l.reversedBy !== null }]);
+      slipRecipient.set(l.issueId, l.recipientId);
+    }
+    const outOn = new Set(loans.filter((l) => l.issueId && l.quantity.negated().minus(returned.get(l.id) ?? 0).gt(0)).map((l) => l.issueId!));
+    const receipts = await ReceiptConfirmationService.forSlips([...slipLines].filter(([id]) => outOn.has(id)).map(([id, lines]) => ({ id, recipientId: slipRecipient.get(id) ?? null, lines })));
 
     const open = new Map<string, OpenLoan[]>();
     for (const l of loans) {
@@ -273,6 +287,7 @@ export const ToolLoanService = {
         extensions: l.loanExtensions.map((e) => ({
           dueOn: dayOf(e.dueOn), previousDueOn: dueOnBefore(dates, e.id), reason: e.reason, extendedBy: e.actor.name, extendedAt: e.createdAt.toISOString(),
         })),
+        receipt: (l.issueId && receipts.get(l.issueId)) || null,
       }]);
     }
 

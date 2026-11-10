@@ -1,0 +1,228 @@
+// Real-HTTP + real-database tests for proof of receipt (ADR-034): the person
+// collecting an issue or a tool loan confirms the slip with their counter
+// PIN, a signature or a photo of the signed slip, or the reason they didn't
+// is kept. What only a real database shows: a wrong PIN is counted although
+// the confirmation is refused, a slip is confirmed once even under a retry,
+// and a confirmation never moves stock.
+//
+// Run with: npm run test:integration
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { ADMIN_EMAIL, client, ledgerAndBalance, login, prisma, requireAdminPassword, runId, startServer, type TestServer } from './helpers.js';
+
+interface Recipient { id: string; pinSet: boolean; pinLocked: boolean; pinFailedTries: number; pinHash?: unknown }
+interface Receipt { method: string; signerName: string | null; collectedFor: boolean; reason: string | null; changed: boolean; hasImage: boolean }
+interface Slip { id: string; receipt: Receipt | null; lines: Array<{ id: string }> }
+type Err = { error: { code: string; message: string; details?: { triesLeft?: number } } };
+
+// The smallest valid PNG: a 1x1 transparent pixel.
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+describe('proof of receipt over real HTTP', () => {
+  const run = runId();
+  let server: TestServer;
+  let api: ReturnType<typeof client>;
+  let materialId: string;
+  let toolId: string;
+  let locationId: string;
+  let sabelo: string;
+  let thabo: string;
+  let forklift: string;
+
+  const recipient = async (name: string, type: string) => {
+    const r = await api<{ id: string }>('POST', '/recipients', { name: `${name} ${run}`, type });
+    expect(r.status).toBe(201);
+    return r.body.id;
+  };
+  const issueTo = async (recipientId: string, quantity = 2) => {
+    const r = await api<{ issueId: string; transactionIds: string[] }>('POST', '/inventory-issues', { recipientId, lines: [{ materialId, locationId, quantity }] });
+    expect(r.status).toBe(201);
+    return r.body;
+  };
+  const confirm = <T = Receipt>(slipId: string, body: unknown, key?: string, as = api) =>
+    as<T>('POST', `/slips/${slipId}/confirmation`, body, key ? { 'idempotency-key': key } : undefined);
+  const slip = async (slipId: string) => (await api<Slip[]>('GET', `/inventory-issues?materialId=${materialId}&limit=200`)).body.find((s) => s.id === slipId)!;
+
+  let users = 0;
+  async function newUser(role: string) {
+    const email = `it-${role.toLowerCase()}-rc-${++users}-${run}@example.com`;
+    const password = `${role.toLowerCase()}-${run}-pass`;
+    expect((await api('POST', '/users', { email, name: `IT ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
+    return client(server.port, await login(server.port, email, password));
+  }
+
+  beforeAll(async () => {
+    server = await startServer();
+    api = client(server.port, await login(server.port, ADMIN_EMAIL, requireAdminPassword()));
+    const location = await api<{ id: string }>('POST', '/locations', { name: `IT receipt rack ${run}`, type: 'RACK' });
+    expect(location.status).toBe(201);
+    locationId = location.body.id;
+    const material = await api<{ id: string }>('POST', '/materials', { sku: `IT-RC-${run}`, name: `Receipt disc ${run}`, category: 'CONSUMABLES', unitOfMeasure: 'each' });
+    expect(material.status).toBe(200);
+    materialId = material.body.id;
+    expect((await api('POST', '/inventory-adjustments', { materialId, locationId, quantity: 100, reasonCode: 'COUNT_VARIANCE' })).status).toBe(201);
+    const tool = await api<{ id: string }>('POST', '/materials', { sku: `IT-RC-TOOL-${run}`, name: `Receipt drill ${run}`, category: 'TOOLS', unitOfMeasure: 'each' });
+    toolId = tool.body.id;
+    expect((await api('POST', '/inventory-adjustments', { materialId: toolId, locationId, quantity: 2, reasonCode: 'COUNT_VARIANCE' })).status).toBe(201);
+
+    sabelo = await recipient('Sabelo', 'WORKER');
+    thabo = await recipient('Thabo', 'WORKER');
+    forklift = await recipient('Forklift', 'MACHINE');
+    expect((await api('PUT', `/recipients/${sabelo}/pin`, { pin: '2580' })).status).toBe(200);
+    expect((await api('PUT', `/recipients/${thabo}/pin`, { pin: '1470' })).status).toBe(200);
+  });
+
+  afterAll(async () => {
+    await server?.close();
+  });
+
+  it('keeps the PIN as a hash that no read returns', async () => {
+    const row = await prisma.recipient.findUniqueOrThrow({ where: { id: sabelo } });
+    expect(row.pinHash).toMatch(/^\$2[aby]\$/);
+    const one = await api<Recipient>('GET', `/recipients/${sabelo}`);
+    expect(one.body).toMatchObject({ pinSet: true, pinLocked: false });
+    expect(one.body).not.toHaveProperty('pinHash');
+    const list = await api<Recipient[]>('GET', `/recipients?q=${run}`);
+    expect(JSON.stringify(list.body)).not.toContain(row.pinHash!);
+    const audit = await prisma.auditLogEntry.findMany({ where: { entityId: sabelo } });
+    expect(JSON.stringify(audit)).not.toContain(row.pinHash!);
+    expect((await api<Err>('PUT', `/recipients/${forklift}/pin`, { pin: '2580' })).status).toBe(400);
+    expect((await api<Err>('PUT', `/recipients/${sabelo}/pin`, { pin: '4719' })).status).toBe(409);
+  });
+
+  it('confirms an issue with the right PIN, without moving stock', async () => {
+    const { issueId } = await issueTo(sabelo);
+    const before = await ledgerAndBalance(materialId, locationId);
+    const res = await confirm(issueId, { method: 'PIN', signerId: sabelo, pin: '2580' }, randomUUID());
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ method: 'PIN', signerName: `Sabelo ${run}`, collectedFor: false, changed: false });
+    expect(await ledgerAndBalance(materialId, locationId)).toEqual(before);
+    expect((await slip(issueId)).receipt).toMatchObject({ method: 'PIN' });
+  });
+
+  it('counts a wrong PIN though nothing is recorded, then locks the PIN', async () => {
+    const { issueId } = await issueTo(thabo);
+    for (const left of [4, 3, 2, 1]) {
+      const wrong = await confirm<Err>(issueId, { method: 'PIN', signerId: thabo, pin: '9999' });
+      expect(wrong.status).toBe(422);
+      expect(wrong.body.error).toMatchObject({ code: 'PIN_MISMATCH', details: { triesLeft: left } });
+    }
+    expect(await prisma.receiptConfirmation.count({ where: { slipId: issueId } })).toBe(0);
+    const locked = await confirm<Err>(issueId, { method: 'PIN', signerId: thabo, pin: '9999' });
+    expect(locked.status).toBe(423);
+    expect((await confirm<Err>(issueId, { method: 'PIN', signerId: thabo, pin: '1470' })).body.error.code).toBe('PIN_LOCKED');
+    expect((await api<Recipient>('GET', `/recipients/${thabo}`)).body).toMatchObject({ pinLocked: true, pinFailedTries: 5 });
+
+    // Locked, they can still sign; and a store controller unlocks the PIN.
+    expect((await confirm(issueId, { method: 'SIGNATURE', signerId: thabo, image: { contentType: 'image/png', data: PNG } })).status).toBe(201);
+    expect((await api('POST', `/recipients/${thabo}/pin/unlock`)).status).toBe(200);
+    expect((await api<Recipient>('GET', `/recipients/${thabo}`)).body).toMatchObject({ pinLocked: false, pinFailedTries: 0 });
+  });
+
+  it('lets only the recipient confirm their own slip, and the person collecting confirm for a machine', async () => {
+    const own = await issueTo(sabelo);
+    const forSomeoneElse = await confirm<Err>(own.issueId, { method: 'PIN', signerId: thabo, pin: '1470' });
+    expect(forSomeoneElse.status).toBe(422);
+    expect(forSomeoneElse.body.error.code).toBe('SIGNER_NOT_RECIPIENT');
+
+    const machine = await issueTo(forklift);
+    const byMachine = await confirm<Err>(machine.issueId, { method: 'SIGNATURE', signerId: forklift, image: { contentType: 'image/png', data: PNG } });
+    expect(byMachine.status).toBe(400);
+    const collected = await confirm(machine.issueId, { method: 'PIN', signerId: thabo, pin: '1470' });
+    expect(collected.status).toBe(201);
+    expect(collected.body).toMatchObject({ signerName: `Thabo ${run}`, collectedFor: true });
+  });
+
+  it('confirms a slip once, and replays a retry instead of recording it twice', async () => {
+    const { issueId } = await issueTo(sabelo);
+    const key = randomUUID();
+    const first = await confirm(issueId, { method: 'PIN', signerId: sabelo, pin: '2580' }, key);
+    const retry = await confirm(issueId, { method: 'PIN', signerId: sabelo, pin: '2580' }, key);
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    expect(retry.headers.get('idempotency-replayed')).toBe('true');
+    expect(await prisma.receiptConfirmation.count({ where: { slipId: issueId } })).toBe(1);
+    // The PIN is not in the stored request.
+    const stored = await prisma.idempotencyKey.findFirstOrThrow({ where: { key } });
+    expect(JSON.stringify(stored)).not.toContain('2580');
+
+    const again = await confirm<Err>(issueId, { method: 'SIGNATURE', signerId: sabelo, image: { contentType: 'image/png', data: PNG } }, randomUUID());
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('ALREADY_CONFIRMED');
+  });
+
+  it('keeps one confirmation when two arrive at the same moment', async () => {
+    const { issueId } = await issueTo(sabelo);
+    const both = await Promise.all([1, 2].map(() => confirm(issueId, { method: 'SIGNATURE', signerId: sabelo, image: { contentType: 'image/png', data: PNG } }, randomUUID())));
+    expect(both.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(await prisma.receiptConfirmation.count({ where: { slipId: issueId, method: { not: 'NONE' } } })).toBe(1);
+  });
+
+  it('records why a slip was not confirmed, lists it as not confirmed, and lets a signed slip close it later', async () => {
+    const { issueId } = await issueTo(sabelo);
+    const noNote = await confirm<Err>(issueId, { method: 'NONE', reason: 'DISPUTED' });
+    expect(noNote.status).toBe(400);
+    expect((await confirm(issueId, { method: 'NONE', reason: 'LEFT' })).body).toMatchObject({ method: 'NONE', reason: 'LEFT' });
+
+    const unconfirmed = await api<Slip[]>('GET', `/inventory-issues?materialId=${materialId}&receipt=unconfirmed&limit=200`);
+    expect(unconfirmed.body.map((s) => s.id)).toContain(issueId);
+
+    const paper = await confirm(issueId, { method: 'PAPER', signerId: sabelo, image: { contentType: 'image/png', data: PNG } });
+    expect(paper.status).toBe(201);
+    expect(paper.body).toMatchObject({ method: 'PAPER', hasImage: true });
+    const confirmed = await api<Slip[]>('GET', `/inventory-issues?materialId=${materialId}&receipt=confirmed&limit=200`);
+    expect(confirmed.body.map((s) => s.id)).toContain(issueId);
+    expect((await api<Slip[]>('GET', `/inventory-issues?materialId=${materialId}&receipt=unconfirmed&limit=200`)).body.map((s) => s.id)).not.toContain(issueId);
+
+    const image = await fetch(`http://127.0.0.1:${server.port}/api/v1/slips/${issueId}/confirmation/image`, {
+      headers: { authorization: `Bearer ${await login(server.port, ADMIN_EMAIL, requireAdminPassword())}` },
+    });
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png');
+    expect(image.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(Buffer.from(await image.arrayBuffer()).equals(Buffer.from(PNG, 'base64'))).toBe(true);
+  });
+
+  it('refuses an image that is not what it says', async () => {
+    const { issueId } = await issueTo(sabelo);
+    const fake = await confirm<Err>(issueId, { method: 'SIGNATURE', signerId: sabelo, image: { contentType: 'image/png', data: Buffer.from('not a picture').toString('base64') } });
+    expect(fake.status).toBe(400);
+    expect(await prisma.receiptConfirmation.count({ where: { slipId: issueId } })).toBe(0);
+  });
+
+  it('shows a slip as changed when a line is reversed after it was confirmed', async () => {
+    const { issueId, transactionIds } = await issueTo(sabelo);
+    expect((await confirm(issueId, { method: 'PIN', signerId: sabelo, pin: '2580' })).status).toBe(201);
+    expect((await slip(issueId)).receipt).toMatchObject({ changed: false });
+    expect((await api('POST', `/inventory-transactions/${transactionIds[0]}/reversal`, { reason: 'Wrong item' })).status).toBe(201);
+    expect((await slip(issueId)).receipt).toMatchObject({ method: 'PIN', changed: true });
+  });
+
+  it('confirms a tool loan slip, which needs checkout:tool, and shows it on the open loan', async () => {
+    const out = await api<{ slipId: string }>('POST', '/tools/check-out', { recipientId: sabelo, lines: [{ materialId: toolId, locationId, quantity: 1 }] });
+    expect(out.status).toBe(201);
+    const viewer = await newUser('VIEWER');
+    expect((await confirm(out.body.slipId, { method: 'PIN', signerId: sabelo, pin: '2580' }, undefined, viewer)).status).toBe(403);
+    const technician = await newUser('TECHNICIAN');
+    expect((await confirm(out.body.slipId, { method: 'PIN', signerId: sabelo, pin: '2580' }, undefined, technician)).status).toBe(201);
+    const tools = await api<Array<{ materialId: string; loans: Array<{ slipId: string; receipt: Receipt | null }> }>>('GET', '/tools');
+    const loan = tools.body.find((t) => t.materialId === toolId)!.loans.find((l) => l.slipId === out.body.slipId)!;
+    expect(loan.receipt).toMatchObject({ method: 'PIN', signerName: `Sabelo ${run}` });
+  });
+
+  it('keeps the database rules even when written past the API', async () => {
+    const { issueId } = await issueTo(sabelo);
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: ADMIN_EMAIL } });
+    // A NONE row names nobody; a confirmation names who confirmed.
+    await expect(prisma.receiptConfirmation.create({ data: { slipId: issueId, slipKind: 'ISSUE', method: 'NONE', capturedById: admin.id } })).rejects.toThrow();
+    await expect(prisma.receiptConfirmation.create({ data: { slipId: issueId, slipKind: 'ISSUE', method: 'PIN', capturedById: admin.id, linesFingerprint: 'x' } })).rejects.toThrow();
+    await prisma.receiptConfirmation.create({ data: { slipId: issueId, slipKind: 'ISSUE', method: 'PIN', signerId: sabelo, capturedById: admin.id, linesFingerprint: 'x' } });
+    await expect(prisma.receiptConfirmation.create({ data: { slipId: issueId, slipKind: 'ISSUE', method: 'PAPER', signerId: sabelo, capturedById: admin.id, linesFingerprint: 'x' } })).rejects.toThrow();
+  });
+
+  it('refuses an unknown slip, and a viewer setting a PIN', async () => {
+    expect((await confirm(randomUUID(), { method: 'NONE', reason: 'LEFT' })).status).toBe(404);
+    const viewer = await newUser('VIEWER');
+    expect((await viewer('POST', `/recipients/${sabelo}/pin/reset`, { reason: 'x' })).status).toBe(403);
+  });
+});

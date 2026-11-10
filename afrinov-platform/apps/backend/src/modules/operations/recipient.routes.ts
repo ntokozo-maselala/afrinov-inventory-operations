@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { RecipientService, RECIPIENT_TYPES } from './recipient.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+import { PIN_PATTERN } from './recipient-pin.js';
 
 const recipientTypeEnum = z.enum(RECIPIENT_TYPES as ['WORKER', 'MACHINE', 'SITE', 'CONTRACTOR']);
 
@@ -23,6 +24,14 @@ export const updateRecipientSchema = z.object({
   type: recipientTypeEnum.optional(),
   notes: z.string().max(1000).nullable().optional(),
   active: z.boolean().optional(),
+});
+
+export const setPinSchema = z.object({
+  pin: z.string().regex(PIN_PATTERN),
+});
+
+export const resetPinSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
 });
 
 function actorId(req: unknown): string {
@@ -67,5 +76,34 @@ export async function recipientRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     return RecipientService.update({ id: (req.params as { id: string }).id, ...parsed.data }, actorId(req));
+  });
+
+  // Counter PINs (ADR-034). A store controller starts each of these; the PIN
+  // itself is typed by the person it belongs to.
+  app.put('/recipients/:id/pin', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageRecipients);
+    const parsed = setPinSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'A PIN is 4 to 6 digits', details: parsed.error.flatten() },
+      });
+    }
+    return RecipientService.setPin((req.params as { id: string }).id, parsed.data.pin, actorId(req));
+  });
+
+  app.post('/recipients/:id/pin/reset', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageRecipients);
+    const parsed = resetPinSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'Say why the PIN is reset', details: parsed.error.flatten() },
+      });
+    }
+    return RecipientService.resetPin((req.params as { id: string }).id, parsed.data.reason, actorId(req));
+  });
+
+  app.post('/recipients/:id/pin/unlock', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageRecipients);
+    return RecipientService.unlockPin((req.params as { id: string }).id, actorId(req));
   });
 }

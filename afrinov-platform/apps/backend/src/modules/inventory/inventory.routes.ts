@@ -333,7 +333,9 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
   app.get('/inventory-issues', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
     const q = req.query as Record<string, string | undefined>;
-    return InventoryService.issueSlips({ ...(await historyFilter(q)), before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
+    // receipt=confirmed or unconfirmed: by whether the person collecting confirmed the slip (ADR-034).
+    const receipt = (['confirmed', 'unconfirmed'] as const).find((r) => r === q['receipt']);
+    return InventoryService.issueSlips({ ...(await historyFilter(q)), receipt, before: q['before'], limit: q['limit'] ? Number(q['limit']) : undefined });
   });
 
   // The received-stock report: deliveries with their lines, newest first.

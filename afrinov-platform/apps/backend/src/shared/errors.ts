@@ -45,6 +45,20 @@ export const Errors = {
     new ApiError(422, 'INSUFFICIENT_BALANCE', msg, details),
   invalidState: (msg: string, details?: Record<string, unknown>) =>
     new ApiError(409, 'INVALID_STATE', msg, details),
+  // Proof of receipt (ADR-034). Each has its own code, so the counter screen
+  // can say what to do next: try again, sign instead, or ask for an unlock.
+  pinMismatch: (triesLeft: number) =>
+    new ApiError(422, 'PIN_MISMATCH', `That PIN doesn't match. ${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left.`, { triesLeft }),
+  pinLocked: (name: string) =>
+    new ApiError(423, 'PIN_LOCKED', `${name}'s PIN is locked after too many wrong tries. They can sign instead, or a store controller can unlock it.`),
+  pinNotSet: (name: string) =>
+    new ApiError(422, 'PIN_NOT_SET', `${name} has no PIN yet. They can sign instead.`),
+  weakPin: () =>
+    new ApiError(422, 'WEAK_PIN', 'That PIN is too easy to guess. Choose one that is not a run like 1234 or the same digit repeated.'),
+  alreadyConfirmed: () =>
+    new ApiError(409, 'ALREADY_CONFIRMED', 'This slip has already been confirmed.'),
+  signerNotRecipient: (name: string) =>
+    new ApiError(422, 'SIGNER_NOT_RECIPIENT', `Only ${name} can confirm this slip.`),
   // Throttling must be reported as 429, not as a server fault. Clients and
   // alerting need to distinguish "you are being rate limited" from "the server
   // is broken", otherwise they retry and defeat the control.

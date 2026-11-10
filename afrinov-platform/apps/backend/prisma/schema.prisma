@@ -77,6 +77,7 @@ model User {
   decidedAdjustments      AdjustmentRequest[]      @relation("AdjustmentDecidedBy")
   createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
   assignedProjectSteps    ProjectStep[]            @relation("ProjectStepAssignee")
+  capturedReceipts        ReceiptConfirmation[]    @relation("ReceiptCapturedBy")
 
   @@map("users")
 }
@@ -397,13 +398,89 @@ model Recipient {
   active    Boolean       @default(true)
   createdAt DateTime      @default(now()) @map("created_at")
   updatedAt DateTime      @updatedAt @map("updated_at")
+  // Counter PIN (ADR-034): workers and contractors confirm what they take with
+  // it. Only the bcrypt hash is kept, and it never leaves the server. Wrong
+  // tries count up to inventory.receiptPinTries, then the PIN locks until a
+  // store controller unlocks it.
+  pinHash        String?   @map("pin_hash")
+  pinSetAt       DateTime? @map("pin_set_at")
+  pinFailedTries Int       @default(0) @map("pin_failed_tries")
+  pinLockedAt    DateTime? @map("pin_locked_at")
 
   inventoryTransactions InventoryTransaction[]
   adjustmentRequests    AdjustmentRequest[]
+  receiptsSigned        ReceiptConfirmation[]
 
   @@index([type])
   @@index([active])
   @@map("recipients")
+}
+
+// ─── Proof of receipt (ADR-034) ───────────────────────────────────────────
+// The person collecting an issue or a tool loan confirms the slip. The slip
+// posts first, as it always has; a confirmation sits beside it and never
+// moves stock.
+
+enum ReceiptSlipKind {
+  ISSUE
+  LOAN
+}
+
+// NONE: not confirmed, with the reason. A real confirmation may follow it.
+enum ReceiptMethod {
+  PIN
+  SIGNATURE
+  PAPER
+  NONE
+}
+
+enum ReceiptSkipReason {
+  LEFT
+  CANNOT
+  NO_SCREEN
+  DISPUTED
+  OTHER
+}
+
+// Add-only. A slip (an issueId) has at most one row that is not NONE, which a
+// partial unique index enforces (migration 20260101000053); NONE rows may
+// come before it.
+model ReceiptConfirmation {
+  id               String             @id @default(uuid())
+  slipId           String             @map("slip_id")
+  slipKind         ReceiptSlipKind    @map("slip_kind")
+  method           ReceiptMethod
+  // Who confirmed: the recipient, or for a machine or site, the person who collected.
+  signerId         String?            @map("signer_id")
+  reason           ReceiptSkipReason?
+  note             String?
+  // A hash of the slip's lines when it was confirmed, so a later reversal shows.
+  linesFingerprint String?            @map("lines_fingerprint")
+  capturedById     String             @map("captured_by_id")
+  confirmedAt      DateTime           @default(now()) @map("confirmed_at")
+  // Set when the image is removed after inventory.receiptImageKeepMonths.
+  imageRemovedAt   DateTime?          @map("image_removed_at")
+
+  signer     Recipient?    @relation(fields: [signerId], references: [id], onDelete: Restrict)
+  capturedBy User          @relation("ReceiptCapturedBy", fields: [capturedById], references: [id])
+  image      ReceiptImage?
+
+  @@index([slipId])
+  @@index([confirmedAt])
+  @@map("receipt_confirmations")
+}
+
+// The signature or the photo of a signed slip, apart from its record so it
+// can be removed when its time is up without losing the fact it was signed.
+model ReceiptImage {
+  confirmationId String @id @map("confirmation_id")
+  contentType    String @map("content_type")
+  size           Int
+  data           Bytes
+
+  confirmation ReceiptConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Cascade)
+
+  @@map("receipt_images")
 }
 
 // ─── Procurement ──────────────────────────────────────────────────────────

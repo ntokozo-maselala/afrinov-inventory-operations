@@ -24,6 +24,7 @@ import { closedOffAgainst, closedTotal, writeOutcome, LIVE_OUTCOME } from './con
 import { checkWriteOff, writeOffRule } from './write-off-limit.js';
 import { checkWholeUnits, holdUnits } from '../../shared/units.js';
 import { STATUS_CHANGE_REFERENCE, inactiveMessage } from './material-status.js';
+import { ReceiptConfirmationService } from './receipt-confirmation.service.js';
 
 type Decimal = Prisma.Decimal;
 
@@ -948,32 +949,52 @@ export const InventoryService = {
    * lines (and what came back). A slip is chosen when any of its lines matches
    * the filter. Reversals are not slips; a reversed line says so.
    */
-  async issueSlips(filter: Omit<HistoryFilter, 'report' | 'issueIds'>) {
-    const and: Prisma.InventoryTransactionWhereInput[] = [
-      historyWhere({ ...filter, report: 'issued' }),
-      { issueId: { not: null }, reversesId: null },
-    ];
-    if (filter.before) {
-      const { at, id } = parseCursor(filter.before);
-      and.push({ OR: [{ postedAt: { lt: at } }, { postedAt: at, issueId: { lt: id } }] });
+  async issueSlips(filter: Omit<HistoryFilter, 'report' | 'issueIds'> & { receipt?: 'confirmed' | 'unconfirmed' }) {
+    const want = Math.min(filter.limit ?? 50, 200);
+    const page = async (before: string | undefined, take: number) => {
+      const and: Prisma.InventoryTransactionWhereInput[] = [
+        historyWhere({ ...filter, report: 'issued' }),
+        { issueId: { not: null }, reversesId: null },
+      ];
+      if (before) {
+        const { at, id } = parseCursor(before);
+        and.push({ OR: [{ postedAt: { lt: at } }, { postedAt: at, issueId: { lt: id } }] });
+      }
+      return prisma.inventoryTransaction.findMany({
+        where: { AND: and },
+        distinct: ['issueId'],
+        orderBy: [{ postedAt: 'desc' }, { issueId: 'desc' }],
+        take,
+        select: { issueId: true, postedAt: true },
+      });
+    };
+    // Confirmed or not (ADR-034) is a record beside the ledger, so slips are
+    // read a batch at a time and kept or passed over until the page is full.
+    // The next page starts after the last slip kept, so none is skipped.
+    let heads: Array<{ issueId: string | null; postedAt: Date }> = [];
+    if (!filter.receipt) heads = await page(filter.before, want);
+    else {
+      const BATCH = 200;
+      for (let before = filter.before; heads.length < want;) {
+        const batch = await page(before, BATCH);
+        const confirmed = await ReceiptConfirmationService.confirmedOf(batch.map((h) => h.issueId!));
+        heads.push(...batch.filter((h) => confirmed.has(h.issueId!) === (filter.receipt === 'confirmed')).slice(0, want - heads.length));
+        const last = batch[batch.length - 1];
+        if (batch.length < BATCH || !last) break;
+        before = pageCursor(last.postedAt, last.issueId!);
+      }
     }
-    const heads = await prisma.inventoryTransaction.findMany({
-      where: { AND: and },
-      distinct: ['issueId'],
-      orderBy: [{ postedAt: 'desc' }, { issueId: 'desc' }],
-      take: Math.min(filter.limit ?? 50, 200),
-      select: { issueId: true, postedAt: true },
-    });
     const ids = heads.map((h) => h.issueId!);
     if (ids.length === 0) return [];
     const lines = (await this.queryHistory({ issueIds: ids, report: 'issued', limit: 10_000 }, 10_000)).filter((l) => !l.reversesId);
-    return heads.map((h) => {
+    const slips = heads.map((h) => {
       const own = lines.filter((l) => l.issueId === h.issueId).sort((a, b) => a.materialName.localeCompare(b.materialName));
       const first = own[0];
       return {
         id: h.issueId!,
         cursor: pageCursor(h.postedAt, h.issueId!),
         issuedAt: h.postedAt.toISOString(),
+        recipientId: first?.recipientId ?? null,
         recipientName: first?.recipientName ?? null,
         recipientType: first?.recipientType ?? null,
         projectNumber: first?.projectNumber ?? null,
@@ -981,6 +1002,10 @@ export const InventoryService = {
         lines: own,
       };
     });
+    const receipts = await ReceiptConfirmationService.forSlips(slips.map((s) => ({
+      id: s.id, recipientId: s.recipientId, lines: s.lines.map((l) => ({ id: l.id, quantity: l.quantity ?? '0', reversed: l.reversedById !== null })),
+    })));
+    return slips.map((s) => ({ ...s, receipt: receipts.get(s.id) ?? null }));
   },
 
   /**
@@ -1234,7 +1259,7 @@ export const InventoryService = {
     }
   },
 
-  async issue(input: IssueInput, within?: Prisma.TransactionClient): Promise<{ transactionIds: string[] }> {
+  async issue(input: IssueInput, within?: Prisma.TransactionClient): Promise<{ issueId: string; transactionIds: string[] }> {
     if (!input.recipientId) throw Errors.validation('Choose who the stock is issued to');
     if (input.lines.length === 0) throw Errors.validation('Add at least one item to issue');
     const lines = input.lines.map((l) => ({ materialId: l.materialId, locationId: l.locationId, heldForProject: l.heldForProject ?? null, qty: toDecimal(l.quantity) }));
@@ -1339,7 +1364,8 @@ export const InventoryService = {
       }
 
       await dispatchDomainEvents(events);
-      return { transactionIds };
+      // The slip's id too, so the counter can open its hand-over step (ADR-034).
+      return { issueId, transactionIds };
     });
   },
 

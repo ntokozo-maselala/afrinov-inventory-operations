@@ -36,7 +36,8 @@ import {
   createProjectSchema, updateProjectSchema,
   createScheduleSchema, updateScheduleSchema, nextMonthSchema, boardQuerySchema, procurementQuerySchema, replanSchema, addStepSchema, updateStepSchema,
 } from '../modules/operations/project.routes.js';
-import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema } from '../modules/operations/recipient.routes.js';
+import { listRecipientsQuerySchema, createRecipientSchema, updateRecipientSchema, setPinSchema, resetPinSchema } from '../modules/operations/recipient.routes.js';
+import { confirmationSchema } from '../modules/inventory/receipt.routes.js';
 import {
   createSupplierSchema,
   updateSupplierSchema,
@@ -302,7 +303,8 @@ export const OPERATIONS: Operation[] = [
       + 'goes to that project only (400 otherwise), while Stores stock follows its item (a leftover goes to its item\'s project). '
       + 'Lines for the same stock are checked against it as one total. '
       + 'Refused with 422 INSUFFICIENT_BALANCE when stock would go below zero, 404 for an unknown recipient, project, '
-      + 'material or location, and 400 for an inactive one. Tools are refused (400): they are checked out, not issued.',
+      + 'material or location, and 400 for an inactive one. Tools are refused (400): they are checked out, not issued. '
+      + 'Returns the slip’s issueId, which POST /slips/:slipId/confirmation takes, and the transaction ids.',
     permissions: [P.IssueInventory], body: issueSchema, success: 201, errors: [404, 422],
   },
   {
@@ -354,9 +356,12 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'get', path: '/inventory-issues', tag: 'Reports', summary: 'Issued stock: issue slips with their lines, newest first',
     description: 'A slip is every line one issue posted; issues from before slips were recorded show as one-line slips. '
-      + 'A slip is listed when any of its lines matches the filters. Reversals are not slips; a reversed line carries reversedById.',
+      + 'A slip is listed when any of its lines matches the filters. Reversals are not slips; a reversed line carries reversedById. '
+      + 'Each slip carries its receipt (ADR-034): how the person collecting confirmed it, or why not, or null when nothing is recorded; '
+      + 'changed is true when a line was reversed after it was confirmed.',
     permissions: [P.ViewReports],
     query: movementFilters.omit({ type: true, report: true }).extend({
+      receipt: z.enum(['confirmed', 'unconfirmed']).optional().openapi({ description: 'Only slips confirmed (by PIN, signature or paper), or only those not.' }),
       before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last slip already shown.' }),
       limit: z.coerce.number().int().positive().max(200).optional().openapi({ description: 'Default 50, at most 200.' }),
     }),
@@ -650,6 +655,41 @@ export const OPERATIONS: Operation[] = [
     method: 'patch', path: '/recipients/:id', tag: 'Recipients', summary: 'Update or deactivate a recipient',
     description: 'Recipients are deactivated, never deleted, so issue history keeps its names.',
     permissions: [P.ManageRecipients], body: updateRecipientSchema, errors: [404, 409],
+  },
+  {
+    method: 'put', path: '/recipients/:id/pin', tag: 'Recipients', summary: 'Set a worker or contractor’s counter PIN',
+    description: 'Typed by the person themselves: 4 to 6 digits, kept only as a bcrypt hash, never returned (a recipient shows pinSet and pinLocked). '
+      + 'Refused with 422 WEAK_PIN for a run (1234), one digit repeated or a pair repeated, 400 for a machine, a site or an inactive recipient, '
+      + 'and 409 when a PIN is already set: reset it first.',
+    permissions: [P.ManageRecipients], body: setPinSchema, errors: [404, 409, 422],
+  },
+  {
+    method: 'post', path: '/recipients/:id/pin/reset', tag: 'Recipients', summary: 'Clear a counter PIN, with a reason',
+    description: 'The reason is kept in the audit log. 409 when no PIN is set.',
+    permissions: [P.ManageRecipients], body: resetPinSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/recipients/:id/pin/unlock', tag: 'Recipients', summary: 'Unlock a counter PIN after too many wrong tries',
+    description: 'The same PIN works again. 409 when it is not locked.',
+    permissions: [P.ManageRecipients], errors: [404, 409],
+  },
+
+  // Proof of receipt (ADR-034)
+  {
+    method: 'post', path: '/slips/:slipId/confirmation', tag: 'Stock movements', summary: 'Confirm who collected an issue or tool loan slip',
+    description: 'The slip is an issueId (an issue’s, or a tool check-out’s slipId). The person collecting confirms with their PIN, a signature '
+      + '(a PNG, up to 200 KB) or a photo of the signed paper slip (JPEG, PNG or WebP, up to 5 MB), sent as base64; or NONE records why not, '
+      + 'with a note for DISPUTED and OTHER. Never moves stock. A worker or contractor confirms only their own slip (422 SIGNER_NOT_RECIPIENT); '
+      + 'for a machine or site, signerId is the worker or contractor who collected. A wrong PIN is 422 PIN_MISMATCH with details.triesLeft, '
+      + 'and is counted even though nothing is recorded; after inventory.receiptPinTries it is 423 PIN_LOCKED. 422 PIN_NOT_SET when the signer has '
+      + 'no PIN. A slip is confirmed once: 409 ALREADY_CONFIRMED after. Needs issue:inventory for an issue slip and checkout:tool for a loan. '
+      + 'Retry-safe with an Idempotency-Key header; the PIN is left out of the stored request hash.',
+    permissions: [P.IssueInventory, P.CheckOutTool], body: confirmationSchema, success: 201, errors: [404, 409, 413, 422, 423],
+  },
+  {
+    method: 'get', path: '/slips/:slipId/confirmation/image', tag: 'Reports', summary: 'The signature or signed-slip photo a slip was confirmed with',
+    description: 'Personal information: only for those who can see issue slips. 404 when there is none, or once it was removed after inventory.receiptImageKeepMonths.',
+    permissions: [P.ViewReports], produces: ['image/png', 'image/jpeg', 'image/webp'], errors: [404],
   },
 
   // Suppliers (always on)
@@ -1051,6 +1091,7 @@ const ERROR_DESCRIPTIONS: Record<number, string> = {
   404: 'Not found',
   409: 'Conflict with the current state (CONFLICT or INVALID_STATE)',
   422: 'Not enough stock (INSUFFICIENT_BALANCE)',
+  423: 'Locked (PIN_LOCKED)',
   429: 'Rate limited; see the Retry-After header',
   503: 'Database unreachable',
 };

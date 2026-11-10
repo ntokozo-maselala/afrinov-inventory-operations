@@ -36,6 +36,12 @@ or a raw driver message. Unexpected faults are answered with the fixed
 | 409 | CONFLICT | Duplicate (supplier, recipient, SKU, codes), already reversed, concurrent change, stock moved during a count |
 | 409 | INVALID_STATE | Action not allowed in the record's current state (e.g. approving a non-pending PO, reversing a reversal) |
 | 422 | INSUFFICIENT_BALANCE | The movement would take stock below zero |
+| 409 | ALREADY_CONFIRMED | The slip has already been confirmed by its recipient (ADR-034) |
+| 422 | PIN_MISMATCH | Wrong counter PIN; `details.triesLeft` says how many tries remain. Counted though nothing is recorded |
+| 422 | PIN_NOT_SET | The person confirming has no counter PIN: they can sign instead |
+| 422 | WEAK_PIN | A new PIN is a run (1234), one digit repeated, or a pair repeated |
+| 422 | SIGNER_NOT_RECIPIENT | Someone other than the worker or contractor on the slip tried to confirm it |
+| 423 | PIN_LOCKED | The counter PIN locked after too many wrong tries; a store controller unlocks it |
 | 429 | TOO_MANY_REQUESTS | Rate limit exceeded |
 | 500 | INTERNAL_ERROR | Unexpected server fault — logged, generic message returned to client |
 | 503 | SERVICE_UNAVAILABLE | The database (or another required dependency) is unreachable or timed out. A retryable availability fault, distinct from a 500 defect |

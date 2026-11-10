@@ -2,9 +2,9 @@
 // posted, newest first; reversals are not slips.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { findMany, groupBy } = vi.hoisted(() => ({ findMany: vi.fn(), groupBy: vi.fn() }));
+const { findMany, groupBy, receipts } = vi.hoisted(() => ({ findMany: vi.fn(), groupBy: vi.fn(), receipts: vi.fn() }));
 vi.mock('../../shared/db.js', () => ({
-  prisma: { inventoryTransaction: { findMany, groupBy }, goodsReceipt: { findMany: vi.fn(async () => []) }, consumableOutcome: { groupBy: vi.fn(async () => []) }, setting: { findMany: vi.fn(async () => []) } },
+  prisma: { inventoryTransaction: { findMany, groupBy }, goodsReceipt: { findMany: vi.fn(async () => []) }, consumableOutcome: { groupBy: vi.fn(async () => []) }, setting: { findMany: vi.fn(async () => []) }, receiptConfirmation: { findMany: receipts } },
 }));
 
 const { InventoryService } = await import('./inventory.service.js');
@@ -22,6 +22,7 @@ const line = (id: string, issueId: string, sku: string, over: Record<string, unk
 describe('InventoryService.issueSlips', () => {
   beforeEach(() => {
     findMany.mockReset();
+    receipts.mockReset().mockResolvedValue([]);
     groupBy.mockReset().mockResolvedValue([{ referenceId: 'tx-2', _sum: { quantity: { toString: () => '1' } } }]);
   });
 
@@ -57,5 +58,53 @@ describe('InventoryService.issueSlips', () => {
       { OR: [{ postedAt: { lt: at } }, { postedAt: at, issueId: { lt: 'iss-2' } }] },
     ]));
     expect(findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('InventoryService.issueSlips and receipts (ADR-034)', () => {
+  beforeEach(() => {
+    findMany.mockReset();
+    groupBy.mockReset().mockResolvedValue([]);
+    receipts.mockReset().mockResolvedValue([]);
+  });
+
+  it('attaches each slip’s receipt, and null where nothing is recorded', async () => {
+    findMany
+      .mockResolvedValueOnce([{ issueId: 'iss-2', postedAt: at }, { issueId: 'iss-1', postedAt: at }])
+      .mockResolvedValueOnce([line('tx-2', 'iss-2', 'A'), line('tx-1', 'iss-1', 'B')]);
+    receipts.mockResolvedValueOnce([{
+      slipId: 'iss-1', method: 'PIN', signerId: 'r-1', reason: null, note: null, linesFingerprint: 'stale', confirmedAt: at, imageRemovedAt: null,
+      signer: { name: 'Sabelo' }, capturedBy: { name: 'Vusi' }, image: null,
+    }]);
+    const slips = await InventoryService.issueSlips({});
+    expect(slips.map((s) => [s.id, s.recipientId, s.receipt?.method ?? null])).toEqual([['iss-2', 'r-1', null], ['iss-1', 'r-1', 'PIN']]);
+    // Its fingerprint doesn't match the lines shown, so it reads as changed after it was confirmed.
+    expect(slips[1]!.receipt).toMatchObject({ signerName: 'Sabelo', capturedByName: 'Vusi', changed: true });
+  });
+
+  it('lists only the slips not confirmed, passing over the confirmed ones', async () => {
+    findMany
+      .mockResolvedValueOnce([{ issueId: 'iss-3', postedAt: at }, { issueId: 'iss-2', postedAt: at }, { issueId: 'iss-1', postedAt: at }])
+      .mockResolvedValueOnce([line('tx-3', 'iss-3', 'A'), line('tx-1', 'iss-1', 'A')]);
+    receipts.mockResolvedValueOnce([{ slipId: 'iss-2' }]);
+    const slips = await InventoryService.issueSlips({ receipt: 'unconfirmed' });
+    expect(slips.map((s) => s.id)).toEqual(['iss-3', 'iss-1']);
+    // Read in batches of 200, whatever the page size, so a page fills past confirmed slips.
+    expect(findMany.mock.calls[0]![0].take).toBe(200);
+    expect(receipts.mock.calls[0]![0].where).toEqual({ slipId: { in: ['iss-3', 'iss-2', 'iss-1'] }, method: { not: 'NONE' } });
+  });
+
+  it('reads on to the next batch until the page is full, starting after the last slip read', async () => {
+    const batch = Array.from({ length: 200 }, (_, i) => ({ issueId: `c-${String(999 - i).padStart(4, '0')}`, postedAt: at }));
+    findMany
+      .mockResolvedValueOnce(batch)
+      .mockResolvedValueOnce([{ issueId: 'iss-0', postedAt: at }])
+      .mockResolvedValueOnce([line('tx-0', 'iss-0', 'A')]);
+    receipts.mockResolvedValueOnce(batch.map((h) => ({ slipId: h.issueId }))).mockResolvedValueOnce([]);
+    const slips = await InventoryService.issueSlips({ receipt: 'unconfirmed', limit: 5 });
+    expect(slips.map((s) => s.id)).toEqual(['iss-0']);
+    expect(findMany.mock.calls[1]![0].where.AND).toEqual(expect.arrayContaining([
+      { OR: [{ postedAt: { lt: at } }, { postedAt: at, issueId: { lt: batch[199]!.issueId } }] },
+    ]));
   });
 });

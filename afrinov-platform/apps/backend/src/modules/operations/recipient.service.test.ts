@@ -2,8 +2,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
-type Recipient = { id: string; name: string; type: string; notes: string | null; active: boolean; createdAt: Date; updatedAt: Date };
-type AuditRow = { actorId: string; action: string; entityType: string; entityId: string };
+type Recipient = {
+  id: string; name: string; type: string; notes: string | null; active: boolean; createdAt: Date; updatedAt: Date;
+  pinHash: string | null; pinSetAt: Date | null; pinFailedTries: number; pinLockedAt: Date | null;
+};
+type AuditRow = { actorId: string; action: string; entityType: string; entityId: string; before?: unknown; after?: unknown };
 
 const db = { recipients: new Map<string, Recipient>(), audit: [] as AuditRow[] };
 let seq = 0;
@@ -18,6 +21,8 @@ function nameMatches(name: string, f: NameFilter): boolean {
 
 function makePrisma(): unknown {
   const tx = {
+    // The row hold a PIN change takes.
+    $queryRaw: async () => [],
     recipient: {
       findUnique: async ({ where }: { where: { id: string } }) => db.recipients.get(where.id) ?? null,
       findFirst: async ({ where }: { where: { name: NameFilter; NOT?: { id: string } } }) =>
@@ -32,7 +37,10 @@ function makePrisma(): unknown {
         if ([...db.recipients.values()].some((r) => r.name.toLowerCase() === data.name.toLowerCase())) {
           throw new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' });
         }
-        const r: Recipient = { ...data, id: `rcp-${++seq}`, active: true, createdAt: new Date(), updatedAt: new Date() };
+        const r: Recipient = {
+          ...data, id: `rcp-${++seq}`, active: true, createdAt: new Date(), updatedAt: new Date(),
+          pinHash: null, pinSetAt: null, pinFailedTries: 0, pinLockedAt: null,
+        };
         db.recipients.set(r.id, r);
         return r;
       },
@@ -100,5 +108,61 @@ describe('RecipientService', () => {
   it('reports an unknown recipient as not found', async () => {
     await expect(RecipientService.update({ id: 'missing', active: false }, 'admin')).rejects.toThrow(/Recipient not found/);
     await expect(RecipientService.getById('missing')).rejects.toThrow(/Recipient not found/);
+  });
+});
+
+describe('RecipientService counter PINs (ADR-034)', () => {
+  const worker = async () => (await RecipientService.create({ name: 'Sabelo Mkhize', type: 'WORKER' }, 'admin'))!;
+
+  it('sets a PIN as a hash, and never shows it in a read or the audit log', async () => {
+    const r = await worker();
+    const after = await RecipientService.setPin(r.id, '2580', 'store');
+    expect(db.recipients.get(r.id)!.pinHash).toMatch(/^\$2[aby]\$10\$/);
+    expect(after).toMatchObject({ pinSet: true, pinLocked: false });
+    expect(after).not.toHaveProperty('pinHash');
+    expect(await RecipientService.getById(r.id)).not.toHaveProperty('pinHash');
+    expect((await RecipientService.list())[0]).not.toHaveProperty('pinHash');
+    expect(JSON.stringify(db.audit)).not.toContain(db.recipients.get(r.id)!.pinHash!);
+    expect(db.audit.at(-1)).toMatchObject({ action: 'PIN_SET', entityType: 'Recipient', entityId: r.id, actorId: 'store' });
+  });
+
+  it('refuses a PIN that is easy to guess', async () => {
+    const r = await worker();
+    for (const pin of ['1234', '0000', '9876', '1212', '123456', '0123']) {
+      await expect(RecipientService.setPin(r.id, pin, 'store')).rejects.toMatchObject({ code: 'WEAK_PIN' });
+    }
+    await expect(RecipientService.setPin(r.id, '12a4', 'store')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(db.recipients.get(r.id)!.pinHash).toBeNull();
+  });
+
+  it('gives a machine or site no PIN: whoever collects for it confirms', async () => {
+    const m = (await RecipientService.create({ name: 'Forklift 3', type: 'MACHINE' }, 'admin'))!;
+    await expect(RecipientService.setPin(m.id, '2580', 'store')).rejects.toThrow(/whoever collects for it/);
+  });
+
+  it('replaces a PIN only after a reset with a reason, so it is never swapped quietly', async () => {
+    const r = await worker();
+    await RecipientService.setPin(r.id, '2580', 'store');
+    await expect(RecipientService.setPin(r.id, '4719', 'store')).rejects.toMatchObject({ code: 'CONFLICT' });
+    const reset = await RecipientService.resetPin(r.id, 'Forgot it', 'store');
+    expect(reset).toMatchObject({ pinSet: false });
+    expect(db.audit.at(-1)).toMatchObject({ action: 'PIN_RESET', after: expect.objectContaining({ reason: 'Forgot it' }) });
+    await RecipientService.setPin(r.id, '4719', 'store');
+    expect(db.recipients.get(r.id)!.pinHash).not.toBeNull();
+  });
+
+  it('unlocks a locked PIN, and says when there is nothing to unlock', async () => {
+    const r = await worker();
+    await RecipientService.setPin(r.id, '2580', 'store');
+    await expect(RecipientService.unlockPin(r.id, 'store')).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    db.recipients.set(r.id, { ...db.recipients.get(r.id)!, pinFailedTries: 5, pinLockedAt: new Date() });
+    expect(await RecipientService.unlockPin(r.id, 'store')).toMatchObject({ pinLocked: false, pinFailedTries: 0, pinSet: true });
+  });
+
+  it('clears the PIN when a worker becomes a machine or site', async () => {
+    const r = await worker();
+    await RecipientService.setPin(r.id, '2580', 'store');
+    expect(await RecipientService.update({ id: r.id, type: 'SITE' }, 'admin')).toMatchObject({ pinSet: false });
+    expect(db.recipients.get(r.id)!.pinHash).toBeNull();
   });
 });

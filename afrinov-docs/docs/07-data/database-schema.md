@@ -88,6 +88,21 @@ to the material and the actor; indexes on (material_id, created_at) and
 created_at. reason_code is null only on changes copied from the audit log. Added
 to only; it holds no stock, so it is never in a ledger sum.
 
+`receipt_confirmations` (ReceiptConfirmation, ADR-034): id, slip_id (the
+issue's or tool loan's issue_id), slip_kind (`ReceiptSlipKind` ISSUE, LOAN),
+method (`ReceiptMethod` PIN, SIGNATURE, PAPER, NONE), signer_id (the recipient
+who confirmed, or who collected for a machine or site), reason
+(`ReceiptSkipReason` LEFT, CANNOT, NO_SCREEN, DISPUTED, OTHER; NONE only), note,
+lines_fingerprint (SHA-256 of the slip's unreversed lines when confirmed),
+captured_by_id, confirmed_at, image_removed_at. A partial unique index allows one
+row that is not NONE per slip; CHECKs make a confirmation name its signer and
+fingerprint and a NONE row its reason and no signer. FKs to the signer and the
+user who captured it; indexes on slip_id and confirmed_at. Added to only; it holds
+no stock. `receipt_images` holds a confirmation's signature or photo (content
+type, size, bytes), removed on its own when its time is up.
+`recipients` gained pin_hash (bcrypt, never returned), pin_set_at,
+pin_failed_tries and pin_locked_at.
+
 `reference_type` values written by the code: `GoodsReceipt` (receipts),
 `PurchaseOrder` (receive-all on an order), `Project` (issues with a
 project), `Return` (returns; `reference_id` = the issue), `StockCount`,
