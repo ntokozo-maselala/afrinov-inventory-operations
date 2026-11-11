@@ -208,6 +208,7 @@ export const UserService = {
       // Changes to accounts take turns, so two Admins removing each other at
       // once can't both see the other still there.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('afrinov:admins'))`;
+      const adminsBefore = await countActiveAdmins(tx);
       await tx.user.update({ where: { id: input.id }, data });
       if (nextRoles !== undefined) {
         await tx.userRole.deleteMany({ where: { userId: input.id } });
@@ -215,9 +216,15 @@ export const UserService = {
           await tx.userRole.createMany({ data: nextRoles.map((r) => ({ userId: input.id, roleId: r.id })) });
         }
       }
-      // Someone must always be able to manage users and settings (system audit F2).
-      if (await countActiveAdmins(tx) === 0) {
+      // Someone must always be able to manage users and settings (system audit
+      // F2), and once two can, two stay: one resets the other's forgotten
+      // password (the owner's choice, ADR-036).
+      const adminsAfter = await countActiveAdmins(tx);
+      if (adminsAfter === 0) {
         throw Errors.invalidState('This would leave no active Admin. Give someone else the Admin role first.');
+      }
+      if (adminsBefore >= MIN_ADMINS && adminsAfter < MIN_ADMINS) {
+        throw Errors.invalidState(`This would leave one active Admin, and nobody to reset their password. Give someone else the Admin role first, so ${MIN_ADMINS} remain.`);
       }
       const fresh = await tx.user.findUnique({
         where: { id: input.id },
@@ -270,6 +277,12 @@ export const UserService = {
     return { id, mustChangePassword: true };
   },
 };
+
+/**
+ * Active Admins kept once there are this many (ADR-036). Below it, a warning
+ * shows to Admins; the system starts with one, so it can't be required then.
+ */
+export const MIN_ADMINS = 2;
 
 /** Active accounts holding the Admin role. */
 async function countActiveAdmins(tx: Prisma.TransactionClient): Promise<number> {

@@ -199,7 +199,8 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate or change roles',
     permissions: [P.ManageUsers], body: updateUserSchema, errors: [404, 409],
-    description: 'Refused (409) when it would leave no active Admin, or would deactivate you or take away your own Admin role.',
+    description: 'Refused (409) when it would leave no active Admin, would bring two or more active Admins down to one, '
+      + 'or would deactivate you or take away your own Admin role (ADR-036).',
   },
   {
     method: 'post', path: '/users/:id/password', tag: 'Users', summary: 'Set a temporary password',

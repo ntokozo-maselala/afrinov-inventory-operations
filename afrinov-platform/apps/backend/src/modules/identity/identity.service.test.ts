@@ -163,12 +163,39 @@ describe('UserService', () => {
       await expect(UserService.update({ id: only.id, roleNames: ['VIEWER'] }, 'someone-else')).rejects.toMatchObject({ code: 'INVALID_STATE' });
     });
 
-    it('lets one Admin demote another while one is left', async () => {
+    it('lets one Admin demote another while two are left', async () => {
       const { UserService } = await import('./identity.service.js');
       const a = await UserService.create({ email: 'a@b.c', name: 'A', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
       const b = await UserService.create({ email: 'b@b.c', name: 'B', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
+      await UserService.create({ email: 'c@b.c', name: 'C', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
       const updated = await UserService.update({ id: b.id, roleNames: ['VIEWER'] }, a.id);
       expect(updated.roles.map((r) => r.role.name)).toEqual(['VIEWER']);
+    });
+
+    // The owner's choice (ADR-036): once two Admins exist, two stay.
+    it('once two Admins exist, refuses bringing it back to one', async () => {
+      const { UserService } = await import('./identity.service.js');
+      const a = await UserService.create({ email: 'a@b.c', name: 'A', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
+      const b = await UserService.create({ email: 'b@b.c', name: 'B', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
+      // Other changes to an Admin go through.
+      await expect(UserService.update({ id: b.id, name: 'B2' }, a.id)).resolves.toMatchObject({ name: 'B2' });
+      await expect(UserService.update({ id: b.id, roleNames: ['VIEWER'] }, a.id)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/one active Admin/) });
+    });
+
+    it('once two Admins exist, refuses deactivating one of them', async () => {
+      const { UserService } = await import('./identity.service.js');
+      const a = await UserService.create({ email: 'a@b.c', name: 'A', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
+      const b = await UserService.create({ email: 'b@b.c', name: 'B', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
+      await expect(UserService.update({ id: b.id, active: false }, a.id)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/one active Admin/) });
+    });
+
+    it('with one Admin, giving a second the role is allowed, as is any change that keeps one', async () => {
+      const { UserService } = await import('./identity.service.js');
+      const a = await UserService.create({ email: 'a@b.c', name: 'A', password: 'ChangeMe!2026', roleNames: ['ADMIN'] }, 'boot');
+      const v = await UserService.create({ email: 'v@b.c', name: 'V', password: 'ChangeMe!2026', roleNames: ['VIEWER'] }, 'boot');
+      await expect(UserService.update({ id: a.id, name: 'A2' }, 'boot')).resolves.toMatchObject({ name: 'A2' });
+      const promoted = await UserService.update({ id: v.id, roleNames: ['ADMIN'] }, a.id);
+      expect(promoted.roles.map((r) => r.role.name)).toEqual(['ADMIN']);
     });
 
     it('refuses deactivating yourself, or taking away your own Admin role', async () => {

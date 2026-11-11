@@ -61,6 +61,21 @@ describe('signing roles', () => {
     expect(within(row('Store Controller')).queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
   });
 
+  // ADR-036: the owner keeps two Admins, so one can reset the other's password.
+  it('asks for a second Admin while fewer than two hold the role', async () => {
+    page();
+    expect(await screen.findByText('Give a second person the Admin role')).toBeInTheDocument();
+  });
+
+  it('says nothing about Admins once two hold the role', async () => {
+    mockGet.mockImplementation(async (path: string) => (path === '/users'
+      ? [...USERS, user('u-a1', 'First Admin', 'ADMIN'), user('u-a2', 'Second Admin', 'ADMIN')]
+      : []));
+    page();
+    await screen.findByText('First Admin');
+    expect(screen.queryByText('Give a second person the Admin role')).not.toBeInTheDocument();
+  });
+
   it('sets a temporary password for someone else', async () => {
     page();
     await screen.findByText('Ona Moloane');

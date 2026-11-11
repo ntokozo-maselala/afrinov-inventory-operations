@@ -32,9 +32,9 @@ requests, closes the database pool).
    `admin@afrinov.local` with `SEED_ADMIN_PASSWORD`.
 2. Sign in as that admin and change the password from the header
    (**Change password**). Every other sign-in of the account ends.
-3. Create the other accounts. Give at least two people the Admin role, so
-   one can reset the other's password (a forgotten password is reset by an
-   Admin with a temporary password, ADR-036).
+3. Create the other accounts, and give a second person the Admin role, so
+   one can reset the other's password (ADR-036). Until then Settings → Users
+   and the Dashboard warn; once two exist, the system keeps two.
 4. Take and restore a backup (`backup-and-recovery.md`) before any stock is
    entered.
 5. Import the workbook once, after the go-live count

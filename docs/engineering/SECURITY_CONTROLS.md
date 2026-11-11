@@ -54,7 +54,8 @@ environment outside this repository. These are listed as open items in
 - **Passwords and Admin access (ADR-036).** Anyone changes their own password
   with the current one; an Admin sets a temporary password that must be changed
   before anything else. A password change ends the account's other sign-ins. A
-  change that would leave no active Admin is refused.
+  change that would leave no active Admin is refused, and once two Admins
+  exist, so is one that would leave one.
 - **Input validation.** Zod schemas validate request bodies; report query arrays
   are bounded.
 - **Error handling.** A central handler maps `ApiError` to the documented error

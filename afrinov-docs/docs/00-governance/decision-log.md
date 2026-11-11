@@ -1094,7 +1094,7 @@ timeout), `settings.service.test.ts`, `migrations.test.ts`,
 `lib/session.test.ts`, `SessionKeeper.test.tsx`, `MaterialForm.test.tsx`,
 `SettingsWithEffect.test.tsx`, `SettingsInventory.test.tsx`.
 
-### ADR-036 — Passwords can be changed and reset; someone always holds Admin; demo data stays out of production
+### ADR-036 — Passwords can be changed and reset; two Admins are kept; demo data stays out of production
 **Date:** 2026-11-11 · **Status:** Accepted
 
 **Context:** The system audit at `c888bbf` (phase P1, go-live safety) found
@@ -1125,10 +1125,15 @@ option for each.
   and the screens show only the change-password form. It also clears the
   account's wrong-password count. Both are logged (`PASSWORD_CHANGE`,
   `PASSWORD_RESET`), never the password.
-- **Someone always holds Admin.** A change that would leave no active account
-  with the Admin role is refused, and nobody deactivates their own account or
-  takes away their own Admin role. Account changes take an advisory lock, so
-  two Admins can't remove each other at once.
+- **Two Admins are kept.** The owner's rule is that the second Admin is
+  another person holding every permission, so that one can reset the
+  other's password. A change that would leave no active account with the
+  Admin role is always refused; once two active Admins exist, one that would
+  bring them back to one is refused too (`MIN_ADMINS`). The system starts with
+  one, so until a second is named, Settings → Users and the Dashboard warn
+  Admins. Nobody deactivates their own account or takes away their own Admin
+  role. Account changes take an advisory lock, so two Admins can't remove each
+  other at once.
 - **The proxy is named.** `TRUST_PROXY` lists the reverse proxy's address or
   range; only those are believed for `X-Forwarded-For`. `true` and hop counts
   are refused at start-up. Sign-in is also limited per account: 10 wrong
@@ -1142,14 +1147,16 @@ option for each.
 - Migration `20260101000055_password_change` adds the two columns; existing
   accounts keep their passwords.
 
-**Consequences:** A forgotten password is an Admin's five-minute job, so at
-least two people should hold Admin (one store controller and Admin cover each
-other, see D-42). The first admin's password is changed in the app; the
+**Consequences:** A forgotten password is an Admin's five-minute job for the
+other Admin. An Admin who leaves is replaced before their account is
+deactivated: give a third person the role first. The first admin's password is changed in the app; the
 `db:rotate-admin` script stays for an account nobody can sign in to.
 Production is seeded empty of stock, so the cutover imports into it once,
 after the count, and the pilot and parallel run use a rehearsal copy
 (`workbook-replacement-roadmap.md`). Backups follow
-`12-operations/backup-and-recovery.md`, tested on a copy. Logging out still
+`12-operations/backup-and-recovery.md`, tested on a copy; who runs them and
+where copies go are recommended there (encrypted, in South Africa, two places)
+for the owner to confirm. Logging out still
 only discards the token in the browser (system audit F7, phase P6). Tests:
 `identity.service.test.ts`, `auth.routes.test.ts` (passwords),
 `login-throttle.test.ts`, `session-policy.test.ts`, `config.test.ts`,

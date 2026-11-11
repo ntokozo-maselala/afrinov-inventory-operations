@@ -10,7 +10,7 @@
 | Revocation | Logout invalidates the session/token | **Planned.** Logout removes the token from the browser only; deactivating a user blocks them on their next request (database check on every request) |
 | Brute force | Lockout or rate limiting | 5 sign-in requests per minute per address (the proxy named in `TRUST_PROXY`), and 10 wrong passwords per account in 15 minutes (ADR-036) |
 | Password change | Users change their own; administrators reset | Anyone changes their own with the current one; an Admin sets a temporary password that must be changed at the next sign-in. Either ends the account's other sign-ins (ADR-036) |
-| Administrator lockout | — | A change that leaves no active Admin is refused, and nobody deactivates or demotes themselves (ADR-036) |
+| Administrator lockout | — | A change that leaves no active Admin is refused; once two exist, two are kept; nobody deactivates or demotes themselves (ADR-036) |
 | Inactivity timeout | — | `security.sessionTimeoutMinutes` (60; 5 to 720). The server refuses a token older than the idle time in force now, so a shorter setting applies at once; the screen renews the token at most once a minute while the person works, warns in the last minute and ends the session when it runs out (ADR-035) |
 
 The token is kept in the browser's `localStorage` under `afrinov.token`.

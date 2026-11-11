@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1314, frontend 1532)
+npm test               # both workspaces (backend 1317, frontend 1536)
 npm run build          # both workspaces
 ```
 
@@ -211,7 +211,9 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `must_change_password` is set (an Admin's temporary password) only
   `/auth/me`, `/auth/refresh` and `/auth/password` answer. Any path that sets a
   password sets `passwordChangedAt` too. `UserService.update` refuses a change
-  that leaves no active Admin, under the `afrinov:admins` lock (ADR-036).
+  that leaves no active Admin, or that brings two or more down to one
+  (`MIN_ADMINS`, kept in step with `src/lib/admins.ts`), under the
+  `afrinov:admins` lock (ADR-036).
 - **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
   production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
   settings, the admin) goes before the `if (!plan.demo)` return in

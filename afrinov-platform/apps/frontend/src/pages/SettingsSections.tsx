@@ -19,6 +19,7 @@ import { Drawer } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TemporaryPasswordForm } from '../components/PasswordForms';
 import { useAuth } from '../auth';
+import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
 import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
@@ -682,6 +683,11 @@ export function SettingsUsers() {
       </div>
 
       {usersApi.error && <Alert tone="danger" title="Couldn't load users">{usersApi.error.message}</Alert>}
+      {usersApi.data && activeAdminCount(users) < MIN_ADMINS && (
+        <Alert tone="warning" title={`Give a second person the Admin role`}>
+          Only {activeAdminCount(users)} active account holds the Admin role. If its password is forgotten, nobody can set a temporary one. Once {MIN_ADMINS} Admins exist, the system keeps {MIN_ADMINS}.
+        </Alert>
+      )}
 
       {usersApi.loading ? (
         <div className="space-y-2"><Skeleton h={32} /><Skeleton h={32} /><Skeleton h={32} /></div>
