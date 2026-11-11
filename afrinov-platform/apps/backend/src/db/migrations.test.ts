@@ -254,3 +254,41 @@ describe('settings rows', () => {
     expect(missing).toEqual([]);
   });
 });
+
+// Settings that do nothing (requirements gap, 11 Nov 2026): seven settings
+// nothing read are retired, and the two kept say what they now do.
+describe('retiring the settings nothing read (migration 54)', () => {
+  const RETIRED = [
+    'general.systemDescription', 'general.dateFormat', 'general.timeFormat', 'general.defaultPageSize',
+    'notifications.enableInAppNotifications', 'notifications.enableLowStockNotifications',
+    'notifications.enablePurchaseOrderNotifications',
+  ];
+  const sql = readMigration('20260101000054_retire_unread_settings');
+  const statements = sql.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+
+  it('changes data only, never the schema', () => {
+    expect(statements).not.toMatch(/\b(CREATE|DROP|ALTER|TRUNCATE)\b/i);
+  });
+
+  it('deletes the rows of exactly the retired settings, which the catalogue no longer has', () => {
+    const deletes = [...statements.matchAll(/DELETE FROM "settings"[\s\S]*?;/g)].map((m) => m[0]);
+    expect(deletes).toHaveLength(1);
+    const keys = [...deletes[0]!.matchAll(/'([A-Za-z0-9.]+)'/g)].map((m) => m[1]).sort();
+    expect(keys).toEqual([...RETIRED].sort());
+    const catalogue = new Set(SETTING_CATALOG.map((d) => d.key));
+    expect(RETIRED.filter((k) => catalogue.has(k))).toEqual([]);
+  });
+
+  // List reads a setting's description from its row, and the seed never
+  // rewrites a row, so the page says what the catalogue says only if this does.
+  it.each(['security.sessionTimeoutMinutes', 'inventory.defaultUnitOfMeasure'])('gives %s its description from the catalogue', (key) => {
+    const description = SETTING_CATALOG.find((d) => d.key === key)!.description;
+    expect(statements).toContain(`SET "description" = '${description.replace(/'/g, "''")}'`);
+    expect(statements).toContain(`WHERE "key" = '${key}'`);
+  });
+
+  it('puts a default unit not on the list onto a listed one, by its spelling or else each', () => {
+    expect(statements).toMatch(/UPDATE "settings"[\s\S]*"units_of_measure"[\s\S]*"active"[\s\S]*'inventory\.defaultUnitOfMeasure'/);
+    expect(statements).toMatch(/to_jsonb\('each'::text\)/);
+  });
+});

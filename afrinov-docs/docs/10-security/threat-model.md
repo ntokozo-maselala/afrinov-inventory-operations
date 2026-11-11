@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Unauthorized stock modification | Direct DB/API tampering with a balance | ADR-002: no direct balance writes; DB grants restrict `inventory_transactions` to INSERT-only | API: no endpoint sets a balance or edits a ledger row. DB grants: **Planned** — no GRANT/REVOKE in migrations (TD-006) |
 | Privilege escalation | A Technician performing Approver-only actions | Server-side role checks on every mutating endpoint | Met (`requirePermission` on every mutating route) |
-| Account compromise | Shared shop-floor terminals, weak passwords | Password policy, session timeout, audit trail | Partial: minimum password length 8 on user creation; login rate limit; no lockout; session timeout not enforced (TD-010) |
+| Account compromise | Shared shop-floor terminals, weak passwords | Password policy, session timeout, audit trail | Partial: minimum password length 8 on user creation; login rate limit; no lockout; idle sign-out enforced by the server, a sign-in ends after 12 hours (ADR-035) |
 | Broken access control | Endpoint forgetting an authorization check | Shared middleware applied by default (deny-by-default) | Not as intended: checks are per-route calls; several reads need only authentication (TD-014) |
 | Audit log tampering | Someone covering their tracks after a bad edit | Append-only table, no UPDATE/DELETE grant on `audit_log_entries` | No API path edits it; no DB grant restriction (TD-006) |
 | Injection (SQL etc.) | Any user-input field | Parameterised queries/ORM throughout | Met: Prisma queries; the few raw queries use tagged templates (parameterised) |

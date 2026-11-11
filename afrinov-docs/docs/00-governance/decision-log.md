@@ -1033,3 +1033,63 @@ with the owner's choices, added these rules:
 - A disputed slip never holds an image: a dispute is a NONE record, an image
   comes only with the confirmation that settles it, and a confirmed slip can't
   be disputed again. Removing images on schedule can't touch an open dispute.
+
+### ADR-035 — Every setting has an effect: idle sign-out is enforced, unread settings are retired
+**Date:** 2026-11-11 · **Status:** Accepted
+
+**Context:** Nine settings were stored, shown and editable, but nothing read
+them: the session timeout, the three notification switches, the date and time
+formats, rows per page, the system description and the default unit of
+measure (requirements gap "Settings that do nothing", TD-010). An administrator
+changing one would expect an effect. The session timeout matters most: the
+threat model names shared shop-floor terminals, and a sign-in lasted a fixed
+12 hours whatever the setting said. The owner chose, for each, to build its
+effect or take it off the page.
+
+**Decision:**
+- **Idle sign-out is enforced by the server.** A sign-in token lasts the idle
+  time in `security.sessionTimeoutMinutes` (60; 5 to 720) and carries
+  `auth_time`, when the sign-in began. `POST /auth/refresh` issues a new token
+  for the idle time from now, for the same sign-in, with the account's roles as
+  they are now; it is refused once the sign-in is 12 hours old or the account
+  has been deactivated. Every authenticated request is refused with 401 when
+  its token is older than the idle time in force now, so a shorter setting
+  closes idle sessions at once rather than when their tokens run out. A token
+  from before this decision has no `auth_time`; its sign-in counts from its
+  issue. The rules are pure functions in `identity/session-policy.ts`.
+- **The screen renews while the person works.** `SessionKeeper`, in the app
+  shell, records activity (pointer, key, wheel, touch) in storage shared by the
+  tabs, renews the token at most once a minute when there has been activity
+  since it was issued, warns in the last minute when there has not ("Are you
+  still there?", with Stay signed in), and ends the session when the token runs
+  out, as a refused request does. A failed renewal for any reason but a refused
+  token is tried again after 30 seconds, and a renewal never replaces the token
+  of a newer sign-in. The 12-hour limit is not renewable; the warning says so.
+- **The default unit of measure is a unit on the list.** It starts a new
+  material on the item form, until someone picks another; a unit taken out of
+  use since, or a setting that can't be read, starts it on each. The server
+  saves only an active listed unit, under its code (`checkUnitOfMeasure`), and
+  Settings offers the units in use instead of free text.
+- **Seven settings are retired:** `general.systemDescription`,
+  `general.dateFormat`, `general.timeFormat`, `general.defaultPageSize` and
+  `notifications.enableInAppNotifications`, `…LowStockNotifications`,
+  `…PurchaseOrderNotifications`. Nothing sends notifications (no handler reads
+  `StockThresholdReached`), stock status and the re-order list already follow
+  `inventory.enableStockAlerts`, every date shows one way ("12 Aug 2026,
+  14:32") that can't be misread, and lists load more on demand. Settings has no
+  Notifications section; its old address opens General.
+- Migration `20260101000054_retire_unread_settings` changes data only: it
+  deletes the seven rows, gives the two kept settings their new descriptions
+  (Settings shows a row's description and the seed never rewrites a row), and
+  moves a stored default unit not on the list onto a listed one. Audit history
+  of the retired settings stays.
+
+**Consequences:** A setting on the page now does what it says, and one with no
+effect is not added: it is built with its effect or not at all. Each
+notification switch can return with an alerts feature that reads it. A
+shortened idle time signs out everyone idle for longer, at once. Logging out
+still only discards the token in the browser; server-side revocation remains
+planned. Tests: `session-policy.test.ts`, `auth.routes.test.ts` (session
+timeout), `settings.service.test.ts`, `migrations.test.ts`,
+`lib/session.test.ts`, `SessionKeeper.test.tsx`, `MaterialForm.test.tsx`,
+`SettingsWithEffect.test.tsx`, `SettingsInventory.test.tsx`.

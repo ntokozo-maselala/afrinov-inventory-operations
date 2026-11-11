@@ -18,23 +18,51 @@ export const AuthService = {
   async login(email: string, password: string) {
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
-      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
+      include: SESSION_USER_INCLUDE,
     });
     if (!user || !user.active) throw Errors.unauthenticated('Invalid credentials');
     const ok = await this.verifyPassword(password, user.passwordHash);
     if (!ok) throw Errors.unauthenticated('Invalid credentials');
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      active: user.active,
-      roles: user.roles.map((r) => r.role.name),
-      // What the roles grant, as the server checks it, so the screens can
-      // follow a grant that isn't in their own role table (Qodo, PR #151).
-      permissions: [...new Set(user.roles.flatMap((r) => r.role.permissions.map((p) => p.permission.code)))].sort(),
-    };
+    return toSessionUser(user);
+  },
+
+  /**
+   * The signed-in person as they are now, to renew their token (ADR-035):
+   * a role granted or taken away since sign-in shows in the new token. Null
+   * when the account no longer exists or has been deactivated.
+   */
+  async sessionUser(id: string): Promise<SessionUser | null> {
+    const user = await prisma.user.findUnique({ where: { id }, include: SESSION_USER_INCLUDE });
+    return user?.active ? toSessionUser(user) : null;
   },
 };
+
+const SESSION_USER_INCLUDE = { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } } as const;
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  name: string;
+  active: boolean;
+  roles: string[];
+  permissions: string[];
+}
+
+function toSessionUser(user: {
+  id: string; email: string; name: string; active: boolean;
+  roles: { role: { name: string; permissions: { permission: { code: string } }[] } }[];
+}): SessionUser {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    active: user.active,
+    roles: user.roles.map((r) => r.role.name),
+    // What the roles grant, as the server checks it, so the screens can
+    // follow a grant that isn't in their own role table (Qodo, PR #151).
+    permissions: [...new Set(user.roles.flatMap((r) => r.role.permissions.map((p) => p.permission.code)))].sort(),
+  };
+}
 
 export interface CreateUserInput {
   email: string;

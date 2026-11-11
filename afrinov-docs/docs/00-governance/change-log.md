@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-11 | `00-governance/decision-log.md`, `08-api/authentication.md`, `10-security/authentication-model.md`, `10-security/threat-model.md`, `12-operations/alerting.md`, `13-project-management/technical-debt.md`, `01-product/product-roadmap.md`, `docs/engineering/SECURITY_CONTROLS.md` | ADR-035: idle sign-out is enforced by the server, with `POST /auth/refresh` and a 12-hour limit per sign-in; the default unit of measure is a unit on the list and starts new materials; seven settings nothing read are retired (TD-010 resolved) | Engineering |
 | 2026-11-10 | `00-governance/decision-log.md` | ADR-034 edge cases: tool loans counted only while out, disputed slips on the Dashboard on Ask too, Skip only from its button, a paper slip accepted from someone who has left, no confirmation of a fully reversed slip, repeated PIN unlocks shown, a warning before images are removed, and the contractor naming rule | Engineering |
 | 2026-11-10 | `00-governance/decision-log.md`, `docs/engineering/DATABASE_ASSURANCE.md` | ADR-034 follow-through: signing lines on the printed slip, the Dashboard count of slips not confirmed in the last 30 days, hourly removal of images past their keep period, and `check:receipts` | Engineering |
 | 2026-11-10 | `09-frontend/page-inventory.md` | The hand-over step on Issue stock and Check out tools, the receipt on each issue slip with Confirm now and Attach signed slip, a Not confirmed filter, and counter PINs on Recipients (ADR-034) | Engineering |
