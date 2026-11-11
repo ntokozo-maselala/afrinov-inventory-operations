@@ -25,13 +25,10 @@ const COLUMNS: Column[] = [
   { header: 'Project / RFQ', weight: 92, align: 'left' },
   { header: 'Material', weight: 140, align: 'left' },
   { header: 'Qty', weight: 36, align: 'right' },
-  { header: 'Sales RFQ prices', weight: 112, align: 'left' },
   { header: 'Procurement RFQ prices', weight: 112, align: 'left' },
   { header: 'PO price', weight: 68, align: 'right' },
   { header: 'Line discount', weight: 48, align: 'right' },
-  { header: 'Sales vs Procurement', weight: 66, align: 'right' },
   { header: 'Procurement vs PO', weight: 66, align: 'right' },
-  { header: 'Sales vs PO', weight: 60, align: 'right' },
 ];
 const TOTAL_WEIGHT = COLUMNS.reduce((sum, c) => sum + c.weight, 0);
 const WIDTHS = COLUMNS.map((c) => (c.weight / TOTAL_WEIGHT) * CONTENT_WIDTH);
@@ -55,12 +52,9 @@ function prices(list: SavingsPrice[] | undefined, lowest: string | null | undefi
   return list.map((p, i) => ({ text: `${p.supplier}: ${money(p.lineTotal, p.currency)}`, bold: i === marked, color: i === marked ? INK : MUTED }));
 }
 
-function difference(value: string | null, against?: string | null, row?: SavingsRow): Run[] {
+function difference(value: string | null): Run[] {
   if (value === null) return [{ text: '—', color: MUTED }];
-  const runs: Run[] = [{ text: money(value), color: Number(value) < 0 ? NEGATIVE : INK }];
-  const shared = row?.comparedWith;
-  if (shared && against) runs.push({ text: `Against ${money(against)} for ${qty(shared.quantity)}${NBSP}${shared.unitOfMeasure} on ${shared.lines} lines`, color: MUTED, size: 6 });
-  return runs;
+  return [{ text: money(value), color: Number(value) < 0 ? NEGATIVE : INK }];
 }
 
 function cells(r: SavingsRow): Run[][] {
@@ -68,23 +62,18 @@ function cells(r: SavingsRow): Run[][] {
     [
       { text: r.projectNumber ?? '—' },
       { text: `Procurement ${r.rfqNumber}`, color: MUTED },
-      ...(r.sales ? [{ text: `Sales ${r.sales.rfqNumber}`, color: MUTED }] : []),
     ],
     [
       { text: `${r.sku} ${r.material}` },
-      ...(r.sales ? [{ text: `Sales: ${r.sales.description}`, color: MUTED }] : []),
       ...r.notes.map((n) => ({ text: n, color: NOTE, size: 6 })),
     ],
     [{ text: `${qty(r.quantity)} ${r.unitOfMeasure}` }],
-    r.sales ? prices(r.sales.prices, r.sales.lowest) : [{ text: '—', color: MUTED }],
     prices(r.procurement.prices, r.procurement.lowest),
     r.order?.lineTotal
       ? [{ text: money(r.order.lineTotal, r.order.currency) }, { text: r.order.supplier, color: MUTED }]
       : [{ text: '—', color: MUTED }],
     r.order?.discount && Number(r.order.discount) > 0 ? [{ text: money(r.order.discount, r.order.currency) }] : [{ text: '—', color: MUTED }],
-    difference(r.salesVsProcurement, r.comparedWith?.procurement, r),
     difference(r.procurementVsOrder),
-    difference(r.salesVsOrder, r.comparedWith?.order, r),
   ];
 }
 
@@ -138,8 +127,8 @@ function drawHeader(doc: PDFKit.PDFDocument, r: SavingsReport, scope: string, ge
 
   // How to read it, above the table rather than under it, where it could be left on a page of its own.
   doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(
-    `What suppliers quoted Sales and the buyers, and what the order was placed at. Line totals excl. VAT, ${r.currency}; each side at its lowest, the order before line discounts. `
-    + 'RFQs count by the day they were sent. The lowest rand price on each side is in bold. A difference is positive where the second figure is lower; '
+    `What suppliers quoted the buyers, and what the order was placed at. Line totals excl. VAT, ${r.currency}; quotes at their lowest, the order before line discounts. `
+    + 'RFQs count by the day they were sent. The lowest rand price is in bold. A difference is positive where the order is lower; '
     + 'one that can\'t be compared is blank and out of the totals, with the reason under the material.',
     MARGIN, 66, { width: CONTENT_WIDTH },
   );
@@ -148,9 +137,7 @@ function drawHeader(doc: PDFKit.PDFDocument, r: SavingsReport, scope: string, ge
 
 function drawTotals(doc: PDFKit.PDFDocument, r: SavingsReport): void {
   const boxes: Array<[string, string]> = [
-    ['Sales vs Procurement', r.total.salesVsProcurement],
     ['Procurement vs PO', r.total.procurementVsOrder],
-    ['Sales vs PO', r.total.salesVsOrder],
     ['Line discounts', r.total.discount],
   ];
   const width = CONTENT_WIDTH / boxes.length;
@@ -201,9 +188,9 @@ export async function buildSavingsPdf(r: SavingsReport, meta: { scope: string; g
         const t = r.total;
         const bold = (text: string, value?: string): Run[] => [{ text, bold: true, color: value !== undefined && Number(value) < 0 ? NEGATIVE : INK }];
         drawRow(doc, [
-          bold(`Total (${t.lines} line${t.lines === 1 ? '' : 's'}, ${t.linked} linked to Sales)`), [], [],
-          bold(money(t.sales)), bold(money(t.procurement)), bold(money(t.order)), bold(money(t.discount)),
-          bold(money(t.salesVsProcurement), t.salesVsProcurement), bold(money(t.procurementVsOrder), t.procurementVsOrder), bold(money(t.salesVsOrder), t.salesVsOrder),
+          bold(`Total (${t.lines} line${t.lines === 1 ? '' : 's'})`), [], [],
+          bold(money(t.procurement)), bold(money(t.order)), bold(money(t.discount)),
+          bold(money(t.procurementVsOrder), t.procurementVsOrder),
         ], { fill: '#f1f5f9' });
       }
 

@@ -19,15 +19,14 @@ const price = (supplier: string, lineTotal: string, currency = 'ZAR') => ({ supp
 const ROW = {
   rfqId: 'r-1', rfqNumber: 'AFRI-02A-1404-02-02', rfqStatus: 'AWARDED', projectNumber: 'AFRI-1404', projectName: 'Pipe spools', lineNo: 1,
   sku: 'PIPE', material: 'Pipe', unitOfMeasure: 'each', quantity: '24',
-  sales: { rfqNumber: 'AFRI-02A-1404-02-01', lineNo: 1, description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: '24', cancelled: false, prices: [price('Fasteners', '2160.00'), price('Local Steel', '2400.00')], lowest: '2160.00' },
   procurement: { prices: [price('EMV', '2280.00'), price('Macsteel', '2112.00')], lowest: '2112.00' },
   order: { number: 'PO-1', status: 'APPROVED', supplier: 'EMV', currency: 'ZAR', quantity: '24', unitPrice: '95', lineTotal: '2280.00', discountPercent: '10', discount: '228.00' },
-  salesVsProcurement: '48.00', procurementVsOrder: '-168.00', salesVsOrder: '-120.00', comparedWith: null, notes: [],
+  procurementVsOrder: '-168.00', notes: [],
 };
-const UNLINKED = { ...ROW, rfqId: 'r-2', rfqNumber: 'AFRI-02A-1404-02-03', sales: null, order: null, salesVsProcurement: null, procurementVsOrder: null, salesVsOrder: null, notes: ['Not linked to a Sales line'] };
+const UNAWARDED = { ...ROW, rfqId: 'r-2', rfqNumber: 'AFRI-02A-1404-02-03', order: null, procurementVsOrder: null, notes: ['Not awarded yet, so there is no order to compare'] };
 const REPORT = {
-  from: '2026-10-01', to: '2026-10-31', currency: 'ZAR', rows: [ROW, UNLINKED],
-  total: { sales: '2160.00', procurement: '4224.00', order: '2280.00', discount: '228.00', salesVsProcurement: '48.00', procurementVsOrder: '-168.00', salesVsOrder: '-120.00', lines: 2, linked: 1 },
+  from: '2026-10-01', to: '2026-10-31', currency: 'ZAR', rows: [ROW, UNAWARDED],
+  total: { procurement: '4224.00', order: '2280.00', discount: '228.00', procurementVsOrder: '-168.00', lines: 2 },
 };
 
 const lastReportCall = () => mockGet.mock.calls.map((c) => String(c[0])).filter((p) => p.startsWith('/reports/procurement-savings')).pop()!;
@@ -45,19 +44,17 @@ beforeEach(() => {
 });
 
 describe('Procurement savings page', () => {
-  it('shows each supplier on both sides, the order, the discount and the differences', async () => {
+  it('shows each supplier, the order, the discount and the difference, with no Sales column', async () => {
     renderPage();
     const table = await screen.findByRole('table', { name: 'Procurement savings' });
     const row = within(table).getByRole('link', { name: 'AFRI-02A-1404-02-02' }).closest('tr')!;
-    expect(within(row).getByText(/Fasteners/)).toBeInTheDocument();
-    expect(within(row).getByText(/Local Steel/)).toBeInTheDocument();
     expect(within(row).getByText(/Macsteel/)).toBeInTheDocument();
-    expect(within(row).getByText('Sales: 200NB pipes x 3m')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /Sales/ })).not.toBeInTheDocument();
     expect(within(row).getByText(/228/)).toBeInTheDocument();
     expect(within(row).getByText(/-.*168|168.*-/)).toHaveClass('text-danger-700');
   });
 
-  it('marks the lowest rand price on each side', async () => {
+  it('marks the lowest rand price', async () => {
     renderPage();
     const table = await screen.findByRole('table', { name: 'Procurement savings' });
     const row = within(table).getByRole('link', { name: 'AFRI-02A-1404-02-02' }).closest('tr')!;
@@ -65,46 +62,19 @@ describe('Procurement savings page', () => {
     expect(within(row).getAllByText(/EMV/).find((e) => e.tagName === 'LI')).not.toHaveClass('font-semibold');
   });
 
-  it('says what a shared Sales line was set against, under each Sales difference', async () => {
-    const shared = {
-      ...ROW, salesVsProcurement: '-2610.00', salesVsOrder: '-3430.00',
-      comparedWith: { lines: 2, quantity: '62', unitOfMeasure: 'm', procurement: '7880.00', order: '8700.00' },
-    };
-    mockGet.mockImplementation(async (path: string) => (path.startsWith('/projects') ? [] : { ...REPORT, rows: [shared] }));
-    renderPage();
-    const table = await screen.findByRole('table', { name: 'Procurement savings' });
-    const row = within(table).getByRole('link', { name: 'AFRI-02A-1404-02-02' }).closest('tr')!;
-    expect(within(row).getByText(/Against .*7.880.* for 62 m on 2 lines/)).toBeInTheDocument();
-    expect(within(row).getByText(/Against .*8.700.* for 62 m on 2 lines/)).toBeInTheDocument();
-    // The minus stays with its amount.
-    expect(within(row).getByText(/2.610/)).toHaveClass('whitespace-nowrap');
-  });
-
-  it('adds nothing under the differences of a line with its own Sales line', async () => {
-    renderPage();
-    await screen.findByRole('table', { name: 'Procurement savings' });
-    expect(screen.queryByText(/^Against /)).not.toBeInTheDocument();
-  });
-
-  it('keeps an unlinked line, saying so', async () => {
-    renderPage();
-    expect(await screen.findByText('Not linked to a Sales line')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'AFRI-02A-1404-02-03' })).toHaveAttribute('href', '/rfqs/r-2');
-  });
-
   it('adds a total row from the server\'s totals', async () => {
     renderPage();
-    const total = (await screen.findByText(/Total \(2 lines, 1 linked to Sales\)/)).closest('tr')!;
+    const total = (await screen.findByText(/Total \(2 lines\)/)).closest('tr')!;
     expect(within(total).getByText(/4.224/)).toBeInTheDocument();
-    expect(within(total).getByText(/-.*120|120.*-/)).toHaveClass('text-danger-700');
+    expect(within(total).getByText(/-.*168|168.*-/)).toHaveClass('text-danger-700');
   });
 
   it('shows what it comes to above the table, without scrolling across to it', async () => {
     renderPage();
     const totals = await screen.findByLabelText('Totals');
-    expect(within(totals).getByText('Sales vs Procurement').parentElement).toHaveTextContent(/48/);
-    expect(within(totals).getByText('Sales vs PO').parentElement).toHaveTextContent(/120/);
+    expect(within(totals).getByText('Procurement vs PO').parentElement).toHaveTextContent(/168/);
     expect(within(totals).getByText('Line discounts').parentElement).toHaveTextContent(/228/);
+    expect(within(totals).queryByText(/Sales/)).not.toBeInTheDocument();
   });
 
   it('asks for the period in the address, and for one project once chosen', async () => {

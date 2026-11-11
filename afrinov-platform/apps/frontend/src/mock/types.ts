@@ -332,11 +332,49 @@ export interface MockRfqLine {
   lineNo: number;
   materialId: string;
   quantity: string;
-  /** Typed as the sheet has it, on a Sales RFQ, whose lines have no catalogue item. */
-  description?: string;
-  unitOfMeasure?: string;
-  /** What Sales asked for, as the buyer matched it, on a Procurement RFQ. */
-  salesRfqLineId?: string | null;
+}
+
+/** A role's hourly selling rate, as labour_rates keeps it. */
+export interface MockLabourRate { id: string; role: string; hourlyRate: string; active: boolean }
+
+/** A Sales RFQ, as sales-rfq.service.ts keeps it: labour lines and the orders its material comes from. */
+export interface MockSalesRfq {
+  id: string;
+  number: string;
+  quoteReference: string | null;
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'CANCELLED';
+  projectNumber: string;
+  equipment: string | null;
+  description: string | null;
+  notes: string | null;
+  penaltiesApply: boolean;
+  markupPercent: string | null;
+  deliveryPrice: string;
+  vatRate: string | null;
+  clientName: string | null;
+  clientAddress: string | null;
+  contactName: string | null;
+  clientReference: string | null;
+  paymentTerms: string | null;
+  validity: string | null;
+  deliveryDuration: string | null;
+  deliveryTerms: string | null;
+  signerPhone: string | null;
+  signerEmail: string | null;
+  issuedAt: string | null;
+  closingDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt: string | null;
+  approvedAt: string | null;
+  returnedAt: string | null;
+  returnReason: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  labour: Array<{ id: string; lineNo: number; labourRateId: string; role: string; hours: string; hourlyRate: string }>;
+  /** One supplier's quote per Procurement RFQ, valued as it was when last saved or submitted. */
+  materials: Array<{ rfqId: string; supplierId: string; quoteTotal: string; currency: string; amount: string }>;
+  history: Array<{ id: string; action: string; actorId: string | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; createdAt: string }>;
 }
 
 /** A supplier asked to quote, and their quote once it is recorded. */
@@ -374,6 +412,9 @@ export interface MockRfq {
   sentAt?: string | null;
   cancelledAt?: string | null;
   cancellationReason?: string | null;
+  /** The supplier whose quote Procurement recommends Sales costs the job from. Not an award. */
+  recommendedSupplierId?: string | null;
+  recommendedAt?: string | null;
   lines: MockRfqLine[];
   suppliers: MockRfqSupplier[];
   history: NonNullable<MockPurchaseOrder['history']>;

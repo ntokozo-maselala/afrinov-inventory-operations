@@ -11,15 +11,15 @@ role's grants each time it runs.
 ## Roles as implemented
 | Role | Permissions |
 |---|---|
-| ADMIN | All 37 permission codes; signs purchase orders only by also holding a signing role (ADR-030) |
+| ADMIN | All 40 permission codes; signs purchase orders only by also holding a signing role (ADR-030) |
 | STORE_CONTROLLER | create/edit material; create/edit/delete location, manage location status; receive, issue, transfer, adjust inventory; reverse inventory transaction; manage racks, projects, recipients; order Stores stock: see, raise, edit, submit, approve (within his approval limit), cancel, close and receive orders without a project (ADR-020, ADR-021), but not project orders or RFQs; receive project orders through a receiving view with no prices, into stock held for the project (ADR-027); view goods receipts; view reports; view users (lookup); check out/in tool; change a tool loan's due date |
-| PROCUREMENT | create/edit supplier; view, create, submit, cancel, close project orders (those with a project, ADR-020), whose delivery the store receives (ADR-027), and requests for quotation, linking their lines to what Sales asked for without seeing Sales' prices or suppliers; no Stores orders; receive inventory; view goods receipts; manage projects; view reports |
+| PROCUREMENT | create/edit supplier; view, create, submit, cancel, close project orders (those with a project, ADR-020), whose delivery the store receives (ADR-027), and requests for quotation, recommending one supplier's quote on each for Sales to cost from (not an award); no Stores orders; receive inventory; view goods receipts; manage projects; view reports |
 | APPROVER | view project orders; view reports. Signs nothing since ADR-030 |
-| PROCUREMENT_MANAGER | sign project and Stores orders (ADR-030), and see them; view Sales RFQs; view reports |
-| DIRECTOR | sign project orders at or above the threshold (ADR-030), and see project orders; view Sales RFQs; view reports |
-| CEO | stand in on project orders (ADR-030), and see them; view Sales RFQs; view reports |
-| WORKSHOP_MANAGER | stand in on project and Stores orders (ADR-030), and see them; view reports |
-| SALES | view and manage Sales RFQs, whose prices buyers and the store can't see (`view:sales_rfq`, `manage:sales_rfq`), and the Procurement savings report, which sets them beside what buyers were quoted and needs `view:sales_rfq`; manage projects; create/edit supplier; view reports. No purchase orders or Procurement RFQs |
+| PROCUREMENT_MANAGER | sign project and Stores orders (ADR-030), and see them; view Sales RFQs and labour rates; view reports |
+| DIRECTOR | sign project orders at or above the threshold (ADR-030), and see project orders; view Sales RFQs and approve their price or send them back (`approve:sales_rfq`), never one they raised or submitted; view labour rates; view reports |
+| CEO | stand in on project orders (ADR-030), and see them; view Sales RFQs and labour rates; view reports |
+| WORKSHOP_MANAGER | stand in on project and Stores orders (ADR-030), and see them; keep the labour rates Sales prices labour at (`manage:labour_rates`); view reports |
+| SALES | view and manage Sales RFQs, whose price and margin buyers and the store can't see (`view:sales_rfq`, `manage:sales_rfq`): raise, edit, submit to the Director and cancel, choosing one supplier's quote on each of the project's sent Procurement RFQs (supplier names and quote totals only, with Procurement's recommendation; no line prices, and no Procurement RFQ to open or change) and reading the labour rates; the Procurement savings report, which needs `view:sales_rfq`; manage projects; view reports. No suppliers, purchase orders or Procurement RFQs |
 | TECHNICIAN | issue inventory; view reports; view users (lookup); check out/in tool |
 | VIEWER | view reports |
 

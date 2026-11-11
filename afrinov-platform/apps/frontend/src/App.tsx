@@ -37,6 +37,7 @@ const SalesRfqs = importPage(() => import('./pages/SalesRfqs').then(m => ({ defa
 const SalesRfqDetail = importPage(() => import('./pages/SalesRfqs').then(m => ({ default: m.SalesRfqDetail })));
 const NewSalesRfq = importPage(() => import('./pages/SalesRfqForm').then(m => ({ default: m.NewSalesRfq })));
 const EditSalesRfq = importPage(() => import('./pages/SalesRfqForm').then(m => ({ default: m.EditSalesRfq })));
+const LabourRates = importPage(() => import('./pages/LabourRates').then(m => ({ default: m.LabourRates })));
 const StockStatus = importPage(() => import('./pages/StockStatus').then(m => ({ default: m.StockStatus })));
 const Consumption = importPage(() => import('./pages/Consumption').then(m => ({ default: m.Consumption })));
 const MonthEnd = importPage(() => import('./pages/MonthEnd').then(m => ({ default: m.MonthEnd })));
@@ -168,6 +169,7 @@ export function App() {
             <Route path="/sales-rfqs/new" element={<RouteBoundary name="New Sales RFQ"><NewSalesRfq /></RouteBoundary>} />
             <Route path="/sales-rfqs/:id" element={<RouteBoundary name="Sales RFQ"><SalesRfqDetail /></RouteBoundary>} />
             <Route path="/sales-rfqs/:id/edit" element={<RouteBoundary name="Edit Sales RFQ"><EditSalesRfq /></RouteBoundary>} />
+            <Route path="/labour-rates" element={<RouteBoundary name="Labour rates"><LabourRates /></RouteBoundary>} />
             {/* Goods receipts had its own page; deliveries, against an order or not, are booked on Receive stock. */}
             <Route path="/goods-receipts/*" element={<Navigate to="/purchase-orders" replace />} />
           </>
@@ -177,6 +179,7 @@ export function App() {
             <Route path="/purchase-orders/*" element={<Navigate to="/" replace />} />
             <Route path="/rfqs/*" element={<Navigate to="/" replace />} />
             <Route path="/sales-rfqs/*" element={<Navigate to="/" replace />} />
+            <Route path="/labour-rates" element={<Navigate to="/" replace />} />
             <Route path="/goods-receipts/*" element={<Navigate to="/" replace />} />
           </>
         )}

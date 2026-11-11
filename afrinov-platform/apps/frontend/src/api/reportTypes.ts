@@ -237,12 +237,6 @@ export interface SavingsRow {
   material: string;
   unitOfMeasure: string;
   quantity: string;
-  sales: {
-    rfqNumber: string; lineNo: number; description: string; unitOfMeasure: string; quantity: string; cancelled: boolean;
-    prices: SavingsPrice[];
-    /** The lowest rand line total. */
-    lowest: string | null;
-  } | null;
   procurement: { prices: SavingsPrice[]; lowest: string | null };
   order: {
     number: string; status: string; supplier: string; currency: string; quantity: string; unitPrice: string | null;
@@ -251,15 +245,8 @@ export interface SavingsRow {
     discountPercent: string;
     discount: string | null;
   } | null;
-  /** Each positive where the second figure is the lower. Null where they can't be compared. */
-  salesVsProcurement: string | null;
+  /** Positive where the order is the lower. Null where they can't be compared. */
   procurementVsOrder: string | null;
-  salesVsOrder: string | null;
-  /**
-   * On the first row of a Sales line other lines share, when it is compared:
-   * what the Sales price was set against, all of those lines together.
-   */
-  comparedWith: { lines: number; quantity: string; unitOfMeasure: string; procurement: string | null; order: string | null } | null;
   /** Why a figure is blank or left out, in words. */
   notes: string[];
 }
@@ -270,9 +257,8 @@ export interface SavingsReport {
   currency: string;
   rows: SavingsRow[];
   total: {
-    sales: string; procurement: string; order: string; discount: string;
-    salesVsProcurement: string; procurementVsOrder: string; salesVsOrder: string;
+    procurement: string; order: string; discount: string;
+    procurementVsOrder: string;
     lines: number;
-    linked: number;
   };
 }

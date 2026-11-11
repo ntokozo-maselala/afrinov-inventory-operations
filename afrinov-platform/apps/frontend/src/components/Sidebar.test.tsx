@@ -78,7 +78,7 @@ describe('useNavGroups', () => {
     expect(useLabelsIn('Operations')).toEqual(['Materials', 'Locations', 'Recipients', 'Suppliers']);
   });
 
-  it.each(['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])(
+  it.each(['STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER'])(
     'shows %s a Production header after Sales, with nothing under it yet',
     (role) => {
       signedIn.roles = [role];
@@ -88,6 +88,17 @@ describe('useNavGroups', () => {
       expect(groups.find((g) => g.title === 'Production')?.items).toEqual([]);
     },
   );
+
+  it.each(['ADMIN', 'WORKSHOP_MANAGER', 'SALES', 'DIRECTOR'])('shows %s the Labour rates under Production', (role) => {
+    signedIn.roles = [role];
+    expect(useLabelsIn('Production')).toEqual(['Labour rates']);
+  });
+
+  it('has no Labour rates with procurement off', () => {
+    features.procurement = false;
+    signedIn.roles = ['WORKSHOP_MANAGER'];
+    expect(useLabelsIn('Production')).toEqual([]);
+  });
 
   // Sales prices can give away a job's margin (Procurement savings report, step 1).
   // Everyone sees the Project board (ADR-032): any job's schedules are readable by all.

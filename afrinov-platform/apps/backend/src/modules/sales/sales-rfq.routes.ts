@@ -1,52 +1,64 @@
-// Sales requests for quotation (see sales-rfq.service.ts). Guarded by their own
-// permissions rather than the purchase order ones: buyers and the store must not
-// see what Sales was quoted.
+// Sales requests for quotation (see sales-rfq.service.ts) and the labour rates
+// they price labour at (labour-rate.service.ts). Guarded by their own
+// permissions rather than the purchase order ones: buyers and the store must
+// not see what a job is priced at or its margin.
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Errors } from '../../shared/errors.js';
+import { supplierIdSchema } from '../../shared/ids.js';
 import { PermissionCode } from '../../shared/permissions.js';
-import { requirePermission } from '../../shared/authorization.js';
-import {
-  QUOTE_FILE_LIMIT, cancelRfqSchema, declineQuoteSchema, recordQuoteSchema, rfqDay, rfqQuantity, rfqSupplierIds, rfqText, sendRfqSchema,
-} from '../procurement/rfq.routes.js';
+import { requirePermission, userHasPermission } from '../../shared/authorization.js';
+import { cancelRfqSchema, rfqDay, rfqText } from '../procurement/rfq.routes.js';
 import { SalesRfqService } from './sales-rfq.service.js';
+import { LabourRateService } from './labour-rate.service.js';
 
-export const SALES_RFQ_STATUSES = ['DRAFT', 'SENT', 'CANCELLED'] as const;
+export const SALES_RFQ_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'CANCELLED'] as const;
 
-const salesRfqLines = z
-  .array(z.object({
-    description: z.string().trim().min(1).max(500),
-    unitOfMeasure: z.string().trim().min(1).max(32),
-    quantity: rfqQuantity,
-  }))
-  .min(1)
-  .max(200);
-
-export const createSalesRfqSchema = z.object({
-  projectNumber: z.string().trim().min(1).max(64),
+const money = z.number().min(0).max(1e12);
+const salesFields = {
+  equipment: rfqText(200),
   description: rfqText(500),
   notes: rfqText(2000),
   penaltiesApply: z.boolean().optional(),
-  lines: salesRfqLines,
-  supplierIds: rfqSupplierIds.optional(),
-});
+  markupPercent: z.number().min(0).max(1000).nullable().optional(),
+  deliveryPrice: money.optional(),
+  closingDate: rfqDay.nullable().optional(),
+  clientName: rfqText(200),
+  clientAddress: rfqText(1000),
+  contactName: rfqText(200),
+  clientReference: rfqText(200),
+  paymentTerms: rfqText(300),
+  validity: rfqText(300),
+  deliveryDuration: rfqText(300),
+  deliveryTerms: rfqText(300),
+  signerPhone: rfqText(60),
+  signerEmail: rfqText(200),
+  labour: z.array(z.object({ labourRateId: z.uuid(), hours: z.number().min(0.01).max(100000) })).max(100).optional(),
+  // One supplier's whole quote per Procurement RFQ.
+  materials: z.array(z.object({ rfqId: z.uuid(), supplierId: supplierIdSchema })).max(50).optional(),
+};
+
+export const createSalesRfqSchema = z.object({ projectNumber: z.string().trim().min(1).max(64), ...salesFields });
 
 // Fields left out are unchanged; null (or blank) clears a text field.
-export const updateSalesRfqSchema = z.object({
-  projectNumber: z.string().trim().min(1).max(64).optional(),
-  description: rfqText(500),
-  notes: rfqText(2000),
-  penaltiesApply: z.boolean().optional(),
-  lines: salesRfqLines.optional(),
-  supplierIds: rfqSupplierIds.optional(),
-  /** Only once it is sent. */
-  closingDate: rfqDay.optional(),
-});
+export const updateSalesRfqSchema = z.object({ projectNumber: z.string().trim().min(1).max(64).optional(), ...salesFields });
 
 export const listSalesRfqQuerySchema = z.object({
   status: z.enum(SALES_RFQ_STATUSES).optional(),
   projectNumber: z.string().max(64).optional(),
 });
+
+export const salesQuoteOptionsQuerySchema = z.object({ projectNumber: z.string().trim().min(1).max(64) });
+
+export const sendBackSalesRfqSchema = z.object({ reason: z.string().trim().min(1).max(1000) });
+
+export const createLabourRateSchema = z.object({ role: z.string().trim().min(1).max(100), hourlyRate: z.number().gt(0).max(1e7) });
+export const updateLabourRateSchema = z.object({
+  role: z.string().trim().min(1).max(100).optional(),
+  hourlyRate: z.number().gt(0).max(1e7).optional(),
+  active: z.boolean().optional(),
+});
+export const listLabourRatesQuerySchema = z.object({ active: z.enum(['true', 'false']).optional() });
 
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
@@ -59,23 +71,24 @@ function parse<T>(schema: z.ZodType<T>, body: unknown, what: string): T {
   return parsed.data;
 }
 
-type QuoteParams = { id: string; supplierId: string };
+const idOf = (req: { params: unknown }) => (req.params as { id: string }).id;
 
 // Registered with the purchase order routes, behind PROCUREMENT_ENABLED.
 export async function salesRfqRoutes(app: FastifyInstance): Promise<void> {
-  // A quotation PDF is sent as itself, not as JSON, with its name in a header.
-  if (!app.hasContentTypeParser('application/pdf')) {
-    app.addContentTypeParser('application/pdf', { parseAs: 'buffer', bodyLimit: QUOTE_FILE_LIMIT }, (_req, body, done) => done(null, body));
-  }
-
   app.get('/sales-rfqs', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewSalesRfq);
     return SalesRfqService.list(parse(listSalesRfqQuerySchema, req.query ?? {}, 'Sales RFQ filter'));
   });
 
+  // The Procurement quotes a Sales RFQ can take its material from. Before /:id, as Fastify prefers the fixed path anyway.
+  app.get('/sales-rfqs/quote-options', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageSalesRfq);
+    return SalesRfqService.quoteOptions(parse(salesQuoteOptionsQuerySchema, req.query ?? {}, 'project').projectNumber);
+  });
+
   app.get('/sales-rfqs/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewSalesRfq);
-    return SalesRfqService.getById((req.params as { id: string }).id);
+    return SalesRfqService.getById(idOf(req));
   });
 
   app.post('/sales-rfqs', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -85,70 +98,48 @@ export async function salesRfqRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch('/sales-rfqs/:id', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ManageSalesRfq);
-    return SalesRfqService.update({ id: (req.params as { id: string }).id, ...parse(updateSalesRfqSchema, req.body, 'Sales RFQ') }, actorId(req));
+    return SalesRfqService.update({ id: idOf(req), ...parse(updateSalesRfqSchema, req.body, 'Sales RFQ') }, actorId(req));
   });
 
-  app.post('/sales-rfqs/:id/send', { preHandler: [app.authenticate] }, async (req) => {
+  app.post('/sales-rfqs/:id/submit', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ManageSalesRfq);
-    return SalesRfqService.send((req.params as { id: string }).id, parse(sendRfqSchema, req.body ?? {}, 'closing date'), actorId(req));
+    return SalesRfqService.submit(idOf(req), actorId(req));
+  });
+
+  app.post('/sales-rfqs/:id/approve', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ApproveSalesRfq);
+    return SalesRfqService.approve(idOf(req), actorId(req));
+  });
+
+  app.post('/sales-rfqs/:id/send-back', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ApproveSalesRfq);
+    return SalesRfqService.sendBack(idOf(req), parse(sendBackSalesRfqSchema, req.body ?? {}, 'reason').reason, actorId(req));
   });
 
   app.post('/sales-rfqs/:id/cancel', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ManageSalesRfq);
-    return SalesRfqService.cancel((req.params as { id: string }).id, parse(cancelRfqSchema, req.body ?? {}, 'cancellation').reason, actorId(req));
-  });
-
-  app.put('/sales-rfqs/:id/suppliers/:supplierId/quote', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ManageSalesRfq);
-    const { id, supplierId } = req.params as QuoteParams;
-    return SalesRfqService.recordQuote(id, supplierId, parse(recordQuoteSchema, req.body, 'quote'), actorId(req));
-  });
-
-  app.post('/sales-rfqs/:id/suppliers/:supplierId/decline', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ManageSalesRfq);
-    const { id, supplierId } = req.params as QuoteParams;
-    return SalesRfqService.decline(id, supplierId, parse(declineQuoteSchema, req.body ?? {}, 'decline'), actorId(req));
-  });
-
-  // Who is sending it, and may they, is checked when the request arrives,
-  // before up to 10 MB is read: nobody else gets that much held in memory.
-  app.put('/sales-rfqs/:id/suppliers/:supplierId/quote-file', {
-    onRequest: [app.authenticate, async (req) => { await requirePermission(req, PermissionCode.ManageSalesRfq); }],
-    bodyLimit: QUOTE_FILE_LIMIT,
-  }, async (req) => {
-    if (!Buffer.isBuffer(req.body)) throw Errors.validation('Send the quotation as application/pdf');
-    const header = req.headers['x-file-name'];
-    let fileName = 'quotation.pdf';
-    try {
-      if (typeof header === 'string' && header) fileName = decodeURIComponent(header);
-    } catch {
-      throw Errors.validation('Invalid file name');
-    }
-    const { id, supplierId } = req.params as QuoteParams;
-    return SalesRfqService.putQuoteFile(id, supplierId, { fileName, data: req.body }, actorId(req));
-  });
-
-  app.get('/sales-rfqs/:id/suppliers/:supplierId/quote-file', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await requirePermission(req, PermissionCode.ViewSalesRfq);
-    const { id, supplierId } = req.params as QuoteParams;
-    const file = await SalesRfqService.getQuoteFile(id, supplierId);
-    // The name as attached, safely quoted for any browser.
-    const ascii = file.fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-    return reply
-      .type('application/pdf')
-      .header('x-content-type-options', 'nosniff')
-      .header('content-disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`)
-      .send(file.data);
-  });
-
-  app.delete('/sales-rfqs/:id/suppliers/:supplierId/quote-file', { preHandler: [app.authenticate] }, async (req) => {
-    await requirePermission(req, PermissionCode.ManageSalesRfq);
-    const { id, supplierId } = req.params as QuoteParams;
-    return SalesRfqService.removeQuoteFile(id, supplierId, actorId(req));
+    return SalesRfqService.cancel(idOf(req), parse(cancelRfqSchema, req.body ?? {}, 'cancellation').reason, actorId(req));
   });
 
   app.get('/sales-rfqs/:id/history', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewSalesRfq);
-    return SalesRfqService.history((req.params as { id: string }).id);
+    return SalesRfqService.history(idOf(req));
+  });
+
+  // Sales reads the rates to price labour; the Workshop Manager keeps them.
+  app.get('/labour-rates', { preHandler: [app.authenticate] }, async (req) => {
+    if (!(await userHasPermission(req, PermissionCode.ManageLabourRates))) await requirePermission(req, PermissionCode.ViewSalesRfq);
+    const { active } = parse(listLabourRatesQuerySchema, req.query ?? {}, 'filter');
+    return LabourRateService.list(active === undefined ? {} : { active: active === 'true' });
+  });
+
+  app.post('/labour-rates', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageLabourRates);
+    return reply.code(201).send(await LabourRateService.create(parse(createLabourRateSchema, req.body, 'labour rate'), actorId(req)));
+  });
+
+  app.patch('/labour-rates/:id', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageLabourRates);
+    return LabourRateService.update(idOf(req), parse(updateLabourRateSchema, req.body, 'labour rate'), actorId(req));
   });
 }
