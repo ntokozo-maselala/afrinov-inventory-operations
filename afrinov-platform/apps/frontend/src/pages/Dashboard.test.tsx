@@ -78,21 +78,37 @@ describe('Dashboard', () => {
     const base = mockGet.getMockImplementation()!;
     mockGet.mockImplementation(async (path: string) => {
       if (path.startsWith('/settings/values')) return { 'inventory.receiptConfirmation': 'require' };
-      if (path === '/slips/unconfirmed/summary') return { since: '2026-10-11T08:00:00.000Z', days: 30, issues: 3, loans: 1, disputed: 1, oldestAt: '2026-10-20T08:00:00.000Z' };
+      if (path === '/slips/unconfirmed/summary') return { since: '2026-10-11T08:00:00.000Z', days: 30, issues: 3, loans: 1, oldestAt: '2026-10-20T08:00:00.000Z', disputed: 1, oldestDisputedAt: '2026-08-02T08:00:00.000Z' };
       return base(path);
     });
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     const card = (await screen.findByText('Slips not confirmed')).closest('a')!;
     expect(card).toHaveAttribute('href', '/movements?report=issued&view=cards&from=2026-10-11&receipt=unconfirmed');
     expect(card).toHaveTextContent('4');
-    expect(card).toHaveTextContent('3 issues, 1 tool loan, 1 disputed · last 30 days');
+    expect(card).toHaveTextContent('3 issues, 1 tool loan · last 30 days');
   });
 
-  it('leaves the count out when receipt confirmation is only Ask', async () => {
+  it('shows disputed slips of any age to the store controller on Ask too, and only the not-confirmed count on Required (E2)', async () => {
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/settings/values')) return { 'inventory.receiptConfirmation': 'ask' };
+      if (path === '/slips/unconfirmed/summary') return { since: '2026-10-11T08:00:00.000Z', days: 30, issues: 3, loans: 0, oldestAt: null, disputed: 2, oldestDisputedAt: '2026-08-02T08:00:00.000Z' };
+      return base(path);
+    });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = (await screen.findByText('Disputed slips')).closest('a')!;
+    expect(card).toHaveAttribute('href', '/movements?report=issued&view=cards&from=2026-08-02&receipt=disputed');
+    expect(card).toHaveTextContent('2');
+    expect(screen.queryByText('Slips not confirmed')).not.toBeInTheDocument();
+  });
+
+  it('asks nothing about receipts of someone who can’t correct a slip, while the setting is only Ask', async () => {
+    auth.roles = ['TECHNICIAN'];
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await screen.findByText('Tools checked out');
     expect(screen.queryByText('Slips not confirmed')).not.toBeInTheDocument();
     expect(mockGet).not.toHaveBeenCalledWith('/slips/unconfirmed/summary');
+    auth.roles = ['STORE_CONTROLLER'];
   });
 
   it('counts the tools out on loan, and links to the overdue ones', async () => {

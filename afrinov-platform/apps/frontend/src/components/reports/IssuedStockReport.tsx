@@ -80,8 +80,9 @@ function columns(open: (l: MovementRow) => void, tracked: boolean): DataTableCol
 }
 
 /** Whether the person collecting confirmed the slip (ADR-034). */
-type ReceiptFilter = '' | 'unconfirmed' | 'confirmed';
-const RECEIPT_FILTERS: Array<[ReceiptFilter, string]> = [['', 'All slips'], ['unconfirmed', 'Not confirmed'], ['confirmed', 'Confirmed']];
+type ReceiptFilter = '' | 'unconfirmed' | 'disputed' | 'confirmed';
+// Disputed: said to be wrong by the person collecting, not confirmed since (edge case E2).
+const RECEIPT_FILTERS: Array<[ReceiptFilter, string]> = [['', 'All slips'], ['unconfirmed', 'Not confirmed'], ['disputed', 'Disputed'], ['confirmed', 'Confirmed']];
 
 export function IssuedStockReport({ query, view, onView }: { query: string; view: ReportView; onView: (v: ReportView) => void }) {
   // The Dashboard links here with ?receipt=unconfirmed.

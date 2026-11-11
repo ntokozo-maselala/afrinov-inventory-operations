@@ -27,6 +27,11 @@ async function main(): Promise<void> {
   }
   if (r.disputed.length > 0) console.log(`\nSaid to be wrong by the person collecting (${r.disputed.length}), to check and correct:\n${list(r.disputed)}`);
   if (r.changedAfter.length > 0) console.log(`\nChanged after they were confirmed (${r.changedAfter.length}):\n${list(r.changedAfter)}`);
+  if (r.returnedLoans.length > 0) console.log(`\nTool loans never confirmed, with every tool back (${r.returnedLoans.length}):\n${list(r.returnedLoans)}`);
+  if (r.repeatedUnlocks.length > 0) {
+    console.log(`\nPINs unlocked 3 or more times in 30 days (${r.repeatedUnlocks.length}):`);
+    for (const u of r.repeatedUnlocks) console.log(`- ${u.name}: ${u.unlocks}, by ${u.by.join(', ')}`);
+  }
   if (r.imagesDue > 0) console.log(`\nImages past inventory.receiptImageKeepMonths: ${r.imagesDue}. The server removes them hourly.`);
 
   if (r.orphaned.length > 0 || r.wrongSigner.length > 0) {

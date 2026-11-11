@@ -263,6 +263,70 @@ describe('proof of receipt over real HTTP', () => {
     expect(report.orphaned).toEqual([]);
   });
 
+  // The edge cases fixed after review (E1 to E8).
+  it('stops counting a tool loan once every tool is back (E1)', async () => {
+    type Summary = { loans: number };
+    const before = (await api<Summary>('GET', '/slips/unconfirmed/summary')).body.loans;
+    const out = await api<{ slipId: string; loanIds: string[] }>('POST', '/tools/check-out', { recipientId: thabo, lines: [{ materialId: toolId, locationId, quantity: 1 }] });
+    expect(out.status).toBe(201);
+    expect((await api<Summary>('GET', '/slips/unconfirmed/summary')).body.loans).toBe(before + 1);
+    expect((await api('POST', '/tools/check-in', { lines: [{ loanId: out.body.loanIds[0], quantity: 1, condition: 'GOOD' }] })).status).toBe(201);
+    expect((await api<Summary>('GET', '/slips/unconfirmed/summary')).body.loans).toBe(before);
+  });
+
+  it('lists disputed slips of any age, on their own filter (E2)', async () => {
+    const { issueId } = await issueTo(sabelo);
+    expect((await confirm(issueId, { method: 'NONE', reason: 'DISPUTED', note: 'Got 1, not 2' })).status).toBe(201);
+    await prisma.inventoryTransaction.updateMany({ where: { issueId }, data: { postedAt: new Date(Date.now() - 60 * 86_400_000) } });
+    const summary = (await api<{ disputed: number; oldestDisputedAt: string | null }>('GET', '/slips/unconfirmed/summary')).body;
+    expect(summary.disputed).toBeGreaterThanOrEqual(1);
+    expect(summary.oldestDisputedAt).not.toBeNull();
+    const disputed = await api<Slip[]>('GET', `/inventory-issues?materialId=${materialId}&receipt=disputed&limit=200`);
+    expect(disputed.body.map((s) => s.id)).toContain(issueId);
+    expect(disputed.body.every((s) => s.receipt?.reason === 'DISPUTED')).toBe(true);
+  });
+
+  it('takes the paper slip of someone who has since left, and nothing else from them (E4)', async () => {
+    const leaver = await recipient('Leaver', 'WORKER');
+    const { issueId } = await issueTo(leaver);
+    expect((await api('PATCH', `/recipients/${leaver}`, { active: false })).status).toBe(200);
+    const signed = await confirm<Err>(issueId, { method: 'SIGNATURE', signerId: leaver, image: { contentType: 'image/png', data: PNG } });
+    expect(signed.status).toBe(400);
+    expect(signed.body.error.message).toMatch(/has left \(inactive\)/);
+    const paper = await confirm(issueId, { method: 'PAPER', signerId: leaver, image: { contentType: 'image/png', data: PNG } });
+    expect(paper.status).toBe(201);
+    expect(paper.body).toMatchObject({ method: 'PAPER', signerName: `Leaver ${run}` });
+  });
+
+  it('refuses to confirm a slip with every line reversed, before any PIN is tried (E5)', async () => {
+    const { issueId, transactionIds } = await issueTo(sabelo);
+    expect((await api('POST', `/inventory-transactions/${transactionIds[0]}/reversal`, { reason: 'Never left' })).status).toBe(201);
+    const tries = (await prisma.recipient.findUniqueOrThrow({ where: { id: sabelo } })).pinFailedTries;
+    const res = await confirm<Err>(issueId, { method: 'PIN', signerId: sabelo, pin: '9999' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.message).toBe('Every line on this slip was reversed, so there is nothing to confirm.');
+    expect((await prisma.recipient.findUniqueOrThrow({ where: { id: sabelo } })).pinFailedTries).toBe(tries);
+  });
+
+  it('says how often a PIN was unlocked in 30 days (E6), and how many images a keep period would remove (E8)', async () => {
+    const lockable = await recipient('Locker', 'WORKER');
+    expect((await api('PUT', `/recipients/${lockable}/pin`, { pin: '4719' })).status).toBe(200);
+    for (let i = 0; i < 3; i++) {
+      await prisma.recipient.update({ where: { id: lockable }, data: { pinFailedTries: 5, pinLockedAt: new Date() } });
+      expect((await api('POST', `/recipients/${lockable}/pin/unlock`)).status).toBe(200);
+    }
+    expect((await api<{ pinUnlocks30d: number }>('GET', `/recipients/${lockable}`)).body.pinUnlocks30d).toBe(3);
+
+    const { issueId } = await issueTo(sabelo);
+    expect((await confirm(issueId, { method: 'SIGNATURE', signerId: sabelo, image: { contentType: 'image/png', data: PNG } })).status).toBe(201);
+    await prisma.receiptConfirmation.updateMany({ where: { slipId: issueId }, data: { confirmedAt: new Date(Date.now() - 13 * 31 * 86_400_000) } });
+    const at12 = await api<{ count: number }>('GET', '/slips/images/past-keep?months=12');
+    expect(at12.status).toBe(200);
+    expect(at12.body.count).toBeGreaterThanOrEqual(1);
+    expect((await api<{ count: number }>('GET', '/slips/images/past-keep?months=0')).body.count).toBe(0);
+    expect((await api('GET', '/slips/images/past-keep?months=abc')).status).toBe(400);
+  });
+
   it('refuses an unknown slip, and a viewer setting a PIN', async () => {
     expect((await confirm(randomUUID(), { method: 'NONE', reason: 'LEFT' })).status).toBe(404);
     const viewer = await newUser('VIEWER');

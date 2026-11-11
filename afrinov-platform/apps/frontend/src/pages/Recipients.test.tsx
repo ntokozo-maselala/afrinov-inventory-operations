@@ -16,7 +16,7 @@ const { ToastProvider } = await import('../components/Toast');
 
 const LIST = [
   { id: 'r-1', name: 'Lerato Dube', type: 'WORKER', active: true, pinSet: false, pinLocked: false, pinFailedTries: 0 },
-  { id: 'r-2', name: 'Sabelo Mkhize', type: 'WORKER', active: true, pinSet: true, pinLocked: true, pinFailedTries: 5 },
+  { id: 'r-2', name: 'Sabelo Mkhize', type: 'WORKER', active: true, pinSet: true, pinLocked: true, pinFailedTries: 5, pinUnlocks30d: 4 },
   { id: 'r-3', name: 'Forklift 3', type: 'MACHINE', active: true },
 ];
 
@@ -39,6 +39,16 @@ describe('Recipients counter PINs', () => {
     expect(within(rowOf('Lerato Dube')).getByText('Not set')).toBeInTheDocument();
     expect(within(rowOf('Sabelo Mkhize')).getByText('Locked')).toBeInTheDocument();
     expect(within(rowOf('Forklift 3')).queryByRole('button', { name: 'Set PIN' })).not.toBeInTheDocument();
+    // Repeated unlocks are shown (E6).
+    expect(within(rowOf('Sabelo Mkhize')).getByText('Unlocked 4× in 30 days')).toBeInTheDocument();
+    expect(within(rowOf('Lerato Dube')).queryByText(/Unlocked/)).not.toBeInTheDocument();
+  });
+
+  it('tells the store how to set up a contractor’s staff, so nobody shares a PIN (E9)', async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Add recipient' }));
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText(/^Type/), { target: { value: 'CONTRACTOR' } });
+    expect(screen.getByText(/Add each person who collects as their own contractor/)).toBeInTheDocument();
   });
 
   it('sets a PIN typed twice by the person, refusing an easy one first', async () => {

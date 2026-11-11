@@ -949,7 +949,7 @@ export const InventoryService = {
    * lines (and what came back). A slip is chosen when any of its lines matches
    * the filter. Reversals are not slips; a reversed line says so.
    */
-  async issueSlips(filter: Omit<HistoryFilter, 'report' | 'issueIds'> & { receipt?: 'confirmed' | 'unconfirmed' }) {
+  async issueSlips(filter: Omit<HistoryFilter, 'report' | 'issueIds'> & { receipt?: 'confirmed' | 'unconfirmed' | 'disputed' }) {
     const want = Math.min(filter.limit ?? 50, 200);
     const page = async (before: string | undefined, take: number) => {
       const and: Prisma.InventoryTransactionWhereInput[] = [
@@ -977,8 +977,8 @@ export const InventoryService = {
       const BATCH = 200;
       for (let before = filter.before; heads.length < want;) {
         const batch = await page(before, BATCH);
-        const confirmed = await ReceiptConfirmationService.confirmedOf(batch.map((h) => h.issueId!));
-        heads.push(...batch.filter((h) => confirmed.has(h.issueId!) === (filter.receipt === 'confirmed')).slice(0, want - heads.length));
+        const kept = await ReceiptConfirmationService.keep(filter.receipt, batch.map((h) => h.issueId!));
+        heads.push(...batch.filter((h) => kept.has(h.issueId!)).slice(0, want - heads.length));
         const last = batch[batch.length - 1];
         if (batch.length < BATCH || !last) break;
         before = pageCursor(last.postedAt, last.issueId!);

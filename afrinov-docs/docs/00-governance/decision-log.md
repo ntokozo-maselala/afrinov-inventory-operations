@@ -1008,3 +1008,28 @@ confirmed on screen carries lines to sign on paper. With the setting at require,
 the Dashboard counts slips of the last 30 days not confirmed: a window, so the
 number can't grow for ever. The server removes images past their keep period
 hourly, and `check:receipts` reports the rest, read-only.
+
+**Edge cases (10 Nov 2026):** a review of 33 cases against the merged code,
+with the owner's choices, added these rules:
+- A tool loan counts as waiting only while a tool on it is still out. Once
+  everything is back, the tool is the proof. `check:receipts` lists returned
+  loans that were never confirmed, apart from the slips still waiting.
+- A disputed slip, of any age, is counted on the Dashboard for whoever corrects
+  slips (`reverse:inventory_transaction`: the store controller, with Admin as
+  cover), on Ask as well as Required. Issued stock has a Disputed filter.
+- While the hand-over is open, only its Skip or Cancel button closes it. A tap
+  outside or Escape does nothing until it is done.
+- Someone who has since left (inactive) can't use a PIN or sign, but a paper
+  slip they signed at the time is accepted as theirs.
+- A slip with every line reversed can't be confirmed. The route refuses it
+  before any PIN is checked, so no try is counted.
+- A PIN unlocked three or more times in 30 days is shown on Recipients and
+  listed by `check:receipts` with who unlocked it.
+- Before a shorter image keep period is saved, Settings says how many images it
+  removes.
+- A contractor's staff are set up as their own contractor recipients, each
+  with a PIN, and the company as a Site. This is a naming rule, shown on the
+  recipient form, and needs no code.
+- A disputed slip never holds an image: a dispute is a NONE record, an image
+  comes only with the confirmation that settles it, and a confirmed slip can't
+  be disputed again. Removing images on schedule can't touch an open dispute.

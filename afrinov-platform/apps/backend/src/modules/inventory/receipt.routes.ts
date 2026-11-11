@@ -5,9 +5,10 @@ import { z } from 'zod';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
 import { idempotentMutation } from '../../shared/idempotency.js';
+import { Errors } from '../../shared/errors.js';
 import { PIN_PATTERN, verifyPin } from '../operations/recipient-pin.js';
 import { ReceiptConfirmationService, SKIP_REASONS, checkSigner, loadSlip, type ConfirmInput, type Slip } from './receipt-confirmation.service.js';
-import { pendingReceipts } from './receipt-check.js';
+import { imagesPastKeep, pendingReceipts } from './receipt-check.js';
 
 // A 5 MB photo as base64, with room for the rest of the body.
 const CONFIRMATION_BODY_LIMIT = 7_500_000;
@@ -46,6 +47,8 @@ export async function receiptRoutes(app: FastifyInstance): Promise<void> {
     }
     const body = parsed.data;
     const slip = slipOf.get(req)!;
+    // Before any PIN is checked, so a try on a slip with nothing to confirm isn't counted (edge case E5).
+    if (slip.lines.length === 0) throw Errors.invalidState('Every line on this slip was reversed, so there is nothing to confirm.');
     const actor = actorId(req);
     let input: ConfirmInput;
     if (body.method === 'PIN') {
@@ -71,6 +74,16 @@ export async function receiptRoutes(app: FastifyInstance): Promise<void> {
   app.get('/slips/unconfirmed/summary', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ViewReports);
     return pendingReceipts();
+  });
+
+  // How many images a shorter keep period would remove, so Settings can say before it is saved (edge case E8).
+  app.get('/slips/images/past-keep', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageSettings);
+    const months = Number((req.query as { months?: string }).months);
+    if (!Number.isInteger(months) || months < 0 || months > 240) {
+      return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'months must be a whole number from 0 to 240' } });
+    }
+    return { months, count: await imagesPastKeep(months) };
   });
 
   // A signature is personal information (POPIA): only those who can see issue slips see it.

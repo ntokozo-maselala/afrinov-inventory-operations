@@ -17,6 +17,7 @@ const PEOPLE = [
   { id: 'r-2', name: 'Thabo Ndlovu', type: 'WORKER', pinSet: true, pinLocked: false },
   { id: 'r-3', name: 'Lerato Dube', type: 'WORKER', pinSet: false, pinLocked: false },
   { id: 'r-4', name: 'Forklift 3', type: 'MACHINE' },
+  { id: 'r-5', name: 'Sipho Zulu', type: 'WORKER', active: false, pinSet: true, pinLocked: false },
 ];
 const slip = (over: Partial<Slip> = {}): Slip => ({
   id: 'iss-9', kind: 'ISSUE', recipientId: 'r-1', recipientName: 'Sabelo Mkhize', recipientType: 'WORKER', note: 'For AFRI-1325',
@@ -34,7 +35,7 @@ function open(props: Partial<Parameters<typeof HandoverPanel>[0]> = {}) {
   return onClose;
 }
 const type = (digits: string) => { for (const d of digits) fireEvent.click(screen.getByRole('button', { name: d })); };
-const ready = () => waitFor(() => expect(mockGet).toHaveBeenCalledWith('/recipients?active=true'));
+const ready = () => waitFor(() => expect(mockGet).toHaveBeenCalledWith('/recipients'));
 
 describe('HandoverPanel', () => {
   beforeEach(() => {
@@ -107,6 +108,31 @@ describe('HandoverPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
     expect(onClose).toHaveBeenCalledWith(null);
     expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('skips only from the Skip button: a stray Escape is not a Skip (E3)', async () => {
+    const onClose = open();
+    await ready();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('offers only the signed paper slip or a reason for someone who has left (E4)', async () => {
+    open({ slip: slip({ recipientId: 'r-5', recipientName: 'Sipho Zulu' }), later: true });
+    expect(await screen.findByText('Sipho Zulu has left (inactive)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enter PIN' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Attach signed slip', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose photo' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(screen.getByText('Why isn’t it confirmed?')).toBeInTheDocument();
+  });
+
+  it('never lists someone who has left as the person collecting', async () => {
+    open({ slip: slip({ recipientId: 'r-4', recipientName: 'Forklift 3', recipientType: 'MACHINE' }) });
+    await ready();
+    expect(within(screen.getByLabelText(/Collected by/)).queryByRole('option', { name: 'Sipho Zulu' })).not.toBeInTheDocument();
   });
 
   it('needs a reason to close when the setting is Required, and a note when they say the slip is wrong', async () => {

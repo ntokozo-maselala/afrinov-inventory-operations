@@ -29,7 +29,12 @@ const loadImage = (url: string) => new Promise<HTMLImageElement>((resolve, rejec
 });
 
 /** Throws an Error with a message to show when the file isn't a photo or is too large. */
+/** An iPhone photo in its own format, which most desktop browsers can't open (limit L5). */
+const isHeic = (file: File) => /image\/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+const HEIC_TIP = 'iPhone photos (HEIC) can’t be read here. On the iPhone, set Settings › Camera › Formats to Most Compatible, or photograph the slip with this computer’s camera.';
+
 export async function readReceiptPhoto(file: File): Promise<ReceiptPhoto> {
+  if (isHeic(file)) throw new Error(HEIC_TIP);
   if (!file.type.startsWith('image/')) throw new Error(`${file.name} is not a photo. Choose a JPEG or PNG picture of the signed slip.`);
   const original = await readAsDataUrl(file);
   try {

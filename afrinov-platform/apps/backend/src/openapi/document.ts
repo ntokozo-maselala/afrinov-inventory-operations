@@ -364,7 +364,7 @@ export const OPERATIONS: Operation[] = [
       + 'changed is true when a line was reversed after it was confirmed.',
     permissions: [P.ViewReports],
     query: movementFilters.omit({ type: true, report: true }).extend({
-      receipt: z.enum(['confirmed', 'unconfirmed']).optional().openapi({ description: 'Only slips confirmed (by PIN, signature or paper), or only those not.' }),
+      receipt: z.enum(['confirmed', 'unconfirmed', 'disputed']).optional().openapi({ description: 'Only slips confirmed (by PIN, signature or paper), only those not, or only those the person collecting said were wrong and not confirmed since.' }),
       before: z.string().optional().openapi({ description: 'Paging: the `cursor` of the last slip already shown.' }),
       limit: z.coerce.number().int().positive().max(200).optional().openapi({ description: 'Default 50, at most 200.' }),
     }),
@@ -690,9 +690,14 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.IssueInventory, P.CheckOutTool], body: confirmationSchema, success: 201, errors: [404, 409, 413, 422, 423],
   },
   {
-    method: 'get', path: '/slips/unconfirmed/summary', tag: 'Reports', summary: 'Slips of the last 30 days nobody has confirmed',
-    description: 'Issue slips and tool check-outs posted in the last 30 days with a line still standing and no confirmation (ADR-034), how many of them were disputed, and when the oldest was posted. For the Dashboard when inventory.receiptConfirmation is require.',
+    method: 'get', path: '/slips/unconfirmed/summary', tag: 'Reports', summary: 'Slips of the last 30 days nobody has confirmed, and disputed slips',
+    description: 'Issue slips and tool check-outs posted in the last 30 days with something still to confirm and no confirmation (ADR-034), and when the oldest was posted. A slip with every line reversed, or a tool loan with every tool back, is not counted. disputed counts slips of any age the person collecting said were wrong and not confirmed since, with oldestDisputedAt.',
     permissions: [P.ViewReports],
+  },
+  {
+    method: 'get', path: '/slips/images/past-keep', tag: 'Settings', summary: 'How many signatures a keep period would remove now',
+    description: 'For Settings to say, before inventory.receiptImageKeepMonths is saved, how many signatures and slip photos the new period removes within the hour. months 0 (keep always) counts none.',
+    permissions: [P.ManageSettings], query: z.object({ months: z.coerce.number().int().min(0).max(240) }), errors: [400],
   },
   {
     method: 'get', path: '/slips/:slipId/confirmation/image', tag: 'Reports', summary: 'The signature or signed-slip photo a slip was confirmed with',
