@@ -49,17 +49,18 @@ RECEIVED, CLOSED, CANCELLED · `GoodsReceiptStatus`: DRAFT, SUBMITTED, POSTED
 (DRAFT is never produced by current code).
 
 ## Sales requests for quotation
-What Sales asks suppliers to price when costing a job. Apart from Procurement's RFQs, because who may see the prices differs and lines are typed rather than catalogue items. Nothing is awarded. `SalesRfqStatus`: DRAFT, SENT, CANCELLED.
+How Sales prices one piece of equipment for the client, the "Costing: Sales Rep." step of the RFQ Process Flow: the production labour, each role's hours at its selling rate, plus the material, which is one supplier's whole quote on each of the project's Procurement RFQs Sales picks (the one Procurement recommends unless Sales picks another), with the job's markup on the whole. Delivery is priced on its own. Nothing goes to a supplier. Apart from Procurement's RFQs, because buyers and the store must not see the price or the margin. `SalesRfqStatus`: DRAFT, PENDING_APPROVAL, APPROVED, CANCELLED. The Director approves a submitted one, or sends it back to DRAFT with a reason; nobody approves one they raised or submitted.
 
 | Table (model) | Key columns | Constraints and notes |
 |---|---|---|
-| `sales_rfqs` (SalesRfq) | number, status, project_number, description, notes, penalties_apply, issued_at, closing_date, created/sent/cancelled by and at, cancellation_reason | number unique; numbered per project in one sequence with Procurement's RFQs, so a number names one RFQ |
-| `sales_rfq_lines` (SalesRfqLine) | sales_rfq_id, line_no, description, unit_of_measure, quantity | (sales_rfq_id, line_no) unique; unit_of_measure references `units_of_measure`; cascade on delete |
-| `sales_rfq_suppliers` (SalesRfqSupplier) | sales_rfq_id, supplier_id, quote_reference, quoted_at, valid_until, lead_time, notes, currency, declined | (sales_rfq_id, supplier_id) unique; cascade on delete |
-| `sales_rfq_quote_prices` (SalesRfqQuotePrice) | sales_rfq_supplier_id, sales_rfq_line_id, unit_price | composite PK; excluding VAT, in the quote's currency |
-| `sales_rfq_quote_files` (SalesRfqQuoteFile) | sales_rfq_supplier_id, file_name, size, data, uploaded_at, uploaded_by_id | one PDF per supplier, up to 10 MB |
+| `sales_rfqs` (SalesRfq) | number, quote_reference, status, project_number, equipment, description, notes, markup_percent, delivery_price, vat_rate, client_name, client_address, contact_name, client_reference, payment_terms, validity, delivery_duration, delivery_terms, signer_phone, signer_email, issued_at, closing_date, created/submitted/approved/returned/cancelled by and at, return_reason, cancellation_reason | number unique, in one sequence per project with Procurement's RFQs; quote_reference unique, AFRI-02A-<project>-04-<n>, given on approval; vat_rate fixed on submission |
+| `sales_rfq_labour_lines` (SalesRfqLabourLine) | sales_rfq_id, line_no, labour_rate_id, role, hours, hourly_rate | (sales_rfq_id, line_no) unique; the role and rate as they were when the line was saved; cascade on delete |
+| `sales_rfq_materials` (SalesRfqMaterial) | sales_rfq_id, rfq_id, supplier_id, quote_total, currency, amount | composite PK (sales_rfq_id, rfq_id): one quote per Procurement RFQ; quote_total in the quote's currency and amount in rand at the Settings exchange rate, both excl. VAT, refreshed on save and fixed on submission |
+| `labour_rates` (LabourRate) | role, hourly_rate, active | role unique; the Manpower Rate list's selling rates, kept by the Workshop Manager; made inactive rather than deleted |
 
-A buyer matches a Procurement RFQ line to the Sales line it answers, for the savings report: `rfq_lines.sales_rfq_line_id`, optional and shared by as many lines as need it, set to null if the Sales line is deleted. It must be on a Sales RFQ sent for the same project. It follows its item when a draft's lines are edited, and is cleared when a draft moves to another project.
+Procurement recommends a quote for costing on its RFQ: `rfqs.recommended_supplier_id`, `recommended_at`, `recommended_by_id`. It is not an award and raises no order; it changes only while the RFQ is sent, and is cleared when that supplier declines.
+
+The migration `20260101000054_sales_rfq_costing` refuses to run while any supplier price or quotation PDF is recorded on a Sales RFQ, rather than drop it: those rows are exported and deleted first. A Sales RFQ that was sent becomes a draft.
 
 ## Inventory ledger
 | Table (model) | Key columns | Constraints and notes |

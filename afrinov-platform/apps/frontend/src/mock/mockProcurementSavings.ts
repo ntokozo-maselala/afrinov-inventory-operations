@@ -8,7 +8,6 @@ type Line = MockRfq['lines'][number];
 
 export interface SavingsData {
   rfqs: MockRfq[];
-  salesRfqs: MockRfq[];
   purchaseOrders: MockPurchaseOrder[];
   material: (id: string) => { sku: string; name: string; unitOfMeasure: string } | undefined;
   supplier: (id: string) => { name: string; currency?: string } | undefined;
@@ -19,7 +18,6 @@ const money = (n: number) => n.toFixed(2);
 const lineTotal = (quantity: string | number, unitPrice: string | number) => money(Math.round(Number(quantity) * Number(unitPrice) * 100) / 100);
 const addUp = (values: string[]) => values.reduce((sum, v) => sum + Number(v), 0);
 const qty = (q: string | number) => String(Number(q));
-const sameUnit = (a: string | undefined, b: string | undefined) => (a ?? '').toLowerCase() === (b ?? '').toLowerCase();
 
 function quotesFor(rfq: MockRfq, line: Line, data: SavingsData): { prices: SavingsPrice[]; lowest: string | null; foreignOnly: boolean } {
   const prices = rfq.suppliers.flatMap((s) => {
@@ -81,80 +79,18 @@ function figuresOf(rfq: MockRfq, data: SavingsData) {
 }
 
 export function computeProcurementSavings(q: { from: string; to: string; projectNumber?: string }, data: SavingsData): SavingsReport {
-  // Lines sharing a Sales line count wherever they are, as on the server.
-  const counted = data.rfqs.filter((r) => r.status === 'SENT' || r.status === 'AWARDED');
-  const worked = new Map(counted.flatMap(figuresOfEach));
-  function figuresOfEach(r: MockRfq) { return figuresOf(r, data).map((f) => [f.line.id, f] as const); }
-  const sharing = new Map<string, Line[]>();
-  for (const l of counted.flatMap((r) => r.lines)) {
-    if (l.salesRfqLineId) sharing.set(l.salesRfqLineId, [...(sharing.get(l.salesRfqLineId) ?? []), l]);
-  }
-  const shown = counted
+  const shown = data.rfqs
+    .filter((r) => r.status === 'SENT' || r.status === 'AWARDED')
     .filter((r) => { const day = r.issuedAt?.slice(0, 10) ?? ''; return day >= q.from && day <= q.to && (!q.projectNumber || r.projectNumber === q.projectNumber); })
     .sort((a, b) => (a.projectNumber ?? '').localeCompare(b.projectNumber ?? '') || a.number.localeCompare(b.number));
 
-  const seen = new Set<string>();
-  const totals = { sales: [] as string[], procurement: [] as string[], order: [] as string[], discount: [] as string[], salesVsProcurement: [] as string[], procurementVsOrder: [] as string[], salesVsOrder: [] as string[] };
-  let linked = 0;
-  const rows = shown.flatMap((rfq) => rfq.lines.map((line): SavingsRow => {
-    const own = worked.get(line.id)!;
+  const totals = { procurement: [] as string[], order: [] as string[], discount: [] as string[], procurementVsOrder: [] as string[] };
+  const rows = shown.flatMap((rfq) => figuresOf(rfq, data).map((own): SavingsRow => {
+    const { line } = own;
     const notes = [...own.notes];
     const material = data.material(line.materialId);
     const low = own.procurement.lowest;
     const procurementVsOrder = low && own.comparable ? money(Number(low) - Number(own.comparable)) : null;
-    let sales: SavingsRow['sales'] = null;
-    let salesVsProcurement: string | null = null;
-    let salesVsOrder: string | null = null;
-    let comparedWith: SavingsRow['comparedWith'] = null;
-    const salesRfq = data.salesRfqs.find((s) => s.lines.some((l) => l.id === line.salesRfqLineId));
-    const asked = salesRfq?.lines.find((l) => l.id === line.salesRfqLineId);
-    if (!salesRfq || !asked) {
-      notes.push('Not linked to a Sales line');
-    } else {
-      linked += 1;
-      const quoted = quotesFor(salesRfq, asked, data);
-      const cancelled = salesRfq.status === 'CANCELLED';
-      sales = {
-        rfqNumber: salesRfq.number, lineNo: asked.lineNo, description: asked.description ?? '', unitOfMeasure: asked.unitOfMeasure ?? '',
-        quantity: qty(asked.quantity), cancelled, prices: quoted.prices, lowest: quoted.lowest,
-      };
-      const group = sharing.get(asked.id) ?? [line];
-      const units = group.every((l) => sameUnit(data.material(l.materialId)?.unitOfMeasure, asked.unitOfMeasure));
-      const together = group.reduce((sum, l) => sum + Number(l.quantity), 0);
-      const matches = units && together === Number(asked.quantity);
-      const first = !seen.has(asked.id);
-      seen.add(asked.id);
-      const label = `${qty(asked.quantity)} ${asked.unitOfMeasure}`;
-      if (cancelled) notes.push(`Sales RFQ ${salesRfq.number} was cancelled, so it is not compared`);
-      else if (!matches) notes.push(`Sales asked for ${label}, so it is not compared: the lines linked to it come to ${units ? `${qty(together)} ${asked.unitOfMeasure}` : 'a different unit'}`);
-      else if (quoted.foreignOnly) notes.push('Sales quotes are not in rand, so they are not compared');
-      else if (!quoted.lowest) notes.push('No Sales quote recorded yet');
-      const compared = !cancelled && matches && !!quoted.lowest;
-      if (group.length > 1) notes.push(`Shares its Sales line with ${group.length - 1} other line${group.length === 2 ? '' : 's'}${compared ? `: compared together${first ? ' here' : ', on the first of them'}` : ''}`);
-      if (compared && quoted.lowest && first) {
-        totals.sales.push(quoted.lowest);
-        let procurementTogether: string | null = null;
-        let orderTogether: string | null = null;
-        const lows = group.map((l) => worked.get(l.id)!.procurement.lowest);
-        if (lows.every((v): v is string => v !== null)) {
-          procurementTogether = money(addUp(lows));
-          salesVsProcurement = money(Number(quoted.lowest) - addUp(lows));
-          totals.salesVsProcurement.push(salesVsProcurement);
-        }
-        const placed = group.map((l) => worked.get(l.id)!.comparable);
-        if (placed.every((v): v is string => v !== null)) {
-          orderTogether = money(addUp(placed));
-          salesVsOrder = money(Number(quoted.lowest) - addUp(placed));
-          totals.salesVsOrder.push(salesVsOrder);
-        }
-        if (group.length > 1) {
-          comparedWith = {
-            lines: group.length, quantity: qty(asked.quantity), unitOfMeasure: asked.unitOfMeasure ?? '',
-            procurement: procurementTogether, order: orderTogether,
-          };
-        }
-      }
-    }
     if (low) totals.procurement.push(low);
     if (own.comparable) totals.order.push(own.comparable);
     if (procurementVsOrder) totals.procurementVsOrder.push(procurementVsOrder);
@@ -163,17 +99,13 @@ export function computeProcurementSavings(q: { from: string; to: string; project
     return {
       rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.projectNumber ? data.projectName(rfq.projectNumber) ?? null : null,
       lineNo: line.lineNo, sku: material?.sku ?? line.materialId, material: material?.name ?? line.materialId, unitOfMeasure: material?.unitOfMeasure ?? '', quantity: qty(line.quantity),
-      sales, procurement: { prices: own.procurement.prices, lowest: low }, order: own.order, salesVsProcurement, procurementVsOrder, salesVsOrder, comparedWith, notes,
+      procurement: { prices: own.procurement.prices, lowest: low }, order: own.order, procurementVsOrder, notes,
     };
   }));
 
   const sum = (values: string[]) => money(addUp(values));
   return {
     from: q.from, to: q.to, currency: CURRENCY, rows,
-    total: {
-      sales: sum(totals.sales), procurement: sum(totals.procurement), order: sum(totals.order), discount: sum(totals.discount),
-      salesVsProcurement: sum(totals.salesVsProcurement), procurementVsOrder: sum(totals.procurementVsOrder), salesVsOrder: sum(totals.salesVsOrder),
-      lines: rows.length, linked,
-    },
+    total: { procurement: sum(totals.procurement), order: sum(totals.order), discount: sum(totals.discount), procurementVsOrder: sum(totals.procurementVsOrder), lines: rows.length },
   };
 }

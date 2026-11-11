@@ -64,11 +64,13 @@ model User {
   sentRfqs                Rfq[]                    @relation("RFQ_SentBy")
   awardedRfqs             Rfq[]                    @relation("RFQ_AwardedBy")
   cancelledRfqs           Rfq[]                    @relation("RFQ_CancelledBy")
+  recommendedRfqs         Rfq[]                    @relation("RFQ_RecommendedBy")
   rfqQuoteFiles           RfqQuoteFile[]           @relation("RFQ_QuoteFileUploadedBy")
   salesRfqs               SalesRfq[]               @relation("SalesRfq_CreatedBy")
-  sentSalesRfqs           SalesRfq[]               @relation("SalesRfq_SentBy")
+  submittedSalesRfqs      SalesRfq[]               @relation("SalesRfq_SubmittedBy")
+  approvedSalesRfqs       SalesRfq[]               @relation("SalesRfq_ApprovedBy")
+  returnedSalesRfqs       SalesRfq[]               @relation("SalesRfq_ReturnedBy")
   cancelledSalesRfqs      SalesRfq[]               @relation("SalesRfq_CancelledBy")
-  salesRfqQuoteFiles      SalesRfqQuoteFile[]      @relation("SalesRfq_QuoteFileUploadedBy")
   idempotencyKeys         IdempotencyKey[]
   toolLoanExtensions      ToolLoanExtension[]
   consumableOutcomes      ConsumableOutcome[]
@@ -154,7 +156,6 @@ model UnitOfMeasure {
   sortOrder   Int      @default(0) @map("sort_order")
 
   materials     Material[]
-  salesRfqLines SalesRfqLine[]
 
   @@map("units_of_measure")
 }
@@ -266,8 +267,9 @@ model Supplier {
 
   purchaseOrders    PurchaseOrder[]
   goodsReceipts     GoodsReceipt[]
-  rfqSuppliers      RfqSupplier[]
-  salesRfqSuppliers SalesRfqSupplier[]
+  rfqSuppliers   RfqSupplier[]
+  recommendedOn  Rfq[]              @relation("RFQ_RecommendedSupplier")
+  salesMaterials SalesRfqMaterial[]
 
   // Case-insensitive name uniqueness is enforced at the database
   // level via a citext unique index (migration
@@ -667,8 +669,16 @@ model Rfq {
   cancelledAt        DateTime? @map("cancelled_at")
   cancelledById      String?   @map("cancelled_by_id")
   cancellationReason String?   @map("cancellation_reason")
+  // The supplier whose recorded quote Procurement recommends Sales costs the job
+  // from. Not an award: no order is raised until the job is won.
+  recommendedSupplierId String?   @map("recommended_supplier_id")
+  recommendedAt         DateTime? @map("recommended_at")
+  recommendedById       String?   @map("recommended_by_id")
 
   project       Project?       @relation(fields: [projectNumber], references: [projectNumber])
+  recommendedSupplier Supplier? @relation("RFQ_RecommendedSupplier", fields: [recommendedSupplierId], references: [id])
+  recommendedBy       User?     @relation("RFQ_RecommendedBy", fields: [recommendedById], references: [id])
+  salesMaterials      SalesRfqMaterial[]
   createdBy     User           @relation("RFQ_CreatedBy", fields: [createdById], references: [id])
   sentBy        User?          @relation("RFQ_SentBy", fields: [sentById], references: [id])
   awardedBy     User?          @relation("RFQ_AwardedBy", fields: [awardedById], references: [id])
@@ -689,18 +699,13 @@ model RfqLine {
   lineNo         Int     @map("line_no")
   materialId     String  @map("material_id")
   quantity       Decimal @db.Decimal(18, 4)
-  // What Sales asked suppliers to price for this line, as the buyer matched it,
-  // for the savings report. Several lines can share one Sales line.
-  salesRfqLineId String? @map("sales_rfq_line_id")
 
   rfq          Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
   material     Material        @relation(fields: [materialId], references: [id])
   prices       RfqQuotePrice[]
-  salesRfqLine SalesRfqLine?   @relation(fields: [salesRfqLineId], references: [id], onDelete: SetNull)
 
   @@unique([rfqId, lineNo])
   @@index([materialId])
-  @@index([salesRfqLineId])
   @@map("rfq_lines")
 }
 
@@ -749,125 +754,152 @@ model RfqQuoteFile {
 }
 
 // ── Sales requests for quotation ─────────────────────────────────────────
-// What the Sales team asks suppliers to price when costing a job, on the same
-// AFRI-02A-xxxx-02-01 sheet as Procurement's. Kept apart from Procurement's
-// RFQs because who may see the prices differs, and lines are typed as the sheet
-// has them (cut lengths and the like), not picked from the catalogue. Nothing
-// is awarded: the prices are compared with Procurement's on the savings report.
+// How the Sales team prices one piece of equipment for the client, the
+// "Costing: Sales Rep." step of the RFQ Process Flow: the production labour, at
+// each role's selling rate, plus the material, which is one supplier's quote on
+// each of the project's Procurement RFQs Sales picks (Procurement recommends
+// one), with the job's markup on the whole. Delivery is priced on its own. Nothing goes to a
+// supplier. The Director approves the price; it then has a quotation reference
+// and its quotation goes to the client. Kept apart from Procurement's RFQs, as
+// buyers and the store must not see the price or the margin.
 //
-// DRAFT → SENT, or CANCELLED from either.
+// DRAFT → PENDING_APPROVAL → APPROVED; the Director can send a submitted one
+// back to DRAFT with a reason; CANCELLED from any of them.
 enum SalesRfqStatus {
   DRAFT
-  SENT
+  PENDING_APPROVAL
+  APPROVED
   CANCELLED
 }
 
 model SalesRfq {
   id                 String         @id @default(uuid())
-  // The sheet's document number, AFRI-02A-1325-02-01 for AFRI-1325. Sales and
-  // Procurement each number their own, so the same number can be on both.
+  // AFRI-02A-1325-02-01 for AFRI-1325, in one sequence per project with
+  // Procurement's RFQs.
   number             String         @unique
+  // The quotation's "Our Reference", AFRI-02A-1325-04-1: given when it is approved.
+  quoteReference     String?        @unique @map("quote_reference")
   status             SalesRfqStatus @default(DRAFT)
   projectNumber      String         @map("project_number")
+  // What is being priced, the quotation's one equipment line: "Main Piston Pump".
+  equipment          String?
   description        String?
-  // Remarks, printed under the lines.
+  // Remarks for Sales and the Director; not printed on the quotation.
   notes              String?
   penaltiesApply     Boolean        @default(false) @map("penalties_apply")
+  // The job's markup on labour and material together, as a percentage: 40 for the
+  // sheet's "× 1.4". Needed to submit, not to save a draft.
+  markupPercent      Decimal?       @map("markup_percent") @db.Decimal(7, 2)
+  // Rand excl. VAT, without markup: the quotation's Delivery line.
+  deliveryPrice      Decimal        @default(0) @map("delivery_price") @db.Decimal(18, 2)
+  // VAT as it was when submitted, so the Director approves the figures Sales saw.
+  vatRate            Decimal?       @map("vat_rate") @db.Decimal(5, 2)
+  // Who the quotation is to, as Sales types it.
+  clientName         String?        @map("client_name")
+  clientAddress      String?        @map("client_address")
+  // "Dear Bongi".
+  contactName        String?        @map("contact_name")
+  // "Your Reference".
+  clientReference    String?        @map("client_reference")
+  // The quotation's Conditions.
+  paymentTerms       String?        @map("payment_terms")
+  validity           String?
+  deliveryDuration   String?        @map("delivery_duration")
+  deliveryTerms      String?        @map("delivery_terms")
+  // Printed under the Sales person's name, who signs the quotation.
+  signerPhone        String?        @map("signer_phone")
+  signerEmail        String?        @map("signer_email")
+  // The day it was approved: the quotation's date.
   issuedAt           DateTime?      @map("issued_at") @db.Date
+  // When the client wants the price by.
   closingDate        DateTime?      @map("closing_date") @db.Date
   createdById        String         @map("created_by_id")
   createdAt          DateTime       @default(now()) @map("created_at")
   updatedAt          DateTime       @updatedAt @map("updated_at")
-  sentAt             DateTime?      @map("sent_at")
-  sentById           String?        @map("sent_by_id")
+  submittedAt        DateTime?      @map("submitted_at")
+  submittedById      String?        @map("submitted_by_id")
+  approvedAt         DateTime?      @map("approved_at")
+  approvedById       String?        @map("approved_by_id")
+  // The last time the Director sent it back, and why; kept until it is submitted again.
+  returnedAt         DateTime?      @map("returned_at")
+  returnedById       String?        @map("returned_by_id")
+  returnReason       String?        @map("return_reason")
   cancelledAt        DateTime?      @map("cancelled_at")
   cancelledById      String?        @map("cancelled_by_id")
   cancellationReason String?        @map("cancellation_reason")
 
-  project     Project            @relation(fields: [projectNumber], references: [projectNumber])
-  createdBy   User               @relation("SalesRfq_CreatedBy", fields: [createdById], references: [id])
-  sentBy      User?              @relation("SalesRfq_SentBy", fields: [sentById], references: [id])
-  cancelledBy User?              @relation("SalesRfq_CancelledBy", fields: [cancelledById], references: [id])
-  lines       SalesRfqLine[]
-  suppliers   SalesRfqSupplier[]
+  project        Project                 @relation(fields: [projectNumber], references: [projectNumber])
+  createdBy      User                    @relation("SalesRfq_CreatedBy", fields: [createdById], references: [id])
+  submittedBy    User?                   @relation("SalesRfq_SubmittedBy", fields: [submittedById], references: [id])
+  approvedBy     User?                   @relation("SalesRfq_ApprovedBy", fields: [approvedById], references: [id])
+  returnedBy     User?                   @relation("SalesRfq_ReturnedBy", fields: [returnedById], references: [id])
+  cancelledBy    User?                   @relation("SalesRfq_CancelledBy", fields: [cancelledById], references: [id])
+  labour         SalesRfqLabourLine[]
+  materials      SalesRfqMaterial[]
 
   @@index([status])
   @@index([projectNumber])
   @@map("sales_rfqs")
 }
 
-model SalesRfqLine {
-  id            String  @id @default(uuid())
-  rfqId         String  @map("sales_rfq_id")
-  // The sheet's ITEM column: 1, 2, 3, … in the order the lines were entered.
-  lineNo        Int     @map("line_no")
-  // As the sheet has it: "200NB pipes x 3m". Not a catalogue item.
-  description   String
-  unitOfMeasure String  @map("unit_of_measure")
-  quantity      Decimal @db.Decimal(18, 4)
+// One role's hours on the job, priced at its selling rate when the line was saved.
+model SalesRfqLabourLine {
+  id           String  @id @default(uuid())
+  rfqId        String  @map("sales_rfq_id")
+  lineNo       Int     @map("line_no")
+  labourRateId String  @map("labour_rate_id")
+  // The role as it was named when the line was saved.
+  role         String
+  hours        Decimal @db.Decimal(10, 2)
+  // Rand per hour, excl. VAT, before markup.
+  hourlyRate   Decimal @map("hourly_rate") @db.Decimal(18, 2)
 
-  rfq              SalesRfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  unit             UnitOfMeasure        @relation(fields: [unitOfMeasure], references: [code])
-  prices           SalesRfqQuotePrice[]
-  procurementLines RfqLine[]
+  rfq        SalesRfq   @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  labourRate LabourRate @relation(fields: [labourRateId], references: [id])
 
   @@unique([rfqId, lineNo])
-  @@map("sales_rfq_lines")
+  @@index([labourRateId])
+  @@map("sales_rfq_labour_lines")
 }
 
-// A supplier asked to quote, and their quote once it is recorded.
-model SalesRfqSupplier {
-  id             String    @id @default(uuid())
-  rfqId          String    @map("sales_rfq_id")
-  supplierId     String    @map("supplier_id")
-  quoteReference String?   @map("quote_reference")
-  // When the quote came in; null until it is recorded.
-  quotedAt       DateTime? @map("quoted_at") @db.Date
-  validUntil     DateTime? @map("valid_until") @db.Date
-  leadTime       String?   @map("lead_time")
-  notes          String?
-  // The currency the quote was given in: the supplier's when it was recorded.
-  currency       String?
-  declined       Boolean   @default(false)
-  createdAt      DateTime  @default(now()) @map("created_at")
+// One Procurement RFQ's quote counted as material: one supplier's whole quote
+// per RFQ.
+model SalesRfqMaterial {
+  salesRfqId String   @map("sales_rfq_id")
+  rfqId      String   @map("rfq_id")
+  supplierId String   @map("supplier_id")
+  // The quote's total excl. VAT in its own currency, and in rand at the day's
+  // exchange rate: refreshed on save, fixed on submission, so what was approved
+  // stays put if the quote is corrected afterwards.
+  quoteTotal Decimal  @map("quote_total") @db.Decimal(18, 2)
+  currency   String
+  amount     Decimal  @db.Decimal(18, 2)
+  addedAt    DateTime @default(now()) @map("added_at")
 
-  rfq       SalesRfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  supplier  Supplier             @relation(fields: [supplierId], references: [id])
-  prices    SalesRfqQuotePrice[]
-  quoteFile SalesRfqQuoteFile?
+  salesRfq SalesRfq @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
+  rfq      Rfq      @relation(fields: [rfqId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
 
-  @@unique([rfqId, supplierId])
-  @@index([supplierId])
-  @@map("sales_rfq_suppliers")
+  @@id([salesRfqId, rfqId])
+  @@index([rfqId])
+  @@map("sales_rfq_materials")
 }
 
-// A supplier's unit price for one line, excluding VAT, in the quote's currency.
-model SalesRfqQuotePrice {
-  rfqSupplierId String  @map("sales_rfq_supplier_id")
-  rfqLineId     String  @map("sales_rfq_line_id")
-  unitPrice     Decimal @map("unit_price") @db.Decimal(18, 4)
+// The hourly selling rate for each role, as the sheet's Manpower Rate list (A–B),
+// that Sales prices labour at. Kept up to date by the Workshop Manager. A role
+// that is no longer used is made inactive rather than deleted, as lines name it.
+model LabourRate {
+  id         String   @id @default(uuid())
+  role       String   @unique
+  // Rand per hour, excl. VAT.
+  hourlyRate Decimal  @map("hourly_rate") @db.Decimal(18, 2)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
-  rfqSupplier SalesRfqSupplier @relation(fields: [rfqSupplierId], references: [id], onDelete: Cascade)
-  rfqLine     SalesRfqLine     @relation(fields: [rfqLineId], references: [id], onDelete: Cascade)
+  lines SalesRfqLabourLine[]
 
-  @@id([rfqSupplierId, rfqLineId])
-  @@index([rfqLineId])
-  @@map("sales_rfq_quote_prices")
-}
-
-// The supplier's returned sheet or quotation, as the PDF it came back as.
-model SalesRfqQuoteFile {
-  rfqSupplierId String   @id @map("sales_rfq_supplier_id")
-  fileName      String   @map("file_name")
-  size          Int
-  data          Bytes
-  uploadedAt    DateTime @default(now()) @map("uploaded_at")
-  uploadedById  String   @map("uploaded_by_id")
-
-  rfqSupplier SalesRfqSupplier @relation(fields: [rfqSupplierId], references: [id], onDelete: Cascade)
-  uploadedBy  User             @relation("SalesRfq_QuoteFileUploadedBy", fields: [uploadedById], references: [id])
-
-  @@map("sales_rfq_quote_files")
+  @@map("labour_rates")
 }
 
 // One supplier's unit price for one line, excluding VAT, in the supplier's currency.

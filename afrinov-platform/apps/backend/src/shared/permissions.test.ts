@@ -13,10 +13,10 @@ describe('RolePermissions', () => {
     expect(ALL_PERMISSION_CODES).not.toContain('update:inventory_transaction');
   });
 
-  it('lets store controllers and sales add and edit suppliers, as well as procurement (ADR-018)', () => {
+  it('lets store controllers add and edit suppliers, as well as procurement (ADR-018), but not Sales, who never asks them', () => {
     for (const code of [PermissionCode.CreateSupplier, PermissionCode.EditSupplier]) {
       const roles = Object.entries(RolePermissions).filter(([, p]) => p.includes(code)).map(([role]) => role).sort();
-      expect(roles).toEqual(['ADMIN', 'PROCUREMENT', 'SALES', 'STORE_CONTROLLER']);
+      expect(roles).toEqual(['ADMIN', 'PROCUREMENT', 'STORE_CONTROLLER']);
     }
   });
 
@@ -25,6 +25,12 @@ describe('RolePermissions', () => {
     expect(holders(PermissionCode.ViewSalesRfq)).toEqual(['ADMIN', 'CEO', 'DIRECTOR', 'PROCUREMENT_MANAGER', 'SALES']);
     expect(holders(PermissionCode.ManageSalesRfq)).toEqual(['ADMIN', 'SALES']);
     expect(RolePermissions.SALES).not.toContain(PermissionCode.ViewPurchaseOrder);
+  });
+
+  it('leaves approving a Sales price to the Director, and the labour rates to the Workshop Manager', () => {
+    const holders = (code: string) => Object.entries(RolePermissions).filter(([, p]) => (p as string[]).includes(code)).map(([role]) => role).sort();
+    expect(holders(PermissionCode.ApproveSalesRfq)).toEqual(['ADMIN', 'DIRECTOR']);
+    expect(holders(PermissionCode.ManageLabourRates)).toEqual(['ADMIN', 'WORKSHOP_MANAGER']);
   });
 
   it('lets procurement add catalogue items from an order line, while editing them stays with the store', () => {

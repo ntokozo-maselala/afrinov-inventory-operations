@@ -6,13 +6,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGet, mockPost, mockPatch, mockDownload, auth } = vi.hoisted(() => ({
-  mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), mockDownload: vi.fn(), auth: { roles: ['PROCUREMENT'] as string[] },
+const { mockGet, mockPost, mockPatch, mockPut, mockDownload, auth } = vi.hoisted(() => ({
+  mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), mockPut: vi.fn(), mockDownload: vi.fn(), auth: { roles: ['PROCUREMENT'] as string[] },
 }));
 // The PDF itself is tested in rfqDocument.test.ts; here, which copy is asked for.
 vi.mock('../lib/rfqDocument', async (original) => ({ ...(await original<typeof import('../lib/rfqDocument')>()), downloadRfqDocument: mockDownload }));
 vi.mock('../api/client', () => ({
-  api: { get: mockGet, post: mockPost, patch: mockPatch, del: vi.fn() },
+  api: { get: mockGet, post: mockPost, patch: mockPatch, put: mockPut, del: vi.fn() },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
 vi.mock('../auth', () => ({ useAuth: () => ({ user: { name: 'Buyer', roles: auth.roles } }) }));
@@ -61,6 +61,7 @@ beforeEach(() => {
   });
   mockPost.mockReset().mockImplementation(async (path: string) => (path === '/rfqs' ? DRAFT : SENT));
   mockPatch.mockReset().mockResolvedValue(SENT);
+  mockPut.mockReset().mockResolvedValue(SENT);
   mockDownload.mockReset().mockResolvedValue(undefined);
 });
 
@@ -188,6 +189,25 @@ describe('New request for quotation', () => {
 });
 
 describe('An RFQ’s page', () => {
+  it('lets a buyer recommend a quote for Sales to cost from, without awarding it', async () => {
+    appAt('/rfqs/r-s');
+    const suppliers = await screen.findByRole('table', { name: 'Suppliers asked' });
+    // Only a supplier who has quoted can be recommended.
+    expect(within(suppliers).getAllByRole('button', { name: /^Recommend for costing/ })).toHaveLength(1);
+    fireEvent.click(within(suppliers).getByRole('button', { name: /^Recommend for costing/ }));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledWith('/rfqs/r-s/recommended-quote', { supplierId: 's-1' }));
+  });
+
+  it('shows the recommended quote, and lets the buyer take the recommendation off', async () => {
+    const recommended = { ...SENT, recommendedSupplierId: 's-1' };
+    mockGet.mockImplementation(async (path: string) => (path === '/rfqs/r-s' ? recommended : path.endsWith('/history') ? [] : path === '/suppliers' ? SUPPLIERS : []));
+    appAt('/rfqs/r-s');
+    const suppliers = await screen.findByRole('table', { name: 'Suppliers asked' });
+    expect(within(suppliers).getByText('Recommended for costing')).toBeInTheDocument();
+    fireEvent.click(within(suppliers).getByRole('button', { name: /^Take off the recommendation/ }));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledWith('/rfqs/r-s/recommended-quote', { supplierId: null }));
+  });
+
   it('sends a draft, closing four days from today unless changed', async () => {
     appAt('/rfqs/r-d');
     fireEvent.click(await screen.findByRole('button', { name: 'Send to suppliers' }));

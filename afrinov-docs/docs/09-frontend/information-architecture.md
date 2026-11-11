@@ -34,6 +34,9 @@ Sales
  |- Projects                      /projects
  `- Sales RFQ                     /sales-rfqs           (sales:view; unless VITE_PROCUREMENT_ENABLED=false)
 
+Production
+ `- Labour rates                  /labour-rates         (labourRates:view; unless VITE_PROCUREMENT_ENABLED=false)
+
 Procurement                       (unless VITE_PROCUREMENT_ENABLED=false)
  |- RFQ                           /rfqs                 (procurement:manage)
  |- New purchase order            /purchase-orders/new  (procurement:manage)
