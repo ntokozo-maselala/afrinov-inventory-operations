@@ -13,14 +13,16 @@ backup at the set time; backup, encryption and copy to an off-site folder; the
 restore test from the newest off-site copy, which matched the backup's figures
 and dropped its copy afterwards; and the failures (no key, wrong key, no
 off-site store), each refused and recorded. CI repeats the backup and restore
-test on every backend change. The upload to a real cloud store depends on the
-provider chosen and has not been tried.
+test on every backend change. The Azure setup script's commands and flags were checked against the Azure CLI
+(2.92), and rclone in the backup image reads the configuration it writes;
+neither has been run against a real Azure account yet.
 
 ## Who and where
 
 The owner asked for the best recommendation on who owns backups and where
-they are kept (2026-11-11). Everything marked RECOMMENDED is that
-recommendation, not yet a business decision.
+they are kept, then asked for it to be done (2026-11-11). The values below are
+that recommendation, adopted on the owner's instruction; change any of them
+here if the business decides otherwise.
 
 | What | Value | Decided by |
 |---|---|---|
@@ -28,10 +30,17 @@ recommendation, not yet a business decision.
 | Accountable | The business owner: reads the restore-test record each quarter and signs it off | RECOMMENDED |
 | How often | Daily at 18:30, after the store closes (`BACKUP_AT`) | RECOMMENDED |
 | Kept | 7 days on the server's backup disk; off site, 30 daily copies and 12 monthly ones | RECOMMENDED |
-| Where | A second disk on the server, and cloud storage in a South African region, for example Microsoft Azure *South Africa North* or AWS *af-south-1* (Cape Town) | RECOMMENDED |
-| Protection | Encrypted before it is written anywhere; the cloud store keeps versions and refuses deletion for 30 days | RECOMMENDED |
+| Where | A second disk on the server, and **Azure Blob Storage in South Africa North (Johannesburg)**, geo-redundant to South Africa West (Cape Town), Cool tier | Adopted, RECOMMENDED |
+| Protection | Encrypted before it is written anywhere; every file in the Azure container is locked against change or deletion for 30 days (version-level immutability), and the backup service's access can add and read but not delete | Adopted, RECOMMENDED |
 | Restore test | Once before go-live, then every three months, and after any change of host | RECOMMENDED |
 | Most data that can be lost (RPO) | One working day | RECOMMENDED, see `disaster-recovery.md` |
+
+**Why Azure:** Afrinov's email already runs on Microsoft 365 (its mail goes
+through `afrinov-co-za.mail.protection.outlook.com`), so the same Microsoft
+account, sign-in and bill cover backups, with nobody new to manage. Azure
+has two South African regions, so the geo-redundant copy in Cape Town stays in
+the country too. At this size (a few megabytes a day) storage costs a few
+rand a month.
 
 **Why these:** a backup holds personal information (names, PIN hashes,
 signatures and slip photos), so it is encrypted and kept in South Africa,
@@ -85,14 +94,32 @@ the stack. On the server, from `apps/backend`:
    `sudo chown 70 /mnt/backup/afrinov`). Without it, copies go to a Docker
    volume on the database's own disk.
 
-3. **The off-site store.** Create the bucket or container in a South African
-   region, with versioning, a 30-day retention (object) lock, and expiry rules:
-   `daily/` after 30 days, `monthly/` after 12 months. Give the service a key
-   that can write and read but not delete. Describe it to rclone in
-   `secrets/rclone.conf` (for example a section named `[offsite]` of type
-   `azureblob` or `s3`; see rclone's documentation for the provider) and set
-   `BACKUP_REMOTE=offsite:afrinov-backups`. Until this is set, backups stay on
-   the server and the Dashboard says so.
+3. **The off-site store.** An Admin with the Azure CLI, signed in to
+   Afrinov's Microsoft account (`az login`), runs:
+
+   ```sh
+   bash backup/azure-setup.sh
+   ```
+
+   It creates the storage account in South Africa North (geo-redundant to
+   Cape Town, Cool tier, HTTPS only, no public access), a container whose files
+   are locked for 30 days, rules that remove `daily/` copies after 31 days and
+   `monthly/` after 366, and access for the backup service that can add, read
+   and list but not delete, for a year. It writes `secrets/rclone.conf` and
+   prints the rest. Then set `BACKUP_REMOTE=offsite:afrinov-backups`. Keep the
+   storage account name it prints with the backup key.
+
+   After a week of good backups, lock the 30-day rule with the command the
+   script prints: once locked, nobody, Admins included, can shorten or remove
+   it. Version-level immutability is marked preview in the Azure CLI.
+
+   **Every year** before the access expires, renew it:
+   `ACCOUNT=<name> RG=rg-afrinov-backups bash backup/azure-setup.sh renew`.
+   If it lapses, backups stay on the server and the Dashboard shows them
+   failing to copy off site.
+
+   Until this step is done, backups stay on the server and the Dashboard says
+   so.
 
 4. **Start it, and take one now:**
 
@@ -154,7 +181,7 @@ backup and signs it off.
   every backup. There are no files on disk to back up separately.
 
 ## Evidence
-- `afrinov-platform/apps/backend/backup/` — `backup.sh`, `restore.sh`, `run.sh`, `Dockerfile`
+- `afrinov-platform/apps/backend/backup/` — `backup.sh`, `restore.sh`, `run.sh`, `Dockerfile`, `azure-setup.sh`
 - `afrinov-platform/apps/backend/docker-compose.yml` — the `backup` service
 - `afrinov-platform/apps/backend/src/modules/backups/backup-status.ts` — what the Dashboard is told
 - `.github/workflows/backend-ci.yml` — the backup and restore drill

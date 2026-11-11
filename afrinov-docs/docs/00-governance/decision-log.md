@@ -1204,7 +1204,10 @@ Dashboard. Without a key, each night's run is recorded as failed; without
 `BACKUP_REMOTE`, backups stay on the server and the Dashboard warns. The key,
 the backup disk and the cloud store are set up by hand on the server
 (`12-operations/backup-and-recovery.md`); losing every copy of the key loses
-every backup. The business still has to choose the cloud provider and confirm
-the recommended owners. Point-in-time recovery is not covered. Tests:
+every backup. The off-site store is Azure Blob Storage in South Africa North,
+geo-redundant to Cape Town, set up by `backup/azure-setup.sh` (adopted on the
+owner's instruction, 2026-11-11, because Afrinov's email already runs on
+Microsoft 365): files locked for 30 days, and access that can't delete,
+renewed yearly. Point-in-time recovery is not covered. Tests:
 `backup-status.test.ts`, `backups.real-http.test.ts`, `lib/backups.test.ts`,
 and the CI drill.
