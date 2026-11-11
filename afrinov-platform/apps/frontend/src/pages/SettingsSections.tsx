@@ -17,6 +17,8 @@ import { Icon } from '../components/Icon';
 import { Input, Select, Field } from '../components/Field';
 import { Drawer } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { TemporaryPasswordForm } from '../components/PasswordForms';
+import { useAuth } from '../auth';
 import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
@@ -497,6 +499,8 @@ interface AdminUser {
   email: string;
   name: string;
   active: boolean;
+  /** Still on an Admin's temporary password (ADR-036). */
+  mustChangePassword?: boolean;
   createdAt: string;
   roles: { role: { name: RoleName } }[];
 }
@@ -579,6 +583,9 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
           setFieldErrors(flat);
         }
         setValidation('Please correct the highlighted fields.');
+      } else if (e.code === 'INVALID_STATE') {
+        // Keeping an Admin (system audit F2): the server says what is in the way.
+        setValidation(e.message);
       } else if (e.code === 'FORBIDDEN') {
         setValidation("You don't have permission to manage users.");
       } else {
@@ -642,7 +649,8 @@ export function SettingsUsers() {
   const usersApi = useApi<AdminUser[]>('/users');
   const users = usersApi.data ?? [];
   const reload = usersApi.reload;
-  const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | null>(null);
+  const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | { mode: 'password'; user: AdminUser } | null>(null);
+  const me = useAuth().user;
   const [pendingToggle, setPendingToggle] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
@@ -687,6 +695,8 @@ export function SettingsUsers() {
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-surface-900">{u.name}</span>
                   {!u.active && <Badge tone="neutral" dot>Inactive</Badge>}
+                  {u.mustChangePassword && <Badge tone="warning">Temporary password</Badge>}
+                  {u.id === me?.id && <Badge tone="neutral">You</Badge>}
                 </div>
                 <div className="text-xs text-surface-500 mt-0.5">{u.email}</div>
                 <div className="flex flex-wrap gap-1 mt-1">
@@ -699,9 +709,15 @@ export function SettingsUsers() {
               </div>
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => setDrawer({ mode: 'edit', user: u })}>Edit</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPendingToggle(u)}>
-                  {u.active ? 'Deactivate' : 'Activate'}
-                </Button>
+                {/* Your own password is changed from the header, and nobody deactivates themselves (ADR-036, system audit F2). */}
+                {u.id !== me?.id && (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => setDrawer({ mode: 'password', user: u })}>Temporary password</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setPendingToggle(u)}>
+                      {u.active ? 'Deactivate' : 'Activate'}
+                    </Button>
+                  </>
+                )}
               </div>
             </li>
           ))}
@@ -712,16 +728,25 @@ export function SettingsUsers() {
         <Drawer
           open
           onClose={() => setDrawer(null)}
-          title={drawer.mode === 'edit' ? `Edit ${drawer.user.name}` : 'Add user'}
-          description={drawer.mode === 'edit' ? 'Update user details, roles, and access.' : 'Create a new user account. The user will be able to sign in immediately.'}
+          title={drawer.mode === 'edit' ? `Edit ${drawer.user.name}` : drawer.mode === 'password' ? `Temporary password for ${drawer.user.name}` : 'Add user'}
+          description={drawer.mode === 'edit' ? 'Update user details, roles, and access.' : drawer.mode === 'password' ? 'For someone who has forgotten theirs or is locked out.' : 'Create a new user account. The user will be able to sign in immediately.'}
           width="md"
         >
-          <UserForm
-            initial={drawer.mode === 'edit' ? drawer.user : undefined}
-            onCancel={() => setDrawer(null)}
-            onSaved={(msg) => { setDrawer(null); reload(); toast.success(msg); }}
-            onError={(err) => toast.error('Could not save user', err.message)}
-          />
+          {drawer.mode === 'password' ? (
+            <TemporaryPasswordForm
+              user={drawer.user}
+              onCancel={() => setDrawer(null)}
+              onSaved={() => { const name = drawer.user.name; setDrawer(null); reload(); toast.success(`Temporary password set for ${name}.`, 'They choose their own when they next sign in.'); }}
+              onError={(err) => toast.error('Could not set the password', err.message)}
+            />
+          ) : (
+            <UserForm
+              initial={drawer.mode === 'edit' ? drawer.user : undefined}
+              onCancel={() => setDrawer(null)}
+              onSaved={(msg) => { setDrawer(null); reload(); toast.success(msg); }}
+              onError={(err) => toast.error('Could not save user', err.message)}
+            />
+          )}
         </Drawer>
       )}
 

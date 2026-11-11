@@ -63,6 +63,9 @@ services:
       PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-true}
       # API docs at /api/docs. Off in production unless this is "true".
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
+      # The reverse proxy's address, so sign-in limits and logs see each
+      # person's address (afrinov-docs/docs/12-operations/reverse-proxy.md).
+      TRUST_PROXY: ${TRUST_PROXY:-}
       # Password for the admin account the seed creates on first start. The
       # current production seed checks this before looking up the existing
       # admin, so keep it injected on every Compose startup.
@@ -73,7 +76,8 @@ services:
         condition: service_healthy
     ports:
       - "4000:4000"
-    # Seed is idempotent. Run the compiled seed (node dist/db/seed.js) rather
+    # Seed is idempotent, and loads no demo data here: SEED_DEMO_DATA is not
+    # set, and the seed refuses it in production. Run the compiled seed (node dist/db/seed.js) rather
     # than `npm run db:seed`, which needs tsx — a dev dependency that is
     # pruned from the production image. The current seed requires
     # SEED_ADMIN_PASSWORD on every production invocation (see above).

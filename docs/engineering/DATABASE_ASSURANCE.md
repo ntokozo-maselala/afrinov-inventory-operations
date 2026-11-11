@@ -161,9 +161,13 @@ here (see `VERIFICATION_EVIDENCE.md`).
 
 ## Backup, restore and rollback
 
-**Not verifiable from this repository.** There is no backup/restore runbook, no
-restore drill evidence, and no recovery objectives (RPO/RTO). This is finding
-OPS-01 and is a release gate. The migration itself is forward-only and additive,
+A backup and restore runbook is in
+`afrinov-docs/docs/12-operations/backup-and-recovery.md` (ADR-036). Its dump,
+restore and comparison were run on a throwaway copy on 2026-11-11, and the
+restored copy matched on ledger rows, balances, units, users and migrations.
+Still **not verifiable from this repository**: backups on the production host,
+a restore drill there, and agreed recovery objectives (RPO/RTO). Those keep
+finding OPS-01 open as a release gate. The migration itself is forward-only and additive,
 so application rollback does not require a database rollback; the new
 constraints can be dropped if necessary without data loss.
 

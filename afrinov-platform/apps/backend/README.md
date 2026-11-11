@@ -44,8 +44,12 @@ variable for one command with `$env:NAME = "value"; <command>`.
    ```sh
    npm run db:generate
    npm run db:migrate
-   SEED_ADMIN_PASSWORD=choose-a-password npm run db:seed
+   SEED_ADMIN_PASSWORD=choose-a-password SEED_DEMO_DATA=true npm run db:seed
    ```
+
+   Without `SEED_DEMO_DATA=true` the seed loads only what the application
+   needs: roles, permissions, settings and the admin account. Demo data is
+   refused when `NODE_ENV` is `production`, so a live ledger never holds it.
 
    The seed creates the admin account `admin@afrinov.local` with that
    password. An unset, empty, or whitespace-only `SEED_ADMIN_PASSWORD` makes
@@ -55,8 +59,10 @@ variable for one command with `$env:NAME = "value"; <command>`.
    requires `SEED_ADMIN_PASSWORD` on every invocation, even after the admin
    exists, so keep it injected for container restarts.
 
-To rotate the existing bootstrap admin password, set a new `SEED_ADMIN_PASSWORD`
-and run `npm run db:rotate-admin`. This updates `admin@afrinov.local` and records
+Once signed in, change the admin password in the app (**Change password** in
+the header); a forgotten password is reset by another Admin with a temporary
+password (ADR-036). For an admin account nobody can sign in to, set a new
+`SEED_ADMIN_PASSWORD` and run `npm run db:rotate-admin`. This updates `admin@afrinov.local` and records
 the rotation in the audit log. Use this after deploying the empty-value fix if
 the existing account may have been created with an empty bootstrap password.
 
@@ -162,7 +168,7 @@ Run from `apps/backend`.
 | `npm test` | Run the unit tests |
 | `npm run test:integration` | Run the integration tests against a real database |
 | `npm run db:migrate` | Apply pending Prisma migrations |
-| `npm run db:seed` | Load roles, permissions, the admin account and demo data |
+| `npm run db:seed` | Load roles, permissions, settings and the admin account; demo data too with `SEED_DEMO_DATA=true`, outside production only |
 | `npm run import:workbook -- --file <workbook.xlsm>` | Dry run of the stock workbook import: checks the four Main and four Summary sheets against the mapping file and writes a problem report to `import-reports/` (git-ignored). The first run creates `import-reports/mapping.xlsx` (new SKUs, units, locations) and `import-reports/master-data.xlsx` (projects, recipients, suppliers) for the storeman and buyer to review; later runs read them. Never touches the database |
 | `npm run import:workbook -- --file <workbook.xlsm> --apply --database <name> --date <YYYY-MM-DD> --actor <email>` | The real import, once per database: creates the projects, recipients and suppliers (skipping any that exist), the items and locations and posts one dated opening-balance receipt per item and location, all or nothing. Refuses while the dry run has blocking problems, when `--database` does not match `DATABASE_URL`, or when opening balances were imported before |
 | `npm run import:suppliers -- --file <Item Description workbook.xlsm>` | Dry run of the vendor list import: reads the "Suppliers" sheet of the AFRI-0000_x purchase order template, compares it with the suppliers in `DATABASE_URL` (by name, ignoring case) and writes a report to `import-reports/` of new suppliers, existing ones whose empty fields would be filled, and rows to review (duplicate names, vendor codes already taken, invalid emails, unknown currencies). Never touches the database |
@@ -199,7 +205,7 @@ run when `NODE_ENV=production`.
   ```
 
   `db:test:migrate` and `db:test:seed` use the same local-host and `_test`
-  database guard. Seeding requires `SEED_ADMIN_PASSWORD` in the ignored
+  database guard. `db:test:seed` loads the demo data the suites read. Seeding requires `SEED_ADMIN_PASSWORD` in the ignored
   `.env.test` or shell environment. Integration tests create persistent rows;
   this dedicated test database is their only supported target.
 

@@ -1093,3 +1093,64 @@ planned. Tests: `session-policy.test.ts`, `auth.routes.test.ts` (session
 timeout), `settings.service.test.ts`, `migrations.test.ts`,
 `lib/session.test.ts`, `SessionKeeper.test.tsx`, `MaterialForm.test.tsx`,
 `SettingsWithEffect.test.tsx`, `SettingsInventory.test.tsx`.
+
+### ADR-036 — Passwords can be changed and reset; someone always holds Admin; demo data stays out of production
+**Date:** 2026-11-11 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P1, go-live safety) found
+that nobody could change or reset a password in the application, although the
+seed tells operators to rotate the first admin password after first sign-in
+(F1); that an Admin could deactivate or demote any account, including their
+own and the last Admin's, after which only direct database access could
+recover user management (F2); that behind a reverse proxy every request looks
+as if it came from the proxy, so five wrong passwords by anyone blocked
+sign-in for everyone (F4, D-36); and that the seed loaded demo items, orders
+and a demo ledger in every environment, production included, where the
+append-only ledger could never be cleaned and the one-time workbook import
+would refuse the database (H1, D-01). The owner approved the recommended
+option for each.
+
+**Decision:**
+- **Anyone changes their own password** (`POST /auth/password`): the current
+  one first, then a new one of 8 to 128 characters that differs from it. The
+  change ends every other sign-in of the account, since
+  `users.password_changed_at` is checked on every request and a sign-in that
+  began before it is refused with 401; this one carries on with the fresh
+  token returned. Rate limited as sign-in is.
+- **An Admin sets a temporary password for someone else**
+  (`POST /users/:id/password`, `manage:users`), never for themselves. It ends
+  the person's current sign-ins and sets `users.must_change_password`. Until
+  they choose their own, the server accepts only `GET /auth/me`,
+  `POST /auth/refresh` and `POST /auth/password` from them (403 otherwise),
+  and the screens show only the change-password form. It also clears the
+  account's wrong-password count. Both are logged (`PASSWORD_CHANGE`,
+  `PASSWORD_RESET`), never the password.
+- **Someone always holds Admin.** A change that would leave no active account
+  with the Admin role is refused, and nobody deactivates their own account or
+  takes away their own Admin role. Account changes take an advisory lock, so
+  two Admins can't remove each other at once.
+- **The proxy is named.** `TRUST_PROXY` lists the reverse proxy's address or
+  range; only those are believed for `X-Forwarded-For`. `true` and hop counts
+  are refused at start-up. Sign-in is also limited per account: 10 wrong
+  passwords in 15 minutes and the account waits, in memory, per process.
+  `12-operations/reverse-proxy.md` gives the proxy setup.
+- **Demo data only on request, never in production.** The seed always loads
+  permissions, roles, settings and the admin account; it loads the demo
+  business only with `SEED_DEMO_DATA=true`, and refuses that flag, writing
+  nothing, when `NODE_ENV` is production (`db/seed-plan.ts`). The test
+  database seed and CI ask for it.
+- Migration `20260101000055_password_change` adds the two columns; existing
+  accounts keep their passwords.
+
+**Consequences:** A forgotten password is an Admin's five-minute job, so at
+least two people should hold Admin (one store controller and Admin cover each
+other, see D-42). The first admin's password is changed in the app; the
+`db:rotate-admin` script stays for an account nobody can sign in to.
+Production is seeded empty of stock, so the cutover imports into it once,
+after the count, and the pilot and parallel run use a rehearsal copy
+(`workbook-replacement-roadmap.md`). Backups follow
+`12-operations/backup-and-recovery.md`, tested on a copy. Logging out still
+only discards the token in the browser (system audit F7, phase P6). Tests:
+`identity.service.test.ts`, `auth.routes.test.ts` (passwords),
+`login-throttle.test.ts`, `session-policy.test.ts`, `config.test.ts`,
+`seed-plan.test.ts`, `PasswordForms.test.tsx`, `PoSigningRoles.test.tsx`.

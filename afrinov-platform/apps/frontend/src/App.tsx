@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell';
 import { ToastProvider } from './components/Toast';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { GlobalPreferencesApplier } from './components/GlobalPreferencesApplier';
+import { ChangePasswordScreen } from './components/PasswordForms';
 import { PROCUREMENT_ENABLED } from './config/features';
 import { applyTheme, getAppearance } from './hooks/useAppearance';
 
@@ -109,6 +110,9 @@ function Protected() {
     // holds the flag, so no effect has to win a race to carry it across.
     return <Navigate to="/login" state={{ from: location, sessionExpired }} replace />;
   }
+  // A temporary password from an Admin is changed before anything else; the
+  // server refuses every other call until it is (ADR-036).
+  if (user.mustChangePassword) return <ChangePasswordScreen />;
   return (
     <ToastProvider>
       <GlobalPreferencesApplier onReady={() => setThemeReady(true)} />

@@ -42,6 +42,12 @@ model User {
   name          String
   passwordHash  String   @map("password_hash")
   active        Boolean  @default(true)
+  // Set when an Admin gives a temporary password (ADR-036): until the person
+  // chooses their own, they can do nothing else.
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  // A sign-in that began before this is refused, so changing a password ends
+  // every other session (ADR-036).
+  passwordChangedAt  DateTime? @map("password_changed_at")
   // No longer read: who signs an order goes by role and the order's value. Kept
   // so older records keep their history.
   approvalLimit Decimal? @map("approval_limit") @db.Decimal(18, 2)

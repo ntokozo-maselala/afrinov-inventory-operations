@@ -13,14 +13,15 @@ import {
   isKnownInsecureSecret,
   isProcurementEnabled,
   isApiDocsEnabled,
+  resolveTrustProxy,
   type AppConfig,
 } from './shared/config.js';
 import { prisma } from './shared/db.js';
-import { isActiveInDb } from './shared/authorization.js';
+import { accountInDb } from './shared/authorization.js';
 import { pruneIdempotencyKeys } from './shared/idempotency.js';
 import { pruneReceiptImages } from './modules/inventory/receipt-check.js';
 import { currentIdleSeconds, nowSeconds } from './modules/identity/session.js';
-import { isIdleTooLong } from './modules/identity/session-policy.js';
+import { authTimeOf, isIdleTooLong, signInPredatesPassword } from './modules/identity/session-policy.js';
 import { serviceName, serviceVersion } from './shared/version.js';
 
 declare module 'fastify' {
@@ -65,6 +66,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     },
     bodyLimit: 1_000_000,
     requestTimeout: 30_000,
+    // The reverse proxy in front, when there is one (system audit F4), so the
+    // sign-in limit and the logs see each person's address, not the proxy's.
+    trustProxy: resolveTrustProxy(process.env.TRUST_PROXY),
     pluginTimeout: config.nodeEnv === 'test' ? 60_000 : 10_000,
   });
 
@@ -130,7 +134,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const envGlobal = Number(process.env.RATE_LIMIT_GLOBAL);
   const authLimit = envAuth > 0 ? envAuth : isTest ? 1000 : 5;
   const globalLimit = envGlobal > 0 ? envGlobal : isTest ? 10000 : 1000;
-  const STRICT_AUTH_PATHS = new Set(['/api/v1/auth/login']);
+  // Changing a password checks the current one, so it is a guess as a sign-in is.
+  const STRICT_AUTH_PATHS = new Set(['/api/v1/auth/login', '/api/v1/auth/password']);
   await app.register(rateLimit, {
     // `req.url` is the raw request target and includes the query string, so an
     // exact-match test would let `/api/v1/auth/login?x=1` fall through to the
@@ -182,14 +187,23 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // request, so the authorization layer reuses this result instead of
     // repeating the identical primary-key query. A lookup error propagates to
     // the error handler (500) — access is never granted on an unknown state.
-    const active = await isActiveInDb(payload.sub, req);
-    if (!active) {
+    const account = await accountInDb(payload.sub, req);
+    if (!account.active) {
       return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Account unavailable'), req.id));
     }
-    (req as unknown as { user: typeof payload & { id: string; active: boolean } }).user = {
+    // A new password ends every sign-in that began before it (ADR-036).
+    if (signInPredatesPassword(authTimeOf(payload as { iat?: unknown; auth_time?: unknown }), account.passwordChangedAt)) {
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Your password was changed. Sign in again.'), req.id));
+    }
+    // With an Admin's temporary password, choosing a new one is all a person can do.
+    if (account.mustChangePassword && !PASSWORD_CHANGE_PATHS.has(pathnameOf(req.url))) {
+      return reply.code(403).send(toErrorEnvelope(Errors.forbidden('Choose a new password before carrying on.'), req.id));
+    }
+    (req as unknown as { user: typeof payload & { id: string; active: boolean; mustChangePassword: boolean } }).user = {
       ...payload,
       id: payload.sub,
-      active,
+      active: account.active,
+      mustChangePassword: account.mustChangePassword,
     };
   });
 
@@ -355,6 +369,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 function loadConfigOrThrow() {
   return loadConfig();
 }
+
+// What someone signed in with a temporary password may still call (ADR-036):
+// who they are, renewing the sign-in, and choosing their own password.
+const PASSWORD_CHANGE_PATHS = new Set(['/api/v1/auth/me', '/api/v1/auth/refresh', '/api/v1/auth/password']);
 
 // Strip the query string (and any fragment) from a raw request target so
 // route-identity comparisons are not defeated by `?`-suffixes.

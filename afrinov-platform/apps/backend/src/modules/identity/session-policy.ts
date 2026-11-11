@@ -60,3 +60,16 @@ export function isIdleTooLong({ now, issuedAt, idleSeconds }: { now: number; iss
   if (issuedAt > now + CLOCK_TOLERANCE_SECONDS) return true;
   return now - issuedAt > idleSeconds;
 }
+
+/**
+ * Whether a sign-in began before the account's password last changed
+ * (ADR-036): such a sign-in is over, so a new password ends every other
+ * session. Whole seconds, as JWT times are, so the token issued with the
+ * change itself (same second) still counts. A sign-in time that can't be read
+ * counts as before.
+ */
+export function signInPredatesPassword(authTime: number | null, passwordChangedAt: Date | null | undefined): boolean {
+  if (!passwordChangedAt) return false;
+  if (authTime === null) return true;
+  return authTime < Math.floor(passwordChangedAt.getTime() / 1000);
+}

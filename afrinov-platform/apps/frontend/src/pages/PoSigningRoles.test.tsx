@@ -11,6 +11,8 @@ vi.mock('../api/client', () => ({
 }));
 // Procurement is a build-time switch; on here so the test reads the same everywhere.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: true }));
+// Signed in as the store controller listed below, so their own row is the one without account actions.
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: 'u-st', name: 'Store Controller', roles: ['ADMIN'] } }) }));
 
 const { SettingsUsers, approvalLine } = await import('./SettingsSections');
 const { ToastProvider } = await import('../components/Toast');
@@ -46,6 +48,27 @@ describe('signing roles', () => {
     fireEvent.click(within(row('Ona Moloane')).getByRole('button', { name: 'Edit' }));
     await screen.findByRole('button', { name: 'Save user' });
     expect(screen.queryByLabelText(/Approval limit/)).not.toBeInTheDocument();
+  });
+
+  // ADR-036 and system audit F2: your own password is changed from the header, and nobody deactivates themselves.
+  it('offers a temporary password and deactivation on other rows, not your own', async () => {
+    page();
+    await screen.findByText('Ona Moloane');
+    expect(within(row('Ona Moloane')).getByRole('button', { name: 'Temporary password' })).toBeInTheDocument();
+    expect(within(row('Ona Moloane')).getByRole('button', { name: 'Deactivate' })).toBeInTheDocument();
+    expect(within(row('Store Controller')).getByText('You')).toBeInTheDocument();
+    expect(within(row('Store Controller')).queryByRole('button', { name: 'Temporary password' })).not.toBeInTheDocument();
+    expect(within(row('Store Controller')).queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
+  });
+
+  it('sets a temporary password for someone else', async () => {
+    page();
+    await screen.findByText('Ona Moloane');
+    fireEvent.click(within(row('Ona Moloane')).getByRole('button', { name: 'Temporary password' }));
+    fireEvent.change(document.getElementById('tmp-pw')!, { target: { value: 'Temp-pass-2026' } });
+    fireEvent.change(document.getElementById('tmp-pw2')!, { target: { value: 'Temp-pass-2026' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set temporary password' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/users/u-ona/password', { temporaryPassword: 'Temp-pass-2026' }));
   });
 
   it('assigns a signing role to a new user', async () => {

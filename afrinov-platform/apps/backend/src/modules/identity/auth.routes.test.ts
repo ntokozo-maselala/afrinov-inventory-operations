@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterEach, vi } from 'vitest';
 import bcrypt from 'bcryptjs';
 import { buildServer } from '../../server.js';
+import { ACCOUNT_FAILURE_LIMIT, loginThrottle } from './login-throttle.js';
 import type { FastifyInstance } from 'fastify';
 
 interface UserRow {
@@ -18,11 +19,14 @@ interface UserRow {
   name: string;
   passwordHash: string;
   active: boolean;
+  mustChangePassword?: boolean;
+  passwordChangedAt?: Date | null;
   roles: { role: { id: string; name: string; permissions: { permission: { code: string } }[] } }[];
 }
 
 const db = {
   users: new Map<string, UserRow>(),
+  audit: [] as Array<{ action: string; entityId: string }>,
   // security.sessionTimeoutMinutes as stored; undefined: no row, so the default.
   sessionTimeoutMinutes: undefined as unknown,
 };
@@ -36,6 +40,7 @@ beforeAll(async () => {
 beforeEach(() => {
   db.sessionTimeoutMinutes = undefined;
   db.users.clear();
+  db.audit.length = 0;
   db.users.set('user-active', {
     id: 'user-active',
     email: 'alice@afrinov.local',
@@ -48,8 +53,13 @@ beforeEach(() => {
 
 vi.mock('../../shared/db.js', () => ({
   get prisma() {
-    return {
+    const fake = {
       user: {
+        update: async ({ where, data }: { where: { id: string }; data: Partial<UserRow> }) => {
+          const row = { ...db.users.get(where.id)!, ...data };
+          db.users.set(where.id, row);
+          return row;
+        },
         findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
           if (where.id) {
             return [...db.users.values()].find((u) => u.id === where.id) ?? null;
@@ -66,7 +76,12 @@ vi.mock('../../shared/db.js', () => ({
             ? { key: where.key, value: db.sessionTimeoutMinutes }
             : null,
       },
+      auditLogEntry: {
+        create: async ({ data }: { data: { action: string; entityId: string } }) => { db.audit.push(data); return data; },
+      },
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fake),
     };
+    return fake;
   },
 }));
 
@@ -83,6 +98,8 @@ describe('auth routes', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    // One process-wide count of wrong passwords; each test starts clean.
+    loginThrottle.clear('alice@afrinov.local');
     app = await buildServer({ skipConfigValidation: true });
   });
 
@@ -420,5 +437,74 @@ describe('auth routes', () => {
       payload: { name: 'Someone', email: 'someone@example.com', password: 'longenough' },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  // ADR-036 and system audit F1, F4.
+  describe('passwords', () => {
+    const changePassword = (token: string, currentPassword: string, newPassword: string) => app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/password',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { currentPassword, newPassword },
+    });
+
+    it('changes your own password, ends every other sign-in and keeps this one', async () => {
+      at('2026-11-11T08:00:00Z');
+      const elsewhere = await signIn();
+      at('2026-11-11T08:00:05Z');
+      const here = await signIn();
+      at('2026-11-11T08:00:10Z');
+      const res = await changePassword(here, 'Correct-Horse-Battery-9', 'Brand-New-Secret-7');
+      expect(res.statusCode).toBe(200);
+      const fresh = res.json<{ token: string; user: { mustChangePassword: boolean } }>();
+      expect(fresh.user.mustChangePassword).toBe(false);
+      expect(db.audit.at(-1)).toMatchObject({ action: 'PASSWORD_CHANGE', entityId: 'user-active' });
+
+      at('2026-11-11T08:00:11Z');
+      const old = await me(elsewhere);
+      expect(old.statusCode).toBe(401);
+      expect(old.json().error.message).toMatch(/password was changed/);
+      expect((await me(here)).statusCode).toBe(401);
+      expect((await me(fresh.token)).statusCode).toBe(200);
+      const signInAgain = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'alice@afrinov.local', password: 'Brand-New-Secret-7' } });
+      expect(signInAgain.statusCode).toBe(200);
+    });
+
+    it('refuses a wrong current password, and a new one under 8 characters', async () => {
+      const token = await signIn();
+      const wrong = await changePassword(token, 'not-it', 'Brand-New-Secret-7');
+      expect(wrong.statusCode).toBe(400);
+      expect(wrong.json().error.message).toMatch(/current password/);
+      expect((await changePassword(token, 'Correct-Horse-Battery-9', 'short')).statusCode).toBe(400);
+    });
+
+    it('with a temporary password, allows only who am I, renewing and choosing a new one', async () => {
+      db.users.get('user-active')!.mustChangePassword = true;
+      const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'alice@afrinov.local', password: 'Correct-Horse-Battery-9' } });
+      expect(login.json<{ user: { mustChangePassword: boolean } }>().user.mustChangePassword).toBe(true);
+      const token = login.json<{ token: string }>().token;
+
+      const who = await me(token);
+      expect(who.statusCode).toBe(200);
+      expect(who.json<{ mustChangePassword: boolean }>().mustChangePassword).toBe(true);
+      expect((await refresh(token)).statusCode).toBe(200);
+      const blocked = await app.inject({ method: 'GET', url: '/api/v1/users', headers: { authorization: `Bearer ${token}` } });
+      expect(blocked.statusCode).toBe(403);
+      expect(blocked.json().error.message).toMatch(/new password/);
+
+      const changed = await changePassword(token, 'Correct-Horse-Battery-9', 'Brand-New-Secret-7');
+      expect(changed.statusCode).toBe(200);
+      const after = await app.inject({ method: 'GET', url: '/api/v1/users', headers: { authorization: `Bearer ${changed.json<{ token: string }>().token}` } });
+      // Now refused only for want of the permission, as anyone would be.
+      expect(after.json().error.message).not.toMatch(/new password/);
+    });
+
+    it('limits wrong passwords per account, whatever the address', async () => {
+      const attempt = (password: string) => app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'alice@afrinov.local', password } });
+      for (let i = 0; i < ACCOUNT_FAILURE_LIMIT; i++) expect((await attempt('wrong-guess')).statusCode).toBe(401);
+      const locked = await attempt('Correct-Horse-Battery-9');
+      expect(locked.statusCode).toBe(429);
+      expect(locked.json().error.message).toMatch(/Too many wrong passwords/);
+    });
   });
 });

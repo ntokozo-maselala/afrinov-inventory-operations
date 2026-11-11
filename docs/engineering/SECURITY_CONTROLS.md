@@ -46,9 +46,15 @@ environment outside this repository. These are listed as open items in
   requires the explicit `CORS_ALLOW_ANY=true` opt-in.
 - **Headers.** `@fastify/helmet` sets HSTS, `X-Content-Type-Options`,
   `Referrer-Policy` and a restrictive CSP on API responses.
-- **Rate limiting.** Strict per-IP limit on `/api/v1/auth/login` (5/min by
-  default), separate global budget; over-limit requests return a documented 429,
-  not a 500.
+- **Rate limiting.** Strict per-IP limit on `/api/v1/auth/login` and
+  `/api/v1/auth/password` (5/min by default), separate global budget, and 10
+  wrong passwords per account in 15 minutes; over-limit requests return a
+  documented 429, not a 500. Behind a proxy, `TRUST_PROXY` names it, so the
+  address counted is the person's (ADR-036).
+- **Passwords and Admin access (ADR-036).** Anyone changes their own password
+  with the current one; an Admin sets a temporary password that must be changed
+  before anything else. A password change ends the account's other sign-ins. A
+  change that would leave no active Admin is refused.
 - **Input validation.** Zod schemas validate request bodies; report query arrays
   are bounded.
 - **Error handling.** A central handler maps `ApiError` to the documented error

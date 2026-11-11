@@ -20,6 +20,18 @@ export interface AuthUser {
   roles: string[];
   /** What the server grants this user, as it checks it (sign-in and /auth/me); absent from older sessions. */
   permissions?: string[];
+  /** Signed in with an Admin's temporary password: a new one comes first (ADR-036). */
+  mustChangePassword?: boolean;
+}
+
+/**
+ * Change the signed-in person's own password (ADR-036). Every other sign-in
+ * of the account ends; this one carries on with the fresh token returned.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<AuthUser> {
+  const res = await api.post<{ token: string; user: AuthUser }>('/auth/password', { currentPassword, newPassword });
+  if (res.token) setToken(res.token);
+  return res.user;
 }
 
 export interface LoginResult {
@@ -113,6 +125,10 @@ export async function login(email: string, password: string): Promise<LoginResul
     if (isApiError(err)) {
       if (err.code === 'UNAUTHENTICATED') throw unauthenticated();
       if (err.code === 'VALIDATION_ERROR') throw validation(err.message);
+      // Too many tries from this address, or for this account (system audit F4).
+      if (err.code === 'TOO_MANY_REQUESTS') {
+        throw { code: 'TOO_MANY_REQUESTS', message: 'Too many sign-in attempts. Wait a few minutes and try again, or ask an Admin to set a temporary password.' } as ApiError;
+      }
     }
     throw { code: 'INTERNAL_ERROR', message: 'Unable to sign in right now. Please try again.' } as ApiError;
   }

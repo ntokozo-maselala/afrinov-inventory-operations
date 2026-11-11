@@ -232,8 +232,8 @@ The steps are in Cutover and go-live below.
 - [ ] Production environment: hosted database, daily backups with a tested restore, HTTPS, error monitoring
 - [ ] Accounts for storemen (Vusi, Vincent) and managers, with roles
 - [ ] Training session and a one-page guide for the store counter
-- [ ] Physical stock count, then final import
-- [ ] Parallel run with the workbook, then cutover
+- [ ] Parallel run on a rehearsal copy, with the workbook
+- [ ] Physical stock count, then the one production import, then cutover
 
 **Exit criteria:** see the go-live gate in Cutover and go-live.
 
@@ -295,18 +295,20 @@ Only opening balances need to move, not history, because all four issue logs are
 2. Run the import against a copy of production and read the problem report.
 3. Repeat until the report is clean.
 4. Compare item count and rand value per category against the workbook Summary totals.
-5. Run the final import into production after the go-live stock count.
+5. Run the one production import after the go-live stock count. The importer runs once per database and refuses a second run (`opening-balance.service.ts`), so every earlier import goes into a copy.
 
 ## Cutover and go-live
 
 Go-live is a single switch at a physical stock count, after a two-week parallel run on Consumables. Consumables goes first because it has the most lines (425) and the highest stock value.
 
-1. **Production ready:** environment live, backups restored once as a test, accounts created, storemen trained.
-2. **Pilot import:** load all four categories from the current workbook into production.
-3. **Parallel run (2 weeks, Consumables):** storemen enter every Consumables movement in both the app and the workbook. At the end of each week, compare on-hand per item and explain every difference.
-4. **Go/no-go meeting:** check the go-live gate below.
-5. **Stock count:** close the store for the count (one day or a weekend), count every location, and enter the counts on the count screen.
-6. **Final import and switch:** post the counted balances as opening balances for all four categories. From that day all entries go into the app.
+The importer loads opening balances once per database and refuses a second run (`opening-balance.service.ts:6-9`), and the ledger can only be added to. So the pilot and the parallel run happen on a **rehearsal database**, a copy that is thrown away, and production receives exactly one import: the counted balances on go-live day. Production is seeded without demo data (`SEED_DEMO_DATA` is refused there), so the import finds no item codes in its way.
+
+1. **Production ready:** environment live, backups restored once as a test (`12-operations/backup-and-recovery.md`), accounts created, storemen trained. Production holds no stock yet.
+2. **Pilot import, on the rehearsal database:** load all four categories from the current workbook into a copy set up like production. Never into production.
+3. **Parallel run (2 weeks, Consumables, on the rehearsal database):** storemen enter every Consumables movement in both the rehearsal app and the workbook. At the end of each week, compare on-hand per item and explain every difference.
+4. **Go/no-go meeting:** check the go-live gate below. Throw the rehearsal database away.
+5. **Stock count:** close the store for the count (one day or a weekend) and count every location onto the workbook's count sheets. The count screen isn't used for this: production has no balances to count against until the import.
+6. **The one production import, and the switch:** update the workbook with the counts, run the dry run until it is clean, then `import:workbook --apply` into production, dated the count day, and `--reconcile`. From that moment all entries go into the app. A mistake found after this is corrected through the count screen or an adjustment, not a second import.
 7. **Workbook archived:** saved read-only with the go-live date in the file name. No further entries.
 8. **First month:** daily check-in with the storemen in week 1, weekly after that; month-end reports compared with what management expects.
 
@@ -319,6 +321,7 @@ All of these must be true:
 - [ ] Urgency, re-order and consumption reports are signed off by management (Phase 3)
 - [ ] Parallel-run differences are zero, or each one is explained by an entry error in the workbook
 - [ ] Backups run daily and a restore has been tested
+- [ ] Production has no demo data and no opening balances before the import
 - [ ] Each storeman has done a full receive, issue and return unaided
 
 ### Fallback
@@ -334,7 +337,7 @@ The biggest risk is the storemen finding the app slower than typing a row in Exc
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
 | Entry in the app is slower than Excel | Storemen batch entries at day end or skip them; stock drifts | Multi-line receive and issue, item search, tablet at the counter; time a typical entry during the pilot |
-| Mapping file not reviewed by someone who knows the store | Wrong locations or merged items carry into the platform | Storeman signs off the mapping file before the final import |
+| Mapping file not reviewed by someone who knows the store | Wrong locations or merged items carry into the platform | Storeman signs off the mapping file before the production import |
 | Required Stock left at 0 for most items | Urgency and re-order reports show nothing useful | Store fills in Required Stock for the top 100 items before go-live |
 | No production environment yet | Go-live slips | Start hosting and backups in Phase 0, not Phase 4 |
 | Workbook kept in use after go-live | Two versions of stock | Archive it read-only on go-live day; management states the app is the record |

@@ -15,8 +15,8 @@ import { PermissionCode, type PermissionCodeValue } from '../shared/permissions.
 import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
-import { loginSchema } from '../modules/identity/auth.routes.js';
-import { createUserSchema, updateUserSchema } from '../modules/identity/user.routes.js';
+import { changePasswordSchema, loginSchema } from '../modules/identity/auth.routes.js';
+import { createUserSchema, temporaryPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema,
   consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
@@ -162,8 +162,8 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/auth/login', tag: 'Auth', summary: 'Log in and receive a bearer token', public: true,
     description: 'The token lasts the idle time in security.sessionTimeoutMinutes (default 60 minutes) and is renewed with '
       + '`POST /auth/refresh` while the person is active; a sign-in ends 12 hours after it began (ADR-035). '
-      + 'Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute). '
-      + 'The user carries their roles and the permission codes those roles grant.',
+      + 'Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute) and per account (10 wrong passwords in 15 minutes). '
+      + 'The user carries their roles and the permission codes those roles grant, and mustChangePassword when an Admin set a temporary password (ADR-036).',
     body: loginSchema, errors: [401, 429],
   },
   {
@@ -175,7 +175,14 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user',
-    description: 'Their id, email, name, roles (from the token) and permissions, read from the database on each call.',
+    description: 'Their id, email, name, roles (from the token), permissions and mustChangePassword, read from the database on each call.',
+  },
+  {
+    method: 'post', path: '/auth/password', tag: 'Auth', summary: 'Change your own password',
+    description: 'Checks the current password, refuses one you are using now, and returns `{ token, user }` for a fresh sign-in. '
+      + 'Every other sign-in of the account ends (ADR-036). Rate limited as sign-in is. '
+      + 'While a temporary password is in use, this, `GET /auth/me` and `POST /auth/refresh` are the only calls accepted; others answer 403.',
+    body: changePasswordSchema, errors: [401, 429],
   },
 
   // Users
@@ -191,7 +198,13 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/users/:id', tag: 'Users', summary: 'Rename, (de)activate or change roles',
-    permissions: [P.ManageUsers], body: updateUserSchema, errors: [404],
+    permissions: [P.ManageUsers], body: updateUserSchema, errors: [404, 409],
+    description: 'Refused (409) when it would leave no active Admin, or would deactivate you or take away your own Admin role.',
+  },
+  {
+    method: 'post', path: '/users/:id/password', tag: 'Users', summary: 'Set a temporary password',
+    description: 'The person must choose their own at the next sign-in, and any sign-in they have now ends (ADR-036). Not for your own account (409).',
+    permissions: [P.ManageUsers], body: temporaryPasswordSchema, errors: [404, 409],
   },
 
   // Materials

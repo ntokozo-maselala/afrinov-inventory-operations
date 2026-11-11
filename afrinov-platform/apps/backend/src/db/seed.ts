@@ -1,16 +1,16 @@
-// Demo business data seed.
+// Database seed.
 //
-// Seeds the catalog the application expects for a populated demo
-// environment: materials, suppliers, projects, racks, purchase orders,
-// goods receipts, and the matching inventory transactions with
-// derived inventory balances. Mirrors the frontend `mock/seed.ts`
-// dataset so the live-mode and frontend-only-mode demos stay
-// visually consistent.
+// Always: the permissions, roles, settings and first admin account the
+// application needs. With SEED_DEMO_DATA=true, outside production only
+// (seed-plan.ts, system audit H1): a populated demo business of materials,
+// suppliers, projects, racks, purchase orders, goods receipts, and the
+// matching inventory transactions with derived inventory balances. The demo
+// mirrors the frontend `mock/seed.ts` dataset so the live-mode and
+// frontend-only-mode demos stay visually consistent.
 //
-// Strictly idempotent: every insert is guarded by an "only if catalog
-// is empty" check, so re-running `npm run db:seed` against an already
-// populated database is a no-op. Operators who want to reset the demo
-// can drop the rows manually before re-seeding.
+// Re-runnable: reference data is upserted; demo inserts are guarded by
+// "only if missing" checks, though a re-run with demo data on resets the
+// cost, required stock and active flag of the demo items.
 //
 // The transactions are written inside a single Prisma transaction so
 // the ledger and the derived balances are committed atomically. After
@@ -24,6 +24,7 @@ import { randomBytes } from 'node:crypto';
 import { ALL_PERMISSION_CODES, RolePermissions } from '../shared/permissions.js';
 import { recomputeBalancesFor } from '../modules/inventory/balances.js';
 import { prisma } from '../shared/db.js';
+import { seedPlan } from './seed-plan.js';
 
 type RoleName = 'ADMIN' | 'STORE_CONTROLLER' | 'PROCUREMENT' | 'APPROVER' | 'TECHNICIAN' | 'VIEWER' | 'PROCUREMENT_MANAGER' | 'DIRECTOR' | 'CEO' | 'WORKSHOP_MANAGER' | 'SALES';
 
@@ -516,9 +517,20 @@ async function ensureTransactions(
 }
 
 async function main(): Promise<void> {
+  // Decided before anything is written, so a refused flag seeds nothing.
+  const plan = seedPlan();
   await ensurePermissions();
   await ensureRoles();
   const adminId = await ensureAdminUser();
+
+  // Settings catalog (idempotent — safe to re-run).
+  const { SettingsService } = await import('../modules/settings/settings.service.js');
+  await SettingsService.ensureSeeded();
+
+  if (!plan.demo) {
+    console.log('Seed complete: roles, permissions, settings and the admin account. No demo data (set SEED_DEMO_DATA=true outside production for it).');
+    return;
+  }
   const locations = await ensureLocations();
   const suppliers = await ensureSuppliers();
   const materials = await ensureMaterials();
@@ -529,11 +541,7 @@ async function main(): Promise<void> {
   await ensureGoodsReceipt(suppliers, materials, locations, adminId);
   await ensureTransactions(materials, locations, recipients, adminId);
 
-  // 5. Settings catalog (idempotent — safe to re-run).
-  const { SettingsService } = await import('../modules/settings/settings.service.js');
-  await SettingsService.ensureSeeded();
-
-  console.log('Seed complete.');
+  console.log('Seed complete, with demo data.');
 }
 
 main()

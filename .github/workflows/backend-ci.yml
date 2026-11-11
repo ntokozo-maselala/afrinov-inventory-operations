@@ -157,7 +157,12 @@ jobs:
       - name: Apply migrations
         run: npx prisma migrate deploy
 
+      # The integration suites read the demo catalogue. Demo data is refused in
+      # production, which is NODE_ENV's default, so this step names test.
       - name: Seed database
         run: npm run db:seed
+        env:
+          NODE_ENV: test
+          SEED_DEMO_DATA: 'true'
 
       - run: npm run test:integration

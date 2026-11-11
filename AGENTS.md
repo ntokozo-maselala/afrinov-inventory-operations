@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1269, frontend 1524)
+npm test               # both workspaces (backend 1314, frontend 1532)
 npm run build          # both workspaces
 ```
 
@@ -206,6 +206,20 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `POST /auth/refresh` only after the person's own input (pointer, key, wheel,
   touch), never because a request was made, so a page that polls still signs
   out when left alone (ADR-035).
+- **A password change ends every other sign-in; someone always holds Admin.**
+  A sign-in that began before `users.password_changed_at` is refused, and while
+  `must_change_password` is set (an Admin's temporary password) only
+  `/auth/me`, `/auth/refresh` and `/auth/password` answer. Any path that sets a
+  password sets `passwordChangedAt` too. `UserService.update` refuses a change
+  that leaves no active Admin, under the `afrinov:admins` lock (ADR-036).
+- **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
+  production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
+  settings, the admin) goes before the `if (!plan.demo)` return in
+  `seed.ts`; anything a demo needs goes after it. `db:test:seed` and CI ask for
+  demo data.
+- **Behind a proxy, `TRUST_PROXY` names it** (addresses only; `true` and hop
+  counts are refused), or every person counts as the proxy's address for the
+  sign-in limit (`afrinov-docs/docs/12-operations/reverse-proxy.md`).
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

@@ -1136,6 +1136,13 @@ function route(method: string, path: string, body?: unknown): unknown {
     // service (rare). It still returns the dev user for consistency.
     return { token: 'mock-token', user: devUser() };
   }
+  // ADR-036: any current password is accepted here; only the new one's length is checked.
+  if (method === 'POST' && p === '/auth/password') {
+    const b = body as { currentPassword?: string; newPassword?: string } | undefined;
+    if (!b?.currentPassword) throw err('VALIDATION_ERROR', 'Enter your current password.');
+    if ((b.newPassword ?? '').length < 8) throw err('VALIDATION_ERROR', 'Use at least 8 characters.');
+    return { token: 'mock-token', user: devUser() };
+  }
 
   // Materials
   /** As MaterialService: only a tool has a serial number, and no two items share one. */
@@ -2308,6 +2315,11 @@ function route(method: string, path: string, body?: unknown): unknown {
       throw err('VALIDATION_ERROR', 'Email, name, password, and at least one role are required');
     }
     return mockUsersApi.create(b as { email: string; name: string; password: string; roleNames: string[] });
+  }
+  if (method === 'POST' && /^\/users\/[^/]+\/password$/.test(p)) {
+    const id = p.split('/')[2]!;
+    if (!mockUsersApi.list().some((x) => x.id === id)) throw err('NOT_FOUND', 'User not found');
+    return { id, mustChangePassword: true };
   }
   if (method === 'PATCH' && p.startsWith('/users/') && p.split('/').length === 3) {
     const id = p.slice('/users/'.length);
