@@ -5,6 +5,7 @@ import { MobileDrawer } from './MobileDrawer';
 import { AppHeader } from './AppHeader';
 import { PageContainer } from './PageContainer';
 import { DevModeBanner } from './DevModeBanner';
+import { SessionKeeper } from './SessionKeeper';
 import { AppShellProvider, useAppShell } from '../hooks/useAppShell';
 import { ToastProvider } from './Toast';
 import { useNavGroups } from '../hooks/useNavGroups';
@@ -44,6 +45,7 @@ function AppShellInner({ children }: { children: ReactNode }) {
     // so the sidebar never moves when the page is scrolled.
     <div className={`h-dvh flex flex-col overflow-hidden bg-surface-50 text-surface-800 dark:bg-surface-50 dark:text-surface-800`}>
       <DevModeBanner />
+      <SessionKeeper onSignOut={logout} />
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <div className="flex flex-1 min-h-0">
         <DesktopSidebar />

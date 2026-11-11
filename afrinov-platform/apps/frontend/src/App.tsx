@@ -55,7 +55,6 @@ const WriteOffApprovals = importPage(() => import('./pages/WriteOffApprovals').t
 const Locations = importPage(() => import('./pages/Locations').then(m => ({ default: m.Locations })));
 const Settings = importPage(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const SettingsGeneral = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsGeneral })));
-const SettingsNotifications = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsNotifications })));
 const SettingsInventory = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsInventory })));
 const SettingsSecurity = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsSecurity })));
 const SettingsPurchaseOrders = importPage(() => import('./pages/SettingsSections').then(m => ({ default: m.SettingsPurchaseOrders })));
@@ -204,7 +203,8 @@ export function App() {
         <Route path="/tools" element={<RouteBoundary name="Tools"><Tools /></RouteBoundary>} />
         <Route path="/settings" element={<RouteBoundary name="Settings" resetKey="/settings"><Settings /></RouteBoundary>}>
           <Route index element={<RouteBoundary name="Settings: general"><SettingsGeneral /></RouteBoundary>} />
-          <Route path="notifications" element={<RouteBoundary name="Settings: notifications"><SettingsNotifications /></RouteBoundary>} />
+          {/* Nothing sends notifications, so their switches were retired; an old link opens General. */}
+          <Route path="notifications" element={<Navigate to="/settings" replace />} />
           <Route path="inventory" element={<RouteBoundary name="Settings: inventory"><SettingsInventory /></RouteBoundary>} />
           {PROCUREMENT_ENABLED
             ? <Route path="purchase-orders" element={<RouteBoundary name="Settings: purchase orders"><SettingsPurchaseOrders /></RouteBoundary>} />

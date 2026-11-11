@@ -14,14 +14,13 @@ import { PROCUREMENT_ENABLED } from '../config/features';
 interface Section { to: string; label: string; description: string; adminOnly?: boolean; category?: SettingCategory }
 
 const SECTIONS: Section[] = [
-  { to: '/settings', label: 'General', description: 'Company info, currency, and language defaults.', category: 'general' },
+  { to: '/settings', label: 'General', description: 'Company name, currency, and where people start.', category: 'general' },
   { to: '/settings/inventory', label: 'Inventory', description: 'Low-stock thresholds and adjustment policy.', category: 'inventory', adminOnly: true },
   { to: '/settings/purchase-orders', label: 'Purchase orders', description: 'Approval, cancellation, and numbering rules.', category: 'purchase_orders', adminOnly: true },
   { to: '/settings/projects', label: 'Projects', description: 'Step templates for schedules, and the days the business is closed.', category: 'projects', adminOnly: true },
-  { to: '/settings/notifications', label: 'Notifications', description: 'In-app and system alert preferences.', category: 'notifications' },
   { to: '/settings/appearance', label: 'Appearance', description: 'Theme and display density.', category: 'appearance' },
-  { to: '/settings/users', label: 'Users & permissions', description: 'Role-based access and session policies.', category: 'users', adminOnly: true },
-  { to: '/settings/security', label: 'Security', description: 'Session, audit, and account security.', category: 'security', adminOnly: true },
+  { to: '/settings/users', label: 'Users & permissions', description: 'Accounts and the roles they hold.', category: 'users', adminOnly: true },
+  { to: '/settings/security', label: 'Security', description: 'When a sign-in ends after a time without activity.', category: 'security', adminOnly: true },
   { to: '/settings/system', label: 'System', description: 'Version, environment, and status.', category: 'system' },
   { to: '/settings/data', label: 'Data & backup', description: 'Export, retention, and restore.', category: 'data', adminOnly: true },
   { to: '/settings/history', label: 'Change history', description: 'Audit log of administrative changes.' },
@@ -376,4 +375,4 @@ function humanizeOption(value: string): string {
 
 // Re-export for legacy callers (existing page files in the project) so the
 // previous Settings.tsx API doesn't break. The new layout uses hooks.
-export { SettingsGeneral, SettingsInventory, SettingsNotifications, SettingsSecurity } from './SettingsSections';
+export { SettingsGeneral, SettingsInventory, SettingsSecurity } from './SettingsSections';

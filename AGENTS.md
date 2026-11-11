@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1142, frontend 1372)
+npm test               # both workspaces (backend 1269, frontend 1524)
 npm run build          # both workspaces
 ```
 
@@ -194,6 +194,18 @@ Use these forms; the older spellings still work but are deprecated or removed.
   the confirmation's transaction, so a wrong try is counted. On the frontend,
   open `HandoverPanel` after a slip posts; it keys the retry by a payload
   without the PIN or image, so neither is kept in the browser.
+- **A setting on the page has an effect.** Add a key to `SETTING_CATALOG` only
+  with the code that reads it; one nothing reads is retired with a migration
+  that deletes its row (ADR-035). A changed description needs a migration too:
+  Settings shows the row's description and the seed never rewrites a row.
+- **A sign-in ends after the idle time, and after 12 hours.** Tokens last
+  `security.sessionTimeoutMinutes` and carry `auth_time`; issue them only
+  through `issueSessionToken` (`src/modules/identity/session.ts`), never
+  `app.jwt.sign` in a route. The `authenticate` hook refuses a token older than
+  the idle time in force now. On the frontend `SessionKeeper` renews through
+  `POST /auth/refresh` only after the person's own input (pointer, key, wheel,
+  touch), never because a request was made, so a page that polls still signs
+  out when left alone (ADR-035).
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

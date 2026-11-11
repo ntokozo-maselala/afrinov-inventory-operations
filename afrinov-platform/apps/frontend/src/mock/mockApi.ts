@@ -2505,11 +2505,7 @@ function buildMockSettings(): Record<string, MockSetting> {
   });
   return {
     'general.companyName': row('general.companyName', 'Afrinov', 'string', 'general', 'Company or organisation name shown across the application.'),
-    'general.systemDescription': row('general.systemDescription', 'Inventory & operations management', 'string', 'general', 'Short description of the system.'),
     'general.defaultCurrency': row('general.defaultCurrency', 'ZAR', 'enum', 'general', 'Default currency for monetary values.', ['ZAR', 'USD', 'EUR', 'GBP']),
-    'general.dateFormat': row('general.dateFormat', 'YYYY-MM-DD', 'enum', 'general', 'Date display format.', ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY']),
-    'general.timeFormat': row('general.timeFormat', '24h', 'enum', 'general', 'Time display format.', ['24h', '12h']),
-    'general.defaultPageSize': row('general.defaultPageSize', 25, 'number', 'general', 'Default rows per page in tables.'),
     'general.defaultLandingPage': row('general.defaultLandingPage', 'by-role', 'enum', 'general', 'Where to go after sign-in. "By role" sends technicians to Issue stock and everyone else to the Dashboard.', ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders']),
 
     'inventory.urgentBelowPercent': row('inventory.urgentBelowPercent', 20, 'number', 'inventory', 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.'),
@@ -2521,7 +2517,7 @@ function buildMockSettings(): Record<string, MockSetting> {
     'inventory.receiptImageKeepMonths': row('inventory.receiptImageKeepMonths', 24, 'number', 'inventory', 'How long signatures and photos of signed slips are kept, in months: at least 24, or 0 to keep them always. After that the image is removed and the record that the slip was signed stays.'),
     'inventory.toolOverdueCheckout': row('inventory.toolOverdueCheckout', 'warn', 'enum', 'inventory', 'Lending more tools to someone who has an overdue tool. Warn: the tools can still be lent, with a reason. Block: the overdue tools must be checked in or extended first.', ['warn', 'block-contractors', 'block']),
     'inventory.warningBelowPercent': row('inventory.warningBelowPercent', 40, 'number', 'inventory', 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT).'),
-    'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'Default unit of measure for new materials.'),
+    'inventory.defaultUnitOfMeasure': row('inventory.defaultUnitOfMeasure', 'each', 'string', 'inventory', 'The unit a new material starts on. It can be changed on each material.'),
     // Off by default in the demo: its one user asked for every request, so could only ever withdraw one.
     // Switched on, adjustments and lost tools over the limit wait, as on the server.
     'inventory.requireWriteOffApproval': row('inventory.requireWriteOffApproval', false, 'boolean', 'inventory', 'When on, adjustments and write-offs worth more than the limit below wait for someone other than whoever asked for them to approve them. When off, every adjustment posts at once.'),
@@ -2555,14 +2551,10 @@ function buildMockSettings(): Record<string, MockSetting> {
     'purchaseOrders.quotationLetterhead': row('purchaseOrders.quotationLetterhead', 'Afrinov (Pty) Ltd\nUnit 9 & 11, 546 Constantia Office Park, 16th Road, Randjespark, Midrand, 1685, South Africa\nT +27 11 077 8670 · admin@afrinov.co.za · www.afrinov.co.za\nRegistration no: 2017/009478/07 · VAT Registration No: 4010288142', 'string', 'purchase_orders', 'The company details printed at the foot of every quotation to a client: address, phone, email, website, registration and VAT numbers, one to a line.'),
     'purchaseOrders.vatRate': row('purchaseOrders.vatRate', 15, 'number', 'purchase_orders', 'VAT rate, in percent, on new purchase orders to rand suppliers. Orders to suppliers in other currencies start at 0%. Either can be changed on the order.'),
 
-    'notifications.enableInAppNotifications': row('notifications.enableInAppNotifications', true, 'boolean', 'notifications', 'Show operational alerts inside the application.'),
-    'notifications.enableLowStockNotifications': row('notifications.enableLowStockNotifications', true, 'boolean', 'notifications', 'Generate alerts when materials run short of their required stock (Urgent or Warning on Stock status).'),
-    'notifications.enablePurchaseOrderNotifications': row('notifications.enablePurchaseOrderNotifications', true, 'boolean', 'notifications', 'Alert when purchase orders need approval or reach a new state.'),
-
     'appearance.theme': row('appearance.theme', 'light', 'enum', 'appearance', 'Default visual theme when no browser preference is saved.', ['system', 'light', 'dark']),
     'appearance.density': row('appearance.density', 'comfortable', 'enum', 'appearance', 'Default table density.', ['comfortable', 'compact']),
 
-    'security.sessionTimeoutMinutes': row('security.sessionTimeoutMinutes', 60, 'number', 'security', 'Inactivity time before a session is signed out.'),
+    'security.sessionTimeoutMinutes': row('security.sessionTimeoutMinutes', 60, 'number', 'security', 'Minutes without activity before someone is signed out. A minute before, the screen offers to keep them signed in. A sign-in also ends 12 hours after it began, however active.'),
 
     // Job tracking (ADR-032), as the server's settings catalog.
     'projects.stepTemplates': row('projects.stepTemplates', [
@@ -2591,6 +2583,10 @@ function validateMockSetting(key: string, raw: unknown): { value?: unknown; erro
       // As the server: the project receiving location must be an active location (Qodo, PR #146).
       if (key === 'inventory.projectReceivingLocationId' && v !== '' && !state.locations.some((l) => l.id === v && l.active)) {
         return { error: 'Choose an active location for project deliveries.' };
+      }
+      // As the server: the default unit is a unit on the list, kept under its code.
+      if (key === 'inventory.defaultUnitOfMeasure') {
+        try { return { value: mockUnitCode(v) }; } catch (e) { return { error: (e as { message: string }).message }; }
       }
       if (v.length > 500) return { error: 'Must be at most 500 characters' };
       return { value: v };

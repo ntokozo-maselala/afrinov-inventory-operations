@@ -60,7 +60,7 @@ How Sales prices one piece of equipment for the client, the "Costing: Sales Rep.
 
 Procurement recommends a quote for costing on its RFQ: `rfqs.recommended_supplier_id`, `recommended_at`, `recommended_by_id`. It is not an award and raises no order; it changes only while the RFQ is sent, and is cleared when that supplier declines.
 
-The migration `20260101000054_sales_rfq_costing` refuses to run while any supplier price or quotation PDF is recorded on a Sales RFQ, rather than drop it: those rows are exported and deleted first. A Sales RFQ that was sent becomes a draft.
+The migration `20260101000055_sales_rfq_costing` refuses to run while any supplier price or quotation PDF is recorded on a Sales RFQ, rather than drop it: those rows are exported and deleted first. A Sales RFQ that was sent becomes a draft.
 
 ## Inventory ledger
 | Table (model) | Key columns | Constraints and notes |

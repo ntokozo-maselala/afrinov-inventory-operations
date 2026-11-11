@@ -56,6 +56,40 @@ describe('Settings: project receiving location', () => {
   });
 });
 
+// The unit a new material starts on is a unit on the list, never free text.
+describe('Settings: unit for new materials', () => {
+  const UNITS = [
+    { code: 'each', label: 'Each', kind: 'COUNTED', needsReview: false, active: true },
+    { code: 'm', label: 'Metre', kind: 'MEASURED', needsReview: false, active: true },
+    { code: 'furlong', label: 'Furlong', kind: 'MEASURED', needsReview: false, active: false },
+    { code: 'Bx', label: 'Bx', kind: 'MEASURED', needsReview: true, active: true },
+  ];
+  function serve(defaultUnit: string) {
+    mockGet.mockReset().mockImplementation(async (path: string) => {
+      if (path === '/settings') return SETTINGS.map((s) => (s.key === 'inventory.defaultUnitOfMeasure' ? { ...s, value: defaultUnit } : s));
+      if (path === '/units-of-measure') return UNITS;
+      return [];
+    });
+  }
+
+  it('offers the units in use, showing the one saved', async () => {
+    serve('m');
+    render(<MemoryRouter><ToastProvider><SettingsProvider canEdit><Loaded /></SettingsProvider></ToastProvider></MemoryRouter>);
+    const field = await screen.findByLabelText('Unit for new materials');
+    await within(field).findByRole('option', { name: 'Metre (m)' });
+    expect(within(field).getAllByRole('option').map((o) => o.textContent)).toEqual(['Each (each)', 'Metre (m)']);
+    expect(field).toHaveValue('m');
+  });
+
+  it('keeps a saved unit no longer in use on show, so it can be changed', async () => {
+    serve('furlong');
+    render(<MemoryRouter><ToastProvider><SettingsProvider canEdit><Loaded /></SettingsProvider></ToastProvider></MemoryRouter>);
+    const field = await screen.findByLabelText('Unit for new materials');
+    await within(field).findByRole('option', { name: 'furlong (not in use)' });
+    expect(field).toHaveValue('furlong');
+  });
+});
+
 describe('Settings: keep signature images for', () => {
   it('says how many images a shorter keep period removes before it is saved (edge case E8)', async () => {
     mockGet.mockReset().mockImplementation(async (path: string) => {

@@ -38,7 +38,7 @@ vi.mock('./pages/Settings', async () => {
       return (
         <div>
           <h1>Settings</h1>
-          <Link to="/settings/notifications">Notifications tab</Link>
+          <Link to="/settings/inventory">Inventory tab</Link>
           <Link to="/settings">General tab</Link>
           <Outlet />
         </div>
@@ -48,7 +48,6 @@ vi.mock('./pages/Settings', async () => {
 });
 vi.mock('./pages/SettingsSections', () => ({
   SettingsGeneral: () => <h2>General</h2>,
-  SettingsNotifications: () => <h2>Notifications</h2>,
   SettingsInventory: () => <h2>Inventory</h2>,
 }));
 
@@ -64,9 +63,9 @@ describe('Settings tab navigation', () => {
     expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
     const afterFirst = settingsMounts;
 
-    fireEvent.click(screen.getByText('Notifications tab'));
+    fireEvent.click(screen.getByText('Inventory tab'));
 
-    expect(await screen.findByRole('heading', { name: 'Notifications' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Inventory' })).toBeInTheDocument();
     expect(settingsMounts).toBe(afterFirst);
   });
 });
@@ -76,6 +75,15 @@ describe('retired goods receipts route', () => {
     render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
 
     expect(await screen.findByRole('heading', { name: 'Purchase orders list' })).toBeInTheDocument();
+  });
+});
+
+// Nothing sends notifications, so their switches were retired (11 Nov 2026).
+describe('retired notifications settings route', () => {
+  it('opens General settings', async () => {
+    render(<MemoryRouter initialEntries={['/settings/notifications']}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
   });
 });
 

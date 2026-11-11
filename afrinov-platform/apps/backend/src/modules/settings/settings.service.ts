@@ -12,6 +12,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { RolePermissions } from '../../shared/permissions.js';
+import { checkUnitOfMeasure } from '../../shared/units.js';
 import { parseClosedDays } from '../../shared/working-days.js';
 import { parseStepTemplates } from '../operations/project-schedule.rules.js';
 
@@ -159,14 +160,21 @@ const UUID_OR_BLANK = (v: unknown) => {
 };
 
 /**
- * Checks a setting that names a record which must exist: the project receiving
- * location has to be an active location, or Receive stock would book project
- * deliveries somewhere else without saying so (Qodo, PR #146).
+ * Checks a setting that names a record which must exist, and returns the value
+ * to store. The project receiving location has to be an active location, or
+ * Receive stock would book project deliveries somewhere else without saying so
+ * (Qodo, PR #146). The default unit has to be an active unit on the list, kept
+ * under its listed code ("EA" is each), as an item's own unit is.
  */
-async function checkReference(key: string, value: unknown, db: Prisma.TransactionClient | typeof prisma): Promise<void> {
-  if (key !== 'inventory.projectReceivingLocationId' || value === '') return;
-  const location = await db.location.findUnique({ where: { id: String(value) }, select: { active: true } });
-  if (!location?.active) throw Errors.validation('Choose an active location for project deliveries.');
+async function resolveReference(key: string, value: unknown, db: Prisma.TransactionClient | typeof prisma): Promise<unknown> {
+  if (key === 'inventory.projectReceivingLocationId' && value !== '') {
+    const location = await db.location.findUnique({ where: { id: String(value) }, select: { active: true } });
+    if (!location?.active) throw Errors.validation('Choose an active location for project deliveries.');
+  }
+  if (key === 'inventory.defaultUnitOfMeasure') {
+    return (await checkUnitOfMeasure(String(value), db)).code;
+  }
+  return value;
 }
 
 /** Turns a parser's problems into a setting's error: the first two, and how many more. */
@@ -186,8 +194,6 @@ export const DEFAULT_STEP_TEMPLATES = [
 ].join('\n');
 
 const CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP'] as const;
-const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'MM/DD/YYYY'] as const;
-const TIME_FORMATS = ['24h', '12h'] as const;
 // 'by-role': each role where it works (technicians on Issue stock, everyone else on the Dashboard).
 const LANDING_PAGES = ['by-role', 'dashboard', 'inventory', 'issue-stock', 'receive-stock', 'low-stock', 'movements', 'purchase-orders'] as const;
 const THEMES = ['system', 'light', 'dark'] as const;
@@ -202,14 +208,14 @@ const KEEP_MONTHS = (v: unknown) => {
   return v === 0 || (v >= 24 && v <= 240) ? null : 'Must be 0 (always) or between 24 and 240 months.';
 };
 
+// Every setting here has an effect; one that nothing reads is retired, not
+// left on the page (migration 20260101000054 removed seven: the system
+// description, date and time formats, rows per page and the three
+// notification switches).
 export const SETTING_CATALOG: readonly SettingDefinition[] = [
   // ── General ────────────────────────────────────────────────────────────
   { key: 'general.companyName', type: 'string', category: 'general', description: 'Company or organisation name shown across the application.', default: 'Afrinov', validate: isLength(1, 120) },
-  { key: 'general.systemDescription', type: 'string', category: 'general', description: 'Short description of the system shown on the dashboard.', default: 'Inventory & operations management', validate: isLength(0, 500) },
   { key: 'general.defaultCurrency', type: 'enum', category: 'general', description: 'Default currency for monetary values.', default: 'ZAR', enumOptions: CURRENCIES, validate: ENUM(CURRENCIES) },
-  { key: 'general.dateFormat', type: 'enum', category: 'general', description: 'Date display format used throughout the application.', default: 'YYYY-MM-DD', enumOptions: DATE_FORMATS, validate: ENUM(DATE_FORMATS) },
-  { key: 'general.timeFormat', type: 'enum', category: 'general', description: 'Time display format.', default: '24h', enumOptions: TIME_FORMATS, validate: ENUM(TIME_FORMATS) },
-  { key: 'general.defaultPageSize', type: 'number', category: 'general', description: 'Default rows per page in tables.', default: 25, validate: POS_INT(5, 200) },
   { key: 'general.defaultLandingPage', type: 'enum', category: 'general', description: 'Where to go after sign-in. "By role" sends technicians to Issue stock and everyone else to the Dashboard.', default: 'by-role', enumOptions: LANDING_PAGES, validate: ENUM(LANDING_PAGES) },
 
   // ── Inventory ──────────────────────────────────────────────────────────
@@ -218,7 +224,8 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   // Segregation of duties: a big write-off is never one person's say-so.
   { key: 'inventory.requireWriteOffApproval', type: 'boolean', category: 'inventory', description: 'When on, adjustments and write-offs worth more than the limit below wait for someone other than whoever asked for them to approve them. When off, every adjustment posts at once.', default: true },
   { key: 'inventory.writeOffApprovalAbove', type: 'number', category: 'inventory', description: "Adjustments and write-offs worth more than this, in rand at the item's unit cost, wait for someone else to approve them before stock moves. An item with no unit cost always waits. 0: every adjustment waits.", default: 1000, validate: NON_NEG(1_000_000) },
-  { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'Default unit of measure suggested for new materials.', default: 'each', validate: isLength(1, 20) },
+  // A unit on the list (resolveReference), as an item's own unit is.
+  { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'The unit a new material starts on. It can be changed on each material.', default: 'each', validate: isLength(1, 20) },
   // Tool loans (04-processes/tool-loans.md). The key predates due dates: it is the default loan period.
   { key: 'inventory.toolOverdueDays', type: 'number', category: 'inventory', description: 'Default tool loan period, in days: a tool checked out is due back this many days later unless another due date is set at check-out. Older loans with no due date fall due this many days after they went out.', default: 7, validate: POS_INT(1, 365) },
   { key: 'inventory.toolMaxLoanDays', type: 'number', category: 'inventory', description: 'The longest a tool may be lent for, in days from check-out, extensions included. Only an administrator can set a later due date.', default: 30, validate: POS_INT(1, 365) },
@@ -266,17 +273,13 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'purchaseOrders.quotationNotes', type: 'string', category: 'purchase_orders', description: 'The Notes printed in bold on every quotation to a client, under the prices. Leave blank to leave them off.', default: 'Orders to be made out to Afrinov (Pty) Ltd.', validate: isLength(0, 500) },
   { key: 'purchaseOrders.quotationLetterhead', type: 'string', category: 'purchase_orders', description: 'The company details printed at the foot of every quotation to a client: address, phone, email, website, registration and VAT numbers, one to a line.', default: 'Afrinov (Pty) Ltd\nUnit 9 & 11, 546 Constantia Office Park, 16th Road, Randjespark, Midrand, 1685, South Africa\nT +27 11 077 8670 · admin@afrinov.co.za · www.afrinov.co.za\nRegistration no: 2017/009478/07 · VAT Registration No: 4010288142', validate: isLength(0, 1000) },
 
-  // ── Notifications ──────────────────────────────────────────────────────
-  { key: 'notifications.enableInAppNotifications', type: 'boolean', category: 'notifications', description: 'Show operational alerts inside the application.', default: true },
-  { key: 'notifications.enableLowStockNotifications', type: 'boolean', category: 'notifications', description: 'Generate alerts when materials run short of their required stock (Urgent or Warning on Stock status).', default: true },
-  { key: 'notifications.enablePurchaseOrderNotifications', type: 'boolean', category: 'notifications', description: 'Alert when purchase orders need approval or reach a new state.', default: true },
-
   // ── Appearance ────────────────────────────────────────────────────────
   { key: 'appearance.theme', type: 'enum', category: 'appearance', description: 'Default visual theme when no browser preference is saved. Users may choose Light, Dark, or System in their browser.', default: 'light', enumOptions: THEMES, validate: ENUM(THEMES) },
   { key: 'appearance.density', type: 'enum', category: 'appearance', description: 'Default table density.', default: 'comfortable', enumOptions: DENSITIES, validate: ENUM(DENSITIES) },
 
   // ── Security ──────────────────────────────────────────────────────────
-  { key: 'security.sessionTimeoutMinutes', type: 'number', category: 'security', description: 'Inactivity time before a session is signed out.', default: 60, validate: POS_INT(5, 720) },
+  // Idle sign-out (ADR-035, identity/session-policy.ts); keep the range in step with IDLE_MIN/MAX_MINUTES.
+  { key: 'security.sessionTimeoutMinutes', type: 'number', category: 'security', description: 'Minutes without activity before someone is signed out. A minute before, the screen offers to keep them signed in. A sign-in also ends 12 hours after it began, however active.', default: 60, validate: POS_INT(5, 720) },
 
   // ── Projects (job tracking, ADR-032) ───────────────────────────────────
   // Last, as the category is last in the schema's SettingCategory, which lists sort by.
@@ -410,8 +413,7 @@ export const SettingsService = {
     const def = getDefinition(key);
     if (!def) throw Errors.notFound('Setting');
     if (def.isEditable === false) throw Errors.forbidden(`Setting "${key}" is not editable`);
-    const coerced = coerceAndValidate(def, rawValue);
-    await checkReference(key, coerced, prisma);
+    const coerced = await resolveReference(key, coerceAndValidate(def, rawValue), prisma);
     const before = await prisma.setting.findUnique({ where: { key } });
     if (!before) throw Errors.notFound('Setting');
     // The setting row and its audit record commit together, so a configuration
@@ -445,8 +447,7 @@ export const SettingsService = {
         const def = getDefinition(key);
         if (!def) throw Errors.notFound(`Setting: ${key}`);
         if (def.isEditable === false) throw Errors.forbidden(`Setting "${key}" is not editable`);
-        const coerced = coerceAndValidate(def, raw);
-        await checkReference(key, coerced, tx);
+        const coerced = await resolveReference(key, coerceAndValidate(def, raw), tx);
         const before = await tx.setting.findUnique({ where: { key } });
         if (!before) throw Errors.notFound(`Setting: ${key}`);
         const updated = await tx.setting.update({

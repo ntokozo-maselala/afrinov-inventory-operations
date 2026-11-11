@@ -19,6 +19,8 @@ import { prisma } from './shared/db.js';
 import { isActiveInDb } from './shared/authorization.js';
 import { pruneIdempotencyKeys } from './shared/idempotency.js';
 import { pruneReceiptImages } from './modules/inventory/receipt-check.js';
+import { currentIdleSeconds, nowSeconds } from './modules/identity/session.js';
+import { isIdleTooLong } from './modules/identity/session-policy.js';
 import { serviceName, serviceVersion } from './shared/version.js';
 
 declare module 'fastify' {
@@ -29,8 +31,9 @@ declare module 'fastify' {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; email: string; name: string; roles: string[] };
-    user: { sub: string; email: string; name: string; roles: string[] };
+    // auth_time: when the sign-in began, in seconds (ADR-035). Tokens issued before it have none.
+    payload: { sub: string; email: string; name: string; roles: string[]; auth_time?: number };
+    user: { sub: string; email: string; name: string; roles: string[]; iat?: number; exp?: number; auth_time?: number };
   }
 }
 
@@ -154,7 +157,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // it must not be reported as an authentication failure, or a database
     // outage is silently disguised as a wave of invalid tokens (and the
     // incident is invisible in the logs).
-    let payload: { sub: string; email: string; name: string; roles: string[] };
+    let payload: { sub: string; email: string; name: string; roles: string[]; iat?: number };
     try {
       await req.jwtVerify();
       payload = req.user as typeof payload;
@@ -164,6 +167,14 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
     if (!payload?.sub) {
       return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated(), req.id));
+    }
+
+    // Idle sign-out (ADR-035). The token's expiry holds the idle time it was
+    // issued with; this holds the one in force now, so shortening the setting
+    // closes idle sessions at once rather than when their tokens run out. The
+    // setting read never throws and is cached, so it adds no query per request.
+    if (isIdleTooLong({ now: nowSeconds(), issuedAt: payload.iat, idleSeconds: await currentIdleSeconds() })) {
+      return reply.code(401).send(toErrorEnvelope(Errors.unauthenticated('Signed out after a time without activity'), req.id));
     }
 
     // DB-authoritative account status: revocation is immediate rather than
