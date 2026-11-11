@@ -83,6 +83,35 @@ services:
     # SEED_ADMIN_PASSWORD on every production invocation (see above).
     command: sh -c "npx prisma migrate deploy && node dist/db/seed.js && node dist/index.js"
 
+  # Nightly backups (ADR-037, afrinov-docs/docs/12-operations/backup-and-recovery.md):
+  # dumped, checked, encrypted, kept on the backup disk and copied off site,
+  # each run recorded for the Dashboard. ./secrets holds backup_key (the
+  # encryption passphrase) and, for the off-site store, rclone.conf; it is
+  # git-ignored. With no key, each night's run is recorded as failed.
+  backup:
+    build: ./backup
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-afrinov}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-}
+      PGDATABASE: ${POSTGRES_DB:-afrinov}
+      # When, in South African time: after the store closes.
+      BACKUP_AT: ${BACKUP_AT:-18:30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+      # The off-site store as rclone names it, for example offsite:afrinov-backups.
+      # Unset keeps copies on this server only, which the Dashboard warns about.
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+    volumes:
+      # Point BACKUP_DISK at a second disk (for example /mnt/backup/afrinov):
+      # a copy on the database's own disk is lost with it.
+      - ${BACKUP_DISK:-afrinov_backups}:/backups
+      - ${BACKUP_SECRETS:-./secrets}:/run/secrets:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   afrinov_pg:
   afrinov_test_pg:
+  afrinov_backups:

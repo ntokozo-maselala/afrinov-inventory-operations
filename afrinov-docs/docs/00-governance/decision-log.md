@@ -1161,3 +1161,50 @@ only discards the token in the browser (system audit F7, phase P6). Tests:
 `identity.service.test.ts`, `auth.routes.test.ts` (passwords),
 `login-throttle.test.ts`, `session-policy.test.ts`, `config.test.ts`,
 `seed-plan.test.ts`, `PasswordForms.test.tsx`, `PoSigningRoles.test.tsx`.
+
+### ADR-037 — A backup service backs up, copies off site, tests restores and reports to the Dashboard
+**Date:** 2026-11-11 · **Status:** Accepted
+
+**Context:** Once the workbook is retired the database is the only record of
+stock, and the repository had no backups (system audit H2, risk OPS-01). A
+written procedure (ADR-036) relies on someone remembering it every evening.
+The owner asked for backups to be implemented, with the recommended owner and
+storage: run by the Admin who looks after the server, encrypted, kept on a
+second disk and in cloud storage in South Africa.
+
+**Decision:**
+- **A backup service** (`apps/backend/backup`, the `backup` service in
+  Compose) takes one backup a day at `BACKUP_AT` (18:30, South African time).
+  It dumps the database, checks the dump lists the tables it should, encrypts
+  it with a passphrase file (AES-256, gpg), keeps it on the backup disk for
+  `BACKUP_KEEP_DAYS` (7) and copies it to the off-site store named in
+  `BACKUP_REMOTE` with rclone, under `daily/` and, on the 1st, `monthly/`.
+  Nothing unencrypted is written to disk. rclone keeps the choice of cloud
+  provider open; retention and the deletion lock are the store's own rules.
+- **The restore test** (`restore.sh latest --drill`) restores the newest
+  off-site copy into a new database, compares movements, balances, units on
+  hand, users and migrations with the figures taken at backup time (counted
+  before and after the dump, so a copy taken while nothing moved must match
+  exactly), records the result and drops the copy. A real restore uses the same
+  script without `--drill` and keeps the database; it never restores over an
+  existing one.
+- **Each run is recorded** in `backup_runs` (migration
+  `20260101000056_backup_runs`), written only by the backup service.
+  `GET /backups/status` (manage:settings) turns the runs into a state:
+  a backup is late after 26 hours, failed, or kept on the server only; a
+  restore test is due after 92 days, or failed. Admins see a **Backups** card
+  on the Dashboard when anything needs them, and Settings → Data & backup
+  shows the state and the latest runs.
+- **CI** builds the backup image and runs a backup to an off-site folder and a
+  restore test after the integration tests; both must be recorded as OK.
+
+**Consequences:** Backups no longer depend on anyone remembering them, and a
+failure is visible to the people who can act on it the next time they open the
+Dashboard. Without a key, each night's run is recorded as failed; without
+`BACKUP_REMOTE`, backups stay on the server and the Dashboard warns. The key,
+the backup disk and the cloud store are set up by hand on the server
+(`12-operations/backup-and-recovery.md`); losing every copy of the key loses
+every backup. The business still has to choose the cloud provider and confirm
+the recommended owners. Point-in-time recovery is not covered. Tests:
+`backup-status.test.ts`, `backups.real-http.test.ts`, `lib/backups.test.ts`,
+and the CI drill.

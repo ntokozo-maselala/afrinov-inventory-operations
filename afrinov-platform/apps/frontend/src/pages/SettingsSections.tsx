@@ -20,6 +20,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TemporaryPasswordForm } from '../components/PasswordForms';
 import { useAuth } from '../auth';
 import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
+import { backupNotice, formatSize, restoreTestNotice, type BackupHealth } from '../lib/backups';
 import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
@@ -889,6 +890,48 @@ async function downloadReport(format: 'xlsx' | 'pdf', filename: string, exporter
   }
 }
 
+/** Whether backups ran, left the server and were restored lately (ADR-037). */
+function BackupStatus() {
+  const status = useApi<BackupHealth>('/backups/status');
+  const h = status.data;
+  if (status.loading && !h) return <Skeleton h={64} />;
+  if (status.error || !h?.backup) return <Alert tone="warning" title="Couldn't load backup status">{status.error?.message ?? 'Try again shortly.'}</Alert>;
+  const b = backupNotice(h.backup);
+  const r = restoreTestNotice(h.restoreTest);
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Alert tone={b.tone} title={b.title}>{b.text}</Alert>
+        <Alert tone={r.tone} title={r.title}>{r.text}</Alert>
+      </div>
+      <p className="text-xs text-surface-500">
+        The backup service takes one each evening, encrypts it, keeps a week on the server&apos;s backup disk and copies it off site. A restore test is run every three months on the server: <code className="font-mono">docker compose run --rm --entrypoint /opt/afrinov-backup/restore.sh backup latest --drill</code>. See the backup and recovery guide.
+      </p>
+      {h.recent.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <caption className="sr-only">Latest backups and restore tests</caption>
+            <thead><tr className="text-left text-xs text-surface-500"><th className="py-1 pr-3 font-medium">When</th><th className="py-1 pr-3 font-medium">What</th><th className="py-1 pr-3 font-medium">Result</th><th className="py-1 pr-3 font-medium text-right">Size</th><th className="py-1 font-medium">Note</th></tr></thead>
+            <tbody>
+              {h.recent.map((run) => (
+                <tr key={run.kind + run.finishedAt} className="border-t border-surface-200 align-top">
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{formatDateTime(run.finishedAt)}</td>
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{run.kind === 'BACKUP' ? 'Backup' : 'Restore test'}</td>
+                  <td className="py-1.5 pr-3 whitespace-nowrap">
+                    {run.status === 'FAILED' ? <Badge tone="danger">Failed</Badge> : run.kind === 'BACKUP' && !run.offsite ? <Badge tone="warning">Server only</Badge> : <Badge tone="success">{run.kind === 'BACKUP' ? 'Off site' : 'Passed'}</Badge>}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums whitespace-nowrap">{formatSize(run.sizeBytes)}</td>
+                  <td className="py-1.5 text-xs text-surface-600">{run.status === 'FAILED' ? run.detail : run.fileName}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsData() {
   const toast = useToast();
   const [busy, setBusy] = useState<null | 'xlsx' | 'pdf' | 'reset'>(null);
@@ -910,7 +953,8 @@ export function SettingsData() {
     }
   }
   return (
-    <SectionPanel title="Data & backup" description="Export operational data, or reset your local session. Destructive operations require explicit confirmation.">
+    <SectionPanel title="Data & backup" description="Whether backups are working, data exports, and your local session.">
+      <BackupStatus />
       <div className="p-3 rounded border border-surface-200 bg-surface-0 flex flex-wrap items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-surface-900">Export inventory report (XLSX)</div>

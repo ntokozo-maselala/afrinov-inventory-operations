@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1317, frontend 1536)
+npm test               # both workspaces (backend 1324, frontend 1541)
 npm run build          # both workspaces
 ```
 
@@ -219,6 +219,12 @@ Use these forms; the older spellings still work but are deprecated or removed.
   settings, the admin) goes before the `if (!plan.demo)` return in
   `seed.ts`; anything a demo needs goes after it. `db:test:seed` and CI ask for
   demo data.
+- **Backups are a service, not a habit** (ADR-037). `apps/backend/backup`
+  (POSIX shell, LF endings via `.gitattributes`) backs up, encrypts, copies off
+  site and records each run in `backup_runs`, which the app only reads
+  (`GET /backups/status`). A new table is in every backup automatically; if a
+  migration changes the table count a lot, check `BACKUP_MIN_TABLES`. CI runs a
+  backup and restore test after the integration tests.
 - **Behind a proxy, `TRUST_PROXY` names it** (addresses only; `true` and hop
   counts are refused), or every person counts as the proxy's address for the
   sign-in limit (`afrinov-docs/docs/12-operations/reverse-proxy.md`).

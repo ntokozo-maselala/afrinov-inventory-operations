@@ -339,6 +339,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const { settingsRoutes } = await import('./modules/settings/settings.routes.js');
     const { auditRoutes } = await import('./modules/audit/audit.routes.js');
     const { healthRoutes } = await import('./modules/health/health.routes.js');
+    const { backupRoutes } = await import('./modules/backups/backup.routes.js');
 
     await authRoutes(instance);
     await userRoutes(instance);
@@ -358,6 +359,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     await recipientRoutes(instance);
     await reportingRoutes(instance, { procurementEnabled });
     await settingsRoutes(instance);
+    await backupRoutes(instance);
     await auditRoutes(instance);
     await healthRoutes(instance);
   }, { prefix: '/api/v1' });

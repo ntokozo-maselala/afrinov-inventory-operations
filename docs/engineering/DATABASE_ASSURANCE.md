@@ -161,13 +161,15 @@ here (see `VERIFICATION_EVIDENCE.md`).
 
 ## Backup, restore and rollback
 
-A backup and restore runbook is in
-`afrinov-docs/docs/12-operations/backup-and-recovery.md` (ADR-036). Its dump,
-restore and comparison were run on a throwaway copy on 2026-11-11, and the
-restored copy matched on ledger rows, balances, units, users and migrations.
-Still **not verifiable from this repository**: backups on the production host,
-a restore drill there, and agreed recovery objectives (RPO/RTO). Those keep
-finding OPS-01 open as a release gate. The migration itself is forward-only and additive,
+A backup service (`apps/backend/backup`, ADR-037) backs the database up every
+evening, encrypted, to a backup disk and an off-site store, and its restore
+test restores the newest off-site copy into a new database and compares it
+with the figures taken at backup time. Each run is recorded in `backup_runs`
+and shown to Admins on the Dashboard. CI runs a backup and a restore test on
+every backend change (`backend-ci.yml`, "Backup and restore drill"). Still
+**not verifiable from this repository**: the production key, disk and cloud
+store, a restore test there, and agreed recovery objectives (RPO/RTO). Those
+keep finding OPS-01 open as a release gate. The migration itself is forward-only and additive,
 so application rollback does not require a database rollback; the new
 constraints can be dropped if necessary without data loss.
 

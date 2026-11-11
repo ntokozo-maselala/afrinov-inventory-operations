@@ -1092,6 +1092,15 @@ export const OPERATIONS: Operation[] = [
     adminOnly: true, permissions: [P.ManageSettings],
   },
 
+  // Backups
+  {
+    method: 'get', path: '/backups/status', tag: 'Settings', summary: 'Whether backups ran, left the server and were restored lately',
+    description: 'From the runs the backup service records (ADR-037): the last backup and restore test, each with a state '
+      + '(backup: NONE, OK, LATE after 26 hours, FAILED, LOCAL_ONLY when it never left the server; restore test: NONE, OK, DUE after 92 days, FAILED), '
+      + 'and the latest runs.',
+    permissions: [P.ManageSettings],
+  },
+
   // Audit
   {
     method: 'get', path: '/audit', tag: 'Audit', summary: 'Audit log entries, newest first',

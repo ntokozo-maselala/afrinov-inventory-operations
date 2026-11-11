@@ -2327,6 +2327,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     return mockUsersApi.update(id, b);
   }
 
+  // Backups (ADR-037): a browser-only demo has no database to back up.
+  if (method === 'GET' && p === '/backups/status') {
+    return { backup: { state: 'NONE', lastSuccessAt: null, lastRun: null }, restoreTest: { state: 'NONE', lastSuccessAt: null, lastRun: null }, recent: [] };
+  }
+
   // ── Settings ───────────────────────────────────────────────────────────
   if (method === 'GET' && p === '/settings') {
     return Object.values(MOCK_SETTINGS);

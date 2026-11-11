@@ -1,144 +1,161 @@
 # Backup & Recovery
 
-**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** feature/audit-p1-go-live-safety, 2026-11-11
+**Status:** IN REVIEW · **Owner:** Product/Engineering · **Last verified against code:** feature/audit-p1-go-live-safety (ADR-037), 2026-11-11
 
 Once the workbook is retired, the database is the only record of stock, so it
-is backed up every day and a restore is tried before go-live (system audit H2,
-risk OPS-01). The commands below were run end to end on a throwaway copy on
-11 November 2026: dump, restore into an empty database, then the checks in
-step 4, which matched row for row. The `gpg` encrypt and decrypt were tried
-as a round trip on a test file the same day; the upload depends on the cloud
-provider chosen.
+is backed up every evening, copied off the server, and a restore is tested
+every three months (system audit H2, risk OPS-01, ADR-037). The **backup
+service** in `apps/backend/backup` does the backing up and the restore test,
+and records each run so Admins see on the Dashboard when something is wrong.
 
-## Who and how often
+What was tried on 11 November 2026, on throwaway databases: a scheduled
+backup at the set time; backup, encryption and copy to an off-site folder; the
+restore test from the newest off-site copy, which matched the backup's figures
+and dropped its copy afterwards; and the failures (no key, wrong key, no
+off-site store), each refused and recorded. CI repeats the backup and restore
+test on every backend change. The upload to a real cloud store depends on the
+provider chosen and has not been tried.
+
+## Who and where
 
 The owner asked for the best recommendation on who owns backups and where
-they are kept (2026-11-11). Everything marked RECOMMENDED below is that
-recommendation, not a business decision yet.
+they are kept (2026-11-11). Everything marked RECOMMENDED is that
+recommendation, not yet a business decision.
 
 | What | Value | Decided by |
 |---|---|---|
-| Runs and checks backups | The Admin who looks after the server, every working day; the second Admin covers when they are away. The system keeps two Admins once two exist (ADR-036) | RECOMMENDED |
-| Accountable | The business owner: reads the restore record each quarter and signs it off | RECOMMENDED |
-| How often | Daily, after the store closes | RECOMMENDED |
-| Kept | 30 daily copies, plus the last copy of each month for 12 months | RECOMMENDED |
-| Where | Two places off the database: a second disk or volume on the server (7 days, for a fast restore), and encrypted cloud storage in a South African region (all copies), for example Microsoft Azure *South Africa North* or AWS *af-south-1* (Cape Town) | RECOMMENDED |
-| Protection | Encrypted before it leaves the server; the cloud bucket has versioning and a 30-day deletion lock, so neither a mistake nor ransomware on the server can delete the copies | RECOMMENDED |
+| Runs and checks backups | The Admin who looks after the server; the second Admin covers when they are away. The system keeps two Admins once two exist (ADR-036) | RECOMMENDED |
+| Accountable | The business owner: reads the restore-test record each quarter and signs it off | RECOMMENDED |
+| How often | Daily at 18:30, after the store closes (`BACKUP_AT`) | RECOMMENDED |
+| Kept | 7 days on the server's backup disk; off site, 30 daily copies and 12 monthly ones | RECOMMENDED |
+| Where | A second disk on the server, and cloud storage in a South African region, for example Microsoft Azure *South Africa North* or AWS *af-south-1* (Cape Town) | RECOMMENDED |
+| Protection | Encrypted before it is written anywhere; the cloud store keeps versions and refuses deletion for 30 days | RECOMMENDED |
 | Restore test | Once before go-live, then every three months, and after any change of host | RECOMMENDED |
 | Most data that can be lost (RPO) | One working day | RECOMMENDED, see `disaster-recovery.md` |
 
-**Why these:** the dump holds personal information (names, PIN hashes,
+**Why these:** a backup holds personal information (names, PIN hashes,
 signatures and slip photos), so it is encrypted and kept in South Africa,
-which avoids POPIA's rules on sending personal information abroad. Two
-kinds of storage in two places means one fire, theft or failed disk can't take
-both the database and its backups. The person who runs the server is the one
-who notices a failed backup first; the owner signing off the restore test is
-what stops "we have backups" being assumed rather than known.
+which avoids POPIA's rules on sending personal information abroad. Two places
+means one fire, theft or failed disk can't take both the database and its
+backups. A deletion lock means neither a mistake nor ransomware on the server
+can delete the off-site copies. The person who runs the server is the first
+to see a failed backup on the Dashboard; the owner signing off the restore
+test is what stops "we have backups" being assumed rather than known.
 
-**The encryption key** is a long random passphrase in a file on the server
-(`/etc/afrinov/backup.key`, readable only by the account that runs the
-backup). Both Admins keep it in a password manager, and the business owner
-keeps a sealed paper copy. Lose every copy of the key and every backup is
-lost with it.
+## What the backup service does
 
-The host and the cloud provider are not chosen yet; the commands assume the
-Compose stack in `apps/backend/docker-compose.yml`, where the database runs in
-the `db` service. On another host, run the same `pg_dump` and `pg_restore`
-against its database.
+Every day at `BACKUP_AT` (South African time) it:
 
-## 1. Take a backup
+1. dumps the database (`pg_dump`, one compressed file), counting key figures
+   (movements, balances, units on hand, users, migrations) before and after;
+2. checks the dump lists the tables it should (42 at migration `…056`);
+3. encrypts it with the backup key (AES-256, `gpg`), so no unencrypted copy is
+   ever written to disk;
+4. keeps it, with its figures, on the backup disk, and removes copies older
+   than `BACKUP_KEEP_DAYS` (7);
+5. copies both to the off-site store under `daily/`, and on the 1st of the
+   month under `monthly/` too;
+6. records the run in the database. A failure is recorded with its reason.
+
+The Dashboard shows Admins a **Backups** card when the last backup failed, no
+backup succeeded in the last 26 hours, the last one never left the server, or
+no restore test passed in the last 92 days. **Settings → Data & backup** shows
+the state and the latest runs.
+
+## Setting it up
+
+The service is `backup` in `apps/backend/docker-compose.yml` and starts with
+the stack. On the server, from `apps/backend`:
+
+1. **The key.** Make a long random passphrase, readable by the service (it
+   runs as uid 70):
+
+   ```sh
+   mkdir -p secrets
+   node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))" > secrets/backup_key
+   sudo chown 70 secrets/backup_key && sudo chmod 400 secrets/backup_key
+   ```
+
+   Both Admins store the passphrase in a password manager, and the business
+   owner keeps a sealed paper copy. **Lose every copy of the key and every
+   backup is lost with it.** `secrets/` is git-ignored.
+
+2. **The backup disk.** Point `BACKUP_DISK` at a folder on a second disk,
+   writable by uid 70, for example `BACKUP_DISK=/mnt/backup/afrinov` (then
+   `sudo chown 70 /mnt/backup/afrinov`). Without it, copies go to a Docker
+   volume on the database's own disk.
+
+3. **The off-site store.** Create the bucket or container in a South African
+   region, with versioning, a 30-day retention (object) lock, and expiry rules:
+   `daily/` after 30 days, `monthly/` after 12 months. Give the service a key
+   that can write and read but not delete. Describe it to rclone in
+   `secrets/rclone.conf` (for example a section named `[offsite]` of type
+   `azureblob` or `s3`; see rclone's documentation for the provider) and set
+   `BACKUP_REMOTE=offsite:afrinov-backups`. Until this is set, backups stay on
+   the server and the Dashboard says so.
+
+4. **Start it, and take one now:**
+
+   ```sh
+   docker compose up -d backup
+   docker compose run --rm backup now
+   docker compose logs backup
+   ```
+
+5. **Test a restore** before go-live (step below), and record it in
+   `docs/engineering/VERIFICATION_EVIDENCE.md`.
+
+## The restore test (every three months)
 
 ```sh
-# From apps/backend, on the database host. One file, compressed, restorable on its own.
-STAMP=$(date +%Y-%m-%d)
-docker compose exec -T db pg_dump -U afrinov -d afrinov --format=custom --no-owner \
-  > "afrinov-$STAMP.dump"
+docker compose run --rm --entrypoint /opt/afrinov-backup/restore.sh backup latest --drill
 ```
 
-Encrypt it, then copy it off the server:
+It fetches the newest **off-site** copy (the one that matters after losing the
+server), decrypts it, restores it into a new database, compares the figures
+with those taken at backup time, records the result for the Dashboard, and
+drops the copy. A wrong key, a damaged file or differing figures fail the test
+and say why. The business owner reads the result under Settings → Data &
+backup and signs it off.
 
-```sh
-gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \n  --passphrase-file /etc/afrinov/backup.key --output "afrinov-$STAMP.dump.gpg" "afrinov-$STAMP.dump"
-# then upload afrinov-$STAMP.dump.gpg with the cloud provider's tool, and keep
-# the unencrypted .dump only on the server's second disk, for 7 days
-```
+## Restoring in earnest
 
-Delete local copies past the keep period; the cloud copies expire by the
-bucket's own rules. A backup that has never left the database server is not a
-backup.
+1. Restore into a **new** database, never over the live one:
 
-A day's file is small (a demo database with 315 movements is about 300 KB);
-watch its size: a sudden drop means something is wrong.
+   ```sh
+   docker compose run --rm --entrypoint /opt/afrinov-backup/restore.sh backup latest --into afrinov_restored
+   ```
 
-## 2. Check the file before trusting it
+   Use a file name instead of `latest` for an older copy, for example
+   `daily/afrinov-2026-11-10_183000.dump.gpg` or one on the backup disk.
 
-```sh
-docker compose exec -T db pg_restore --list < "afrinov-$STAMP.dump" | grep -c "TABLE DATA"
-```
+2. Run the read-only checks against it, with `DATABASE_URL` pointing at
+   `afrinov_restored`:
 
-It lists the tables the file holds (41 at migration `…055`). An error or a
-much smaller number means the backup failed.
+   ```sh
+   npm run check:issued-stock --workspace=@afrinov/backend   # balances equal the ledger, none negative
+   npm run check:catalogue --workspace=@afrinov/backend
+   npm run check:item-status --workspace=@afrinov/backend
+   npm run check:receipts --workspace=@afrinov/backend
+   ```
 
-## 3. Restore
+3. Point the backend's `DATABASE_URL` at it and restart the backend.
 
-Restore into a **new, empty database**, never over the live one, then switch
-the backend's `DATABASE_URL` once the checks pass. A copy from the cloud is
-decrypted first:
-
-```sh
-gpg --batch --pinentry-mode loopback --decrypt --passphrase-file /etc/afrinov/backup.key \n  --output "afrinov-$STAMP.dump" "afrinov-$STAMP.dump.gpg"
-```
-
-```sh
-docker compose exec -T db psql -U afrinov -d postgres -c "CREATE DATABASE afrinov_restored"
-docker compose exec -T db pg_restore -U afrinov -d afrinov_restored --no-owner --exit-on-error \
-  < "afrinov-$STAMP.dump"
-```
-
-`--exit-on-error` stops at the first problem instead of leaving a half
-restored database that looks complete.
-
-## 4. Check the restored copy
-
-Point `DATABASE_URL` at the restored database and run the read-only checks:
-
-```sh
-npm run check:issued-stock --workspace=@afrinov/backend   # balances equal the ledger, none negative
-npm run check:catalogue --workspace=@afrinov/backend      # Materials adds up against Stock and Tools
-npm run check:item-status --workspace=@afrinov/backend
-npm run check:receipts --workspace=@afrinov/backend
-```
-
-Then compare these counts with the live database (or with the figures noted
-when the backup was taken). They must be equal:
-
-```sql
-SELECT (SELECT count(*) FROM inventory_transactions) AS ledger,
-       (SELECT count(*) FROM inventory_balances)     AS balances,
-       (SELECT sum(quantity) FROM inventory_balances) AS units,
-       (SELECT count(*) FROM users)                  AS users,
-       (SELECT count(*) FROM _prisma_migrations)     AS migrations;
-```
-
-Finally start the backend against it and sign in. Record the date, the file
-restored and who did it in `docs/engineering/VERIFICATION_EVIDENCE.md`; that
-record is the evidence the go-live gate asks for.
-
-## 5. After a restore in earnest
-
-Anything entered after the backup was taken is gone. Collect that day's paper
-slips and enter them again, oldest first. Retry keys are kept for 24 hours
-only, so a slip entered twice is not caught: check Movements before entering
-each one.
+4. Anything entered after the backup was taken is gone. Collect that day's
+   paper slips and enter them again, oldest first. Retry keys are kept for 24
+   hours only, so a slip entered twice is not caught: check Movements before
+   entering each one.
 
 ## Not covered here
 
-- Point-in-time recovery (restoring to a minute rather than a day) needs WAL
-  archiving from the host; decide it with the host.
-- Uploaded slip photos and quotation PDFs are stored in the database, so they
-  are in the dump. There are no files on disk to back up separately.
+- Point-in-time recovery (to a minute rather than a day) needs WAL archiving
+  from the host; decide it with the host.
+- Slip photos and quotation PDFs are stored in the database, so they are in
+  every backup. There are no files on disk to back up separately.
 
 ## Evidence
-- `afrinov-platform/apps/backend/docker-compose.yml` — the `db` service and volume `afrinov_pg`
-- `afrinov-platform/apps/backend/package.json` — the `check:*` scripts
+- `afrinov-platform/apps/backend/backup/` — `backup.sh`, `restore.sh`, `run.sh`, `Dockerfile`
+- `afrinov-platform/apps/backend/docker-compose.yml` — the `backup` service
+- `afrinov-platform/apps/backend/src/modules/backups/backup-status.ts` — what the Dashboard is told
+- `.github/workflows/backend-ci.yml` — the backup and restore drill
 - `afrinov-platform/apps/backend/src/shared/idempotency.ts` — keys kept 24 hours

@@ -14,8 +14,9 @@ data loads only with `SEED_DEMO_DATA=true`, and the seed refuses that flag
 when `NODE_ENV` is `production`, so a live ledger never holds demo stock
 (system audit H1).
 
-Required environment: `POSTGRES_PASSWORD`, `JWT_SECRET`,
-`SEED_ADMIN_PASSWORD`, and `TRUST_PROXY` set to the reverse proxy's address
+The `backup` service in the same file backs the database up every evening and
+copies it off site (ADR-037). Required environment: `POSTGRES_PASSWORD`, `JWT_SECRET`,
+`SEED_ADMIN_PASSWORD`, `BACKUP_REMOTE` and `BACKUP_DISK`, and `TRUST_PROXY` set to the reverse proxy's address
 (see `reverse-proxy.md`). `CORS_ORIGIN` is needed only if the screens are
 served from another address than the API, which the screens don't support
 today.
@@ -35,8 +36,9 @@ requests, closes the database pool).
 3. Create the other accounts, and give a second person the Admin role, so
    one can reset the other's password (ADR-036). Until then Settings → Users
    and the Dashboard warn; once two exist, the system keeps two.
-4. Take and restore a backup (`backup-and-recovery.md`) before any stock is
-   entered.
+4. Set up backups (`backup-and-recovery.md`): the key in `secrets/`, the
+   backup disk, the off-site store; then take one and run the restore test,
+   before any stock is entered. The `backup` service then runs every evening.
 5. Import the workbook once, after the go-live count
    (`workbook-replacement-roadmap.md`, Cutover and go-live).
 
