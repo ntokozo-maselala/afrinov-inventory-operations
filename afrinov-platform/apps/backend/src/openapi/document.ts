@@ -160,9 +160,18 @@ export const OPERATIONS: Operation[] = [
   // Auth
   {
     method: 'post', path: '/auth/login', tag: 'Auth', summary: 'Log in and receive a bearer token', public: true,
-    description: 'The token is valid for 12 hours. Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute). '
+    description: 'The token lasts the idle time in security.sessionTimeoutMinutes (default 60 minutes) and is renewed with '
+      + '`POST /auth/refresh` while the person is active; a sign-in ends 12 hours after it began (ADR-035). '
+      + 'Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute). '
       + 'The user carries their roles and the permission codes those roles grant.',
     body: loginSchema, errors: [401, 429],
+  },
+  {
+    method: 'post', path: '/auth/refresh', tag: 'Auth', summary: 'Renew the bearer token while the person is active',
+    description: 'Returns `{ token, user }`: a token for the idle time from now, for the same sign-in, with the account\'s roles '
+      + 'as they are now. Refused with 401 once the sign-in is 12 hours old, or when the account has been deactivated. '
+      + 'Any request with a token unrenewed for longer than the current idle time is refused with 401 (ADR-035).',
+    errors: [401],
   },
   {
     method: 'get', path: '/auth/me', tag: 'Auth', summary: 'The logged-in user',

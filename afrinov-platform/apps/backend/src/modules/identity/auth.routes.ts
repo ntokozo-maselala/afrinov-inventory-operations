@@ -2,6 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthService } from './identity.service.js';
 import { loadUserPermissions } from '../../shared/authorization.js';
+import { Errors } from '../../shared/errors.js';
+import { issueSessionToken } from './session.js';
+import { authTimeOf } from './session-policy.js';
 
 export const loginSchema = z.object({
   email: z.email(),
@@ -17,7 +20,23 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const user = await AuthService.login(parsed.data.email, parsed.data.password);
-    const token = app.jwt.sign({ sub: user.id, email: user.email, name: user.name, roles: user.roles });
+    // A new sign-in always has its 12 hours ahead of it.
+    const token = await issueSessionToken(app, user);
+    if (!token) throw new Error('A new sign-in was refused a token');
+    return reply.send({ token, user });
+  });
+
+  // ADR-035: the screen renews its token while the person is active, so the
+  // idle time counts from their last activity. Renewal keeps when the sign-in
+  // began and stops 12 hours after it; the account is read again, so a
+  // deactivation or a change of role takes effect here too.
+  app.post('/auth/refresh', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const claims = req.user as { sub: string; iat?: unknown; auth_time?: unknown };
+    const authTime = authTimeOf(claims);
+    const user = await AuthService.sessionUser(claims.sub);
+    if (authTime === null || !user) throw Errors.unauthenticated();
+    const token = await issueSessionToken(app, user, authTime);
+    if (!token) throw Errors.unauthenticated('Your sign-in has ended. Sign in again.');
     return reply.send({ token, user });
   });
 

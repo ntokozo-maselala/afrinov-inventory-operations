@@ -46,7 +46,7 @@ consumption — replacing the Dashboard and `*Stock Summary` sheets.
 ## Milestone 6 — Identity, Access & Audit
 Users, roles, permissions, audit trail — capability that doesn't exist at
 all in the current spreadsheet system.
-*Status:* done with gaps — users, fixed roles, permissions, audit log (TD-006, TD-008, TD-010).
+*Status:* done with gaps — users, fixed roles, permissions, audit log, idle sign-out (TD-006, TD-008; TD-010 resolved by ADR-035).
 
 ## Milestone 7 — Migration & Cutover
 Import and reconcile historical data from `07__July_2026_Report.xlsm` and

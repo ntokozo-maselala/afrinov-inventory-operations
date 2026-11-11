@@ -20,12 +20,30 @@ import { Alert } from './Alert';
 import { api, type ApiError } from '../api/client';
 import { QuantityInput } from './QuantityInput';
 import { useUnits } from '../hooks/useUnits';
+import { useApi } from '../hooks/useApi';
 import { parseQuantity, readQuantity } from '../lib/quantity';
 import { useStatusBands } from '../hooks/useStatusBands';
 import { PROJECTS_CATEGORY, STORES_CATEGORIES, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 
 export interface CreatedMaterial { id: string; sku: string; name: string }
+
+const FALLBACK_UNIT = 'each';
+
+/**
+ * The unit a new item starts on: inventory.defaultUnitOfMeasure, when it is a
+ * unit on the list. The server only saves a listed unit, but one taken out of
+ * use since, or a setting that can't be read, starts the item on each rather
+ * than on a unit the form can't offer. Read only for a new item.
+ */
+function useDefaultUnit(enabled: boolean, listed: ReadonlyArray<{ code: string }> | null): string {
+  const res = useApi<Record<string, unknown>>(enabled ? '/settings/values?keys=inventory.defaultUnitOfMeasure' : null);
+  const value = res.data?.['inventory.defaultUnitOfMeasure'];
+  if (typeof value !== 'string' || !value) return FALLBACK_UNIT;
+  // Until the list is in, the setting's own unit: the server checks it on save.
+  if (listed && !listed.some((u) => u.code === value)) return FALLBACK_UNIT;
+  return value;
+}
 
 /** A stored decimal ("12.5000") as the user would type it ("12.5"); blank when unset. */
 const asInput = (v: string | null | undefined) => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
@@ -53,7 +71,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
   const [sku, setSku] = useState(initial?.sku ?? '');
   const [name, setName] = useState(initial?.name ?? '');
   const [category, setCategory] = useState(initial && sectionOf(initial.category) === 'STORES' ? initial.category : startCategory ?? STORES_CATEGORIES[0]!.value);
-  const [unitOfMeasure, setUom] = useState(initial?.unitOfMeasure ?? 'each');
+  // The unit picked here, or the item's own; null on a new item until one is picked.
+  const [chosenUnit, setUom] = useState<string | null>(initial?.unitOfMeasure ?? null);
   const [description, setDescription] = useState(initial?.description ?? '');
   const [requiredStock, setRequiredStock] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
   const [unitCost, setUnitCost] = useState(asInput(initial?.unitCost));
@@ -65,6 +84,9 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
   const { units, kindOf, loading: unitsLoading, error: unitsError, reload: reloadUnits } = useUnits();
   // An item still on a unit from before the list keeps it until someone picks a listed one.
   const listed = (units ?? []).filter((u) => u.active && !u.needsReview);
+  // A new item starts on the unit set in Settings → Inventory, until someone picks another.
+  const defaultUnit = useDefaultUnit(!editing, units ? listed : null);
+  const unitOfMeasure = chosenUnit ?? defaultUnit;
   const legacyUnit = unitOfMeasure && units && !listed.some((u) => u.code === unitOfMeasure) ? unitOfMeasure : null;
   const projects = section === 'PROJECTS';
   const sectionFixed = editing || !!fixedBy;

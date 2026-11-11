@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react';
 import { useSettings, type SettingValue } from '../hooks/useSettings';
 import { setAppearance, useAppearance, type AppTheme } from '../hooks/useAppearance';
 import { useApi } from '../hooks/useApi';
+import { useUnits } from '../hooks/useUnits';
 import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField } from './Settings';
 import { useToast } from '../components/Toast';
 import { Alert } from '../components/Alert';
@@ -37,42 +38,23 @@ export function SettingsGeneral() {
   const toast = useToast();
   const items = useCategorySettings('general');
   const companyName = useSetting('general.companyName');
-  const systemDescription = useSetting('general.systemDescription');
   const defaultCurrency = useSetting('general.defaultCurrency');
-  const dateFormat = useSetting('general.dateFormat');
-  const timeFormat = useSetting('general.timeFormat');
   const defaultLandingPage = useSetting('general.defaultLandingPage');
-  const defaultPageSize = useSetting('general.defaultPageSize');
 
   if (items.length === 0) return <PanelSkeleton />;
 
   return (
-    <SectionPanel title="General" description="Company, locale, and default page-size used across the application.">
+    <SectionPanel title="General" description="The company name, the currency and where people start after signing in.">
       <TextField
         def={companyName}
         value={(draft['general.companyName'] as string) ?? ''}
         onChange={(v) => setDraft('general.companyName', v)}
         error={errors['general.companyName'] ?? null}
       />
-      <TextField
-        def={systemDescription}
-        value={(draft['general.systemDescription'] as string) ?? ''}
-        onChange={(v) => setDraft('general.systemDescription', v)}
-        error={errors['general.systemDescription'] ?? null}
-        multiline
-      />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <EnumField def={defaultCurrency} value={(draft['general.defaultCurrency'] as string) ?? ''} onChange={(v) => setDraft('general.defaultCurrency', v)} error={errors['general.defaultCurrency'] ?? null} />
-        <EnumField def={dateFormat} value={(draft['general.dateFormat'] as string) ?? ''} onChange={(v) => setDraft('general.dateFormat', v)} error={errors['general.dateFormat'] ?? null} />
-        <EnumField def={timeFormat} value={(draft['general.timeFormat'] as string) ?? ''} onChange={(v) => setDraft('general.timeFormat', v)} error={errors['general.timeFormat'] ?? null} />
         <EnumField def={landingPageDef(defaultLandingPage, draft['general.defaultLandingPage'])} value={(draft['general.defaultLandingPage'] as string) ?? ''} onChange={(v) => setDraft('general.defaultLandingPage', v)} error={errors['general.defaultLandingPage'] ?? null} />
       </div>
-      <NumberField
-        def={defaultPageSize}
-        value={Number(draft['general.defaultPageSize'] ?? 0)}
-        onChange={(v) => setDraft('general.defaultPageSize', v)}
-        error={errors['general.defaultPageSize'] ?? null}
-      />
       <SaveBar items={items} onSave={async () => {
         try {
           const r = await save();
@@ -102,6 +84,30 @@ function LocationSettingField({ def, value, onChange, error }: { def: SettingVal
         {options.map((l) => <option key={l.id} value={l.id}>{l.name}{l.active ? '' : ' (inactive)'}</option>)}
       </Select>
       {locations.error && <p className="field-error mt-1">The locations could not be loaded.</p>}
+      {error && <p role="alert" className="field-error mt-1">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The unit a new material starts on: one of the units in use, as on the item
+ * form; the server refuses any other. A saved unit taken out of use since
+ * still shows, so it can be changed.
+ */
+function UnitSettingField({ def, value, onChange, error }: { def: SettingValue; value: string; onChange: (v: string) => void; error?: string | null }) {
+  const { units, loading, error: unitsError } = useUnits();
+  const inUse = (units ?? []).filter((u) => u.active && !u.needsReview);
+  const saved = value && units && !inUse.some((u) => u.code === value) ? value : null;
+  return (
+    <div className="p-3 rounded border border-surface-200 bg-surface-0">
+      <label htmlFor={def.key} className="block text-sm font-medium text-surface-900">Unit for new materials</label>
+      <div className="text-xs text-surface-500 mt-0.5 mb-2">{def.description}</div>
+      <Select id={def.key} value={value} onChange={(e) => onChange(e.target.value)} disabled={loading || !units} invalid={!!error}>
+        {!units && <option value={value}>{value || (loading ? 'Loading…' : '—')}</option>}
+        {saved && <option value={saved}>{saved} (not in use)</option>}
+        {inUse.map((u) => <option key={u.code} value={u.code}>{u.label} ({u.code})</option>)}
+      </Select>
+      {unitsError && <p className="field-error mt-1">The units of measure could not be loaded.</p>}
       {error && <p role="alert" className="field-error mt-1">{error}</p>}
     </div>
   );
@@ -228,7 +234,7 @@ export function SettingsInventory() {
       {receiptImageKeepMonths && (
         <ImageRemovalWarning saved={Number(receiptImageKeepMonths.value ?? 24)} next={Number(draft['inventory.receiptImageKeepMonths'] ?? 24)} />
       )}
-      <TextField
+      <UnitSettingField
         def={defaultUnitOfMeasure}
         value={(draft['inventory.defaultUnitOfMeasure'] as string) ?? ''}
         onChange={(v) => setDraft('inventory.defaultUnitOfMeasure', v)}
@@ -434,38 +440,6 @@ export function SettingsProjects() {
         } catch (e) { const t = errorToast(e); toast.error(t.title, t.description); }
       }} saving={saving} />
     </SectionPanel>
-  );
-}
-
-// ── Notifications ─────────────────────────────────────────────────────
-// "Alert when purchase orders need approval or reach a new state"
-// (notifications.enablePurchaseOrderNotifications) is not shown: nothing sends
-// or shows those alerts yet, and approvers find their orders on the Dashboard.
-// Its key stays on the server, so it can come back with the alerts.
-export function SettingsNotifications() {
-  const { draft, setDraft, save, saving } = useSettings();
-  const toast = useToast();
-  const items = useCategorySettings('notifications');
-  const inApp = useSetting('notifications.enableInAppNotifications');
-  const lowStock = useSetting('notifications.enableLowStockNotifications');
-  if (items.length === 0) return <PanelSkeleton />;
-  return (
-    <>
-      <SectionPanel title="Notifications" description="Operational alerts. Disabling a category silences that alert type across the application.">
-        <BooleanField def={inApp} value={Boolean(draft['notifications.enableInAppNotifications'])} onChange={(v) => setDraft('notifications.enableInAppNotifications', v)} />
-        <BooleanField def={lowStock} value={Boolean(draft['notifications.enableLowStockNotifications'])} onChange={(v) => setDraft('notifications.enableLowStockNotifications', v)} />
-        <SaveBar items={items} onSave={async () => {
-          try {
-            const r = await save();
-            toast.success('Settings saved', `${r.updated} setting(s) updated.`);
-          } catch (e) { toast.error('Save failed', (e as ApiError).message); }
-        }} saving={saving} />
-      </SectionPanel>
-      <Alert tone="info" title="How notifications work">
-        Alerts are dispatched as in-app toasts and domain events. The current build does not include email or SMS delivery —
-        those channels would consume the same setting flags once added.
-      </Alert>
-    </>
   );
 }
 
@@ -776,18 +750,18 @@ export function SettingsSecurity() {
   const session = useSetting('security.sessionTimeoutMinutes');
   if (items.length === 0) return <PanelSkeleton />;
   return (
-    <SectionPanel title="Security" description="Session policy. Every administrative action is always recorded in the audit log. Sign-in is currently fixed at email + password; advanced controls are noted below.">
+    <SectionPanel title="Security" description="When a sign-in ends. Every administrative action is recorded in the audit log.">
       <NumberField
         def={session}
         value={Number(draft['security.sessionTimeoutMinutes'] ?? 0)}
         onChange={(v) => setDraft('security.sessionTimeoutMinutes', v)}
         error={errors['security.sessionTimeoutMinutes'] ?? null}
       />
-      <Alert tone="info" title="Notes">
-        The current authentication module supports email + password and a 12-hour JWT lifetime. Adjusting
-        the session timeout below is the only setting the existing backend can enforce; more granular controls
-        (account lockout, password complexity) are not yet wired and would require backend changes.
-        Accounts are created by an administrator under Settings → Users.
+      <Alert tone="info" title="How sign-in works">
+        People sign in with their email and password. The time without activity is checked by the server on every request,
+        so a screen left open on a shared computer is signed out even if the browser is closed, and a shorter time applies
+        at once to everyone signed in. There is no account lockout or password rule yet; accounts are created by an
+        administrator under Settings → Users.
       </Alert>
       <SaveBar items={items} onSave={async () => {
         try {

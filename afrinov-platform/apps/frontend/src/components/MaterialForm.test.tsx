@@ -1,8 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { mockPost } = vi.hoisted(() => ({ mockPost: vi.fn() }));
-vi.mock('../api/client', () => ({ api: { post: mockPost, get: vi.fn().mockResolvedValue({}) } }));
+const { mockPost, mockGet } = vi.hoisted(() => ({ mockPost: vi.fn(), mockGet: vi.fn() }));
+vi.mock('../api/client', () => ({
+  api: { post: mockPost, get: mockGet },
+  isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
+}));
+
+beforeEach(() => { mockGet.mockReset().mockResolvedValue({}); });
 
 const { MaterialForm } = await import('./MaterialForm');
 
@@ -47,5 +52,69 @@ describe('MaterialForm', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalled());
     expect(mockPost.mock.calls[0]![1]).toMatchObject({ category: 'CONSUMABLES', trackUse: true });
+  });
+
+  // Settings → Inventory: the unit a new material starts on.
+  describe('default unit of measure', () => {
+    const UNITS = [
+      { code: 'each', label: 'Each', kind: 'COUNTED', needsReview: false, active: true },
+      { code: 'm', label: 'Metre', kind: 'MEASURED', needsReview: false, active: true },
+      { code: 'kg', label: 'Kilogram', kind: 'MEASURED', needsReview: false, active: true },
+      { code: 'furlong', label: 'Furlong', kind: 'MEASURED', needsReview: false, active: false },
+    ];
+    function serve(defaultUnit: unknown) {
+      mockGet.mockReset().mockImplementation(async (path: string) => {
+        if (path === '/units-of-measure') return UNITS;
+        if (path === '/settings/values?keys=inventory.defaultUnitOfMeasure') {
+          if (defaultUnit instanceof Error) throw { code: 'SERVICE_UNAVAILABLE', message: 'down' };
+          return { 'inventory.defaultUnitOfMeasure': defaultUnit };
+        }
+        return {};
+      });
+    }
+    const uom = () => screen.getByLabelText('Unit of measure', { exact: false }) as HTMLSelectElement;
+
+    it('starts a new item on the unit set in Settings, and sends it', async () => {
+      serve('m');
+      mockPost.mockReset().mockResolvedValue({ id: 'm-9', sku: 'CAB-1', name: 'Cable' });
+      render(<MaterialForm onCancel={vi.fn()} onSaved={vi.fn()} onError={vi.fn()} />);
+      await waitFor(() => expect(uom().value).toBe('m'));
+      fill('SKU / item code', 'CAB-1');
+      fill('Item name', 'Cable 2.5mm');
+      fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+      await waitFor(() => expect(mockPost).toHaveBeenCalled());
+      expect(mockPost.mock.calls[0]![1]).toMatchObject({ unitOfMeasure: 'm' });
+    });
+
+    it('keeps the unit the person picks', async () => {
+      serve('m');
+      render(<MaterialForm onCancel={vi.fn()} onSaved={vi.fn()} onError={vi.fn()} />);
+      await waitFor(() => expect(uom().value).toBe('m'));
+      fireEvent.change(uom(), { target: { value: 'kg' } });
+      await waitFor(() => expect(uom().value).toBe('kg'));
+    });
+
+    it.each([
+      ['a unit no longer in use', 'furlong'],
+      ['a unit not on the list', 'bushel'],
+      ['no value', undefined],
+      ['a value that is not text', 42],
+      ['a setting it cannot read', new Error('down')],
+    ])('starts on each for %s', async (_label, value) => {
+      serve(value);
+      render(<MaterialForm onCancel={vi.fn()} onSaved={vi.fn()} onError={vi.fn()} />);
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/units-of-measure'));
+      await waitFor(() => expect(uom().querySelectorAll('option').length).toBeGreaterThan(1));
+      expect(uom().value).toBe('each');
+    });
+
+    it('keeps an item\'s own unit when editing, and does not read the setting', async () => {
+      serve('m');
+      const item = { id: 'm-1', sku: 'BOLT', name: 'Bolt', category: 'CONSUMABLES', unitOfMeasure: 'kg', requiredStock: '0', unitCost: null, description: null, serialNumber: null, trackUse: false };
+      render(<MaterialForm initial={item as never} onCancel={vi.fn()} onSaved={vi.fn()} onError={vi.fn()} />);
+      await waitFor(() => expect(mockGet).toHaveBeenCalledWith('/units-of-measure'));
+      expect(uom().value).toBe('kg');
+      expect(mockGet).not.toHaveBeenCalledWith('/settings/values?keys=inventory.defaultUnitOfMeasure');
+    });
   });
 });

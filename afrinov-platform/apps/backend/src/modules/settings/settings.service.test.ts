@@ -39,7 +39,17 @@ const db = {
   audit: [] as AuditRow[],
   // Locations a setting may name, by id.
   locations: new Map<string, { active: boolean }>(),
+  // Units of measure a setting may name, by code.
+  units: new Map<string, { code: string; kind: 'COUNTED' | 'MEASURED'; active: boolean }>([
+    ['each', { code: 'each', kind: 'COUNTED', active: true }],
+  ]),
 };
+
+/** Settings that nothing read, retired on 11 Nov 2026 (migration 20260101000054). */
+const RETIRED_UNREAD = [
+  'general.systemDescription', 'general.dateFormat', 'general.timeFormat', 'general.defaultPageSize',
+  'notifications.enableInAppNotifications', 'notifications.enableLowStockNotifications', 'notifications.enablePurchaseOrderNotifications',
+];
 let auditCounter = 0;
 function nextAuditId(): string { auditCounter += 1; return `audit-${auditCounter}`; }
 
@@ -51,6 +61,9 @@ function makePrisma(): unknown {
   return {
     location: {
       findUnique: async ({ where }: { where: { id: string } }) => db.locations.get(where.id) ?? null,
+    },
+    unitOfMeasure: {
+      findUnique: async ({ where }: { where: { code: string } }) => db.units.get(where.code) ?? null,
     },
     setting: {
       findUnique: async ({ where }: { where: { key: string } }) => db.settings.get(where.key) ?? null,
@@ -237,16 +250,72 @@ describe('SettingsService', () => {
     await expect(SettingsService.set('inventory.projectReceivingLocationId', '', 'u-1')).resolves.toBeDefined();
   });
 
-  it('rejects non-numeric defaultPageSize', async () => {
+  it('rejects a non-numeric whole-number setting', async () => {
     const { SettingsService } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();
-    await expect(SettingsService.set('general.defaultPageSize', 'not-a-number', 'u-1')).rejects.toThrow(/number/i);
+    await expect(SettingsService.set('inventory.toolOverdueDays', 'not-a-number', 'u-1')).rejects.toThrow(/number/i);
   });
 
-  it('rejects out-of-range page size', async () => {
+  it('rejects an out-of-range whole-number setting', async () => {
     const { SettingsService } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();
-    await expect(SettingsService.set('general.defaultPageSize', 9999, 'u-1')).rejects.toThrow(/between/i);
+    await expect(SettingsService.set('inventory.toolOverdueDays', 9999, 'u-1')).rejects.toThrow(/between/i);
+  });
+
+  // Settings that do nothing (requirements gap, 11 Nov 2026): each setting on
+  // the page has an effect, or it isn't there. These had none and were retired.
+  it('offers no setting that nothing reads', async () => {
+    const { SETTING_CATALOG } = await import('./settings.service.js');
+    const keys = SETTING_CATALOG.map((d) => d.key);
+    for (const retired of RETIRED_UNREAD) expect(keys).not.toContain(retired);
+    expect(SETTING_CATALOG.some((d) => d.category === 'notifications')).toBe(false);
+  });
+
+  it('says what the session timeout does, 12-hour limit included', async () => {
+    const { getDefinition } = await import('./settings.service.js');
+    const def = getDefinition('security.sessionTimeoutMinutes')!;
+    expect(def.default).toBe(60);
+    expect(def.description).toMatch(/without activity/i);
+    expect(def.description).toMatch(/12 hours/);
+  });
+
+  // The unit a new material starts on: one on the list, never free text.
+  describe('default unit of measure', () => {
+    beforeEach(() => {
+      db.units.clear();
+      db.units.set('each', { code: 'each', kind: 'COUNTED', active: true });
+      db.units.set('m', { code: 'm', kind: 'MEASURED', active: true });
+      db.units.set('furlong', { code: 'furlong', kind: 'MEASURED', active: false });
+    });
+
+    it('defaults to each', async () => {
+      const { SettingsService } = await import('./settings.service.js');
+      expect(await SettingsService.getValue('inventory.defaultUnitOfMeasure')).toBe('each');
+    });
+
+    it('takes a unit on the list, stored under its listed code', async () => {
+      const { SettingsService } = await import('./settings.service.js');
+      await SettingsService.ensureSeeded();
+      expect((await SettingsService.set('inventory.defaultUnitOfMeasure', 'm', 'u-1')).value).toBe('m');
+      // Any spelling of a listed unit is kept as its code, as on an item.
+      expect((await SettingsService.set('inventory.defaultUnitOfMeasure', ' EA ', 'u-1')).value).toBe('each');
+      const audit = db.audit.filter((a) => a.entityId === 'inventory.defaultUnitOfMeasure');
+      expect((audit.at(-1)!.after as { value: string }).value).toBe('each');
+    });
+
+    it('refuses a unit not on the list, or no longer in use, through either write', async () => {
+      const { SettingsService } = await import('./settings.service.js');
+      await SettingsService.ensureSeeded();
+      await expect(SettingsService.set('inventory.defaultUnitOfMeasure', 'bushel', 'u-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(SettingsService.set('inventory.defaultUnitOfMeasure', 'furlong', 'u-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      await expect(SettingsService.setMany({ 'inventory.defaultUnitOfMeasure': 'bushel' }, 'u-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(db.settings.get('inventory.defaultUnitOfMeasure')?.value).toBe('each');
+    });
+
+    it('says it is the unit a new material starts on', async () => {
+      const { getDefinition } = await import('./settings.service.js');
+      expect(getDefinition('inventory.defaultUnitOfMeasure')!.description).toMatch(/new material/i);
+    });
   });
 
   it('rejects an unsupported enum value', async () => {
@@ -297,7 +366,7 @@ describe('SettingsService', () => {
     await SettingsService.ensureSeeded();
     await expect(SettingsService.setMany({
       'general.companyName': 'OK',
-      'general.defaultPageSize': -1,
+      'inventory.toolOverdueDays': -1,
     }, 'u-1')).rejects.toThrow();
     // company name must still be the seeded default because the txn rolled back
     expect(db.settings.get('general.companyName')?.value).toBe('Afrinov');
@@ -359,7 +428,7 @@ describe('SettingsService', () => {
     it('accepts number written as string', async () => {
       const { SettingsService } = await import('./settings.service.js');
       await SettingsService.ensureSeeded();
-      const result = await SettingsService.set('general.defaultPageSize', '50', 'u-1');
+      const result = await SettingsService.set('inventory.toolOverdueDays', '50', 'u-1');
       expect(result.value).toBe(50);
     });
 

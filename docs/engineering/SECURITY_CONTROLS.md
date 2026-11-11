@@ -25,8 +25,15 @@ environment outside this repository. These are listed as open items in
 
 ## Controls confirmed in place
 
-- **Authentication.** JWT HS256, 12-hour expiry, verified with an algorithm
-  allowlist (`algorithms: ['HS256']`). Passwords are bcrypt-hashed at cost 12.
+- **Authentication.** JWT HS256, verified with an algorithm allowlist
+  (`algorithms: ['HS256']`). Passwords are bcrypt-hashed at cost 12.
+- **Idle sign-out (ADR-035).** A token lasts the idle time in
+  `security.sessionTimeoutMinutes` and is renewed by `POST /auth/refresh` while
+  the person is active; a sign-in ends 12 hours after it began (`auth_time`).
+  Every authenticated request refuses a token older than the idle time in force
+  now, so a shorter setting applies at once. Rules in
+  `src/modules/identity/session-policy.ts`, tested in `session-policy.test.ts`
+  and `auth.routes.test.ts`.
 - **Revocation.** Every authenticated request re-reads the account's active
   flag from the database (`isActiveInDb`), so deactivation takes effect
   immediately rather than at token expiry.

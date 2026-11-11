@@ -55,7 +55,6 @@ interface SettingsContextValue {
   preferences: {
     theme: 'system' | 'light' | 'dark';
     density: 'comfortable' | 'compact';
-    enableInAppNotifications: boolean;
   };
 }
 
@@ -76,7 +75,7 @@ function validate(def: SettingValue, raw: unknown): string | null {
     case 'string': {
       if (typeof raw !== 'string') return 'Must be text.';
       const v = raw.trim();
-      const max = def.key === 'general.companyName' ? 120 : def.key === 'general.systemDescription' ? 500 : def.key === 'inventory.defaultUnitOfMeasure' ? 20 : 500;
+      const max = def.key === 'general.companyName' ? 120 : def.key === 'inventory.defaultUnitOfMeasure' ? 20 : 500;
       if (def.key === 'general.companyName' && v.length < 1) return 'Company name is required.';
       if (v.length > max) return `Must be at most ${max} characters.`;
       return null;
@@ -91,9 +90,8 @@ function validate(def: SettingValue, raw: unknown): string | null {
       // Proof of receipt (ADR-034), as the server allows.
       if (def.key === 'inventory.receiptPinTries' && (n < 3 || n > 10)) return 'Must be between 3 and 10.';
       if (def.key === 'inventory.receiptImageKeepMonths' && n !== 0 && (n < 24 || n > 240)) return 'Must be 0 (always) or between 24 and 240 months.';
-      const min = def.key === 'general.defaultPageSize' ? 5 : 0;
-      const max = def.key === 'general.defaultPageSize' ? 200
-        : def.key === 'inventory.urgentBelowPercent' ? 100
+      const min = def.key === 'security.sessionTimeoutMinutes' ? 5 : 0;
+      const max = def.key === 'inventory.urgentBelowPercent' ? 100
         : def.key === 'inventory.warningBelowPercent' ? 1000
         : def.key === 'security.sessionTimeoutMinutes' ? 720
         : def.key === 'purchaseOrders.directorApprovalFrom' ? 1_000_000_000_000 : 1_000_000;
@@ -252,7 +250,6 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
   const preferences = useMemo(() => ({
     theme: appearance.theme,
     density: (settings['appearance.density']?.value as 'comfortable' | 'compact') ?? 'comfortable',
-    enableInAppNotifications: asBool(settings['notifications.enableInAppNotifications']?.value ?? true),
   }), [appearance.theme, settings]);
 
   const value: SettingsContextValue = {
