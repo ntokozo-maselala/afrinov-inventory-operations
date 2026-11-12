@@ -36,10 +36,18 @@ Notes on the table, against the original proposal:
   withdrawing that mark as `reverse:inventory_transaction` (ADR-026).
 - A tool loan due date more than `inventory.toolMaxLoanDays` after check-out
   needs `manage:settings` (ADMIN), on check-out and on extension.
-- Reads of materials, locations, racks, projects, recipients, suppliers,
-  settings and the inventory ledger need authentication only, not a
-  permission (TD-014). Reports need `view:reports`, which every role has.
-- `POST /stock-items` needs both `create:material` and `receive:inventory`.
+- Reads of materials, locations, racks, projects, recipients, suppliers and
+  settings need authentication only, not a permission (TD-014). Reports need
+  `view:reports`, which every role has; so do the ledger (Movements, its
+  summary and export), the tool list and a loan's history (system audit F6).
+  Write-offs by the person responsible also need `adjust:inventory` or
+  `approve:write_off`.
+- Setting an item's unit cost needs `edit:unit_cost` (Admin, Procurement), and
+  a change needs a reason (system audit C1, C3).
+- Completing, cancelling or archiving a project, or changing its manager,
+  needs `close:project` (Admin) or being its manager (system audit E3).
+- `POST /stock-items` and `POST /purchase-orders/:id/receive` are retired and
+  refuse every request (system audit D3).
 - Approvers cannot reject an order (no reject transition; they lack
   `cancel:purchase_order`) — see ADR-007.
 

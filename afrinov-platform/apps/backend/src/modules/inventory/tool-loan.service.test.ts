@@ -94,6 +94,8 @@ const client = {
       for (const r of db.ledger.filter((x) => matches(x, where))) sums.set(r.referenceId!, (sums.get(r.referenceId!) ?? D(0)).plus(r.quantity));
       return [...sums].map(([referenceId, quantity]) => ({ referenceId, _sum: { quantity } }));
     },
+    // What the same person wrote off of the item in 7 days (system audit C2): nothing here.
+    aggregate: async () => ({ _sum: { quantity: null } }),
   },
   toolLoanExtension: {
     create: async ({ data }: { data: Omit<Extension, 'id' | 'createdAt'> }) => {
@@ -106,8 +108,8 @@ const client = {
   adjustmentRequest: {
     create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, status: 'PENDING', ...data }; db.requests.push(row); return row; },
     // Lost tools waiting for their write-off, by loan.
-    findMany: async ({ where }: { where: { referenceId: { in: string[] } } }) => db.requests
-      .filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && where.referenceId.in.includes(r.referenceId as string))
+    findMany: async ({ where }: { where: { referenceId?: { in: string[] } } }) => !where.referenceId ? [] : db.requests
+      .filter((r) => r.status === 'PENDING' && r.referenceType === 'ToolLoan' && where.referenceId!.in.includes(r.referenceId as string))
       .map((r) => ({ referenceId: r.referenceId, quantity: r.quantity })),
   },
 };

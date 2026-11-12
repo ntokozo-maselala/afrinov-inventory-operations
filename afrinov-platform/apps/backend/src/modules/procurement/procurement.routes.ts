@@ -124,11 +124,6 @@ export const listPOQuerySchema = z.object({
   awaitingMyApproval: z.enum(['true', 'false']).optional(),
 });
 
-export const receiveSchema = z.object({
-  locationId: z.uuid(),
-  deliveryNotes: z.string().max(2000).optional(),
-});
-
 export const confirmDeliverySchema = z.object({
   // Kept to 4 decimal places, as the order line keeps it, so what is recorded is what is credited.
   lines: z.array(z.object({ lineId: z.uuid(), quantity: z.number().positive().max(1e9).refine(fourDecimals, 'At most 4 decimal places') })).min(1).max(500),
@@ -396,18 +391,13 @@ export async function procurementRoutes(app: FastifyInstance): Promise<void> {
     return PurchaseOrderService.approve(id, actorId(req));
   });
 
-  app.post('/purchase-orders/:id/receive', { preHandler: [app.authenticate] }, async (req, reply) => {
+  app.post('/purchase-orders/:id/receive', { preHandler: [app.authenticate] }, async (req) => {
     await requirePermission(req, PermissionCode.ReceivePurchaseOrder);
     const id = (req.params as { id: string }).id;
     // A Stores order by the store, a project order by those who receive orders into the store.
     await requireReceiveOrder(req, id);
-    const parsed = receiveSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid receive payload', details: parsed.error.flatten() },
-      });
-    }
-    return PurchaseOrderService.receive({ id, ...parsed.data }, actorId(req));
+    // Retired (system audit D3): every delivery is received on Receive stock.
+    return PurchaseOrderService.receive({ id }, actorId(req));
   });
 
   // Retired: project material comes through the store, so a project order's

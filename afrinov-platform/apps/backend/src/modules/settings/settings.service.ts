@@ -222,7 +222,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.urgentBelowPercent', type: 'number', category: 'inventory', description: 'An item is URGENT when its stock on hand is below this percentage of its Required Stock.', default: 20, validate: NON_NEG(100) },
   { key: 'inventory.warningBelowPercent', type: 'number', category: 'inventory', description: 'An item is WARNING when its stock on hand is below this percentage of its Required Stock (and not URGENT). At or above it, the item is OK.', default: 40, validate: NON_NEG(1000) },
   // Segregation of duties: a big write-off is never one person's say-so.
-  { key: 'inventory.requireWriteOffApproval', type: 'boolean', category: 'inventory', description: 'When on, adjustments and write-offs worth more than the limit below wait for someone other than whoever asked for them to approve them. When off, every adjustment posts at once.', default: true },
+  { key: 'inventory.requireWriteOffApproval', type: 'boolean', category: 'inventory', description: 'When on, adjustments and write-offs worth more than the limit below, or with no unit cost, wait for someone other than whoever asked for them to approve them. Switching it off removes that second person: every write-off posts at once, whatever its value. Switching it off asks for a reason.', default: true },
   { key: 'inventory.writeOffApprovalAbove', type: 'number', category: 'inventory', description: "Adjustments and write-offs worth more than this, in rand at the item's unit cost, wait for someone else to approve them before stock moves. An item with no unit cost always waits. 0: every adjustment waits.", default: 1000, validate: NON_NEG(1_000_000) },
   // A unit on the list (resolveReference), as an item's own unit is.
   { key: 'inventory.defaultUnitOfMeasure', type: 'string', category: 'inventory', description: 'The unit a new material starts on. It can be changed on each material.', default: 'each', validate: isLength(1, 20) },
@@ -240,7 +240,7 @@ export const SETTING_CATALOG: readonly SettingDefinition[] = [
   { key: 'inventory.enableStockAlerts', type: 'boolean', category: 'inventory', description: 'Show stock status (URGENT, WARNING, OK) and list items that need re-ordering.', default: true },
 
   // ── Purchase Orders ─────────────────────────────────────────────────────
-  { key: 'purchaseOrders.requireApprovalBeforeProcessing', type: 'boolean', category: 'purchase_orders', description: 'When on, submitting a purchase order moves it to PENDING_APPROVAL; when off, submission auto-approves.', default: true },
+  { key: 'purchaseOrders.requireApprovalBeforeProcessing', type: 'boolean', category: 'purchase_orders', description: 'When on, a submitted purchase order waits for its signatures. Switching it off removes them: submitting an order approves it in the name of whoever submitted it, whatever its value. Switching it off asks for a reason.', default: true },
   // Who signs an order goes by its value in rand excluding VAT (po-approval.ts).
   { key: 'purchaseOrders.directorApprovalFrom', type: 'number', category: 'purchase_orders', description: 'From this value, in rand excluding VAT, a project order needs the Director as well as the Procurement Manager.', default: 200000, validate: NON_NEG(1e12) },
   // An order locks the rate when submitted. 0: not set, so an order in that currency can't be submitted.
@@ -351,6 +351,25 @@ function rowToValue(row: {
   };
 }
 
+/**
+ * The two settings that remove the second person (system audit C9, ADR-039):
+ * switching either off needs a reason, kept in Activity, and the Dashboard
+ * tells Admins while it is off.
+ */
+export const TWO_PERSON_SETTINGS = ['inventory.requireWriteOffApproval', 'purchaseOrders.requireApprovalBeforeProcessing'] as const;
+export const SWITCH_OFF_REASON = 'Say why: switching this off removes the second person who checks.';
+
+/** The reason to keep, when this change switches a two-person check off; refused without one. */
+function switchOffReason(key: string, before: unknown, after: unknown, reason: string | undefined): string | null {
+  if (!(TWO_PERSON_SETTINGS as readonly string[]).includes(key) || after !== false || before === false) return null;
+  const why = reason?.trim();
+  if (!why) throw Errors.validation(SWITCH_OFF_REASON, { fieldErrors: { reason: [SWITCH_OFF_REASON] } });
+  return why;
+}
+
+/** What resetting a section would change: only settings not already at their default. */
+export interface ResetChange { key: string; description: string; from: unknown; to: unknown }
+
 export const SettingsService = {
   /**
    * Idempotent: ensures every catalog key has a row, and deletes rows for
@@ -406,13 +425,14 @@ export const SettingsService = {
     return rowToValue(row);
   },
 
-  async set(key: string, rawValue: unknown, actorId: string): Promise<SettingValue> {
+  async set(key: string, rawValue: unknown, actorId: string, reason?: string): Promise<SettingValue> {
     const def = getDefinition(key);
     if (!def) throw Errors.notFound('Setting');
     if (def.isEditable === false) throw Errors.forbidden(`Setting "${key}" is not editable`);
     const coerced = await resolveReference(key, coerceAndValidate(def, rawValue), prisma);
     const before = await prisma.setting.findUnique({ where: { key } });
     if (!before) throw Errors.notFound('Setting');
+    const why = switchOffReason(key, before.value, coerced, reason);
     // The setting row and its audit record commit together, so a configuration
     // change can never be recorded without the history entry that explains it.
     const updated = await prisma.$transaction(async (tx) => {
@@ -427,7 +447,7 @@ export const SettingsService = {
           entityType: 'Setting',
           entityId: key,
           before: { value: before.value as Prisma.InputJsonValue },
-          after: { value: setting.value as Prisma.InputJsonValue },
+          after: { value: setting.value as Prisma.InputJsonValue, ...(why ? { reason: why } : {}) },
         },
       });
       return setting;
@@ -436,7 +456,7 @@ export const SettingsService = {
     return rowToValue(updated);
   },
 
-  async setMany(updates: Record<string, unknown>, actorId: string): Promise<SettingValue[]> {
+  async setMany(updates: Record<string, unknown>, actorId: string, reason?: string): Promise<SettingValue[]> {
     if (Object.keys(updates).length === 0) return [];
     const out: SettingValue[] = [];
     await prisma.$transaction(async (tx) => {
@@ -447,6 +467,7 @@ export const SettingsService = {
         const coerced = await resolveReference(key, coerceAndValidate(def, raw), tx);
         const before = await tx.setting.findUnique({ where: { key } });
         if (!before) throw Errors.notFound(`Setting: ${key}`);
+        const why = switchOffReason(key, before.value, coerced, reason);
         const updated = await tx.setting.update({
           where: { key },
           data: { value: coerced as Prisma.InputJsonValue, updatedById: actorId },
@@ -458,7 +479,7 @@ export const SettingsService = {
             entityType: 'Setting',
             entityId: key,
             before: { value: before.value as Prisma.InputJsonValue },
-            after: { value: updated.value as Prisma.InputJsonValue },
+            after: { value: updated.value as Prisma.InputJsonValue, ...(why ? { reason: why } : {}) },
           },
         });
         out.push(rowToValue(updated));
@@ -468,12 +489,33 @@ export const SettingsService = {
     return out;
   },
 
-  async resetDefaults(actorId: string): Promise<SettingValue[]> {
+  /**
+   * What resetting one section would change (system audit C10): each editable
+   * setting in it that isn't at its default now, with its value and the default.
+   */
+  async resetPreview(category: SettingCategoryLiteral): Promise<ResetChange[]> {
+    const defs = SETTING_CATALOG.filter((d) => d.category === category && d.isEditable !== false);
+    if (defs.length === 0) throw Errors.notFound('Settings section');
+    const rows = await prisma.setting.findMany({ where: { key: { in: defs.map((d) => d.key) } } });
+    const now = new Map(rows.map((r) => [r.key, r.value]));
+    return defs
+      .filter((d) => JSON.stringify(now.get(d.key) ?? null) !== JSON.stringify(d.default))
+      .map((d) => ({ key: d.key, description: d.description, from: now.get(d.key) ?? null, to: d.default }));
+  },
+
+  /**
+   * Returns one section to its defaults (system audit C10), never every
+   * setting at once. Only the settings not at their default are written, each
+   * logged. A two-person check reset off needs a reason, as switching it off does.
+   */
+  async resetDefaults(actorId: string, category: SettingCategoryLiteral, reason?: string): Promise<SettingValue[]> {
+    const changes = await this.resetPreview(category);
     const out: SettingValue[] = [];
     await prisma.$transaction(async (tx) => {
-      for (const def of SETTING_CATALOG) {
-        if (def.isEditable === false) continue;
+      for (const change of changes) {
+        const def = getDefinition(change.key)!;
         const before = await tx.setting.findUnique({ where: { key: def.key } });
+        const why = switchOffReason(def.key, before?.value, def.default, reason);
         const updated = await tx.setting.update({
           where: { key: def.key },
           data: { value: def.default as Prisma.InputJsonValue, updatedById: actorId },
@@ -485,7 +527,7 @@ export const SettingsService = {
             entityType: 'Setting',
             entityId: def.key,
             before: before ? { value: before.value as Prisma.InputJsonValue } : Prisma.JsonNull,
-            after: { value: updated.value as Prisma.InputJsonValue, reset: true },
+            after: { value: updated.value as Prisma.InputJsonValue, reset: true, section: category, ...(why ? { reason: why } : {}) },
           },
         });
         out.push(rowToValue(updated));

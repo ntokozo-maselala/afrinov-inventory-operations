@@ -5,6 +5,7 @@ import { loadUserPermissions } from '../../shared/authorization.js';
 import { Errors } from '../../shared/errors.js';
 import { issueSessionToken } from './session.js';
 import { authTimeOf } from './session-policy.js';
+import { recordSignIn } from './sign-in-log.js';
 
 export const loginSchema = z.object({
   email: z.email(),
@@ -27,7 +28,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         error: { code: 'VALIDATION_ERROR', message: 'Invalid login payload', details: parsed.error.flatten() },
       });
     }
-    const user = await AuthService.login(parsed.data.email, parsed.data.password);
+    const user = await AuthService.login(parsed.data.email, parsed.data.password, {
+      ip: req.ip, userAgent: req.headers['user-agent'] ?? null,
+      onLogError: (err) => req.log.warn({ err: err.message }, 'Sign-in log write failed'),
+    });
     // A new sign-in always has its 12 hours ahead of it.
     const token = await issueSessionToken(app, user);
     if (!token) throw new Error('A new sign-in was refused a token');
@@ -46,6 +50,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const token = await issueSessionToken(app, user, authTime);
     if (!token) throw Errors.unauthenticated('Your sign-in has ended. Sign in again.');
     return reply.send({ token, user });
+  });
+
+  // The person signs out (system audit F3): written on the sign-in log. The
+  // token itself runs out on its own; the screen forgets it.
+  app.post('/auth/logout', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { sub, email } = req.user as { sub: string; email: string };
+    await recordSignIn({ userId: sub, email, outcome: 'SIGN_OUT', ip: req.ip, userAgent: req.headers['user-agent'] ?? null },
+      (err) => req.log.warn({ err: err.message }, 'Sign-in log write failed'));
+    return reply.code(204).send();
   });
 
   app.get('/auth/me', { preHandler: [app.authenticate] }, async (req) => {

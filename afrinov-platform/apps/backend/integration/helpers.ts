@@ -129,3 +129,18 @@ export async function letAdminSign(api: ReturnType<typeof client>): Promise<void
   const updated = await api('PATCH', `/users/${admin.id}`, { roleNames: ['ADMIN', 'PROCUREMENT_MANAGER'] });
   if (updated.status !== 200) throw new Error(`Could not give the admin a signing role: ${updated.status}`);
 }
+
+/**
+ * Receives everything an order still owes on Receive stock, in one posted
+ * goods receipt, as the store books a delivery. The receive-all route this
+ * replaces is retired (system audit D3). Returns the response to the receipt.
+ */
+export async function receiveOutstanding(
+  call: ReturnType<typeof client>, orderId: string, locationId: string,
+): Promise<ApiResponse<{ id: string; status: string; error?: { code: string; message: string } }>> {
+  const order = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: orderId }, include: { lines: true } });
+  const lines = order.lines
+    .filter((l) => l.orderedQty.gt(l.receivedQty))
+    .map((l) => ({ materialId: l.materialId, locationId, quantity: Number(l.orderedQty.minus(l.receivedQty)), purchaseOrderLineId: l.id }));
+  return call('POST', '/goods-receipts', { purchaseOrderId: orderId, supplierId: order.supplierId, deliveryRef: `DN-${orderId.slice(0, 8)}`, lines, post: true });
+}

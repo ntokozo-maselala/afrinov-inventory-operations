@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const { mockPost, mockGet } = vi.hoisted(() => ({ mockPost: vi.fn(), mockGet: vi.fn() }));
+// Signed in as an Admin, who sets unit costs too (system audit C1).
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: 'u-1', roles: ['ADMIN'] } }) }));
+
 vi.mock('../api/client', () => ({
   api: { post: mockPost, get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,

@@ -43,8 +43,16 @@ interface SettingsContextValue {
 
   // Persistence
   save: () => Promise<{ updated: number }>;
-  resetAll: () => Promise<{ updated: number }>;
+  /** One section back to its defaults, after its preview (system audit C10). */
+  resetSection: (category: SettingCategory) => Promise<{ updated: number }>;
   saving: boolean;
+  /**
+   * The two-person checks the draft switches off, and why (system audit C9):
+   * the server refuses switching either off without a reason.
+   */
+  switchingOff: string[];
+  switchOffReason: string;
+  setSwitchOffReason: (reason: string) => void;
   resetting: boolean;
 
   // Validation: a key→error string map for invalid draft values.
@@ -119,6 +127,7 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
   const [draft, setDraftState] = useState<DraftMap>({});
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [switchOffReason, setSwitchOffReason] = useState('');
   const savedRef = useRef<SettingMap>({});
 
   // eslint-disable react-hooks/set-state-in-effect
@@ -208,9 +217,14 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
       updates[key] = coerceForApi(def, draft[key]);
     }
     if (Object.keys(updates).length === 0) return { updated: 0 };
+    const offNow = switchingOffKeys(savedRef.current, updates);
+    if (offNow.length > 0 && !switchOffReason.trim()) {
+      throw { code: 'VALIDATION_ERROR', message: SWITCH_OFF_REASON } as ApiError;
+    }
     setSaving(true);
     try {
-      const updated = await api.patch<SettingValue[]>('/settings', { updates });
+      const updated = await api.patch<SettingValue[]>('/settings', { updates, ...(offNow.length > 0 ? { reason: switchOffReason.trim() } : {}) });
+      setSwitchOffReason('');
       const map: SettingMap = {};
       for (const r of updated) map[r.key] = r;
       // Re-merge with the existing rows for keys we didn't update.
@@ -224,13 +238,13 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
     } finally {
       setSaving(false);
     }
-  }, [all, canEdit, draft]);
+  }, [all, canEdit, draft, switchOffReason]);
 
-  const resetAll = useCallback(async (): Promise<{ updated: number }> => {
+  const resetSection = useCallback(async (category: SettingCategory): Promise<{ updated: number }> => {
     if (!canEdit) throw { code: 'FORBIDDEN', message: 'You do not have permission to reset settings.' } as ApiError;
     setResetting(true);
     try {
-      const updated = await api.post<SettingValue[]>('/settings/reset');
+      const updated = await api.post<SettingValue[]>('/settings/reset', { category });
       const map: SettingMap = {};
       for (const r of updated) map[r.key] = r;
       const merged: SettingValue[] = all.map((r) => map[r.key] ?? r);
@@ -245,6 +259,14 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
     }
   }, [all, canEdit]);
 
+  const switchingOff = useMemo(() => {
+    const changed: Record<string, unknown> = {};
+    // eslint-disable-next-line react-hooks/refs
+    for (const k of Object.keys(draft)) if (savedRef.current[k] && !valuesEqual(savedRef.current[k]!.value, draft[k])) changed[k] = draft[k];
+    // eslint-disable-next-line react-hooks/refs
+    return switchingOffKeys(savedRef.current, changed);
+  }, [draft]);
+
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   const preferences = useMemo(() => ({
@@ -255,7 +277,8 @@ export function SettingsProvider({ children, canEdit }: { children: ReactNode; c
   const value: SettingsContextValue = {
     loading, error, reload, settings,
     draft, setDraft, resetDraft, dirty,
-    save, resetAll, saving, resetting,
+    save, resetSection, saving, resetting,
+    switchingOff, switchOffReason, setSwitchOffReason,
     errors,
     preferences,
   };
@@ -266,6 +289,15 @@ export function useSettings(): SettingsContextValue {
   const ctx = useContext(SettingsContext);
   if (!ctx) throw new Error('useSettings must be used within a SettingsProvider');
   return ctx;
+}
+
+/** The two settings that remove the second person (system audit C9), as the server lists them. */
+export const SWITCH_OFF_REASON = 'Say why: switching this off removes the second person who checks.';
+export const TWO_PERSON_SETTINGS = ['inventory.requireWriteOffApproval', 'purchaseOrders.requireApprovalBeforeProcessing'];
+
+/** Which of them these changes switch off: on (or unset) now, off after. */
+export function switchingOffKeys(saved: SettingMap, changes: Record<string, unknown>): string[] {
+  return TWO_PERSON_SETTINGS.filter((k) => k in changes && changes[k] === false && saved[k]?.value !== false);
 }
 
 function buildInitialDraft(rows: SettingValue[]): DraftMap {

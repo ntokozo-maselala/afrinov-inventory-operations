@@ -37,11 +37,11 @@ enum ApprovalStep {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  name          String
-  passwordHash  String   @map("password_hash")
-  active        Boolean  @default(true)
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  name               String
+  passwordHash       String    @map("password_hash")
+  active             Boolean   @default(true)
   // Set when an Admin gives a temporary password (ADR-036): until the person
   // chooses their own, they can do nothing else.
   mustChangePassword Boolean   @default(false) @map("must_change_password")
@@ -50,9 +50,9 @@ model User {
   passwordChangedAt  DateTime? @map("password_changed_at")
   // No longer read: who signs an order goes by role and the order's value. Kept
   // so older records keep their history.
-  approvalLimit Decimal? @map("approval_limit") @db.Decimal(18, 2)
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  approvalLimit      Decimal?  @map("approval_limit") @db.Decimal(18, 2)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   roles                   UserRole[]
   settingsUpdated         Setting[]                @relation("SettingUpdatedBy")
@@ -84,6 +84,10 @@ model User {
   createdProjectSchedules ProjectSchedule[]        @relation("ProjectScheduleCreatedBy")
   assignedProjectSteps    ProjectStep[]            @relation("ProjectStepAssignee")
   capturedReceipts        ReceiptConfirmation[]    @relation("ReceiptCapturedBy")
+  costChanges             MaterialCostChange[]
+  signIns                 SignInEvent[]
+  // The recipient this person is at the counter, when they are one (system audit F5).
+  recipient               Recipient?
 
   @@map("users")
 }
@@ -197,6 +201,7 @@ model Material {
   rfqLines              RfqLine[]
   adjustmentRequests    AdjustmentRequest[]
   statusChanges         MaterialStatusChange[]
+  costChanges           MaterialCostChange[]
   project               Project?               @relation(fields: [projectNumber], references: [projectNumber])
   unit                  UnitOfMeasure          @relation(fields: [unitOfMeasure], references: [code])
 
@@ -397,21 +402,25 @@ enum RecipientType {
 // Names are unique ignoring case (index in migration 20260101000005).
 // Deactivate instead of deleting, so issue history keeps its recipient.
 model Recipient {
-  id        String        @id @default(uuid())
-  name      String
-  type      RecipientType
-  notes     String?
-  active    Boolean       @default(true)
-  createdAt DateTime      @default(now()) @map("created_at")
-  updatedAt DateTime      @updatedAt @map("updated_at")
+  id             String        @id @default(uuid())
+  name           String
+  type           RecipientType
+  notes          String?
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
   // Counter PIN (ADR-034): workers and contractors confirm what they take with
   // it. Only the bcrypt hash is kept, and it never leaves the server. Wrong
   // tries count up to inventory.receiptPinTries, then the PIN locks until a
   // store controller unlocks it.
-  pinHash        String?   @map("pin_hash")
-  pinSetAt       DateTime? @map("pin_set_at")
-  pinFailedTries Int       @default(0) @map("pin_failed_tries")
-  pinLockedAt    DateTime? @map("pin_locked_at")
+  pinHash        String?       @map("pin_hash")
+  pinSetAt       DateTime?     @map("pin_set_at")
+  pinFailedTries Int           @default(0) @map("pin_failed_tries")
+  pinLockedAt    DateTime?     @map("pin_locked_at")
+  // The user account of this person, when they have one, so a slip they issue
+  // to themselves is seen (system audit F5). One account per recipient.
+  userId         String?       @unique @map("user_id")
+  user           User?         @relation(fields: [userId], references: [id])
 
   inventoryTransactions InventoryTransaction[]
   adjustmentRequests    AdjustmentRequest[]
@@ -1341,4 +1350,43 @@ model BackupRun {
 
   @@index([kind, finishedAt])
   @@map("backup_runs")
+}
+
+// A change of an item's unit cost, with why (system audit C3, ADR-039). Unit
+// cost values stock and decides whether a write-off needs someone else's
+// approval, so each change is kept and shown on the item.
+model MaterialCostChange {
+  id         String   @id @default(uuid())
+  materialId String   @map("material_id")
+  before     Decimal? @db.Decimal(18, 4)
+  after      Decimal? @db.Decimal(18, 4)
+  reason     String
+  actorId    String   @map("actor_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+  actor    User     @relation(fields: [actorId], references: [id])
+
+  @@index([materialId, createdAt])
+  @@map("material_cost_changes")
+}
+
+// Sign-ins and failed sign-ins, kept 12 months (system audit F3, ADR-039), so
+// an Admin can see who signed in when, and repeated wrong passwords.
+model SignInEvent {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  // As typed, lower case: kept for a failed sign-in with no such account too.
+  email     String
+  // SIGN_IN, FAILED, THROTTLED or SIGN_OUT (checked in the migration).
+  outcome   String
+  ip        String?
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("sign_in_events")
 }

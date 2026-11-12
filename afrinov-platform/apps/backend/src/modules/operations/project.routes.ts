@@ -155,7 +155,8 @@ export async function projectRoutes(app: FastifyInstance, opts: { procurementEna
         error: { code: 'VALIDATION_ERROR', message: 'Invalid project payload', details: parsed.error.flatten() },
       });
     }
-    return ProjectService.update({ projectNumber, ...parsed.data }, actorId(req));
+    // Completing, cancelling and handing it on take close:project, or being its manager (system audit E3).
+    return ProjectService.update({ projectNumber, ...parsed.data }, actorId(req), { canClose: await userHasPermission(req, PermissionCode.CloseProject) });
   });
 
   // System audit E1: what must be dealt with before completing or cancelling it.
@@ -169,7 +170,7 @@ export async function projectRoutes(app: FastifyInstance, opts: { procurementEna
   app.delete('/projects/:projectNumber', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ManageProjects);
     const projectNumber = decodeURIComponent((req.params as { projectNumber: string }).projectNumber);
-    const after = await ProjectService.archive(projectNumber, actorId(req));
+    const after = await ProjectService.archive(projectNumber, actorId(req), { canClose: await userHasPermission(req, PermissionCode.CloseProject) });
     return reply.send(after);
   });
 

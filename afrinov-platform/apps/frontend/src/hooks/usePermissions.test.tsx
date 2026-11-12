@@ -189,7 +189,7 @@ describe('usePermissions — the role check sheet', () => {
       'writeoffs:approve', 'writeoffs:view',
     ],
     // Buyers add client-specific material from an order line, but don't edit the catalogue.
-    PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
+    PROCUREMENT: ['materials:create', 'materials:cost', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
     // What Sales was quoted is kept from buyers and the store.
     SALES: ['sales:view', 'sales:manage', 'projects:manage', 'suppliers:manage'],
     // View only: orders are signed by the roles below.

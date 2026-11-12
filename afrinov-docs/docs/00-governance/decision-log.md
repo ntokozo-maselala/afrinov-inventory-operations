@@ -1276,3 +1276,84 @@ a project is a status change, and it becomes active again. Tests:
 `closing-safely.real-http.test.ts`, `materials-sections.real-http.test.ts`,
 `ClearFirstDialog.test.tsx`, `SupplierMaster.test.tsx`,
 `mockMaterialSections.test.ts`.
+
+### ADR-039 — Controls: who prices, closes and switches off checks, and what is recorded
+**Date:** 2026-11-12 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P3, controls) found ways
+round the two-person checks and gaps in what is recorded. The store controller
+could set an item's unit cost and then write it off under the approval limit
+(C1); a cost change kept no history (C3); a large write-off could be split into
+small ones (C2). Changing an approved order's terms didn't send it back for
+signing (D1). Two API-only routes booked stock with no count or order (D3).
+Anyone with `manage:projects` (store, Procurement, Sales) could complete or
+cancel any project (E3). Sign-ins left no record (F3). Nothing linked a
+recipient to a user account, so issuing to oneself went unseen (F5). The ledger
+and who was blamed for losses needed only a sign-in (F6). Switching off either
+approval setting said nothing about removing the second person (C9), and one
+button reset every setting at once (C10). The owner approved the phase and
+answered no question, so each finding takes its recommended option.
+
+**Decision:**
+- **The unit cost is Procurement's and Admin's** (`edit:unit_cost`). Setting it
+  on a new item or changing it needs the permission; a change needs a reason.
+  Each change is a row of `material_cost_changes` (before, after, reason, who,
+  when), shown on the item's page (`GET /materials/:id/cost-history`). A body
+  that changes only the cost needs `edit:unit_cost` alone. A cost of 0 counts
+  as no cost: the write-off waits for approval.
+- **Write-offs are judged over a week.** A write-off's value is added to what
+  the same person wrote off of the same item in the last 7 days
+  (`WRITE_OFF_WINDOW_DAYS`), less reversals and those someone else approved;
+  over the limit, it waits. Manual adjustments, count differences and lost
+  tools all use it. A waiting request records `recentValue`.
+- **An approved order's signed terms are signed for.** Changing payment terms or
+  milestone, settlement discount, penalties, project, delivery method, address,
+  country, destination or shipping terms sends it back for signing, as a price
+  rise does (`SIGNED_TERMS`). Contacts, notes and dates don't.
+- **Every delivery is counted in on Receive stock.** `POST
+  /purchase-orders/:id/receive` and `POST /stock-items` are retired: they refuse
+  every request (400) with a pointer to Receive stock, as confirm-delivery does.
+  `StockItemService` is removed.
+- **Closing a project takes `close:project` (Admin) or being its manager.**
+  Completing, cancelling and archiving it, and changing its manager (so nobody
+  makes themselves manager to close it), are checked with the project's row held
+  `FOR UPDATE`. Creating and editing stay with `manage:projects`.
+- **A sign-in log.** Each sign-in, wrong email or password, attempt held back by
+  the account limit, and sign-out (`POST /auth/logout`, new) is a row of
+  `sign_in_events` with the address and browser, kept 12 months by the server's
+  hourly sweep, and listed for Admins (`GET /sign-ins`, Settings → Security).
+  Writing it is best-effort: a sign-in isn't refused because its row failed. A
+  sign-in left alone ends when its token runs out, which writes nothing.
+- **A recipient can name its user account** (`recipients.user_id`, unique; a
+  worker or contractor only). A slip whose recipient is the account that posted
+  it is listed by `GET /reports/self-issued` (last 30 days, `view:audit_log`)
+  and shown on the Dashboard. *Choice within the recommendation:* flagged, not
+  refused, because one store controller works the counter alone.
+- **The ledger is a report.** Movements, its summary, actors and export, an
+  issue's outcomes, the tool list and a loan's history need `view:reports`.
+  Write-offs by the person responsible also need `adjust:inventory` or
+  `approve:write_off`. Every role holds `view:reports` today, so nobody sees
+  less now.
+- **Switching off a two-person check needs a reason.** Turning off
+  `inventory.requireWriteOffApproval` or
+  `purchaseOrders.requireApprovalBeforeProcessing` is refused without one; the
+  reason is kept in the setting's audit entry. Their descriptions say what
+  switching off removes, and the Dashboard tells Admins while either is off.
+- **"Reset to defaults" resets one section, after a preview.**
+  `GET /settings/reset-preview?category=` lists each setting not at its
+  default; `POST /settings/reset` takes the `category` and writes only those.
+
+Migration `20260101000058_controls` adds the two tables, the recipient's
+account link, the two permissions with their grants, and the two settings'
+new descriptions.
+
+**Consequences:** The store controller asks Procurement to price an item. A
+project's manager, or an Admin, closes it; a project with no manager is closed
+by an Admin. Scripts or tools that called the two retired routes must post a
+goods receipt or a counter receipt instead. Tests: `material.service.test.ts`,
+`write-off-limit` callers' tests, `procurement.service.test.ts`,
+`project.service.test.ts`, `auth.routes.test.ts`, `sign-in-log.test.ts`,
+`settings.service.test.ts`, `inventory.routes.test.ts`,
+`controls.real-http.test.ts`, `procurement.real-http.test.ts`,
+`MaterialDetail.test.tsx`, `projectClose.test.ts`, `SignInLog.test.ts`,
+`DashboardControls.test.ts`.

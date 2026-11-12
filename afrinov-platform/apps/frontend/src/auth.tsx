@@ -169,6 +169,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const logout = useCallback(() => {
+    // On the sign-in log (system audit F3). Best-effort and never retried: the
+    // request takes the token before it is forgotten, and signing out never
+    // waits for the server.
+    if (!FRONTEND_ONLY && getToken()) void api.post('/auth/logout').catch(() => undefined);
     setToken(null);
     clearPersistedSession();
     setUser(null);

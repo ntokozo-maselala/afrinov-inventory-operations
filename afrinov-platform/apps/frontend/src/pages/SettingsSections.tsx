@@ -7,7 +7,7 @@ import { useSettings, type SettingValue } from '../hooks/useSettings';
 import { setAppearance, useAppearance, type AppTheme } from '../hooks/useAppearance';
 import { useApi } from '../hooks/useApi';
 import { useUnits } from '../hooks/useUnits';
-import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField } from './Settings';
+import { useCategorySettings, useSetting, SectionPanel, BooleanField, NumberField, TextField, EnumField, SwitchOffReason } from './Settings';
 import { useToast } from '../components/Toast';
 import { Alert } from '../components/Alert';
 import { Skeleton } from '../components/Skeleton';
@@ -18,6 +18,7 @@ import { Input, Select, Field } from '../components/Field';
 import { Drawer } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TemporaryPasswordForm } from '../components/PasswordForms';
+import { SignInLog } from '../components/SignInLog';
 import { useAuth } from '../auth';
 import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
 import { backupNotice, formatSize, restoreTestNotice, type BackupHealth } from '../lib/backups';
@@ -169,7 +170,10 @@ export function SettingsInventory() {
         error={errors['inventory.warningBelowPercent'] ?? null}
       />
       {requireWriteOffApproval && (
-        <BooleanField def={requireWriteOffApproval} value={draft['inventory.requireWriteOffApproval'] !== false} onChange={(v) => setDraft('inventory.requireWriteOffApproval', v)} />
+        <>
+          <BooleanField def={requireWriteOffApproval} value={draft['inventory.requireWriteOffApproval'] !== false} onChange={(v) => setDraft('inventory.requireWriteOffApproval', v)} />
+          <SwitchOffReason settingKey="inventory.requireWriteOffApproval" />
+        </>
       )}
       {writeOffApprovalAbove && (
         <NumberField
@@ -305,6 +309,7 @@ export function SettingsPurchaseOrders() {
   return (
     <SectionPanel title="Purchase orders" description="Rules that govern the purchase order workflow. Changes take effect immediately for the next operation.">
       <BooleanField def={requireApproval} value={Boolean(draft['purchaseOrders.requireApprovalBeforeProcessing'])} onChange={(v) => setDraft('purchaseOrders.requireApprovalBeforeProcessing', v)} />
+      <SwitchOffReason settingKey="purchaseOrders.requireApprovalBeforeProcessing" />
       <p className="text-xs text-surface-500 -mt-2 pl-11">When on, submitting a PO routes it through <code>PENDING_APPROVAL</code>. When off, submission auto-approves.</p>
       <BooleanField def={allowCancellation} value={Boolean(draft['purchaseOrders.allowCancellation'])} onChange={(v) => setDraft('purchaseOrders.allowCancellation', v)} />
       <BooleanField def={allowEditAfterApproval} value={Boolean(draft['purchaseOrders.allowEditAfterApproval'])} onChange={(v) => setDraft('purchaseOrders.allowEditAfterApproval', v)} />
@@ -792,8 +797,8 @@ export function SettingsSecurity() {
       <Alert tone="info" title="How sign-in works">
         People sign in with their email and password. The time without activity is checked by the server on every request,
         so a screen left open on a shared computer is signed out even if the browser is closed, and a shorter time applies
-        at once to everyone signed in. There is no account lockout or password rule yet; accounts are created by an
-        administrator under Settings → Users.
+        at once to everyone signed in. A password has at least 8 characters. After 10 wrong passwords in 15 minutes an
+        account is held back for 15 minutes, or until an Admin sets a temporary password under Settings → Users.
       </Alert>
       <SaveBar items={items} onSave={async () => {
         try {
@@ -801,6 +806,11 @@ export function SettingsSecurity() {
           toast.success('Settings saved', `${r.updated} setting(s) updated.`);
         } catch (e) { toast.error('Save failed', (e as ApiError).message); }
       }} saving={saving} />
+      <div className="pt-4 border-t border-surface-200 space-y-2">
+        <h3 className="text-sm font-semibold text-surface-900">Sign-in log</h3>
+        <p className="text-sm text-surface-500">Every sign-in, wrong password and sign-out, with the address and browser it came from, kept for 12 months. A sign-in left alone ends without a line: after its idle time.</p>
+        <SignInLog />
+      </div>
     </SectionPanel>
   );
 }

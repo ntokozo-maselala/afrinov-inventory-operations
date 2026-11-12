@@ -41,14 +41,11 @@ async function checkOpenProject(projectNumber: string, db: Db): Promise<void> {
  * material has no Required Stock, and any project given must be open; a
  * Stores material has no project. A Projects item needs no project of its own
  * (Project on the Order Roadmap, Phase 2): the order it is bought on says
- * which project it is for. `projectRequired` keeps the old rule where a new
- * item comes with stock (`POST /stock-items`), as stock with no project can't
- * be issued.
+ * which project it is for.
  */
 export async function projectForNewMaterial(
   input: { category: string; projectNumber?: string | null; requiredStock?: number },
   db: Db,
-  opts: { projectRequired?: boolean } = {},
 ): Promise<string | null> {
   const projectNumber = input.projectNumber?.trim() || null;
   if (sectionOf(input.category) === 'STORES') {
@@ -56,10 +53,7 @@ export async function projectForNewMaterial(
     return null;
   }
   if (input.requiredStock) throw Errors.validation('A Projects material has no Required Stock: it is bought for its job, not re-ordered');
-  if (!projectNumber) {
-    if (opts.projectRequired) throw Errors.validation('A Projects material needs the project it is for');
-    return null;
-  }
+  if (!projectNumber) return null;
   await checkOpenProject(projectNumber, db);
   return projectNumber;
 }

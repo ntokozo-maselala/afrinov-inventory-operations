@@ -103,6 +103,24 @@ async function assertClosable(projectNumber: string, to: 'COMPLETED' | 'CANCELLE
   }
 }
 
+/** Whether the caller holds close:project (system audit E3). */
+export interface CloseRights { canClose: boolean }
+
+export const CLOSE_REFUSED = "Only an Admin or the project's manager completes, cancels or archives a project.";
+export const HANDOVER_REFUSED = "Only an Admin or the project's manager hands the project to another manager.";
+
+/**
+ * Completing, cancelling or archiving a project, and changing its manager,
+ * take close:project or being its manager now (system audit E3, ADR-039).
+ * Creating and editing it stay with manage:projects. The manager is read with
+ * the row held FOR UPDATE, so a handover can't slip between.
+ */
+async function assertMayClose(projectNumber: string, actorId: string, rights: CloseRights, refused: string, tx: Prisma.TransactionClient): Promise<void> {
+  if (rights.canClose) return;
+  const rows = await tx.$queryRaw<Array<{ manager_id: string | null }>>`SELECT "manager_id" FROM "projects" WHERE "project_number" = ${projectNumber} FOR UPDATE`;
+  if (rows[0]?.manager_id !== actorId) throw Errors.forbidden(refused);
+}
+
 function toDateOrNull(iso: string | null | undefined): Date | null {
   if (!iso) return null;
   const d = new Date(iso);
@@ -195,7 +213,7 @@ export const ProjectService = {
     });
     return created;
   },
-  async update(input: UpdateProjectInput, actorId: string) {
+  async update(input: UpdateProjectInput, actorId: string, rights: CloseRights) {
     const before = await prisma.project.findUnique({ where: { projectNumber: input.projectNumber } });
     if (!before) throw Errors.notFound('Project');
 
@@ -233,7 +251,12 @@ export const ProjectService = {
     if (input.endDate !== undefined) data.endDate = toDateOrNull(input.endDate);
     if (input.notes !== undefined) data.notes = input.notes;
 
+    const closing = !!input.status && isClosedStatus(input.status) && input.status !== before.status;
+    const managerChanging = input.managerId !== undefined && input.managerId !== before.managerId;
     const after = await prisma.$transaction(async (tx) => {
+      // Who closes it, or hands it to another manager, is checked against the
+      // project as it is now, held so a change of manager can't slip between.
+      if (closing || managerChanging) await assertMayClose(input.projectNumber, actorId, rights, closing ? CLOSE_REFUSED : HANDOVER_REFUSED, tx);
       // A project closes only when nothing still depends on it (system audit E1);
       // completing it also needs every schedule done or cancelled (ADR-032).
       if (input.status && isClosedStatus(input.status) && input.status !== before.status) {
@@ -265,10 +288,11 @@ export const ProjectService = {
     return { blockers: await closingBlockers(projectNumber, to, prisma as unknown as Prisma.TransactionClient) };
   },
 
-  async archive(projectNumber: string, actorId: string) {
+  async archive(projectNumber: string, actorId: string, rights: CloseRights) {
     const p = await prisma.project.findUnique({ where: { projectNumber } });
     if (!p) throw Errors.notFound('Project');
     const after = await prisma.$transaction(async (tx) => {
+      await assertMayClose(projectNumber, actorId, rights, CLOSE_REFUSED, tx);
       // Archiving cancels it, so the same check applies (system audit E1).
       if (p.status !== 'CANCELLED') await assertClosable(projectNumber, 'CANCELLED', tx);
       const project = await tx.project.update({

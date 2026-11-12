@@ -12,7 +12,7 @@ inventory/
 ├── location.service.ts       # location create/update/status/delete (delete only when unused)
 ├── rack.routes.ts            # /racks
 ├── rack.service.ts           # rack create/update/archive (archive = status INACTIVE)
-├── stock-item.routes.ts      # POST /stock-items
+├── stock-item.routes.ts      # POST /stock-items (retired, ADR-039)
 ├── stock-item.service.ts     # new material + optional opening RECEIPT in one transaction
 ├── inventory.routes.ts       # ledger reads and stock movements (issue, transfer, adjust,
 │                             #   stock count, counter receipt, return, reversal)

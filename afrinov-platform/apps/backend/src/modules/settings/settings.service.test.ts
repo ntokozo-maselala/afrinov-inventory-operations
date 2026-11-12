@@ -372,13 +372,35 @@ describe('SettingsService', () => {
     expect(db.settings.get('general.companyName')?.value).toBe('Afrinov');
   });
 
-  it('resetDefaults restores every setting to its catalog default', async () => {
-    const { SettingsService, SETTING_CATALOG } = await import('./settings.service.js');
+  // System audit C10: one section, after a preview, never every setting at once.
+  it('resetDefaults returns one section to its defaults, and only what differs', async () => {
+    const { SettingsService } = await import('./settings.service.js');
     await SettingsService.ensureSeeded();
     await SettingsService.set('general.companyName', 'Changed', 'u-1');
-    await SettingsService.resetDefaults('u-1');
+    await SettingsService.set('inventory.writeOffApprovalAbove', 5000, 'u-1');
+    expect(await SettingsService.resetPreview('general')).toEqual([expect.objectContaining({ key: 'general.companyName', from: 'Changed', to: 'Afrinov' })]);
+    await SettingsService.resetDefaults('u-1', 'general');
     expect(db.settings.get('general.companyName')?.value).toBe('Afrinov');
-    expect(db.audit.filter((a) => a.action === 'SETTING_RESET').length).toBe(SETTING_CATALOG.length);
+    // Another section is left as it is.
+    expect(db.settings.get('inventory.writeOffApprovalAbove')?.value).toBe(5000);
+    expect(db.audit.filter((a) => a.action === 'SETTING_RESET').map((a) => a.entityId)).toEqual(['general.companyName']);
+    await expect(SettingsService.resetPreview('nothing' as never)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  // System audit C9: the two settings that remove the second person.
+  it('needs a reason to switch off either two-person check, and keeps it in Activity', async () => {
+    const { SettingsService, TWO_PERSON_SETTINGS, SWITCH_OFF_REASON } = await import('./settings.service.js');
+    await SettingsService.ensureSeeded();
+    for (const key of TWO_PERSON_SETTINGS) {
+      await expect(SettingsService.set(key, false, 'u-1')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: SWITCH_OFF_REASON });
+      await expect(SettingsService.setMany({ [key]: false }, 'u-1', '  ')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(db.settings.get(key)?.value).toBe(true);
+      await SettingsService.set(key, false, 'u-1', 'Month-end rush, Thabo away');
+      expect(db.audit.at(-1)).toMatchObject({ entityId: key, after: { value: false, reason: 'Month-end rush, Thabo away' } });
+      // Switching it back on, or saving it off again, needs none.
+      await SettingsService.setMany({ [key]: false }, 'u-1');
+      await SettingsService.set(key, true, 'u-1');
+    }
   });
 
   it('getValue returns the default when no row exists', async () => {
@@ -513,7 +535,7 @@ describe('SettingsService', () => {
       const { SettingsService } = await import('./settings.service.js');
       await SettingsService.ensureSeeded();
       await SettingsService.set('general.companyName', 'Changed', 'u-1');
-      const result = await SettingsService.resetDefaults('u-1');
+      const result = await SettingsService.resetDefaults('u-1', 'general');
       expect(result.every((r) => r.value === 'Afrinov' || typeof r.value === 'boolean' || typeof r.value === 'number' || typeof r.value === 'string')).toBe(true);
       const resetAudit = db.audit.filter((a) => a.action === 'SETTING_RESET');
       expect(resetAudit.length).toBeGreaterThan(0);

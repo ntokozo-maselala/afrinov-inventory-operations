@@ -55,13 +55,13 @@ describe('Stores and Projects materials over real HTTP', () => {
     const noProject = await create({ sku: `IT-SEC-X1-${run}`, category: 'PROJECT_MATERIAL' });
     expect(noProject.status).toBe(200);
     expect(noProject.body).toMatchObject({ section: 'PROJECTS', projectNumber: null });
-    // With opening stock it still needs one: stock with no project can't be issued.
+    // An item and its stock aren't created in one call any more (system audit D3).
     const loc = await api<{ id: string }>('POST', '/locations', { name: `IT sections opening ${run}`, type: 'RACK' });
     const opening = await api<{ error: { message: string } }>('POST', '/stock-items', {
       sku: `IT-SEC-X1B-${run}`, name: 'Opening plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each', initialQuantity: 2, locationId: loc.body.id,
     });
     expect(opening.status).toBe(400);
-    expect(opening.body.error.message).toMatch(/needs the project/);
+    expect(opening.body.error.message).toMatch(/receive its stock on Receive stock/);
     const withRequired = await create({ sku: `IT-SEC-X2-${run}`, category: 'PROJECT_MATERIAL', projectNumber, requiredStock: 5 });
     expect(withRequired.status).toBe(400);
     expect(withRequired.body.error?.message).toMatch(/no Required Stock/);

@@ -21,7 +21,8 @@ import { LeftoversNotice, ReceivedNotIssuedNotice } from '../components/Leftover
 import type { CurrentStockRow } from '../api/types';
 import { ClosedProjectToolsNotice, ClosingProjectTools } from '../components/ProjectToolsNotice';
 import { StaleDataNotice } from '../components/StaleDataNotice';
-import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE } from '../lib/projectStatus';
+import { PROJECT_STATUS_OPTIONS, PROJECT_STATUS_TONE, canCloseProject, isClosedProjectStatus } from '../lib/projectStatus';
+import { useAuth } from '../auth';
 import { PROCUREMENT_ENABLED } from '../config/features';
 
 interface UserOpt { id: string; name: string }
@@ -72,6 +73,10 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
   const users = useApi<UserOpt[]>('/users');
+  // Completing, cancelling and handing it to another manager take an Admin or
+  // its manager (system audit E3); a new project is anyone's to set up.
+  const { user } = useAuth();
+  const mayClose = !initial?.projectNumber || canCloseProject(user, initial.managerId);
   const [busy, setBusy] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -124,7 +129,7 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
         // Closing it while something still depends on it (system audit E1): the server lists what.
         setValidation(e.message);
       } else if (e.code === 'FORBIDDEN') {
-        setValidation("You don't have permission to manage projects.");
+        setValidation(mayClose ? "You don't have permission to manage projects." : "Only an Admin or the project's manager completes, cancels or hands on a project.");
       } else {
         setValidation('We couldn\u2019t save the project. Please try again.');
       }
@@ -157,13 +162,13 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
       </Field>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Status" htmlFor="pj-status">
+        <Field label="Status" htmlFor="pj-status" help={mayClose ? undefined : 'Only an Admin or the project’s manager completes or cancels it.'}>
           <Select id="pj-status" value={status} onChange={(e) => setStatus(e.target.value as Project['status'])}>
-            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value} disabled={!mayClose && isClosedProjectStatus(o.value) && o.value !== initial?.status}>{o.label}</option>)}
           </Select>
         </Field>
-        <Field label="Project manager" htmlFor="pj-mgr" help="Optional. The user responsible for the project." error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
-          <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)}>
+        <Field label="Project manager" htmlFor="pj-mgr" help={mayClose ? 'Optional. The user responsible for the project.' : 'Only an Admin or the project’s manager hands it to another manager.'} error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
+          <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)} disabled={!mayClose}>
             <option value="">Unassigned</option>
             {(users.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </Select>
@@ -213,6 +218,7 @@ export function Projects() {
   // Adding, editing and archiving need manage:projects on the server.
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('projects:manage');
+  const { user } = useAuth();
   // A project's orders are Procurement's: shown to those who see project orders,
   // while procurement is on (off, the order pages aren't there: Qodo, PR #131).
   const canSeeOrders = PROCUREMENT_ENABLED && hasPermission('orders:view');
@@ -298,6 +304,7 @@ export function Projects() {
             canSeeOrders,
             onEdit: (p) => setDrawer({ mode: 'edit', project: p }),
             onArchive: (p) => setArchive(p),
+            mayClose: (p) => canCloseProject(user, p.managerId),
           })}
           emptyState={
             <EmptyState
@@ -356,7 +363,7 @@ function stockUsedLink(p: Project): string {
  * When `canManage` is true, add buttons that call `onEdit` or `onArchive` with the row;
  * archiving is disabled for inactive projects.
  */
-function columns({ canManage, canSeeOrders, onEdit, onArchive }: { canManage: boolean; canSeeOrders: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void }): DataTableColumn<Project>[] {
+function columns({ canManage, canSeeOrders, onEdit, onArchive, mayClose }: { canManage: boolean; canSeeOrders: boolean; onEdit: (p: Project) => void; onArchive: (p: Project) => void; mayClose: (p: Project) => boolean }): DataTableColumn<Project>[] {
   return [
     // A project's page holds its schedules (Project Tracking Roadmap, Phase 2).
     { key: 'num', header: 'Number', render: (p) => <Link to={`/projects/${encodeURIComponent(p.projectNumber)}`} className="font-mono btn-link">{p.projectNumber}</Link>, width: '10rem' },
@@ -377,7 +384,7 @@ function columns({ canManage, canSeeOrders, onEdit, onArchive }: { canManage: bo
       render: (p: Project) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => onEdit(p)}>Edit</Button>
-          <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onArchive(p)} disabled={!p.active}>Archive</Button>
+          {mayClose(p) && <Button size="sm" variant="ghost" leadingIcon={<Icon.Trash size={12} />} onClick={() => onArchive(p)} disabled={!p.active}>Archive</Button>}
         </div>
       ),
     }] : []),

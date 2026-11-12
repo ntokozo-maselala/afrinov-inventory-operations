@@ -193,7 +193,9 @@ export const COUNTER_RECEIPTS_OFF =
   'Deliveries to the store are booked against an approved Stores order: choose the order on Receive stock.';
 
 export async function inventoryRoutes(app: FastifyInstance, opts: { procurementEnabled?: boolean } = {}): Promise<void> {
+  // The ledger is a report: view:reports, as the other reports (system audit F6).
   app.get('/inventory-transactions', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
     const q = req.query as Record<string, string | undefined>;
     return InventoryService.queryHistory({
       ...(await historyFilter(q)),
@@ -203,19 +205,28 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
   });
 
   app.get('/inventory-transactions/summary', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
     return InventoryService.historySummary(await historyFilter(req.query as Record<string, string | undefined>));
   });
 
-  app.get('/inventory-transactions/actors', { preHandler: [app.authenticate] }, async () => {
+  app.get('/inventory-transactions/actors', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
     return InventoryService.historyActors();
   });
 
   // The Write-offs report's totals by who was responsible; the service sets the report itself.
+  // Who was responsible for losses is a personnel matter: only for those who
+  // adjust stock or approve write-offs (system audit F6).
   app.get('/inventory-transactions/writeoffs-by-responsible', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    if (!(await userHasPermission(req, PermissionCode.AdjustInventory)) && !(await userHasPermission(req, PermissionCode.ApproveWriteOff))) {
+      throw Errors.forbidden('Write-offs by the person responsible are for those who adjust stock or approve write-offs.');
+    }
     return InventoryService.writeoffsByResponsible(await historyFilter(req.query as Record<string, string | undefined>));
   });
 
   app.get('/inventory-transactions/export', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ViewReports);
     const filter = await historyFilter(req.query as Record<string, string | undefined>);
     const count = await InventoryService.historyCount(filter);
     if (count > MOVEMENTS_EXPORT_LIMIT) {
@@ -419,6 +430,7 @@ export async function inventoryRoutes(app: FastifyInstance, opts: { procurementE
 
   // Tracked consumables: what became of an issue line, used up or broken.
   app.get('/inventory-transactions/:id/outcomes', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
     const { id } = req.params as { id: string };
     return ConsumableOutcomeService.forIssue(id);
   });

@@ -11,7 +11,7 @@ permission is required (see `authorization.md`).
 | Auth | `users` | `POST /auth/login` — *public*; `GET /auth/me` — auth |
 | User | `users`, `user_roles` | `GET /users`, `GET /users/:id`, `POST /users`, `PATCH /users/:id` (name, active, roles) — manage:users; `GET /users/lookup` — view:users |
 | Material | `materials` | `GET /materials` (category, active, q), `GET /materials/:id` — auth; `POST /materials` — create:material; `PATCH /materials/:id` (incl. active) — edit:material |
-| StockItem (action) | `materials` + `inventory_transactions` | `POST /stock-items` — create:material and receive:inventory |
+| StockItem (action) | `materials` + `inventory_transactions` | `POST /stock-items` — retired (ADR-039): add the item, then receive it |
 | Location | `locations` | `GET /locations` (q, type, active), `GET /locations/:id` — auth; `POST` — create:location; `PATCH /:id` — edit:location; `PATCH /:id/status` — manage:location_status; `DELETE /:id` (only when unused) — delete:location |
 | Rack | — | Dropped in Phase 3.3 (migration `20260101000022_drop_racks`): a rack is a Location of type Rack, inside its room (`parentId`). Each rack's last record is in the audit log (`MOVE_TO_LOCATION` or `DISCARD`) |
 | Supplier | `suppliers` | `GET /suppliers` (q) — auth; `POST /suppliers` — create:supplier. Update/deactivate **Planned** |

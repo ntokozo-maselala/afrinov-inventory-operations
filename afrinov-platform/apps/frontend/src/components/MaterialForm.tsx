@@ -23,6 +23,7 @@ import { useUnits } from '../hooks/useUnits';
 import { useApi } from '../hooks/useApi';
 import { parseQuantity, readQuantity } from '../lib/quantity';
 import { useStatusBands } from '../hooks/useStatusBands';
+import { usePermissions } from '../hooks/usePermissions';
 import { PROJECTS_CATEGORY, STORES_CATEGORIES, sectionOf, type MaterialSection } from '../lib/categories';
 import type { Material } from '../api/types';
 
@@ -76,6 +77,10 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
   const [description, setDescription] = useState(initial?.description ?? '');
   const [requiredStock, setRequiredStock] = useState(initial ? asInput(initial.requiredStock) || '0' : '0');
   const [unitCost, setUnitCost] = useState(asInput(initial?.unitCost));
+  // A write-off is valued at the unit cost, so only Procurement and Admin set
+  // it, and a change says why (system audit C1, C3).
+  const canSetCost = usePermissions().hasPermission('materials:cost');
+  const [costReason, setCostReason] = useState('');
   const [serialNumber, setSerialNumber] = useState(initial?.serialNumber ?? '');
   const [trackUse, setTrackUse] = useState(initial?.trackUse ?? false);
   const [busy, setBusy] = useState(false);
@@ -108,6 +113,8 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
     const required = projects || !parsedRequired.ok ? 0 : parsedRequired.value;
     const cost = unitCost.trim() === '' ? undefined : Number(unitCost);
     if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) { setValidation('Unit cost must be 0 or positive.'); return; }
+    const costChanged = canSetCost && !!initial && (initial.unitCost == null || initial.unitCost === '' ? cost !== undefined : cost === undefined || Number(initial.unitCost) !== cost);
+    if (costChanged && !costReason.trim()) { setValidation('Say why the unit cost changed.'); return; }
     const itemCategory = projects ? PROJECTS_CATEGORY : category;
     setBusy(true);
     try {
@@ -116,13 +123,14 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
         // cost or description clears it.
         ? await api.patch<CreatedMaterial>(`/materials/${initial.id}`, {
           name: name.trim(), unitOfMeasure: unitOfMeasure.trim(),
-          unitCost: cost ?? null, description: description.trim() || null,
+          ...(costChanged ? { unitCost: cost ?? null, unitCostReason: costReason.trim() } : {}),
+          description: description.trim() || null,
           ...(projects ? {} : { requiredStock: required }),
           ...(initial.category === 'TOOLS' ? { serialNumber: serialNumber.trim() || null } : { trackUse }),
         })
         : await api.post<CreatedMaterial>('/materials', {
           sku: sku.trim(), name: name.trim(), category: itemCategory, unitOfMeasure: unitOfMeasure.trim(),
-          unitCost: cost, description: description.trim() || undefined,
+          ...(canSetCost ? { unitCost: cost } : {}), description: description.trim() || undefined,
           ...(projects ? {} : { requiredStock: required }),
           serialNumber: itemCategory === 'TOOLS' ? serialNumber.trim() || undefined : undefined,
           trackUse: itemCategory === 'TOOLS' ? undefined : trackUse,
@@ -196,10 +204,15 @@ export function MaterialForm({ initial, section: startSection = 'STORES', catego
             <QuantityInput id="m-required" kind={kindOf(unitOfMeasure)} unit={unitOfMeasure} value={requiredStock} onChange={(e) => setRequiredStock(e.target.value)} />
           </Field>
         )}
-        <Field label="Unit cost" htmlFor="m-cost" help={editing ? 'In ZAR excl. VAT. Leave it blank if the price is not known.' : 'Optional, in ZAR excl. VAT.'}>
-          <Input id="m-cost" type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="0.00" />
+        <Field label="Unit cost" htmlFor="m-cost" help={!canSetCost ? 'Set by Procurement or an Admin: write-offs are valued at it.' : editing ? 'In ZAR excl. VAT. Leave it blank if the price is not known.' : 'Optional, in ZAR excl. VAT.'}>
+          <Input id="m-cost" type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="0.00" disabled={!canSetCost} />
         </Field>
       </div>
+      {editing && canSetCost && unitCost.trim() !== asInput(initial?.unitCost) && (
+        <Field label="Why the unit cost changed" htmlFor="m-cost-reason" required help="Kept with the change in the item's cost history.">
+          <Input id="m-cost-reason" value={costReason} onChange={(e) => setCostReason(e.target.value)} maxLength={500} placeholder="e.g. New price from the supplier's quote" invalid={!!validation && !costReason.trim()} />
+        </Field>
+      )}
       {projects && <p className="text-xs text-surface-500">Projects material has no required stock: it is bought for its project, not kept topped up.</p>}
       {(projects || category !== 'TOOLS') && (
         <label htmlFor="m-track-use" className="flex items-start gap-2 cursor-pointer">
