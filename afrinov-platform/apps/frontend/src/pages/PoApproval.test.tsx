@@ -140,7 +140,16 @@ describe('the record of who signed', () => {
       ],
     } as typeof current.po;
     page(['PROCUREMENT']);
-    expect(await screen.findByText('by Ona Moloane, Chief Executive (standing in)')).toBeInTheDocument();
+    expect(await screen.findByText('by Ona Moloane (Procurement Manager), then Chief Executive (standing in for the Director)')).toBeInTheDocument();
+  });
+
+  it('names the role, not the person, where whoever signed doesn\'t hold it, as an admin testing', async () => {
+    current.po = {
+      ...order('APPROVED'), approvedAt: '2026-11-03T09:00:00Z', approvedBy: { id: 'u-a', name: 'System Administrator', roles: ['ADMIN'] },
+      signatures: [{ step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { id: 'u-a', name: 'System Administrator', roles: ['ADMIN'] } }],
+    } as typeof current.po;
+    page(['PROCUREMENT']);
+    expect(await screen.findByText('by Procurement Manager')).toHaveAttribute('title', 'System Administrator');
   });
 
   it('names whoever approved it without signing, as well as who signed', async () => {
@@ -149,7 +158,7 @@ describe('the record of who signed', () => {
       signatures: [{ step: 'MANAGER', signedAt: '2026-11-02T09:00:00Z', standIn: false, signedBy: { id: 'u-o', name: 'Ona Moloane' } }],
     } as typeof current.po;
     page(['PROCUREMENT']);
-    expect(await screen.findByText('by Ona Moloane, approved by Second Person')).toBeInTheDocument();
+    expect(await screen.findByText('by Ona Moloane (Procurement Manager), approved by Second Person')).toBeInTheDocument();
   });
 
   it('says in the Activity who stood in, and when signatures were cleared', async () => {

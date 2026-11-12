@@ -15,7 +15,7 @@
 // Concurrency: every transition uses an optimistic WHERE status = expected
 // guard inside the Prisma transaction. Two concurrent transitions on the
 // same PO cannot both succeed.
-import { Prisma, PurchaseOrderStatus } from '@prisma/client';
+import { Prisma, PurchaseOrderStatus, type RoleName } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { ApiError, Errors } from '../../shared/errors.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -438,11 +438,11 @@ export const PurchaseOrderService = {
         supplier: true,
         project: { select: { projectNumber: true, name: true } },
         createdBy: { select: { id: true, name: true, email: true } },
-        approvedBy: { select: { id: true, name: true, email: true } },
-        deliveredBy: { select: { id: true, name: true, email: true } },
+        approvedBy: { select: { id: true, name: true, email: true, roles: WITH_ROLES } },
+        deliveredBy: { select: { id: true, name: true, email: true, roles: WITH_ROLES } },
         cancelledBy: { select: { id: true, name: true, email: true } },
         closedBy: { select: { id: true, name: true, email: true } },
-        signatures: { include: { signedBy: { select: { id: true, name: true } } }, orderBy: { signedAt: 'asc' } },
+        signatures: { include: { signedBy: { select: { id: true, name: true, roles: WITH_ROLES } } }, orderBy: { signedAt: 'asc' } },
         lines: { include: { material: true } },
         goodsReceipts: { include: { lines: true } },
         // The request for quotation it was awarded from, if any.
@@ -450,7 +450,12 @@ export const PurchaseOrderService = {
       },
     });
     if (!po) throw Errors.notFound('PurchaseOrder');
-    return withTotals(po);
+    return withTotals({
+      ...po,
+      approvedBy: po.approvedBy && withRoleNames(po.approvedBy),
+      deliveredBy: po.deliveredBy && withRoleNames(po.deliveredBy),
+      signatures: po.signatures.map((sig) => ({ ...sig, signedBy: withRoleNames(sig.signedBy) })),
+    });
   },
 
   /**
@@ -1075,12 +1080,22 @@ export const PurchaseOrderService = {
     });
     const actorIds = [...new Set(entries.map((e) => e.actorId).filter((a): a is string => a !== null))];
     const actors = actorIds.length
-      ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+      ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true, roles: WITH_ROLES } })
       : [];
-    const names = new Map(actors.map((a) => [a.id, a.name]));
-    return entries.map((e) => ({ ...e, actorName: e.actorId ? names.get(e.actorId) ?? null : null }));
+    const people = new Map(actors.map((a) => [a.id, withRoleNames(a)]));
+    return entries.map((e) => {
+      const actor = e.actorId ? people.get(e.actorId) : undefined;
+      // Their roles now, so the page names a step by its role where they don't hold it (an admin testing).
+      return { ...e, actorName: actor?.name ?? null, actorRoles: actor?.roles ?? [] };
+    });
   },
 };
+
+/** A person's roles, by name, so the order page can tell who held the step's role. */
+const WITH_ROLES = { select: { role: { select: { name: true } } } } as const;
+function withRoleNames<U extends { roles: Array<{ role: { name: RoleName } }> }>(user: U): Omit<U, 'roles'> & { roles: RoleName[] } {
+  return { ...user, roles: user.roles.map((r) => r.role.name) };
+}
 
 /**
  * Locks the order's row before anything about it is read. Posting a goods
