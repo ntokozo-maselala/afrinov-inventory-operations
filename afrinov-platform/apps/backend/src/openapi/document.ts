@@ -55,7 +55,7 @@ import {
   createLabourRateSchema, createSalesRfqSchema, listLabourRatesQuerySchema, listSalesRfqQuerySchema, salesQuoteOptionsQuerySchema, sendBackSalesRfqSchema,
   updateLabourRateSchema, updateSalesRfqSchema,
 } from '../modules/sales/sales-rfq.routes.js';
-import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
+import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
   materialCategorySchema,
