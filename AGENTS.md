@@ -225,6 +225,11 @@ Use these forms; the older spellings still work but are deprecated or removed.
   (`GET /backups/status`). A new table is in every backup automatically; if a
   migration changes the table count a lot, check `BACKUP_MIN_TABLES`. CI runs a
   backup and restore test after the integration tests.
+- **Production runs both Compose files.** `apps/backend/docker-compose.prod.yml`
+  binds the database and API to `127.0.0.1` only; the server's
+  `apps/backend/.env` sets `COMPOSE_FILE` to include it. The step-by-step guide
+  is `afrinov-docs/docs/12-operations/deployment.md`: keep it in step with any
+  change to the stack, its settings or the go-live steps.
 - **Behind a proxy, `TRUST_PROXY` names it** (addresses only; `true` and hop
   counts are refused), or every person counts as the proxy's address for the
   sign-in limit (`afrinov-docs/docs/12-operations/reverse-proxy.md`).

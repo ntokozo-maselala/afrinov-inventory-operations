@@ -1,0 +1,19 @@
+# Production overrides (afrinov-docs/docs/12-operations/deployment.md).
+# Used on the server together with docker-compose.yml: set
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+# in apps/backend/.env, so a plain `docker compose ...` uses both.
+#
+# The database and the API answer only on the server itself. The reverse
+# proxy on the same machine reaches the API at 127.0.0.1:4000, and the
+# import and check scripts reach the database at 127.0.0.1:5432; nothing on
+# the network can. Needs Docker Compose 2.24 or later (!override).
+services:
+  db:
+    ports: !override
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+
+  backend:
+    ports: !override
+      - "127.0.0.1:4000:4000"
+    restart: unless-stopped

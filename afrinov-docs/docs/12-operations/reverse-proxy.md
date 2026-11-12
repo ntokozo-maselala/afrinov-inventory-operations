@@ -33,6 +33,10 @@ in 15 minutes and that account waits, or an Admin sets a temporary password.
 
 ## Example: nginx
 
+This is the finished configuration, after Certbot has added HTTPS. To set it
+up from scratch, start from the plain-HTTP version in `deployment.md`, Part 6,
+and let Certbot add the rest.
+
 ```nginx
 server {
     listen 443 ssl;
