@@ -28,6 +28,8 @@ export const toolCheckInSchema = z.object({
     quantity: storedQuantity,
     condition: z.enum(['GOOD', 'DAMAGED', 'LOST']),
     note: z.string().max(500).optional(),
+    // Where it goes back to, when the location it was lent from has closed (system audit A2).
+    locationId: z.uuid().optional(),
   })).min(1).max(50),
 });
 

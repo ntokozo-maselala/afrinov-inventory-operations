@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ClearFirstDialog } from '../components/ClearFirstDialog';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
@@ -70,7 +70,6 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
   const [startDate, setStartDate] = useState(initial?.startDate?.slice(0, 10) ?? '');
   const [endDate, setEndDate] = useState(initial?.endDate?.slice(0, 10) ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
-  const [active, setActive] = useState(initial?.active ?? true);
 
   const users = useApi<UserOpt[]>('/users');
   const [busy, setBusy] = useState(false);
@@ -105,7 +104,6 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
         startDate: startDate ? new Date(startDate).toISOString() : undefined,
         endDate: endDate ? new Date(endDate).toISOString() : undefined,
         notes: notes.trim() || undefined,
-        active,
       };
       if (initial?.projectNumber) {
         await api.patch(`/projects/${encodeURIComponent(initial.projectNumber)}`, payload);
@@ -122,6 +120,9 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
         setValidation('A project with this code already exists.');
       } else if (e.code === 'VALIDATION_ERROR') {
         setValidation('Please correct the highlighted fields.');
+      } else if (e.code === 'INVALID_STATE') {
+        // Closing it while something still depends on it (system audit E1): the server lists what.
+        setValidation(e.message);
       } else if (e.code === 'FORBIDDEN') {
         setValidation("You don't have permission to manage projects.");
       } else {
@@ -187,11 +188,6 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
       <Field label="Notes" htmlFor="pj-notes">
         <Textarea id="pj-notes" rows={2} value={notes ?? ''} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
       </Field>
-
-      <div className="flex items-center gap-2">
-        <input id="pj-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4" />
-        <label htmlFor="pj-active" className="text-sm">Project is active</label>
-      </div>
 
       {validation && <Alert tone="danger" title="Cannot save">{validation}</Alert>}
 
@@ -330,15 +326,16 @@ export function Projects() {
         </Drawer>
       )}
 
+      {/* System audit E1: a project is cancelled only once nothing still depends on it. */}
       {archive && (
-        <ConfirmDialog
-          open
+        <ClearFirstDialog
           onClose={() => setArchive(null)}
           onConfirm={() => void performArchive()}
           title={`Archive project ${archive.projectNumber}?`}
-          description="Archiving marks the project inactive and sets its status to Cancelled. Historical inventory references are preserved. This action can be reversed by editing the project."
+          description="Archiving cancels the project, so it takes no more stock, tools or orders. Its history stays, and stock still held for it shows under Leftovers to move to Stores. To reopen it, change its status."
+          checkPath={`/projects/${encodeURIComponent(archive.projectNumber)}/closing-check?to=CANCELLED`}
+          blockedIntro="It can't be archived yet: deliveries, loans or write-offs would land on a cancelled job. First deal with:"
           confirmLabel="Archive"
-          destructive
           loading={archiving}
         />
       )}

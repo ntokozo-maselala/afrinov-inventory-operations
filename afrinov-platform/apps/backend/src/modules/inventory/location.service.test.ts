@@ -1,7 +1,7 @@
 // Unit tests for LocationService. Uses an in-memory fake Prisma to verify
 // list/create/update/status/delete semantics without a real database.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { LocationType } from '@prisma/client';
+import { Prisma, type LocationType } from '@prisma/client';
 
 type Loc = {
   id: string;
@@ -24,7 +24,9 @@ type Loc = {
 
 type Grl = { id: string; locationId: string };
 type InvTx = { id: string; locationId: string };
-type InvBal = { materialId: string; locationId: string; quantity: number };
+type InvBal = { materialId: string; locationId: string; quantity: number; sku?: string; heldForProject?: string };
+/** A tool lent from a location, and how many have come back. */
+type Loan = { id: string; materialId: string; sku: string; locationId: string; lent: number; back: number };
 
 type AuditRow = { actorId: string; action: string; entityType: string; entityId: string };
 
@@ -33,6 +35,11 @@ const db = {
   grls: new Map<string, Grl>(),
   invTxs: new Map<string, InvTx>(),
   invBal: new Map<string, InvBal>(),
+  loans: [] as Loan[],
+  /** Adjustments waiting for approval, by location. */
+  waiting: new Map<string, number>(),
+  /** inventory.projectReceivingLocationId. */
+  receivingLocationId: '',
   audit: [] as AuditRow[],
   /** The advisory locks taken, one per locked change. */
   locks: [] as string[],
@@ -104,12 +111,32 @@ function makePrisma(): unknown {
     inventoryTransaction: {
       count: async ({ where }: { where: { locationId: string } }) =>
         [...db.invTxs.values()].filter((t) => t.locationId === where.locationId).length,
+      // Loans from a location (toolsOutOn).
+      findMany: async ({ where }: { where: { locationId?: string } }) => db.loans
+        .filter((l) => l.locationId === where.locationId)
+        .map((l) => ({ id: l.id, materialId: l.materialId, quantity: new Prisma.Decimal(-l.lent), material: { sku: l.sku } })),
+      groupBy: async ({ where }: { where: { referenceId: { in: string[] } } }) => db.loans
+        .filter((l) => where.referenceId.in.includes(l.id))
+        .map((l) => ({ referenceId: l.id, _sum: { quantity: new Prisma.Decimal(l.back) } })),
+    },
+    adjustmentRequest: {
+      count: async ({ where }: { where: { locationId: string } }) => db.waiting.get(where.locationId) ?? 0,
+    },
+    setting: {
+      findUnique: async ({ where }: { where: { key: string } }) =>
+        where.key === 'inventory.projectReceivingLocationId' ? { key: where.key, value: db.receivingLocationId } : null,
     },
     inventoryBalance: {
-      findMany: async ({ where }: { where?: { locationId?: { in?: string[] } } }) =>
-        where?.locationId?.in
-          ? [...db.invBal.values()].filter((b) => where.locationId!.in!.includes(b.locationId))
-          : [...db.invBal.values()],
+      findMany: async ({ where }: { where?: { locationId?: string | { in?: string[] }; quantity?: { not: number } } }) => {
+        const at = where?.locationId;
+        if (typeof at === 'string') {
+          // What is on one location (the deactivation check): non-zero rows, with their item.
+          return [...db.invBal.values()]
+            .filter((b) => b.locationId === at && (where?.quantity === undefined || b.quantity !== 0))
+            .map((b) => ({ quantity: new Prisma.Decimal(b.quantity), heldForProject: b.heldForProject ?? '', material: { sku: b.sku ?? b.materialId, unitOfMeasure: 'each' } }));
+        }
+        return at?.in ? [...db.invBal.values()].filter((b) => at.in!.includes(b.locationId)) : [...db.invBal.values()];
+      },
       count: async ({ where }: { where: { locationId: string } }) =>
         [...db.invBal.values()].filter((b) => b.locationId === where.locationId).length,
     },
@@ -124,6 +151,9 @@ beforeEach(() => {
   db.grls.clear();
   db.invTxs.clear();
   db.invBal.clear();
+  db.loans.length = 0;
+  db.waiting.clear();
+  db.receivingLocationId = '';
   db.audit.length = 0;
   db.locks.length = 0;
   counter = 0;
@@ -309,7 +339,64 @@ describe('LocationService: a location inside another', () => {
     const rack = await LocationService.create({ name: 'D-1', type: 'RACK', parentId: store.id }, 'user-1');
     await LocationService.update({ id: rack.id, name: 'D-2' }, 'user-1');
     await LocationService.setStatus(rack.id, false, 'user-1');
-    expect(db.locks).toHaveLength(4);
-    expect(db.locks.every((q) => q.includes('pg_advisory_xact_lock') && q.includes('afrinov:location-tree'))).toBe(true);
+    const treeLocks = db.locks.filter((q) => q.includes('pg_advisory_xact_lock'));
+    expect(treeLocks).toHaveLength(4);
+    expect(treeLocks.every((q) => q.includes('afrinov:location-tree'))).toBe(true);
+    // Deactivating also holds the location's row, so no movement onto it can slip past the check (system audit A1).
+    expect(db.locks.some((q) => q.includes('FROM locations') && q.includes('FOR UPDATE'))).toBe(true);
   });
 });
+
+// System audit A1: a location is closed only when nothing is left on it.
+describe('LocationService: deactivating only when clear', () => {
+  async function rack(name = 'R-1') {
+    const { LocationService } = await import('./location.service.js');
+    return LocationService.create({ name, type: 'RACK' }, 'user-1');
+  }
+
+  it('refuses while stock is on it, Stores or a project\'s, and lists it', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const r = await rack();
+    db.invBal.set('m1|' + r.id, { materialId: 'm1', sku: 'BOLT-M12', locationId: r.id, quantity: 40 });
+    db.invBal.set('m2|' + r.id, { materialId: 'm2', sku: 'PIPE-50', locationId: r.id, quantity: 3, heldForProject: 'P-100' });
+    db.invBal.set('m3|' + r.id, { materialId: 'm3', sku: 'EMPTY', locationId: r.id, quantity: 0 });
+    await expect(LocationService.setStatus(r.id, false, 'user-1')).rejects.toMatchObject({
+      code: 'CONFLICT', message: expect.stringMatching(/40 each of BOLT-M12; 3 each of PIPE-50, held for project P-100/),
+    });
+    expect(db.locations.get(r.id)?.active).toBe(true);
+    const check = await LocationService.deactivationCheck(r.id);
+    expect(check.blockers.map((b) => b.kind)).toEqual(['STOCK', 'STOCK']);
+  });
+
+  it('refuses while a tool lent from it is still out, or an adjustment waits there', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const r = await rack();
+    db.loans.push({ id: 'loan-1', materialId: 't1', sku: 'DRILL-01', locationId: r.id, lent: 2, back: 1 });
+    db.waiting.set(r.id, 1);
+    const { blockers } = await LocationService.deactivationCheck(r.id);
+    expect(blockers).toEqual([
+      { kind: 'LOAN', text: '1 × DRILL-01 out on loan from here' },
+      { kind: 'APPROVAL', text: '1 adjustment here waiting for approval' },
+    ]);
+    // The same rule through PATCH /locations/:id.
+    await expect(LocationService.update({ id: r.id, active: false }, 'user-1')).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('refuses while project deliveries are booked there', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const r = await rack();
+    db.receivingLocationId = r.id;
+    expect((await LocationService.deactivationCheck(r.id)).blockers).toEqual([{ kind: 'SETTING', text: 'Project deliveries are booked here (Settings → Inventory)' }]);
+  });
+
+  it('deactivates once clear: empty rows and tools all back don\'t count', async () => {
+    const { LocationService } = await import('./location.service.js');
+    const r = await rack();
+    db.invBal.set('m1|' + r.id, { materialId: 'm1', locationId: r.id, quantity: 0 });
+    db.loans.push({ id: 'loan-2', materialId: 't1', sku: 'DRILL-01', locationId: r.id, lent: 1, back: 1 });
+    expect((await LocationService.deactivationCheck(r.id)).blockers).toEqual([]);
+    await LocationService.setStatus(r.id, false, 'user-1');
+    expect(db.locations.get(r.id)?.active).toBe(false);
+  });
+});
+

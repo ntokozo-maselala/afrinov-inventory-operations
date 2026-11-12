@@ -182,11 +182,13 @@ describe('Stores and Projects materials over real HTTP', () => {
       supplierId: supplier.body.id, projectNumber: to, lines: [{ materialId, orderedQty: 2 }],
     });
 
-    expect([200, 201]).toContain((await order(pipe.body.id, other)).status);
+    const onOther = await order(pipe.body.id, other);
+    expect([200, 201]).toContain(onOther.status);
     expect([200, 201]).toContain((await order(pipe.body.id, projectNumber)).status);
     // An item with no project goes on a project order too.
     const plain = await prisma.material.create({ data: { sku: `IT-SEC-PLAIN-${run}`, name: 'Plain plate', category: 'PROJECT_MATERIAL', unitOfMeasure: 'each' } });
-    expect([200, 201]).toContain((await order(plain.id, other)).status);
+    const plainOrder = await order(plain.id, other);
+    expect([200, 201]).toContain(plainOrder.status);
     // An order with no project is a Stores order: Stores items only.
     const stores = await order(pipe.body.id);
     expect(stores.status).toBe(400);
@@ -199,12 +201,18 @@ describe('Stores and Projects materials over real HTTP', () => {
     const beam = await create({ sku: `IT-SEC-BEAM3-${run}`, category: 'PROJECT_MATERIAL', projectNumber: other });
     const draft = await order(beam.body.id, other);
     expect([200, 201]).toContain(draft.status);
+    // System audit E1: not while its orders are still open, even drafts.
+    const blocked = await api<{ error: { message: string; details: { blockers: Array<{ kind: string }> } } }>('PATCH', `/projects/${other}`, { status: 'COMPLETED' });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.details.blockers.filter((b) => b.kind === 'ORDER')).toHaveLength(3);
+    for (const id of [onOther.body.id, plainOrder.body.id, draft.body.id]) {
+      expect((await api('POST', `/purchase-orders/${id}/cancel`, { reason: 'Job closing' })).status).toBe(200);
+    }
     expect((await api('PATCH', `/projects/${other}`, { status: 'COMPLETED' })).status).toBe(200);
+    expect(await prisma.project.findUniqueOrThrow({ where: { projectNumber: other } })).toMatchObject({ status: 'COMPLETED', active: false });
     const closed = await order(beam.body.id, other);
     expect(closed.status).toBe(400);
     expect(closed.body.error?.message).toMatch(/is completed, so nothing more is ordered for it/);
-    const submit = await api<{ error?: { message: string } }>('POST', `/purchase-orders/${draft.body.id}/submit`);
-    expect(submit.status).toBe(400);
   });
 
   it('moves the leftovers of a completed project to Stores, to be issued to another job (Phase 7)', async () => {

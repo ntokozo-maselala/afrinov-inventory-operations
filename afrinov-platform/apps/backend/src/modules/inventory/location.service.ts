@@ -18,6 +18,8 @@
 import { Prisma, type LocationType } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { toolsOutOn } from '../../shared/inventory/tool-loans.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 export interface CreateLocationInput {
   name: string;
@@ -124,6 +126,53 @@ async function assertRoomActive(db: Db, name: string, parentId: string | null): 
   const room = await db.location.findUnique({ where: { id: parentId } });
   if (room && !room.active) {
     throw Errors.validation(`${name} is inside ${room.name}, which is inactive. Reactivate ${room.name} first, or move ${name} out of it.`);
+  }
+}
+
+/** What has to be dealt with before a location can be deactivated (system audit A1). */
+export interface LocationBlocker {
+  kind: 'LOCATIONS' | 'STOCK' | 'LOAN' | 'APPROVAL' | 'SETTING';
+  text: string;
+}
+
+export const PROJECT_RECEIVING_SETTING = 'inventory.projectReceivingLocationId';
+
+/**
+ * Stock on it (Stores or a project's), tools out on loan from it, adjustments
+ * waiting for approval there, and whether project deliveries are booked to
+ * it. While any remain, it stays active: stock on an inactive location can't
+ * be issued, moved, adjusted or counted, and a tool lent from it can't come
+ * back. Items follow the same rule (ADR-033).
+ */
+async function blockersOf(db: Db, id: string): Promise<LocationBlocker[]> {
+  const [balances, tools, waiting, receiving] = await Promise.all([
+    db.inventoryBalance.findMany({
+      where: { locationId: id, quantity: { not: 0 } },
+      select: { quantity: true, heldForProject: true, material: { select: { sku: true, unitOfMeasure: true } } },
+      orderBy: { material: { sku: 'asc' } },
+    }),
+    toolsOutOn(db, { locationId: id }),
+    db.adjustmentRequest.count({ where: { locationId: id, status: 'PENDING' } }),
+    SettingsService.getValue<string>(PROJECT_RECEIVING_SETTING, db),
+  ]);
+  const blockers: LocationBlocker[] = balances.map((b) => ({
+    kind: 'STOCK',
+    text: `${b.quantity.toString()} ${b.material.unitOfMeasure} of ${b.material.sku}${b.heldForProject ? `, held for project ${b.heldForProject}` : ''}`,
+  }));
+  for (const t of tools) blockers.push({ kind: 'LOAN', text: `${t.out.toString()} × ${t.sku} out on loan from here` });
+  if (waiting > 0) blockers.push({ kind: 'APPROVAL', text: `${waiting} adjustment${waiting === 1 ? '' : 's'} here waiting for approval` });
+  if (receiving === id) blockers.push({ kind: 'SETTING', text: 'Project deliveries are booked here (Settings → Inventory)' });
+  return blockers;
+}
+
+/** Refuses to deactivate a location until it is clear, listing what is in the way. */
+async function assertClear(db: Db, id: string, name: string): Promise<void> {
+  // Held until this commits: a movement holds the row FOR SHARE (checkLocationActive),
+  // so one in progress finishes before the check, or waits and is then refused.
+  await db.$executeRaw`SELECT 1 FROM locations WHERE id = ${id} FOR UPDATE`;
+  const blockers = await blockersOf(db, id);
+  if (blockers.length > 0) {
+    throw Errors.conflict(`${name} is not clear yet: ${blockers.map((b) => b.text).join('; ')}. Move or issue the stock, check the tools in, and decide the adjustments first.`, { blockers });
   }
 }
 
@@ -269,7 +318,10 @@ export const LocationService = {
         data.parentId = parentId;
       }
       if (input.active !== undefined) {
-        if (!input.active && before.active) await assertNoActiveChildren(tx, before.id, before.name);
+        if (!input.active && before.active) {
+          await assertNoActiveChildren(tx, before.id, before.name);
+          await assertClear(tx, before.id, before.name);
+        }
         // A new room was checked active above; an unchanged one is checked here.
         if (input.active && !before.active && parentId === before.parentId) {
           await assertRoomActive(tx, (data.name as string | undefined) ?? before.name, parentId);
@@ -304,7 +356,10 @@ export const LocationService = {
       const before = await tx.location.findUnique({ where: { id } });
       if (!before) throw Errors.notFound('Location');
       if (before.active === active) return before;
-      if (!active) await assertNoActiveChildren(tx, id, before.name);
+      if (!active) {
+        await assertNoActiveChildren(tx, id, before.name);
+        await assertClear(tx, id, before.name);
+      }
       else await assertRoomActive(tx, before.name, before.parentId);
       const after = await tx.location.update({
         where: { id },
@@ -322,6 +377,16 @@ export const LocationService = {
       });
       return after;
     });
+  },
+
+  /** What must be dealt with before the location can be deactivated, for the screen to show first. */
+  async deactivationCheck(id: string): Promise<{ blockers: LocationBlocker[] }> {
+    const loc = await prisma.location.findUnique({ where: { id }, select: { id: true } });
+    if (!loc) throw Errors.notFound('Location');
+    const blockers = await blockersOf(prisma as unknown as Db, id);
+    const inside = await prisma.location.count({ where: { parentId: id, active: true } });
+    if (inside > 0) blockers.unshift({ kind: 'LOCATIONS', text: `${inside} active location${inside === 1 ? '' : 's'} inside it` });
+    return { blockers };
   },
 
   async remove(id: string, actorId: string) {

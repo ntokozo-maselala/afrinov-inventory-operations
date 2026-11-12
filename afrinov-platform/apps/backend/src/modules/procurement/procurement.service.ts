@@ -263,10 +263,11 @@ function cleanLines(s: string | null | undefined): string | null {
 export async function assertProjectOpen(projectNumber: string, client: Prisma.TransactionClient | typeof prisma = prisma): Promise<void> {
   const project = await client.project.findUnique({ where: { projectNumber } });
   if (!project) throw Errors.validation(`No project ${projectNumber}`);
-  if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
+  // The status first: it says why (inactive follows from it, system audit E2).
   if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
     throw Errors.validation(`Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
   }
+  if (!project.active) throw Errors.validation(`Project ${projectNumber} is inactive`);
 }
 
 /** The order's lines' materials, for the project rules. */
@@ -531,6 +532,12 @@ export const PurchaseOrderService = {
       // either waits for this order (and is refused, being on it) or is seen as
       // moved here (Qodo, PR #129).
       const ids = [...new Set(input.lines.map((l) => l.materialId))];
+      // The project is held and read again here, so it can't close between the
+      // check and the order being written (system audit E1).
+      if (input.projectNumber) {
+        await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${input.projectNumber} FOR SHARE`;
+        await assertProjectOpen(input.projectNumber, tx);
+      }
       await tx.$executeRaw`SELECT 1 FROM materials WHERE id IN (${Prisma.join(ids)}) FOR SHARE`;
       const held = await lineMaterialsOf(ids, tx);
       refuseInactiveMaterial(held);
@@ -738,7 +745,10 @@ export const PurchaseOrderService = {
       const lineMaterials = await lineMaterialsOf(po.lines.map((l) => l.materialId), tx);
       refuseInactiveMaterial(lineMaterials);
       refuseProjectMaterialOnStoresOrder(po.projectNumber, lineMaterials);
-      if (po.projectNumber) await assertProjectOpen(po.projectNumber, tx);
+      if (po.projectNumber) {
+        await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${po.projectNumber} FOR SHARE`;
+        await assertProjectOpen(po.projectNumber, tx);
+      }
       const now = new Date();
       // The rate locks here, so who has to sign can't move with today's rate.
       const exchangeRate = exchangeRateOf({ currency: po.currency, exchangeRate: null }, approvalSettings);

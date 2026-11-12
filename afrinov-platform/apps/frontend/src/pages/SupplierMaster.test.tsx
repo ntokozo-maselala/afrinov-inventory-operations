@@ -142,7 +142,8 @@ describe('Supplier detail', () => {
     detailPage(['PROCUREMENT']);
     await screen.findByRole('heading', { name: 'Hydac' });
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
-    expect(screen.getAllByText(/no stock can be received from them/).length).toBeGreaterThan(0);
+    // System audit D2: no new orders, but orders already raised still go through.
+    expect(screen.getAllByText(/no new purchase orders or quotes are raised with them. Orders already raised still go through/).length).toBeGreaterThan(0);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/suppliers/s-1', { active: false }));
     expect(await screen.findByRole('button', { name: 'Reactivate' })).toBeInTheDocument();

@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1324, frontend 1541)
+npm test               # both workspaces (backend 1335, frontend 1543)
 npm run build          # both workspaces
 ```
 
@@ -174,6 +174,15 @@ Use these forms; the older spellings still work but are deprecated or removed.
   order still owing. A new path that moves stock calls `checkMaterialActive`
   after its balance lock: it holds the item's row, so a deactivation waits for
   the movement or the movement is refused (ADR-033).
+- **Locations and projects close only when clear (ADR-038).** A location is
+  deactivated only with no stock, no tool out from it, no adjustment waiting
+  and not where project deliveries go; a project is completed or cancelled
+  only with no open order, open RFQ, tool on loan or waiting write-off.
+  `checkLocationActive` holds the location's row `FOR SHARE` and
+  `checkProjectTakesIssues` the project's; a new path that moves stock onto a
+  location, or works for a project, uses them so a close can't slip past it.
+  A project's status decides `active` (Completed and Cancelled are inactive),
+  enforced by a database check: never set `active` on its own.
 - **An adjustment's reason sets its sign.** Damage, loss and scrap only remove
   stock, Found only adds it, Other goes either way; Found and Other need a note
   (`checkRequestedAdjustment`). The API still takes the signed quantity.

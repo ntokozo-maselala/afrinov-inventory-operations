@@ -26,3 +26,35 @@ export async function onLoanByMaterial(client: Client, materialIds?: string[], a
   }
   return out;
 }
+
+/** A tool still out on loans taken from one location or for one project. */
+export interface ToolOut { materialId: string; sku: string; out: Prisma.Decimal }
+
+/**
+ * Tools still out on the loans matching `where`, per item: what was lent less
+ * what has come back against each loan (a lost tool comes back on paper).
+ * Counted per loan, so a tool checked in to another location still counts
+ * against the loan it went out on. Used before closing a location or a project.
+ */
+export async function toolsOutOn(client: Client, where: { locationId?: string; projectNumber?: string }): Promise<ToolOut[]> {
+  const loans = await client.inventoryTransaction.findMany({
+    where: { type: InventoryTransactionType.LOAN, reversesId: null, ...where },
+    select: { id: true, materialId: true, quantity: true, material: { select: { sku: true } } },
+  });
+  if (loans.length === 0) return [];
+  const back = await client.inventoryTransaction.groupBy({
+    by: ['referenceId'],
+    where: { type: InventoryTransactionType.LOAN_RETURN, referenceType: 'ToolLoan', referenceId: { in: loans.map((l) => l.id) } },
+    _sum: { quantity: true },
+  });
+  const returned = new Map(back.map((b) => [b.referenceId, b._sum.quantity ?? new Prisma.Decimal(0)]));
+  const byItem = new Map<string, ToolOut>();
+  for (const l of loans) {
+    const out = l.quantity.negated().minus(returned.get(l.id) ?? 0);
+    if (!out.gt(0)) continue;
+    const t = byItem.get(l.materialId);
+    if (t) t.out = t.out.plus(out);
+    else byItem.set(l.materialId, { materialId: l.materialId, sku: l.material.sku, out });
+  }
+  return [...byItem.values()].sort((a, b) => a.sku.localeCompare(b.sku));
+}

@@ -1,5 +1,6 @@
 // Unit tests for ProjectService.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 type Proj = {
   projectNumber: string;
@@ -24,6 +25,10 @@ const db = {
   users: new Map<string, User>(),
   audit: [] as AuditRow[],
   schedules: [] as Array<{ projectNumber: string; status: string }>,
+  orders: [] as Array<{ id: string; number: string; status: string; projectNumber: string }>,
+  rfqs: [] as Array<{ id: string; number: string; status: string; projectNumber: string }>,
+  loans: [] as Array<{ id: string; materialId: string; sku: string; projectNumber: string; lent: number; back: number }>,
+  waiting: new Map<string, number>(),
   locks: 0,
 };
 
@@ -93,6 +98,26 @@ function makePrisma(): unknown {
     auditLogEntry: {
       create: async ({ data }: { data: AuditRow }) => { db.audit.push(data); return data; },
     },
+    purchaseOrder: {
+      findMany: async ({ where }: { where: { projectNumber: string; status: { in: string[] } } }) =>
+        db.orders.filter((o) => o.projectNumber === where.projectNumber && where.status.in.includes(o.status)),
+    },
+    rfq: {
+      findMany: async ({ where }: { where: { projectNumber: string; status: { in: string[] } } }) =>
+        db.rfqs.filter((r) => r.projectNumber === where.projectNumber && where.status.in.includes(r.status)),
+    },
+    inventoryTransaction: {
+      findMany: async ({ where }: { where: { projectNumber?: string } }) => db.loans
+        .filter((l) => l.projectNumber === where.projectNumber)
+        .map((l) => ({ id: l.id, materialId: l.materialId, quantity: new Prisma.Decimal(-l.lent), material: { sku: l.sku } })),
+      groupBy: async ({ where }: { where: { referenceId: { in: string[] } } }) => db.loans
+        .filter((l) => where.referenceId.in.includes(l.id))
+        .map((l) => ({ referenceId: l.id, _sum: { quantity: new Prisma.Decimal(l.back) } })),
+    },
+    adjustmentRequest: {
+      count: async ({ where }: { where: { OR: Array<{ projectNumber?: string; heldForProject?: string }> } }) =>
+        db.waiting.get(where.OR[0]!.projectNumber ?? '') ?? 0,
+    },
     projectSchedule: {
       count: async ({ where }: { where: { projectNumber: string; status: { in: string[] } } }) =>
         db.schedules.filter((s) => s.projectNumber === where.projectNumber && where.status.in.includes(s.status)).length,
@@ -110,6 +135,10 @@ beforeEach(() => {
   db.users.clear();
   db.audit.length = 0;
   db.schedules.length = 0;
+  db.orders.length = 0;
+  db.rfqs.length = 0;
+  db.loans.length = 0;
+  db.waiting.clear();
   db.locks = 0;
   db.users.set('user-1', { id: 'user-1', name: 'Alice', email: 'alice@example.com' });
   db.users.set('user-2', { id: 'user-2', name: 'Bob', email: 'bob@example.com' });
@@ -169,6 +198,38 @@ describe('ProjectService', () => {
     expect(db.locks).toBe(1);
     db.schedules[1]!.status = 'CANCELLED';
     expect((await ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).status).toBe('COMPLETED');
+  });
+
+  // System audit E1: a project closes only when nothing still depends on it.
+  it('refuses closing while orders, RFQs, tool loans or write-offs remain, and lists them', async () => {
+    const { ProjectService } = await import('./project.service.js');
+    await ProjectService.create({ projectNumber: 'P-8', name: 'X', status: 'ACTIVE' }, 'user-1');
+    db.orders.push({ id: 'po-1', number: 'AFRI-0101', status: 'APPROVED', projectNumber: 'P-8' }, { id: 'po-2', number: 'AFRI-0102', status: 'RECEIVED', projectNumber: 'P-8' });
+    db.rfqs.push({ id: 'rfq-1', number: 'AFRI-02A-0008-01', status: 'SENT', projectNumber: 'P-8' });
+    db.loans.push({ id: 'loan-1', materialId: 't1', sku: 'GRINDER-01', projectNumber: 'P-8', lent: 1, back: 0 });
+    db.waiting.set('P-8', 2);
+    const { blockers } = await ProjectService.closingCheck('P-8', 'CANCELLED');
+    expect(blockers.map((b) => b.kind)).toEqual(['ORDER', 'RFQ', 'LOAN', 'APPROVAL']);
+    expect(blockers[0]).toMatchObject({ id: 'po-1', text: expect.stringMatching(/AFRI-0101 is approved/) });
+    await expect(ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1')).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/can't be cancelled yet/) });
+    await expect(ProjectService.archive('P-8', 'user-1')).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    expect(db.projects.get('P-8')).toMatchObject({ status: 'ACTIVE', active: true });
+
+    db.orders[0]!.status = 'CLOSED';
+    db.rfqs[0]!.status = 'AWARDED';
+    db.loans[0]!.back = 1;
+    db.waiting.clear();
+    expect((await ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1'))).toMatchObject({ status: 'CANCELLED', active: false });
+  });
+
+  // System audit E2: status decides whether a project is active.
+  it('keeps active in step with status, both ways', async () => {
+    const { ProjectService } = await import('./project.service.js');
+    await ProjectService.create({ projectNumber: 'P-9', name: 'X', status: 'ACTIVE' }, 'user-1');
+    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'COMPLETED' }, 'user-1')).active).toBe(false);
+    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'ACTIVE' }, 'user-1')).active).toBe(true);
+    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'ON_HOLD' }, 'user-1')).active).toBe(true);
+    expect((await ProjectService.create({ projectNumber: 'P-10', name: 'Y', status: 'CANCELLED' }, 'user-1')).active).toBe(false);
   });
 
   it('disconnects manager when null passed', async () => {

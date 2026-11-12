@@ -207,13 +207,17 @@ export async function checkProjectActive(projectNumber: string, tx: Prisma.Trans
  * takes no more: its leftovers go to Stores and are issued from there.
  * Returns are still accepted from it.
  */
-async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.TransactionClient): Promise<void> {
+export async function checkProjectTakesIssues(projectNumber: string, tx: Prisma.TransactionClient, what = 'stock is issued'): Promise<void> {
+  // Held for the rest of the transaction, so the project can't be closed
+  // between this check and the movement committing (system audit E1).
+  await tx.$executeRaw`SELECT 1 FROM projects WHERE project_number = ${projectNumber} FOR SHARE`;
   const p = await tx.project.findUnique({ where: { projectNumber } });
   if (!p) throw Errors.notFound('Project');
-  if (!p.active) throw Errors.validation('Project is inactive');
+  // The status first: it says why (inactive follows from it, system audit E2).
   if (p.status === 'COMPLETED' || p.status === 'CANCELLED') {
-    throw Errors.validation(`Project ${projectNumber} is ${p.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
+    throw Errors.validation(`Project ${projectNumber} is ${p.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more ${what} to it.`);
   }
+  if (!p.active) throw Errors.validation('Project is inactive');
 }
 
 /** Stock can be held only for a project that exists (the ledger's foreign key, said plainly). */
@@ -353,6 +357,9 @@ export async function checkRecipientActive(recipientId: string, tx: Prisma.Trans
 }
 
 export async function checkLocationActive(locationId: string, tx: Prisma.TransactionClient): Promise<void> {
+  // Held for the rest of the transaction, so a deactivation waits for this
+  // movement or this movement waits for it and is refused, as for items (system audit A1).
+  await tx.$executeRaw`SELECT 1 FROM locations WHERE id = ${locationId} FOR SHARE`;
   const l = await tx.location.findUnique({ where: { id: locationId } });
   if (!l) throw Errors.notFound('Location');
   if (!l.active) throw Errors.validation('Location is inactive');
@@ -1648,6 +1655,8 @@ export const InventoryService = {
       // checked when the receipt is recorded).
       for (const line of gr.lines) {
         await checkMaterialActive(line.materialId, tx);
+        // As every other way stock arrives (system audit A3): not onto a closed location.
+        await checkLocationActive(line.locationId, tx);
         if (gr.purchaseOrderId && !line.purchaseOrderLineId) {
           throw Errors.validation('Every line of a receipt against a purchase order must name the order line it is for.');
         }

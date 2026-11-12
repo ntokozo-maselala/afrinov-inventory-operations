@@ -22,7 +22,7 @@ import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, gtZero } from '../../shared/decimal.js';
 import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
-import { checkLocationActive, checkMaterialActive, checkProjectActive, checkRecipientActive } from './inventory.service.js';
+import { checkLocationActive, checkMaterialActive, checkProjectTakesIssues, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
 import { ReceiptConfirmationService, type ReceiptSummary } from './receipt-confirmation.service.js';
 import { checkWriteOff } from './write-off-limit.js';
@@ -71,7 +71,14 @@ export interface CheckOutInput {
 }
 
 export interface CheckInInput {
-  lines: Array<{ loanId: string; quantity: number | string | Decimal; condition: ToolCondition; note?: string }>;
+  lines: Array<{
+    loanId: string; quantity: number | string | Decimal; condition: ToolCondition; note?: string;
+    /**
+     * Where it goes back to, when not the location it was lent from: needed
+     * only when that location has closed since (system audit A2).
+     */
+    locationId?: string;
+  }>;
   actorId: string;
 }
 
@@ -133,6 +140,8 @@ export interface OpenLoan {
   projectNumber: string | null;
   locationId: string;
   locationName: string;
+  /** False when the location it was lent from has closed: check-in then asks where it goes back (system audit A2). */
+  locationActive: boolean;
   /** How many were lent on this loan. */
   quantity: string;
   /** How many of them are still out. */
@@ -236,7 +245,7 @@ export const ToolLoanService = {
         where: { type: InventoryTransactionType.LOAN, materialId: { in: ids } },
         include: {
           recipient: { select: { name: true, type: true } },
-          location: { select: { name: true } },
+          location: { select: { name: true, active: true } },
           actor: { select: { name: true } },
           loanExtensions: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { actor: { select: { name: true } } } },
           reversedBy: { select: { id: true } },
@@ -276,6 +285,7 @@ export const ToolLoanService = {
         projectNumber: l.projectNumber,
         locationId: l.locationId,
         locationName: l.location.name,
+        locationActive: l.location.active,
         quantity: lent.toString(),
         out: out.toString(),
         lostWaiting: (lostWaiting.get(l.id) ?? toDecimal(0)).toString(),
@@ -340,7 +350,8 @@ export const ToolLoanService = {
       // Tools are Stores items, so their stock is the store's own.
       await lockInventoryBalances([...totals.values()].map((t) => storesStock(t.materialId, t.locationId)), tx);
       await checkRecipientActive(input.recipientId, tx);
-      if (input.projectNumber) await checkProjectActive(input.projectNumber, tx);
+      // As issuing stock does (system audit B1): not to a completed or cancelled project.
+      if (input.projectNumber) await checkProjectTakesIssues(input.projectNumber, tx, 'tools are lent');
       // Each line becomes a loan of its own, so each is whole, not just their total.
       await checkWholeUnits(lines.map((l) => ({ materialId: l.materialId, quantity: l.qty })), tx);
       for (const t of totals.values()) {
@@ -452,8 +463,14 @@ export const ToolLoanService = {
         if (!loan) throw Errors.notFound('Tool check-out');
         if (loan.type !== InventoryTransactionType.LOAN) throw Errors.invalidState('Only a tool check-out can be checked in');
       }
-      await lock(tx, loans.map((l) => `${l.materialId}:${l.locationId}`));
-      await lockInventoryBalances(loans.map((l) => storesStock(l.materialId, l.locationId)), tx);
+      // Where each line goes back to: the location it was lent from, unless another is given.
+      const backTo = (l: { loanId: string; locationId?: string }) => l.locationId ?? byId.get(l.loanId)!.locationId;
+      const stockKeys = [
+        ...loans.map((l) => ({ materialId: l.materialId, locationId: l.locationId })),
+        ...lines.map((l) => ({ materialId: byId.get(l.loanId)!.materialId, locationId: backTo(l) })),
+      ];
+      await lock(tx, stockKeys.map((k) => `${k.materialId}:${k.locationId}`));
+      await lockInventoryBalances(stockKeys.map((k) => storesStock(k.materialId, k.locationId)), tx);
 
       // Read after the lock, so two check-ins of one loan cannot both pass. A
       // lost tool waiting for its write-off to be approved is still out, but
@@ -473,7 +490,21 @@ export const ToolLoanService = {
         }
         outOf.set(id, out);
         await checkMaterialActive(loan.materialId, tx);
-        await checkLocationActive(loan.locationId, tx);
+      }
+      // A tool coming back goes onto an active location. A lost one moves no
+      // stock (its return and write-off cancel out), so it needs none.
+      for (const l of lines) {
+        if (l.condition === 'LOST') continue;
+        const loan = byId.get(l.loanId)!;
+        const to = backTo(l);
+        await tx.$executeRaw`SELECT 1 FROM locations WHERE id = ${to} FOR SHARE`;
+        const where = await tx.location.findUnique({ where: { id: to }, select: { name: true, active: true } });
+        if (!where) throw Errors.notFound('Location');
+        if (!where.active) {
+          throw Errors.validation(l.locationId
+            ? `${where.name} is inactive: choose another location to check ${loan.material.sku} in to.`
+            : `${where.name}, where ${loan.material.sku} was lent from, is closed: choose where it goes back.`, { loanId: loan.id, needsLocation: true });
+        }
       }
       // Whole units, but for one line of a loan that carries the part-unit still
       // out on a loan made before the rule, so what is left becomes whole.
@@ -526,7 +557,7 @@ export const ToolLoanService = {
           data: {
             postedAt,
             materialId: loan.materialId,
-            locationId: loan.locationId,
+            locationId: backTo(l),
             type: InventoryTransactionType.LOAN_RETURN,
             quantity: l.qty,
             actorId: input.actorId,
@@ -540,7 +571,7 @@ export const ToolLoanService = {
         });
         returnIds.push(back.id);
       }
-      for (const key of new Set(loans.map((l) => `${l.materialId}|${l.locationId}`))) {
+      for (const key of new Set(stockKeys.map((k) => `${k.materialId}|${k.locationId}`))) {
         const [materialId, locationId] = key.split('|') as [string, string];
         await recomputeBalance(storesStock(materialId, locationId), tx);
       }
@@ -551,7 +582,7 @@ export const ToolLoanService = {
           action: 'TOOL_CHECK_IN',
           entityType: 'ToolLoan',
           entityId: loanIds[0]!,
-          after: { lines: lines.map((l) => ({ loanId: l.loanId, quantity: l.qty.toString(), condition: l.condition })), returnIds, writeOffIds, writeOffRequestIds } as Prisma.InputJsonValue,
+          after: { lines: lines.map((l) => ({ loanId: l.loanId, quantity: l.qty.toString(), condition: l.condition, ...(l.locationId ? { locationId: l.locationId } : {}) })), returnIds, writeOffIds, writeOffRequestIds } as Prisma.InputJsonValue,
         },
       });
       return { returnIds, writeOffIds, writeOffRequestIds, heldLoanIds };
@@ -576,7 +607,9 @@ export const ToolLoanService = {
       }
       // As approving any adjustment: a tool retired while this waited is not written off.
       await checkMaterialActive(loan.materialId, tx);
-      await checkLocationActive(loan.locationId, tx);
+      // No location check: a lost tool's return and write-off cancel out where
+      // it was lent from, so it can be written off even if that location has
+      // closed since (system audit A2).
       const posted = await postLost(tx, loan, input.quantity, { returnNote: input.reasonNote, writeOffNote: input.reasonNote }, input.actorId, new Date());
       await recomputeBalance(storesStock(loan.materialId, loan.locationId), tx);
       return { transactionId: posted.writeOffId };

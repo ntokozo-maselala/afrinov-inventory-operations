@@ -265,6 +265,13 @@ export async function locationRoutes(app: FastifyInstance): Promise<void> {
     return LocationService.update({ id, ...parsed.data }, actorId);
   });
 
+  // System audit A1: what must be dealt with before the location can be deactivated.
+  app.get('/locations/:id/deactivation-check', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ManageLocationStatus);
+    const id = (req.params as { id: string }).id;
+    return LocationService.deactivationCheck(id);
+  });
+
   app.patch('/locations/:id/status', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.ManageLocationStatus);
     const id = (req.params as { id: string }).id;
