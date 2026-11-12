@@ -1,6 +1,7 @@
 // Procurement savings: for each line of a Procurement RFQ sent in a period, what
-// suppliers quoted Sales, what they quoted the buyers, and what the order was
-// placed at (GET /reports/procurement-savings). The server works out every
+// suppliers quoted the buyers and what the order was placed at
+// (GET /reports/procurement-savings). Sales has no column: a Sales RFQ takes its
+// material cost from these same orders. The server works out every
 // figure; what can't be compared comes back blank, with a note saying why.
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -43,47 +44,27 @@ function Difference({ value, currency }: { value: string | null; currency: strin
   return <span className={`font-mono whitespace-nowrap ${Number(value) < 0 ? 'text-danger-700' : ''}`}>{formatMoney(value, currency)}</span>;
 }
 
-/** A Sales difference, with what it was set against where other lines share the Sales line. */
-function SalesDifference({ value, against, row, currency }: { value: string | null; against: string | null | undefined; row: SavingsRow; currency: string }) {
-  const shared = row.comparedWith;
-  return (
-    <>
-      <Difference value={value} currency={currency} />
-      {shared && against && value !== null && (
-        <div className="text-meta whitespace-nowrap">
-          Against {formatMoney(against, currency)} for {formatNumber(Number(shared.quantity))} {shared.unitOfMeasure} on {shared.lines} lines
-        </div>
-      )}
-    </>
-  );
-}
-
 function columns(currency: string): DataTableColumn<SavingsRow>[] {
   return [
     { key: 'project', header: 'Project', render: (r) => <div className="min-w-24"><div className="font-mono text-sm">{r.projectNumber ?? '—'}</div>{r.projectName && <div className="text-meta">{r.projectName}</div>}</div> },
     { key: 'rfq', header: 'RFQ no.', render: (r) => (
       <div className="min-w-40 text-sm">
         <div><span className="text-meta">Procurement </span><Link to={`/rfqs/${r.rfqId}`} className="btn-link text-mono">{r.rfqNumber}</Link></div>
-        {r.sales && <div><span className="text-meta">Sales </span><span className="text-mono">{r.sales.rfqNumber}</span></div>}
       </div>
     ) },
     { key: 'material', header: 'Material', render: (r) => (
       <div className="min-w-56">
         <span className="text-mono text-xs">{r.sku}</span> {r.material}
-        {r.sales && <div className="text-meta">Sales: {r.sales.description}</div>}
         {r.notes.length > 0 && <ul className="text-xs text-warning-700 mt-1 space-y-0.5">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       </div>
     ) },
     { key: 'qty', header: 'Qty', align: 'right', className: 'text-num', render: (r) => <span className="font-mono whitespace-nowrap">{formatNumber(Number(r.quantity))} {r.unitOfMeasure}</span> },
-    { key: 'sales', header: 'Sales RFQ prices', render: (r) => (r.sales ? <Prices prices={r.sales.prices} lowest={r.sales.lowest} /> : dash) },
     { key: 'procurement', header: 'Procurement RFQ prices', render: (r) => <Prices prices={r.procurement.prices} lowest={r.procurement.lowest} /> },
     { key: 'order', header: 'PO price', align: 'right', render: (r) => (r.order?.lineTotal
       ? <div className="whitespace-nowrap"><span className="font-mono">{formatMoney(r.order.lineTotal, r.order.currency)}</span><div className="text-meta">{r.order.supplier}</div></div>
       : dash) },
     { key: 'discount', header: 'Line discount', align: 'right', render: (r) => (r.order?.discount && Number(r.order.discount) > 0 ? <span className="font-mono">{formatMoney(r.order.discount, r.order.currency)}</span> : dash) },
-    { key: 'salesVsProcurement', header: 'Sales vs Procurement', align: 'right', render: (r) => <SalesDifference value={r.salesVsProcurement} against={r.comparedWith?.procurement} row={r} currency={currency} /> },
     { key: 'procurementVsOrder', header: 'Procurement vs PO', align: 'right', render: (r) => <Difference value={r.procurementVsOrder} currency={currency} /> },
-    { key: 'salesVsOrder', header: 'Sales vs PO', align: 'right', render: (r) => <SalesDifference value={r.salesVsOrder} against={r.comparedWith?.order} row={r} currency={currency} /> },
   ];
 }
 
@@ -136,7 +117,7 @@ export function ProcurementSavings() {
     <div>
       <PageHeader
         title="Procurement savings"
-        description="What suppliers quoted Sales and the buyers, and what the order was placed at. Line totals excl. VAT, each side at its lowest, the order before line discounts."
+        description="What suppliers quoted the buyers, and what the order was placed at. Line totals excl. VAT, quotes at their lowest, the order before line discounts."
         actions={(
           <DownloadMenu
             label="Download savings report"
@@ -170,11 +151,9 @@ export function ProcurementSavings() {
         <div className="space-y-3">
           {/* The table is wide, so what it comes to is here without scrolling across to it. */}
           {r.rows.length > 0 && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Totals">
+            <div className="grid grid-cols-2 gap-3 max-w-xl" aria-label="Totals">
               {[
-                ['Sales vs Procurement', total.salesVsProcurement],
                 ['Procurement vs PO', total.procurementVsOrder],
-                ['Sales vs PO', total.salesVsOrder],
                 ['Line discounts', total.discount],
               ].map(([label, value]) => (
                 <div key={label} className="surface-card p-4">
@@ -192,19 +171,16 @@ export function ProcurementSavings() {
             emptyState={<EmptyState title="Nothing to compare" description="No Procurement RFQ was sent for this selection in this period." />}
             footer={r.rows.length > 0 && (
               <tr className="font-semibold">
-                <td colSpan={4}>Total ({total.lines} line{total.lines === 1 ? '' : 's'}, {total.linked} linked to Sales)</td>
-                <td>{money(total.sales)}</td>
+                <td colSpan={4}>Total ({total.lines} line{total.lines === 1 ? '' : 's'})</td>
                 <td>{money(total.procurement)}</td>
                 <td className="text-right">{money(total.order)}</td>
                 <td className="text-right">{money(total.discount)}</td>
-                <td className="text-right"><Difference value={total.salesVsProcurement} currency={currency} /></td>
                 <td className="text-right"><Difference value={total.procurementVsOrder} currency={currency} /></td>
-                <td className="text-right"><Difference value={total.salesVsOrder} currency={currency} /></td>
               </tr>
             )}
           />
           <p className="text-meta">
-            RFQs count by the day they were sent. The lowest rand price on each side is in bold. A difference is positive where the second figure is lower. One that can&apos;t be compared is blank and out of the totals, with the reason under the material, so each total adds up only what it can compare.
+            RFQs count by the day they were sent. The lowest rand price is in bold. A difference is positive where the order is lower. One that can&apos;t be compared is blank and out of the totals, with the reason under the material, so each total adds up only what it can compare.
           </p>
         </div>
       )}

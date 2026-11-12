@@ -255,6 +255,34 @@ export function drawLogo(doc: jsPDF, centre: number, y: number, height: number) 
   });
 }
 
+/** The logo's flame mark alone (the red flame and the green leaf), without the wordmark. */
+const MARK_SHAPES = [0, 1];
+
+/**
+ * The flame mark as a faint watermark, centred on (`centreX`, `centreY`),
+ * `height` mm tall. Drawn before a page's content, so the text sits on top.
+ */
+export function drawLogoWatermark(doc: jsPDF, centreX: number, centreY: number, height: number, opacity = 0.15) {
+  const shapes = MARK_SHAPES.map((i) => parsePath(LOGO_PATHS[i]!));
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const op of shapes.flat()) op.c.forEach((v, k) => (k % 2 === 0 ? xs : ys).push(v));
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const scale = height / (Math.max(...ys) - top);
+  const x = centreX - ((Math.max(...xs) - left) * scale) / 2;
+  const y = centreY - height / 2;
+  const gs = doc as unknown as { GState: new (o: { opacity: number }) => unknown; setGState: (g: unknown) => void };
+  doc.saveGraphicsState();
+  gs.setGState(new gs.GState({ opacity }));
+  shapes.forEach((ops, n) => {
+    doc.setFillColor(LOGO_FILLS[MARK_SHAPES[n]!] ?? '#E3001B');
+    doc.path(ops.map((o) => ({ op: o.op, c: o.c.map((v, k) => (k % 2 === 0 ? x + (v - left) * scale : y + (v - top) * scale)) })));
+    doc.fill();
+  });
+  doc.restoreGraphicsState();
+}
+
 export async function downloadPdf(report: PdfReport, filename: string): Promise<void> {
   triggerDownload(new Blob([await buildPdf(report)], { type: 'application/pdf' }), filename);
 }

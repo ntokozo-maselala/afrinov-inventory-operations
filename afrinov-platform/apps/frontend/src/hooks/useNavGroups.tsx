@@ -67,7 +67,7 @@ export function useNavGroups(): NavGroup[] {
         { to: '/reports/stock-status', label: 'Stock status', icon: <Icon.Warning /> },
         { to: '/reports/consumption', label: 'Stock used', icon: <Icon.Cash /> },
         { to: '/reports/stock-report', label: 'Stock report', icon: <Icon.Doc /> },
-        // Sets what Sales was quoted beside what buyers were, so only for those who may see it.
+        // Buyers' quotes against the orders placed: for the managers who oversee margin, as before.
         ...(PROCUREMENT_ENABLED ? [{ to: '/reports/procurement-savings', label: 'Procurement savings', icon: <Icon.Cash />, permissions: ['sales:view'] }] : []),
         // The history of every movement, as reports with downloads; mistakes are reversed from here.
         { to: '/movements', label: 'Movements', icon: <Icon.Activity /> },
@@ -90,14 +90,17 @@ export function useNavGroups(): NavGroup[] {
         { to: '/projects', label: 'Projects', icon: <Icon.Tag />, excludes: ['/projects/board'] },
         // Every open job, most at risk first, and each user's own steps (ADR-032).
         { to: '/projects/board', label: 'Project board', icon: <Icon.Chart /> },
-        // What suppliers quote Sales can give away a job's margin, so buyers and the store don't see it.
+        // What a job is priced at gives away its margin, so buyers and the store don't see it.
         ...(PROCUREMENT_ENABLED ? [{ to: '/sales-rfqs', label: 'Sales RFQ', icon: <Icon.Doc />, permissions: ['sales:view'] }] : []),
       ],
     },
     {
-      // A header for now: its pages come later.
+      // The workshop. More pages come later.
       title: 'Production',
-      items: [],
+      items: [
+        // The hourly selling rates Sales prices labour at; the Workshop Manager keeps them.
+        ...(PROCUREMENT_ENABLED ? [{ to: '/labour-rates', label: 'Labour rates', icon: <Icon.Cash />, permissions: ['labourRates:view'] }] : []),
+      ],
       placeholder: true,
     },
     ...(PROCUREMENT_ENABLED ? [{

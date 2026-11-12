@@ -192,12 +192,17 @@ describe('usePermissions — the role check sheet', () => {
     PROCUREMENT: ['materials:create', 'materials:cost', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
     // What Sales was quoted is kept from buyers and the store.
     SALES: ['sales:view', 'sales:manage', 'projects:manage', 'suppliers:manage'],
+    PROCUREMENT: ['materials:create', 'inventory:receive', 'projects:manage', 'suppliers:manage', 'procurement:manage', 'orders:view', 'receipts:view'],
+    // What a job is priced at is kept from buyers and the store. Sales no longer deals with suppliers.
+    SALES: ['sales:view', 'sales:manage', 'projects:manage', 'labourRates:view'],
     // View only: orders are signed by the roles below.
     APPROVER: ['orders:view'],
-    PROCUREMENT_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'sales:view'],
-    DIRECTOR: ['orders:approve', 'orders:view', 'sales:view'],
-    CEO: ['orders:approve', 'orders:view', 'sales:view'],
-    WORKSHOP_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view'],
+    PROCUREMENT_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'sales:view', 'labourRates:view'],
+    // The Director approves a Sales RFQ's price.
+    DIRECTOR: ['orders:approve', 'orders:view', 'sales:view', 'sales:approve', 'labourRates:view'],
+    CEO: ['orders:approve', 'orders:view', 'sales:view', 'labourRates:view'],
+    // The Workshop Manager keeps the labour rates.
+    WORKSHOP_MANAGER: ['orders:approve', 'orders:view', 'stores:approve', 'stores:view', 'labourRates:manage', 'labourRates:view'],
     TECHNICIAN: ['inventory:issue', 'inventory:return', 'tools:lend'],
     VIEWER: [],
   };

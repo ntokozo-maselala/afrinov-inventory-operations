@@ -67,7 +67,7 @@ export const PERMISSION_ROLES = {
   'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT', 'SALES'], // manage:projects
   'projects:close': [], // close:project (Admin; a project's own manager closes it too: canCloseProject)
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
-  'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT', 'SALES'], // create:supplier, edit:supplier (ADR-018)
+  'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
   'procurement:manage': ['PROCUREMENT'], // create/submit/cancel/close:purchase_order (project orders)
   'stores:order': ['STORE_CONTROLLER'], // order:stores_stock (Stores orders: those without a project)
@@ -77,8 +77,11 @@ export const PERMISSION_ROLES = {
   'orders:view': ['PROCUREMENT', 'APPROVER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER'], // view:purchase_order (project orders; the store sees its own through stores:order)
   'orders:receive': ['STORE_CONTROLLER'], // receive:purchase_order
   'receipts:view': ['STORE_CONTROLLER', 'PROCUREMENT'], // view:goods_receipt
-  'sales:view': ['SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO'], // view:sales_rfq (what Sales was quoted; buyers and the store don't see it)
+  'sales:view': ['SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO'], // view:sales_rfq (what a job is priced at; buyers and the store don't see it)
   'sales:manage': ['SALES'], // manage:sales_rfq
+  'sales:approve': ['DIRECTOR'], // approve:sales_rfq (never one they raised or submitted)
+  'labourRates:manage': ['WORKSHOP_MANAGER'], // manage:labour_rates
+  'labourRates:view': ['WORKSHOP_MANAGER', 'SALES', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO'], // manage:labour_rates or view:sales_rfq
   'users:manage': [], // manage:users (ADMIN only)
 } as const satisfies Record<string, readonly RoleName[]>;
 

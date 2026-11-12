@@ -5,9 +5,6 @@
 // four days later unless another date is picked, as the RFQ sheet does. Once
 // sent, it has gone to its suppliers as it stands: only its closing date
 // moves and suppliers who were missed are added, and it can still be cancelled.
-//
-// On Procurement's, a buyer matches each line to what Sales asked for, for the
-// savings report, seeing nothing of what Sales was quoted.
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -26,7 +23,7 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatDateTime, formatNumber } from '../lib/format';
 import type { Supplier } from '../api/types';
-import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, salesLineAsked, salesLineDifference, salesLineLabel, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSalesLine, type RfqSupplier } from '../lib/rfq';
+import { DEFAULT_CLOSING_DAYS, addDays, formatDay, lineDescription, lineUnits, quoteCurrency, todayInSouthAfrica, type Rfq, type RfqLine, type RfqSupplier } from '../lib/rfq';
 import { PROCUREMENT_RFQS, type RfqArea } from '../lib/rfqArea';
 import { RFQ_DOCUMENT_SETTINGS, downloadRfqDocument, rfqCompanyFromSettings } from '../lib/rfqDocument';
 import { StaleDataNotice } from '../components/StaleDataNotice';
@@ -57,7 +54,6 @@ export function RfqPage({ area }: { area: RfqArea }) {
   const rfq = useApi<Rfq>(id ? `${area.api}/${id}` : null);
   const history = useApi<HistoryEntry[]>(id ? `${area.api}/${id}/history` : null);
   const canManage = usePermissions().hasPermission(area.managePermission);
-  const salesLines = useApi<RfqSalesLine[]>(id && area.linksSalesLines && canManage ? `${area.api}/${id}/sales-lines` : null);
   const navigate = useNavigate();
   const toast = useToast();
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -91,19 +87,19 @@ export function RfqPage({ area }: { area: RfqArea }) {
     }
   }
 
-  // Saved as it is chosen. On a failure the line still shows the link it has.
-  const [linking, setLinking] = useState<string | null>(null);
-  async function linkLine(l: RfqLine, salesRfqLineId: string | null) {
+  // Which quote Sales costs the job from, before anything is awarded.
+  const [recommending, setRecommending] = useState<string | null>(null);
+  async function recommend(s: RfqSupplier, on: boolean) {
     if (!r) return;
-    setLinking(l.id);
+    setRecommending(s.supplierId);
     try {
-      await api.put<Rfq>(`${area.api}/${r.id}/lines/${l.id}/sales-line`, { salesRfqLineId });
-      toast.success(salesRfqLineId ? `Line ${l.lineNo} linked` : `Line ${l.lineNo} unlinked`);
+      await api.put<Rfq>(`${area.api}/${r.id}/recommended-quote`, { supplierId: on ? s.supplierId : null });
+      toast.success(on ? `${s.supplier?.name ?? 'The quote'} recommended for costing` : 'Recommendation taken off');
       reload();
     } catch (err) {
       toast.error('That did not go through', (err as ApiError).message);
     } finally {
-      setLinking(null);
+      setRecommending(null);
     }
   }
 
@@ -199,28 +195,15 @@ export function RfqPage({ area }: { area: RfqArea }) {
 
             <div className="lg:col-span-2 space-y-6">
               <section>
-                <SectionHeader
-                  title="Lines"
-                  description={area.linksSalesLines && canManage && r.status !== 'CANCELLED'
-                    ? 'What the suppliers are asked to price, as on the RFQ sheet. Link each line to what Sales asked for, for the savings report; you see what Sales asked for, not its prices.'
-                    : 'What the suppliers are asked to price, as on the RFQ sheet.'}
-                />
-                {salesLines.error && canManage && r.status !== 'CANCELLED' && (
-                  <div className="mb-3"><Alert tone="warning" title="Sales lines could not be loaded">Lines cannot be linked just now. Reload the page to try again.</Alert></div>
-                )}
-                <DataTable
-                  ariaLabel="RFQ lines" rows={r.lines} rowKey={(l) => l.id}
-                  columns={area.linksSalesLines
-                    ? [...LINE_COLUMNS, salesLineColumn(r.lines, canManage && r.status !== 'CANCELLED' && !salesLines.error ? { options: salesLines.data ?? [], loading: salesLines.loading, saving: linking, onLink: linkLine } : undefined)]
-                    : LINE_COLUMNS}
-                />
+                <SectionHeader title="Lines" description="What the suppliers are asked to price, as on the RFQ sheet." />
+                <DataTable ariaLabel="RFQ lines" rows={r.lines} rowKey={(l) => l.id} columns={LINE_COLUMNS} />
               </section>
               <section>
                 <SectionHeader
                   title="Suppliers asked"
                   description={r.status === 'DRAFT'
                     ? 'They are asked once it is sent. A copy downloaded now is marked as a draft.'
-                    : "Download each supplier's copy to email to them. Quotes are recorded as they come back."}
+                    : "Download each supplier's copy to email to them. Quotes are recorded as they come back. Recommend one for Sales to cost the job from: that isn't an award, and no order is raised."}
                 />
                 {r.suppliers.length === 0
                   ? <EmptyState title="No suppliers yet" description={canManage && r.status === 'DRAFT' ? 'Edit the RFQ to add the suppliers to ask.' : 'Nobody has been asked.'} />
@@ -229,6 +212,8 @@ export function RfqPage({ area }: { area: RfqArea }) {
                       printing,
                       onRecord: canManage && r.status === 'SENT' ? (s) => setRecording(s.supplierId) : undefined,
                       onQuoteFile: (s) => void quoteFileFor(s),
+                      onRecommend: canManage && r.status === 'SENT' ? (s, on) => void recommend(s, on) : undefined,
+                      recommending,
                     })} />}
               </section>
               <section>
@@ -280,47 +265,6 @@ const LINE_COLUMNS: DataTableColumn<RfqLine>[] = [
   { key: 'qty', header: 'Qty', align: 'right', width: '8rem', className: 'text-num', render: (l) => <span className="font-mono">{formatNumber(Number(l.quantity))}</span> },
 ];
 
-interface SalesLinking {
-  /** The lines of Sales RFQs sent for this project. */
-  options: RfqSalesLine[];
-  loading: boolean;
-  /** The line being saved. */
-  saving: string | null;
-  onLink: (l: RfqLine, salesRfqLineId: string | null) => void;
-}
-
-/** A dropdown for those who raise RFQs; the link as it stands for others who may open one. */
-function salesLineColumn(lines: RfqLine[], linking?: SalesLinking): DataTableColumn<RfqLine> {
-  return {
-    key: 'salesLine', header: 'Sales line', render: (l) => {
-      const linked = l.salesRfqLine ?? null;
-      const difference = salesLineDifference(lines, l);
-      return (
-        <div className="space-y-1 min-w-48">
-          {linking
-            ? (
-              <Select
-                aria-label={`Sales line for line ${l.lineNo}`} value={linked?.id ?? ''}
-                disabled={linking.saving !== null || (!linked && linking.options.length === 0)}
-                onChange={(e) => linking.onLink(l, e.target.value || null)}
-              >
-                <option value="">{!linked && !linking.loading && linking.options.length === 0 ? 'No Sales RFQ sent for this project' : 'Not linked'}</option>
-                {/* One Sales has since cancelled is no longer offered, but is still this line's link. */}
-                {linked && !linking.options.some((o) => o.id === linked.id) && <option value={linked.id}>{salesLineLabel(linked)}</option>}
-                {linking.options.map((o) => <option key={o.id} value={o.id}>{salesLineLabel(o)}</option>)}
-              </Select>
-            )
-            : linked ? <div className="text-sm">{salesLineLabel(linked)}</div> : <span className="text-surface-300">—</span>}
-          {/* The dropdown is too narrow to show a whole line: what was picked is spelled out here. */}
-          {linking && linked && <div className="text-meta">{linked.description} ({salesLineAsked(linked)})</div>}
-          {linked?.rfq.status === 'CANCELLED' && <Badge tone="warning">Sales RFQ cancelled</Badge>}
-          {difference && <div className="text-meta">{difference}</div>}
-        </div>
-      );
-    },
-  };
-}
-
 interface SupplierActions {
   /** Their copy of the RFQ, to email to them. */
   onDownload: (s: RfqSupplier) => void;
@@ -329,9 +273,12 @@ interface SupplierActions {
   onRecord?: (s: RfqSupplier) => void;
   /** Their own quotation PDF, as attached. */
   onQuoteFile: (s: RfqSupplier) => void;
+  /** Recommend their quote for costing, or take that off; only while sent, for those who may. */
+  onRecommend?: (s: RfqSupplier, on: boolean) => void;
+  recommending?: string | null;
 }
 
-function supplierColumns(r: Rfq, { onDownload, printing, onRecord, onQuoteFile }: SupplierActions): DataTableColumn<RfqSupplier>[] {
+function supplierColumns(r: Rfq, { onDownload, printing, onRecord, onQuoteFile, onRecommend, recommending }: SupplierActions): DataTableColumn<RfqSupplier>[] {
   return [
     {
       key: 'name', header: 'Supplier', render: (s) => (
@@ -366,6 +313,14 @@ function supplierColumns(r: Rfq, { onDownload, printing, onRecord, onQuoteFile }
               {!!s.totals?.unpricedLines && <div className="text-meta">{s.totals.unpricedLines} line{s.totals.unpricedLines === 1 ? '' : 's'} not offered</div>}
               <div className="text-meta">{[s.quoteReference && `Ref ${s.quoteReference}`, s.validUntil && `valid to ${formatDay(s.validUntil)}`, s.leadTime].filter(Boolean).join(' · ')}</div>
               {file}
+              {r.recommendedSupplierId === s.supplierId && <div className="mt-1"><Badge tone="brand">Recommended for costing</Badge></div>}
+              {onRecommend && (
+                <button type="button" className="btn-link text-xs mt-1 block" disabled={recommending !== null}
+                  onClick={() => onRecommend(s, r.recommendedSupplierId !== s.supplierId)}
+                  aria-label={`${r.recommendedSupplierId === s.supplierId ? 'Take off the recommendation of' : 'Recommend for costing'} ${s.supplier?.name ?? s.supplierId}`}>
+                  {r.recommendedSupplierId === s.supplierId ? 'Take off recommendation' : 'Recommend for costing'}
+                </button>
+              )}
             </div>
           );
         }
@@ -428,20 +383,18 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
     return `Sent to ${n} supplier${n === 1 ? '' : 's'}, closing ${formatDay(String(after.closingDate ?? ''))}`;
   }
   if (e.action === 'RFQ_CANCEL') return `Cancelled: ${String(after.reason ?? '')}`;
+  if (e.action === 'RFQ_RECOMMEND') {
+    return after.supplierId ? `${supplierName(String(after.supplierId))}'s quote recommended for costing` : 'Recommendation for costing taken off';
+  }
   if (e.action === 'RFQ_AWARD') {
     return `Awarded to ${supplierName(String(after.supplierId ?? ''))}, raising order ${String(after.purchaseOrderNumber ?? '')}${after.reason ? `: ${String(after.reason)}` : ''}`;
   }
   const who = supplierName(String(after.supplierId ?? ''));
   if (e.action === 'RFQ_QUOTE') return `Quote recorded from ${who}${after.quoteReference ? ` (ref ${String(after.quoteReference)})` : ''}`;
   if (e.action === 'RFQ_QUOTE_CORRECTED') return `Quote from ${who} corrected`;
-  if (e.action === 'RFQ_DECLINED') return `${who} declined to quote${after.notes ? `: ${String(after.notes)}` : ''}`;
+  if (e.action === 'RFQ_DECLINED') return `${who} declined to quote${after.notes ? `: ${String(after.notes)}` : ''}${after.recommendationCleared ? '; their quote is no longer recommended for costing' : ''}`;
   if (e.action === 'RFQ_QUOTE_FILE') return `${who}'s quotation attached (${String(after.fileName ?? 'PDF')})`;
   if (e.action === 'RFQ_QUOTE_FILE_REMOVED') return `${who}'s quotation taken off`;
-  if (e.action === 'RFQ_SALES_LINK') {
-    return after.salesRfqNumber
-      ? `Line ${String(after.lineNo)} linked to Sales RFQ ${String(after.salesRfqNumber)}, line ${String(after.salesLineNo)}`
-      : `Line ${String(after.lineNo)} unlinked from its Sales line`;
-  }
   if (e.action === 'UPDATE') {
     const parts: string[] = [];
     if ('number' in after) parts.push(`renumbered ${String(after.number)}`);
@@ -456,7 +409,6 @@ function describeEntry(e: HistoryEntry, supplierName: (id: string) => string = (
     }
     if ('lines' in after) parts.push('lines changed');
     if ('projectNumber' in after) parts.push(after.projectNumber ? `moved to project ${String(after.projectNumber)}` : 'taken off its project');
-    if ('salesLinks' in after) parts.push('its links to Sales lines taken off');
     if (['description', 'notes', 'penaltiesApply'].some((k) => k in after)) parts.push('details changed');
     return parts.length ? `${parts[0]!.charAt(0).toUpperCase()}${parts.join('; ').slice(1)}` : 'Details updated';
   }

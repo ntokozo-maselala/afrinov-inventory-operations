@@ -49,10 +49,13 @@ import {
   createGRSchema,
 } from '../modules/procurement/procurement.routes.js';
 import {
-  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, linkSalesLineSchema, listRfqQuerySchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
+  awardRfqSchema, cancelRfqSchema, createRfqSchema, declineQuoteSchema, listRfqQuerySchema, recommendQuoteSchema, recordQuoteSchema, sendRfqSchema, updateRfqSchema,
 } from '../modules/procurement/rfq.routes.js';
-import { createSalesRfqSchema, listSalesRfqQuerySchema, updateSalesRfqSchema } from '../modules/sales/sales-rfq.routes.js';
-import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema } from '../modules/settings/settings.routes.js';
+import {
+  createLabourRateSchema, createSalesRfqSchema, listLabourRatesQuerySchema, listSalesRfqQuerySchema, salesQuoteOptionsQuerySchema, sendBackSalesRfqSchema,
+  updateLabourRateSchema, updateSalesRfqSchema,
+} from '../modules/sales/sales-rfq.routes.js';
+import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
   materialCategorySchema,
@@ -893,55 +896,67 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'List Sales requests for quotation',
+    description: 'Each with its labour, the orders its material comes from, and its totals, as GET /sales-rfqs/:id. ?status=PENDING_APPROVAL lists those waiting for the Director.',
     procurement: true, permissions: [P.ViewSalesRfq], query: listSalesRfqQuerySchema, errors: [400],
   },
   {
-    method: 'get', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Get a Sales request for quotation with its lines, suppliers and quotes',
-    description: "Each supplier carries its VAT rate and, once its quote is recorded, the quote's totals.",
+    method: 'get', path: '/sales-rfqs/quote-options', tag: 'Sales requests for quotation', summary: "The project's Procurement quotes a Sales RFQ can take its material from",
+    description: 'Procurement RFQs of ?projectNumber= that are sent or awarded, each with every supplier who quoted: their total excl. VAT in their currency and in rand at the Settings exchange rate (null without one), lines they did not price, which one Procurement recommends for costing, and any other Sales RFQ already counting the RFQ. Totals only, never line prices.',
+    procurement: true, permissions: [P.ManageSalesRfq], query: salesQuoteOptionsQuerySchema, errors: [400],
+  },
+  {
+    method: 'get', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Get a Sales request for quotation with its costing',
+    description: 'Labour lines (role, hours, rate, total), the Procurement quotes its material comes from, one per RFQ, each saying whether it is the one Procurement recommends (a draft values them today and flags any that can no longer be counted; once submitted each keeps the amount it had then), '
+      + 'and totals: labour, material, cost, markup, equipment price, delivery, total excl. VAT, VAT and total incl. VAT. Markup-dependent totals are null until a markup is given.',
     procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
   },
   {
     method: 'post', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'Raise a draft Sales request for quotation',
-    description: 'Lines are typed as the RFQ sheet has them, with a unit on the list; they are not catalogue items.',
+    description: "One piece of equipment for one project. Labour is priced at each role's rate on GET /labour-rates; the material is one supplier's whole quote on each chosen Procurement RFQ of the project (GET /sales-rfqs/quote-options). "
+      + "The client defaults to the project's, the conditions to the quotation's usual ones, and the signer's email to the creator's.",
     procurement: true, permissions: [P.ManageSalesRfq], body: createSalesRfqSchema, success: 201,
   },
   {
-    method: 'patch', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Change a draft, or a sent RFQ\'s closing date and suppliers',
+    method: 'patch', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Change a draft',
+    description: 'Only a draft (409 otherwise). Saving labour prices it at today\'s rates and the quotes at today\'s values; moving it to another project takes its quotes off.',
     procurement: true, permissions: [P.ManageSalesRfq], body: updateSalesRfqSchema, errors: [404, 409],
   },
   {
-    method: 'post', path: '/sales-rfqs/:id/send', tag: 'Sales requests for quotation', summary: 'Mark a draft as sent to its suppliers',
-    description: 'Nothing is emailed: each supplier\'s copy is downloaded and sent by hand.',
-    procurement: true, permissions: [P.ManageSalesRfq], body: sendRfqSchema, errors: [404, 409],
+    method: 'post', path: '/sales-rfqs/:id/submit', tag: 'Sales requests for quotation', summary: 'Send a draft to the Director for approval',
+    description: "Needs the equipment, the client's name, a markup, and labour or a quote (400). Each quote's amount and the VAT rate are fixed as they are now.",
+    procurement: true, permissions: [P.ManageSalesRfq], errors: [400, 404, 409],
   },
   {
-    method: 'post', path: '/sales-rfqs/:id/cancel', tag: 'Sales requests for quotation', summary: 'Cancel a draft or sent Sales request for quotation',
+    method: 'post', path: '/sales-rfqs/:id/approve', tag: 'Sales requests for quotation', summary: 'Approve the price',
+    description: 'Gives it the project\'s next quotation reference (AFRI-02A-<project>-04-<n>) and issues it today. Refused (403) to whoever raised or submitted it.',
+    procurement: true, permissions: [P.ApproveSalesRfq], errors: [403, 404, 409],
+  },
+  {
+    method: 'post', path: '/sales-rfqs/:id/send-back', tag: 'Sales requests for quotation', summary: 'Send it back to Sales as a draft, saying why',
+    procurement: true, permissions: [P.ApproveSalesRfq], body: sendBackSalesRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'post', path: '/sales-rfqs/:id/cancel', tag: 'Sales requests for quotation', summary: 'Cancel a Sales request for quotation',
     procurement: true, permissions: [P.ManageSalesRfq], body: cancelRfqSchema, errors: [404, 409],
-  },
-  {
-    method: 'put', path: '/sales-rfqs/:id/suppliers/:supplierId/quote', tag: 'Sales requests for quotation', summary: "Record or correct a supplier's quote",
-    procurement: true, permissions: [P.ManageSalesRfq], body: recordQuoteSchema, errors: [404, 409],
-  },
-  {
-    method: 'post', path: '/sales-rfqs/:id/suppliers/:supplierId/decline', tag: 'Sales requests for quotation', summary: "Record that a supplier won't quote",
-    procurement: true, permissions: [P.ManageSalesRfq], body: declineQuoteSchema, errors: [404, 409],
-  },
-  {
-    method: 'put', path: '/sales-rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Sales requests for quotation', summary: "Attach the supplier's quotation PDF",
-    description: 'The body is the PDF itself (application/pdf, up to 10 MB), with its name in the X-File-Name header.',
-    procurement: true, permissions: [P.ManageSalesRfq], errors: [404, 409],
-  },
-  {
-    method: 'get', path: '/sales-rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Sales requests for quotation', summary: "Download the supplier's quotation PDF",
-    procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
-  },
-  {
-    method: 'delete', path: '/sales-rfqs/:id/suppliers/:supplierId/quote-file', tag: 'Sales requests for quotation', summary: "Take off the supplier's quotation PDF",
-    procurement: true, permissions: [P.ManageSalesRfq], errors: [404, 409],
   },
   {
     method: 'get', path: '/sales-rfqs/:id/history', tag: 'Sales requests for quotation', summary: "A Sales request for quotation's Activity",
     procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
+  },
+  {
+    method: 'get', path: '/labour-rates', tag: 'Sales requests for quotation', summary: 'The hourly selling rates labour is priced at',
+    description: 'By role; ?active=true for those in use. For Sales and whoever keeps the rates.',
+    procurement: true, permissions: [P.ViewSalesRfq], query: listLabourRatesQuerySchema, errors: [400],
+  },
+  {
+    method: 'post', path: '/labour-rates', tag: 'Sales requests for quotation', summary: 'Add a role and its hourly rate',
+    description: 'Rand per hour excl. VAT, more than 0. A role already listed, whatever its case, is refused (409).',
+    procurement: true, permissions: [P.ManageLabourRates], body: createLabourRateSchema, success: 201, errors: [409],
+  },
+  {
+    method: 'patch', path: '/labour-rates/:id', tag: 'Sales requests for quotation', summary: "Change a role's name or rate, or make it inactive",
+    description: 'Lines already saved keep the rate they were priced at.',
+    procurement: true, permissions: [P.ManageLabourRates], body: updateLabourRateSchema, errors: [404, 409],
   },
   {
     method: 'get', path: '/rfqs', tag: 'Requests for quotation', summary: 'List requests for quotation',
@@ -958,16 +973,6 @@ export const OPERATIONS: Operation[] = [
     procurement: true, permissions: [P.CreatePurchaseOrder], body: createRfqSchema, success: 201,
   },
   {
-    method: 'get', path: '/rfqs/:id/sales-lines', tag: 'Requests for quotation', summary: 'The Sales lines its lines can be linked to',
-    description: "The lines of Sales RFQs sent for this RFQ's project: what was asked for, never a price or a supplier.",
-    procurement: true, permissions: [P.CreatePurchaseOrder], errors: [404],
-  },
-  {
-    method: 'put', path: '/rfqs/:id/lines/:lineId/sales-line', tag: 'Requests for quotation', summary: 'Link a line to a Sales line, or take the link off',
-    description: 'For the savings report. Several lines can share a Sales line, which must be on a Sales RFQ sent for the same project. Can be corrected at any point until the RFQ is cancelled (409).',
-    procurement: true, permissions: [P.CreatePurchaseOrder], body: linkSalesLineSchema, errors: [404, 409],
-  },
-  {
     method: 'patch', path: '/rfqs/:id', tag: 'Requests for quotation', summary: 'Change a draft request for quotation',
     description: "On a draft, lines and suppliers, when sent, replace the draft's, and a new project gives it that project's next number. Once sent, only the closing date changes and suppliers are added, none taken off (409 otherwise).",
     procurement: true, permissions: [P.CreatePurchaseOrder], body: updateRfqSchema, errors: [404, 409],
@@ -980,6 +985,11 @@ export const OPERATIONS: Operation[] = [
   {
     method: 'post', path: '/rfqs/:id/cancel', tag: 'Requests for quotation', summary: 'Cancel a draft or sent request for quotation',
     procurement: true, permissions: [P.CreatePurchaseOrder], body: cancelRfqSchema, errors: [404, 409],
+  },
+  {
+    method: 'put', path: '/rfqs/:id/recommended-quote', tag: 'Requests for quotation', summary: 'Recommend a quote for Sales to cost from, or take the recommendation off',
+    description: 'Only while the RFQ is sent (409), and only a supplier who has quoted (400). Not an award: no order is raised. Declining the recommended supplier takes it off.',
+    procurement: true, permissions: [P.CreatePurchaseOrder], body: recommendQuoteSchema, errors: [400, 404, 409],
   },
   {
     method: 'put', path: '/rfqs/:id/suppliers/:supplierId/quote', tag: 'Requests for quotation', summary: "Record or correct a supplier's quote",
@@ -1063,9 +1073,9 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.ViewReports],
   },
   {
-    method: 'get', path: '/reports/procurement-savings', tag: 'Reports', summary: 'Sales, Procurement and order prices compared',
+    method: 'get', path: '/reports/procurement-savings', tag: 'Reports', summary: 'Procurement quotes and order prices compared',
     description: 'Each line of a Procurement RFQ sent between ?from and ?to (YYYY-MM-DD, both included; default this month), optionally for one ?projectNumber=. '
-      + 'Line totals excl. VAT: every quote by supplier, each side compared at its lowest, the order before line discounts. Only rand is compared; a figure that cannot be compared is null, with a note, and out of the totals. A selection of more than 2000 lines is refused (400).',
+      + 'Line totals excl. VAT: every quote by supplier, compared at its lowest, the order before line discounts. Only rand is compared; a figure that cannot be compared is null, with a note, and out of the totals. A selection of more than 2000 lines is refused (400).',
     procurement: true, permissions: [P.ViewSalesRfq], errors: [400],
   },
   {

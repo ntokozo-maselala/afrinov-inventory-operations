@@ -1,18 +1,16 @@
 // The Procurement savings report: for each line of a Procurement RFQ sent in a
-// period, what suppliers quoted Sales, what they quoted the buyers, and what the
-// order was placed at, with the differences between the three.
+// period, what suppliers quoted the buyers and what the order was placed at,
+// with the difference between the two.
 //
-// All excl. VAT, as line totals. Every quote is listed by supplier; each side is
-// compared at its lowest. The order is at its price before line discounts, which
-// are asked for once a price is awarded and shown on their own. Only rand is
-// compared, and a figure that can't be compared (a quantity or unit that differs,
-// a Sales RFQ that was cancelled) is left blank and out of the totals, with a
-// note saying why, rather than being compared wrongly.
+// All excl. VAT, as line totals. Every quote is listed by supplier and compared
+// at its lowest. The order is at its price before line discounts, which are
+// asked for once a price is awarded and shown on their own. Only rand is
+// compared, and a figure that can't be compared (a quantity that differs, an
+// order in another currency) is left blank and out of the totals, with a note
+// saying why, rather than being compared wrongly.
 //
-// Lines sharing a Sales line are added up and compared with it together, once, on
-// the first of them in the report, so its price isn't counted again for each.
-// Lines sharing it on an RFQ outside the period or project chosen still count:
-// otherwise the same Sales line would look cheaper or dearer by the filter.
+// Sales no longer has a column: a Sales RFQ takes its material cost from these
+// same orders (sales-rfq.service.ts), so there is nothing of its own to compare.
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
@@ -33,7 +31,6 @@ const SAVINGS_RFQ = {
     include: {
       material: { select: { sku: true, name: true, unitOfMeasure: true } },
       prices: { include: { rfqSupplier: QUOTE } },
-      salesRfqLine: { include: { rfq: { select: { number: true, status: true } }, prices: { include: { rfqSupplier: QUOTE } } } },
     },
   },
   purchaseOrder: {
@@ -61,12 +58,6 @@ export interface SavingsRow {
   material: string;
   unitOfMeasure: string;
   quantity: string;
-  sales: {
-    rfqNumber: string; lineNo: number; description: string; unitOfMeasure: string; quantity: string; cancelled: boolean;
-    prices: SavingsPrice[];
-    /** The lowest rand line total. */
-    lowest: string | null;
-  } | null;
   procurement: { prices: SavingsPrice[]; lowest: string | null };
   order: {
     number: string; status: string; supplier: string; currency: string; quantity: string; unitPrice: string | null;
@@ -75,15 +66,8 @@ export interface SavingsRow {
     discountPercent: string;
     discount: string | null;
   } | null;
-  /** Each positive where the second figure is the lower. Null where they can't be compared. */
-  salesVsProcurement: string | null;
+  /** Positive where the order is the lower. Null where they can't be compared. */
   procurementVsOrder: string | null;
-  salesVsOrder: string | null;
-  /**
-   * On the first row of a Sales line other lines share, when it is compared:
-   * what the Sales price was set against, all of those lines together.
-   */
-  comparedWith: { lines: number; quantity: string; unitOfMeasure: string; procurement: string | null; order: string | null } | null;
   /** Why a figure is blank or left out, in words. */
   notes: string[];
 }
@@ -94,16 +78,13 @@ export interface SavingsReport {
   currency: string;
   rows: SavingsRow[];
   total: {
-    sales: string; procurement: string; order: string; discount: string;
-    salesVsProcurement: string; procurementVsOrder: string; salesVsOrder: string;
+    procurement: string; order: string; discount: string;
+    procurementVsOrder: string;
     lines: number;
-    linked: number;
   };
 }
 
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
-const qtyLabel = (q: Prisma.Decimal.Value, unit: string) => `${D(q).toString()} ${unit}`;
-const sameUnit = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const add = (values: string[]) => values.reduce((sum, v) => sum.plus(v), D(0));
 const lineTotal = (quantity: Prisma.Decimal, unitPrice: Prisma.Decimal.Value) => lineMoney({ orderedQty: quantity, unitPrice }, 0)!.subtotal;
 
@@ -149,7 +130,7 @@ function orderLinesFor(rfq: SavingsRfq) {
   return pairs;
 }
 
-/** One line's own figures, for the report or for a line sharing its Sales line. */
+/** One line's own figures. */
 function figures(rfq: SavingsRfq, line: SavingsLine, orderLine: ReturnType<typeof orderLinesFor> extends Map<string, infer O> ? O | undefined : never) {
   const procurement = quotesFor(line.prices, line.quantity);
   const notes: string[] = [];
@@ -177,106 +158,36 @@ function figures(rfq: SavingsRfq, line: SavingsLine, orderLine: ReturnType<typeo
   return { procurement, order, comparable, notes };
 }
 
-/**
- * The report's rows and totals. `rfqs` are the RFQs asked for; `others` hold any
- * further lines sharing their Sales lines.
- */
-export function buildSavingsReport(rfqs: SavingsRfq[], others: SavingsRfq[], range: { from: string; to: string }): SavingsReport {
-  const worked = new Map<string, ReturnType<typeof figures>>();
-  const sharing = new Map<string, SavingsLine[]>();
-  for (const rfq of [...rfqs, ...others]) {
+/** The report's rows and totals. */
+export function buildSavingsReport(rfqs: SavingsRfq[], range: { from: string; to: string }): SavingsReport {
+  const totals = { procurement: [] as string[], order: [] as string[], discount: [] as string[], procurementVsOrder: [] as string[] };
+  const rows = rfqs.flatMap((rfq) => {
     const pairs = orderLinesFor(rfq);
-    for (const line of rfq.lines) {
-      worked.set(line.id, figures(rfq, line, pairs.get(line.id)));
-      if (line.salesRfqLineId) sharing.set(line.salesRfqLineId, [...(sharing.get(line.salesRfqLineId) ?? []), line]);
-    }
-  }
-
-  const seen = new Set<string>();
-  const totals = { sales: [] as string[], procurement: [] as string[], order: [] as string[], discount: [] as string[], salesVsProcurement: [] as string[], procurementVsOrder: [] as string[], salesVsOrder: [] as string[] };
-  let linked = 0;
-  const rows = rfqs.flatMap((rfq) => rfq.lines.map((line): SavingsRow => {
-    const own = worked.get(line.id)!;
-    const notes = [...own.notes];
-    const procurementLow = own.procurement.lowest;
-    const procurementVsOrder = procurementLow && own.comparable ? D(procurementLow).minus(own.comparable).toFixed(2) : null;
-
-    let sales: SavingsRow['sales'] = null;
-    let salesVsProcurement: string | null = null;
-    let salesVsOrder: string | null = null;
-    let comparedWith: SavingsRow['comparedWith'] = null;
-    const asked = line.salesRfqLine;
-    if (!asked) {
-      notes.push('Not linked to a Sales line');
-    } else {
-      linked += 1;
-      const quoted = quotesFor(asked.prices, asked.quantity);
-      const cancelled = asked.rfq.status === 'CANCELLED';
-      sales = {
-        rfqNumber: asked.rfq.number, lineNo: asked.lineNo, description: asked.description, unitOfMeasure: asked.unitOfMeasure,
-        quantity: asked.quantity.toString(), cancelled, prices: quoted.prices, lowest: quoted.lowest,
+    return rfq.lines.map((line): SavingsRow => {
+      const own = figures(rfq, line, pairs.get(line.id));
+      const notes = [...own.notes];
+      const procurementLow = own.procurement.lowest;
+      const procurementVsOrder = procurementLow && own.comparable ? D(procurementLow).minus(own.comparable).toFixed(2) : null;
+      if (procurementLow) totals.procurement.push(procurementLow);
+      if (own.comparable) totals.order.push(own.comparable);
+      if (procurementVsOrder) totals.procurementVsOrder.push(procurementVsOrder);
+      // Over the same lines as the order total, so the two can be read together.
+      if (own.order?.discount && own.comparable) totals.discount.push(own.order.discount);
+      if (!rfq.purchaseOrder) notes.push('Not awarded yet, so there is no order to compare');
+      return {
+        rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.project?.name ?? null,
+        lineNo: line.lineNo, sku: line.material.sku, material: line.material.name, unitOfMeasure: line.material.unitOfMeasure, quantity: line.quantity.toString(),
+        procurement: { prices: own.procurement.prices, lowest: procurementLow }, order: own.order, procurementVsOrder, notes,
       };
-      const group = sharing.get(asked.id) ?? [line];
-      const units = group.every((l) => sameUnit(l.material.unitOfMeasure, asked.unitOfMeasure));
-      const matches = units && group.reduce((sum, l) => sum.plus(l.quantity), D(0)).equals(asked.quantity);
-      const first = !seen.has(asked.id);
-      seen.add(asked.id);
-
-      if (cancelled) notes.push(`Sales RFQ ${asked.rfq.number} was cancelled, so it is not compared`);
-      else if (!matches) notes.push(`Sales asked for ${qtyLabel(asked.quantity, asked.unitOfMeasure)}, so it is not compared: the lines linked to it come to ${units ? qtyLabel(group.reduce((sum, l) => sum.plus(l.quantity), D(0)), asked.unitOfMeasure) : 'a different unit'}`);
-      else if (quoted.foreignOnly) notes.push('Sales quotes are not in rand, so they are not compared');
-      else if (!quoted.lowest) notes.push('No Sales quote recorded yet');
-      // Only a comparison that is made is said to be made together.
-      const compared = !cancelled && matches && !!quoted.lowest;
-      if (group.length > 1) notes.push(`Shares its Sales line with ${group.length - 1} other line${group.length === 2 ? '' : 's'}${compared ? `: compared together${first ? ' here' : ', on the first of them'}` : ''}`);
-
-      if (compared && quoted.lowest && first) {
-        totals.sales.push(quoted.lowest);
-        let procurementTogether: string | null = null;
-        let orderTogether: string | null = null;
-        const lows = group.map((l) => worked.get(l.id)!.procurement.lowest);
-        if (lows.every((v): v is string => v !== null)) {
-          procurementTogether = add(lows).toFixed(2);
-          salesVsProcurement = D(quoted.lowest).minus(procurementTogether).toFixed(2);
-          totals.salesVsProcurement.push(salesVsProcurement);
-        }
-        const placed = group.map((l) => worked.get(l.id)!.comparable);
-        if (placed.every((v): v is string => v !== null)) {
-          orderTogether = add(placed).toFixed(2);
-          salesVsOrder = D(quoted.lowest).minus(orderTogether).toFixed(2);
-          totals.salesVsOrder.push(salesVsOrder);
-        }
-        if (group.length > 1) {
-          comparedWith = {
-            lines: group.length, quantity: asked.quantity.toString(), unitOfMeasure: asked.unitOfMeasure,
-            procurement: procurementTogether, order: orderTogether,
-          };
-        }
-      }
-    }
-
-    if (procurementLow) totals.procurement.push(procurementLow);
-    if (own.comparable) totals.order.push(own.comparable);
-    if (procurementVsOrder) totals.procurementVsOrder.push(procurementVsOrder);
-    // Over the same lines as the order total, so the two can be read together.
-    if (own.order?.discount && own.comparable) totals.discount.push(own.order.discount);
-    if (!rfq.purchaseOrder) notes.push('Not awarded yet, so there is no order to compare');
-
-    return {
-      rfqId: rfq.id, rfqNumber: rfq.number, rfqStatus: rfq.status, projectNumber: rfq.projectNumber, projectName: rfq.project?.name ?? null,
-      lineNo: line.lineNo, sku: line.material.sku, material: line.material.name, unitOfMeasure: line.material.unitOfMeasure, quantity: line.quantity.toString(),
-      sales, procurement: { prices: own.procurement.prices, lowest: procurementLow }, order: own.order,
-      salesVsProcurement, procurementVsOrder, salesVsOrder, comparedWith, notes,
-    };
-  }));
+    });
+  });
 
   const sum = (values: string[]) => add(values).toFixed(2);
   return {
     from: range.from, to: range.to, currency: CURRENCY, rows,
     total: {
-      sales: sum(totals.sales), procurement: sum(totals.procurement), order: sum(totals.order), discount: sum(totals.discount),
-      salesVsProcurement: sum(totals.salesVsProcurement), procurementVsOrder: sum(totals.procurementVsOrder), salesVsOrder: sum(totals.salesVsOrder),
-      lines: rows.length, linked,
+      procurement: sum(totals.procurement), order: sum(totals.order), discount: sum(totals.discount),
+      procurementVsOrder: sum(totals.procurementVsOrder), lines: rows.length,
     },
   };
 }
@@ -305,11 +216,6 @@ export const ProcurementSavingsService = {
       include: SAVINGS_RFQ,
       orderBy: [{ projectNumber: 'asc' }, { number: 'asc' }],
     });
-    const salesLines = [...new Set(rfqs.flatMap((r) => r.lines.flatMap((l) => (l.salesRfqLineId ? [l.salesRfqLineId] : []))))];
-    const others = salesLines.length === 0 ? [] : await prisma.rfq.findMany({
-      where: { ...counted, id: { notIn: rfqs.map((r) => r.id) }, lines: { some: { salesRfqLineId: { in: salesLines } } } },
-      include: SAVINGS_RFQ,
-    });
-    return buildSavingsReport(rfqs, others, { from, to });
+    return buildSavingsReport(rfqs, { from, to });
   },
 };

@@ -1,51 +1,78 @@
-// Sales RFQs on screen: the form with typed lines, and the shared list and detail
-// pages at Sales' address, with Sales' permission and nothing to award.
+// Sales RFQs on screen: the list, a Sales RFQ's costing with the actions its
+// status and the viewer allow (Sales submits, the Director approves or sends
+// back, never their own), the form's labour, orders and live price, and the
+// labour rates page.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockGet, mockPost, mockPatch, auth } = vi.hoisted(() => ({
-  mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), auth: { roles: ['SALES'] as string[] },
+const { mockGet, mockPost, mockPatch, mockQuotation, auth } = vi.hoisted(() => ({
+  mockGet: vi.fn(), mockPost: vi.fn(), mockPatch: vi.fn(), mockQuotation: vi.fn(),
+  auth: { id: 'u-sales', roles: ['SALES'] as string[] },
 }));
 vi.mock('../api/client', () => ({
   api: { get: mockGet, post: mockPost, patch: mockPatch, put: vi.fn(), del: vi.fn() },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
-vi.mock('../auth', () => ({ useAuth: () => ({ user: { name: 'Seller', roles: auth.roles } }) }));
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: auth.id, name: 'Someone', roles: auth.roles } }) }));
+// The PDF itself is built by jsPDF; here, which copy is asked for.
+vi.mock('../lib/salesQuotation', async (original) => ({ ...(await original<typeof import('../lib/salesQuotation')>()), downloadQuotation: mockQuotation }));
 
 const { SalesRfqs, SalesRfqDetail } = await import('./SalesRfqs');
 const { NewSalesRfq } = await import('./SalesRfqForm');
+const { LabourRates } = await import('./LabourRates');
 const { ToastProvider } = await import('../components/Toast');
 
-const SUPPLIERS = [{ id: 's-1', name: 'Local Steel', active: true, currency: 'ZAR' }, { id: 's-2', name: 'Fasteners', active: true, currency: 'ZAR' }];
-const UNITS = [
-  { code: 'each', label: 'Each', kind: 'COUNTED', needsReview: false, active: true },
-  { code: 'kg', label: 'Kilogram', kind: 'MEASURED', needsReview: false, active: true },
+const RATES = [
+  { id: 'lr-welder', role: 'Welder', hourlyRate: '400', active: true },
+  { id: 'lr-bm', role: 'Boiler Maker', hourlyRate: '300', active: true },
+  { id: 'lr-old', role: 'Retired role', hourlyRate: '100', active: false },
 ];
-const LINES = [
-  { id: 'l-1', lineNo: 1, description: '200NB pipes x 3m', unitOfMeasure: 'each', quantity: '24' },
-  { id: 'l-2', lineNo: 2, description: 'Mild steel plate', unitOfMeasure: 'kg', quantity: '12.5' },
-];
-const quoted = (id: string, unit: string, plate: string, subtotal: string) => ({
-  supplierId: id, quotedAt: '2026-11-05T00:00:00.000Z', declined: false, currency: 'ZAR', vatRate: 15,
-  supplier: SUPPLIERS.find((s) => s.id === id),
-  prices: [{ rfqLineId: 'l-1', unitPrice: unit }, { rfqLineId: 'l-2', unitPrice: plate }],
-  lineSubtotals: [{ rfqLineId: 'l-1', subtotal: String(Number(unit) * 24) }, { rfqLineId: 'l-2', subtotal: String(Number(plate) * 12.5) }],
-  totals: { subtotal, vat: '0.00', net: subtotal, unpricedLines: 0 },
-});
-const RFQ = {
-  id: 'r-1', number: 'AFRI-02A-1404-02-01', status: 'SENT', closed: false, projectNumber: 'AFRI-1404', description: 'Pipe spools', notes: null,
-  penaltiesApply: false, issuedAt: '2026-11-05T00:00:00.000Z', closingDate: '2026-11-09T00:00:00.000Z', createdAt: '2026-11-05T08:00:00.000Z',
-  lines: LINES, suppliers: [quoted('s-1', '100', '20', '2650.00'), quoted('s-2', '90', '25', '2472.50')],
+const TOTALS = {
+  labour: '5650.00', material: '9000.00', cost: '14650.00', markup: '5860.00', equipment: '20510.00', delivery: '500.00',
+  totalExVat: '21010.00', vatRate: '15', vat: '3151.50', totalIncVat: '24161.50',
 };
+const RFQ = {
+  id: 'r-1', number: 'AFRI-02A-1469-02-01', quoteReference: null, status: 'DRAFT', projectNumber: 'AFRI-1469',
+  project: { projectNumber: 'AFRI-1469', name: 'Pump rebuild', client: 'Northam Platinum' },
+  equipment: 'Main Piston Pump', description: 'Pump rebuild', notes: null, penaltiesApply: false, markupPercent: '40', deliveryPrice: '500', vatRate: null,
+  clientName: 'Northam Platinum', clientAddress: 'Main Office\nFarm Zondereinde 384KQ', contactName: 'Bongi', clientReference: null,
+  paymentTerms: '30 days from invoice date.', validity: '30 days from issue of quotation.', deliveryDuration: '2 - 4 weeks', deliveryTerms: 'DAP, Northam Platinum',
+  signerPhone: '+27 73 805 9123', signerEmail: 'northamplats@afrinov.co.za', issuedAt: null, closingDate: null, createdAt: '2026-11-05T08:00:00.000Z',
+  createdById: 'u-sales', createdBy: { id: 'u-sales', name: 'Ona Moloane' }, submittedAt: null, submittedById: null, submittedBy: null,
+  approvedAt: null, approvedBy: null, returnedAt: null, returnedBy: null, returnReason: null, cancelledAt: null, cancelledBy: null, cancellationReason: null,
+  labour: [
+    { id: 'll-1', lineNo: 1, labourRateId: 'lr-welder', role: 'Welder', hours: '10', hourlyRate: '400', total: '4000.00' },
+    { id: 'll-2', lineNo: 2, labourRateId: 'lr-bm', role: 'Boiler Maker', hours: '5.5', hourlyRate: '300', total: '1650.00' },
+  ],
+  materials: [{
+    rfqId: 'rfq-1', rfqNumber: 'AFRI-02A-1469-02-01', rfqStatus: 'SENT', description: 'Pump parts', supplierId: 's-2', supplier: 'EMV', currency: 'ZAR',
+    quoteTotal: '9000.00', amount: '9000.00', unpricedLines: 0, recommendedSupplier: { id: 's-1', name: 'Local Steel' }, recommended: false, unusable: false,
+  }],
+  totals: TOTALS,
+};
+const PENDING = { ...RFQ, status: 'PENDING_APPROVAL', submittedAt: '2026-11-06T08:00:00.000Z', submittedById: 'u-sales', submittedBy: { id: 'u-sales', name: 'Ona Moloane' }, vatRate: '15' };
+const OPTIONS = [
+  {
+    id: 'rfq-1', number: 'AFRI-02A-1469-02-01', status: 'SENT', description: 'Pump parts', issuedAt: null, recommendedSupplierId: 's-1', salesRfqs: [],
+    quotes: [
+      { supplierId: 's-1', supplier: 'Local Steel', total: '9000.00', currency: 'ZAR', amount: '9000.00', unpricedLines: 0, recommended: true },
+      { supplierId: 's-2', supplier: 'EMV', total: '8500.00', currency: 'ZAR', amount: '8500.00', unpricedLines: 1, recommended: false },
+      { supplierId: 's-3', supplier: 'Hydac', total: '400.00', currency: 'EUR', amount: null, unpricedLines: 0, recommended: false },
+    ],
+  },
+  { id: 'rfq-2', number: 'AFRI-02A-1469-02-03', status: 'SENT', description: 'Seals', issuedAt: null, recommendedSupplierId: null, salesRfqs: [], quotes: [] },
+];
 
+let current: Record<string, unknown> = RFQ;
 function answer(path: string): unknown {
-  if (path === '/suppliers') return SUPPLIERS;
-  if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1404', name: 'Pipe spools', status: 'PLANNING' }];
-  if (path === '/units-of-measure') return UNITS;
-  if (path === '/sales-rfqs') return [RFQ];
-  if (path === '/sales-rfqs/r-1') return RFQ;
-  if (path === '/sales-rfqs/r-1/history') return [];
+  if (path.startsWith('/projects')) return [{ projectNumber: 'AFRI-1469', name: 'Pump rebuild', status: 'PLANNING', client: 'Northam Platinum' }];
+  if (path.startsWith('/labour-rates')) return RATES;
+  if (path.startsWith('/settings/values')) return { 'purchaseOrders.vatRate': 15, 'general.companyName': 'Afrinov' };
+  if (path.startsWith('/sales-rfqs/quote-options')) return OPTIONS;
+  if (path === '/sales-rfqs') return [RFQ, { ...PENDING, id: 'r-2', number: 'AFRI-02A-1469-02-02' }];
+  if (path === '/sales-rfqs/r-1') return current;
+  if (path === '/sales-rfqs/r-1/history') return [{ id: 'a-1', action: 'SALES_RFQ_RETURN', actorId: 'u-dir', actorName: 'Director', before: null, after: { reason: 'Too low' }, createdAt: '2026-11-06T09:00:00.000Z' }];
   throw new Error(`Unexpected GET ${path}`);
 }
 
@@ -56,112 +83,180 @@ const renderAt = (url: string) => render(
         <Route path="/sales-rfqs" element={<SalesRfqs />} />
         <Route path="/sales-rfqs/new" element={<NewSalesRfq />} />
         <Route path="/sales-rfqs/:id" element={<SalesRfqDetail />} />
+        <Route path="/labour-rates" element={<LabourRates />} />
       </Routes>
     </ToastProvider>
   </MemoryRouter>,
 );
 
 beforeEach(() => {
+  auth.id = 'u-sales';
   auth.roles = ['SALES'];
+  current = RFQ;
   mockGet.mockReset().mockImplementation(async (path: string) => answer(path));
-  mockPost.mockReset();
-  mockPatch.mockReset();
+  mockPost.mockReset().mockImplementation(async () => ({ ...RFQ, id: 'r-1' }));
+  mockPatch.mockReset().mockImplementation(async () => RFQ);
+  mockQuotation.mockReset().mockResolvedValue(undefined);
 });
 
 describe('Sales RFQ list', () => {
-  it('lists from Sales\' routes, and links each to Sales\' page', async () => {
+  it('lists the equipment, client and total, landing Sales on what it has in hand', async () => {
     renderAt('/sales-rfqs');
-    const link = await screen.findByRole('link', { name: 'AFRI-02A-1404-02-01' });
-    expect(link).toHaveAttribute('href', '/sales-rfqs/r-1');
-    expect(mockGet).toHaveBeenCalledWith('/sales-rfqs');
-    expect(screen.getByRole('link', { name: /New Sales RFQ/ })).toHaveAttribute('href', '/sales-rfqs/new');
+    const table = await screen.findByRole('table', { name: 'Sales RFQs' });
+    expect(within(table).getByRole('link', { name: 'AFRI-02A-1469-02-01' })).toHaveAttribute('href', '/sales-rfqs/r-1');
+    expect(within(table).getAllByText('Main Piston Pump')).toHaveLength(2);
+    expect(within(table).getAllByText(/21.010/)).toHaveLength(2);
+    expect(screen.getByRole('link', { name: /New Sales RFQ/ })).toBeInTheDocument();
   });
 
-  it('has no Awarded filter, as nothing is awarded', async () => {
-    renderAt('/sales-rfqs');
-    await screen.findByRole('link', { name: 'AFRI-02A-1404-02-01' });
-    expect(screen.queryByRole('option', { name: 'Awarded' })).not.toBeInTheDocument();
-  });
-
-  it('offers a senior manager no way to raise one', async () => {
+  it('lands the Director on what waits for their approval, with no way to raise one', async () => {
     auth.roles = ['DIRECTOR'];
     renderAt('/sales-rfqs');
-    await screen.findByRole('link', { name: 'AFRI-02A-1404-02-01' });
+    const table = await screen.findByRole('table', { name: 'Sales RFQs' });
+    expect(within(table).queryByRole('link', { name: 'AFRI-02A-1469-02-01' })).not.toBeInTheDocument();
+    expect(within(table).getByRole('link', { name: 'AFRI-02A-1469-02-02' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Waiting for my approval' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /New Sales RFQ/ })).not.toBeInTheDocument();
   });
 });
 
-describe('Sales RFQ form', () => {
-  const fillLine = (description: string, quantity: string) => {
-    fireEvent.change(screen.getByLabelText('Line 1 description'), { target: { value: description } });
-    fireEvent.change(screen.getByLabelText('Line 1 quantity'), { target: { value: quantity } });
-  };
-  const chooseProject = async () => {
-    await screen.findByRole('option', { name: /AFRI-1404/ });
-    fireEvent.change(screen.getByLabelText(/Project/), { target: { value: 'AFRI-1404' } });
-  };
-
-  it('saves typed lines with a unit, not catalogue items', async () => {
-    mockPost.mockResolvedValue({ id: 'r-1', number: 'AFRI-02A-1404-02-01' });
-    renderAt('/sales-rfqs/new');
-    await chooseProject();
-    await screen.findByRole('option', { name: 'Kilogram' });
-    fillLine('  Mild steel plate ', '12.5');
-    fireEvent.change(screen.getByLabelText('Line 1 units'), { target: { value: 'kg' } });
-    fireEvent.change(screen.getByLabelText('Add a supplier to ask'), { target: { value: 's-1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalled());
-    expect(mockPost).toHaveBeenCalledWith('/sales-rfqs', expect.objectContaining({
-      projectNumber: 'AFRI-1404',
-      lines: [{ description: 'Mild steel plate', unitOfMeasure: 'kg', quantity: 12.5 }],
-      supplierIds: ['s-1'],
-    }));
+describe('Sales RFQ page', () => {
+  it('shows the costing: labour, the orders, the markup and the price to the client', async () => {
+    renderAt('/sales-rfqs/r-1');
+    expect(await screen.findByRole('table', { name: 'Labour' })).toHaveTextContent(/Welder.*10.*400.*4.000/);
+    expect(screen.getByRole('table', { name: 'Material quotes' })).toHaveTextContent(/AFRI-02A-1469-02-01.*EMV.*Procurement recommends Local Steel.*9.000/);
+    // The Director sees that Sales didn't go with Procurement's recommendation.
+    expect(screen.getByText(/AFRI-02A-1469-02-01: EMV chosen, Local Steel recommended/)).toBeInTheDocument();
+    const price = screen.getByLabelText('Price');
+    expect(price).toHaveTextContent(/Cost.*14.650/);
+    expect(price).toHaveTextContent(/Markup.*40%.*5.860/);
+    expect(price).toHaveTextContent(/Main Piston Pump.*20.510/);
+    expect(price).toHaveTextContent(/Total incl\. VAT.*24.161,50|Total incl\. VAT.*24.161\.50/);
+    expect(screen.getByText('Sent back: Too low')).toBeInTheDocument();
   });
 
-  it('refuses part of a counted unit, and a line with no quantity, before saving', async () => {
-    renderAt('/sales-rfqs/new');
-    await chooseProject();
-    await screen.findByRole('option', { name: 'Each' });
-    fillLine('Bend', '1.5');
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await screen.findByText(/counted in whole numbers/)).toBeInTheDocument();
-    fillLine('Bend', '');
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await screen.findByText(/needs a description and a quantity/)).toBeInTheDocument();
-    expect(mockPost).not.toHaveBeenCalled();
+  it('lets Sales submit a draft, saying what goes to the Director', async () => {
+    renderAt('/sales-rfqs/r-1');
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(/21.010/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/sales-rfqs/r-1/submit'));
   });
 
-  it('tells someone without Sales\' permission they can\'t raise one', () => {
-    auth.roles = ['PROCUREMENT'];
-    renderAt('/sales-rfqs/new');
-    expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
+  it('lets the Director approve or send back with a reason', async () => {
+    auth.id = 'u-dir';
+    auth.roles = ['DIRECTOR'];
+    current = PENDING;
+    renderAt('/sales-rfqs/r-1');
+    fireEvent.click(await screen.findByRole('button', { name: 'Send back' }));
+    const dialog = await screen.findByRole('dialog');
+    const send = within(dialog).getByRole('button', { name: 'Send back' });
+    expect(send).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/What should change/), { target: { value: 'Markup too low' } });
+    fireEvent.click(send);
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/sales-rfqs/r-1/send-back', { reason: 'Markup too low' }));
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  it("offers no approval on one the approver raised or submitted", async () => {
+    auth.id = 'u-sales';
+    auth.roles = ['ADMIN'];
+    current = PENDING;
+    renderAt('/sales-rfqs/r-1');
+    expect(await screen.findByRole('table', { name: 'Labour' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
+  it('shows no banner while it waits for the Director: the status says so', async () => {
+    current = PENDING;
+    renderAt('/sales-rfqs/r-1');
+    await screen.findByRole('table', { name: 'Labour' });
+    expect(screen.getAllByText('Waiting for approval').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Waiting for the Director')).not.toBeInTheDocument();
+  });
+
+  it('downloads the quotation once approved, and previews it before', async () => {
+    current = { ...PENDING, status: 'APPROVED', quoteReference: 'AFRI-02A-1469-04-1' };
+    renderAt('/sales-rfqs/r-1');
+    fireEvent.click(await screen.findByRole('button', { name: 'Download quotation' }));
+    await waitFor(() => expect(mockQuotation).toHaveBeenCalledWith(expect.objectContaining({ quoteReference: 'AFRI-02A-1469-04-1' }), expect.objectContaining({ name: 'Afrinov' })));
+    expect(mockGet).toHaveBeenCalledWith('/settings/values?keys=general.companyName,purchaseOrders.quotationNotes,purchaseOrders.quotationLetterhead');
   });
 });
 
-describe('Sales RFQ page', () => {
-  it('compares the quotes on the typed lines, with nothing to award', async () => {
-    renderAt('/sales-rfqs/r-1');
-    const table = await screen.findByRole('table', { name: 'Quote comparison' });
-    expect(table).toHaveTextContent('200NB pipes x 3m');
-    expect(table).toHaveTextContent('each');
-    expect(screen.queryByRole('button', { name: /^Award to/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Record quote|Edit quote for Local Steel/ })).toBeInTheDocument();
+describe('Sales RFQ form', () => {
+  it('prices labour and the chosen quotes as it is typed, starting on the recommended one, and saves them', async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    // The project's client fills in the client.
+    expect(screen.getByLabelText('Client')).toHaveValue('Northam Platinum');
+    fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'Main Piston Pump' } });
+    await screen.findByRole('option', { name: 'Welder' });
+    fireEvent.change(screen.getByLabelText('Labour line 1 role'), { target: { value: 'lr-welder' } });
+    fireEvent.change(screen.getByLabelText('Labour line 1 hours'), { target: { value: '10' } });
+    expect(screen.getByLabelText('Labour line 1 total')).toHaveTextContent(/4.000/);
+    fireEvent.click(await screen.findByLabelText(/AFRI-02A-1469-02-01/));
+    // It starts on the quote Procurement recommends; one that can't be valued in rand can't be chosen.
+    expect(screen.getByLabelText('Local Steel on AFRI-02A-1469-02-01')).toBeChecked();
+    expect(screen.getByLabelText('Hydac on AFRI-02A-1469-02-01')).toBeDisabled();
+    expect(screen.getByText('1 line not priced')).toBeInTheDocument();
+    // An RFQ with no quotes yet can't be counted.
+    expect(screen.getByLabelText(/AFRI-02A-1469-02-03/)).toBeDisabled();
+    expect(screen.queryByRole('option', { name: /Retired role/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Markup %'), { target: { value: '40' } });
+    const preview = screen.getByLabelText('Price as typed');
+    expect(preview).toHaveTextContent(/Cost.*13.000/);
+    expect(preview).toHaveTextContent(/Main Piston Pump.*18.200/);
+    // Sales can go with another supplier's quote.
+    fireEvent.click(screen.getByLabelText('EMV on AFRI-02A-1469-02-01'));
+    expect(preview).toHaveTextContent(/Cost.*12.500/);
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/sales-rfqs', expect.objectContaining({
+      projectNumber: 'AFRI-1469', equipment: 'Main Piston Pump', clientName: 'Northam Platinum',
+      labour: [{ labourRateId: 'lr-welder', hours: 10 }], materials: [{ rfqId: 'rfq-1', supplierId: 's-2' }], markupPercent: 40, deliveryPrice: 0,
+    })));
+    // Left blank on a new one, the server fills in the usual conditions.
+    expect(mockPost.mock.calls[0]![1]).not.toHaveProperty('paymentTerms');
   });
 
-  it('records against Sales\' routes when sending', async () => {
-    mockGet.mockImplementation(async (path: string) => (path === '/sales-rfqs/r-1' ? { ...RFQ, status: 'DRAFT', suppliers: [{ supplierId: 's-1', quotedAt: null, declined: false, supplier: SUPPLIERS[0] }] } : answer(path)));
-    mockPost.mockResolvedValue({ ...RFQ });
-    renderAt('/sales-rfqs/r-1');
-    fireEvent.click(await screen.findByRole('button', { name: 'Send to suppliers' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/sales-rfqs/r-1/send', expect.anything()));
+  it('refuses hours finer than 2 decimal places and a role with no hours before saving', async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    await screen.findByRole('option', { name: 'Welder' });
+    fireEvent.change(screen.getByLabelText('Labour line 1 role'), { target: { value: 'lr-welder' } });
+    fireEvent.change(screen.getByLabelText('Labour line 1 hours'), { target: { value: '1,555' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText(/Labour line 1 needs a role and its hours/)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 
-  it('shows a senior manager the prices with nothing to change', async () => {
-    auth.roles = ['CEO'];
-    renderAt('/sales-rfqs/r-1');
-    await screen.findByRole('table', { name: 'Quote comparison' });
-    expect(screen.queryByRole('button', { name: /Cancel RFQ/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /quote for/ })).not.toBeInTheDocument();
+  it('is not for a senior manager', async () => {
+    auth.roles = ['DIRECTOR'];
+    renderAt('/sales-rfqs/new');
+    expect(await screen.findByText(/cannot raise Sales RFQs/i)).toBeInTheDocument();
+  });
+});
+
+describe('Labour rates', () => {
+  it('lets the Workshop Manager change a rate, and hides inactive roles until asked', async () => {
+    auth.roles = ['WORKSHOP_MANAGER'];
+    renderAt('/labour-rates');
+    const table = await screen.findByRole('table', { name: 'Labour rates' });
+    expect(within(table).queryByText('Retired role')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Show inactive roles'));
+    expect(within(table).getByText('Retired role')).toBeInTheDocument();
+    fireEvent.click(within(table).getByRole('button', { name: 'Change Welder' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Selling rate per hour/), { target: { value: '450' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith('/labour-rates/lr-welder', { role: 'Welder', hourlyRate: 450, active: true }));
+  });
+
+  it('shows Sales the rates without letting it change them', async () => {
+    renderAt('/labour-rates');
+    await screen.findByRole('table', { name: 'Labour rates' });
+    expect(screen.queryByRole('button', { name: /Change|Add role/ })).not.toBeInTheDocument();
   });
 });

@@ -1,34 +1,18 @@
 // Requests for quotation as the API returns them (rfq.service.ts), and the
 // small helpers the RFQ pages share.
-import { formatDate, formatNumber } from './format';
+import { formatDate } from './format';
 
 export type RfqStatus = 'DRAFT' | 'SENT' | 'AWARDED' | 'CANCELLED';
 
 export interface RfqPerson { id: string; name: string }
 
-/** All a buyer sees of a Sales line: what was asked for, never a price or a supplier. */
-export interface RfqSalesLine {
-  id: string;
-  lineNo: number;
-  description: string;
-  unitOfMeasure: string;
-  quantity: string;
-  rfq: { number: string; status: RfqStatus };
-}
-
 export interface RfqLine {
   id: string;
   /** The RFQ sheet's ITEM column: 1, 2, 3, … */
   lineNo: number;
-  /** A catalogue item, on Procurement's RFQs. */
   materialId?: string;
   quantity: string;
   material?: { sku: string; name: string; unitOfMeasure: string; category?: string; projectNumber?: string | null };
-  /** Typed as the sheet has it, on Sales RFQs. */
-  description?: string;
-  unitOfMeasure?: string;
-  /** What Sales asked for, as the buyer matched it, on Procurement's RFQs. */
-  salesRfqLine?: RfqSalesLine | null;
 }
 
 export interface RfqSupplier {
@@ -81,44 +65,23 @@ export interface Rfq {
   cancelledAt?: string | null;
   cancelledBy?: RfqPerson | null;
   cancellationReason?: string | null;
+  /** The supplier whose quote Procurement recommends Sales costs the job from. Not an award. */
+  recommendedSupplierId?: string | null;
+  recommendedAt?: string | null;
+  recommendedBy?: RfqPerson | null;
   /** The order it was awarded as, and the supplier it went to. */
   purchaseOrder?: { id: string; number: string; status: string; supplierId?: string } | null;
   lines: RfqLine[];
   suppliers: RfqSupplier[];
 }
 
-/** What a line asks to be priced: its catalogue item, or the description typed on a Sales RFQ. */
+/** What a line asks to be priced: its catalogue item. */
 export function lineDescription(l: RfqLine): string {
-  return l.material ? `${l.material.sku} ${l.material.name}` : l.description ?? l.materialId ?? '';
+  return l.material ? `${l.material.sku} ${l.material.name}` : l.materialId ?? '';
 }
 
 export function lineUnits(l: RfqLine): string {
-  return l.material?.unitOfMeasure ?? l.unitOfMeasure ?? '—';
-}
-
-export function salesLineAsked(s: RfqSalesLine): string {
-  return `${formatNumber(Number(s.quantity))} ${s.unitOfMeasure}`;
-}
-
-export function salesLineLabel(s: RfqSalesLine): string {
-  return `${s.rfq.number} line ${s.lineNo}: ${s.description} (${salesLineAsked(s)})`;
-}
-
-/**
- * How what this RFQ asks for differs from what Sales asked for on the line it
- * is linked to, in words; null when it doesn't: another unit, or a quantity
- * that doesn't add up across this RFQ's lines sharing it. Other RFQs may make up
- * the rest, which the savings report takes into account, so it says only what
- * this RFQ comes to. Compared in whole ten-thousandths, as quantities are kept.
- */
-export function salesLineDifference(lines: RfqLine[], line: RfqLine): string | null {
-  const asked = line.salesRfqLine;
-  if (!asked) return null;
-  const said = `Sales asked for ${salesLineAsked(asked)}`;
-  if (lineUnits(line).toLowerCase() !== asked.unitOfMeasure.toLowerCase()) return `${said}; this line is in ${lineUnits(line)}`;
-  const kept = (q: string) => Math.round(Number(q) * 1e4);
-  const here = lines.filter((l) => l.salesRfqLine?.id === asked.id).reduce((sum, l) => sum + kept(l.quantity), 0);
-  return here === kept(asked.quantity) ? null : `${said}; this RFQ's lines come to ${formatNumber(here / 1e4)} ${asked.unitOfMeasure}`;
+  return l.material?.unitOfMeasure ?? '—';
 }
 
 /** Days from sending to closing unless the buyer picks another, as the RFQ sheet's Closing = Issued + 4. */
