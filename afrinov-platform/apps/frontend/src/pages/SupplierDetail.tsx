@@ -48,6 +48,8 @@ export function SupplierDetail() {
   // Filter POs by the supplier's stable id. Filtering by name is
   // unreliable (case/whitespace variations, duplicate names).
   const supplierPOs = (pos.data ?? []).filter((p) => p.supplierId === id || p.supplier?.id === id);
+  // Orders still going through: they stay open when the supplier is deactivated (system audit D2).
+  const openPOs = supplierPOs.filter((p) => ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'].includes(p.status));
   const totalOrdered = supplierPOs.reduce((acc, p) => acc + p.lines.reduce((a, l) => a + Number(l.orderedQty), 0), 0);
   const totalReceived = supplierPOs.reduce((acc, p) => acc + p.lines.reduce((a, l) => a + Number(l.receivedQty), 0), 0);
 
@@ -192,7 +194,7 @@ export function SupplierDetail() {
           onConfirm={() => void setActive(false)}
           title={`Deactivate ${supplier.name}?`}
           description={PROCUREMENT_ENABLED
-            ? 'While the supplier is inactive, no stock can be received from them and no new purchase orders raised. Orders already raised and their history stay. You can reactivate them at any time.'
+            ? `While the supplier is inactive, no new purchase orders or quotes are raised with them. Orders already raised still go through and are received as normal${openPOs.length > 0 ? `: ${openPOs.length} still open (${openPOs.slice(0, 5).map((p) => p.number).join(', ')}${openPOs.length > 5 ? ', …' : ''})` : ''}. You can reactivate them at any time.`
             : 'While the supplier is inactive, no stock can be received from them. Their delivery history stays. You can reactivate them at any time.'}
           confirmLabel="Deactivate"
           destructive

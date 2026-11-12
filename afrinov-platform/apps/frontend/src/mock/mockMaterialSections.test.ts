@@ -118,12 +118,14 @@ describe('mock: project material is ordered for the order’s project', () => {
     expect(await messageOf(api.get('/purchase-orders?kind=shelf'))).toMatch(/Invalid purchase order filter/);
   });
 
-  it('refuses an order for a completed project, and submitting a draft whose project has closed since', async () => {
+  // System audit E1: a project with an order still open (even a draft) isn't closed.
+  it('refuses closing a project with a draft order, then any order once it has closed', async () => {
     const pipe = await api.post<Material>('/materials', { sku: 'AFRI-1402-PIPE', name: 'Pipe', category: 'PROJECT_MATERIAL', unitOfMeasure: 'm', projectNumber: 'AFRI-1402' });
     const draft = await order('AFRI-1402', pipe.id);
+    expect(await messageOf(api.patch('/projects/AFRI-1402', { status: 'COMPLETED' }))).toMatch(/can't be closed yet: Order .* is draft/);
+    await api.post(`/purchase-orders/${draft.id}/cancel`, { reason: 'Job closing' });
     await api.patch('/projects/AFRI-1402', { status: 'COMPLETED' });
     expect(await messageOf(order('AFRI-1402', pipe.id))).toMatch(/Project AFRI-1402 is completed, so nothing more is ordered for it/);
-    expect(await messageOf(api.post(`/purchase-orders/${draft.id}/submit`))).toMatch(/is completed/);
   });
 });
 

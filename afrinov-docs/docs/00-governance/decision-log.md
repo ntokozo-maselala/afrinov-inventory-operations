@@ -1211,3 +1211,68 @@ Microsoft 365): files locked for 30 days, and access that can't delete,
 renewed yearly. Point-in-time recovery is not covered. Tests:
 `backup-status.test.ts`, `backups.real-http.test.ts`, `lib/backups.test.ts`,
 and the CI drill.
+
+### ADR-038 — Locations, suppliers and projects close only when nothing still depends on them; a project's status decides whether it is active
+**Date:** 2026-11-12 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P2, closing things safely)
+found that items follow "inactive means nothing moves" (ADR-033), but
+locations, suppliers and projects could be closed while work still depended
+on them. A location could be deactivated with stock on it, which could then not
+be issued, moved, adjusted or counted, and with tools out on loan that could
+never be checked back in (A1, A2). Receiving against an order didn't check the
+location was open (A3), and a counter receipt read an item's status before
+holding its row (A5). Tools could be lent to a completed project (B1).
+Deactivating a supplier refused every delivery against their open orders (D2).
+Completing a project checked only its schedules, and cancelling or archiving it
+checked nothing (E1, D4). A project's `active` flag and its status were set
+separately and could disagree (E2). The owner approved the recommended option
+for each.
+
+**Decision:**
+- **A location is deactivated only when clear:** no stock on it (Stores or a
+  project's), no tool out on loan from it, no adjustment waiting there, not
+  where project deliveries are booked, and no active location inside it.
+  `GET /locations/:id/deactivation-check` lists what is in the way; the screen
+  shows it first. Every movement holds the location's row `FOR SHARE`
+  (`checkLocationActive`, stock counts, counter receipts) and deactivation
+  holds it `FOR UPDATE`, so the two can't pass each other, as for items.
+- **A tool comes back even if its location has closed:** check-in takes a
+  `locationId` to put it elsewhere, and a lost tool is written off without its
+  location being open, since its return and write-off cancel out there.
+- **Every way stock arrives checks the location is open**, receipts against an
+  order included; counter receipts use `checkMaterialActive`.
+- **No tool is lent to a completed or cancelled project**, as no stock is
+  issued to one.
+- **An inactive supplier gets no new orders or quotes, but orders already
+  raised still go through and are received.** Deactivating lists their open
+  orders.
+- **A project is completed, cancelled or archived only when nothing still
+  depends on it:** no order still open (drafts included), no Procurement RFQ
+  still in draft or sent, no tool out on loan to it, no write-off of its stock
+  waiting; completing also needs every schedule done or cancelled (ADR-032).
+  `GET /projects/:projectNumber/closing-check?to=COMPLETED|CANCELLED` lists what
+  is in the way. Issuing, lending and ordering for a project hold its row
+  `FOR SHARE`; closing holds it `FOR UPDATE`.
+  *Departure from the recommendation:* stock held for the project does not
+  block closing, because Leftovers moves that stock to Stores only once the
+  project is closed; requiring it first would make every project with stock
+  impossible to close. Sales RFQs don't block either: they record prices
+  asked for and are never awarded or closed.
+- **Status decides whether a project is active:** Completed and Cancelled are
+  inactive, every other status active; the separate flag is no longer taken
+  from the API or the project form. Migration
+  `20260101000057_project_status_decides` lines the flag up with status and adds
+  two database checks: status is one of the five values, and `active` agrees
+  with it. That makes the recommended `check:project-status` report
+  unnecessary: the database refuses a disagreement.
+
+**Consequences:** Closing a location or a project can now take a few steps
+(move the stock, check the tools in, cancel the drafts) and the screen says
+which. A project's stock still shows under Leftovers after it closes. Reopening
+a project is a status change, and it becomes active again. Tests:
+`location.service.test.ts`, `project.service.test.ts`,
+`tool-loan.service.test.ts`, `goods-receipt.service.test.ts`,
+`closing-safely.real-http.test.ts`, `materials-sections.real-http.test.ts`,
+`ClearFirstDialog.test.tsx`, `SupplierMaster.test.tsx`,
+`mockMaterialSections.test.ts`.

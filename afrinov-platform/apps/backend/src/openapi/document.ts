@@ -278,7 +278,15 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/locations/:id/status', tag: 'Locations', summary: 'Activate or deactivate a location',
-    permissions: [P.ManageLocationStatus], body: locationStatusSchema, errors: [404],
+    description: 'Deactivating is refused (409) until the location is clear: no stock on it, no tool out on loan from it, '
+      + 'no adjustment waiting there, not where project deliveries are booked, and no active location inside it. '
+      + 'The same rule applies to active=false on PATCH /locations/:id.',
+    permissions: [P.ManageLocationStatus], body: locationStatusSchema, errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/locations/:id/deactivation-check', tag: 'Locations', summary: 'What must be dealt with before deactivating',
+    description: 'The same list the deactivation would refuse with, for the screen to show first: `{ blockers: [{ kind, text }] }`.',
+    permissions: [P.ManageLocationStatus], errors: [404],
   },
   {
     method: 'delete', path: '/locations/:id', tag: 'Locations', summary: 'Delete a location',
@@ -553,12 +561,21 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'patch', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Update a project',
-    permissions: [P.ManageProjects], body: updateProjectSchema, errors: [404],
+    description: 'Status decides whether the project is active: Completed and Cancelled are inactive. Completing or cancelling it is '
+      + 'refused (409) while orders are still open, requests for quotation not awarded or cancelled, tools out on loan to it or '
+      + 'write-offs of its stock waiting, and, to complete it, while schedules are open (system audit E1, E2).',
+    permissions: [P.ManageProjects], body: updateProjectSchema, errors: [404, 409],
+  },
+  {
+    method: 'get', path: '/projects/:projectNumber/closing-check', tag: 'Projects', summary: 'What must be dealt with before closing a project',
+    description: 'For ?to=COMPLETED or ?to=CANCELLED (the default): the list completing or cancelling would be refused with, '
+      + '`{ blockers: [{ kind, text, id? }] }`.',
+    permissions: [P.ManageProjects], errors: [404],
   },
   {
     method: 'delete', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Archive a project',
-    description: 'Archives rather than deletes, and returns the archived project.',
-    permissions: [P.ManageProjects], errors: [404],
+    description: 'Archives rather than deletes: the project is cancelled, so the same check applies (409). Returns the archived project.',
+    permissions: [P.ManageProjects], errors: [404, 409],
   },
   // Job tracking (ADR-032). Anyone signed in may read; only the project's manager,
   // or a holder of manage:project_schedule (Admin), may change. Each change

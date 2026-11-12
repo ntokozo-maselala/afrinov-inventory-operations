@@ -276,10 +276,11 @@ function refuseUnassigned(materialId: string) {
 function assertProjectOpen(projectNumber: string) {
   const project = state.projects.find((p) => p.projectNumber === projectNumber);
   if (!project) throw err('VALIDATION_ERROR', `No project ${projectNumber}`);
-  if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
+  // The status first, as the server (system audit E2): it says why.
   if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
     throw err('VALIDATION_ERROR', `Project ${projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so nothing more is ordered for it.`);
   }
+  if (project.active === false) throw err('VALIDATION_ERROR', `Project ${projectNumber} is inactive`);
 }
 
 // As the server (checkProjectMaterial): a project's leftovers go only to that
@@ -1369,6 +1370,14 @@ function route(method: string, path: string, body?: unknown): unknown {
         inventoryCount: balances.filter((b) => b.locationId === l.id).length,
       }));
   }
+  // System audit A1: stock on it keeps a location open (tools out are kept on the server's list only).
+  if (method === 'GET' && /^\/locations\/[^/]+\/deactivation-check$/.test(p)) {
+    const id = p.split('/')[2]!;
+    if (!findLocation(id)) throw err('NOT_FOUND', 'Location not found');
+    const blockers = computeBalances().filter((b) => b.locationId === id && Number(b.quantity) !== 0)
+      .map((b) => ({ kind: 'STOCK', text: `${b.quantity} of ${findMaterial(b.materialId)?.sku ?? b.materialId}` }));
+    return { blockers };
+  }
   if (method === 'GET' && p.startsWith('/locations/')) {
     const id = p.slice('/locations/'.length);
     const l = findLocation(id);
@@ -1413,7 +1422,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!l) throw err('NOT_FOUND', 'Location not found');
     const b = body as { active?: boolean };
     if (typeof b?.active !== 'boolean') throw err('VALIDATION_ERROR', 'active is required');
-    if (!b.active && l.active) mockAssertNoActiveChildren(l);
+    if (!b.active && l.active) {
+      mockAssertNoActiveChildren(l);
+      if (computeBalances().some((x) => x.locationId === id && Number(x.quantity) !== 0)) throw err('CONFLICT', `${l.name} is not clear yet: stock is still on it.`);
+    }
     if (b.active && !l.active) mockAssertRoomActive(l.name, l.parentId);
     l.active = b.active;
     l.updatedAt = new Date().toISOString();
@@ -2253,6 +2265,10 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (q) list = list.filter((p) => `${p.projectNumber} ${p.name} ${p.code ?? ''} ${p.client ?? ''}`.toLowerCase().includes(q));
     return list;
   }
+  // System audit E1: open orders keep a project open (the server also counts RFQs, tool loans and write-offs).
+  if (method === 'GET' && /^\/projects\/[^/]+\/closing-check$/.test(p)) {
+    return { blockers: mockOpenOrdersFor(decodeURIComponent(p.split('/')[2]!)) };
+  }
   if (method === 'GET' && p.startsWith('/projects/')) {
     const projectNumber = decodeURIComponent(p.slice('/projects/'.length));
     return state.projects.find((p) => p.projectNumber === projectNumber) ?? null;
@@ -2298,12 +2314,19 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (b.startDate !== undefined && b.startDate && proj.endDate && new Date(proj.endDate) < new Date(b.startDate)) {
       throw err('VALIDATION_ERROR', 'End date cannot be earlier than start date');
     }
+    // As the server (system audit E1): not closed while its orders are open.
+    if ((b.status === 'COMPLETED' || b.status === 'CANCELLED') && proj.status !== b.status) {
+      const open = mockOpenOrdersFor(projectNumber);
+      if (open.length > 0) throw err('INVALID_STATE', `Project ${projectNumber} can't be closed yet: ${open.map((o) => o.text).join('; ')}.`);
+    }
     // As the server (ADR-032): a job is completed when every schedule is done or cancelled.
     if (b.status === 'COMPLETED' && proj.status !== 'COMPLETED') {
       const open = mockOpenSchedules(projectNumber);
       if (open > 0) throw err('INVALID_STATE', `This project has ${open} open schedule${open === 1 ? '' : 's'}: finish or cancel ${open === 1 ? 'it' : 'them'} before marking the project Completed.`);
     }
     Object.assign(proj, b);
+    // Status decides whether it is active (system audit E2).
+    if (b.status) proj.active = b.status !== 'COMPLETED' && b.status !== 'CANCELLED';
     proj.updatedAt = new Date().toISOString();
     return proj;
   }
@@ -2796,10 +2819,10 @@ function handleIssue(b: IssueBody): { issueId: string; transactionIds: string[] 
   if (b.projectNumber) {
     const project = state.projects.find((x) => x.projectNumber === b.projectNumber);
     if (!project) throw err('NOT_FOUND', 'Project not found');
-    if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
     if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
       throw err('VALIDATION_ERROR', `Project ${b.projectNumber} is ${project.status === 'COMPLETED' ? 'completed' : 'cancelled'}, so no more stock is issued to it.`);
     }
+    if (project.active === false) throw err('VALIDATION_ERROR', 'Project is inactive');
   }
   // As the server: a project's own stock goes to that project only; Stores
   // stock follows the item's rules (Project Material Through the Store Roadmap, Phase 3).
@@ -4498,4 +4521,11 @@ function dueDateChangeRow(c: State['toolLoanExtensions'][number]): MockMovementR
     returnedQuantity: null, usedUpQuantity: null, brokenQuantity: null, otherLocationName: null, returnOf: null,
     dueOn: c.dueOn, previousDueOn: dueOnBefore(loan, c.id), currentDueOn: null, daysLate: null, overdueOverrideReason: null,
   };
+}
+
+/** A project's orders still open, as the server's closing check lists them (system audit E1). */
+function mockOpenOrdersFor(projectNumber: string): Array<{ kind: string; text: string; id: string }> {
+  return state.purchaseOrders
+    .filter((po) => po.projectNumber === projectNumber && ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PARTIALLY_RECEIVED'].includes(po.status))
+    .map((po) => ({ kind: 'ORDER', id: po.id, text: `Order ${po.number} is ${po.status.toLowerCase().replace('_', ' ')}: close, cancel or finish receiving it` }));
 }

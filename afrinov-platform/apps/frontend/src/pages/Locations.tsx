@@ -10,6 +10,7 @@ import { Badge } from '../components/Badge';
 import { Drawer, Modal } from '../components/Modal';
 import { EmptyState, ErrorState } from '../components/EmptyState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ClearFirstDialog } from '../components/ClearFirstDialog';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Stat } from '../components/Stat';
@@ -509,16 +510,27 @@ export function Locations() {
         />
       )}
 
-      {pendingStatus && (
+      {/* System audit A1: a location is closed only once nothing is left on it. */}
+      {pendingStatus?.active && (
+        <ClearFirstDialog
+          onClose={() => setPendingStatus(null)}
+          onConfirm={() => void performToggleStatus()}
+          title={`Deactivate ${pendingStatus.name}?`}
+          description="Nothing is on it. Once deactivated, nothing can be received, moved or counted here; its history stays."
+          checkPath={`/locations/${pendingStatus.id}/deactivation-check`}
+          blockedIntro="It can't be deactivated yet: stock on it couldn't be issued, moved or counted, and a tool lent from it couldn't come back. First deal with:"
+          confirmLabel="Deactivate"
+          loading={toggling}
+        />
+      )}
+      {pendingStatus && !pendingStatus.active && (
         <ConfirmDialog
           open
           onClose={() => setPendingStatus(null)}
           onConfirm={() => void performToggleStatus()}
-          title={pendingStatus.active ? `Deactivate ${pendingStatus.name}?` : `Activate ${pendingStatus.name}?`}
-          description={pendingStatus.active
-            ? 'Deactivating prevents new transactions being posted to this location while preserving all historical records.'
-            : 'Activating makes the location available for new transactions again.'}
-          confirmLabel={pendingStatus.active ? 'Deactivate' : 'Activate'}
+          title={`Activate ${pendingStatus.name}?`}
+          description="Activating makes the location available for new transactions again."
+          confirmLabel="Activate"
           loading={toggling}
         />
       )}

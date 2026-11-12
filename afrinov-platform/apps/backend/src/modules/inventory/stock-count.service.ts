@@ -150,6 +150,8 @@ export const StockCountService = {
       // A count is of Stores stock; counting a project's stock comes with Phase 3.
       await lockInventoryBalances(lines.map((line) => storesStock(line.materialId, input.locationId)), tx);
 
+      // Held as checkLocationActive does (system audit A1).
+      await tx.$executeRaw`SELECT 1 FROM locations WHERE id = ${input.locationId} FOR SHARE`;
       const location = await tx.location.findUnique({ where: { id: input.locationId } });
       if (!location) throw Errors.notFound('Location');
       if (!location.active) throw Errors.validation(`Location ${location.name} is inactive`);
