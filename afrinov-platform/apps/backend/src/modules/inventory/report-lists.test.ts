@@ -73,7 +73,7 @@ describe('StockCountService.list', () => {
 
   it('returns each count with where, who, how many items and the differences it adjusted', async () => {
     auditFindMany.mockResolvedValue([
-      { id: 'a-2', entityId: 'c-2', actorId: 'u-1', createdAt: at, after: { locationId: 'l-1', counted: 4, adjusted: 1, note: 'Monthly' } },
+      { id: 'a-2', entityId: 'c-2', actorId: 'u-1', createdAt: at, after: { locationId: 'l-1', counted: 4, adjusted: 1, note: 'Monthly', kind: 'FULL', heldForProject: 'AFRI-1325' } },
       { id: 'a-1', entityId: 'c-1', actorId: 'u-1', createdAt: at, after: { locationId: 'l-1', counted: 3, adjusted: 0, note: null } },
     ]);
     txFindMany.mockResolvedValue([
@@ -87,7 +87,7 @@ describe('StockCountService.list', () => {
     expect(counts).toEqual([
       {
         id: 'c-2', cursor: '2026-09-25T10:00:00.000Z_a-2', at: '2026-09-25T10:00:00.000Z', locationId: 'l-1', locationName: 'Boiler Shop',
-        countedByName: 'Vusi', counted: 4, adjusted: 1, note: 'Monthly',
+        countedByName: 'Vusi', counted: 4, adjusted: 1, note: 'Monthly', kind: 'FULL', heldForProject: 'AFRI-1325',
         differences: [{ materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', quantity: '-2' }],
         lines: [
           { materialId: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitOfMeasure: 'each', expected: '9', counted: '7', note: '2 cracked' },
@@ -95,7 +95,8 @@ describe('StockCountService.list', () => {
         ],
       },
       // Counted before sheets were kept: differences only.
-      expect.objectContaining({ id: 'c-1', counted: 3, adjusted: 0, differences: [], lines: [] }),
+      // And before ADR-040: a Spot count of Stores stock.
+      expect.objectContaining({ id: 'c-1', counted: 3, adjusted: 0, kind: 'SPOT', heldForProject: null, differences: [], lines: [] }),
     ]);
     expect(sheetFindMany.mock.calls[0]![0].where).toEqual({ countId: { in: ['c-2', 'c-1'] } });
     expect(txFindMany.mock.calls[0]![0].where).toEqual({ referenceType: 'StockCount', referenceId: { in: ['c-2', 'c-1'] } });

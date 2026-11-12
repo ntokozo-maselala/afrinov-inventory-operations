@@ -42,7 +42,8 @@ code only; the column is free text (TD-024).
 | `purchase_order_signatures` (PurchaseOrderSignature) | id, purchase_order_id, step (MANAGER, DIRECTOR), signed_by_id, signed_at, stand_in | unique on purchase_order_id and step; cascade on PO delete; `purchase_orders.exchange_rate` holds the rate locked at submission (ADR-030) |
 | `purchase_order_lines` | id, purchase_order_id, material_id, ordered_qty, received_qty (default 0) | cascade on PO delete; index on purchase_order_id; no price column |
 | `goods_receipts` (GoodsReceipt) | id, number, purchase_order_id (nullable), supplier_id, delivery_ref, status, received_by_id, received_at | number unique; indexes on status, purchase_order_id |
-| `goods_receipt_lines` | id, goods_receipt_id, material_id, location_id, quantity, purchase_order_line_id (no FK) | cascade on receipt delete |
+| `goods_receipt_lines` | id, goods_receipt_id, material_id, location_id, quantity, purchase_order_line_id (no FK), over_delivery_reason, transaction_id (the RECEIPT it posted) | cascade on receipt delete |
+| `supplier_returns` (SupplierReturn, ADR-040) | id, goods_receipt_line_id, quantity, reason, supplier_reference, transaction_id (the RETURN_TO_SUPPLIER), actor_id, created_at | transaction_id unique; quantity > 0 |
 
 `PurchaseOrderStatus`: DRAFT, PENDING_APPROVAL, APPROVED, PARTIALLY_RECEIVED,
 RECEIVED, CLOSED, CANCELLED · `GoodsReceiptStatus`: DRAFT, SUBMITTED, POSTED
@@ -72,8 +73,8 @@ The migration `20260101000058_sales_rfq_equipment_lines` gives every Sales RFQ o
 | `inventory_transactions` (InventoryTransaction) | id, material_id, location_id, type, quantity (signed), reference_type, reference_id, recipient_id, reason_code, reason_note, project_number, actor_id, posted_at, paired_with_id, reverses_id | `paired_with_id` unique (transfer legs); `reverses_id` unique (a row can be reversed once); FKs to material, location, actor (users), project, recipient, paired and reversed rows; indexes on (material_id, location_id, posted_at), (reference_type, reference_id), posted_at, type, recipient_id |
 | `inventory_balances` (InventoryBalance) | material_id, location_id, quantity, updated_at | composite PK; index on location_id. The schema declares FKs to materials and locations but no migration creates them (TD-005) |
 
-`InventoryTransactionType`: RECEIPT, ISSUE, TRANSFER_OUT, TRANSFER_IN,
-ADJUSTMENT, RETURN · `AdjustmentReasonCode`: COUNT_VARIANCE, DAMAGE, LOSS,
+`InventoryTransactionType`: RECEIPT, RETURN_TO_SUPPLIER, ISSUE, TRANSFER_OUT,
+TRANSFER_IN, ADJUSTMENT, RETURN, LOAN, LOAN_RETURN · `AdjustmentReasonCode`: COUNT_VARIANCE, DAMAGE, LOSS,
 SCRAP, OTHER.
 
 `consumable_outcomes` (ConsumableOutcome, ADR-026): id, issue_transaction_id,
@@ -83,6 +84,13 @@ unique (an outcome is withdrawn once); `return_transaction_id` is the RETURN
 booked in the same counter visit, if any, which shows it on Movements; FKs to
 the issue, the return, the actor and the withdrawn outcome; indexes on
 issue_transaction_id, return_transaction_id and created_at. Added to only; it
+holds no stock.
+
+`tool_repairs` (ToolRepair, ADR-040): id, material_id, location_id, quantity,
+return_id (the damaged LOAN_RETURN), note, reported_by_id, reported_at,
+resolution (REPAIRED, WRITTEN_OFF), resolution_note, resolved_by_id,
+resolved_at, transaction_id (the write-off). A CHECK keeps resolution and
+resolved_at together. An open row holds that quantity back from check-out; it
 holds no stock.
 
 `material_status_changes` (MaterialStatusChange, ADR-033): id, material_id,

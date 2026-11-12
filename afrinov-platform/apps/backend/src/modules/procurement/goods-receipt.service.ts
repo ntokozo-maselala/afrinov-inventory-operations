@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
+import { mostReceivable, overDeliveryShare } from './over-delivery.js';
 import { RECEIVABLE_STATUSES } from './procurement.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 import { checkWholeUnits } from '../../shared/units.js';
@@ -44,6 +45,8 @@ export interface CreateGoodsReceiptInput {
     locationId: string;
     quantity: number;
     purchaseOrderLineId?: string;
+    /** Why more than is still owed came: needed when it does (system audit A8). */
+    overDeliveryReason?: string;
   }>;
 }
 
@@ -59,7 +62,7 @@ type OrderForReceipt = {
  * more than is still outstanding. Without this, the stock was booked but the
  * order still showed it as owed, and could be received a second time.
  */
-function assertLinesOnOrder(po: OrderForReceipt, input: CreateGoodsReceiptInput): void {
+function assertLinesOnOrder(po: OrderForReceipt, input: CreateGoodsReceiptInput, share: Prisma.Decimal): void {
   if (po.supplierId !== input.supplierId) {
     throw Errors.validation(`${po.number} is with another supplier. Choose the order's supplier, or another order.`);
   }
@@ -79,11 +82,19 @@ function assertLinesOnOrder(po: OrderForReceipt, input: CreateGoodsReceiptInput)
   for (const [id, qty] of receiving) {
     const orderLine = onOrder.get(id)!;
     const outstanding = orderLine.orderedQty.minus(orderLine.receivedQty);
-    if (qty.gt(outstanding)) {
+    if (!qty.gt(outstanding)) continue;
+    // Over what is owed: within the over-delivery allowance, with a reason (system audit A8).
+    const upTo = mostReceivable(orderLine.orderedQty, share).minus(orderLine.receivedQty);
+    if (qty.gt(upTo)) {
       throw Errors.validation(
-        `Receiving ${qty.toString()} of ${orderLine.material.sku} would exceed what is still outstanding on ${po.number} (${outstanding.toString()}).`,
-        { outstanding: outstanding.toString(), receiving: qty.toString() },
+        share.isZero()
+          ? `Receiving ${qty.toString()} of ${orderLine.material.sku} would exceed what is still outstanding on ${po.number} (${outstanding.toString()}).`
+          : `Receiving ${qty.toString()} of ${orderLine.material.sku} would exceed what ${po.number} still owes (${outstanding.toString()}) by more than the over-delivery allowed: up to ${Prisma.Decimal.max(upTo, 0).toString()} can be received.`,
+        { outstanding: outstanding.toString(), receiving: qty.toString(), upTo: Prisma.Decimal.max(upTo, 0).toString() },
       );
+    }
+    if (input.lines.some((l) => l.purchaseOrderLineId === id && !l.overDeliveryReason?.trim())) {
+      throw Errors.validation(`${qty.toString()} of ${orderLine.material.sku} is more than ${po.number} still owes (${outstanding.toString()}): say why the extra is kept.`, { outstanding: outstanding.toString(), receiving: qty.toString() });
     }
   }
 }
@@ -131,7 +142,7 @@ export const GoodsReceiptService = {
       if (!RECEIVABLE_STATUSES.includes(po.status)) {
         throw Errors.invalidState(`Cannot receive against a purchase order in status ${po.status}`, { status: po.status });
       }
-      assertLinesOnOrder(po, input);
+      assertLinesOnOrder(po, input, await overDeliveryShare());
       for (const l of po.lines) outstanding.set(l.id, l.orderedQty.minus(l.receivedQty));
     } else if (input.lines.some((l) => l.purchaseOrderLineId)) {
       throw Errors.validation('These lines belong to a purchase order: choose the order the delivery is for.');
@@ -166,6 +177,7 @@ export const GoodsReceiptService = {
               locationId: l.locationId,
               quantity: l.quantity,
               purchaseOrderLineId: l.purchaseOrderLineId ?? null,
+              overDeliveryReason: l.overDeliveryReason?.trim() || null,
             })),
           },
         },

@@ -40,6 +40,7 @@ interface MovementBadgeProps { type: string }
 
 const movementTone: Record<string, Tone> = {
   RECEIPT: 'success',
+  RETURN_TO_SUPPLIER: 'warning',
   ISSUE: 'danger',
   TRANSFER_OUT: 'info',
   TRANSFER_IN: 'info',
@@ -57,6 +58,8 @@ const movementTone: Record<string, Tone> = {
 
 const movementLabel: Record<string, string> = {
   RECEIPT: 'Receipt',
+  // Goods sent back to the supplier against a receipt (system audit A6).
+  RETURN_TO_SUPPLIER: 'Returned to supplier',
   ISSUE: 'Issue',
   TRANSFER_OUT: 'Transfer out',
   TRANSFER_IN: 'Transfer in',

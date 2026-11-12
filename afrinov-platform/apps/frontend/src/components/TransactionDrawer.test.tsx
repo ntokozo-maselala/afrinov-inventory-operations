@@ -28,7 +28,7 @@ const issue = {
   actorName: 'Vusi',
 };
 
-function renderDrawer(overrides: Partial<typeof issue & { reversesId: string; reversedById: string; referenceType: string; fromPurchaseOrder: boolean; receiptNumber: string }> = {}) {
+function renderDrawer(overrides: Partial<typeof issue & { reversesId: string; reversedById: string; referenceType: string; fromPurchaseOrder: boolean; receiptNumber: string; againstOrder: boolean; receiptId: string; receiptLineId: string; returnedToSupplier: string; returnableToSupplier: string; supplierName: string; unitOfMeasure: string }> = {}) {
   const onReversed = vi.fn();
   const onError = vi.fn();
   render(<TransactionDrawer transaction={{ ...issue, ...overrides }} onClose={() => {}} onReversed={onReversed} onError={onError} />);
@@ -397,5 +397,27 @@ describe('TransactionDrawer', () => {
       expect(await screen.findByText('Stub back')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
     });
+  });
+
+  // System audit A6, A7: a receipt line against an order is reversed with its order, or goes back to the supplier.
+  it('reverses a receipt line against an order, and sends goods back to the supplier with a reason', async () => {
+    const receipt = { type: 'RECEIPT', quantity: '10', referenceType: 'GoodsReceipt', receiptNumber: 'GR-0007', supplierName: 'Hydroscand', unitOfMeasure: 'each',
+      againstOrder: true, receiptId: 'gr-7', receiptLineId: 'grl-1', returnedToSupplier: '0', returnableToSupplier: '10' };
+    mockPost.mockResolvedValue({ id: 'sr-1', transactionId: 'tx-9' });
+    renderDrawer(receipt);
+    expect(screen.getByText(/The order is put right too: it shows these as still owed/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Return to supplier' }));
+    fireEvent.change(screen.getByLabelText(/Quantity going back/), { target: { value: '3' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Return to supplier' }).at(-1)!);
+    expect(await screen.findByText('Say why they go back.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Why they go back/), { target: { value: 'Wrong size' } });
+    fireEvent.change(screen.getByLabelText(/Supplier's reference/), { target: { value: 'CN-551' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Return to supplier' }).at(-1)!);
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/goods-receipts/gr-7/lines/grl-1/return', { quantity: 3, reason: 'Wrong size', supplierReference: 'CN-551' }, { idempotencyKey: expect.any(String) }));
+    cleanup();
+    // Part of it went back: the rest goes back the same way, and it isn't reversed.
+    renderDrawer({ ...receipt, returnedToSupplier: '3', returnableToSupplier: '7' });
+    expect(screen.queryByRole('button', { name: 'Reverse this movement' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Up to 7 can go back/)).toBeInTheDocument();
   });
 });

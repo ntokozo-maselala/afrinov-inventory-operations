@@ -18,6 +18,7 @@ import { checkWriteOff, recentWriteOffQuantity } from './write-off-limit.js';
 import { requestAdjustment } from './write-off-requests.js';
 import { lockInventoryBalances } from '../../shared/inventory/balances.js';
 import { ToolLoanService, TOOL_LOAN_REFERENCE } from './tool-loan.service.js';
+import { resolveRepair, TOOL_REPAIR_REFERENCE } from '../../shared/inventory/tool-repairs.js';
 
 export type AdjustOutcome =
   | { status: 'POSTED'; transactionId: string }
@@ -118,6 +119,10 @@ export const WriteOffApprovalService = {
           referenceId: request.referenceId,
           actorId: request.requestedById,
         }, tx);
+      // A tool held for repair, written off: its repair closes (system audit B2).
+      if (request.referenceType === TOOL_REPAIR_REFERENCE && request.referenceId) {
+        await resolveRepair(tx, request.referenceId, 'WRITTEN_OFF', { actorId: request.requestedById, note: request.reasonNote, transactionId });
+      }
       const now = new Date();
       await tx.adjustmentRequest.update({
         where: { id },

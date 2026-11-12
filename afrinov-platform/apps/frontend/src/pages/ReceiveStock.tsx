@@ -117,7 +117,9 @@ function ReceiveAgainstOrder() {
   const orders = useApi<OpenOrder[]>('/purchase-orders/receivable');
   // Where project deliveries are booked, such as the workshop floor: project
   // material isn't shelved (Project Material Through the Store Roadmap, Phase 4).
-  const settings = useApi<Record<string, unknown>>(`/settings/values?keys=${PROJECT_RECEIVING_LOCATION}`);
+  const settings = useApi<Record<string, unknown>>(`/settings/values?keys=${PROJECT_RECEIVING_LOCATION},purchaseOrders.overDeliveryPercent`);
+  // How far over the order a line may go, as a fraction of it (system audit A8).
+  const overShare = Math.min(Math.max(Number(settings.data?.['purchaseOrders.overDeliveryPercent']) || 0, 0), 100) / 100;
   const toast = useToast();
   const idem = useIdempotencyKey('receive-stock');
   const { kindOf } = useUnits();
@@ -180,7 +182,7 @@ function ReceiveAgainstOrder() {
     setCloseReason('');
     setError(null);
     const into = (materialId: string) => (!order?.projectNumber || projectHome.state === 'none' ? homeOf(materialId) : projectHome.id);
-    setOrderLines(order ? receiptLinesFromOrder(order).map((l) => ({ ...l, locationId: into(l.materialId) })) : []);
+    setOrderLines(order ? receiptLinesFromOrder(order, overShare).map((l) => ({ ...l, locationId: into(l.materialId) })) : []);
   }
 
   // The order's page and Order stock link here with ?order=: once the orders,

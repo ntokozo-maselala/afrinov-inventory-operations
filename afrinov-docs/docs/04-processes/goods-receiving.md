@@ -75,6 +75,16 @@ own or a project's (ADR-027).
   cannot be reversed in the system.
 
 ## Exceptions
+- Supplier sends more than ordered → up to `purchaseOrders.overDeliveryPercent`
+  of the ordered quantity (default 0%) may be received, each such line with a
+  reason; the order line shows the extra (ADR-040).
+- Goods sent back to the supplier → on Movements, open the receipt and
+  **Return to supplier** (`POST /goods-receipts/:id/lines/:lineId/return`), with
+  a reason and the supplier's reference: a `RETURN_TO_SUPPLIER` movement takes
+  them off and the order owes them again.
+- A receipt line booked wrong → reverse it on Movements (`reverse:inventory_transaction`):
+  the order line's received quantity goes down and the order reopens. A line
+  partly sent back isn't reversed; the rest goes back the same way.
 - Duplicate delivery note number → warn, don't block. **Planned** — no
   duplicate check exists.
 - Material not yet in the Material master → add it from Receive stock, then

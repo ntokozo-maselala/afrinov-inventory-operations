@@ -30,7 +30,11 @@ coming back, or needed for longer.
 4. **Check in** (`POST /tools/check-in`, `checkin:tool`): for each loan, how
    many came back and in what condition:
    - `GOOD` — back on the shelf at the location it came from (`LOAN_RETURN`).
-   - `DAMAGED` — back on the shelf, recorded as damaged.
+   - `DAMAGED` — back on the shelf, recorded as damaged, and **held for
+     repair**: it isn't lent until the store marks it repaired
+     (`POST /tools/repairs/:id/repaired`) or writes it off as damaged
+     (`POST /tools/repairs/:id/write-off`, which waits for approval over the
+     write-off limit). Moving it to another location moves the hold too (ADR-040).
    - `LOST` — a note saying what happened is required. The tool comes back
      on paper (`LOAN_RETURN`) and is written off at once (`ADJUSTMENT`,
      reason `LOSS`), so it is neither out nor owned any more.

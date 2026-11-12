@@ -88,6 +88,9 @@ model User {
   capturedReceipts        ReceiptConfirmation[]    @relation("ReceiptCapturedBy")
   costChanges             MaterialCostChange[]
   signIns                 SignInEvent[]
+  toolRepairsReported     ToolRepair[]             @relation("ToolRepairReportedBy")
+  toolRepairsResolved     ToolRepair[]             @relation("ToolRepairResolvedBy")
+  supplierReturns         SupplierReturn[]
   // The recipient this person is at the counter, when they are one (system audit F5).
   recipient               Recipient?
 
@@ -165,7 +168,7 @@ model UnitOfMeasure {
   active      Boolean  @default(true)
   sortOrder   Int      @default(0) @map("sort_order")
 
-  materials     Material[]
+  materials Material[]
 
   @@map("units_of_measure")
 }
@@ -198,6 +201,7 @@ model Material {
   goodsReceiptLines     GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
   inventoryBalances     InventoryBalance[]
+  toolRepairs           ToolRepair[]
   stockCountLines       StockCountLine[]
   rfqLines              RfqLine[]
   adjustmentRequests    AdjustmentRequest[]
@@ -248,6 +252,7 @@ model Location {
   goodsReceiptLines     GoodsReceiptLine[]
   inventoryTransactions InventoryTransaction[]
   inventoryBalances     InventoryBalance[]
+  toolRepairs           ToolRepair[]
   adjustmentRequests    AdjustmentRequest[]
   parent                Location?              @relation("LocationParent", fields: [parentId], references: [id], onDelete: Restrict)
   children              Location[]             @relation("LocationParent")
@@ -276,8 +281,8 @@ model Supplier {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now()) @map("created_at")
 
-  purchaseOrders    PurchaseOrder[]
-  goodsReceipts     GoodsReceipt[]
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
   rfqSuppliers   RfqSupplier[]
   recommendedOn  Rfq[]              @relation("RFQ_RecommendedSupplier")
   salesMaterials SalesRfqMaterial[]
@@ -660,47 +665,47 @@ enum RfqStatus {
 }
 
 model Rfq {
-  id                 String    @id @default(uuid())
+  id                    String    @id @default(uuid())
   // For a project, the workbook's document number, AFRI-02A-1325-02-01 for
   // AFRI-1325; without one, RFQ-0001 onwards.
-  number             String    @unique
-  status             RfqStatus @default(DRAFT)
-  projectNumber      String?   @map("project_number")
-  description        String?
+  number                String    @unique
+  status                RfqStatus @default(DRAFT)
+  projectNumber         String?   @map("project_number")
+  description           String?
   // Remarks, printed under the lines.
-  notes              String?
-  penaltiesApply     Boolean   @default(false) @map("penalties_apply")
-  issuedAt           DateTime? @map("issued_at") @db.Date
-  closingDate        DateTime? @map("closing_date") @db.Date
-  createdById        String    @map("created_by_id")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  sentAt             DateTime? @map("sent_at")
-  sentById           String?   @map("sent_by_id")
-  awardedAt          DateTime? @map("awarded_at")
-  awardedById        String?   @map("awarded_by_id")
+  notes                 String?
+  penaltiesApply        Boolean   @default(false) @map("penalties_apply")
+  issuedAt              DateTime? @map("issued_at") @db.Date
+  closingDate           DateTime? @map("closing_date") @db.Date
+  createdById           String    @map("created_by_id")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  sentAt                DateTime? @map("sent_at")
+  sentById              String?   @map("sent_by_id")
+  awardedAt             DateTime? @map("awarded_at")
+  awardedById           String?   @map("awarded_by_id")
   // The draft order the award created; its supplier is the one awarded.
-  purchaseOrderId    String?   @unique @map("purchase_order_id")
-  cancelledAt        DateTime? @map("cancelled_at")
-  cancelledById      String?   @map("cancelled_by_id")
-  cancellationReason String?   @map("cancellation_reason")
+  purchaseOrderId       String?   @unique @map("purchase_order_id")
+  cancelledAt           DateTime? @map("cancelled_at")
+  cancelledById         String?   @map("cancelled_by_id")
+  cancellationReason    String?   @map("cancellation_reason")
   // The supplier whose recorded quote Procurement recommends Sales costs the job
   // from. Not an award: no order is raised until the job is won.
   recommendedSupplierId String?   @map("recommended_supplier_id")
   recommendedAt         DateTime? @map("recommended_at")
   recommendedById       String?   @map("recommended_by_id")
 
-  project       Project?       @relation(fields: [projectNumber], references: [projectNumber])
-  recommendedSupplier Supplier? @relation("RFQ_RecommendedSupplier", fields: [recommendedSupplierId], references: [id])
-  recommendedBy       User?     @relation("RFQ_RecommendedBy", fields: [recommendedById], references: [id])
+  project             Project?           @relation(fields: [projectNumber], references: [projectNumber])
+  recommendedSupplier Supplier?          @relation("RFQ_RecommendedSupplier", fields: [recommendedSupplierId], references: [id])
+  recommendedBy       User?              @relation("RFQ_RecommendedBy", fields: [recommendedById], references: [id])
   salesMaterials      SalesRfqMaterial[]
-  createdBy     User           @relation("RFQ_CreatedBy", fields: [createdById], references: [id])
-  sentBy        User?          @relation("RFQ_SentBy", fields: [sentById], references: [id])
-  awardedBy     User?          @relation("RFQ_AwardedBy", fields: [awardedById], references: [id])
-  cancelledBy   User?          @relation("RFQ_CancelledBy", fields: [cancelledById], references: [id])
-  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
-  lines         RfqLine[]
-  suppliers     RfqSupplier[]
+  createdBy           User               @relation("RFQ_CreatedBy", fields: [createdById], references: [id])
+  sentBy              User?              @relation("RFQ_SentBy", fields: [sentById], references: [id])
+  awardedBy           User?              @relation("RFQ_AwardedBy", fields: [awardedById], references: [id])
+  cancelledBy         User?              @relation("RFQ_CancelledBy", fields: [cancelledById], references: [id])
+  purchaseOrder       PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  lines               RfqLine[]
+  suppliers           RfqSupplier[]
 
   @@index([status])
   @@index([projectNumber])
@@ -708,16 +713,16 @@ model Rfq {
 }
 
 model RfqLine {
-  id             String  @id @default(uuid())
-  rfqId          String  @map("rfq_id")
+  id         String  @id @default(uuid())
+  rfqId      String  @map("rfq_id")
   // The sheet's ITEM column: 1, 2, 3, … in the order the lines were entered.
-  lineNo         Int     @map("line_no")
-  materialId     String  @map("material_id")
-  quantity       Decimal @db.Decimal(18, 4)
+  lineNo     Int     @map("line_no")
+  materialId String  @map("material_id")
+  quantity   Decimal @db.Decimal(18, 4)
 
-  rfq          Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
-  material     Material        @relation(fields: [materialId], references: [id])
-  prices       RfqQuotePrice[]
+  rfq      Rfq             @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  material Material        @relation(fields: [materialId], references: [id])
+  prices   RfqQuotePrice[]
 
   @@unique([rfqId, lineNo])
   @@index([materialId])
@@ -917,10 +922,10 @@ model SalesRfqMaterial {
   // The quote's total excl. VAT in its own currency, and in rand at the day's
   // exchange rate: refreshed on save, fixed on submission, so what was approved
   // stays put if the quote is corrected afterwards.
-  quoteTotal Decimal  @map("quote_total") @db.Decimal(18, 2)
-  currency   String
-  amount     Decimal  @db.Decimal(18, 2)
-  addedAt    DateTime @default(now()) @map("added_at")
+  quoteTotal      Decimal  @map("quote_total") @db.Decimal(18, 2)
+  currency        String
+  amount          Decimal  @db.Decimal(18, 2)
+  addedAt         DateTime @default(now()) @map("added_at")
 
   salesRfq      SalesRfq              @relation(fields: [salesRfqId], references: [id], onDelete: Cascade)
   equipmentLine SalesRfqEquipmentLine @relation(fields: [equipmentLineId], references: [id], onDelete: Cascade)
@@ -1044,10 +1049,15 @@ model GoodsReceiptLine {
   locationId          String  @map("location_id")
   quantity            Decimal @db.Decimal(18, 4)
   purchaseOrderLineId String? @map("purchase_order_line_id")
+  // Why more than was still owed came, within the over-delivery allowance (system audit A8).
+  overDeliveryReason  String? @map("over_delivery_reason")
+  // The RECEIPT it posted, so the line can be reversed or returned on its own (A6, A7).
+  transactionId       String? @map("transaction_id")
 
-  goodsReceipt GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  material     Material     @relation(fields: [materialId], references: [id])
-  location     Location     @relation(fields: [locationId], references: [id])
+  goodsReceipt    GoodsReceipt     @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  material        Material         @relation(fields: [materialId], references: [id])
+  location        Location         @relation(fields: [locationId], references: [id])
+  supplierReturns SupplierReturn[]
 
   @@index([goodsReceiptId])
   @@map("goods_receipt_lines")
@@ -1057,6 +1067,9 @@ model GoodsReceiptLine {
 
 enum InventoryTransactionType {
   RECEIPT
+  // Goods sent back to the supplier against a receipt line (negative): the
+  // order owes them again (system audit A6). referenceType 'GoodsReceipt'.
+  RETURN_TO_SUPPLIER
   ISSUE
   TRANSFER_OUT
   TRANSFER_IN
@@ -1476,4 +1489,55 @@ model SignInEvent {
   @@index([createdAt])
   @@index([userId, createdAt])
   @@map("sign_in_events")
+}
+
+// A tool checked in damaged, held for repair (system audit B2, ADR-040): it
+// can't be lent until someone marks it repaired or writes it off. Moving it
+// moves the hold with it; part of one moved splits the row.
+model ToolRepair {
+  id             String    @id @default(uuid())
+  materialId     String    @map("material_id")
+  locationId     String    @map("location_id")
+  quantity       Decimal   @db.Decimal(18, 4)
+  // The damaged check-in (LOAN_RETURN) it comes from.
+  returnId       String?   @map("return_id")
+  note           String?
+  reportedById   String    @map("reported_by_id")
+  reportedAt     DateTime  @default(now()) @map("reported_at")
+  // REPAIRED or WRITTEN_OFF once resolved (checked in the migration).
+  resolution     String?
+  resolutionNote String?   @map("resolution_note")
+  resolvedById   String?   @map("resolved_by_id")
+  resolvedAt     DateTime? @map("resolved_at")
+  // The write-off, when it was written off.
+  transactionId  String?   @map("transaction_id")
+
+  material   Material @relation(fields: [materialId], references: [id])
+  location   Location @relation(fields: [locationId], references: [id])
+  reportedBy User     @relation("ToolRepairReportedBy", fields: [reportedById], references: [id])
+  resolvedBy User?    @relation("ToolRepairResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([materialId, locationId, resolvedAt])
+  @@map("tool_repairs")
+}
+
+// Goods sent back to the supplier against a receipt line (system audit A6,
+// ADR-040): the stock goes off as a RETURN_TO_SUPPLIER movement and the order
+// line's received quantity goes down, so the order owes them again.
+model SupplierReturn {
+  id                 String   @id @default(uuid())
+  goodsReceiptLineId String   @map("goods_receipt_line_id")
+  quantity           Decimal  @db.Decimal(18, 4)
+  reason             String
+  // The supplier's credit note, return number or similar.
+  supplierReference  String?  @map("supplier_reference")
+  transactionId      String   @unique @map("transaction_id")
+  actorId            String   @map("actor_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  line  GoodsReceiptLine @relation(fields: [goodsReceiptLineId], references: [id])
+  actor User             @relation(fields: [actorId], references: [id])
+
+  @@index([goodsReceiptLineId])
+  @@map("supplier_returns")
 }

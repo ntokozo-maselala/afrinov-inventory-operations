@@ -38,6 +38,9 @@ export type ProblemCode =
   | 'SKU_JOINS_DIFFERENT_NAMES'
   | 'RACK_WITHOUT_ROOM'
   | 'MAPPING_COLUMN_MISSING'
+  // Whole units (see unit-check.ts; system audit H6).
+  | 'PART_UNIT'
+  | 'UNLISTED_UNIT'
   // Projects, recipients and suppliers (see master-data.ts).
   | 'MASTER_DATA_INVALID'
   | 'MASTER_DATA_NOT_LISTED';
@@ -61,6 +64,8 @@ export const PROBLEM_TEXT: Record<ProblemCode, { severity: 'error' | 'review'; t
   TOOL_COUNT_BLANK: { severity: 'review', title: 'Tool with no count', resolution: 'Imported with none owned. If the row is a heading rather than a tool (e.g. "Site tool box 001"), delete it in the workbook; otherwise give it a count.' },
   TOOL_ON_SEVERAL_ROWS: { severity: 'review', title: 'Same tool on several rows', resolution: 'Imported as separate tools, one per row (several grinders of one model, say). To make them one set, merge the rows in the workbook.' },
   TOOL_CHECKED_OUT: { severity: 'review', title: 'Tool checked out in the workbook', resolution: 'Imported as owned and in store. Record who has it once tool check-out is in the platform.' },
+  PART_UNIT: { severity: 'error', title: 'Part of a unit on a counted item', resolution: 'In the mapping file, give the item a measured unit (m, kg, l) if it is measured, or correct the count in the workbook to a whole number.' },
+  UNLISTED_UNIT: { severity: 'error', title: 'Unit not on the list', resolution: 'In the mapping file, choose a unit on the list (Settings → Inventory → Units), such as each, pair, box, m or kg.' },
   MAPPING_SHEET_MISSING: { severity: 'error', title: 'Mapping file sheet missing', resolution: 'Delete the mapping file and run the dry run again to get a fresh one.' },
   MAPPING_ROW_INVALID: { severity: 'error', title: 'Mapping row incomplete or wrong', resolution: 'Correct the row in the mapping file.' },
   UNMAPPED_ITEM: { severity: 'error', title: 'Workbook row not in the mapping file', resolution: 'Add a row for it on the Items sheet, copying the grey columns exactly.' },

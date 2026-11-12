@@ -3,13 +3,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 
-const { tx } = vi.hoisted(() => ({
+const { tx, settings } = vi.hoisted(() => ({
+  // Blind counts off unless a test switches them on (system audit C4).
+  settings: { blind: false },
   tx: {
     $executeRaw: vi.fn(async () => 0),
     location: { findUnique: vi.fn() },
     material: { findMany: vi.fn(), findUnique: vi.fn(async () => ({ sku: 'S', active: true })) },
     // Nothing written off in the last 7 days (system audit C2).
-    inventoryTransaction: { create: vi.fn(), aggregate: vi.fn(async () => ({ _sum: { quantity: null } })) },
+    inventoryTransaction: { create: vi.fn(), aggregate: vi.fn(async () => ({ _sum: { quantity: null } })), findMany: vi.fn(async (_args?: unknown): Promise<Array<{ materialId: string }>> => []) },
+    // Items with stock here that the sheet leaves out (a full count, system audit C5).
+    inventoryBalance: { findMany: vi.fn(async (): Promise<Array<{ materialId: string; material: { sku: string } }>> => []) },
+    project: { findUnique: vi.fn(async (): Promise<{ projectNumber: string } | null> => ({ projectNumber: 'AFRI-1325' })) },
     stockCountLine: { createMany: vi.fn() },
     auditLogEntry: { create: vi.fn() },
     adjustmentRequest: { findMany: vi.fn(), create: vi.fn() },
@@ -24,6 +29,12 @@ vi.mock('../../shared/inventory/balances.js', () => ({
   lockInventoryBalances: vi.fn(async () => undefined),
   storesStock: (materialId: string, locationId: string) => ({ materialId, locationId, heldForProject: null }),
 }));
+vi.mock('../settings/settings.service.js', () => ({
+  SettingsService: {
+    getValue: vi.fn(async (key: string) => (key === 'inventory.blindCounts' ? settings.blind : undefined)),
+    getValues: vi.fn(async () => ({ 'inventory.requireWriteOffApproval': true, 'inventory.writeOffApprovalAbove': 1000 })),
+  },
+}));
 vi.mock('../../shared/events.js', () => ({ dispatchDomainEvents: vi.fn(async () => undefined) }));
 
 const { StockCountService } = await import('./stock-count.service.js');
@@ -31,6 +42,9 @@ const { StockCountService } = await import('./stock-count.service.js');
 describe('StockCountService.post', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    settings.blind = false;
+    tx.inventoryTransaction.findMany.mockResolvedValue([]);
+    tx.inventoryBalance.findMany.mockResolvedValue([]);
     tx.location.findUnique.mockResolvedValue({ id: 'l-1', name: 'Boiler Shop', active: true });
     tx.material.findMany.mockResolvedValue([
       { id: 'm-1', sku: 'DISC-115', name: 'Cutting disc', unitCost: new Prisma.Decimal(5), unitOfMeasure: 'each', unit: { kind: 'COUNTED' } },
@@ -103,5 +117,59 @@ describe('StockCountService.post', () => {
       locationId: 'l-1', actorId: 'u-1', lines: [{ materialId: 'm-1', expectedQuantity: 9, countedQuantity: 7 }],
     })).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(tx.stockCountLine.createMany).not.toHaveBeenCalled();
+  });
+
+  // System audit C7: one movement doesn't hold back the whole sheet.
+  it('posts the lines that did not move and holds back those that did, for a recount', async () => {
+    const result = await StockCountService.post({
+      locationId: 'l-1', actorId: 'u-1',
+      lines: [{ materialId: 'm-1', expectedQuantity: 9, countedQuantity: 7 }, { materialId: 'm-2', expectedQuantity: 4, countedQuantity: 3 }],
+    });
+    expect(result).toMatchObject({ counted: 1, adjusted: 1, heldBack: [{ materialId: 'm-1', sku: 'DISC-115', expected: '9', current: '10' }] });
+    expect(tx.stockCountLine.createMany.mock.calls[0]![0].data.map((l: { materialId: string }) => l.materialId)).toEqual(['m-2']);
+    // Every line moved: nothing to post.
+    await expect(StockCountService.post({ locationId: 'l-1', actorId: 'u-1', lines: [{ materialId: 'm-1', expectedQuantity: 9, countedQuantity: 7 }] }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  // System audit C5: a full count leaves nothing with stock off the sheet.
+  it('refuses a full count that leaves out an item with stock there, and records the kind', async () => {
+    tx.inventoryBalance.findMany.mockResolvedValueOnce([{ materialId: 'm-3', material: { sku: 'BOLT-8' } }]);
+    const lines = [{ materialId: 'm-1', expectedQuantity: 10, countedQuantity: 10 }, { materialId: 'm-2', expectedQuantity: 4, countedQuantity: 4 }];
+    await expect(StockCountService.post({ locationId: 'l-1', actorId: 'u-1', kind: 'FULL', lines }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining("BOLT-8 isn't on it. Count it, or confirm it as 0") });
+    const result = await StockCountService.post({ locationId: 'l-1', actorId: 'u-1', kind: 'FULL', lines });
+    expect(result.kind).toBe('FULL');
+    expect(tx.auditLogEntry.create.mock.calls[0]![0].data.after).toMatchObject({ kind: 'FULL', heldForProject: null, blind: false });
+  });
+
+  // System audit C6: a project's stock is counted too.
+  it("counts a project's stock, adjusting that project's stock", async () => {
+    const { lockInventoryBalances } = await import('../../shared/inventory/balances.js');
+    const result = await StockCountService.post({
+      locationId: 'l-1', actorId: 'u-1', heldForProject: 'AFRI-1325', lines: [{ materialId: 'm-2', expectedQuantity: 4, countedQuantity: 3 }],
+    });
+    expect(result.heldForProject).toBe('AFRI-1325');
+    expect(vi.mocked(lockInventoryBalances).mock.calls[0]![0]).toEqual([{ materialId: 'm-2', locationId: 'l-1', heldForProject: 'AFRI-1325' }]);
+    expect(tx.inventoryTransaction.create.mock.calls[0]![0].data).toMatchObject({ heldForProject: 'AFRI-1325', quantity: new Prisma.Decimal(-1) });
+    tx.project.findUnique.mockResolvedValueOnce(null);
+    await expect(StockCountService.post({ locationId: 'l-1', actorId: 'u-1', heldForProject: 'NOPE', lines: [{ materialId: 'm-2', expectedQuantity: 4, countedQuantity: 3 }] }))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  // System audit C4: a blind count never sees, or sends, a book figure.
+  it('on a blind sheet, finds movements by when they were posted, and ignores any figure sent', async () => {
+    settings.blind = true;
+    await expect(StockCountService.post({ locationId: 'l-1', actorId: 'u-1', lines: [{ materialId: 'm-1', countedQuantity: 7 }] }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('Counts are blind') });
+    tx.inventoryTransaction.findMany.mockResolvedValueOnce([{ materialId: 'm-2' }]);
+    const result = await StockCountService.post({
+      locationId: 'l-1', actorId: 'u-1', openedAt: '2026-11-12T08:00:00.000Z',
+      lines: [{ materialId: 'm-1', countedQuantity: 7 }, { materialId: 'm-2', expectedQuantity: 999, countedQuantity: 3 }],
+    });
+    // m-1: counted 7 against 10 on the books; m-2 moved since the sheet was opened, and no figures go back.
+    expect(result.lines).toEqual([{ materialId: 'm-1', variance: '-3', transactionId: 'tx-1', requestId: null }]);
+    expect(result.heldBack).toEqual([{ materialId: 'm-2', sku: 'GLOVE-L' }]);
+    expect((tx.inventoryTransaction.findMany.mock.calls[0]![0] as { where: unknown }).where).toMatchObject({ locationId: 'l-1', heldForProject: null, postedAt: { gt: new Date('2026-11-12T08:00:00.000Z') } });
   });
 });

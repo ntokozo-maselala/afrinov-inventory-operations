@@ -773,6 +773,27 @@ describe('mock API mutation flows', () => {
       await expect(api.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: 'mat-1', expectedQuantity: disc, countedQuantity: -1 }] }))
         .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     });
+
+    // As the server (system audit C4, C5, C7).
+    it('holds back a moved line and posts the rest, asks a full count for every item, and counts blind from the sheet', async () => {
+      type Sheet = { openedAt: string; blind: boolean; lines: Array<{ materialId: string; expected: string | null }> };
+      const sheet = await api.get<Sheet>('/stock-counts/sheet?locationId=loc-1');
+      const [a, b] = sheet.lines;
+      const res = await api.post<{ counted: number; heldBack: Array<{ materialId: string }> }>('/stock-counts', {
+        locationId: 'loc-1', lines: [{ materialId: a!.materialId, expectedQuantity: Number(a!.expected) + 1, countedQuantity: 1 }, { materialId: b!.materialId, expectedQuantity: Number(b!.expected), countedQuantity: Number(b!.expected) }],
+      });
+      expect(res).toMatchObject({ counted: 1, heldBack: [{ materialId: a!.materialId }] });
+      await expect(api.post('/stock-counts', { locationId: 'loc-1', kind: 'FULL', lines: [{ materialId: b!.materialId, expectedQuantity: Number(b!.expected), countedQuantity: 0 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('A full count lists every item') });
+
+      await api.put('/settings/inventory.blindCounts', { value: true });
+      const blind = await api.get<Sheet>('/stock-counts/sheet?locationId=loc-1');
+      expect(blind.blind).toBe(true);
+      expect(blind.lines.every((l) => l.expected === null)).toBe(true);
+      await expect(api.post('/stock-counts', { locationId: 'loc-1', lines: [{ materialId: b!.materialId, countedQuantity: 0 }] }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('Counts are blind') });
+      expect((await api.post<{ counted: number }>('/stock-counts', { locationId: 'loc-1', openedAt: blind.openedAt, lines: [{ materialId: b!.materialId, countedQuantity: 0 }] })).counted).toBe(1);
+    });
   });
 
   describe('receiving stock at the counter', () => {
@@ -847,6 +868,25 @@ describe('mock API mutation flows', () => {
       await expect(issue('mat-12', 'loc-1', 1)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
       const { loanIds } = await api.post<{ loanIds: string[] }>('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 1 }] });
       await expect(api.post(`/inventory-transactions/${loanIds[0]}/reversal`, { reason: 'Wrong person' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    });
+
+    // As the server (system audit B2): a damaged tool is held until repaired or written off.
+    it('holds a tool checked in damaged, moves the hold with it, and lends it again once repaired', async () => {
+      type Held = Tool & { heldForRepair: string; repairs: Array<{ id: string; locationId: string }> };
+      const { loanIds } = await api.post<{ loanIds: string[] }>('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 3 }] });
+      await api.post('/tools/check-in', { lines: [{ loanId: loanIds[0]!, quantity: 3, condition: 'DAMAGED', note: 'Ratchet slips' }] });
+      let t = (await wrench()) as Held;
+      expect([t.inStore, t.heldForRepair, t.repairs.length]).toEqual(['3', '3', 1]);
+      await expect(api.post('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 1 }] }))
+        .rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE', message: expect.stringContaining('held for repair') });
+      // One goes to another location: its hold goes too.
+      await api.post('/inventory-transfers', { materialId: 'mat-12', fromLocationId: 'loc-1', toLocationId: 'loc-2', quantity: 1 });
+      t = (await wrench()) as Held;
+      expect(t.repairs.map((r) => r.locationId).sort()).toEqual(['loc-1', 'loc-2']);
+      for (const r of t.repairs) await api.post(`/tools/repairs/${r.id}/repaired`, {});
+      await expect(api.post(`/tools/repairs/${t.repairs[0]!.id}/repaired`, {})).rejects.toMatchObject({ code: 'INVALID_STATE' });
+      expect(((await wrench()) as Held).heldForRepair).toBe('0');
+      expect((await api.post<{ loanIds: string[] }>('/tools/check-out', { recipientId: 'rcp-1', lines: [{ materialId: 'mat-12', locationId: 'loc-1', quantity: 2 }] })).loanIds).toHaveLength(1);
     });
   });
 });

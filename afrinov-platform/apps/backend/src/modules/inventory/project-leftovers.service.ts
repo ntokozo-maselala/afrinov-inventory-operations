@@ -20,6 +20,15 @@ import { checkMaterialActive } from './inventory.service.js';
 import { lockInventoryBalances, recomputeBalance } from '../../shared/inventory/balances.js';
 
 /**
+ * Runs in the caller's transaction when given one (a keyed request's, so the
+ * idempotency key is stored with the movement: system audit B3), else in its own.
+ */
+function inTransaction<T>(outer: Prisma.TransactionClient | undefined, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return outer ? work(outer) : prisma.$transaction(work);
+}
+
+
+/**
  * The reference on the pair of movements that takes a closed project's held
  * stock onto Stores stock. They aren't reversed: the item's category changed
  * with them (Qodo, PR #149).
@@ -135,10 +144,10 @@ export const ProjectLeftoversService = {
    * movements at each location takes it off the project onto Stores stock. A
    * Stores item held for the project keeps its category; only its stock moves.
    */
-  async moveToStores(projectNumber: string | null, items: Array<{ materialId: string; category?: LeftoverCategory }>, actorId: string): Promise<{ moved: number }> {
+  async moveToStores(projectNumber: string | null, items: Array<{ materialId: string; category?: LeftoverCategory }>, actorId: string, outer?: Prisma.TransactionClient): Promise<{ moved: number }> {
     if (items.length === 0) throw Errors.validation('Choose at least one item to move to Stores');
     if (new Set(items.map((i) => i.materialId)).size !== items.length) throw Errors.validation('An item is listed twice');
-    return prisma.$transaction(async (tx) => {
+    return inTransaction(outer, async (tx) => {
       if (projectNumber !== null) {
         const project = await findProject(projectNumber, tx);
         if (!isClosed(project.status)) {

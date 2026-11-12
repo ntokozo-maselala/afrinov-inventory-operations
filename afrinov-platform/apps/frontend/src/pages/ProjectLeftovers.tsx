@@ -17,6 +17,7 @@ import { EmptyState, ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { api, type ApiError } from '../api/client';
+import { useIdempotencyKey } from '../lib/idempotency';
 import { STORES_CATEGORIES, categoryLabel } from '../lib/categories';
 import { formatCurrency } from '../lib/currency';
 
@@ -49,6 +50,8 @@ export function ProjectLeftovers() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [moved, setMoved] = useState<number | null>(null);
+  // Retry-safe: a retry replays the move instead of moving twice (system audit B3).
+  const idem = useIdempotencyKey('leftovers-move');
   const toast = useToast();
 
   const data = leftovers.data;
@@ -59,14 +62,17 @@ export function ProjectLeftovers() {
     setError(null);
     setBusy(true);
     try {
-      const { moved: count } = await api.post<{ moved: number }>(`${path}/move`, {
+      const body = {
         items: chosen.map((i) => (categories[i.materialId] === KEEP ? { materialId: i.materialId } : { materialId: i.materialId, category: categories[i.materialId] })),
-      });
+      };
+      const { moved: count } = await api.post<{ moved: number }>(`${path}/move`, body, { idempotencyKey: idem.keyFor(body) });
+      idem.confirm();
       toast.success(`Moved ${count} item${count === 1 ? '' : 's'} to Stores`);
       setMoved(count);
       setCategories({});
       leftovers.reload();
     } catch (err) {
+      idem.resolve(err);
       setError((err as ApiError).message);
     } finally {
       setBusy(false);

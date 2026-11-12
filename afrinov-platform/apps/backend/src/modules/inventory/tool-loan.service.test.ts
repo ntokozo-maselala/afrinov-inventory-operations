@@ -20,6 +20,8 @@ const db = vi.hoisted(() => ({
   audit: [] as Array<{ action: string; before?: unknown; after?: unknown }>,
   settings: {} as Record<string, unknown>,
   requests: [] as Array<Record<string, unknown>>,
+  // Tools checked in damaged, held for repair (system audit B2).
+  repairs: [] as Array<{ id: string; materialId: string; locationId: string; quantity: Prisma.Decimal; resolvedAt: Date | null; reportedAt: Date; note: string | null }>,
   projectEnd: null as string | null,
   projectStatus: 'ACTIVE',
   /** Locations closed since (system audit A2). */
@@ -104,6 +106,26 @@ const client = {
       return row;
     },
   },
+  toolRepair: {
+    create: async ({ data }: { data: { materialId: string; locationId: string; quantity: Prisma.Decimal; note: string | null; reportedAt?: Date } }) => {
+      const row = { id: `rep-${db.repairs.length + 1}`, resolvedAt: null, reportedAt: data.reportedAt ?? new Date(), ...data, quantity: D(data.quantity.toString()) };
+      db.repairs.push(row);
+      return row;
+    },
+    groupBy: async ({ where }: { where: { materialId: { in: string[] } } }) => {
+      const sums = new Map<string, { materialId: string; locationId: string; _sum: { quantity: Prisma.Decimal } }>();
+      for (const r of db.repairs.filter((x) => !x.resolvedAt && where.materialId.in.includes(x.materialId))) {
+        const k = `${r.materialId}|${r.locationId}`;
+        const s = sums.get(k) ?? { materialId: r.materialId, locationId: r.locationId, _sum: { quantity: D(0) } };
+        s._sum.quantity = s._sum.quantity.plus(r.quantity);
+        sums.set(k, s);
+      }
+      return [...sums.values()];
+    },
+    findMany: async ({ where }: { where: { materialId: { in: string[] } } }) => db.repairs
+      .filter((r) => !r.resolvedAt && where.materialId.in.includes(r.materialId))
+      .map((r) => ({ ...r, location: { name: names[r.locationId] }, reportedBy: { name: 'Store' } })),
+  },
   auditLogEntry: { create: async ({ data }: { data: { action: string } }) => { db.audit.push(data); return data; } },
   adjustmentRequest: {
     create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `req-${db.requests.length + 1}`, status: 'PENDING', ...data }; db.requests.push(row); return row; },
@@ -151,6 +173,7 @@ beforeEach(() => {
   // A lost tool posts its write-off at once unless a test switches write-off approval on.
   db.settings = { 'inventory.requireWriteOffApproval': false };
   db.requests.length = 0;
+  db.repairs.length = 0;
   db.projectEnd = null;
   db.projectStatus = 'ACTIVE';
   db.closed.clear();
@@ -207,6 +230,21 @@ describe('ToolLoanService', () => {
     await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'GOOD' }] });
     scraper = await tool('m-scraper');
     expect([scraper.inStore, scraper.onLoan, scraper.loans]).toEqual(['11', '0', []]);
+  });
+
+  // System audit B2: a damaged tool is held for repair, not lent again.
+  it('holds a tool checked in damaged for repair, so it is not lent until dealt with', async () => {
+    const { loanIds: [loanId] } = await ToolLoanService.checkOut({ recipientId: 'r-bukho', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] });
+    await ToolLoanService.checkIn({ actorId: 'u-1', lines: [{ loanId: loanId!, quantity: 1, condition: 'DAMAGED', note: 'Chuck slips' }] });
+    expect(db.repairs.map((r) => [r.materialId, r.locationId, r.quantity.toString(), r.note])).toEqual([['m-drill', 'l-store', '1', 'Chuck slips']]);
+    const drill = await tool('m-drill');
+    expect([drill.inStore, drill.heldForRepair, drill.onLoan]).toEqual(['1', '1', '0']);
+    expect(drill.repairs).toMatchObject([{ locationId: 'l-store', quantity: '1', note: 'Chuck slips', writeOffWaiting: false }]);
+    await expect(ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] }))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE', message: expect.stringContaining('only 0 can be lent there; 1 is held for repair') });
+    // Repaired, it can be lent again.
+    db.repairs[0]!.resolvedAt = new Date();
+    expect((await ToolLoanService.checkOut({ recipientId: 'r-sabelo', actorId: 'u-1', lines: [{ materialId: 'm-drill', locationId: 'l-store', quantity: 1 }] })).loanIds).toHaveLength(1);
   });
 
   it('writes off a tool lost on loan, so it is neither out nor owned, and asks what happened', async () => {

@@ -159,3 +159,26 @@ describe('mock: delivery of a project order', () => {
     expect(await messageOf(api.post(`/inventory-transactions/${out.id}/reversal`, { reason: 'Moved by mistake' }))).toMatch(/along with its item, so it isn.t reversed/);
   });
 });
+
+// As the server (system audit A6, A7): a receipt line goes back to the supplier, or is reversed, with its order.
+describe('mock: putting a receipt against an order right', () => {
+  type Row = { id: string; type: string; receiptId: string | null; receiptLineId: string | null; returnableToSupplier: string | null };
+
+  it('sends goods back, owed again, and reverses a line with nothing sent back', async () => {
+    const po = await approvedProjectOrder();
+    await receiveRest(po.id);
+    const rows = await api.get<Row[]>('/inventory-transactions?materialId=mat-9');
+    const receipt = rows.find((r) => r.type === 'RECEIPT' && r.receiptLineId)!;
+    expect(receipt.returnableToSupplier).toBe('4');
+    await expect(api.post(`/goods-receipts/${receipt.receiptId}/lines/${receipt.receiptLineId}/return`, { quantity: 1 })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await api.post(`/goods-receipts/${receipt.receiptId}/lines/${receipt.receiptLineId}/return`, { quantity: 1, reason: 'Wrong size', supplierReference: 'CN-1' });
+    expect(await api.get<Order>(`/purchase-orders/${po.id}`)).toMatchObject({ status: 'PARTIALLY_RECEIVED', lines: [{ receivedQty: '3' }] });
+    await expect(api.post(`/inventory-transactions/${receipt.id}/reversal`, { reason: 'Booked twice' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    const second = await approvedProjectOrder();
+    await receiveRest(second.id);
+    const other = (await api.get<Row[]>('/inventory-transactions?materialId=mat-9')).find((r) => r.type === 'RECEIPT' && r.receiptLineId && r.id !== receipt.id)!;
+    await api.post(`/inventory-transactions/${other.id}/reversal`, { reason: 'Booked against the wrong order' });
+    expect(await api.get<Order>(`/purchase-orders/${second.id}`)).toMatchObject({ status: 'APPROVED', lines: [{ receivedQty: '0' }] });
+  });
+});

@@ -48,6 +48,10 @@ Notes on the table, against the original proposal:
   needs `close:project` (Admin) or being its manager (system audit E3).
 - `POST /stock-items` and `POST /purchase-orders/:id/receive` are retired and
   refuse every request (system audit D3).
+- A tool held for repair is marked repaired or written off with
+  `adjust:inventory`; goods go back to the supplier with `receive:inventory`
+  and the right to receive that order's kind; a count sheet needs
+  `adjust:inventory` (ADR-040).
 - Approvers cannot reject an order (no reject transition; they lack
   `cancel:purchase_order`) — see ADR-007.
 

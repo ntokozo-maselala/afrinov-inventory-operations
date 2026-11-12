@@ -1357,3 +1357,69 @@ goods receipt or a counter receipt instead. Tests: `material.service.test.ts`,
 `controls.real-http.test.ts`, `procurement.real-http.test.ts`,
 `MaterialDetail.test.tsx`, `projectClose.test.ts`, `SignInLog.test.ts`,
 `DashboardControls.test.ts`.
+
+### ADR-040 — Stock accuracy: returns to suppliers, receipt corrections, over-delivery, damaged tools, honest counts and a trustworthy import
+**Date:** 2026-11-12 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P4, stock accuracy and
+corrections) found real store situations the ledger couldn't record cleanly.
+Goods going back to a supplier could only be written off as a loss (A6). A
+wrong receipt against an order couldn't be reversed, so the order stayed
+overstated (A7). Over-deliveries had no path (A8). A tool checked in damaged
+could be lent straight out again (B2). Tool check-out and check-in, and moving
+leftovers, weren't retry-safe (B3). Counts showed the book figure (C4), didn't
+say whether they covered everything (C5), couldn't count a project's stock
+(C6), and one movement held the whole sheet back (C7). The live import of
+12 November 2026 found the dry run passing part units on counted items that the
+real import then refused, one at a time (H6). The owner approved the phase and
+answered none of the questions (Q1–Q3), so each finding takes its recommended
+option.
+
+**Decision:**
+- **Return to supplier** is a movement of its own, `RETURN_TO_SUPPLIER`,
+  against a line of a posted receipt (`POST /goods-receipts/:id/lines/:lineId/return`),
+  with a reason and the supplier's reference, kept in `supplier_returns`. It is
+  not a loss, so it needs no write-off approval. Against an order, the line's
+  received quantity goes down and the order goes back to partly received or
+  approved: it owes the goods again. A closed or cancelled order keeps its status.
+- **A receipt line against an order is reversed with its order**, on the
+  ordinary reversal (`reverse:inventory_transaction`, with a reason): same
+  effect on the order. Each posted receipt line now records its movement
+  (`goods_receipt_lines.transaction_id`); one posted before is matched when it
+  is its receipt's only line like it. A line partly sent back isn't reversed,
+  and a return isn't reversed (the goods are received again instead). A whole
+  order received at once (retired in ADR-039) stays unreversed.
+- **Over-delivery** up to `purchaseOrders.overDeliveryPercent` of the ordered
+  quantity (default 0%) is received with a reason per line
+  (`goods_receipt_lines.over_delivery_reason`), checked when recorded and when
+  posted. The order line shows more received than ordered.
+- **A damaged tool is held for repair** (`tool_repairs`): not lent until marked
+  repaired or written off as damaged, the write-off going through the
+  write-off rules and closing the repair when it posts. Moving a held tool
+  moves its hold, oldest first, splitting a row when part of it moves.
+- **Tool check-out and check-in, and both leftover moves, take an
+  Idempotency-Key**, sent by the Tools and Leftovers screens.
+- **Counts**: a sheet (`GET /stock-counts/sheet`) per location and stock, Stores
+  or one project's, opened at the database's time. `inventory.blindCounts`
+  (default off) leaves the book figures off it, and a line counts as moved when
+  anything was posted to it after the sheet opened. A count is FULL or SPOT; a
+  full one lists every item with stock there, blanks confirmed as 0. A line
+  that moved is held back for a recount and the rest post.
+- **The import's dry run checks whole units**, against the database's unit
+  list when it can read one, or else the units counted at release, and reports
+  every counted item holding part of a unit (`PART_UNIT`) and every unit not on
+  the list (`UNLISTED_UNIT`) as blocking. The real import names them all at once.
+
+Migration `20260101000060_stock_accuracy` adds `tool_repairs`,
+`supplier_returns`, the movement type, the two receipt line columns and the two
+settings.
+
+**Consequences:** The store can put a delivery right without inventing a loss,
+and an order's received quantity stays true. A blind count needs the sheet
+opened before counting; the count screen does that. Counts and receipts
+reported before this ADR read as Spot counts of Stores stock. Tests:
+`tool-loan.service.test.ts`, `stock-count.post.test.ts`, `unit-check.test.ts`,
+`inventory.service.test.ts`, `stock-accuracy.real-http.test.ts`,
+`opening-balances.real-http.test.ts`, `StockCount.test.tsx`, `Tools.test.tsx`,
+`TransactionDrawer.test.tsx`, `OrderReceiptLines.test.ts`,
+`mockApi.mutation.test.ts`, `mockDelivery.test.ts`.

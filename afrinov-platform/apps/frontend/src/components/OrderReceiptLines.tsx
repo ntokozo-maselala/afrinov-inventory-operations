@@ -4,7 +4,7 @@
 // it credits; typing lines by hand used to book the stock without crediting
 // the order.
 import { Button } from './Button';
-import { Select } from './Field';
+import { Input, Select } from './Field';
 import { QuantityInput } from './QuantityInput';
 import { formatNumber } from '../lib/format';
 import { locationLabel } from '../lib/locations';
@@ -22,12 +22,20 @@ export interface ReceiptLineDraft {
   purchaseOrderLineId?: string;
   /** For order lines: what the order still expects, shown beside the quantity. */
   outstanding?: number; label?: string; unit?: string;
+  /** The most this delivery may bring: outstanding plus the over-delivery allowed (system audit A8). */
+  upTo?: number;
+  /** Why more than is outstanding came: needed when it did. */
+  overReason?: string;
 }
 
 interface LocationOpt { id: string; name: string; parent?: { name: string } | null }
 
-/** The order's lines with something still outstanding, each filled in with that amount. */
-export function receiptLinesFromOrder(order: OrderForReceipt): ReceiptLineDraft[] {
+/**
+ * The order's lines with something still outstanding, each filled in with that
+ * amount. `share` is the over-delivery allowed, as a fraction of the ordered
+ * quantity (purchaseOrders.overDeliveryPercent / 100; system audit A8).
+ */
+export function receiptLinesFromOrder(order: OrderForReceipt, share = 0): ReceiptLineDraft[] {
   return order.lines
     // Rounded to the 4 places the server keeps: 10 - 9.7 is 0.3000000000000007 in floating point.
     .map((l) => ({ l, outstanding: round4(Number(l.orderedQty) - Number(l.receivedQty)) }))
@@ -35,6 +43,8 @@ export function receiptLinesFromOrder(order: OrderForReceipt): ReceiptLineDraft[
     .map(({ l, outstanding }) => ({
       materialId: l.materialId, locationId: '', quantity: String(outstanding), purchaseOrderLineId: l.id,
       outstanding, label: `${l.material.sku} — ${l.material.name}`, unit: l.material.unitOfMeasure,
+      // As the server: the ordered quantity plus the allowance, to 4 places rounded down, less what came.
+      upTo: round4(Math.floor(Number(l.orderedQty) * (1 + share) * 10000) / 10000 - Number(l.receivedQty)),
     }));
 }
 
@@ -53,16 +63,26 @@ export function checkReceiptLines(
   const arrived = lines.filter((l) => l.materialId && readQuantity(l.quantity) > 0);
   if (arrived.length === 0) return { problem: fromOrder ? 'Enter what arrived on at least one line.' : 'Add at least one complete line.' };
   if (arrived.some((l) => !l.locationId)) return { problem: 'Choose where each line is going.' };
-  const over = arrived.find((l) => l.outstanding !== undefined && readQuantity(l.quantity) > l.outstanding);
-  if (over) return { problem: `${over.label}: only ${formatNumber(over.outstanding!)} ${over.unit ?? ''} is still outstanding.` };
+  const over = arrived.find((l) => l.outstanding !== undefined && readQuantity(l.quantity) > (l.upTo ?? l.outstanding));
+  if (over) {
+    return { problem: (over.upTo ?? 0) > over.outstanding!
+      ? `${over.label}: up to ${formatNumber(over.upTo!)} ${over.unit ?? ''} can be received: ${formatNumber(over.outstanding!)} outstanding and the over-delivery allowed.`
+      : `${over.label}: only ${formatNumber(over.outstanding!)} ${over.unit ?? ''} is still outstanding.` };
+  }
+  const unexplained = arrived.find((l) => isOver(l) && !l.overReason?.trim());
+  if (unexplained) return { problem: `${unexplained.label}: more came than is outstanding. Say why the extra is kept.` };
   return { lines: arrived };
 }
+
+/** Whether a line brings more than its order line still owes (system audit A8). */
+export const isOver = (l: ReceiptLineDraft) => l.outstanding !== undefined && readQuantity(l.quantity) > l.outstanding;
 
 /** The receipt lines as the server takes them. */
 export function receiptLinesBody(lines: ReceiptLineDraft[]) {
   return lines.map((l) => ({
     materialId: l.materialId, locationId: l.locationId, quantity: readQuantity(l.quantity),
     ...(l.purchaseOrderLineId ? { purchaseOrderLineId: l.purchaseOrderLineId } : {}),
+    ...(isOver(l) && l.overReason?.trim() ? { overDeliveryReason: l.overReason.trim() } : {}),
   }));
 }
 
@@ -88,7 +108,7 @@ export function OrderReceiptRow({ line, index, locations, onChange, kind = 'MEAS
     <div className="grid grid-cols-12 gap-2 items-start">
       <div className="col-span-12 sm:col-span-5 text-sm pt-1.5">
         {line.label}
-        <div className="text-meta">{formatNumber(line.outstanding!)} {line.unit} outstanding</div>
+        <div className="text-meta">{formatNumber(line.outstanding!)} {line.unit} outstanding{(line.upTo ?? 0) > line.outstanding! ? ` · up to ${formatNumber(line.upTo!)} can come` : ''}</div>
       </div>
       <div className="col-span-7 sm:col-span-3">
         {!fixedLocation && (
@@ -104,6 +124,11 @@ export function OrderReceiptRow({ line, index, locations, onChange, kind = 'MEAS
       <div className="col-span-12 sm:col-span-2">
         <Button size="sm" variant="ghost" type="button" onClick={() => onChange({ quantity: '0' })} className="w-full">None came</Button>
       </div>
+      {isOver(line) && (line.upTo ?? 0) > line.outstanding! && (
+        <div className="col-span-12">
+          <Input value={line.overReason ?? ''} onChange={(e) => onChange({ overReason: e.target.value })} maxLength={500} aria-label={`Line ${index + 1}: why the extra is kept`} placeholder="Why the extra is kept, e.g. sold by the box of 105" />
+        </div>
+      )}
     </div>
   );
 }

@@ -20,7 +20,9 @@ export type InventoryTransactionType =
   | 'RETURN'
   // Tools: lent (negative) and back (positive), as the backend's LOAN and LOAN_RETURN.
   | 'LOAN'
-  | 'LOAN_RETURN';
+  | 'LOAN_RETURN'
+  // Goods sent back to the supplier (negative), as the backend's (system audit A6).
+  | 'RETURN_TO_SUPPLIER';
 
 export type PurchaseOrderStatus =
   | 'DRAFT'
@@ -178,6 +180,11 @@ export interface MockGoodsReceiptLine {
   locationId: string;
   quantity: string;
   purchaseOrderLineId?: string;
+  /** Why more than was owed came (system audit A8). */
+  overDeliveryReason?: string;
+  /** The RECEIPT it posted, and what went back on it to the supplier (A6, A7). */
+  transactionId?: string;
+  returned?: number;
 }
 
 export interface MockGoodsReceipt {
