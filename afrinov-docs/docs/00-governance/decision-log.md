@@ -1343,7 +1343,7 @@ answered no question, so each finding takes its recommended option.
   `GET /settings/reset-preview?category=` lists each setting not at its
   default; `POST /settings/reset` takes the `category` and writes only those.
 
-Migration `20260101000058_controls` adds the two tables, the recipient's
+Migration `20260101000059_controls` (numbered after main's `…058_sales_rfq_equipment_lines`) adds the two tables, the recipient's
 account link, the two permissions with their grants, and the two settings'
 new descriptions.
 

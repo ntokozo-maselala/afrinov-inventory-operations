@@ -1,18 +1,30 @@
 // The money on a Sales RFQ, worked out in one place so the page, the Director's
 // approval and the quotation show the same figures. All rand, excl. VAT until
-// the last two:
+// the last two.
+//
+// Each equipment line, for one unit of it:
 //
 //   labour       = Σ hours × hourly rate, each line rounded to cents
-//   material     = Σ the chosen quote on each Procurement RFQ, in rand at the
-//                  Settings exchange rate for another currency
-//   cost         = labour + material
-//   markup       = cost × markup% (the sheet's "× 1.4" is 40%)
-//   equipment    = cost + markup: the quotation's one equipment line
+//   material     = Σ the chosen quote on each of its Procurement RFQs, in rand
+//                  at the Settings exchange rate for another currency
+//   other        = Σ quantity × unit cost (accommodation, LOA), each rounded
+//   unit cost    = labour + material + other
+//   unit markup  = unit cost × markup% (the sheet's "× 1.4" is 40%)
+//   unit price   = unit cost + unit markup: the quotation's Unit Price
+//   total        = unit price × quantity: its Total Price
+//
+// The quotation, over all its lines:
+//
+//   labour, material, other, cost, markup = each line's × its quantity, added up
+//   equipment    = Σ line totals (= cost + markup)
 //   total ex VAT = equipment + delivery (delivery carries no markup)
 //   VAT          = total ex VAT × VAT rate
 //   total inc VAT
 //
-// Rounded half up to cents at each step, as orders are (po-pricing.ts).
+// Rounded half up to cents at each step, as orders are (po-pricing.ts). The unit
+// price is rounded before it is multiplied, so the quotation's Qty × Unit Price
+// is always its Total Price. One line of quantity 1 with no other costs adds up
+// exactly as the single equipment line did before lines (migration 58).
 import { Prisma } from '@prisma/client';
 import { orderTotals } from '../procurement/po-pricing.js';
 
@@ -20,50 +32,90 @@ type Num = Prisma.Decimal | number | string;
 const D = (v: Num) => new Prisma.Decimal(v);
 const cents = (d: Prisma.Decimal) => d.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
+/** One equipment line's money. The markup-dependent figures are null until a markup is given. */
+export interface LineTotals {
+  quantity: number;
+  /** For one unit. */
+  labour: string;
+  material: string;
+  other: string;
+  unitCost: string;
+  unitMarkup: string | null;
+  unitPrice: string | null;
+  /** Unit price × quantity. */
+  total: string | null;
+}
+
 export interface CostingTotals {
   labour: string;
   material: string;
+  other: string;
   cost: string;
   /** Null until a markup is given. */
   markup: string | null;
+  /** All the equipment lines together. */
   equipment: string | null;
   delivery: string;
   totalExVat: string | null;
   vatRate: string;
   vat: string | null;
   totalIncVat: string | null;
+  /** Each equipment line's, in order. */
+  lines: LineTotals[];
+}
+
+export interface CostingLine {
+  quantity: number;
+  labour: Array<{ hours: Num; hourlyRate: Num }>;
+  materials: Num[];
+  otherCosts: Array<{ quantity: Num; unitCost: Num }>;
 }
 
 export function labourLineTotal(line: { hours: Num; hourlyRate: Num }): string {
   return cents(D(line.hours).times(D(line.hourlyRate))).toFixed(2);
 }
 
+export function otherCostTotal(cost: { quantity: Num; unitCost: Num }): string {
+  return cents(D(cost.quantity).times(D(cost.unitCost))).toFixed(2);
+}
+
+export function lineTotals(line: CostingLine, markupPercent: Num | null): LineTotals {
+  const labour = line.labour.reduce((sum, l) => sum.plus(labourLineTotal(l)), D(0));
+  const material = line.materials.reduce<Prisma.Decimal>((sum, m) => sum.plus(D(m)), D(0));
+  const other = line.otherCosts.reduce((sum, c) => sum.plus(otherCostTotal(c)), D(0));
+  const unitCost = labour.plus(material).plus(other);
+  const base = { quantity: line.quantity, labour: labour.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), unitCost: unitCost.toFixed(2) };
+  if (markupPercent === null || markupPercent === undefined) return { ...base, unitMarkup: null, unitPrice: null, total: null };
+  const unitMarkup = cents(unitCost.times(D(markupPercent)).dividedBy(100));
+  const unitPrice = unitCost.plus(unitMarkup);
+  return { ...base, unitMarkup: unitMarkup.toFixed(2), unitPrice: unitPrice.toFixed(2), total: unitPrice.times(line.quantity).toFixed(2) };
+}
+
 export function costingTotals(input: {
-  labour: Array<{ hours: Num; hourlyRate: Num }>;
-  materials: Num[];
+  lines: CostingLine[];
   markupPercent: Num | null;
   deliveryPrice: Num;
   vatRate: Num;
 }): CostingTotals {
-  const labour = input.labour.reduce((sum, l) => sum.plus(labourLineTotal(l)), D(0));
-  const material = input.materials.reduce<Prisma.Decimal>((sum, m) => sum.plus(D(m)), D(0));
-  const cost = labour.plus(material);
+  const lines = input.lines.map((l) => lineTotals(l, input.markupPercent));
+  const sum = (pick: (l: LineTotals) => string) => lines.reduce((s, l) => s.plus(D(pick(l)).times(l.quantity)), D(0));
+  const labour = sum((l) => l.labour);
+  const material = sum((l) => l.material);
+  const other = sum((l) => l.other);
+  const cost = sum((l) => l.unitCost);
   const delivery = cents(D(input.deliveryPrice));
   const vatRate = D(input.vatRate);
+  const base = { labour: labour.toFixed(2), material: material.toFixed(2), other: other.toFixed(2), cost: cost.toFixed(2), delivery: delivery.toFixed(2), vatRate: vatRate.toString(), lines };
   if (input.markupPercent === null || input.markupPercent === undefined) {
-    return {
-      labour: labour.toFixed(2), material: material.toFixed(2), cost: cost.toFixed(2), markup: null, equipment: null,
-      delivery: delivery.toFixed(2), totalExVat: null, vatRate: vatRate.toString(), vat: null, totalIncVat: null,
-    };
+    return { ...base, markup: null, equipment: null, totalExVat: null, vat: null, totalIncVat: null };
   }
-  const markup = cents(cost.times(D(input.markupPercent)).dividedBy(100));
-  const equipment = cost.plus(markup);
+  const markup = sum((l) => l.unitMarkup!);
+  const equipment = lines.reduce((s, l) => s.plus(D(l.total!)), D(0));
   const totalExVat = equipment.plus(delivery);
   const vat = cents(totalExVat.times(vatRate).dividedBy(100));
   return {
-    labour: labour.toFixed(2), material: material.toFixed(2), cost: cost.toFixed(2), markup: markup.toFixed(2),
-    equipment: equipment.toFixed(2), delivery: delivery.toFixed(2), totalExVat: totalExVat.toFixed(2),
-    vatRate: vatRate.toString(), vat: vat.toFixed(2), totalIncVat: totalExVat.plus(vat).toFixed(2),
+    ...base, markup: markup.toFixed(2), equipment: equipment.toFixed(2), totalExVat: totalExVat.toFixed(2),
+    vat: vat.toFixed(2), totalIncVat: totalExVat.plus(vat).toFixed(2),
   };
 }
 

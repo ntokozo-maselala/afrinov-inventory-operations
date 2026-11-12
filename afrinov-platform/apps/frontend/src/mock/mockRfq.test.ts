@@ -295,13 +295,17 @@ describe('mock: Procurement savings report', () => {
   });
 });
 
-// Sales RFQs, as sales-rfq.service.ts: labour at the listed rates, the
-// project's approved orders as the material, the markup, and the Director.
+// Sales RFQs, as sales-rfq.service.ts: equipment lines, each with labour at the
+// listed rates, the project's Procurement quotes and other costs, the markup
+// times the line's quantity, and the Director.
 describe('mock: Sales requests for quotation', () => {
   interface SalesRfq {
     id: string; number: string; status: string; quoteReference: string | null; clientName: string | null; deliveryTerms: string | null;
-    labour: Array<{ role: string; total: string }>; materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean }>;
-    totals: { labour: string; material: string; cost: string; markup: string | null; equipment: string | null; totalExVat: string | null };
+    equipmentLines: Array<{
+      quantity: number; labour: Array<{ role: string; total: string }>; materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean }>;
+      totals: { unitPrice: string | null; total: string | null };
+    }>;
+    totals: { labour: string; material: string; other: string; cost: string; markup: string | null; equipment: string | null; totalExVat: string | null };
   }
   type Rate = { id: string; role: string; hourlyRate: string; active: boolean };
   /** Sent for AFRI-1325: sup-1 quoted R9 000 (recommended), sup-2 R9 500. */
@@ -319,8 +323,9 @@ describe('mock: Sales requests for quotation', () => {
     welder = (await api.get<Rate[]>('/labour-rates?active=true')).find((r) => r.role === 'Welder')!;
   });
 
-  const draft = (over: Record<string, unknown> = {}) => api.post<SalesRfq>('/sales-rfqs', {
-    projectNumber: 'AFRI-1325', equipment: 'Main Piston Pump', labour: [{ labourRateId: welder.id, hours: 10 }], materials: [{ rfqId: quoted, supplierId: 'sup-1' }], markupPercent: 40, deliveryPrice: 500, ...over,
+  const pump = (over: Record<string, unknown> = {}) => ({ equipment: 'Main Piston Pump', labour: [{ labourRateId: welder.id, hours: 10 }], materials: [{ rfqId: quoted, supplierId: 'sup-1' }], ...over });
+  const draft = (over: Record<string, unknown> = {}, line: Record<string, unknown> = {}) => api.post<SalesRfq>('/sales-rfqs', {
+    projectNumber: 'AFRI-1325', equipmentLines: [pump(line)], markupPercent: 40, deliveryPrice: 500, ...over,
   });
 
   it("lists the sheet's selling rates, and lets them be added and changed", async () => {
@@ -338,9 +343,22 @@ describe('mock: Sales requests for quotation', () => {
     expect(r).toMatchObject({ status: 'DRAFT', deliveryTerms: expect.stringMatching(/^DAP/) });
     expect(r.number).toMatch(/^AFRI-02A-1325-02-\d{2}$/);
     expect(r.totals).toMatchObject({ labour: '4000.00', material: '9000.00', cost: '13000.00', markup: '5200.00', equipment: '18200.00', totalExVat: '18700.00' });
-    expect(r.materials[0]).toMatchObject({ supplierId: 'sup-1', recommended: true });
-    const other = await draft({ materials: [{ rfqId: quoted, supplierId: 'sup-2' }] });
-    expect(other.materials[0]).toMatchObject({ amount: '9500.00', recommended: false });
+    expect(r.equipmentLines[0]!.materials[0]).toMatchObject({ supplierId: 'sup-1', recommended: true });
+    const other = await draft({}, { materials: [{ rfqId: quoted, supplierId: 'sup-2' }] });
+    expect(other.equipmentLines[0]!.materials[0]).toMatchObject({ amount: '9500.00', recommended: false });
+  });
+
+  it('prices each equipment line for one unit times its quantity, with other costs, and counts a quote on one line only', async () => {
+    const r = await draft({ deliveryPrice: 0 }, { quantity: 2 });
+    // 13 000 a pump × 1.4 = 18 200, × 2.
+    expect(r.equipmentLines[0]!.totals).toMatchObject({ unitPrice: '18200.00', total: '36400.00' });
+    const two = await draft({ deliveryPrice: 0, equipmentLines: [pump(), { equipment: 'Installation', otherCosts: [{ description: 'Accommodation', quantity: 2, unitCost: 1200 }] }] });
+    expect(two.equipmentLines.map((l) => l.totals.total)).toEqual(['18200.00', '3360.00']);
+    expect(two.totals).toMatchObject({ other: '2400.00', equipment: '21560.00' });
+    await expect(draft({ equipmentLines: [pump(), pump()] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('one quote on each') });
+    const bare = await api.post<SalesRfq>('/sales-rfqs', { projectNumber: 'AFRI-1325' });
+    expect(bare.equipmentLines).toHaveLength(1);
+    await expect(api.post(`/sales-rfqs/${bare.id}/submit`)).rejects.toMatchObject({ message: expect.stringContaining('the equipment being quoted') });
   });
 
   it('recommends a quote without awarding, and drops it when that supplier declines', async () => {
@@ -354,7 +372,7 @@ describe('mock: Sales requests for quotation', () => {
   it("refuses another project's RFQ and a role no longer used", async () => {
     const other = await api.post<Rate>('/labour-rates', { role: 'Retired', hourlyRate: 1 });
     await api.patch(`/labour-rates/${other.id}`, { active: false });
-    await expect(draft({ labour: [{ labourRateId: other.id, hours: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(draft({}, { labour: [{ labourRateId: other.id, hours: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     await expect(draft({ projectNumber: 'AFRI-1402' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: "That isn't a request for quotation sent for AFRI-1402" });
   });
 

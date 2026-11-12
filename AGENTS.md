@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1337, frontend 1553)
+npm test               # both workspaces (backend 1342, frontend 1559)
 npm run build          # both workspaces
 ```
 
