@@ -63,6 +63,9 @@ services:
       PROCUREMENT_ENABLED: ${PROCUREMENT_ENABLED:-true}
       # API docs at /api/docs. Off in production unless this is "true".
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
+      # The reverse proxy's address, so sign-in limits and logs see each
+      # person's address (afrinov-docs/docs/12-operations/reverse-proxy.md).
+      TRUST_PROXY: ${TRUST_PROXY:-}
       # Password for the admin account the seed creates on first start. The
       # current production seed checks this before looking up the existing
       # admin, so keep it injected on every Compose startup.
@@ -73,12 +76,42 @@ services:
         condition: service_healthy
     ports:
       - "4000:4000"
-    # Seed is idempotent. Run the compiled seed (node dist/db/seed.js) rather
+    # Seed is idempotent, and loads no demo data here: SEED_DEMO_DATA is not
+    # set, and the seed refuses it in production. Run the compiled seed (node dist/db/seed.js) rather
     # than `npm run db:seed`, which needs tsx — a dev dependency that is
     # pruned from the production image. The current seed requires
     # SEED_ADMIN_PASSWORD on every production invocation (see above).
     command: sh -c "npx prisma migrate deploy && node dist/db/seed.js && node dist/index.js"
 
+  # Nightly backups (ADR-037, afrinov-docs/docs/12-operations/backup-and-recovery.md):
+  # dumped, checked, encrypted, kept on the backup disk and copied off site,
+  # each run recorded for the Dashboard. ./secrets holds backup_key (the
+  # encryption passphrase) and, for the off-site store, rclone.conf; it is
+  # git-ignored. With no key, each night's run is recorded as failed.
+  backup:
+    build: ./backup
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-afrinov}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-}
+      PGDATABASE: ${POSTGRES_DB:-afrinov}
+      # When, in South African time: after the store closes.
+      BACKUP_AT: ${BACKUP_AT:-18:30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+      # The off-site store as rclone names it, for example offsite:afrinov-backups.
+      # Unset keeps copies on this server only, which the Dashboard warns about.
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+    volumes:
+      # Point BACKUP_DISK at a second disk (for example /mnt/backup/afrinov):
+      # a copy on the database's own disk is lost with it.
+      - ${BACKUP_DISK:-afrinov_backups}:/backups
+      - ${BACKUP_SECRETS:-./secrets}:/run/secrets:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   afrinov_pg:
   afrinov_test_pg:
+  afrinov_backups:

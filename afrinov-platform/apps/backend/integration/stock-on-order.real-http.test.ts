@@ -97,7 +97,7 @@ describe('stock on order over real HTTP', () => {
   it('keeps the quantity and due date, but not the order, from someone who cannot open Stores orders', async () => {
     const email = `it-oo-viewer-${run}@example.com`;
     const password = `viewer-${run}-pass`;
-    expect((await api('POST', '/users', { email, name: `IT on-order viewer ${run}`, password, roleNames: ['VIEWER'] })).status).toBe(201);
+    expect((await api('POST', '/users', { email, name: `IT on-order viewer ${run}`, password, roleNames: ['VIEWER'], mustChangePassword: false })).status).toBe(201);
     const viewer = client(server.port, await login(server.port, email, password));
     const res = await viewer<StatusRow[]>('GET', '/reports/stock-status');
     expect(res.status).toBe(200);

@@ -4,8 +4,9 @@
 
 **Planned.** Define RPO/RTO targets with the business before go-live.
 *Unverified* proposed default in the absence of a stated requirement:
-RPO ≤ 24h via daily backup, RTO ≤ 1 business day. Write the recovery
-runbook once the hosting environment is chosen. Recovery from the
+RPO ≤ 24h via daily backup, RTO ≤ 1 business day. The backup and restore
+steps are in `backup-and-recovery.md` (tested on a copy, 2026-11-11); fit them
+to the host once it is chosen. Recovery from the
 workbook is possible only up to the go-live date (opening balances are
 imported once; see `07-data/migration-strategy.md`).
 

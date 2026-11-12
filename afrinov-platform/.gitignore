@@ -17,3 +17,8 @@ test-results
 .kilo
 .claude
 .git
+# The backup key and off-site store credentials (ADR-037). Never committed.
+apps/backend/secrets/
+# Backup copies, if the backup disk is pointed inside the repository.
+*.dump
+*.dump.gpg

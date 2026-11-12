@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { useAppShell } from '../hooks/useAppShell';
 import { Icon } from './Icon';
 import { Button } from './Button';
+import { Modal } from './Modal';
+import { ChangePasswordForm } from './PasswordForms';
+import { useToast } from './Toast';
 import type { AuthUser } from '../api/authService';
 
 interface AppHeaderProps {
@@ -11,6 +15,8 @@ interface AppHeaderProps {
 export function AppHeader({ user, onLogout }: AppHeaderProps) {
   const { sidebarMode, isMobile, isTablet, isDesktop, toggleCollapsed, openMobile } = useAppShell();
 
+  const [changingPassword, setChangingPassword] = useState(false);
+  const toast = useToast();
   const showCollapseButton = isDesktop || isTablet;
   const showMobileMenu = isMobile;
 
@@ -47,6 +53,9 @@ export function AppHeader({ user, onLogout }: AppHeaderProps) {
             </span>
             <span className="font-medium truncate max-w-[160px]">{user?.name}</span>
           </div>
+          <Button variant="ghost" size="sm" onClick={() => setChangingPassword(true)}>
+            Change password
+          </Button>
           <Button variant="ghost" size="sm" onClick={onLogout} className="hidden sm:inline-flex">
             <Icon.Logout size={14} /> Sign out
           </Button>
@@ -55,6 +64,12 @@ export function AppHeader({ user, onLogout }: AppHeaderProps) {
           </Button>
         </div>
       </div>
+      <Modal open={changingPassword} onClose={() => setChangingPassword(false)} title="Change your password" description="Any other sign-in of yours ends; this one carries on." size="sm">
+        <ChangePasswordForm
+          onDone={() => { setChangingPassword(false); toast.success('Password changed.'); }}
+          onCancel={() => setChangingPassword(false)}
+        />
+      </Modal>
     </header>
   );
 }

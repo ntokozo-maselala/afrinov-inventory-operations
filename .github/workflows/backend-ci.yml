@@ -157,7 +157,38 @@ jobs:
       - name: Apply migrations
         run: npx prisma migrate deploy
 
+      # The integration suites read the demo catalogue. Demo data is refused in
+      # production, which is NODE_ENV's default, so this step names test.
       - name: Seed database
         run: npm run db:seed
+        env:
+          NODE_ENV: test
+          SEED_DEMO_DATA: 'true'
 
       - run: npm run test:integration
+
+      # ADR-037: the backup service backs up this database, copies it off site
+      # (a folder standing in for the cloud store), then restores the newest
+      # off-site copy into a new database as the quarterly test does. Both runs
+      # must be recorded as OK, so a change that breaks backups fails here.
+      - name: Backup and restore drill
+        run: |
+          docker build --quiet --tag afrinov-backup:ci backup
+          drill="$RUNNER_TEMP/backup"
+          mkdir -p "$drill/disk" "$drill/secrets"
+          chmod 777 "$drill/disk"
+          node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))" > "$drill/secrets/backup_key"
+          chmod 644 "$drill/secrets/backup_key"
+          backup() {
+            docker run --rm --network host \
+              -e PGHOST=localhost -e PGUSER=afrinov -e PGPASSWORD=afrinov -e PGDATABASE=afrinov_test \
+              -e BACKUP_REMOTE=:local:/backups/offsite \
+              -v "$drill/disk:/backups" -v "$drill/secrets:/run/secrets:ro" \
+              --entrypoint "$1" afrinov-backup:ci "${@:2}"
+          }
+          backup /opt/afrinov-backup/backup.sh
+          backup /opt/afrinov-backup/restore.sh latest --drill
+          docker run --rm --network host -e PGPASSWORD=afrinov postgres:16-alpine \
+            psql -h localhost -U afrinov -d afrinov_test -tAc \
+            "SELECT kind || ' ' || status || ' ' || offsite FROM backup_runs ORDER BY finished_at DESC LIMIT 2" | tee "$drill/runs.txt"
+          printf 'RESTORE_TEST OK false\nBACKUP OK true\n' | diff - "$drill/runs.txt"

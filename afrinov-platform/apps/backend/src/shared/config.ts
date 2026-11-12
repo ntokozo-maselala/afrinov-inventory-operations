@@ -148,6 +148,30 @@ export function resolveCorsOrigin(
   return false;
 }
 
+export type TrustProxySetting = false | string[];
+
+const CIDR = /^[0-9a-fA-F:.]+(\/\d{1,3})?$/;
+
+/**
+ * Which proxy's X-Forwarded-For to believe (system audit F4). Behind a reverse
+ * proxy every request arrives from the proxy, so without this the sign-in
+ * limit counts everyone as one address. `TRUST_PROXY` is the proxy's address
+ * or addresses, comma separated, CIDR allowed. Unset trusts nobody. "true"
+ * and hop counts are refused: either would believe a header any sender can
+ * write, letting them choose the address the limit counts.
+ */
+export function resolveTrustProxy(raw: string | undefined): TrustProxySetting {
+  const value = raw?.trim() ?? '';
+  if (!value || value.toLowerCase() === 'false') return false;
+  if (value.toLowerCase() === 'true' || /^\d+$/.test(value)) {
+    throw new ConfigError(`TRUST_PROXY=${value} would believe any sender. Set it to the proxy's address, for example 10.0.0.5 or 172.18.0.0/16.`);
+  }
+  const list = value.split(',').map((v) => v.trim()).filter(Boolean);
+  const bad = list.find((v) => !CIDR.test(v));
+  if (bad) throw new ConfigError(`TRUST_PROXY has "${bad}", which is not an address or a CIDR range.`);
+  return list;
+}
+
 export class ConfigError extends Error {
   constructor(message: string) {
     super(message);

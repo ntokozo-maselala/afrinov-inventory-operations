@@ -80,7 +80,7 @@ describe('recipients over real HTTP', () => {
   it('lets a viewer read the list but not change it', async () => {
     const email = `it-rcp-viewer-${run}@example.com`;
     const password = `viewer-${run}-pass`;
-    expect((await api('POST', '/users', { email, name: `IT viewer ${run}`, password, roleNames: ['VIEWER'] })).status).toBe(201);
+    expect((await api('POST', '/users', { email, name: `IT viewer ${run}`, password, roleNames: ['VIEWER'], mustChangePassword: false })).status).toBe(201);
     const viewer = client(server.port, await login(server.port, email, password));
 
     expect((await viewer('GET', '/recipients')).status).toBe(200);

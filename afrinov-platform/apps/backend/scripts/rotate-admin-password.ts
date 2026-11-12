@@ -22,7 +22,8 @@ async function main(): Promise<void> {
 
   const passwordHash = await bcrypt.hash(password, 12);
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: admin.id }, data: { passwordHash } });
+    // As a change in the app does (ADR-036): every earlier sign-in of the account ends.
+    await tx.user.update({ where: { id: admin.id }, data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() } });
     await tx.auditLogEntry.create({
       data: {
         actorId: null,

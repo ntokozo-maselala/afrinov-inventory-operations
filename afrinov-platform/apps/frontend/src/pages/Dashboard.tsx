@@ -16,6 +16,8 @@ import type { StockStatusItem } from './StockStatus';
 import type { ToolRow } from '../api/types';
 import { LOCATION_STATUS_LABEL } from '../lib/stockStatus';
 import { usePermissions } from '../hooks/usePermissions';
+import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
+import { dashboardNotice, type BackupHealth } from '../lib/backups';
 import { PROCUREMENT_ENABLED } from '../config/features';
 import { useReceiptMode } from '../lib/receipts';
 import { DashboardLocationDonut, DashboardValueBarChart, type RoomOf } from './DashboardCharts';
@@ -137,6 +139,27 @@ function stores(v: StockValue): { items: number; itemsInStock: number } {
   return v.sections?.STORES ?? v.total;
 }
 
+/** For Admins while fewer than two hold the role (ADR-036): nobody could reset a lone Admin's password. */
+function adminsCard(count: number) {
+  return {
+    label: 'Admins',
+    value: formatNumber(count),
+    tone: 'warning' as const,
+    note: `keep ${MIN_ADMINS} · one resets the other's password`,
+    to: '/settings/users',
+  };
+}
+
+/** For Admins when backups failed, are late, stay on the server, or no restore was tested lately (ADR-037). */
+function backupCard(h: BackupHealth) {
+  const notice = dashboardNotice(h);
+  if (!notice) return null;
+  const value = h.backup.state !== 'OK'
+    ? { NONE: 'None', FAILED: 'Failed', LATE: 'Late', LOCAL_ONLY: 'On server only' }[h.backup.state]
+    : { NONE: 'Untested', FAILED: 'Test failed', DUE: 'Test due', OK: '' }[h.restoreTest.state];
+  return { label: 'Backups', value, tone: notice.tone === 'danger' ? 'danger' as const : 'warning' as const, note: notice.title, to: '/settings/data' };
+}
+
 export function Dashboard() {
   const { hasPermission } = usePermissions();
   // Each kind of order has its signers, and the server picks which are waiting on them.
@@ -165,6 +188,12 @@ export function Dashboard() {
   const correctsSlips = hasPermission('inventory:reverse');
   const { data: unconfirmed } = useApi<PendingReceipts>(receiptMode !== 'off' && (receiptRequired || correctsSlips) ? '/slips/unconfirmed/summary' : null);
   // Not essential to the dashboard: if it can't load, the notice simply doesn't show.
+  const managesUsers = hasPermission('users:manage');
+  const { data: users } = useApi<Array<{ active: boolean; roles: Array<{ role: { name: string } }> }>>(managesUsers ? '/users' : null);
+  const admins = managesUsers && Array.isArray(users) ? activeAdminCount(users) : null;
+  // Only Admins hold manage:users, and only they keep the system running, backups included.
+  const { data: backups } = useApi<BackupHealth>(managesUsers ? '/backups/status' : null);
+  const backupWarning = backups?.backup && backups.restoreTest ? backupCard(backups) : null;
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -189,6 +218,8 @@ export function Dashboard() {
       loanCard,
       ...(unconfirmed && typeof unconfirmed.issues === 'number' && receiptRequired ? [receiptCard(unconfirmed)] : []),
       ...(unconfirmed && correctsSlips && unconfirmed.disputed > 0 ? [disputedCard(unconfirmed)] : []),
+      ...(admins !== null && admins < MIN_ADMINS ? [adminsCard(admins)] : []),
+      ...(backupWarning ? [backupWarning] : []),
       ...(!canApprove ? [] : mineError
         ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
         : mine
@@ -196,7 +227,7 @@ export function Dashboard() {
           ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [

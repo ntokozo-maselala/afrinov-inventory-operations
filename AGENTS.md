@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1269, frontend 1524)
+npm test               # both workspaces (backend 1324, frontend 1541)
 npm run build          # both workspaces
 ```
 
@@ -206,6 +206,33 @@ Use these forms; the older spellings still work but are deprecated or removed.
   `POST /auth/refresh` only after the person's own input (pointer, key, wheel,
   touch), never because a request was made, so a page that polls still signs
   out when left alone (ADR-035).
+- **A password change ends every other sign-in; someone always holds Admin.**
+  A sign-in that began before `users.password_changed_at` is refused, and while
+  `must_change_password` is set (an Admin's temporary password) only
+  `/auth/me`, `/auth/refresh` and `/auth/password` answer. Any path that sets a
+  password sets `passwordChangedAt` too. `UserService.update` refuses a change
+  that leaves no active Admin, or that brings two or more down to one
+  (`MIN_ADMINS`, kept in step with `src/lib/admins.ts`), under the
+  `afrinov:admins` lock (ADR-036).
+- **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
+  production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
+  settings, the admin) goes before the `if (!plan.demo)` return in
+  `seed.ts`; anything a demo needs goes after it. `db:test:seed` and CI ask for
+  demo data.
+- **Backups are a service, not a habit** (ADR-037). `apps/backend/backup`
+  (POSIX shell, LF endings via `.gitattributes`) backs up, encrypts, copies off
+  site and records each run in `backup_runs`, which the app only reads
+  (`GET /backups/status`). A new table is in every backup automatically; if a
+  migration changes the table count a lot, check `BACKUP_MIN_TABLES`. CI runs a
+  backup and restore test after the integration tests.
+- **Production runs both Compose files.** `apps/backend/docker-compose.prod.yml`
+  binds the database and API to `127.0.0.1` only; the server's
+  `apps/backend/.env` sets `COMPOSE_FILE` to include it. The step-by-step guide
+  is `afrinov-docs/docs/12-operations/deployment.md`: keep it in step with any
+  change to the stack, its settings or the go-live steps.
+- **Behind a proxy, `TRUST_PROXY` names it** (addresses only; `true` and hop
+  counts are refused), or every person counts as the proxy's address for the
+  sign-in limit (`afrinov-docs/docs/12-operations/reverse-proxy.md`).
 - `pino-pretty` is loaded by name as a Fastify transport target
   (`src/server.ts`), so it looks unused to static analysers but is required.
 - Tailwind CSS 4 is configured in CSS (`src/index.css`), not a JS config. See

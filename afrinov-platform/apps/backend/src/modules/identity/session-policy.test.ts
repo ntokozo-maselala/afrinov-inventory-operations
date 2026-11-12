@@ -2,7 +2,7 @@
 // security.sessionTimeoutMinutes, and in any case 12 hours after it began.
 import { describe, it, expect } from 'vitest';
 import {
-  SESSION_LIMIT_SECONDS, authTimeOf, idleSecondsFrom, isIdleTooLong, sessionExpiry,
+  SESSION_LIMIT_SECONDS, authTimeOf, idleSecondsFrom, isIdleTooLong, sessionExpiry, signInPredatesPassword,
 } from './session-policy.js';
 
 describe('idleSecondsFrom', () => {
@@ -100,5 +100,28 @@ describe('isIdleTooLong', () => {
   it('allows a few seconds of clock difference for a token issued just ahead', () => {
     expect(isIdleTooLong({ now: 5000, issuedAt: 5005, idleSeconds: 300 })).toBe(false);
     expect(isIdleTooLong({ now: 5000, issuedAt: 5120, idleSeconds: 300 })).toBe(true);
+  });
+});
+
+describe('signInPredatesPassword (ADR-036)', () => {
+  const changedAt = new Date('2026-11-11T10:00:00.700Z');
+  const changedSec = Math.floor(changedAt.getTime() / 1000);
+
+  it('keeps every sign-in while the password never changed', () => {
+    expect(signInPredatesPassword(1, null)).toBe(false);
+    expect(signInPredatesPassword(1, undefined)).toBe(false);
+  });
+
+  it('ends a sign-in that began before the change', () => {
+    expect(signInPredatesPassword(changedSec - 1, changedAt)).toBe(true);
+  });
+
+  it('keeps the sign-in made with the change, in the same second, and any after', () => {
+    expect(signInPredatesPassword(changedSec, changedAt)).toBe(false);
+    expect(signInPredatesPassword(changedSec + 60, changedAt)).toBe(false);
+  });
+
+  it('ends a sign-in whose start can\'t be read once a password has changed', () => {
+    expect(signInPredatesPassword(null, changedAt)).toBe(true);
   });
 });

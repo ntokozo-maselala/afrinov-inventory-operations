@@ -186,3 +186,28 @@ describe('loadConfig', () => {
     expect(process.env).toEqual(before);
   });
 });
+
+describe('resolveTrustProxy (system audit F4)', () => {
+  it('trusts nobody when unset', async () => {
+    const { resolveTrustProxy } = await import('./config.js');
+    expect(resolveTrustProxy(undefined)).toBe(false);
+    expect(resolveTrustProxy('  ')).toBe(false);
+    expect(resolveTrustProxy('false')).toBe(false);
+  });
+
+  it('trusts the proxy addresses named', async () => {
+    const { resolveTrustProxy } = await import('./config.js');
+    expect(resolveTrustProxy('127.0.0.1')).toEqual(['127.0.0.1']);
+    expect(resolveTrustProxy('10.0.0.5, 172.18.0.0/16 ,::1')).toEqual(['10.0.0.5', '172.18.0.0/16', '::1']);
+  });
+
+  it.each(['true', 'TRUE', '1', '2'])('refuses %s, which would believe any sender', async (value) => {
+    const { resolveTrustProxy, ConfigError } = await import('./config.js');
+    expect(() => resolveTrustProxy(value)).toThrow(ConfigError);
+  });
+
+  it('refuses something that is not an address', async () => {
+    const { resolveTrustProxy } = await import('./config.js');
+    expect(() => resolveTrustProxy('proxy.local')).toThrow(/not an address/);
+  });
+});

@@ -6,7 +6,15 @@ import { Errors } from './errors.js';
 import type { PermissionCodeValue } from './permissions.js';
 
 const permissionCache = new WeakMap<FastifyRequest, Set<string>>();
-const activeCache = new WeakMap<FastifyRequest, boolean>();
+const accountCache = new WeakMap<FastifyRequest, AccountState>();
+
+/** What the authentication hook needs to know about an account, read fresh. */
+export interface AccountState {
+  active: boolean;
+  /** An Admin's temporary password is still in use (ADR-036). */
+  mustChangePassword: boolean;
+  passwordChangedAt: Date | null;
+}
 
 // DB-fresh active check. A token issued before a user was deactivated still
 // carries active:true until expiry, so the JWT claim alone cannot be trusted
@@ -18,15 +26,26 @@ const activeCache = new WeakMap<FastifyRequest, boolean>();
 // `requirePermission` on the same request would otherwise repeat the identical
 // primary-key lookup. The cache lives only as long as the request, so the
 // value can never outlive the request that established it.
-export async function isActiveInDb(userId: string, req?: FastifyRequest): Promise<boolean> {
+export async function accountInDb(userId: string, req?: FastifyRequest): Promise<AccountState> {
   if (req) {
-    const cached = activeCache.get(req);
+    const cached = accountCache.get(req);
     if (cached !== undefined) return cached;
   }
-  const row = await prisma.user.findUnique({ where: { id: userId }, select: { active: true } });
-  const active = !!row?.active;
-  if (req) activeCache.set(req, active);
-  return active;
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { active: true, mustChangePassword: true, passwordChangedAt: true },
+  });
+  const account = {
+    active: !!row?.active,
+    mustChangePassword: row?.mustChangePassword === true,
+    passwordChangedAt: row?.passwordChangedAt ?? null,
+  };
+  if (req) accountCache.set(req, account);
+  return account;
+}
+
+export async function isActiveInDb(userId: string, req?: FastifyRequest): Promise<boolean> {
+  return (await accountInDb(userId, req)).active;
 }
 
 export async function loadUserPermissions(userId: string, req: FastifyRequest): Promise<Set<string>> {

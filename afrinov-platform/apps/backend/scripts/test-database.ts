@@ -17,6 +17,9 @@ process.env.DATABASE_URL = requireIsolatedTestDatabaseUrl();
 if (action === 'seed' && !process.env.SEED_ADMIN_PASSWORD?.trim()) {
   throw new Error('SEED_ADMIN_PASSWORD is required to seed the isolated test database.');
 }
+// The integration suites read the demo catalogue, so a test database has it
+// unless the shell says otherwise (the seed refuses it only in production).
+if (action === 'seed') process.env.SEED_DEMO_DATA ??= 'true';
 
 const args = action === 'migrate'
   ? ['prisma', 'migrate', 'deploy', '--schema', 'prisma/schema.prisma']
