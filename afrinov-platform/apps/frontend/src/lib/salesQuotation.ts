@@ -1,11 +1,13 @@
 // The quotation a client receives for an approved Sales RFQ, laid out like the
 // Northam Platinum quotation (AFRI-02A-1469-04-1): the logo and date at the top,
 // Our Reference and Your Reference, the client's name and address, QUOTATION:
-// AFRI – 1469, "Dear <contact>", the one equipment line and Delivery with Total
-// ex VAT, VAT and Total inc VAT, the Notes and Conditions, the Sales person who
-// signs it, and the company's details at the foot of the page.
+// AFRI – 1469, "Dear <contact>", the equipment lines (each with what it covers
+// listed under it, as AFRI-02A-1094-04-1 lists the door and its installation)
+// and Delivery when it is charged, with Total ex VAT, VAT and Total inc VAT, the
+// Notes and Conditions, the Sales person who signs it, and the company's details
+// at the foot of the page.
 //
-// The equipment's unit price is the Sales RFQ's labour and material with the
+// Each line's unit price is its labour, material and other costs with the
 // markup (sales-costing.ts): the client never sees the costing. Until it is
 // approved it is marked "Draft, not for issue", and a cancelled one "Cancelled",
 // as orders are. The flame mark sits faint in the middle of every page, as on
@@ -14,7 +16,7 @@
 import { triggerDownload } from '../api/exportReport';
 import { drawLogo, drawLogoWatermark, pdfText } from './pdf';
 import { finishPages } from './poDocument';
-import type { SalesRfq } from './salesRfq';
+import type { SalesEquipmentLine, SalesRfq } from './salesRfq';
 
 /** The wording Settings → Purchase orders has for quotations. */
 export interface QuotationCompany { name: string; notes: string; letterhead: string }
@@ -60,13 +62,21 @@ export function quotationFilename(r: Pick<SalesRfq, 'quoteReference' | 'number' 
   return `${r.quoteReference ?? r.number}${name ? ` ${name}` : ''}${stamp === 'CANCELLED' ? ' - cancelled' : stamp ? ' - draft' : ''}.pdf`;
 }
 
-/** The table's rows: the equipment, then Delivery, as the example has them. */
-export function quotationLines(r: Pick<SalesRfq, 'equipment' | 'totals'>): string[][] {
+/** A line's description cell: its name, then each detail on its own line as "- …", as the example lists them. */
+export function quotationDescription(line: Pick<SalesEquipmentLine, 'equipment' | 'details'>): string {
+  const details = (line.details ?? '').split('\n').map((d) => d.trim()).filter(Boolean)
+    .map((d) => (/^[-•*]/.test(d) ? `- ${d.replace(/^[-•*]\s*/, '')}` : `- ${d}`));
+  return [line.equipment?.trim() || '-', ...details].join('\n');
+}
+
+/** The table's rows: each equipment line, then Delivery when it is charged, numbered on. */
+export function quotationLines(r: Pick<SalesRfq, 'equipmentLines' | 'totals'>): string[][] {
+  const rows = r.equipmentLines.map((l, i) => [
+    String(i + 1), quotationDescription(l), String(l.quantity), quotationMoney(l.totals.unitPrice), quotationMoney(l.totals.total),
+  ]);
   const delivery = Number(r.totals.delivery);
-  return [
-    ['1', r.equipment ?? '-', '1', quotationMoney(r.totals.equipment), quotationMoney(r.totals.equipment)],
-    ['2', 'Delivery', delivery > 0 ? '1' : '0', quotationMoney(delivery), delivery > 0 ? quotationMoney(delivery) : ''],
-  ];
+  if (delivery > 0) rows.push([String(rows.length + 1), 'Delivery', '1', quotationMoney(delivery), quotationMoney(delivery)]);
+  return rows;
 }
 
 /** The numbered Conditions, each left off when blank. */
@@ -163,9 +173,10 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
     styles: { font: 'helvetica', fontSize: 9, cellPadding: 1.4, lineColor: [0, 0, 0], lineWidth: 0.2, textColor: INK, overflow: 'linebreak' },
     headStyles: { fillColor: false, textColor: INK, fontStyle: 'bold', halign: 'center' },
     footStyles: { fillColor: false, textColor: INK },
+    // The Item, Qty and prices sit in the middle of a tall row, as the example has them.
     columnStyles: {
-      0: { cellWidth: 14, halign: 'center' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 15, halign: 'center' },
-      3: { cellWidth: 30, halign: 'right' }, 4: { cellWidth: 30, halign: 'right' },
+      0: { cellWidth: 14, halign: 'center', valign: 'middle' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 15, halign: 'center', valign: 'middle' },
+      3: { cellWidth: 30, halign: 'right', valign: 'middle' }, 4: { cellWidth: 30, halign: 'right', valign: 'middle' },
     },
   });
   y = finalY() + 8;

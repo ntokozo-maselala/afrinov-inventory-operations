@@ -865,7 +865,7 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'List Sales requests for quotation',
-    description: 'Each with its labour, the orders its material comes from, and its totals, as GET /sales-rfqs/:id. ?status=PENDING_APPROVAL lists those waiting for the Director.',
+    description: 'Each with its equipment lines and totals, as GET /sales-rfqs/:id. ?status=PENDING_APPROVAL lists those waiting for the Director.',
     procurement: true, permissions: [P.ViewSalesRfq], query: listSalesRfqQuerySchema, errors: [400],
   },
   {
@@ -875,24 +875,25 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'get', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Get a Sales request for quotation with its costing',
-    description: 'Labour lines (role, hours, rate, total), the Procurement quotes its material comes from, one per RFQ, each saying whether it is the one Procurement recommends (a draft values them today and flags any that can no longer be counted; once submitted each keeps the amount it had then), '
-      + 'and totals: labour, material, cost, markup, equipment price, delivery, total excl. VAT, VAT and total incl. VAT. Markup-dependent totals are null until a markup is given.',
+    description: 'Its equipment lines in order, each with its name, the details printed under it, its quantity, labour lines (role, hours, rate, total), the Procurement quotes counted on it, one per RFQ, each saying whether it is the one Procurement recommends (a draft values them today and flags any that can no longer be counted; once submitted each keeps the amount it had then), '
+      + 'other costs (description, quantity, unit cost, total), and its totals for one unit (labour, material, other, unit cost, unit markup, unit price) with its total (unit price × quantity). '
+      + 'The overall totals: labour, material, other, cost, markup, equipment (all lines), delivery, total excl. VAT, VAT and total incl. VAT. Markup-dependent totals are null until a markup is given. equipment is the first line\'s name.',
     procurement: true, permissions: [P.ViewSalesRfq], errors: [404],
   },
   {
     method: 'post', path: '/sales-rfqs', tag: 'Sales requests for quotation', summary: 'Raise a draft Sales request for quotation',
-    description: "One piece of equipment for one project. Labour is priced at each role's rate on GET /labour-rates; the material is one supplier's whole quote on each chosen Procurement RFQ of the project (GET /sales-rfqs/quote-options). "
+    description: "One job for one project, priced in one or more equipment lines (one empty line when none are given). On each line, for one unit: labour at each role's rate on GET /labour-rates, one supplier's whole quote on each chosen Procurement RFQ of the project (GET /sales-rfqs/quote-options; each RFQ on one line only), and other costs as quantity × unit cost. "
       + "The client defaults to the project's, the conditions to the quotation's usual ones, and the signer's email to the creator's.",
     procurement: true, permissions: [P.ManageSalesRfq], body: createSalesRfqSchema, success: 201,
   },
   {
     method: 'patch', path: '/sales-rfqs/:id', tag: 'Sales requests for quotation', summary: 'Change a draft',
-    description: 'Only a draft (409 otherwise). Saving labour prices it at today\'s rates and the quotes at today\'s values; moving it to another project takes its quotes off.',
+    description: 'Only a draft (409 otherwise). equipmentLines replaces every line; saving them prices labour at today\'s rates and the quotes at today\'s values. Moving it to another project takes its quotes off.',
     procurement: true, permissions: [P.ManageSalesRfq], body: updateSalesRfqSchema, errors: [404, 409],
   },
   {
     method: 'post', path: '/sales-rfqs/:id/submit', tag: 'Sales requests for quotation', summary: 'Send a draft to the Director for approval',
-    description: "Needs the equipment, the client's name, a markup, and labour or a quote (400). Each quote's amount and the VAT rate are fixed as they are now.",
+    description: "Needs each equipment line's name and labour, a quote or another cost on it, the client's name and a markup (400). Each quote's amount and the VAT rate are fixed as they are now.",
     procurement: true, permissions: [P.ManageSalesRfq], errors: [400, 404, 409],
   },
   {
