@@ -292,3 +292,28 @@ describe('retiring the settings nothing read (migration 54)', () => {
     expect(statements).toMatch(/to_jsonb\('each'::text\)/);
   });
 });
+
+// More than one equipment line on a Sales RFQ (12 Nov 2026): every Sales RFQ
+// becomes one line holding all its labour and quotes before the columns that
+// tie them to a line are required, and only then is its equipment dropped.
+describe('Sales RFQ equipment lines (migration 58)', () => {
+  const sql = readMigration('20260101000058_sales_rfq_equipment_lines');
+  const at = (pattern: RegExp) => sql.search(pattern);
+
+  it('gives each Sales RFQ one line, quantity 1, named as its equipment was', () => {
+    expect(sql).toMatch(/INSERT INTO "sales_rfq_equipment_lines"[^;]*SELECT gen_random_uuid\(\)::text, "id", 1, "equipment", NULL, 1\s+FROM "sales_rfqs";/);
+  });
+
+  it('puts the labour and quotes on that line before the column is required, and drops the equipment last', () => {
+    for (const table of ['sales_rfq_labour_lines', 'sales_rfq_materials']) {
+      // Added nullable, filled from the line, then required.
+      const added = sql.indexOf(`ALTER TABLE "${table}" ADD COLUMN     "equipment_line_id" TEXT;`);
+      const filled = sql.indexOf(`UPDATE "${table}"`);
+      const required = sql.indexOf(`ALTER TABLE "${table}" ALTER COLUMN "equipment_line_id" SET NOT NULL`);
+      expect([added, filled, required].every((i) => i >= 0), table).toBe(true);
+      expect(added < filled && filled < required, table).toBe(true);
+      expect(required).toBeLessThan(at(/DROP COLUMN "equipment"/));
+    }
+    expect(at(/INSERT INTO "sales_rfq_equipment_lines"/)).toBeLessThan(at(/UPDATE "sales_rfq_labour_lines"/));
+  });
+});

@@ -1,7 +1,7 @@
-// Sales RFQs on screen: the list, a Sales RFQ's costing with the actions its
-// status and the viewer allow (Sales submits, the Director approves or sends
-// back, never their own), the form's labour, orders and live price, and the
-// labour rates page.
+// Sales RFQs on screen: the list, a Sales RFQ's costing line by line with the
+// actions its status and the viewer allow (Sales submits, the Director approves
+// or sends back, never their own), the form's equipment lines with their labour,
+// quotes, other costs and live price, and the labour rates page.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -29,7 +29,7 @@ const RATES = [
   { id: 'lr-old', role: 'Retired role', hourlyRate: '100', active: false },
 ];
 const TOTALS = {
-  labour: '5650.00', material: '9000.00', cost: '14650.00', markup: '5860.00', equipment: '20510.00', delivery: '500.00',
+  labour: '5650.00', material: '9000.00', other: '0.00', cost: '14650.00', markup: '5860.00', equipment: '20510.00', delivery: '500.00',
   totalExVat: '21010.00', vatRate: '15', vat: '3151.50', totalIncVat: '24161.50',
 };
 const RFQ = {
@@ -41,15 +41,35 @@ const RFQ = {
   signerPhone: '+27 73 805 9123', signerEmail: 'northamplats@afrinov.co.za', issuedAt: null, closingDate: null, createdAt: '2026-11-05T08:00:00.000Z',
   createdById: 'u-sales', createdBy: { id: 'u-sales', name: 'Ona Moloane' }, submittedAt: null, submittedById: null, submittedBy: null,
   approvedAt: null, approvedBy: null, returnedAt: null, returnedBy: null, returnReason: null, cancelledAt: null, cancelledBy: null, cancellationReason: null,
-  labour: [
-    { id: 'll-1', lineNo: 1, labourRateId: 'lr-welder', role: 'Welder', hours: '10', hourlyRate: '400', total: '4000.00' },
-    { id: 'll-2', lineNo: 2, labourRateId: 'lr-bm', role: 'Boiler Maker', hours: '5.5', hourlyRate: '300', total: '1650.00' },
-  ],
-  materials: [{
-    rfqId: 'rfq-1', rfqNumber: 'AFRI-02A-1469-02-01', rfqStatus: 'SENT', description: 'Pump parts', supplierId: 's-2', supplier: 'EMV', currency: 'ZAR',
-    quoteTotal: '9000.00', amount: '9000.00', unpricedLines: 0, recommendedSupplier: { id: 's-1', name: 'Local Steel' }, recommended: false, unusable: false,
+  equipmentLines: [{
+    id: 'e-1', lineNo: 1, equipment: 'Main Piston Pump', details: null, quantity: 1,
+    labour: [
+      { id: 'll-1', lineNo: 1, labourRateId: 'lr-welder', role: 'Welder', hours: '10', hourlyRate: '400', total: '4000.00' },
+      { id: 'll-2', lineNo: 2, labourRateId: 'lr-bm', role: 'Boiler Maker', hours: '5.5', hourlyRate: '300', total: '1650.00' },
+    ],
+    materials: [{
+      rfqId: 'rfq-1', rfqNumber: 'AFRI-02A-1469-02-01', rfqStatus: 'SENT', description: 'Pump parts', supplierId: 's-2', supplier: 'EMV', currency: 'ZAR',
+      quoteTotal: '9000.00', amount: '9000.00', unpricedLines: 0, recommendedSupplier: { id: 's-1', name: 'Local Steel' }, recommended: false, unusable: false,
+    }],
+    otherCosts: [],
+    totals: { quantity: 1, labour: '5650.00', material: '9000.00', other: '0.00', unitCost: '14650.00', unitMarkup: '5860.00', unitPrice: '20510.00', total: '20510.00' },
   }],
   totals: TOTALS,
+};
+/** The pump and, as AFRI-02A-1094-04-1 has it, its installation: two fitters' days and their accommodation, for 2 sites. */
+const TWO_LINES = {
+  ...RFQ,
+  equipmentLines: [
+    RFQ.equipmentLines[0]!,
+    {
+      id: 'e-2', lineNo: 2, equipment: 'Installation', details: 'Accommodation & LOA\nInstallation Labour', quantity: 2,
+      labour: [{ id: 'll-3', lineNo: 3, labourRateId: 'lr-welder', role: 'Welder', hours: '8', hourlyRate: '400', total: '3200.00' }],
+      materials: [],
+      otherCosts: [{ id: 'oc-1', lineNo: 1, description: 'Accommodation', quantity: '2', unitCost: '1200', total: '2400.00' }],
+      totals: { quantity: 2, labour: '3200.00', material: '0.00', other: '2400.00', unitCost: '5600.00', unitMarkup: '2240.00', unitPrice: '7840.00', total: '15680.00' },
+    },
+  ],
+  totals: { ...TOTALS, labour: '12050.00', other: '4800.00', cost: '25850.00', markup: '10340.00', equipment: '36190.00', totalExVat: '36690.00', vat: '5503.50', totalIncVat: '42193.50' },
 };
 const PENDING = { ...RFQ, status: 'PENDING_APPROVAL', submittedAt: '2026-11-06T08:00:00.000Z', submittedById: 'u-sales', submittedBy: { id: 'u-sales', name: 'Ona Moloane' }, vatRate: '15' };
 const OPTIONS = [
@@ -123,8 +143,8 @@ describe('Sales RFQ list', () => {
 describe('Sales RFQ page', () => {
   it('shows the costing: labour, the orders, the markup and the price to the client', async () => {
     renderAt('/sales-rfqs/r-1');
-    expect(await screen.findByRole('table', { name: 'Labour' })).toHaveTextContent(/Welder.*10.*400.*4.000/);
-    expect(screen.getByRole('table', { name: 'Material quotes' })).toHaveTextContent(/AFRI-02A-1469-02-01.*EMV.*Procurement recommends Local Steel.*9.000/);
+    expect(await screen.findByRole('table', { name: 'Labour on line 1' })).toHaveTextContent(/Welder.*10.*400.*4.000/);
+    expect(screen.getByRole('table', { name: 'Material quotes on line 1' })).toHaveTextContent(/AFRI-02A-1469-02-01.*EMV.*Procurement recommends Local Steel.*9.000/);
     // The Director sees that Sales didn't go with Procurement's recommendation.
     expect(screen.getByText(/AFRI-02A-1469-02-01: EMV chosen, Local Steel recommended/)).toBeInTheDocument();
     const price = screen.getByLabelText('Price');
@@ -133,6 +153,20 @@ describe('Sales RFQ page', () => {
     expect(price).toHaveTextContent(/Main Piston Pump.*20.510/);
     expect(price).toHaveTextContent(/Total incl\. VAT.*24.161,50|Total incl\. VAT.*24.161\.50/);
     expect(screen.getByText('Sent back: Too low')).toBeInTheDocument();
+  });
+
+  it('shows each equipment line with what it covers, its costs for one unit and its price times its quantity', async () => {
+    current = TWO_LINES;
+    renderAt('/sales-rfqs/r-1');
+    const install = await screen.findByRole('region', { name: 'Equipment line 2' });
+    expect(within(install).getByText('2. Installation')).toBeInTheDocument();
+    expect(install).toHaveTextContent(/2 × R\s?7.840,00 = R\s?15.680,00|2 × R\s?7.840\.00 = R\s?15.680\.00/);
+    expect(install).toHaveTextContent('The costs below are for one unit.');
+    expect(within(install).getByRole('table', { name: 'Other costs on line 2' })).toHaveTextContent(/Accommodation.*2.*1.200.*2.400/);
+    expect(within(install).getByLabelText('Price of line 2')).toHaveTextContent(/Unit price.*7.840.*Total \(2\).*15.680/);
+    const price = screen.getByLabelText('Price');
+    expect(price).toHaveTextContent(/Other costs.*4.800/);
+    expect(price).toHaveTextContent(/2 equipment lines.*36.190/);
   });
 
   it('lets Sales submit a draft, saying what goes to the Director', async () => {
@@ -165,14 +199,14 @@ describe('Sales RFQ page', () => {
     auth.roles = ['ADMIN'];
     current = PENDING;
     renderAt('/sales-rfqs/r-1');
-    expect(await screen.findByRole('table', { name: 'Labour' })).toBeInTheDocument();
+    expect(await screen.findByRole('table', { name: 'Labour on line 1' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
   it('shows no banner while it waits for the Director: the status says so', async () => {
     current = PENDING;
     renderAt('/sales-rfqs/r-1');
-    await screen.findByRole('table', { name: 'Labour' });
+    await screen.findByRole('table', { name: 'Labour on line 1' });
     expect(screen.getAllByText('Waiting for approval').length).toBeGreaterThan(0);
     expect(screen.queryByText('Waiting for the Director')).not.toBeInTheDocument();
   });
@@ -214,11 +248,67 @@ describe('Sales RFQ form', () => {
     expect(preview).toHaveTextContent(/Cost.*12.500/);
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/sales-rfqs', expect.objectContaining({
-      projectNumber: 'AFRI-1469', equipment: 'Main Piston Pump', clientName: 'Northam Platinum',
-      labour: [{ labourRateId: 'lr-welder', hours: 10 }], materials: [{ rfqId: 'rfq-1', supplierId: 's-2' }], markupPercent: 40, deliveryPrice: 0,
+      projectNumber: 'AFRI-1469', clientName: 'Northam Platinum', markupPercent: 40, deliveryPrice: 0,
+      equipmentLines: [{
+        equipment: 'Main Piston Pump', details: null, quantity: 1,
+        labour: [{ labourRateId: 'lr-welder', hours: 10 }], materials: [{ rfqId: 'rfq-1', supplierId: 's-2' }], otherCosts: [],
+      }],
     })));
     // Left blank on a new one, the server fills in the usual conditions.
     expect(mockPost.mock.calls[0]![1]).not.toHaveProperty('paymentTerms');
+  });
+
+  it('adds another equipment line, priced the same way, with its own quantity and other costs; a quote counts on one line only', async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    await screen.findByRole('option', { name: 'Welder' });
+    fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'Main Piston Pump' } });
+    fireEvent.click(await screen.findByLabelText(/AFRI-02A-1469-02-01/));
+    fireEvent.click(screen.getByRole('button', { name: 'Add equipment line' }));
+
+    const second = screen.getByRole('group', { name: 'Equipment line 2' });
+    fireEvent.change(within(second).getByLabelText('Equipment'), { target: { value: 'Installation' } });
+    fireEvent.change(within(second).getByLabelText('What it covers'), { target: { value: 'Accommodation & LOA\nInstallation Labour' } });
+    fireEvent.change(within(second).getByLabelText('Qty'), { target: { value: '2' } });
+    expect(second).toHaveTextContent(/for one unit; the line.s price is that times 2/);
+    fireEvent.change(within(second).getByLabelText('Line 2 labour 1 role'), { target: { value: 'lr-welder' } });
+    fireEvent.change(within(second).getByLabelText('Line 2 labour 1 hours'), { target: { value: '8' } });
+    fireEvent.click(within(second).getByRole('button', { name: 'Add other cost to equipment line 2' }));
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 description'), { target: { value: 'Accommodation' } });
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 quantity'), { target: { value: '2' } });
+    fireEvent.change(within(second).getByLabelText('Line 2 other cost 1 unit cost'), { target: { value: '1200' } });
+    expect(within(second).getByLabelText('Line 2 other cost 1 total')).toHaveTextContent(/2.400/);
+    // The RFQ already counted on line 1 can't be counted again here.
+    const rfqOnSecond = within(second).getByLabelText(/AFRI-02A-1469-02-01/);
+    expect(rfqOnSecond).toBeDisabled();
+    expect(within(second).getByText('Counted on equipment line 1')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Markup %'), { target: { value: '40' } });
+    // 3 200 + 2 400 = 5 600 a unit, × 1.4 = 7 840, × 2 = 15 680; the pump 9 000 × 1.4 = 12 600.
+    expect(within(second).getByLabelText('Price of equipment line 2')).toHaveTextContent(/Unit price.*7.840.*Total.*15.680/);
+    const preview = screen.getByLabelText('Price as typed');
+    expect(preview).toHaveTextContent(/2\. Installation × 2.*15.680/);
+    expect(preview).toHaveTextContent(/Equipment lines.*28.280/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect((mockPost.mock.calls[0]![1] as { equipmentLines: unknown[] }).equipmentLines).toEqual([
+      { equipment: 'Main Piston Pump', details: null, quantity: 1, labour: [], materials: [{ rfqId: 'rfq-1', supplierId: 's-1' }], otherCosts: [] },
+      {
+        equipment: 'Installation', details: 'Accommodation & LOA\nInstallation Labour', quantity: 2,
+        labour: [{ labourRateId: 'lr-welder', hours: 8 }], materials: [], otherCosts: [{ description: 'Accommodation', quantity: 2, unitCost: 1200 }],
+      },
+    ]);
+  });
+
+  it('refuses a quantity that is not a whole number, naming the line', async () => {
+    renderAt('/sales-rfqs/new');
+    fireEvent.change(await screen.findByLabelText('Project'), { target: { value: 'AFRI-1469' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add equipment line' }));
+    fireEvent.change(within(screen.getByRole('group', { name: 'Equipment line 2' })).getByLabelText('Qty'), { target: { value: '1.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Equipment line 2: the quantity is a whole number, 1 or more.')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 
   it('refuses hours finer than 2 decimal places and a role with no hours before saving', async () => {

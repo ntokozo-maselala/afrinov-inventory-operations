@@ -1,9 +1,12 @@
 // The Sales RFQ form, the "Costing: Sales Rep." step of the RFQ Process Flow:
-// what is being priced and for whom, the production labour (each role's hours
-// at its listed rate), the material (one supplier's quote on each of the
-// project's Procurement RFQs, starting on the one Procurement recommends), the
-// markup and delivery, and the quotation's conditions. The price is shown as it is typed; the server works out the
-// figures that are kept (sales-costing.ts).
+// what the job is and for whom, its equipment lines, the markup and delivery,
+// and the quotation's conditions. Each equipment line is priced the same way,
+// for one unit: the production labour (each role's hours at its listed rate),
+// the material (one supplier's quote on each of the project's Procurement RFQs,
+// starting on the one Procurement recommends; an RFQ counts on one line only)
+// and other costs (accommodation, LOA), times the line's quantity. The price is
+// shown as it is typed; the server works out the figures that are kept
+// (sales-costing.ts).
 //
 // New and Edit share it; only a draft is edited. Saving opens the Sales RFQ,
 // where it is submitted to the Director.
@@ -23,19 +26,54 @@ import { api, type ApiError } from '../api/client';
 import { usePermissions } from '../hooks/usePermissions';
 import { formatMoney } from '../lib/poMoney';
 import { Badge } from '../components/Badge';
-import { amountDecimals as decimals, costingPreview, defaultQuote, parseAmount, type LabourRate, type SalesQuoteOption, type SalesRfq } from '../lib/salesRfq';
+import {
+  amountDecimals as decimals, costingPreview, defaultQuote, parseAmount,
+  type LabourRate, type PreviewLine, type SalesEquipmentLine, type SalesQuoteOption, type SalesRfq,
+} from '../lib/salesRfq';
 
 const RFQS = { label: 'Sales RFQs', to: '/sales-rfqs' };
 
+/** At most this many equipment lines, as the server allows. */
+const MAX_LINES = 20;
+
 interface ProjectOpt { projectNumber: string; name?: string | null; status?: string; client?: string | null }
 
-/** A labour line being typed. `key` stays with the line as others are added or removed. */
+/** Rows being typed. `key` stays with a row as others are added, moved or removed. */
 interface DraftLabour { key: number; labourRateId: string; hours: string }
+interface DraftOther { key: number; description: string; quantity: string; unitCost: string }
+interface DraftLine {
+  key: number;
+  equipment: string;
+  details: string;
+  quantity: string;
+  labour: DraftLabour[];
+  /** The quote counted on each Procurement RFQ ticked on this line: its supplier, by RFQ. */
+  picks: Record<string, string>;
+  other: DraftOther[];
+}
+
 let nextKey = 1;
 const blankLabour = (): DraftLabour => ({ key: nextKey++, labourRateId: '', hours: '' });
+const blankOther = (): DraftOther => ({ key: nextKey++, description: '', quantity: '1', unitCost: '' });
+const blankLine = (): DraftLine => ({ key: nextKey++, equipment: '', details: '', quantity: '1', labour: [blankLabour()], picks: {}, other: [] });
 
-/** The quotes a saved draft counts, by Procurement RFQ. */
-const keptPicks = (rfq?: SalesRfq): Record<string, string> => Object.fromEntries((rfq?.materials ?? []).map((m) => [m.rfqId, m.supplierId]));
+/** The quotes a saved line counts, by Procurement RFQ. */
+const keptPicks = (line?: Pick<SalesEquipmentLine, 'materials'>): Record<string, string> => Object.fromEntries((line?.materials ?? []).map((m) => [m.rfqId, m.supplierId]));
+
+const fromSaved = (l: SalesEquipmentLine): DraftLine => ({
+  key: nextKey++,
+  equipment: l.equipment ?? '',
+  details: l.details ?? '',
+  quantity: String(l.quantity),
+  labour: l.labour.length ? l.labour.map((x) => ({ key: nextKey++, labourRateId: x.labourRateId, hours: String(Number(x.hours)) })) : [blankLabour()],
+  picks: keptPicks(l),
+  other: l.otherCosts.map((c) => ({ key: nextKey++, description: c.description, quantity: String(Number(c.quantity)), unitCost: String(Number(c.unitCost)) })),
+});
+
+const typedLabourOf = (l: DraftLine) => l.labour.filter((x) => x.labourRateId || x.hours.trim());
+const typedOtherOf = (l: DraftLine) => l.other.filter((c) => c.description.trim() || c.unitCost.trim());
+/** A whole number, 1 or more; null otherwise. */
+const wholeQuantity = (text: string) => (/^\s*\d+\s*$/.test(text) && Number(text) >= 1 && Number(text) <= 100000 ? Number(text) : null);
 
 export function NewSalesRfq() {
   if (!usePermissions().hasPermission('sales:manage')) {
@@ -74,18 +112,13 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
   const vatReq = useApi<Record<string, unknown>>(rfq ? null : '/settings/values?keys=purchaseOrders.vatRate');
 
   const [project, setProject] = useState(rfq?.projectNumber ?? '');
-  const [equipment, setEquipment] = useState(rfq?.equipment ?? '');
   const [description, setDescription] = useState(rfq?.description ?? '');
   const [clientName, setClientName] = useState(rfq?.clientName ?? '');
   const [clientAddress, setClientAddress] = useState(rfq?.clientAddress ?? '');
   const [contactName, setContactName] = useState(rfq?.contactName ?? '');
   const [clientReference, setClientReference] = useState(rfq?.clientReference ?? '');
   const [closingDate, setClosingDate] = useState(rfq?.closingDate?.slice(0, 10) ?? '');
-  const [labour, setLabour] = useState<DraftLabour[]>(() => (rfq?.labour.length
-    ? rfq.labour.map((l) => ({ key: nextKey++, labourRateId: l.labourRateId, hours: String(Number(l.hours)) }))
-    : [blankLabour()]));
-  /** The quote counted on each Procurement RFQ ticked: its supplier, by RFQ. */
-  const [picks, setPicks] = useState<Record<string, string>>(() => keptPicks(rfq));
+  const [lines, setLines] = useState<DraftLine[]>(() => (rfq?.equipmentLines.length ? rfq.equipmentLines.map(fromSaved) : [blankLine()]));
   const [markup, setMarkup] = useState(rfq?.markupPercent !== null && rfq?.markupPercent !== undefined ? String(Number(rfq.markupPercent)) : '');
   const [delivery, setDelivery] = useState(rfq ? String(Number(rfq.deliveryPrice)) : '0');
   const [paymentTerms, setPaymentTerms] = useState(rfq?.paymentTerms ?? '');
@@ -103,65 +136,91 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
   const projects = (projectsReq.data ?? []).filter((p) => p.status !== 'COMPLETED' && p.status !== 'CANCELLED');
   const projectOptions = project && !projects.some((p) => p.projectNumber === project) ? [...projects, { projectNumber: project, name: null }] : projects;
   const rates = ratesReq.data ?? [];
-  // A role made inactive since it was put on this draft stays offered on its line.
-  const offered = (current: string) => rates.filter((r) => r.active || r.id === current);
-  const rateOf = (id: string) => rates.find((r) => r.id === id) ?? null;
   const options = quotesReq.data ?? [];
-  // A chosen quote whose RFQ is no longer offered (since cancelled), at its last amount.
-  const missing = rfq?.materials.filter((m) => picks[m.rfqId] && !options.some((o) => o.id === m.rfqId)) ?? [];
-  const pickedQuote = (o: SalesQuoteOption) => o.quotes.find((q) => q.supplierId === picks[o.id]) ?? null;
+  const keptLabour = rfq?.equipmentLines.flatMap((l) => l.labour) ?? [];
+  const rateOf = (id: string) => rates.find((r) => r.id === id) ?? null;
+  /** The rate a labour row is priced at: today's, or the one it was saved at for a role since made inactive. */
+  const hourlyOf = (labourRateId: string) => {
+    const rate = rateOf(labourRateId);
+    const kept = keptLabour.find((x) => x.labourRateId === labourRateId);
+    return rate && (rate.active || !kept) ? Number(rate.hourlyRate) : kept ? Number(kept.hourlyRate) : null;
+  };
+  /** The equipment line an RFQ's quote is counted on, if any. */
+  const lineCounting = (rfqId: string) => lines.findIndex((l) => !!l.picks[rfqId]);
 
   function chooseProject(next: string) {
     // Quotes are the project's: another project's can't stay chosen.
-    if (next !== project) setPicks(rfq && next === rfq.projectNumber ? keptPicks(rfq) : {});
+    if (next !== project) {
+      setLines((ls) => ls.map((l, i) => ({ ...l, picks: rfq && next === rfq.projectNumber ? keptPicks(rfq.equipmentLines[i]) : {} })));
+    }
     setProject(next);
     if (!rfq && !clientName.trim()) {
       const client = projects.find((p) => p.projectNumber === next)?.client;
       if (client) setClientName(client);
     }
   }
-  function updateLabour(key: number, patch: Partial<DraftLabour>) { setLabour((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l))); }
-  /** Ticking an RFQ starts from Procurement's recommended quote, or the lowest. */
-  function toggleRfq(o: Pick<SalesQuoteOption, 'id' | 'quotes'>) {
-    setPicks((p) => {
-      const next = { ...p };
-      if (next[o.id]) delete next[o.id];
-      else {
-        const start = defaultQuote(o);
-        if (start) next[o.id] = start.supplierId;
-      }
+  const updateLine = (key: number, patch: (l: DraftLine) => Partial<DraftLine>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch(l) } : l)));
+  function moveLine(key: number, by: -1 | 1) {
+    setLines((ls) => {
+      const i = ls.findIndex((l) => l.key === key);
+      const j = i + by;
+      if (i < 0 || j < 0 || j >= ls.length) return ls;
+      const next = [...ls];
+      [next[i], next[j]] = [next[j]!, next[i]!];
       return next;
     });
   }
-  function untick(rfqId: string) { setPicks((p) => { const next = { ...p }; delete next[rfqId]; return next; }); }
 
   const vatRate = Number(rfq?.totals.vatRate ?? vatReq.data?.['purchaseOrders.vatRate'] ?? 15);
-  const typedLabour = labour.filter((l) => l.labourRateId || l.hours.trim());
-  const preview = costingPreview({
-    labour: typedLabour.flatMap((l) => {
-      const hours = parseAmount(l.hours);
-      const rate = rateOf(l.labourRateId);
-      const kept = rfq?.labour.find((x) => x.labourRateId === l.labourRateId);
-      const hourly = rate && (rate.active || !kept) ? Number(rate.hourlyRate) : kept ? Number(kept.hourlyRate) : null;
+  /** A saved quote whose RFQ is no longer offered (since cancelled), at its last amount. */
+  const missingOn = (line: DraftLine) => (rfq?.equipmentLines.flatMap((l) => l.materials) ?? []).filter((m) => line.picks[m.rfqId] && !options.some((o) => o.id === m.rfqId));
+  const previewLine = (l: DraftLine): PreviewLine => ({
+    quantity: wholeQuantity(l.quantity) ?? 1,
+    labour: typedLabourOf(l).flatMap((x) => {
+      const hours = parseAmount(x.hours);
+      const hourly = hourlyOf(x.labourRateId);
       return hours !== null && hourly !== null ? [{ hours, hourlyRate: hourly }] : [];
     }),
     materials: [
-      ...options.flatMap((o) => { const q = pickedQuote(o); return q?.amount ? [Number(q.amount)] : []; }),
-      ...missing.map((m) => Number(m.amount)),
+      ...options.flatMap((o) => {
+        const q = o.quotes.find((x) => x.supplierId === l.picks[o.id]);
+        return q?.amount ? [Number(q.amount)] : [];
+      }),
+      ...missingOn(l).map((m) => Number(m.amount)),
     ],
-    markupPercent: parseAmount(markup),
-    deliveryPrice: parseAmount(delivery) ?? 0,
-    vatRate,
+    otherCosts: typedOtherOf(l).flatMap((c) => {
+      const quantity = parseAmount(c.quantity);
+      const unitCost = parseAmount(c.unitCost);
+      return quantity !== null && unitCost !== null ? [{ quantity, unitCost }] : [];
+    }),
   });
+  const preview = costingPreview({ lines: lines.map(previewLine), markupPercent: parseAmount(markup), deliveryPrice: parseAmount(delivery) ?? 0, vatRate });
+
+  /** What is wrong with the lines as typed, in words naming the line; null when they can be saved. */
+  function linesProblem(): string | null {
+    for (const [i, l] of lines.entries()) {
+      const on = lines.length > 1 ? `Equipment line ${i + 1}: ` : '';
+      if (wholeQuantity(l.quantity) === null) return `${on}the quantity is a whole number, 1 or more.`;
+      const badLabour = typedLabourOf(l).findIndex((x) => {
+        const h = parseAmount(x.hours);
+        return !x.labourRateId || h === null || h <= 0 || decimals(x.hours) > 2;
+      });
+      if (badLabour >= 0) return `${on}labour line ${badLabour + 1} needs a role and its hours, more than 0, to at most 2 decimal places.`;
+      const badOther = typedOtherOf(l).findIndex((c) => {
+        const q = parseAmount(c.quantity);
+        const u = parseAmount(c.unitCost);
+        return !c.description.trim() || q === null || q <= 0 || decimals(c.quantity) > 2 || u === null || u <= 0 || decimals(c.unitCost) > 2;
+      });
+      if (badOther >= 0) return `${on}other cost ${badOther + 1} needs a description, a quantity more than 0 and a unit cost in rand and cents.`;
+    }
+    return null;
+  }
 
   async function save() {
     setValidation(null);
     if (!project) { setValidation('Choose the project this Sales RFQ is for.'); return; }
-    const bad = typedLabour.findIndex((l) => {
-      const h = parseAmount(l.hours);
-      return !l.labourRateId || h === null || h <= 0 || decimals(l.hours) > 2;
-    });
-    if (bad >= 0) { setValidation(`Labour line ${bad + 1} needs a role and its hours, more than 0, to at most 2 decimal places.`); return; }
+    const problem = linesProblem();
+    if (problem) { setValidation(problem.charAt(0).toUpperCase() + problem.slice(1)); return; }
     const markupValue = markup.trim() ? parseAmount(markup) : null;
     if (markup.trim() && (markupValue === null || markupValue > 1000 || decimals(markup) > 2)) { setValidation('The markup is a percentage from 0 to 1000, to at most 2 decimal places.'); return; }
     const deliveryValue = delivery.trim() ? parseAmount(delivery) : 0;
@@ -169,7 +228,6 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
     const text = (v: string) => v.trim() || null;
     const body = {
       projectNumber: project,
-      equipment: text(equipment),
       // Left blank on a new one, the server takes the project's name.
       description: description.trim() || (rfq ? null : undefined),
       clientName: text(clientName),
@@ -177,8 +235,14 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
       contactName: text(contactName),
       clientReference: text(clientReference),
       closingDate: closingDate || null,
-      labour: typedLabour.map((l) => ({ labourRateId: l.labourRateId, hours: parseAmount(l.hours)! })),
-      materials: Object.entries(picks).map(([rfqId, supplierId]) => ({ rfqId, supplierId })),
+      equipmentLines: lines.map((l) => ({
+        equipment: text(l.equipment),
+        details: text(l.details),
+        quantity: wholeQuantity(l.quantity)!,
+        labour: typedLabourOf(l).map((x) => ({ labourRateId: x.labourRateId, hours: parseAmount(x.hours)! })),
+        materials: Object.entries(l.picks).map(([rfqId, supplierId]) => ({ rfqId, supplierId })),
+        otherCosts: typedOtherOf(l).map((c) => ({ description: c.description.trim(), quantity: parseAmount(c.quantity)!, unitCost: parseAmount(c.unitCost)! })),
+      })),
       markupPercent: markupValue,
       deliveryPrice: deliveryValue,
       // Left blank on a new one, the server fills in the usual wording.
@@ -210,13 +274,13 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
     <div>
       <PageHeader
         title={rfq ? `Edit ${rfq.number}` : 'New Sales RFQ'}
-        description="Price one piece of equipment for the client. Save it as a draft, then submit it to the Director from its page."
+        description="Price the job for the client, one equipment line at a time. Save it as a draft, then submit it to the Director from its page."
         breadcrumb={rfq ? [RFQS, { label: rfq.number, to: back }, { label: 'Edit' }] : [RFQS, { label: 'New' }]}
       />
       <form onSubmit={(e) => { e.preventDefault(); void save(); }} className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start" noValidate>
         <div className="xl:col-span-2 surface-card p-5 space-y-6">
           <fieldset className="space-y-3">
-            <legend className="text-eyebrow mb-1">What is being priced</legend>
+            <legend className="text-eyebrow mb-1">The job</legend>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Project" htmlFor="srfq-project" required help="Add it under Sales → Projects if it isn't listed.">
                 <Select id="srfq-project" value={project} onChange={(e) => chooseProject(e.target.value)}>
@@ -224,118 +288,57 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
                   {projectOptions.map((p) => <option key={p.projectNumber} value={p.projectNumber}>{p.projectNumber}{p.name ? ` — ${p.name}` : ''}</option>)}
                 </Select>
               </Field>
-              <Field label="Equipment" htmlFor="srfq-equipment" help="The quotation's one line, e.g. Main Piston Pump. Needed to submit.">
-                <Input id="srfq-equipment" maxLength={200} value={equipment} onChange={(e) => setEquipment(e.target.value)} />
-              </Field>
-              <Field label="Description" htmlFor="srfq-description" help={rfq ? 'For Sales and the Director; not on the quotation.' : "Left blank, it takes the project's name."}>
-                <Input id="srfq-description" maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
-              </Field>
               <Field label="Price due" htmlFor="srfq-closing" help="When the client wants the price by.">
                 <Input id="srfq-closing" type="date" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} />
               </Field>
+              <Field label="Description" htmlFor="srfq-description" help={rfq ? 'For Sales and the Director; not on the quotation.' : "For Sales and the Director; not on the quotation. Left blank, it takes the project's name."}>
+                <Input id="srfq-description" maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
+              </Field>
             </div>
           </fieldset>
 
-          <fieldset>
-            <div className="flex items-center justify-between mb-2">
-              <legend className="text-eyebrow">Production labour</legend>
-              <Button size="sm" variant="secondary" type="button" onClick={() => setLabour((l) => [...l, blankLabour()])} leadingIcon={<Icon.Plus size={12} />}>Add role</Button>
+          <section className="space-y-4" aria-label="Equipment lines">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-eyebrow">Equipment lines</h2>
+                <p className="text-meta">Each is a line on the quotation, priced from its own labour, quotes and other costs.</p>
+              </div>
             </div>
-            <div className="hidden md:grid grid-cols-[minmax(0,1fr)_7rem_8rem_8rem_2.5rem] gap-2 text-meta mb-1">
-              <span>Role</span><span>Hours</span><span className="text-right">Rate / hour</span><span className="text-right">Total</span><span />
-            </div>
-            <div className="space-y-2">
-              {labour.map((l, i) => {
-                const rate = rateOf(l.labourRateId);
-                const kept = rfq?.labour.find((x) => x.labourRateId === l.labourRateId);
-                const hourly = rate && (rate.active || !kept) ? Number(rate.hourlyRate) : kept ? Number(kept.hourlyRate) : null;
-                const hours = parseAmount(l.hours);
-                return (
-                  <div key={l.key} className="grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem_2.5rem] gap-2 items-start">
-                    <div className="col-span-12 md:col-span-1">
-                      <Select value={l.labourRateId} onChange={(e) => updateLabour(l.key, { labourRateId: e.target.value })} aria-label={`Labour line ${i + 1} role`}>
-                        <option value="">{ratesReq.loading ? 'Loading roles…' : 'Choose a role…'}</option>
-                        {offered(l.labourRateId).map((r) => <option key={r.id} value={r.id}>{r.role}{r.active ? '' : ' (no longer used)'}</option>)}
-                      </Select>
-                    </div>
-                    <div className="col-span-4 md:col-span-1">
-                      <Input inputMode="decimal" autoComplete="off" className="font-mono tabular-nums" placeholder="Hours" value={l.hours} onChange={(e) => updateLabour(l.key, { hours: e.target.value })} aria-label={`Labour line ${i + 1} hours`} />
-                    </div>
-                    <output className="col-span-3 md:col-span-1 py-2 text-sm text-right font-mono text-surface-600">{hourly === null ? '—' : formatMoney(hourly.toFixed(2))}</output>
-                    <output className="col-span-3 md:col-span-1 py-2 text-sm text-right font-mono" aria-label={`Labour line ${i + 1} total`}>{hourly === null || hours === null ? '—' : formatMoney((Math.round(hours * hourly * 100) / 100).toFixed(2))}</output>
-                    <div className="col-span-2 md:col-span-1 flex md:justify-center">
-                      <Button size="sm" variant="ghost" type="button" onClick={() => setLabour((ls) => (ls.length === 1 ? [blankLabour()] : ls.filter((x) => x.key !== l.key)))} aria-label={`Remove labour line ${i + 1}`} leadingIcon={<Icon.Trash size={14} />} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-meta mt-2">Priced at each role&rsquo;s selling rate on Production → Labour rates, as it is when you save.</p>
-          </fieldset>
-
-          <fieldset className="space-y-2">
-            <legend className="text-eyebrow mb-1">Material</legend>
-            <p className="text-meta">The quotes Procurement has on the project&rsquo;s RFQs. Tick each RFQ to count and choose one supplier&rsquo;s whole quote; it starts on the one Procurement recommends. Totals excl. VAT.</p>
-            {!project && <p className="text-meta italic">Choose the project first.</p>}
-            {project && quotesReq.error && <Alert tone="warning" title="The quotes could not be loaded">Reload the page to try again.</Alert>}
-            {project && !quotesReq.loading && !quotesReq.error && options.length === 0 && missing.length === 0 && (
-              <p className="text-meta italic">No requests for quotation sent for {project} yet. Procurement asks suppliers for prices; labour can be priced meanwhile.</p>
-            )}
-            <ul className="space-y-2" aria-label="Procurement quotes">
-              {options.map((o) => {
-                const others = o.salesRfqs.filter((s) => s.id !== rfq?.id);
-                const picked = picks[o.id];
-                const usable = o.quotes.some((q) => q.amount !== null);
-                return (
-                  <li key={o.id} className="rounded border border-surface-200">
-                    <div className="flex items-start gap-3 px-3 py-2">
-                      <input type="checkbox" id={`srfq-rfq-${o.id}`} className="mt-1 h-4 w-4" checked={!!picked} disabled={!picked && !usable} onChange={() => toggleRfq(o)} />
-                      <label htmlFor={`srfq-rfq-${o.id}`} className="flex-1 min-w-0 text-sm">
-                        <span className="text-mono">{o.number}</span>{o.description ? ` · ${o.description}` : ''}
-                        {o.quotes.length === 0 && <span className="block text-meta">No quotes recorded yet.</span>}
-                        {others.length > 0 && <span className="block text-meta text-warning-700">Also counted on {others.map((s) => s.number).join(', ')}</span>}
-                      </label>
-                      <span className="font-mono text-sm">{formatMoney(pickedQuote(o)?.amount ?? null)}</span>
-                    </div>
-                    {picked && (
-                      <fieldset className="border-t border-surface-200 px-3 py-2 pl-10 space-y-1">
-                        <legend className="sr-only">Quote counted on {o.number}</legend>
-                        {o.quotes.map((q) => (
-                          <label key={q.supplierId} className="flex items-start gap-2 text-sm">
-                            <input type="radio" name={`srfq-quote-${o.id}`} className="mt-1" checked={picked === q.supplierId} disabled={q.amount === null}
-                              onChange={() => setPicks((p) => ({ ...p, [o.id]: q.supplierId }))} aria-label={`${q.supplier} on ${o.number}`} />
-                            <span className="flex-1 min-w-0">
-                              {q.supplier}
-                              {q.recommended && <Badge tone="success" className="ml-2">Recommended</Badge>}
-                              {q.currency !== 'ZAR' && <span className="block text-meta">{formatMoney(q.total, q.currency)}{q.amount === null ? `: no exchange rate for ${q.currency} yet` : ', in rand at the exchange rate'}</span>}
-                              {q.unpricedLines > 0 && <span className="block text-meta text-warning-700">{q.unpricedLines} line{q.unpricedLines === 1 ? '' : 's'} not priced</span>}
-                            </span>
-                            <span className="font-mono">{formatMoney(q.amount)}</span>
-                          </label>
-                        ))}
-                        {o.recommendedSupplierId === null && <p className="text-meta">Procurement hasn&rsquo;t recommended a quote on this RFQ.</p>}
-                      </fieldset>
-                    )}
-                  </li>
-                );
-              })}
-              {missing.map((m) => (
-                <li key={m.rfqId} className="flex items-start gap-3 rounded border border-surface-200 px-3 py-2">
-                  <input type="checkbox" id={`srfq-rfq-${m.rfqId}`} className="mt-1 h-4 w-4" checked onChange={() => untick(m.rfqId)} />
-                  <label htmlFor={`srfq-rfq-${m.rfqId}`} className="flex-1 text-sm"><span className="text-mono">{m.rfqNumber}</span> · {m.supplier}<span className="block text-meta text-danger-700">No longer out with suppliers: untick it to save.</span></label>
-                  <span className="font-mono text-sm">{formatMoney(m.amount)}</span>
-                </li>
-              ))}
-            </ul>
-          </fieldset>
+            {lines.map((line, i) => (
+              <EquipmentLineCard
+                key={line.key}
+                line={line}
+                index={i}
+                count={lines.length}
+                project={project}
+                rates={rates}
+                ratesLoading={ratesReq.loading}
+                options={options}
+                optionsLoading={quotesReq.loading}
+                optionsError={!!quotesReq.error}
+                missing={missingOn(line)}
+                otherSalesRfqId={rfq?.id}
+                hourlyOf={hourlyOf}
+                lineCounting={lineCounting}
+                priced={preview.lines[i]!}
+                onChange={(patch) => updateLine(line.key, patch)}
+                onMove={(by) => moveLine(line.key, by)}
+                onRemove={() => setLines((ls) => ls.filter((l) => l.key !== line.key))}
+              />
+            ))}
+            <Button
+              variant="secondary" type="button" disabled={lines.length >= MAX_LINES}
+              onClick={() => setLines((ls) => [...ls, blankLine()])} leadingIcon={<Icon.Plus size={12} />}
+            >Add equipment line</Button>
+          </section>
 
           <fieldset className="space-y-3">
             <legend className="text-eyebrow mb-1">Price</legend>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Markup %" htmlFor="srfq-markup" help="On labour and material together, e.g. 40 for × 1.4. Needed to submit.">
+              <Field label="Markup %" htmlFor="srfq-markup" help="On every equipment line, e.g. 40 for × 1.4. Needed to submit.">
                 <Input id="srfq-markup" inputMode="decimal" autoComplete="off" className="font-mono" value={markup} onChange={(e) => setMarkup(e.target.value)} />
               </Field>
-              <Field label="Delivery (R, excl. VAT)" htmlFor="srfq-delivery" help="Its own line on the quotation, with no markup.">
+              <Field label="Delivery (R, excl. VAT)" htmlFor="srfq-delivery" help="Its own line on the quotation, with no markup. Left at R0, the quotation has no Delivery line.">
                 <Input id="srfq-delivery" inputMode="decimal" autoComplete="off" className="font-mono" value={delivery} onChange={(e) => setDelivery(e.target.value)} />
               </Field>
             </div>
@@ -398,20 +401,22 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
         <aside className="surface-card p-5 space-y-3 xl:sticky xl:top-4" aria-label="Price as typed">
           <h2 className="text-h3 text-surface-900">Price</h2>
           <dl className="text-sm space-y-2">
-            {[
+            {([
               ['Labour', preview.labour],
               ['Material', preview.material],
+              ...(preview.other > 0 ? [['Other costs', preview.other]] : []),
               ['Cost', preview.cost, true],
               ['Markup', preview.markup],
-              [equipment.trim() || 'Equipment', preview.equipment, true],
+              ...lines.map((l, i) => [`${i + 1}. ${l.equipment.trim() || 'Equipment'}${(wholeQuantity(l.quantity) ?? 1) > 1 ? ` × ${wholeQuantity(l.quantity)}` : ''}`, preview.lines[i]!.total]),
+              ...(lines.length > 1 ? [['Equipment lines', preview.equipment, true]] : []),
               ['Delivery', parseAmount(delivery) ?? 0],
               ['Total excl. VAT', preview.totalExVat, true],
               [`VAT ${vatRate}%`, preview.vat],
               ['Total incl. VAT', preview.totalIncVat, true],
-            ].map(([label, value, strong]) => (
-              <div key={String(label)} className={`flex justify-between gap-3 ${strong ? 'font-semibold text-surface-900 border-t border-surface-200 pt-2' : ''}`}>
-                <dt className={strong ? '' : 'text-surface-500'}>{label as string}</dt>
-                <dd className="font-mono tabular-nums">{money(value as number | null)}</dd>
+            ] as Array<[string, number | null, boolean?]>).map(([label, value, strong], i) => (
+              <div key={`${i}-${label}`} className={`flex justify-between gap-3 ${strong ? 'font-semibold text-surface-900 border-t border-surface-200 pt-2' : ''}`}>
+                <dt className={`${strong ? '' : 'text-surface-500'} min-w-0 truncate`}>{label}</dt>
+                <dd className="font-mono tabular-nums">{money(value)}</dd>
               </div>
             ))}
           </dl>
@@ -419,5 +424,227 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
         </aside>
       </form>
     </div>
+  );
+}
+
+interface CardProps {
+  line: DraftLine;
+  index: number;
+  count: number;
+  project: string;
+  rates: LabourRate[];
+  ratesLoading: boolean;
+  options: SalesQuoteOption[];
+  optionsLoading: boolean;
+  optionsError: boolean;
+  missing: SalesEquipmentLine['materials'];
+  otherSalesRfqId?: string;
+  hourlyOf: (labourRateId: string) => number | null;
+  lineCounting: (rfqId: string) => number;
+  priced: { unitCost: number; unitPrice: number | null; total: number | null };
+  onChange: (patch: (l: DraftLine) => Partial<DraftLine>) => void;
+  onMove: (by: -1 | 1) => void;
+  onRemove: () => void;
+}
+
+/** One equipment line: what the quotation prints for it, and what it costs for one unit. */
+function EquipmentLineCard({
+  line, index, count, project, rates, ratesLoading, options, optionsLoading, optionsError, missing, otherSalesRfqId,
+  hourlyOf, lineCounting, priced, onChange, onMove, onRemove,
+}: CardProps) {
+  const n = index + 1;
+  const name = count > 1 ? `equipment line ${n}` : 'the equipment line';
+  const id = (part: string) => `srfq-line-${line.key}-${part}`;
+  const quantity = wholeQuantity(line.quantity);
+  // A role made inactive since it was put on this draft stays offered on its row.
+  const offered = (current: string) => rates.filter((r) => r.active || r.id === current);
+  const setLabour = (key: number, patch: Partial<DraftLabour>) => onChange((l) => ({ labour: l.labour.map((x) => (x.key === key ? { ...x, ...patch } : x)) }));
+  const setOther = (key: number, patch: Partial<DraftOther>) => onChange((l) => ({ other: l.other.map((x) => (x.key === key ? { ...x, ...patch } : x)) }));
+  /** Ticking an RFQ starts from Procurement's recommended quote, or the lowest. */
+  function toggleRfq(o: SalesQuoteOption) {
+    onChange((l) => {
+      const picks = { ...l.picks };
+      if (picks[o.id]) delete picks[o.id];
+      else {
+        const start = defaultQuote(o);
+        if (start) picks[o.id] = start.supplierId;
+      }
+      return { picks };
+    });
+  }
+  const untick = (rfqId: string) => onChange((l) => { const picks = { ...l.picks }; delete picks[rfqId]; return { picks }; });
+  const money = (v: number | null) => (v === null ? '—' : formatMoney(v.toFixed(2)));
+
+  return (
+    <fieldset className="rounded-lg border border-surface-200 p-4 space-y-5" aria-label={`Equipment line ${n}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <legend className="text-h3 text-surface-900">Equipment line {n}</legend>
+        {count > 1 && (
+          <div className="flex gap-1">
+            <Button size="sm" variant="ghost" type="button" disabled={index === 0} onClick={() => onMove(-1)} aria-label={`Move equipment line ${n} up`}>Up</Button>
+            <Button size="sm" variant="ghost" type="button" disabled={index === count - 1} onClick={() => onMove(1)} aria-label={`Move equipment line ${n} down`}>Down</Button>
+            <Button size="sm" variant="ghost" type="button" onClick={onRemove} aria-label={`Remove equipment line ${n}`} leadingIcon={<Icon.Trash size={14} />}>Remove</Button>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_7rem] gap-3">
+        <Field label="Equipment" htmlFor={id('equipment')} help="The line on the quotation, e.g. Main Piston Pump or Installation. Needed to submit.">
+          <Input id={id('equipment')} maxLength={200} value={line.equipment} onChange={(e) => onChange(() => ({ equipment: e.target.value }))} />
+        </Field>
+        <Field label="Qty" htmlFor={id('quantity')} help="Whole number.">
+          <Input id={id('quantity')} inputMode="numeric" autoComplete="off" className="font-mono" value={line.quantity} onChange={(e) => onChange(() => ({ quantity: e.target.value }))} />
+        </Field>
+        <div className="sm:col-span-2">
+          <Field label="What it covers" htmlFor={id('details')} help="Printed under it on the quotation, one per line, e.g. Accommodation & LOA.">
+            <Textarea id={id('details')} rows={3} maxLength={2000} value={line.details} onChange={(e) => onChange(() => ({ details: e.target.value }))} />
+          </Field>
+        </div>
+      </div>
+      {quantity !== null && quantity > 1 && <p className="text-meta">The hours, quotes and other costs below are for one unit; the line&rsquo;s price is that times {quantity}.</p>}
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-eyebrow">Production labour</h3>
+          <Button size="sm" variant="secondary" type="button" onClick={() => onChange((l) => ({ labour: [...l.labour, blankLabour()] }))} leadingIcon={<Icon.Plus size={12} />} aria-label={`Add role to ${name}`}>Add role</Button>
+        </div>
+        <div className="hidden md:grid grid-cols-[minmax(0,1fr)_7rem_8rem_8rem_2.5rem] gap-2 text-meta mb-1">
+          <span>Role</span><span>Hours</span><span className="text-right">Rate / hour</span><span className="text-right">Total</span><span />
+        </div>
+        <div className="space-y-2">
+          {line.labour.map((l, i) => {
+            const hourly = hourlyOf(l.labourRateId);
+            const hours = parseAmount(l.hours);
+            const label = `${count > 1 ? `Line ${n} labour` : 'Labour line'} ${i + 1}`;
+            return (
+              <div key={l.key} className="grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem_2.5rem] gap-2 items-start">
+                <div className="col-span-12 md:col-span-1">
+                  <Select value={l.labourRateId} onChange={(e) => setLabour(l.key, { labourRateId: e.target.value })} aria-label={`${label} role`}>
+                    <option value="">{ratesLoading ? 'Loading roles…' : 'Choose a role…'}</option>
+                    {offered(l.labourRateId).map((r) => <option key={r.id} value={r.id}>{r.role}{r.active ? '' : ' (no longer used)'}</option>)}
+                  </Select>
+                </div>
+                <div className="col-span-4 md:col-span-1">
+                  <Input inputMode="decimal" autoComplete="off" className="font-mono tabular-nums" placeholder="Hours" value={l.hours} onChange={(e) => setLabour(l.key, { hours: e.target.value })} aria-label={`${label} hours`} />
+                </div>
+                <output className="col-span-3 md:col-span-1 py-2 text-sm text-right font-mono text-surface-600">{hourly === null ? '—' : formatMoney(hourly.toFixed(2))}</output>
+                <output className="col-span-3 md:col-span-1 py-2 text-sm text-right font-mono" aria-label={`${label} total`}>{hourly === null || hours === null ? '—' : formatMoney((Math.round(hours * hourly * 100) / 100).toFixed(2))}</output>
+                <div className="col-span-2 md:col-span-1 flex md:justify-center">
+                  <Button size="sm" variant="ghost" type="button" onClick={() => onChange((x) => ({ labour: x.labour.length === 1 ? [blankLabour()] : x.labour.filter((y) => y.key !== l.key) }))} aria-label={`Remove ${label.toLowerCase()}`} leadingIcon={<Icon.Trash size={14} />} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-meta mt-2">Priced at each role&rsquo;s selling rate on Production → Labour rates, as it is when you save.</p>
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-eyebrow">Material</h3>
+        <p className="text-meta">The quotes Procurement has on the project&rsquo;s RFQs. Tick each RFQ to count on this line and choose one supplier&rsquo;s whole quote; it starts on the one Procurement recommends. An RFQ counts on one line only. Totals excl. VAT.</p>
+        {!project && <p className="text-meta italic">Choose the project first.</p>}
+        {project && optionsError && <Alert tone="warning" title="The quotes could not be loaded">Reload the page to try again.</Alert>}
+        {project && !optionsLoading && !optionsError && options.length === 0 && missing.length === 0 && (
+          <p className="text-meta italic">No requests for quotation sent for {project} yet. Procurement asks suppliers for prices; labour can be priced meanwhile.</p>
+        )}
+        <ul className="space-y-2" aria-label={`Procurement quotes for ${name}`}>
+          {options.map((o) => {
+            const others = o.salesRfqs.filter((s) => s.id !== otherSalesRfqId);
+            const picked = line.picks[o.id];
+            const elsewhere = lineCounting(o.id);
+            const onAnother = !picked && elsewhere >= 0;
+            const usable = o.quotes.some((q) => q.amount !== null);
+            const pickedQuote = o.quotes.find((q) => q.supplierId === picked) ?? null;
+            const box = id(`rfq-${o.id}`);
+            return (
+              <li key={o.id} className="rounded border border-surface-200">
+                <div className="flex items-start gap-3 px-3 py-2">
+                  <input type="checkbox" id={box} className="mt-1 h-4 w-4" checked={!!picked} disabled={onAnother || (!picked && !usable)} onChange={() => toggleRfq(o)} />
+                  <label htmlFor={box} className="flex-1 min-w-0 text-sm">
+                    <span className="text-mono">{o.number}</span>{o.description ? ` · ${o.description}` : ''}
+                    {o.quotes.length === 0 && <span className="block text-meta">No quotes recorded yet.</span>}
+                    {onAnother && <span className="block text-meta">Counted on equipment line {elsewhere + 1}</span>}
+                    {others.length > 0 && <span className="block text-meta text-warning-700">Also counted on {others.map((s) => s.number).join(', ')}</span>}
+                  </label>
+                  <span className="font-mono text-sm">{formatMoney(pickedQuote?.amount ?? null)}</span>
+                </div>
+                {picked && (
+                  <fieldset className="border-t border-surface-200 px-3 py-2 pl-10 space-y-1">
+                    <legend className="sr-only">Quote counted on {o.number}</legend>
+                    {o.quotes.map((q) => (
+                      <label key={q.supplierId} className="flex items-start gap-2 text-sm">
+                        <input type="radio" name={id(`quote-${o.id}`)} className="mt-1" checked={picked === q.supplierId} disabled={q.amount === null}
+                          onChange={() => onChange((l) => ({ picks: { ...l.picks, [o.id]: q.supplierId } }))} aria-label={`${q.supplier} on ${o.number}`} />
+                        <span className="flex-1 min-w-0">
+                          {q.supplier}
+                          {q.recommended && <Badge tone="success" className="ml-2">Recommended</Badge>}
+                          {q.currency !== 'ZAR' && <span className="block text-meta">{formatMoney(q.total, q.currency)}{q.amount === null ? `: no exchange rate for ${q.currency} yet` : ', in rand at the exchange rate'}</span>}
+                          {q.unpricedLines > 0 && <span className="block text-meta text-warning-700">{q.unpricedLines} line{q.unpricedLines === 1 ? '' : 's'} not priced</span>}
+                        </span>
+                        <span className="font-mono">{formatMoney(q.amount)}</span>
+                      </label>
+                    ))}
+                    {o.recommendedSupplierId === null && <p className="text-meta">Procurement hasn&rsquo;t recommended a quote on this RFQ.</p>}
+                  </fieldset>
+                )}
+              </li>
+            );
+          })}
+          {missing.map((m) => (
+            <li key={m.rfqId} className="flex items-start gap-3 rounded border border-surface-200 px-3 py-2">
+              <input type="checkbox" id={id(`gone-${m.rfqId}`)} className="mt-1 h-4 w-4" checked onChange={() => untick(m.rfqId)} />
+              <label htmlFor={id(`gone-${m.rfqId}`)} className="flex-1 text-sm"><span className="text-mono">{m.rfqNumber}</span> · {m.supplier}<span className="block text-meta text-danger-700">No longer out with suppliers: untick it to save.</span></label>
+              <span className="font-mono text-sm">{formatMoney(m.amount)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-eyebrow">Other costs</h3>
+          <Button size="sm" variant="secondary" type="button" onClick={() => onChange((l) => ({ other: [...l.other, blankOther()] }))} leadingIcon={<Icon.Plus size={12} />} aria-label={`Add other cost to ${name}`}>Add cost</Button>
+        </div>
+        {line.other.length === 0
+          ? <p className="text-meta">Accommodation, LOA, travel or hire: anything that is neither labour nor a supplier&rsquo;s quote.</p>
+          : (
+            <>
+              <div className="hidden md:grid grid-cols-[minmax(0,1fr)_6rem_8rem_8rem_2.5rem] gap-2 text-meta mb-1">
+                <span>Cost</span><span>Quantity</span><span>Unit cost (R)</span><span className="text-right">Total</span><span />
+              </div>
+              <div className="space-y-2">
+                {line.other.map((c, i) => {
+                  const q = parseAmount(c.quantity);
+                  const u = parseAmount(c.unitCost);
+                  const label = `${count > 1 ? `Line ${n} other cost` : 'Other cost'} ${i + 1}`;
+                  return (
+                    <div key={c.key} className="grid grid-cols-12 md:grid-cols-[minmax(0,1fr)_6rem_8rem_8rem_2.5rem] gap-2 items-start">
+                      <div className="col-span-12 md:col-span-1">
+                        <Input maxLength={200} placeholder="e.g. Accommodation" value={c.description} onChange={(e) => setOther(c.key, { description: e.target.value })} aria-label={`${label} description`} />
+                      </div>
+                      <div className="col-span-3 md:col-span-1">
+                        <Input inputMode="decimal" autoComplete="off" className="font-mono tabular-nums" value={c.quantity} onChange={(e) => setOther(c.key, { quantity: e.target.value })} aria-label={`${label} quantity`} />
+                      </div>
+                      <div className="col-span-4 md:col-span-1">
+                        <Input inputMode="decimal" autoComplete="off" className="font-mono tabular-nums" value={c.unitCost} onChange={(e) => setOther(c.key, { unitCost: e.target.value })} aria-label={`${label} unit cost`} />
+                      </div>
+                      <output className="col-span-3 md:col-span-1 py-2 text-sm text-right font-mono" aria-label={`${label} total`}>{q === null || u === null ? '—' : formatMoney((Math.round(q * u * 100) / 100).toFixed(2))}</output>
+                      <div className="col-span-2 md:col-span-1 flex md:justify-center">
+                        <Button size="sm" variant="ghost" type="button" onClick={() => onChange((x) => ({ other: x.other.filter((y) => y.key !== c.key) }))} aria-label={`Remove ${label.toLowerCase()}`} leadingIcon={<Icon.Trash size={14} />} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+      </div>
+
+      <dl className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm border-t border-surface-200 pt-3" aria-label={`Price of ${name}`}>
+        <div className="flex gap-2"><dt className="text-surface-500">Cost a unit</dt><dd className="font-mono">{money(priced.unitCost)}</dd></div>
+        <div className="flex gap-2"><dt className="text-surface-500">Unit price</dt><dd className="font-mono">{money(priced.unitPrice)}</dd></div>
+        <div className="flex gap-2 font-semibold"><dt>Total</dt><dd className="font-mono">{money(priced.total)}</dd></div>
+      </dl>
+    </fieldset>
   );
 }

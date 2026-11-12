@@ -1,12 +1,12 @@
-// Sales RFQs: how Sales prices one piece of equipment for a client, from the
-// production labour at the listed rates and the project's approved orders, with
-// the job's markup. The Director approves the price, and its quotation then goes
-// to the client.
+// Sales RFQs: how Sales prices a job for a client in one or more equipment
+// lines, each from the production labour at the listed rates, the project's
+// Procurement quotes and other costs, with the job's markup. The Director
+// approves the price, and its quotation then goes to the client.
 //
 // The list lands on the ones still in hand (drafts and those waiting for the
 // Director); the Director's "Waiting for my approval" is the status filter. A
-// Sales RFQ's page shows its costing, its quotation details and its Activity,
-// with the actions its status and the viewer allow.
+// Sales RFQ's page shows each equipment line's costing, its quotation details
+// and its Activity, with the actions its status and the viewer allow.
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -29,7 +29,7 @@ import { api, type ApiError } from '../api/client';
 import { formatDateTime, formatNumber } from '../lib/format';
 import { formatMoney } from '../lib/poMoney';
 import { formatDay } from '../lib/rfq';
-import { SALES_STATUS_LABEL, mayApprove, type SalesLabourLine, type SalesMaterial, type SalesRfq, type SalesRfqStatus } from '../lib/salesRfq';
+import { SALES_STATUS_LABEL, allMaterials, mayApprove, type SalesEquipmentLine, type SalesLabourLine, type SalesMaterial, type SalesOtherCost, type SalesRfq, type SalesRfqStatus } from '../lib/salesRfq';
 import { QUOTATION_SETTINGS, downloadQuotation, quotationCompanyFromSettings } from '../lib/salesQuotation';
 
 const LIST = { label: 'Sales RFQs', to: '/sales-rfqs' };
@@ -72,7 +72,7 @@ export function SalesRfqs() {
   const filtered = (rfqs.data ?? []).filter((r) => {
     if (statuses.length > 0 && !statuses.includes(r.status)) return false;
     if (!needle) return true;
-    return `${r.number} ${r.quoteReference ?? ''} ${r.projectNumber} ${r.equipment ?? ''} ${r.clientName ?? ''} ${r.description ?? ''}`.toLowerCase().includes(needle);
+    return `${r.number} ${r.quoteReference ?? ''} ${r.projectNumber} ${r.equipmentLines.map((l) => l.equipment ?? '').join(' ')} ${r.clientName ?? ''} ${r.description ?? ''}`.toLowerCase().includes(needle);
   });
 
   return (
@@ -137,7 +137,10 @@ const LIST_COLUMNS: DataTableColumn<SalesRfq>[] = [
   {
     key: 'equipment', header: 'Equipment', render: (r) => (
       <div className="min-w-0">
-        <div className="truncate">{r.equipment ?? <span className="text-surface-400">Not named yet</span>}</div>
+        <div className="truncate">
+          {r.equipment ?? <span className="text-surface-400">Not named yet</span>}
+          {r.equipmentLines.length > 1 && <span className="text-meta"> and {r.equipmentLines.length - 1} more</span>}
+        </div>
         <div className="text-meta">Project {r.projectNumber}{r.clientName ? ` · ${r.clientName}` : ''}</div>
       </div>
     ),
@@ -174,6 +177,7 @@ export function SalesRfqDetail() {
   const reload = () => { rfq.reload(); history.reload(); };
   const r = rfq.data;
   const approver = !!r && mayApprove(r, user?.id, hasPermission('sales:approve'));
+  const materials = r ? allMaterials(r) : [];
 
   async function act(label: string, run: () => Promise<SalesRfq>) {
     try {
@@ -240,9 +244,9 @@ export function SalesRfqDetail() {
           {r.status === 'DRAFT' && r.returnReason && (
             <Alert tone="warning" title={`Sent back${r.returnedBy ? ` by ${r.returnedBy.name}` : ''}`}>{r.returnReason}</Alert>
           )}
-          {r.status === 'DRAFT' && r.materials.some((m) => m.unusable) && (
+          {r.status === 'DRAFT' && materials.some((m) => m.unusable) && (
             <Alert tone="danger" title="A quote can't be counted">
-              The quote on {r.materials.filter((m) => m.unusable).map((m) => m.rfqNumber).join(', ')} was withdrawn, its RFQ was cancelled, or it can&rsquo;t be valued in rand. Edit the Sales RFQ to choose another before submitting.
+              The quote on {materials.filter((m) => m.unusable).map((m) => m.rfqNumber).join(', ')} was withdrawn, its RFQ was cancelled, or it can&rsquo;t be valued in rand. Edit the Sales RFQ to choose another before submitting.
             </Alert>
           )}
           {r.status === 'APPROVED' && (
@@ -264,7 +268,8 @@ export function SalesRfqDetail() {
                   <dt className="text-surface-500">RFQ no.</dt><dd className="col-span-2 text-mono">{r.number}</dd>
                   <dt className="text-surface-500">Quotation</dt><dd className="col-span-2 text-mono">{r.quoteReference ?? 'Given when approved'}</dd>
                   <dt className="text-surface-500">Project</dt><dd className="col-span-2">{r.projectNumber}{r.project?.name ? ` — ${r.project.name}` : ''}</dd>
-                  <dt className="text-surface-500">Equipment</dt><dd className="col-span-2">{r.equipment ?? '—'}</dd>
+                  <dt className="text-surface-500">Equipment</dt>
+                  <dd className="col-span-2">{r.equipmentLines.map((l) => l.equipment ?? 'Not named yet').join('; ') || '—'}</dd>
                   <dt className="text-surface-500">Description</dt><dd className="col-span-2">{r.description ?? '—'}</dd>
                   <dt className="text-surface-500">Price due</dt><dd className="col-span-2">{r.closingDate ? formatDay(r.closingDate) : '—'}</dd>
                   <dt className="text-surface-500">Raised</dt><dd className="col-span-2 text-meta">{formatDateTime(r.createdAt)}{r.createdBy ? <><br /><span className="text-surface-400">by {r.createdBy.name}</span></> : null}</dd>
@@ -276,30 +281,14 @@ export function SalesRfqDetail() {
             </aside>
 
             <div className="lg:col-span-2 space-y-6">
-              <section>
-                <SectionHeader title="Production labour" description="Each role's hours at its selling rate when the line was saved." />
-                {r.labour.length === 0
-                  ? <EmptyState title="No labour" description={canManage && r.status === 'DRAFT' ? 'Edit the Sales RFQ to add the hours each role works.' : 'None was priced.'} />
-                  : <DataTable ariaLabel="Labour" rows={r.labour} rowKey={(l) => l.id} columns={LABOUR_COLUMNS} />}
-              </section>
-              <section>
-                <SectionHeader
-                  title="Material"
-                  description={r.status === 'DRAFT'
-                    ? "One supplier's quote on each of the project's Procurement RFQs, at its total excl. VAT as it stands today."
-                    : "The quotes counted, at their totals excl. VAT when it was submitted."}
-                />
-                {r.materials.some((m) => !m.recommended) && (
-                  <div className="mb-3">
-                    <Alert tone="info" title="Not the quote Procurement recommends">
-                      {r.materials.filter((m) => !m.recommended).map((m) => `${m.rfqNumber}: ${m.supplier} chosen, ${m.recommendedSupplier?.name ?? 'another supplier'} recommended`).join('; ')}.
-                    </Alert>
-                  </div>
-                )}
-                {r.materials.length === 0
-                  ? <EmptyState title="No quotes" description={canManage && r.status === 'DRAFT' ? "Edit the Sales RFQ to choose a quote on each of the project's Procurement RFQs." : 'No material was counted.'} />
-                  : <DataTable ariaLabel="Material quotes" rows={r.materials} rowKey={(m) => m.rfqId} columns={materialColumns(seesRfqs)} />}
-              </section>
+              {materials.some((m) => !m.recommended) && (
+                <Alert tone="info" title="Not the quote Procurement recommends">
+                  {materials.filter((m) => !m.recommended).map((m) => `${m.rfqNumber}: ${m.supplier} chosen, ${m.recommendedSupplier?.name ?? 'another supplier'} recommended`).join('; ')}.
+                </Alert>
+              )}
+              {r.equipmentLines.map((line) => (
+                <EquipmentLineSection key={line.id} line={line} r={r} canEdit={canManage && r.status === 'DRAFT'} linked={seesRfqs} />
+              ))}
               <section>
                 <SectionHeader title="On the quotation" description="Who it is to, and the conditions printed under the prices." />
                 <dl className="surface-card p-4 text-sm grid grid-cols-1 sm:grid-cols-[10rem_1fr] gap-x-4 gap-y-2">
@@ -325,7 +314,7 @@ export function SalesRfqDetail() {
       {r && dialog === 'submit' && (
         <ConfirmDialog
           title={`Submit ${r.number} for approval?`}
-          description={`It goes to the Director at ${formatMoney(r.totals.totalExVat)} excl. VAT. Its orders' amounts and the VAT rate are fixed as they are now, and it can't be edited unless the Director sends it back.`}
+          description={`It goes to the Director at ${formatMoney(r.totals.totalExVat)} excl. VAT. Its quotes' amounts and the VAT rate are fixed as they are now, and it can't be edited unless the Director sends it back.`}
           confirm="Submit" onClose={() => setDialog(null)}
           onConfirm={() => act('{n} submitted for approval', () => api.post<SalesRfq>(`/sales-rfqs/${r.id}/submit`))}
         />
@@ -369,9 +358,10 @@ function Totals({ r }: { r: SalesRfq }) {
     <dl className="text-sm space-y-2" aria-label="Price">
       {row('Labour', t.labour)}
       {row('Material', t.material)}
+      {Number(t.other) > 0 && row('Other costs', t.other)}
       {row('Cost', t.cost, { strong: true })}
       {row('Markup', t.markup, { muted: r.markupPercent !== null ? `${formatNumber(Number(r.markupPercent))}%` : 'not set' })}
-      {row(r.equipment ?? 'Equipment', t.equipment, { strong: true })}
+      {row(r.equipmentLines.length === 1 ? (r.equipment ?? 'Equipment') : `${r.equipmentLines.length} equipment lines`, t.equipment, { strong: true })}
       {row('Delivery', t.delivery)}
       {row('Total excl. VAT', t.totalExVat, { strong: true })}
       {row('VAT', t.vat, { muted: `${formatNumber(Number(t.vatRate))}%` })}
@@ -379,6 +369,64 @@ function Totals({ r }: { r: SalesRfq }) {
     </dl>
   );
 }
+
+/**
+ * One equipment line: what the quotation prints for it, then what it costs for
+ * one unit (labour, quotes, other costs) and its price, so the Director can
+ * trace each figure on the quotation.
+ */
+function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipmentLine; r: SalesRfq; canEdit: boolean; linked: boolean }) {
+  const t = line.totals;
+  const several = r.equipmentLines.length > 1;
+  const nothing = line.labour.length === 0 && line.materials.length === 0 && line.otherCosts.length === 0;
+  const priced = t.unitPrice === null
+    ? `Cost ${formatMoney(t.unitCost)} a unit; priced once the markup is set`
+    : `${formatNumber(line.quantity)} × ${formatMoney(t.unitPrice)} = ${formatMoney(t.total)}`;
+  return (
+    <section aria-label={`Equipment line ${line.lineNo}`} className="space-y-3">
+      <SectionHeader
+        title={`${several ? `${line.lineNo}. ` : ''}${line.equipment ?? 'Equipment not named yet'}`}
+        description={`${priced}${line.quantity > 1 ? '. The costs below are for one unit.' : ''}`}
+      />
+      {line.details && <p className="text-sm text-surface-700 whitespace-pre-wrap">{line.details}</p>}
+      {nothing && <EmptyState title="Nothing priced yet" description={canEdit ? 'Edit the Sales RFQ to add labour, a quote or another cost to this line.' : 'Nothing was priced on this line.'} />}
+      {line.labour.length > 0 && (
+        <div>
+          <h3 className="text-eyebrow mb-1">Production labour</h3>
+          <DataTable ariaLabel={`Labour on line ${line.lineNo}`} rows={line.labour} rowKey={(l) => l.id} columns={LABOUR_COLUMNS} />
+        </div>
+      )}
+      {line.materials.length > 0 && (
+        <div>
+          <h3 className="text-eyebrow mb-1">Material</h3>
+          <p className="text-meta mb-1">{r.status === 'DRAFT' ? 'Each quote at its total excl. VAT as it stands today.' : 'Each quote at its total excl. VAT when it was submitted.'}</p>
+          <DataTable ariaLabel={`Material quotes on line ${line.lineNo}`} rows={line.materials} rowKey={(m) => m.rfqId} columns={materialColumns(linked)} />
+        </div>
+      )}
+      {line.otherCosts.length > 0 && (
+        <div>
+          <h3 className="text-eyebrow mb-1">Other costs</h3>
+          <DataTable ariaLabel={`Other costs on line ${line.lineNo}`} rows={line.otherCosts} rowKey={(c) => c.id} columns={OTHER_COLUMNS} />
+        </div>
+      )}
+      {!nothing && (
+        <dl className="text-sm surface-card p-3 grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label={`Price of line ${line.lineNo}`}>
+          <div><dt className="text-meta">Cost a unit</dt><dd className="font-mono">{formatMoney(t.unitCost)}</dd></div>
+          <div><dt className="text-meta">Markup a unit</dt><dd className="font-mono">{formatMoney(t.unitMarkup)}</dd></div>
+          <div><dt className="text-meta">Unit price</dt><dd className="font-mono">{formatMoney(t.unitPrice)}</dd></div>
+          <div><dt className="text-meta">Total ({formatNumber(line.quantity)})</dt><dd className="font-mono font-semibold">{formatMoney(t.total)}</dd></div>
+        </dl>
+      )}
+    </section>
+  );
+}
+
+const OTHER_COLUMNS: DataTableColumn<SalesOtherCost>[] = [
+  { key: 'description', header: 'Cost', render: (c) => c.description },
+  { key: 'quantity', header: 'Quantity', align: 'right', width: '7rem', className: 'text-num', render: (c) => <span className="font-mono">{formatNumber(Number(c.quantity))}</span> },
+  { key: 'unit', header: 'Unit cost', align: 'right', width: '9rem', className: 'text-num', render: (c) => <span className="font-mono">{formatMoney(c.unitCost)}</span> },
+  { key: 'total', header: 'Total', align: 'right', width: '9rem', className: 'text-num', render: (c) => <span className="font-mono">{formatMoney(c.total)}</span> },
+];
 
 const LABOUR_COLUMNS: DataTableColumn<SalesLabourLine>[] = [
   { key: 'role', header: 'Role', render: (l) => l.role },
@@ -430,7 +478,7 @@ function History({ entries, loading }: { entries: HistoryEntry[]; loading: boole
 }
 
 const FIELD_WORDS: Record<string, string> = {
-  equipment: 'equipment', markupPercent: 'markup', deliveryPrice: 'delivery price', labour: 'labour', materials: 'quotes',
+  equipmentLines: 'equipment lines', markupPercent: 'markup', deliveryPrice: 'delivery price',
   clientName: 'client', clientAddress: 'client address', contactName: 'contact', clientReference: 'client reference',
   paymentTerms: 'conditions', validity: 'conditions', deliveryDuration: 'conditions', deliveryTerms: 'conditions',
   signerPhone: 'signer', signerEmail: 'signer', closingDate: 'price due date', description: 'description', notes: 'remarks',

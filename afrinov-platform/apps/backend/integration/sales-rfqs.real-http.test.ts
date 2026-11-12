@@ -1,5 +1,5 @@
-// Real-HTTP + real-database tests for Sales requests for quotation: pricing one
-// piece of equipment from labour at the listed rates and the quotes on the
+// Real-HTTP + real-database tests for Sales requests for quotation: pricing each
+// equipment line from labour at the listed rates and the quotes on the
 // project's Procurement RFQs (the one Procurement recommends, or another), the markup, the Director's approval and the quotation reference, the
 // labour rates the Workshop Manager keeps, and above all who may see the price.
 // Also the Procurement savings report, which no longer has a Sales column.
@@ -17,7 +17,7 @@ import {
 } from './helpers.js';
 
 interface Totals {
-  labour: string; material: string; cost: string; markup: string | null; equipment: string | null; delivery: string;
+  labour: string; material: string; other: string; cost: string; markup: string | null; equipment: string | null; delivery: string;
   totalExVat: string | null; vatRate: string; vat: string | null; totalIncVat: string | null;
 }
 interface SalesRfq {
@@ -33,10 +33,18 @@ interface SalesRfq {
   signerEmail: string | null;
   issuedAt: string | null;
   returnReason: string | null;
-  labour: Array<{ lineNo: number; role: string; hours: string; hourlyRate: string; total: string }>;
-  materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean; recommendedSupplier: { id: string } | null; unusable: boolean }>;
+  clientAddress: string | null;
+  equipmentLines: Array<{
+    lineNo: number; equipment: string | null; details: string | null; quantity: number;
+    labour: Array<{ lineNo: number; role: string; hours: string; hourlyRate: string; total: string }>;
+    materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean; recommendedSupplier: { id: string } | null; unusable: boolean }>;
+    otherCosts: Array<{ lineNo: number; description: string; quantity: string; unitCost: string; total: string }>;
+    totals: { quantity: number; labour: string; material: string; other: string; unitCost: string; unitMarkup: string | null; unitPrice: string | null; total: string | null };
+  }>;
   totals: Totals;
 }
+/** The first line's labour and quotes, as the single equipment line had them. */
+const first = (r: SalesRfq) => r.equipmentLines[0]!;
 interface LabourRate { id: string; role: string; hourlyRate: string; active: boolean }
 interface ApiErrorBody { error: { code: string; message: string } }
 
@@ -139,11 +147,16 @@ describe('Sales requests for quotation over real HTTP', () => {
   });
 
   describe('costing', () => {
-    const draft = () => ({
-      projectNumber,
+    /** One equipment line: the pump, its labour and the recommended quote. */
+    const pump = (over: Record<string, unknown> = {}) => ({
       equipment: 'Main Piston Pump',
       labour: [{ labourRateId: welder.id, hours: 10 }, { labourRateId: boilerMaker.id, hours: 5.5 }],
       materials: [{ rfqId: quotedRfq, supplierId }],
+      ...over,
+    });
+    const draft = (line: Record<string, unknown> = {}) => ({
+      projectNumber,
+      equipmentLines: [pump(line)],
       markupPercent: 40,
       deliveryPrice: 500,
     });
@@ -185,8 +198,9 @@ describe('Sales requests for quotation over real HTTP', () => {
       // The client is the project's, the conditions the usual ones, the email the creator's.
       expect(res.body).toMatchObject({ clientName: 'Northam Platinum', deliveryTerms: 'DAP, Northam Platinum', paymentTerms: '30 days from invoice date.' });
       expect(res.body.signerEmail).toBe(`it-sales-sales-${run}@example.test`);
-      expect(res.body.labour.map((l) => [l.lineNo, l.role, l.hours, l.hourlyRate, l.total])).toEqual([[1, 'Welder', '10', '400', '4000.00'], [2, 'Boiler Maker', '5.5', '300', '1650.00']]);
-      expect(res.body.materials).toEqual([expect.objectContaining({ rfqId: quotedRfq, supplierId, amount: '9000.00', recommended: true, unusable: false })]);
+      expect(first(res.body).labour.map((l) => [l.lineNo, l.role, l.hours, l.hourlyRate, l.total])).toEqual([[1, 'Welder', '10', '400', '4000.00'], [2, 'Boiler Maker', '5.5', '300', '1650.00']]);
+      expect(first(res.body)).toMatchObject({ lineNo: 1, equipment: 'Main Piston Pump', quantity: 1, totals: { unitPrice: '20510.00', total: '20510.00' } });
+      expect(first(res.body).materials).toEqual([expect.objectContaining({ rfqId: quotedRfq, supplierId, amount: '9000.00', recommended: true, unusable: false })]);
       const t = res.body.totals;
       expect(t).toMatchObject({ labour: '5650.00', material: '9000.00', cost: '14650.00', markup: '5860.00', equipment: '20510.00', delivery: '500.00', totalExVat: '21010.00' });
       const vat = (21010 * Number(t.vatRate)) / 100;
@@ -195,28 +209,28 @@ describe('Sales requests for quotation over real HTTP', () => {
     });
 
     it('shows a quote other than the recommended one as such', async () => {
-      const res = await (await as('SALES'))<SalesRfq>('POST', '/sales-rfqs', { ...draft(), materials: [{ rfqId: quotedRfq, supplierId: otherSupplier }] });
-      expect(res.body.materials[0]).toMatchObject({ supplierId: otherSupplier, amount: '9500.00', recommended: false, recommendedSupplier: { id: supplierId } });
+      const res = await (await as('SALES'))<SalesRfq>('POST', '/sales-rfqs', draft({ materials: [{ rfqId: quotedRfq, supplierId: otherSupplier }] }));
+      expect(first(res.body).materials[0]).toMatchObject({ supplierId: otherSupplier, amount: '9500.00', recommended: false, recommendedSupplier: { id: supplierId } });
     });
 
     it("refuses a quote that isn't on one of the project's sent RFQs, a supplier who hasn't quoted, a role no longer used, and bad hours or markup", async () => {
       const sales = await as('SALES');
       for (const rfqId of [draftRfq, otherRfq]) {
-        const refused = await sales<ApiErrorBody>('POST', '/sales-rfqs', { ...draft(), materials: [{ rfqId, supplierId }] });
+        const refused = await sales<ApiErrorBody>('POST', '/sales-rfqs', draft({ materials: [{ rfqId, supplierId }] }));
         expect(refused.status).toBe(400);
         expect(refused.body.error.message).toBe(`That isn't a request for quotation sent for ${projectNumber}`);
       }
-      const nobody = await sales<ApiErrorBody>('POST', '/sales-rfqs', { ...draft(), materials: [{ rfqId: quotedRfq, supplierId: 'no-such-supplier' }] });
+      const nobody = await sales<ApiErrorBody>('POST', '/sales-rfqs', draft({ materials: [{ rfqId: quotedRfq, supplierId: 'no-such-supplier' }] }));
       expect(nobody.body.error.message).toMatch(/hasn't quoted/);
-      const twice = await sales<ApiErrorBody>('POST', '/sales-rfqs', { ...draft(), materials: [{ rfqId: quotedRfq, supplierId }, { rfqId: quotedRfq, supplierId: otherSupplier }] });
+      const twice = await sales<ApiErrorBody>('POST', '/sales-rfqs', draft({ materials: [{ rfqId: quotedRfq, supplierId }, { rfqId: quotedRfq, supplierId: otherSupplier }] }));
       expect(twice.body.error.message).toMatch(/one quote on each/);
       const workshop = await as('WORKSHOP_MANAGER');
       const retired = await workshop<LabourRate>('POST', '/labour-rates', { role: `Retired role ${run}`, hourlyRate: 100 });
       await workshop('PATCH', `/labour-rates/${retired.body.id}`, { active: false });
-      const inactive = await sales<ApiErrorBody>('POST', '/sales-rfqs', { ...draft(), labour: [{ labourRateId: retired.body.id, hours: 1 }] });
+      const inactive = await sales<ApiErrorBody>('POST', '/sales-rfqs', draft({ labour: [{ labourRateId: retired.body.id, hours: 1 }] }));
       expect(inactive.status).toBe(400);
       expect(inactive.body.error.message).toMatch(/no longer used/);
-      expect((await sales('POST', '/sales-rfqs', { ...draft(), labour: [{ labourRateId: welder.id, hours: 1.555 }] })).status).toBe(400);
+      expect((await sales('POST', '/sales-rfqs', draft({ labour: [{ labourRateId: welder.id, hours: 1.555 }] }))).status).toBe(400);
       expect((await sales('POST', '/sales-rfqs', { ...draft(), markupPercent: -1 })).status).toBe(400);
     });
 
@@ -255,14 +269,74 @@ describe('Sales requests for quotation over real HTTP', () => {
       const line = (await admin<{ lines: Array<{ id: string }> }>('GET', `/rfqs/${quotedRfq}`)).body.lines[0]!.id;
       await admin('PUT', `/rfqs/${quotedRfq}/suppliers/${supplierId}/quote`, { prices: [{ rfqLineId: line, unitPrice: 1000 }] });
       const later = await sales<SalesRfq>('GET', `/sales-rfqs/${id}`);
-      expect(later.body.labour[0]!.hourlyRate).toBe('400');
-      expect(later.body.materials[0]!.amount).toBe('9000.00');
+      expect(first(later.body).labour[0]!.hourlyRate).toBe('400');
+      expect(first(later.body).materials[0]!.amount).toBe('9000.00');
       expect(later.body.totals.equipment).toBe(approved.body.totals.equipment);
       await (await as('WORKSHOP_MANAGER'))('PATCH', `/labour-rates/${welder.id}`, { hourlyRate: 400 });
       await admin('PUT', `/rfqs/${quotedRfq}/suppliers/${supplierId}/quote`, { prices: [{ rfqLineId: line, unitPrice: 900 }] });
 
       const history = await sales<Array<{ action: string }>>('GET', `/sales-rfqs/${id}/history`);
       expect(history.body.map((e) => e.action)).toEqual(expect.arrayContaining(['CREATE', 'SALES_RFQ_SUBMIT', 'SALES_RFQ_RETURN', 'SALES_RFQ_APPROVE']));
+    });
+
+    it('prices more than one equipment line, each for one unit times its quantity, with other costs, as AFRI-02A-1094-04-1 quotes a door and its installation', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 10, deliveryPrice: 0,
+        clientAddress: '  Main Office \n\n Farm Zondereinde 384KQ  ',
+        equipmentLines: [
+          { equipment: 'Stainless Steel Ultra High Door & Rail', details: '3D Scan Existing Area\n  Safety Installation Pack ', quantity: 2, materials: [{ rfqId: quotedRfq, supplierId }] },
+          {
+            equipment: 'Installation', details: 'Accommodation & LOA\nInstallation Labour',
+            labour: [{ labourRateId: welder.id, hours: 8 }],
+            otherCosts: [{ description: ' Accommodation ', quantity: 2, unitCost: 1200 }, { description: 'LOA', quantity: 2.5, unitCost: 350.5 }],
+          },
+        ],
+      });
+      expect(res.status).toBe(201);
+      // The address and details keep their lines.
+      expect(res.body.clientAddress).toBe('Main Office\nFarm Zondereinde 384KQ');
+      const [door, install] = res.body.equipmentLines;
+      expect(door).toMatchObject({ lineNo: 1, details: '3D Scan Existing Area\nSafety Installation Pack', quantity: 2, totals: { unitCost: '9000.00', unitMarkup: '900.00', unitPrice: '9900.00', total: '19800.00' } });
+      // 8 × 400 + 2 × 1 200 + 2.5 × 350.50 = 3 200 + 2 400 + 876.25.
+      expect(install!.otherCosts.map((c) => [c.lineNo, c.description, c.total])).toEqual([[1, 'Accommodation', '2400.00'], [2, 'LOA', '876.25']]);
+      expect(install!.totals).toMatchObject({ labour: '3200.00', other: '3276.25', unitCost: '6476.25', unitMarkup: '647.63', unitPrice: '7123.88', total: '7123.88' });
+      expect(res.body.totals).toMatchObject({ labour: '3200.00', material: '18000.00', other: '3276.25', cost: '24476.25', markup: '2447.63', equipment: '26923.88', totalExVat: '26923.88' });
+      expect(res.body.equipment).toBe('Stainless Steel Ultra High Door & Rail');
+
+      // A quote counts on one line only.
+      const twice = await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump(), pump({ equipment: 'Spare' })] });
+      expect(twice.status).toBe(400);
+      expect(twice.body.error.message).toMatch(/one quote on each/);
+      // The quantity is a whole number, and an error names the line.
+      expect((await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump({ quantity: 1.5 })] })).status).toBe(400);
+      const bad = await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump(), { equipment: 'Hire', otherCosts: [{ description: ' ', quantity: 1, unitCost: 10 }] }] });
+      expect(bad.body.error.message).toMatch(/^Equipment line 2: Other cost 1 needs a description/);
+      expect((await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [] })).body.error.message).toMatch(/at least one equipment line/);
+
+      // A line with nothing to price, or no name, holds up submitting, by line.
+      await sales('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump(), { details: 'Nothing yet' }] });
+      const held = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(held.body.error.message).toMatch(/the equipment on line 2, labour, a quote or another cost on line 2/);
+
+      // Saving the lines replaces them; the Activity says what they were.
+      const saved = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [pump({ quantity: 3 })] });
+      expect(saved.body.equipmentLines).toHaveLength(1);
+      // 14 650 + 10% = 16 115 a unit, times 3.
+      expect(saved.body.totals.equipment).toBe('48345.00');
+      const history = await sales<Array<{ action: string; after: { equipmentLines?: Array<{ quantity: number }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      expect(history.body[0]!.after.equipmentLines?.map((l) => l.quantity)).toEqual([3]);
+      expect((await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`)).body.status).toBe('PENDING_APPROVAL');
+    });
+
+    it('starts a new one with one empty equipment line, and moving it to another project takes its quotes off its lines', async () => {
+      const sales = await as('SALES');
+      const bare = await sales<SalesRfq>('POST', '/sales-rfqs', { projectNumber });
+      expect(bare.body.equipmentLines).toEqual([expect.objectContaining({ lineNo: 1, equipment: null, quantity: 1, labour: [], materials: [], otherCosts: [] })]);
+      const priced = await sales<SalesRfq>('POST', '/sales-rfqs', draft());
+      const moved = await sales<SalesRfq>('PATCH', `/sales-rfqs/${priced.body.id}`, { projectNumber: otherProject });
+      expect(first(moved.body)).toMatchObject({ equipment: 'Main Piston Pump', materials: [] });
+      expect(first(moved.body).labour).toHaveLength(2);
     });
 
     it('numbers each approved quotation of a project in turn', async () => {
