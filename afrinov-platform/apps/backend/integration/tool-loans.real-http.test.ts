@@ -60,7 +60,7 @@ describe('tool loans over real HTTP', () => {
     // Several tests sign in as the same role, so each user gets its own address.
     const email = `it-${role.toLowerCase()}-tl-${++users}-${run}@example.com`;
     const password = `${role.toLowerCase()}-${run}-pass`;
-    expect((await api('POST', '/users', { email, name: `IT ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
+    expect((await api('POST', '/users', { email, name: `IT ${role} ${run}`, password, roleNames: [role], mustChangePassword: false })).status).toBe(201);
     return client(server.port, await login(server.port, email, password));
   }
 

@@ -194,6 +194,7 @@ export const OPERATIONS: Operation[] = [
   { method: 'get', path: '/users/:id', tag: 'Users', summary: 'Get a user', permissions: [P.ManageUsers], errors: [404] },
   {
     method: 'post', path: '/users', tag: 'Users', summary: 'Create a user with roles', permissions: [P.ManageUsers],
+    description: 'The password is a starting one: the person must choose their own at first sign-in, unless mustChangePassword is false (ADR-036).',
     body: createUserSchema, success: 201, errors: [409],
   },
   {

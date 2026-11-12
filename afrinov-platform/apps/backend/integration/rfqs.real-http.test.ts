@@ -589,7 +589,7 @@ describe('requests for quotation over real HTTP', () => {
     async function as(role: string) {
       const email = `it-rfq-${role.toLowerCase()}-${run}@afrinov.local`;
       const password = `It-${run}-${role.toLowerCase()}`;
-      expect((await api('POST', '/users', { email, name: `IT RFQ ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
+      expect((await api('POST', '/users', { email, name: `IT RFQ ${role} ${run}`, password, roleNames: [role], mustChangePassword: false })).status).toBe(201);
       return client(server.port, await login(server.port, email, password));
     }
 

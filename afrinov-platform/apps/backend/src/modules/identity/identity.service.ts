@@ -113,6 +113,11 @@ export interface CreateUserInput {
   name: string;
   password: string;
   roleNames: string[];
+  /**
+   * The password is a starting one, chosen by the Admin: the person chooses
+   * their own at first sign-in (ADR-036). On unless false is given.
+   */
+  mustChangePassword?: boolean;
 }
 
 export interface UpdateUserInput {
@@ -160,6 +165,8 @@ export const UserService = {
           email: input.email.toLowerCase(),
           name: input.name,
           passwordHash: hash,
+          mustChangePassword: input.mustChangePassword !== false,
+          passwordChangedAt: new Date(),
           roles: { create: roles.map((r) => ({ roleId: r.id })) },
         },
       });
@@ -169,7 +176,7 @@ export const UserService = {
           action: 'CREATE',
           entityType: 'User',
           entityId: user.id,
-          after: { email: user.email, name: user.name, roles: input.roleNames } as Prisma.InputJsonValue,
+          after: { email: user.email, name: user.name, roles: input.roleNames, mustChangePassword: input.mustChangePassword !== false } as Prisma.InputJsonValue,
         },
       });
       return user;

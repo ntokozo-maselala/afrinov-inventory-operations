@@ -46,7 +46,7 @@ function makePrisma(): unknown {
         return !name || [...db.userRoles.values()].some((ur) => ur.userId === u.id && db.roles.get(ur.roleId)?.name === name);
       }).length,
       create: async ({ data, include }: { data: Omit<User, 'id' | 'createdAt'> & { roles?: { create: Array<{ roleId: string }> } }; include?: unknown }) => {
-        const u: User = { id: nextId(), email: data.email, name: data.name, passwordHash: data.passwordHash, active: data.active ?? true, createdAt: new Date() };
+        const u: User = { id: nextId(), email: data.email, name: data.name, passwordHash: data.passwordHash, active: data.active ?? true, createdAt: new Date(), mustChangePassword: data.mustChangePassword, passwordChangedAt: data.passwordChangedAt };
         db.users.set(u.id, u);
         for (const c of data.roles?.create ?? []) {
           db.userRoles.set(userRoleKey(u.id, c.roleId), { userId: u.id, roleId: c.roleId });
@@ -119,6 +119,17 @@ describe('UserService', () => {
     expect(stored.passwordHash).not.toBe('ChangeMe!2026');
     expect(db.userRoles.size).toBe(1);
     expect(db.audit[0]).toMatchObject({ action: 'CREATE', entityType: 'User', actorId: 'actor-1' });
+  });
+
+  // ADR-036: an Admin chose that password, so the person chooses their own at first sign-in.
+  it('makes a new account\'s password a starting one, unless told not to', async () => {
+    const { UserService } = await import('./identity.service.js');
+    const a = await UserService.create({ email: 'a@b.c', name: 'A', password: 'ChangeMe!2026', roleNames: ['VIEWER'] }, 'admin-1');
+    expect(db.users.get(a.id)).toMatchObject({ mustChangePassword: true });
+    expect(db.users.get(a.id)?.passwordChangedAt).toBeInstanceOf(Date);
+    expect(db.audit.at(-1)?.after).toMatchObject({ mustChangePassword: true });
+    const b = await UserService.create({ email: 'b@b.c', name: 'B', password: 'ChangeMe!2026', roleNames: ['VIEWER'], mustChangePassword: false }, 'admin-1');
+    expect(db.users.get(b.id)).toMatchObject({ mustChangePassword: false });
   });
 
   it('rejects duplicate email', async () => {

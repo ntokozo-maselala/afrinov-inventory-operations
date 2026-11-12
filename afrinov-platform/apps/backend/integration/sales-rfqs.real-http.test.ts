@@ -45,7 +45,7 @@ describe('Sales requests for quotation over real HTTP', () => {
     if (known) return known;
     const email = `it-sales-${role.toLowerCase()}-${run}@example.test`;
     const password = `It-${run}-sales`;
-    expect((await admin('POST', '/users', { email, name: `${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
+    expect((await admin('POST', '/users', { email, name: `${role} ${run}`, password, roleNames: [role], mustChangePassword: false })).status).toBe(201);
     const made = client(server.port, await login(server.port, email, password));
     signedIn.set(role, made);
     return made;

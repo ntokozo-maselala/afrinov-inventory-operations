@@ -611,7 +611,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       </div>
       {!isEdit && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Password" htmlFor="usr-pw" required help="At least 8 characters." error={fieldErrors.password}>
+          <Field label="Starting password" htmlFor="usr-pw" required help="At least 8 characters. They sign in with it once, then choose their own." error={fieldErrors.password}>
             <Input id="usr-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} invalid={!!fieldErrors.password} autoComplete="new-password" />
           </Field>
           <Field label="Confirm password" htmlFor="usr-pw2" required error={fieldErrors.confirm}>
@@ -736,7 +736,7 @@ export function SettingsUsers() {
           open
           onClose={() => setDrawer(null)}
           title={drawer.mode === 'edit' ? `Edit ${drawer.user.name}` : drawer.mode === 'password' ? `Temporary password for ${drawer.user.name}` : 'Add user'}
-          description={drawer.mode === 'edit' ? 'Update user details, roles, and access.' : drawer.mode === 'password' ? 'For someone who has forgotten theirs or is locked out.' : 'Create a new user account. The user will be able to sign in immediately.'}
+          description={drawer.mode === 'edit' ? 'Update user details, roles, and access.' : drawer.mode === 'password' ? 'For someone who has forgotten theirs or is locked out.' : 'Create an account. The person signs in with the starting password once, then chooses their own.'}
           width="md"
         >
           {drawer.mode === 'password' ? (

@@ -92,7 +92,7 @@ describe('signing roles', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Add user' })[0]!);
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'New Director' } });
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'new@afrinov.local' } });
-    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText(/^Starting password/), { target: { value: 'secret123' } });
     fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: 'secret123' } });
     const drawer = screen.getByRole('dialog');
     fireEvent.click(within(drawer).getByRole('checkbox', { name: /^Director/ }));

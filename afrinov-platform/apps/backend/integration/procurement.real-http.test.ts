@@ -443,7 +443,7 @@ describe('receiving stock over real HTTP', () => {
       const person = async (role: string, label: string) => {
         const email = `it-${label}-${run}@afrinov.local`;
         const password = `It-${run}-${label}`;
-        const created = await api('POST', '/users', { email, name: `IT ${label} ${run}`, password, roleNames: [role] });
+        const created = await api('POST', '/users', { email, name: `IT ${label} ${run}`, password, roleNames: [role], mustChangePassword: false });
         expect(created.status).toBe(201);
         return client(server.port, await login(server.port, email, password));
       };
@@ -508,7 +508,7 @@ describe('receiving stock over real HTTP', () => {
     it('makes signing and editing the money take turns on the order', async () => {
       const email = `it-turns-${run}@afrinov.local`;
       const password = `It-${run}-turns`;
-      expect((await api('POST', '/users', { email, name: `IT turns ${run}`, password, roleNames: ['PROCUREMENT_MANAGER'] })).status).toBe(201);
+      expect((await api('POST', '/users', { email, name: `IT turns ${run}`, password, roleNames: ['PROCUREMENT_MANAGER'], mustChangePassword: false })).status).toBe(201);
       const manager = client(server.port, await login(server.port, email, password));
       const approvalKey = '/settings/purchaseOrders.requireApprovalBeforeProcessing';
       const approvalWas = (await api<{ value: boolean }>('GET', approvalKey)).body.value;
@@ -762,7 +762,7 @@ describe('receiving stock over real HTTP', () => {
     async function as(role: string) {
       const email = `it-so-${role.toLowerCase()}-${++users}-${run}@afrinov.local`;
       const password = `It-${run}-${role.toLowerCase()}`;
-      expect((await api('POST', '/users', { email, name: `IT SO ${role} ${run}`, password, roleNames: [role] })).status).toBe(201);
+      expect((await api('POST', '/users', { email, name: `IT SO ${role} ${run}`, password, roleNames: [role], mustChangePassword: false })).status).toBe(201);
       return client(server.port, await login(server.port, email, password));
     }
 

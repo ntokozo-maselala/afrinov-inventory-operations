@@ -12,6 +12,8 @@ export const createUserSchema = z.object({
   name: z.string().min(1),
   password: newPasswordSchema,
   roleNames: z.array(z.enum(ROLE_NAMES)).min(1),
+  // A starting password unless false: chosen again by the person at first sign-in (ADR-036).
+  mustChangePassword: z.boolean().optional(),
 });
 
 export const updateUserSchema = z.object({

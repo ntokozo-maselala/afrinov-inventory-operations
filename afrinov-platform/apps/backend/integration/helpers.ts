@@ -87,7 +87,7 @@ export function client(port: number, token?: string) {
 export async function secondAdmin(port: number, api: ReturnType<typeof client>, run: string): Promise<ReturnType<typeof client>> {
   const email = `it-checker-${run}@afrinov.local`;
   const password = `It-${run}-checker`;
-  const made = await api('POST', '/users', { email, name: `IT Checker ${run}`, password, roleNames: ['ADMIN', 'PROCUREMENT_MANAGER'] });
+  const made = await api('POST', '/users', { email, name: `IT Checker ${run}`, password, roleNames: ['ADMIN', 'PROCUREMENT_MANAGER'], mustChangePassword: false });
   if (made.status !== 201) throw new Error(`Creating the second admin failed with ${made.status}: ${JSON.stringify(made.body)}`);
   return client(port, await login(port, email, password));
 }

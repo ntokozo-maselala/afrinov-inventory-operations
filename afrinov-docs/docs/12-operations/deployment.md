@@ -302,10 +302,9 @@ sign-in of the account ends.
 **7.3 Accounts** (Settings → Users): one per person, with their real email and
 the roles their job needs (the store controller, Procurement, the signers,
 technicians). Give the **second Admin** the Admin role now; until then
-Settings → Users and the Dashboard warn. A password typed when an account is
-created is not forced to change, so straight after creating each account
-choose **Temporary password** on it: the person then chooses their own at
-first sign-in, and nobody else knows it. Tell them the temporary one in
+Settings → Users and the Dashboard warn. The password you type for each new
+account is a starting one: the person signs in with it once and must choose
+their own, so nobody else knows it. Tell them the starting password in
 person.
 
 **7.4 Recipients and PINs** (Recipients): the workers, contractors, machines
