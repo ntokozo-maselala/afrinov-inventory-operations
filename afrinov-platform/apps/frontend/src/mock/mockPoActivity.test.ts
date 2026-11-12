@@ -45,7 +45,7 @@ describe('mock: small print kept on approval', () => {
 
   it('keeps it when submission approves the order, with approval not required', async () => {
     // Settings outlive resetMockState, so it is put back however the test ends.
-    await api.patch('/settings', { updates: { 'purchaseOrders.requireApprovalBeforeProcessing': false } });
+    await api.patch('/settings', { updates: { 'purchaseOrders.requireApprovalBeforeProcessing': false }, reason: 'Test with it off' });
     try {
       const po = await draft();
       const submitted = await api.post<Order>(`/purchase-orders/${po.id}/submit`, {});

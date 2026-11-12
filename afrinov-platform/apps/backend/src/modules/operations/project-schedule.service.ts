@@ -853,7 +853,7 @@ export const ProjectScheduleService = {
       // When what it still owes is expected; once nothing is owed, the order's own date.
       const expected = owed.length ? (owedOn[0] ?? null) : iso(o.expectedDeliveryDate);
       // A receipt's delivery note date, not the day it was booked. An order received in one go
-      // (POST /purchase-orders/:id/receive) has no receipt for that delivery: its deliveredAt is
+      // (POST /purchase-orders/:id/receive, retired by system audit D3) has no receipt for that delivery: its deliveredAt is
       // the day, when it came after every receipt was booked.
       const notes = o.goodsReceipts.map((r) => r.receivedAt.getTime());
       const lastBooked = Math.max(0, ...o.goodsReceipts.map((r) => (r.postedAt ?? r.receivedAt).getTime()));

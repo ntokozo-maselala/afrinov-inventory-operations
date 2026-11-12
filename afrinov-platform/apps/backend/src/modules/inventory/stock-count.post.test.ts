@@ -8,7 +8,8 @@ const { tx } = vi.hoisted(() => ({
     $executeRaw: vi.fn(async () => 0),
     location: { findUnique: vi.fn() },
     material: { findMany: vi.fn(), findUnique: vi.fn(async () => ({ sku: 'S', active: true })) },
-    inventoryTransaction: { create: vi.fn() },
+    // Nothing written off in the last 7 days (system audit C2).
+    inventoryTransaction: { create: vi.fn(), aggregate: vi.fn(async () => ({ _sum: { quantity: null } })) },
     stockCountLine: { createMany: vi.fn() },
     auditLogEntry: { create: vi.fn() },
     adjustmentRequest: { findMany: vi.fn(), create: vi.fn() },

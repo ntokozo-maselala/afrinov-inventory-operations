@@ -51,6 +51,7 @@ export function useCanManageUsers(): boolean {
 export const PERMISSION_ROLES = {
   'materials:manage': ['STORE_CONTROLLER'], // create:material, edit:material
   'materials:create': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:material (buyers add an item from an order line)
+  'materials:cost': ['PROCUREMENT'], // edit:unit_cost (system audit C1: the store doesn't price what it writes off)
   'inventory:receive': ['STORE_CONTROLLER', 'PROCUREMENT'], // receive:inventory
   'inventory:issue': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory
   'inventory:return': ['STORE_CONTROLLER', 'TECHNICIAN'], // issue:inventory (returns are booked by the people who issue)
@@ -64,6 +65,7 @@ export const PERMISSION_ROLES = {
   'tools:extend': ['STORE_CONTROLLER'], // extend:tool_loan
   'locations:manage': ['STORE_CONTROLLER'], // create/edit/delete:location, manage:location_status
   'projects:manage': ['STORE_CONTROLLER', 'PROCUREMENT', 'SALES'], // manage:projects
+  'projects:close': [], // close:project (Admin; a project's own manager closes it too: canCloseProject)
   'recipients:manage': ['STORE_CONTROLLER'], // manage:recipients
   'suppliers:manage': ['STORE_CONTROLLER', 'PROCUREMENT'], // create:supplier, edit:supplier (ADR-018)
   'activity:view': ['STORE_CONTROLLER'], // view:audit_log
@@ -93,6 +95,8 @@ export type Permission = keyof typeof PERMISSION_ROLES;
 const SERVER_GRANTS: Partial<Record<Permission, readonly string[]>> = {
   'writeoffs:approve': ['approve:write_off'],
   'writeoffs:view': ['approve:write_off', 'adjust:inventory'],
+  'materials:cost': ['edit:unit_cost'],
+  'projects:close': ['close:project'],
 };
 
 export function usePermissions(): { hasPermission: (permission: Permission | string) => boolean } {

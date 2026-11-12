@@ -24,6 +24,15 @@ export interface CreateMaterialInput {
   trackUse?: boolean;
 }
 
+/**
+ * Who may set an item's unit cost (system audit C1, ADR-039): it decides
+ * whether a write-off needs someone else's approval, so not whoever writes
+ * stock off. The route says whether the caller holds edit:unit_cost.
+ */
+export interface CostRights { canSetCost: boolean }
+
+const COST_REFUSED = 'Unit cost is set by Procurement or an Admin: it decides whether a write-off needs someone else\'s approval. Leave it blank, and they fill it in.';
+
 /** Something to deal with before an item can be deactivated (ADR-033). */
 export interface DeactivationBlocker {
   kind: 'STOCK' | 'LOAN' | 'APPROVAL' | 'ORDER';
@@ -84,8 +93,10 @@ export interface UpdateMaterialInput {
   description?: string | null;
   unitOfMeasure?: string;
   requiredStock?: number;
-  /** null clears it. */
+  /** null clears it. A change needs edit:unit_cost and a reason (system audit C1, C3). */
   unitCost?: number | null;
+  /** Why the unit cost changes. */
+  unitCostReason?: string;
   serialNumber?: string | null;
   /** Projects material only: assigns its project. */
   projectNumber?: string;
@@ -157,7 +168,8 @@ export const MaterialService = {
     return shape(m);
   },
 
-  async create(input: CreateMaterialInput, actorId: string) {
+  async create(input: CreateMaterialInput, actorId: string, rights: CostRights) {
+    if (input.unitCost !== undefined && !rights.canSetCost) throw Errors.forbidden(COST_REFUSED);
     const sku = input.sku.trim();
     const existing = await prisma.material.findUnique({ where: { sku } });
     if (existing) throw Errors.conflict(`Material with SKU "${sku}" already exists`);
@@ -184,6 +196,10 @@ export const MaterialService = {
         },
         include: withProject,
       });
+      // Its first cost is in its history too (system audit C3).
+      if (input.unitCost !== undefined) {
+        await tx.materialCostChange.create({ data: { materialId: material.id, before: null, after: input.unitCost, reason: 'Set when the item was added', actorId } });
+      }
       // The material row and its audit record commit together, so a change can
       // never be recorded without the history entry that explains it.
       await tx.auditLogEntry.create({
@@ -200,7 +216,7 @@ export const MaterialService = {
     return shape(created);
   },
 
-  async update(input: UpdateMaterialInput, actorId: string) {
+  async update(input: UpdateMaterialInput, actorId: string, rights: CostRights) {
     const before = await prisma.material.findUnique({ where: { id: input.id } });
     if (!before) throw Errors.notFound('Material');
 
@@ -225,7 +241,16 @@ export const MaterialService = {
       checkQuantityForUnit(input.name ?? before.name, unit, input.requiredStock, 'requiredStock');
       data.requiredStock = input.requiredStock;
     }
-    if (input.unitCost !== undefined) data.unitCost = input.unitCost;
+    // A change of unit cost needs the right to set it and a reason, and is kept
+    // (system audit C1, C3). Sent unchanged, it is not a change.
+    const nextCost = input.unitCost === undefined ? undefined : input.unitCost === null ? null : new Prisma.Decimal(input.unitCost);
+    const costChanges = nextCost !== undefined && !(nextCost === null ? before.unitCost === null : before.unitCost !== null && nextCost.equals(before.unitCost));
+    const costReason = input.unitCostReason?.trim() || '';
+    if (costChanges) {
+      if (!rights.canSetCost) throw Errors.forbidden(COST_REFUSED);
+      if (!costReason) throw Errors.validation('Say why the unit cost changes, for example the supplier\'s new price or a corrected invoice.', { fieldErrors: { unitCostReason: ['Say why the unit cost changes.'] } });
+      data.unitCost = nextCost;
+    }
     if (input.trackUse !== undefined) {
       checkTrackUse(input.trackUse, before.category);
       data.trackUse = input.trackUse;
@@ -239,6 +264,9 @@ export const MaterialService = {
     const after = await prisma.$transaction(async (tx) => {
       if (newUnit?.kind === 'COUNTED') await refusePartUnits(before.id, input.name ?? before.name, newUnit.code, tx);
       const material = await tx.material.update({ where: { id: input.id }, data, include: withProject });
+      if (costChanges) {
+        await tx.materialCostChange.create({ data: { materialId: input.id, before: before.unitCost, after: nextCost ?? null, reason: costReason, actorId } });
+      }
       await tx.auditLogEntry.create({
         data: {
           actorId,
@@ -252,6 +280,20 @@ export const MaterialService = {
       return material;
     });
     return shape(after);
+  },
+
+  /** Every change of the item's unit cost, newest first, with who and why (system audit C3). */
+  async costHistory(id: string) {
+    if (!(await prisma.material.findUnique({ where: { id }, select: { id: true } }))) throw Errors.notFound('Material');
+    const rows = await prisma.materialCostChange.findMany({
+      where: { materialId: id },
+      include: { actor: { select: { name: true } } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+    });
+    return rows.map((r) => ({
+      before: r.before?.toString() ?? null, after: r.after?.toString() ?? null, reason: r.reason, by: r.actor.name, at: r.createdAt.toISOString(),
+    }));
   },
 
   /** What must be dealt with before the item can be deactivated, for the screen to show first. */

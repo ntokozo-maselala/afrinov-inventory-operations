@@ -12,7 +12,7 @@ import { prisma } from '../../shared/db.js';
 import { inTx } from '../../shared/tx.js';
 import { Errors } from '../../shared/errors.js';
 import { toDecimal, fitsQuantityColumn } from '../../shared/decimal.js';
-import { writeOffRule } from './write-off-limit.js';
+import { recentWriteOffQuantity, writeOffRule } from './write-off-limit.js';
 import { requestAdjustment } from './write-off-requests.js';
 import { checkWholeUnits } from '../../shared/units.js';
 import { getCurrentBalance, recomputeBalance, lockInventoryBalances, storesStock } from '../../shared/inventory/balances.js';
@@ -210,7 +210,9 @@ export const StockCountService = {
           continue;
         }
         const reasonNote = [note, l.note].some(Boolean) ? `Stock count: ${[note, l.note].filter(Boolean).join(' — ')}` : 'Stock count';
-        const check = rule(variance, costById.get(l.materialId) ?? null);
+        // Judged with the counter's other write-offs of the item this week (system audit C2).
+        const recent = variance.isNegative() ? await recentWriteOffQuantity({ actorId: input.actorId, materialId: l.materialId }, tx) : undefined;
+        const check = rule(variance, costById.get(l.materialId) ?? null, recent);
         if (check.needsApproval) {
           const { requestId } = await requestAdjustment({
             materialId: l.materialId, locationId: input.locationId, quantity: variance, reasonCode: AdjustmentReasonCode.COUNT_VARIANCE,

@@ -79,7 +79,8 @@ describe('Stock page actions', () => {
 describe('setup pages', () => {
   it.each([
     ['Locations', <Locations key="l" />, 'A-1', ['Add location', 'Edit', 'Deactivate', 'Delete'], 'STORE_CONTROLLER'],
-    ['Projects', <Projects key="p" />, 'Plant upgrade', ['Add project', 'Edit', 'Archive'], 'PROCUREMENT'],
+    // Archiving a project is an Admin's or its manager's (system audit E3): below.
+    ['Projects', <Projects key="p" />, 'Plant upgrade', ['Add project', 'Edit'], 'PROCUREMENT'],
     ['Suppliers', <Suppliers key="s" />, 'Hydroscand', ['Add supplier'], 'PROCUREMENT'],
   ] as const)('%s: a viewer, a technician and an approver only look; the role that may manage it sees its buttons', async (_name, el, shown, buttons, manager) => {
     for (const roles of [['VIEWER'], ['TECHNICIAN'], ['APPROVER']]) {
@@ -92,6 +93,17 @@ describe('setup pages', () => {
     page(el, [manager]);
     await screen.findByText(shown);
     for (const name of buttons) expect(button(name)).toBeInTheDocument();
+  });
+
+  it('Projects: Procurement does not archive a project it does not manage', async () => {
+    page(<Projects />, ['PROCUREMENT']);
+    await screen.findByText('Plant upgrade');
+    expect(button('Archive')).not.toBeInTheDocument();
+  });
+
+  it('Projects: an Admin archives any project', async () => {
+    page(<Projects />, ['ADMIN']);
+    expect(await screen.findByRole('button', { name: 'Archive' })).toBeInTheDocument();
   });
 
   it('Locations still lets everyone view a location', async () => {

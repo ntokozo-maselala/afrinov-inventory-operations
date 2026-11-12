@@ -16,7 +16,7 @@ import { serviceVersion } from '../shared/version.js';
 import { auditQuerySchema } from '../modules/audit/audit.routes.js';
 import { ACTIVITY_TYPES } from '../modules/audit/activity.service.js';
 import { changePasswordSchema, loginSchema } from '../modules/identity/auth.routes.js';
-import { createUserSchema, temporaryPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
+import { createUserSchema, signInQuerySchema, temporaryPasswordSchema, updateUserSchema } from '../modules/identity/user.routes.js';
 import {
   issueSchema, transferSchema, adjustmentSchema, reversalSchema, stockReceiptSchema, returnSchema, returnManySchema, returnableQuerySchema, stockCountSchema,
   consumableOutcomeSchema, outcomeWithdrawalSchema, adjustmentRequestQuerySchema, adjustmentRejectionSchema,
@@ -31,7 +31,6 @@ import {
   updateLocationSchema,
   locationStatusSchema,
 } from '../modules/inventory/material.routes.js';
-import { createStockItemSchema } from '../modules/inventory/stock-item.routes.js';
 import {
   createProjectSchema, updateProjectSchema,
   createScheduleSchema, updateScheduleSchema, nextMonthSchema, boardQuerySchema, procurementQuerySchema, replanSchema, addStepSchema, updateStepSchema,
@@ -44,7 +43,6 @@ import {
   createPOSchema,
   updatePOSchema,
   listPOQuerySchema,
-  receiveSchema,
   confirmDeliverySchema,
   closeSchema,
   cancelSchema,
@@ -57,7 +55,7 @@ import {
   createLabourRateSchema, createSalesRfqSchema, listLabourRatesQuerySchema, listSalesRfqQuerySchema, salesQuoteOptionsQuerySchema, sendBackSalesRfqSchema,
   updateLabourRateSchema, updateSalesRfqSchema,
 } from '../modules/sales/sales-rfq.routes.js';
-import { setOneSchema, setManySchema } from '../modules/settings/settings.routes.js';
+import { setOneSchema, setManySchema, resetSectionQuerySchema, resetSectionSchema } from '../modules/settings/settings.routes.js';
 import {
   dateRangePresetSchema,
   materialCategorySchema,
@@ -166,7 +164,8 @@ export const OPERATIONS: Operation[] = [
     description: 'The token lasts the idle time in security.sessionTimeoutMinutes (default 60 minutes) and is renewed with '
       + '`POST /auth/refresh` while the person is active; a sign-in ends 12 hours after it began (ADR-035). '
       + 'Rate limited per IP (RATE_LIMIT_AUTH, default 5 per minute) and per account (10 wrong passwords in 15 minutes). '
-      + 'The user carries their roles and the permission codes those roles grant, and mustChangePassword when an Admin set a temporary password (ADR-036).',
+      + 'The user carries their roles and the permission codes those roles grant, and mustChangePassword when an Admin set a temporary password (ADR-036). '
+      + 'Each attempt is written on the sign-in log: SIGN_IN, FAILED or THROTTLED, with the address and browser (system audit F3).',
     body: loginSchema, errors: [401, 429],
   },
   {
@@ -184,12 +183,24 @@ export const OPERATIONS: Operation[] = [
     method: 'post', path: '/auth/password', tag: 'Auth', summary: 'Change your own password',
     description: 'Checks the current password, refuses one you are using now, and returns `{ token, user }` for a fresh sign-in. '
       + 'Every other sign-in of the account ends (ADR-036). Rate limited as sign-in is. '
-      + 'While a temporary password is in use, this, `GET /auth/me` and `POST /auth/refresh` are the only calls accepted; others answer 403.',
+      + 'While a temporary password is in use, this, `GET /auth/me`, `POST /auth/refresh` and `POST /auth/logout` are the only calls accepted; others answer 403.',
     body: changePasswordSchema, errors: [401, 429],
+  },
+  {
+    method: 'post', path: '/auth/logout', tag: 'Auth', summary: 'Sign out',
+    description: 'Writes SIGN_OUT on the sign-in log (system audit F3) and answers 204. The token itself runs out on its own; the screen forgets it.',
+    success: 204, errors: [401],
   },
 
   // Users
   { method: 'get', path: '/users', tag: 'Users', summary: 'List users', permissions: [P.ManageUsers] },
+  {
+    method: 'get', path: '/sign-ins', tag: 'Users', summary: 'The sign-in log, newest first',
+    description: 'Sign-ins, wrong emails or passwords, attempts held back after too many, and sign-outs, each with the account (when known), '
+      + 'address and browser, kept 12 months (system audit F3). `from` and `to` are days in South Africa; `to` takes in the whole day. '
+      + 'Returns { total, items }; at most 500 a page.',
+    permissions: [P.ManageUsers], query: signInQuerySchema, errors: [400],
+  },
   {
     method: 'get', path: '/users/lookup', tag: 'Users', summary: 'Id and name of active users, for pickers',
     permissions: [P.ViewUsers],
@@ -235,12 +246,19 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/materials', tag: 'Materials', summary: 'Create a material',
-    description: 'Answers 200, not 201. A Projects material needs no project of its own (the order it is bought on says which); any project given must be open. A Stores material has no project.', permissions: [P.CreateMaterial], body: createMaterialSchema, errors: [409],
+    description: 'Answers 200, not 201. A Projects material needs no project of its own (the order it is bought on says which); any project given must be open. A Stores material has no project. '
+      + 'A unitCost needs edit:unit_cost (403 otherwise) and starts the item\'s cost history (system audit C1, C3).', permissions: [P.CreateMaterial], body: createMaterialSchema, errors: [403, 409],
   },
   {
     method: 'patch', path: '/materials/:id', tag: 'Materials', summary: 'Update a material',
-    description: 'Not its status: sending active is refused, as an item is deactivated or reactivated with a reason on /materials/:id/status.',
-    permissions: [P.EditMaterial], body: updateMaterialSchema, errors: [404],
+    description: 'Not its status: sending active is refused, as an item is deactivated or reactivated with a reason on /materials/:id/status. '
+      + 'Changing unitCost needs edit:unit_cost and a unitCostReason, kept in the cost history; a body that changes only the cost needs edit:unit_cost alone (system audit C1, C3).',
+    permissions: [P.EditMaterial], body: updateMaterialSchema, errors: [400, 403, 404],
+  },
+  {
+    method: 'get', path: '/materials/:id/cost-history', tag: 'Materials', summary: 'Each change of an item\'s unit cost',
+    description: 'Newest first, at most 100: before and after (null: no price), the reason, who and when (system audit C3).',
+    permissions: [P.ViewReports], errors: [404],
   },
   {
     method: 'patch', path: '/materials/:id/status', tag: 'Materials', summary: 'Deactivate or reactivate a material',
@@ -254,9 +272,10 @@ export const OPERATIONS: Operation[] = [
     permissions: [P.EditMaterial], errors: [404],
   },
   {
-    method: 'post', path: '/stock-items', tag: 'Materials', summary: 'Create a material with its opening stock',
-    description: 'A location is required when initialQuantity is above zero.',
-    permissions: [P.CreateMaterial, P.ReceiveInventory], body: createStockItemSchema, success: 201, errors: [404, 409],
+    method: 'post', path: '/stock-items', tag: 'Materials', summary: 'Retired: add the item, then receive its stock',
+    description: 'Creating an item with stock in one call put stock on the shelf with no order and no count (system audit D3). '
+      + 'This refuses every request (400): add the item with POST /materials and receive its stock with POST /stock-receipts or POST /goods-receipts.',
+    permissions: [P.CreateMaterial, P.ReceiveInventory], errors: [400],
   },
 
   // Locations
@@ -307,14 +326,15 @@ export const OPERATIONS: Operation[] = [
       + 'brokenQuantity so far; a RETURN carries the usedUpQuantity and brokenQuantity marked in the same counter visit, as booked, '
       + 'and bookedMarksLive, whether any of those still counts (the return is reversed only once they are withdrawn); '
       + 'trackUse says whether the item asks for used up or broken.',
-    query: movementQuery,
+    permissions: [P.ViewReports], query: movementQuery,
   },
   {
     method: 'get', path: '/inventory-transactions/summary', tag: 'Stock movements', summary: 'How many movements of each type the filters select',
-    query: movementFilters,
+    permissions: [P.ViewReports], query: movementFilters,
   },
   {
     method: 'get', path: '/inventory-transactions/actors', tag: 'Stock movements', summary: 'Everyone who has posted a movement (id and name)',
+    permissions: [P.ViewReports],
   },
   {
     method: 'get', path: '/inventory-transactions/writeoffs-by-responsible', tag: 'Stock movements',
@@ -322,13 +342,13 @@ export const OPERATIONS: Operation[] = [
     description: 'Damage, loss and scrap that took stock away, for the same filters as the write-offs report: per responsible '
       + 'recipient (recipientId null: nobody known), how many write-offs and their value at unit cost (an item with no unit '
       + 'cost counts as 0), largest value first (ties by name, nobody known last), as { currency, totals }. Reversed write-offs and their reversals are left out. '
-      + 'The report filter is implied.',
-    query: movementFilters,
+      + 'The report filter is implied. Who was responsible is for those who adjust stock or approve write-offs: adjust:inventory or approve:write_off as well (system audit F6).',
+    permissions: [P.ViewReports], query: movementFilters, errors: [403],
   },
   {
     method: 'get', path: '/inventory-transactions/export', tag: 'Stock movements', summary: 'Download the filtered movement history as Excel',
     description: 'Refused with 400 when the filters select more than 10,000 movements.',
-    query: movementFilters, errors: [400],
+    permissions: [P.ViewReports], query: movementFilters, errors: [400],
     produces: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   },
   {
@@ -348,6 +368,7 @@ export const OPERATIONS: Operation[] = [
       + '(recipient, project, where it came from, how many were lent and how many are still out), each with its due date '
       + '(dueOn), daysLate (negative while days are left), state (ON_LOAN, DUE_SOON, OVERDUE, or NEEDS_DECISION once '
       + 'inventory.toolEscalateDays past due), overdue (past its due date) and its extensions, oldest first.',
+    permissions: [P.ViewReports],
   },
   {
     method: 'post', path: '/tools/check-out', tag: 'Tools', summary: 'Lend tools to a recipient',
@@ -386,6 +407,7 @@ export const OPERATIONS: Operation[] = [
       + 'null once all back) and its events oldest first: CHECKED_OUT (agreed due date, override reason), DUE_DATE_CHANGED '
       + '(new and previous date, reason), CHECKED_IN (condition, the due date then and daysLate) and BECAME_OVERDUE, which '
       + 'is worked out from the dates and never stored. 404 unless :id is a check-out.',
+    permissions: [P.ViewReports],
     errors: [404],
   },
   {
@@ -526,7 +548,7 @@ export const OPERATIONS: Operation[] = [
     summary: 'What became of an issue line: used up or broken',
     description: 'For an issue: quantity issued, returned, used up, broken and still out (issued less the other three), whether the '
       + 'item tracks use now, and every outcome oldest first, with its withdrawal when it was withdrawn. 404 for anything but an issue.',
-    errors: [404],
+    permissions: [P.ViewReports], errors: [404],
   },
   {
     method: 'post', path: '/inventory-transactions/:id/outcomes', tag: 'Stock movements',
@@ -563,8 +585,9 @@ export const OPERATIONS: Operation[] = [
     method: 'patch', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Update a project',
     description: 'Status decides whether the project is active: Completed and Cancelled are inactive. Completing or cancelling it is '
       + 'refused (409) while orders are still open, requests for quotation not awarded or cancelled, tools out on loan to it or '
-      + 'write-offs of its stock waiting, and, to complete it, while schedules are open (system audit E1, E2).',
-    permissions: [P.ManageProjects], body: updateProjectSchema, errors: [404, 409],
+      + 'write-offs of its stock waiting, and, to complete it, while schedules are open (system audit E1, E2). '
+      + 'Completing or cancelling it, or changing its manager, also needs close:project or being its manager (403 otherwise: system audit E3).',
+    permissions: [P.ManageProjects], body: updateProjectSchema, errors: [403, 404, 409],
   },
   {
     method: 'get', path: '/projects/:projectNumber/closing-check', tag: 'Projects', summary: 'What must be dealt with before closing a project',
@@ -574,8 +597,9 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'delete', path: '/projects/:projectNumber', tag: 'Projects', summary: 'Archive a project',
-    description: 'Archives rather than deletes: the project is cancelled, so the same check applies (409). Returns the archived project.',
-    permissions: [P.ManageProjects], errors: [404, 409],
+    description: 'Archives rather than deletes: the project is cancelled, so the same check applies (409), and the same rule on who: '
+      + 'close:project or its manager (403: system audit E3). Returns the archived project.',
+    permissions: [P.ManageProjects], errors: [403, 404, 409],
   },
   // Job tracking (ADR-032). Anyone signed in may read; only the project's manager,
   // or a holder of manage:project_schedule (Admin), may change. Each change
@@ -692,13 +716,21 @@ export const OPERATIONS: Operation[] = [
   { method: 'get', path: '/recipients/:id', tag: 'Recipients', summary: 'Get a recipient', errors: [404] },
   {
     method: 'post', path: '/recipients', tag: 'Recipients', summary: 'Add a recipient',
-    description: 'Names are unique ignoring case. Refused with 409 when the name is taken.',
-    permissions: [P.ManageRecipients], body: createRecipientSchema, success: 201, errors: [409],
+    description: 'Names are unique ignoring case. Refused with 409 when the name is taken. A worker or contractor may name their user account '
+      + '(userId), one recipient per account (409), so a slip they issue to themselves shows (system audit F5).',
+    permissions: [P.ManageRecipients], body: createRecipientSchema, success: 201, errors: [400, 404, 409],
   },
   {
     method: 'patch', path: '/recipients/:id', tag: 'Recipients', summary: 'Update or deactivate a recipient',
-    description: 'Recipients are deactivated, never deleted, so issue history keeps its names.',
-    permissions: [P.ManageRecipients], body: updateRecipientSchema, errors: [404, 409],
+    description: 'Recipients are deactivated, never deleted, so issue history keeps its names. userId null unlinks the account; '
+      + 'a machine or site loses its link.',
+    permissions: [P.ManageRecipients], body: updateRecipientSchema, errors: [400, 404, 409],
+  },
+  {
+    method: 'get', path: '/reports/self-issued', tag: 'Recipients', summary: 'Slips someone issued or lent to themselves',
+    description: 'The last 30 days, newest first, at most 200: issues and tool loans whose recipient is linked to the account that posted them '
+      + '(system audit F5). Returns { days, slips: [{ issueId, kind, postedAt, by, recipient, lines }] }.',
+    permissions: [P.ViewAuditLog],
   },
   {
     method: 'put', path: '/recipients/:id/pin', tag: 'Recipients', summary: 'Set a worker or contractor’s counter PIN',
@@ -818,11 +850,10 @@ export const OPERATIONS: Operation[] = [
   },
   {
     method: 'post', path: '/purchase-orders/:id/receive', tag: 'Purchase orders',
-    summary: 'Receive everything still outstanding',
-    description: 'Receives each line\'s outstanding quantity into the given location and marks the order RECEIVED. '
-      + 'Allowed when APPROVED or PARTIALLY_RECEIVED. Partial deliveries go through goods receipts. '
-      + 'A Stores order also needs `order:stores_stock`. A project order\'s stock is held for its project. To anyone who receives neither kind the order is not found (404).',
-    procurement: true, permissions: [P.ReceivePurchaseOrder], body: receiveSchema, errors: [400, 403, 404, 409],
+    summary: 'Retired: deliveries are received on Receive stock',
+    description: 'Booking every outstanding line in one call skipped the count of what arrived, the whole-unit check and the project check (system audit D3). '
+      + 'This refuses every request (400), pointing to POST /goods-receipts; orders received this way before stay as they are.',
+    procurement: true, permissions: [P.ReceivePurchaseOrder], errors: [400, 403, 404],
   },
   {
     method: 'post', path: '/purchase-orders/:id/confirm-delivery', tag: 'Purchase orders',
@@ -1110,15 +1141,24 @@ export const OPERATIONS: Operation[] = [
   { method: 'get', path: '/settings/:key', tag: 'Settings', summary: 'Get one setting', errors: [404] },
   {
     method: 'put', path: '/settings/:key', tag: 'Settings', summary: 'Set one setting', adminOnly: true,
-    permissions: [P.ManageSettings], body: setOneSchema, errors: [404],
+    description: 'Switching off inventory.requireWriteOffApproval or purchaseOrders.requireApprovalBeforeProcessing needs a reason (400 without), kept in Activity (system audit C9).',
+    permissions: [P.ManageSettings], body: setOneSchema, errors: [400, 404],
   },
   {
     method: 'patch', path: '/settings', tag: 'Settings', summary: 'Set several settings at once', adminOnly: true,
-    permissions: [P.ManageSettings], body: setManySchema, errors: [404],
+    description: 'All or nothing. As PUT: switching off either two-person check needs a reason (system audit C9).',
+    permissions: [P.ManageSettings], body: setManySchema, errors: [400, 404],
   },
   {
-    method: 'post', path: '/settings/reset', tag: 'Settings', summary: 'Reset every setting to its default',
-    adminOnly: true, permissions: [P.ManageSettings],
+    method: 'get', path: '/settings/reset-preview', tag: 'Settings', summary: 'What resetting one section would change',
+    description: 'Each editable setting in the section not at its default: [{ key, description, from, to }] (system audit C10).',
+    adminOnly: true, permissions: [P.ManageSettings], query: resetSectionQuerySchema, errors: [400, 404],
+  },
+  {
+    method: 'post', path: '/settings/reset', tag: 'Settings', summary: 'Reset one section to its defaults',
+    description: 'One section at a time, never every setting (system audit C10). Writes only the settings not at their default, each logged, '
+      + 'and returns them. A reason is needed when a reset would switch a two-person check off.',
+    adminOnly: true, permissions: [P.ManageSettings], body: resetSectionSchema, errors: [400, 404],
   },
 
   // Backups

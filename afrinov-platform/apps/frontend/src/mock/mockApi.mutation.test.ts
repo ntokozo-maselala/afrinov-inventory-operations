@@ -492,15 +492,18 @@ describe('mock API mutation flows', () => {
       expect(await codeOf(api.post(`/purchase-orders/${draft.id}/ship`, { trackingNumber: 'TRK-1' }))).not.toBeUndefined();
     });
 
-    it('rejects receiving a PO that is not approved yet', async () => {
-      const draft = await makeDraftPO();
-      await api.post(`/purchase-orders/${draft.id}/submit`, {});
-      expect(await codeOf(api.post(`/purchase-orders/${draft.id}/receive`, { locationId: 'loc-1' }))).toBe('INVALID_STATE');
+    it('refuses to receive a whole order in one call, as the server (system audit D3)', async () => {
+      const po = await approvedPO();
+      expect(await codeOf(api.post(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' }))).toBe('VALIDATION_ERROR');
+      expect(await codeOf(api.post(`/purchase-orders/po-none/receive`, { locationId: 'loc-1' }))).toBe('NOT_FOUND');
+      expect(await codeOf(api.post('/stock-items', { sku: 'X', name: 'X', category: 'CONSUMABLES', unitOfMeasure: 'each' }))).toBe('VALIDATION_ERROR');
     });
 
-    it('receives everything outstanding, then closes', async () => {
+    it('receives everything outstanding on a goods receipt, then closes', async () => {
       const po = await approvedPO();
-      const received = await api.post<{ status: string }>(`/purchase-orders/${po.id}/receive`, { locationId: 'loc-1' });
+      const order = await api.get<{ supplierId: string; lines: Array<{ id: string; materialId: string; orderedQty: string }> }>(`/purchase-orders/${po.id}`);
+      await api.post('/goods-receipts', { supplierId: order.supplierId, purchaseOrderId: po.id, post: true, lines: order.lines.map((l) => ({ materialId: l.materialId, locationId: 'loc-1', quantity: Number(l.orderedQty), purchaseOrderLineId: l.id })) });
+      const received = await api.get<{ status: string }>(`/purchase-orders/${po.id}`);
       expect(received.status).toBe('RECEIVED');
       expect(await codeOf(api.post(`/purchase-orders/${po.id}/cancel`, { reason: 'Too late' }))).toBe('INVALID_STATE');
       const closed = await api.post<{ status: string }>(`/purchase-orders/${po.id}/close`, {});
@@ -945,7 +948,9 @@ describe('mock: write-off approval when switched on', () => {
     await api.put('/settings/inventory.requireWriteOffApproval', { value: true });
   });
   afterEach(async () => {
-    await api.put('/settings/inventory.requireWriteOffApproval', { value: false });
+    // As the server (system audit C9): not without a reason.
+    await expect(api.put('/settings/inventory.requireWriteOffApproval', { value: false })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await api.put('/settings/inventory.requireWriteOffApproval', { value: false, reason: 'Test with it off' });
   });
 
   it('holds an adjustment over the limit, which the demo user may withdraw but not approve', async () => {

@@ -10,6 +10,8 @@ vi.mock('../api/client', () => ({
   api: { get: mockGet },
   isApiError: (e: unknown) => typeof e === 'object' && e !== null && 'code' in e,
 }));
+// Signed in, as the Projects page reads who closes a project (system audit E3).
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: 'u-1', roles: [] } }) }));
 vi.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ hasPermission: (p: string) => granted.has(p) }) }));
 
 const { Projects } = await import('./Projects');

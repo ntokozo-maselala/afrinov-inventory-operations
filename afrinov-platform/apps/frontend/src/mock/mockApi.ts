@@ -323,6 +323,15 @@ function refuseProjectMaterialOnStoresOrder(projectNumber: string | null | undef
 
 // As the server: a project order goes to site, so it isn't received into stock.
 const DELIVERY_IS_RECEIVED = 'Project orders are received into stock now: the store books each delivery on Receive stock.';
+/** As the server (system audit C9): switching off a two-person check needs a reason. */
+const TWO_PERSON_SETTINGS = ['inventory.requireWriteOffApproval', 'purchaseOrders.requireApprovalBeforeProcessing'];
+function mockSwitchOffReason(key: string, before: unknown, after: unknown, reason: string | undefined): string | null {
+  if (!TWO_PERSON_SETTINGS.includes(key) || after !== false || before === false) return null;
+  if (!reason?.trim()) throw err('VALIDATION_ERROR', 'Say why: switching this off removes the second person who checks.', { fieldErrors: { reason: ['Say why: switching this off removes the second person who checks.'] } });
+  return reason.trim();
+}
+const RECEIVE_ON_RECEIVE_STOCK = 'Deliveries are received on Receive stock: count what arrived against the order there.';
+const STOCK_ITEMS_RETIRED = 'Add the item on Materials, then receive its stock on Receive stock.';
 
 function projectRef(projectNumber: string | null | undefined) {
   if (!projectNumber) return null;
@@ -1791,43 +1800,11 @@ function route(method: string, path: string, body?: unknown): unknown {
     if (!state.purchaseOrders.some((x) => x.id === id)) throw err('NOT_FOUND', 'Purchase order not found');
     throw err('VALIDATION_ERROR', DELIVERY_IS_RECEIVED);
   }
-  if (method === 'POST' && p.endsWith('/receive')) {
+  // As the server (system audit D3): retired, as every delivery is counted in on Receive stock.
+  if (method === 'POST' && /^\/purchase-orders\/[^/]+\/receive$/.test(p)) {
     const id = p.slice('/purchase-orders/'.length, -'/receive'.length);
-    const po = state.purchaseOrders.find((x) => x.id === id);
-    if (!po) throw err('NOT_FOUND', 'Purchase order not found');
-    if (po.status !== 'APPROVED' && po.status !== 'PARTIALLY_RECEIVED') throw err('INVALID_STATE', `Cannot receive from ${po.status}`);
-    const b = (body as { locationId?: string; deliveryNotes?: string }) ?? {};
-    if (!b.locationId) throw err('VALIDATION_ERROR', 'locationId is required');
-    if (!state.locations.find((l) => l.id === b.locationId)) throw err('NOT_FOUND', 'Location not found');
-    const before = { status: po.status };
-    po.status = 'RECEIVED';
-    po.deliveredAt = new Date().toISOString();
-    po.deliveredBy = { id: 'u-admin', name: 'You (admin)', email: 'admin@afrinov.local', roles: ['ADMIN'] };
-    po.deliveryNotes = b.deliveryNotes ?? null;
-    for (const line of po.lines) {
-      const orderedQty = Number(line.orderedQty);
-      const alreadyReceived = Number(line.receivedQty);
-      const toReceive = orderedQty - alreadyReceived;
-      line.receivedQty = String(orderedQty);
-      if (toReceive > 0) {
-        state.transactions.push({
-          id: nextId('tx'),
-          materialId: line.materialId,
-          locationId: b.locationId,
-          quantity: String(toReceive),
-          type: 'RECEIPT',
-          reasonCode: 'PO_RECEIPT',
-          referenceType: 'PurchaseOrder',
-          referenceId: po.id,
-          postedAt: new Date().toISOString(),
-          actorId: 'u-admin',
-          heldForProject: po.projectNumber ?? undefined,
-        });
-      }
-    }
-    po.history = po.history ?? [];
-    po.history.push({ id: nextId('audit'), action: 'PO_RECEIVE', actorId: 'u-admin', before, after: { status: po.status, locationId: b.locationId }, createdAt: new Date().toISOString() });
-    return po;
+    if (!state.purchaseOrders.some((x) => x.id === id)) throw err('NOT_FOUND', 'Purchase order not found');
+    throw err('VALIDATION_ERROR', RECEIVE_ON_RECEIVE_STOCK);
   }
   if (method === 'POST' && p.endsWith('/close')) {
     const id = p.slice('/purchase-orders/'.length, -'/close'.length);
@@ -2164,12 +2141,8 @@ function route(method: string, path: string, body?: unknown): unknown {
     return handleReversal(reversalMatch[1]!, body as { reason?: string } | undefined);
   }
 
-  if (method === 'POST' && p === '/stock-items') {
-    return handleStockItemCreate(body as {
-      sku: string; name: string; category: string; description?: string; unitOfMeasure: string;
-      requiredStock?: number; unitCost?: number; initialQuantity?: number; locationId?: string; supplierId?: string;
-    });
-  }
+  // As the server (system audit D3): retired. The item is added on Materials and its stock received on Receive stock.
+  if (method === 'POST' && p === '/stock-items') throw err('VALIDATION_ERROR', STOCK_ITEMS_RETIRED);
 
   // Proof of receipt (mockReceipts.ts): confirming a slip, and counter PINs.
   const receipts = routeReceipts(method, p, body, {
@@ -2503,6 +2476,8 @@ function route(method: string, path: string, body?: unknown): unknown {
   if (method === 'GET' && p === '/settings') {
     return Object.values(MOCK_SETTINGS);
   }
+  // As the server (system audit F5): the demo's recipients aren't linked to accounts, so nobody issues to themselves.
+  if (method === 'GET' && p === '/reports/self-issued') return { days: 30, slips: [] };
   if (method === 'GET' && p === '/settings/values') {
     // `p` is the path with the query string already stripped (see
     // `route()` above). Parse the query from the original `path`
@@ -2516,6 +2491,14 @@ function route(method: string, path: string, body?: unknown): unknown {
     }
     return out;
   }
+  // As the server (system audit C10): what resetting one section would change.
+  if (method === 'GET' && p.startsWith('/settings/reset-preview')) {
+    const category = parseQuery(p)['category'];
+    const defs = Object.values(MOCK_SETTINGS).filter((d) => d.category === category && d.isEditable !== false);
+    if (defs.length === 0) throw err('NOT_FOUND', 'Settings section not found');
+    return defs.filter((d) => JSON.stringify(d.value) !== JSON.stringify(d.defaultValue))
+      .map((d) => ({ key: d.key, description: d.description, from: d.value, to: d.defaultValue }));
+  }
   if (method === 'GET' && p.startsWith('/settings/')) {
     const key = p.slice('/settings/'.length);
     if (key in MOCK_SETTINGS) return MOCK_SETTINGS[key];
@@ -2525,42 +2508,54 @@ function route(method: string, path: string, body?: unknown): unknown {
     const key = p.slice('/settings/'.length);
     const def = MOCK_SETTINGS[key];
     if (!def) throw err('NOT_FOUND', 'Setting not found');
-    const b = body as { value: unknown };
+    const b = body as { value: unknown; reason?: string };
     const validated = validateMockSetting(key, b.value);
     if (validated.error) throw err('VALIDATION_ERROR', validated.error);
+    const why = mockSwitchOffReason(key, def.value, validated.value, b.reason);
     const before = { value: def.value };
     def.value = validated.value;
     def.updatedAt = new Date().toISOString();
     def.updatedById = 'u-admin';
-    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'user-1' });
+    MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value, ...(why ? { reason: why } : {}) }, createdAt: new Date().toISOString(), actorId: 'user-1' });
     return def;
   }
   if (method === 'PATCH' && p === '/settings') {
-    const b = body as { updates: Record<string, unknown> };
+    const b = body as { updates: Record<string, unknown>; reason?: string };
     if (!b?.updates || typeof b.updates !== 'object') throw err('VALIDATION_ERROR', 'updates is required');
+    // Checked for every key first, so a refusal changes nothing, as the server's transaction.
+    for (const [key, raw] of Object.entries(b.updates)) {
+      const def = MOCK_SETTINGS[key];
+      if (def) mockSwitchOffReason(key, def.value, validateMockSetting(key, raw).value, b.reason);
+    }
     const out: MockSetting[] = [];
     for (const [key, raw] of Object.entries(b.updates)) {
       const def = MOCK_SETTINGS[key];
       if (!def) throw err('NOT_FOUND', `Setting ${key} not found`);
       const validated = validateMockSetting(key, raw);
       if (validated.error) throw err('VALIDATION_ERROR', `${key}: ${validated.error}`);
+      const why = mockSwitchOffReason(key, def.value, validated.value, b.reason);
       const before = { value: def.value };
       def.value = validated.value;
       def.updatedAt = new Date().toISOString();
       def.updatedById = 'u-admin';
-      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_BULK_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value }, createdAt: new Date().toISOString(), actorId: 'user-1' });
+      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_BULK_UPDATE', entityType: 'Setting', entityId: key, before, after: { value: def.value, ...(why ? { reason: why } : {}) }, createdAt: new Date().toISOString(), actorId: 'user-1' });
       out.push({ ...def });
     }
     return out;
   }
+  // One section at a time, as the server (system audit C10).
   if (method === 'POST' && p === '/settings/reset') {
-    for (const def of Object.values(MOCK_SETTINGS)) {
+    const category = (body as { category?: string } | undefined)?.category;
+    const defs = Object.values(MOCK_SETTINGS).filter((d) => d.category === category && d.isEditable !== false);
+    if (!category || defs.length === 0) throw err('VALIDATION_ERROR', 'Name the settings section to reset');
+    const changed = defs.filter((d) => JSON.stringify(d.value) !== JSON.stringify(d.defaultValue));
+    for (const def of changed) {
       def.value = def.defaultValue;
       def.updatedAt = new Date().toISOString();
       def.updatedById = 'u-admin';
-      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_RESET', entityType: 'Setting', entityId: def.key, before: { value: def.value }, after: { value: def.value, reset: true }, createdAt: new Date().toISOString(), actorId: 'user-1' });
+      MOCK_AUDIT.unshift({ id: nextId('audit'), action: 'SETTING_RESET', entityType: 'Setting', entityId: def.key, before: { value: def.value }, after: { value: def.value, reset: true, section: category }, createdAt: new Date().toISOString(), actorId: 'user-1' });
     }
-    return Object.values(MOCK_SETTINGS);
+    return changed;
   }
 
   // ── Audit log ─────────────────────────────────────────────────────────
@@ -2756,56 +2751,6 @@ function devUser(): MockUser {
     name: 'System Administrator (dev)',
     roles: ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'],
   };
-}
-
-function handleStockItemCreate(b: {
-  sku: string; name: string; category: string; description?: string; unitOfMeasure: string;
-  requiredStock?: number; unitCost?: number; initialQuantity?: number; locationId?: string; supplierId?: string;
-}): { material: MockMaterial; initialTransactionId: string | null } {
-  if (!b.sku || !b.name || !b.category || !b.unitOfMeasure) {
-    throw err('VALIDATION_ERROR', 'SKU, name, category and unit of measure are required');
-  }
-  if (state.materials.some((m) => m.sku === b.sku)) {
-    throw err('CONFLICT', `An item with this SKU already exists.`);
-  }
-  const qty = b.initialQuantity ?? 0;
-  if (qty < 0) throw err('VALIDATION_ERROR', 'Initial quantity cannot be negative');
-  if (qty > 0 && !b.locationId) throw err('VALIDATION_ERROR', 'A location is required when an initial quantity is supplied');
-  const loc = b.locationId ? findLocation(b.locationId) : null;
-  if (b.locationId && !loc) throw err('NOT_FOUND', 'Location not found');
-  if (loc && !loc.active) throw err('VALIDATION_ERROR', 'Location is inactive');
-
-  const created: MockMaterial = {
-    id: nextId('mat'),
-    sku: b.sku,
-    name: b.name,
-    description: b.description,
-    category: b.category as MockMaterial['category'],
-    unitOfMeasure: mockUnitCode(b.unitOfMeasure),
-    requiredStock: String(b.requiredStock ?? 0),
-    unitCost: b.unitCost !== undefined ? String(b.unitCost) : undefined,
-    active: true,
-  };
-  state.materials.push(created);
-
-  let initialTransactionId: string | null = null;
-  if (qty > 0 && b.locationId) {
-    const txId = nextId('t');
-    state.transactions.push({
-      id: txId,
-      postedAt: new Date().toISOString(),
-      type: 'RECEIPT',
-      materialId: created.id,
-      locationId: b.locationId,
-      quantity: String(qty),
-      actorId: 'user-1',
-      referenceType: 'InitialStock',
-      referenceId: created.id,
-    });
-    initialTransactionId = txId;
-  }
-
-  return { material: created, initialTransactionId };
 }
 
 // Mirrors InventoryService.issue: one recipient (required), an optional

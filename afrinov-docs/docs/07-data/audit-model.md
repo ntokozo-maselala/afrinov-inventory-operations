@@ -18,7 +18,7 @@ Two records answer "who changed what, when":
 | Area | Actions (`action` value) |
 |---|---|
 | Users | CREATE, UPDATE (name, active, roles; before and after) |
-| Materials | CREATE (also via POST /stock-items), UPDATE, ACTIVATE / DEACTIVATE (with the reason; before ADR-033 a status change was an UPDATE) |
+| Materials | CREATE (also via POST /stock-items before ADR-039), UPDATE (a unit cost change also writes `material_cost_changes`, with its reason), ACTIVATE / DEACTIVATE (with the reason; before ADR-033 a status change was an UPDATE) |
 | Locations | CREATE, UPDATE, ACTIVATE / DEACTIVATE, DELETE |
 | Racks | CREATE, UPDATE, ARCHIVE (until Phase 3.2 retired the Racks page); MOVE_TO_LOCATION and DISCARD by racks to locations, each carrying the rack's full record |
 | Projects | CREATE, UPDATE, ARCHIVE |
@@ -27,11 +27,13 @@ Two records answer "who changed what, when":
 | Purchase orders | UPDATE, PO_SUBMIT, PO_SUBMIT_AUTO_APPROVE, PO_APPROVE, PO_RECEIVE, PO_CANCEL, PO_CLOSE |
 | Stock | RECEIVE_STOCK (counter receipt), STOCK_COUNT, RETURN, REVERSE, CONSUMABLE_OUTCOME, CONSUMABLE_OUTCOME_WITHDRAW (entity: the issue) |
 | Import | IMPORT_OPENING_BALANCES |
-| Settings | SETTING_UPDATE, SETTING_BULK_UPDATE, SETTING_RESET |
+| Settings | SETTING_UPDATE, SETTING_BULK_UPDATE, SETTING_RESET (one section; `after.section`). Switching off a two-person check keeps `after.reason` (ADR-039) |
 
 **Not written to the audit log** (the ledger row still records the actor
 where stock moves): stock issues, transfers, adjustments, purchase-order
-creation, goods-receipt creation and posting, and logins. Several services
+creation, goods-receipt creation and posting, and logins. Sign-ins, failed and
+throttled attempts and sign-outs go on their own log, `sign_in_events`, kept
+12 months and shown to Admins on Settings → Security (ADR-039). Several services
 (for example materials, users, suppliers, locations) write the audit entry
 as a separate statement after the change, not inside the same database
 transaction, so a failure between the two can leave a change unaudited

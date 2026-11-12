@@ -3,6 +3,7 @@ import { Prisma, type Role } from '@prisma/client';
 import { prisma } from '../../shared/db.js';
 import { Errors } from '../../shared/errors.js';
 import { ACCOUNT_THROTTLED_MESSAGE, loginThrottle } from './login-throttle.js';
+import { recordSignIn, type SignInContext } from './sign-in-log.js';
 
 export const AuthService = {
   async hashPassword(plain: string): Promise<string> {
@@ -16,23 +17,36 @@ export const AuthService = {
     return bcrypt.compare(plain, hash);
   },
 
-  async login(email: string, password: string) {
+  /**
+   * Each attempt goes on the sign-in log (system audit F3): signed in, failed
+   * or throttled, with where it came from.
+   */
+  async login(email: string, password: string, from: SignInContext & { onLogError?: (err: Error) => void } = {}) {
+    const log = (userId: string | null, outcome: 'SIGN_IN' | 'FAILED' | 'THROTTLED') =>
+      recordSignIn({ userId, email, outcome, ip: from.ip, userAgent: from.userAgent }, from.onLogError);
     // Counted per account as well as per address (system audit F4).
-    if (loginThrottle.isBlocked(email)) throw Errors.rateLimited(ACCOUNT_THROTTLED_MESSAGE);
+    if (loginThrottle.isBlocked(email)) {
+      const known = await prisma.user.findUnique({ where: { email: email.toLowerCase() }, select: { id: true } });
+      await log(known?.id ?? null, 'THROTTLED');
+      throw Errors.rateLimited(ACCOUNT_THROTTLED_MESSAGE);
+    }
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       include: SESSION_USER_INCLUDE,
     });
     if (!user || !user.active) {
       loginThrottle.recordFailure(email);
+      await log(user?.id ?? null, 'FAILED');
       throw Errors.unauthenticated('Invalid credentials');
     }
     const ok = await this.verifyPassword(password, user.passwordHash);
     if (!ok) {
       loginThrottle.recordFailure(email);
+      await log(user.id, 'FAILED');
       throw Errors.unauthenticated('Invalid credentials');
     }
     loginThrottle.clear(email);
+    await log(user.id, 'SIGN_IN');
     return toSessionUser(user);
   },
 

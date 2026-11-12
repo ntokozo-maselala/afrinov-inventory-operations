@@ -44,7 +44,11 @@ const actorId = (req: unknown) => (req as { user: { id: string } }).user.id;
 const canExceedMaxLoan = (req: FastifyRequest) => userHasPermission(req, PermissionCode.ManageSettings);
 
 export async function toolRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/tools', { preHandler: [app.authenticate] }, async () => ToolLoanService.list());
+  // view:reports, as the ledger it is read from (system audit F6).
+  app.get('/tools', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
+    return ToolLoanService.list();
+  });
 
   app.post('/tools/check-out', { preHandler: [app.authenticate] }, async (req, reply) => {
     await requirePermission(req, PermissionCode.CheckOutTool);
@@ -86,6 +90,7 @@ export async function toolRoutes(app: FastifyInstance): Promise<void> {
 
   // One loan from check-out to now, for the movement detail on Movements.
   app.get('/tools/loans/:id/history', { preHandler: [app.authenticate] }, async (req) => {
+    await requirePermission(req, PermissionCode.ViewReports);
     const { id } = req.params as { id: string };
     return ToolLoanService.history(id);
   });

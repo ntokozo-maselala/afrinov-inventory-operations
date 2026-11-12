@@ -27,6 +27,7 @@ interface UserRow {
 const db = {
   users: new Map<string, UserRow>(),
   audit: [] as Array<{ action: string; entityId: string }>,
+  signIns: [] as Array<{ userId: string | null; email: string; outcome: string; ip: string | null; userAgent: string | null }>,
   // security.sessionTimeoutMinutes as stored; undefined: no row, so the default.
   sessionTimeoutMinutes: undefined as unknown,
 };
@@ -41,6 +42,7 @@ beforeEach(() => {
   db.sessionTimeoutMinutes = undefined;
   db.users.clear();
   db.audit.length = 0;
+  db.signIns.length = 0;
   db.users.set('user-active', {
     id: 'user-active',
     email: 'alice@afrinov.local',
@@ -78,6 +80,9 @@ vi.mock('../../shared/db.js', () => ({
       },
       auditLogEntry: {
         create: async ({ data }: { data: { action: string; entityId: string } }) => { db.audit.push(data); return data; },
+      },
+      signInEvent: {
+        create: async ({ data }: { data: (typeof db.signIns)[number] }) => { db.signIns.push(data); return data; },
       },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fake),
     };
@@ -505,6 +510,28 @@ describe('auth routes', () => {
       const locked = await attempt('Correct-Horse-Battery-9');
       expect(locked.statusCode).toBe(429);
       expect(locked.json().error.message).toMatch(/Too many wrong passwords/);
+    });
+
+    // System audit F3: every attempt is on the sign-in log, never the password.
+    it('logs sign-ins, failures, throttling and signing out, with where they came from', async () => {
+      const attempt = (email: string, password: string) => app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email, password }, headers: { 'user-agent': 'Counter PC' } });
+      expect((await attempt('nobody@afrinov.local', 'whatever-1')).statusCode).toBe(401);
+      expect((await attempt('alice@afrinov.local', 'wrong-guess')).statusCode).toBe(401);
+      const ok = await attempt('Alice@afrinov.local', 'Correct-Horse-Battery-9');
+      expect(ok.statusCode).toBe(200);
+      const out = await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: { authorization: `Bearer ${ok.json<{ token: string }>().token}` } });
+      expect(out.statusCode).toBe(204);
+      for (let i = 0; i < ACCOUNT_FAILURE_LIMIT; i++) await attempt('alice@afrinov.local', 'wrong-guess');
+      expect((await attempt('alice@afrinov.local', 'Correct-Horse-Battery-9')).statusCode).toBe(429);
+
+      expect(db.signIns.slice(0, 4)).toEqual([
+        { userId: null, email: 'nobody@afrinov.local', outcome: 'FAILED', ip: '127.0.0.1', userAgent: 'Counter PC' },
+        { userId: 'user-active', email: 'alice@afrinov.local', outcome: 'FAILED', ip: '127.0.0.1', userAgent: 'Counter PC' },
+        { userId: 'user-active', email: 'alice@afrinov.local', outcome: 'SIGN_IN', ip: '127.0.0.1', userAgent: 'Counter PC' },
+        { userId: 'user-active', email: 'alice@afrinov.local', outcome: 'SIGN_OUT', ip: '127.0.0.1', userAgent: 'lightMyRequest' },
+      ]);
+      expect(db.signIns.at(-1)).toMatchObject({ userId: 'user-active', outcome: 'THROTTLED' });
+      expect(JSON.stringify(db.signIns)).not.toMatch(/Correct-Horse|wrong-guess/);
     });
   });
 });

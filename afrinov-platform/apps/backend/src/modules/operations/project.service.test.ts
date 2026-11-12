@@ -126,7 +126,11 @@ function makePrisma(): unknown {
     // the mock runs the callback against the same in-memory client.
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(makePrisma()),
     // The row lock taken before counting open schedules.
-    $queryRaw: async () => { db.locks += 1; return []; },
+    // Who manages it, read with the row held, for closing without close:project.
+    $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
+      db.locks += 1;
+      return sql.join('?').includes('manager_id') ? [{ manager_id: db.projects.get(values[0] as string)?.managerId ?? null }] : [];
+    },
   };
 }
 
@@ -143,6 +147,8 @@ beforeEach(() => {
   db.users.set('user-1', { id: 'user-1', name: 'Alice', email: 'alice@example.com' });
   db.users.set('user-2', { id: 'user-2', name: 'Bob', email: 'bob@example.com' });
 });
+
+const ADMIN = { canClose: true };
 
 describe('ProjectService', () => {
   it('creates a project and writes audit', async () => {
@@ -181,10 +187,10 @@ describe('ProjectService', () => {
   it('updates and archives', async () => {
     const { ProjectService } = await import('./project.service.js');
     await ProjectService.create({ projectNumber: 'P-4', name: 'X' }, 'user-1');
-    const updated = await ProjectService.update({ projectNumber: 'P-4', name: 'Renamed', managerId: 'user-2' }, 'user-1');
+    const updated = await ProjectService.update({ projectNumber: 'P-4', name: 'Renamed', managerId: 'user-2' }, 'user-1', ADMIN);
     expect(updated.name).toBe('Renamed');
     expect(updated.managerId).toBe('user-2');
-    const archived = await ProjectService.archive('P-4', 'user-1');
+    const archived = await ProjectService.archive('P-4', 'user-1', ADMIN);
     expect(archived.active).toBe(false);
     expect(archived.status).toBe('CANCELLED');
   });
@@ -193,11 +199,11 @@ describe('ProjectService', () => {
     const { ProjectService } = await import('./project.service.js');
     await ProjectService.create({ projectNumber: 'P-7', name: 'X', status: 'ACTIVE' }, 'user-1');
     db.schedules.push({ projectNumber: 'P-7', status: 'DONE' }, { projectNumber: 'P-7', status: 'ACTIVE' });
-    await expect(ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).rejects.toThrow(/1 open schedule/);
+    await expect(ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1', ADMIN)).rejects.toThrow(/1 open schedule/);
     // Counted with the project's row locked, inside the update's transaction.
     expect(db.locks).toBe(1);
     db.schedules[1]!.status = 'CANCELLED';
-    expect((await ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1')).status).toBe('COMPLETED');
+    expect((await ProjectService.update({ projectNumber: 'P-7', status: 'COMPLETED' }, 'user-1', ADMIN)).status).toBe('COMPLETED');
   });
 
   // System audit E1: a project closes only when nothing still depends on it.
@@ -211,32 +217,51 @@ describe('ProjectService', () => {
     const { blockers } = await ProjectService.closingCheck('P-8', 'CANCELLED');
     expect(blockers.map((b) => b.kind)).toEqual(['ORDER', 'RFQ', 'LOAN', 'APPROVAL']);
     expect(blockers[0]).toMatchObject({ id: 'po-1', text: expect.stringMatching(/AFRI-0101 is approved/) });
-    await expect(ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1')).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/can't be cancelled yet/) });
-    await expect(ProjectService.archive('P-8', 'user-1')).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1', ADMIN)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/can't be cancelled yet/) });
+    await expect(ProjectService.archive('P-8', 'user-1', ADMIN)).rejects.toMatchObject({ code: 'INVALID_STATE' });
     expect(db.projects.get('P-8')).toMatchObject({ status: 'ACTIVE', active: true });
 
     db.orders[0]!.status = 'CLOSED';
     db.rfqs[0]!.status = 'AWARDED';
     db.loans[0]!.back = 1;
     db.waiting.clear();
-    expect((await ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1'))).toMatchObject({ status: 'CANCELLED', active: false });
+    expect((await ProjectService.update({ projectNumber: 'P-8', status: 'CANCELLED' }, 'user-1', ADMIN))).toMatchObject({ status: 'CANCELLED', active: false });
   });
 
   // System audit E2: status decides whether a project is active.
   it('keeps active in step with status, both ways', async () => {
     const { ProjectService } = await import('./project.service.js');
     await ProjectService.create({ projectNumber: 'P-9', name: 'X', status: 'ACTIVE' }, 'user-1');
-    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'COMPLETED' }, 'user-1')).active).toBe(false);
-    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'ACTIVE' }, 'user-1')).active).toBe(true);
-    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'ON_HOLD' }, 'user-1')).active).toBe(true);
+    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'COMPLETED' }, 'user-1', ADMIN)).active).toBe(false);
+    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'ACTIVE' }, 'user-1', ADMIN)).active).toBe(true);
+    expect((await ProjectService.update({ projectNumber: 'P-9', status: 'ON_HOLD' }, 'user-1', ADMIN)).active).toBe(true);
     expect((await ProjectService.create({ projectNumber: 'P-10', name: 'Y', status: 'CANCELLED' }, 'user-1')).active).toBe(false);
   });
 
   it('disconnects manager when null passed', async () => {
     const { ProjectService } = await import('./project.service.js');
     await ProjectService.create({ projectNumber: 'P-5', name: 'X', managerId: 'user-1' }, 'user-1');
-    const updated = await ProjectService.update({ projectNumber: 'P-5', managerId: null }, 'user-1');
+    const updated = await ProjectService.update({ projectNumber: 'P-5', managerId: null }, 'user-1', ADMIN);
     expect(updated.managerId).toBeNull();
+  });
+
+  // System audit E3: closing takes close:project, or being the project's manager.
+  it("lets only an Admin or the project's manager complete, cancel, archive or hand it on", async () => {
+    const { ProjectService, CLOSE_REFUSED, HANDOVER_REFUSED } = await import('./project.service.js');
+    const SALES = { canClose: false };
+    await ProjectService.create({ projectNumber: 'P-11', name: 'X', status: 'ACTIVE', managerId: 'user-2' }, 'user-1');
+    // Editing stays with manage:projects; closing and handing on don't.
+    expect((await ProjectService.update({ projectNumber: 'P-11', name: 'Renamed', managerId: 'user-2' }, 'user-3', SALES)).name).toBe('Renamed');
+    for (const status of ['COMPLETED', 'CANCELLED'] as const) {
+      await expect(ProjectService.update({ projectNumber: 'P-11', status }, 'user-3', SALES)).rejects.toMatchObject({ code: 'FORBIDDEN', message: CLOSE_REFUSED });
+    }
+    await expect(ProjectService.archive('P-11', 'user-3', SALES)).rejects.toMatchObject({ code: 'FORBIDDEN', message: CLOSE_REFUSED });
+    await expect(ProjectService.update({ projectNumber: 'P-11', managerId: 'user-3' }, 'user-3', SALES)).rejects.toMatchObject({ code: 'FORBIDDEN', message: HANDOVER_REFUSED });
+    expect(db.projects.get('P-11')).toMatchObject({ status: 'ACTIVE', managerId: 'user-2' });
+    // Its manager closes it without the permission.
+    expect((await ProjectService.update({ projectNumber: 'P-11', status: 'COMPLETED' }, 'user-2', SALES)).status).toBe('COMPLETED');
+    // Reopening isn't closing.
+    expect((await ProjectService.update({ projectNumber: 'P-11', status: 'ACTIVE' }, 'user-3', SALES)).status).toBe('ACTIVE');
   });
 
   it('throws when not found', async () => {

@@ -3,6 +3,9 @@
 export const PermissionCode = {
   CreateMaterial: 'create:material',
   EditMaterial: 'edit:material',
+  // Setting an item's unit cost, which decides whether a write-off needs
+  // someone else's approval: not the store's own (system audit C1).
+  EditUnitCost: 'edit:unit_cost',
   CreateLocation: 'create:location',
   EditLocation: 'edit:location',
   DeleteLocation: 'delete:location',
@@ -39,6 +42,9 @@ export const PermissionCode = {
   ViewReports: 'view:reports',
   ViewAuditLog: 'view:audit_log',
   ManageProjects: 'manage:projects',
+  // Completing, cancelling or archiving a project: Admin, or the project's own
+  // manager without it (system audit E3).
+  CloseProject: 'close:project',
   // Changing any project's schedules and steps (ADR-032). Admin only for now: a
   // project's own manager changes that project's without it.
   ManageProjectSchedule: 'manage:project_schedule',
@@ -100,6 +106,8 @@ export const RolePermissions: Record<string, PermissionCodeValue[]> = {
   PROCUREMENT: [
     // Buyers add client-specific material to the catalogue from an order line; editing it stays with the store.
     PermissionCode.CreateMaterial,
+    // Buyers know what things cost; the store, which writes stock off, doesn't set it (system audit C1).
+    PermissionCode.EditUnitCost,
     PermissionCode.CreateSupplier,
     PermissionCode.EditSupplier,
     PermissionCode.ViewPurchaseOrder,

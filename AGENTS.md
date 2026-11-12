@@ -30,7 +30,7 @@ npm ci                 # install from the workspace-root lockfile
 
 npm run typecheck      # both workspaces
 npm run lint           # both workspaces
-npm test               # both workspaces (backend 1335, frontend 1543)
+npm test               # both workspaces (backend 1342, frontend 1559)
 npm run build          # both workspaces
 ```
 
@@ -218,11 +218,23 @@ Use these forms; the older spellings still work but are deprecated or removed.
 - **A password change ends every other sign-in; someone always holds Admin.**
   A sign-in that began before `users.password_changed_at` is refused, and while
   `must_change_password` is set (an Admin's temporary password) only
-  `/auth/me`, `/auth/refresh` and `/auth/password` answer. Any path that sets a
+  `/auth/me`, `/auth/refresh`, `/auth/password` and `/auth/logout` answer. Any path that sets a
   password sets `passwordChangedAt` too. `UserService.update` refuses a change
   that leaves no active Admin, or that brings two or more down to one
   (`MIN_ADMINS`, kept in step with `src/lib/admins.ts`), under the
   `afrinov:admins` lock (ADR-036).
+- **Controls (ADR-039).** Only `edit:unit_cost` (Admin, Procurement) sets an
+  item's unit cost, a change needs `unitCostReason`, and each is a row of
+  `material_cost_changes`. A write-off is judged with the same person's
+  write-offs of the item over 7 days (`recentWriteOffQuantity`): pass it to
+  `writeOffRule` on any new path that writes stock off. Changing an approved
+  order's `SIGNED_TERMS` sends it back for signing. Closing a project, or
+  changing its manager, takes `close:project` or being its manager
+  (`CloseRights`, required: never default it to true). Switching off either
+  `TWO_PERSON_SETTINGS` needs a reason; "Reset to defaults" resets one
+  section. Sign-ins go on `sign_in_events` (`recordSignIn`), kept 12 months.
+  `POST /purchase-orders/:id/receive` and `POST /stock-items` are retired: in
+  integration tests receive with `receiveOutstanding` (`integration/helpers.ts`).
 - **The seed loads demo data only with `SEED_DEMO_DATA=true`, never in
   production** (`src/db/seed-plan.ts`). Reference data (permissions, roles,
   settings, the admin) goes before the `if (!plan.demo)` return in

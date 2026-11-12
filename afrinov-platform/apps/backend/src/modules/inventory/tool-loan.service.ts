@@ -25,7 +25,7 @@ import { recomputeBalance, getCurrentBalance, lockInventoryBalances, storesStock
 import { checkLocationActive, checkMaterialActive, checkProjectTakesIssues, checkRecipientActive } from './inventory.service.js';
 import { loanTerms } from './tool-loan-dates.js';
 import { ReceiptConfirmationService, type ReceiptSummary } from './receipt-confirmation.service.js';
-import { checkWriteOff } from './write-off-limit.js';
+import { checkWriteOff, recentWriteOffQuantity } from './write-off-limit.js';
 import { checkWholeUnits } from '../../shared/units.js';
 import { pendingLostByLoan, requestAdjustment } from './write-off-requests.js';
 import {
@@ -523,7 +523,9 @@ export const ToolLoanService = {
       const needsApproval = new Map<string, boolean>();
       for (const [key, qty] of lostTotal) {
         const loan = loans.find((x) => `${x.materialId}|${x.locationId}` === key)!;
-        needsApproval.set(key, (await checkWriteOff(qty, loan.material.unitCost, tx)).needsApproval);
+        // With this person's other write-offs of the tool this week (system audit C2).
+        const recent = await recentWriteOffQuantity({ actorId: input.actorId, materialId: loan.materialId }, tx);
+        needsApproval.set(key, (await checkWriteOff(qty.negated(), loan.material.unitCost, tx, recent)).needsApproval);
       }
 
       const postedAt = new Date();

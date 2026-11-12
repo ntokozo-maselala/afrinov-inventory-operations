@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { usePagedList } from '../../hooks/usePagedList';
+import { usePermissions } from '../../hooks/usePermissions';
 import { Button } from '../Button';
 import { DataTable, type DataTableColumn } from '../DataTable';
 import { Badge, MovementBadge } from '../Badge';
@@ -71,21 +72,23 @@ export function LedgerReport({ kind, query, responsible, onResponsible }: {
   // The totals keep every person in view, so they ignore the responsible filter itself.
   const totalsQuery = new URLSearchParams(query);
   totalsQuery.delete('recipientId');
-  const totals = useApi<WriteoffsByResponsible>(kind === 'writeoffs' ? `/inventory-transactions/writeoffs-by-responsible?${totalsQuery.toString()}` : null);
+  // Who was responsible is for those who adjust or approve write-offs (system audit F6).
+  const seesResponsible = usePermissions().hasPermission('writeoffs:view');
+  const totals = useApi<WriteoffsByResponsible>(kind === 'writeoffs' && seesResponsible ? `/inventory-transactions/writeoffs-by-responsible?${totalsQuery.toString()}` : null);
   const [selected, setSelected] = useState<MovementRow | null>(null);
   const toast = useToast();
 
   function reload() {
     list.reload();
     summary.reload();
-    if (kind === 'writeoffs') totals.reload();
+    if (kind === 'writeoffs' && seesResponsible) totals.reload();
   }
 
   if (list.error && !list.stale) return <ErrorState error={list.error} onRetry={reload} />;
   return (
     <>
       {list.stale && <StaleDataNotice error={list.error} onRetry={reload} />}
-      {kind === 'writeoffs' && (
+      {kind === 'writeoffs' && seesResponsible && (
         <ResponsibleTotals data={totals.data} failed={!!totals.error} active={responsible ?? null} onChoose={onResponsible} />
       )}
       <p className="text-meta mb-2">{list.loaded && summary.data ? `${formatNumber(list.rows.length)} of ${formatNumber(summary.data.total)} shown` : ' '}</p>

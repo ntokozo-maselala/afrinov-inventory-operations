@@ -150,6 +150,37 @@ function adminsCard(count: number) {
   };
 }
 
+/**
+ * For Admins while a two-person check is switched off (system audit C9): the
+ * second person is gone until it is switched back on.
+ */
+export function checksOffCard(values: Record<string, unknown> | null | undefined, procurement: boolean) {
+  if (!values) return null;
+  const off = [
+    values['inventory.requireWriteOffApproval'] === false ? 'write-off approval' : null,
+    procurement && values['purchaseOrders.requireApprovalBeforeProcessing'] === false ? 'order approval' : null,
+  ].filter((x): x is string => !!x);
+  if (off.length === 0) return null;
+  return {
+    label: 'Second person', value: 'Off', tone: 'warning' as const,
+    note: `${off.join(' and ')} switched off`,
+    to: off[0] === 'write-off approval' ? '/settings/inventory' : '/settings/purchase-orders',
+  };
+}
+
+/** Slips someone issued or lent to themselves in the last 30 days (system audit F5). */
+export interface SelfIssued { days: number; slips: Array<{ issueId: string; kind: 'ISSUE' | 'LOAN'; postedAt: string; by: { id: string; name: string } }> }
+
+export function selfIssuedCard(data: SelfIssued | null | undefined) {
+  if (!data || !Array.isArray(data.slips) || data.slips.length === 0) return null;
+  const names = [...new Set(data.slips.map((x) => x.by.name))];
+  return {
+    label: 'Issued to themselves', value: formatNumber(data.slips.length), tone: 'warning' as const,
+    note: `${names.slice(0, 2).join(', ')}${names.length > 2 ? ` and ${names.length - 2} more` : ''} · last ${data.days} days`,
+    to: `/movements?report=issued&from=${data.slips.at(-1)!.postedAt.slice(0, 10)}`,
+  };
+}
+
 /** For Admins when backups failed, are late, stay on the server, or no restore was tested lately (ADR-037). */
 function backupCard(h: BackupHealth) {
   const notice = dashboardNotice(h);
@@ -194,6 +225,12 @@ export function Dashboard() {
   // Only Admins hold manage:users, and only they keep the system running, backups included.
   const { data: backups } = useApi<BackupHealth>(managesUsers ? '/backups/status' : null);
   const backupWarning = backups?.backup && backups.restoreTest ? backupCard(backups) : null;
+  // While either two-person check is off (system audit C9).
+  const { data: checks } = useApi<Record<string, unknown>>(managesUsers ? '/settings/values?keys=inventory.requireWriteOffApproval,purchaseOrders.requireApprovalBeforeProcessing' : null);
+  const checksOff = checksOffCard(checks, PROCUREMENT_ENABLED);
+  // Slips issued to oneself, for those who read Activity (system audit F5).
+  const { data: selfIssued } = useApi<SelfIssued>(hasPermission('activity:view') ? '/reports/self-issued' : null);
+  const selfIssuedWarning = selfIssuedCard(selfIssued);
 
   const kpis = useMemo(() => {
     if (!value) return null;
@@ -220,6 +257,8 @@ export function Dashboard() {
       ...(unconfirmed && correctsSlips && unconfirmed.disputed > 0 ? [disputedCard(unconfirmed)] : []),
       ...(admins !== null && admins < MIN_ADMINS ? [adminsCard(admins)] : []),
       ...(backupWarning ? [backupWarning] : []),
+      ...(checksOff ? [checksOff] : []),
+      ...(selfIssuedWarning ? [selfIssuedWarning] : []),
       ...(!canApprove ? [] : mineError
         ? [{ label: 'Pending Approvals', value: 'Unavailable', tone: 'neutral' as const, note: 'Orders could not be loaded', to: undefined }]
         : mine
@@ -227,7 +266,7 @@ export function Dashboard() {
           ? [approvalCard(Array.isArray(mine) ? mine : [], Array.isArray(pending) ? pending : null, { projects: approvesProjects, stores: approvesStores })]
           : [{ label: 'Pending Approvals', value: mineLoading ? '—' : 'Unavailable', tone: 'neutral' as const, note: mineLoading ? 'Loading orders' : 'Orders unavailable', to: undefined }]),
     ];
-  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning]);
+  }, [value, urgentBelowPercent, warningBelowPercent, tools, toolsError, toolsLoading, canApprove, mine, mineError, mineLoading, pending, approvesProjects, approvesStores, unconfirmed, receiptRequired, correctsSlips, admins, backupWarning, checksOff, selfIssuedWarning]);
 
   const attentionItems = useMemo(() => lowStock?.slice(0, 5) ?? [], [lowStock]);
   const columns = useMemo<DataTableColumn<ReportInventoryLine>[]>(() => [
