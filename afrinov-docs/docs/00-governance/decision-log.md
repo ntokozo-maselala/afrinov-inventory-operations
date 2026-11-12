@@ -1093,3 +1093,121 @@ planned. Tests: `session-policy.test.ts`, `auth.routes.test.ts` (session
 timeout), `settings.service.test.ts`, `migrations.test.ts`,
 `lib/session.test.ts`, `SessionKeeper.test.tsx`, `MaterialForm.test.tsx`,
 `SettingsWithEffect.test.tsx`, `SettingsInventory.test.tsx`.
+
+### ADR-036 — Passwords can be changed and reset; two Admins are kept; demo data stays out of production
+**Date:** 2026-11-11 · **Status:** Accepted
+
+**Context:** The system audit at `c888bbf` (phase P1, go-live safety) found
+that nobody could change or reset a password in the application, although the
+seed tells operators to rotate the first admin password after first sign-in
+(F1); that an Admin could deactivate or demote any account, including their
+own and the last Admin's, after which only direct database access could
+recover user management (F2); that behind a reverse proxy every request looks
+as if it came from the proxy, so five wrong passwords by anyone blocked
+sign-in for everyone (F4, D-36); and that the seed loaded demo items, orders
+and a demo ledger in every environment, production included, where the
+append-only ledger could never be cleaned and the one-time workbook import
+would refuse the database (H1, D-01). The owner approved the recommended
+option for each.
+
+**Decision:**
+- **Anyone changes their own password** (`POST /auth/password`): the current
+  one first, then a new one of 8 to 128 characters that differs from it. The
+  change ends every other sign-in of the account, since
+  `users.password_changed_at` is checked on every request and a sign-in that
+  began before it is refused with 401; this one carries on with the fresh
+  token returned. Rate limited as sign-in is.
+- **An Admin sets a temporary password for someone else**
+  (`POST /users/:id/password`, `manage:users`), never for themselves. It ends
+  the person's current sign-ins and sets `users.must_change_password`. Until
+  they choose their own, the server accepts only `GET /auth/me`,
+  `POST /auth/refresh` and `POST /auth/password` from them (403 otherwise),
+  and the screens show only the change-password form. It also clears the
+  account's wrong-password count. Both are logged (`PASSWORD_CHANGE`,
+  `PASSWORD_RESET`), never the password.
+- **Two Admins are kept.** The owner's rule is that the second Admin is
+  another person holding every permission, so that one can reset the
+  other's password. A change that would leave no active account with the
+  Admin role is always refused; once two active Admins exist, one that would
+  bring them back to one is refused too (`MIN_ADMINS`). The system starts with
+  one, so until a second is named, Settings → Users and the Dashboard warn
+  Admins. Nobody deactivates their own account or takes away their own Admin
+  role. Account changes take an advisory lock, so two Admins can't remove each
+  other at once.
+- **The proxy is named.** `TRUST_PROXY` lists the reverse proxy's address or
+  range; only those are believed for `X-Forwarded-For`. `true` and hop counts
+  are refused at start-up. Sign-in is also limited per account: 10 wrong
+  passwords in 15 minutes and the account waits, in memory, per process.
+  `12-operations/reverse-proxy.md` gives the proxy setup.
+- **Demo data only on request, never in production.** The seed always loads
+  permissions, roles, settings and the admin account; it loads the demo
+  business only with `SEED_DEMO_DATA=true`, and refuses that flag, writing
+  nothing, when `NODE_ENV` is production (`db/seed-plan.ts`). The test
+  database seed and CI ask for it.
+- Migration `20260101000055_password_change` adds the two columns; existing
+  accounts keep their passwords.
+
+**Consequences:** A forgotten password is an Admin's five-minute job for the
+other Admin. An Admin who leaves is replaced before their account is
+deactivated: give a third person the role first. The first admin's password is changed in the app; the
+`db:rotate-admin` script stays for an account nobody can sign in to.
+Production is seeded empty of stock, so the cutover imports into it once,
+after the count, and the pilot and parallel run use a rehearsal copy
+(`workbook-replacement-roadmap.md`). Backups follow
+`12-operations/backup-and-recovery.md`, tested on a copy; who runs them and
+where copies go are recommended there (encrypted, in South Africa, two places)
+for the owner to confirm. Logging out still
+only discards the token in the browser (system audit F7, phase P6). Tests:
+`identity.service.test.ts`, `auth.routes.test.ts` (passwords),
+`login-throttle.test.ts`, `session-policy.test.ts`, `config.test.ts`,
+`seed-plan.test.ts`, `PasswordForms.test.tsx`, `PoSigningRoles.test.tsx`.
+
+### ADR-037 — A backup service backs up, copies off site, tests restores and reports to the Dashboard
+**Date:** 2026-11-11 · **Status:** Accepted
+
+**Context:** Once the workbook is retired the database is the only record of
+stock, and the repository had no backups (system audit H2, risk OPS-01). A
+written procedure (ADR-036) relies on someone remembering it every evening.
+The owner asked for backups to be implemented, with the recommended owner and
+storage: run by the Admin who looks after the server, encrypted, kept on a
+second disk and in cloud storage in South Africa.
+
+**Decision:**
+- **A backup service** (`apps/backend/backup`, the `backup` service in
+  Compose) takes one backup a day at `BACKUP_AT` (18:30, South African time).
+  It dumps the database, checks the dump lists the tables it should, encrypts
+  it with a passphrase file (AES-256, gpg), keeps it on the backup disk for
+  `BACKUP_KEEP_DAYS` (7) and copies it to the off-site store named in
+  `BACKUP_REMOTE` with rclone, under `daily/` and, on the 1st, `monthly/`.
+  Nothing unencrypted is written to disk. rclone keeps the choice of cloud
+  provider open; retention and the deletion lock are the store's own rules.
+- **The restore test** (`restore.sh latest --drill`) restores the newest
+  off-site copy into a new database, compares movements, balances, units on
+  hand, users and migrations with the figures taken at backup time (counted
+  before and after the dump, so a copy taken while nothing moved must match
+  exactly), records the result and drops the copy. A real restore uses the same
+  script without `--drill` and keeps the database; it never restores over an
+  existing one.
+- **Each run is recorded** in `backup_runs` (migration
+  `20260101000056_backup_runs`), written only by the backup service.
+  `GET /backups/status` (manage:settings) turns the runs into a state:
+  a backup is late after 26 hours, failed, or kept on the server only; a
+  restore test is due after 92 days, or failed. Admins see a **Backups** card
+  on the Dashboard when anything needs them, and Settings → Data & backup
+  shows the state and the latest runs.
+- **CI** builds the backup image and runs a backup to an off-site folder and a
+  restore test after the integration tests; both must be recorded as OK.
+
+**Consequences:** Backups no longer depend on anyone remembering them, and a
+failure is visible to the people who can act on it the next time they open the
+Dashboard. Without a key, each night's run is recorded as failed; without
+`BACKUP_REMOTE`, backups stay on the server and the Dashboard warns. The key,
+the backup disk and the cloud store are set up by hand on the server
+(`12-operations/backup-and-recovery.md`); losing every copy of the key loses
+every backup. The off-site store is Azure Blob Storage in South Africa North,
+geo-redundant to Cape Town, set up by `backup/azure-setup.sh` (adopted on the
+owner's instruction, 2026-11-11, because Afrinov's email already runs on
+Microsoft 365): files locked for 30 days, and access that can't delete,
+renewed yearly. Point-in-time recovery is not covered. Tests:
+`backup-status.test.ts`, `backups.real-http.test.ts`, `lib/backups.test.ts`,
+and the CI drill.

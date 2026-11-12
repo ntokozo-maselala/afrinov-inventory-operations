@@ -3,14 +3,17 @@ import { z } from 'zod';
 import { UserService } from './identity.service.js';
 import { PermissionCode } from '../../shared/permissions.js';
 import { requirePermission } from '../../shared/authorization.js';
+import { newPasswordSchema } from './auth.routes.js';
 
 const ROLE_NAMES = ['ADMIN', 'STORE_CONTROLLER', 'PROCUREMENT', 'APPROVER', 'TECHNICIAN', 'VIEWER', 'PROCUREMENT_MANAGER', 'DIRECTOR', 'CEO', 'WORKSHOP_MANAGER', 'SALES'] as const;
 
 export const createUserSchema = z.object({
   email: z.email(),
   name: z.string().min(1),
-  password: z.string().min(8).regex(/[^\0]/),
+  password: newPasswordSchema,
   roleNames: z.array(z.enum(ROLE_NAMES)).min(1),
+  // A starting password unless false: chosen again by the person at first sign-in (ADR-036).
+  mustChangePassword: z.boolean().optional(),
 });
 
 export const updateUserSchema = z.object({
@@ -18,6 +21,8 @@ export const updateUserSchema = z.object({
   active: z.boolean().optional(),
   roleNames: z.array(z.enum(ROLE_NAMES)).min(1).optional(),
 });
+
+export const temporaryPasswordSchema = z.object({ temporaryPassword: newPasswordSchema });
 
 function actorId(req: unknown): string {
   return (req as { user: { id: string } }).user.id;
@@ -67,5 +72,18 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     }
     const updated = await UserService.update({ id, ...parsed.data }, actorId(req));
     return updated;
+  });
+
+  // ADR-036: an Admin gives someone a temporary password, to be changed at their next sign-in.
+  app.post('/users/:id/password', { preHandler: [app.authenticate] }, async (req, reply) => {
+    await requirePermission(req, PermissionCode.ManageUsers);
+    const id = (req.params as { id: string }).id;
+    const parsed = temporaryPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_ERROR', message: 'A temporary password needs at least 8 characters', details: parsed.error.flatten() },
+      });
+    }
+    return UserService.setTemporaryPassword(id, parsed.data.temporaryPassword, actorId(req));
   });
 }

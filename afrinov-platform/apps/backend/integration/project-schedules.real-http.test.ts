@@ -46,7 +46,7 @@ describe('Project schedules over real HTTP', () => {
   async function user(label: string, role: string): Promise<{ api: ReturnType<typeof client>; id: string }> {
     const email = `it-sched-${label}-${run}@example.test`;
     const password = `It-${run}-sched`;
-    const made = await admin<{ id: string }>('POST', '/users', { email, name: `${label} ${run}`, password, roleNames: [role] });
+    const made = await admin<{ id: string }>('POST', '/users', { email, name: `${label} ${run}`, password, roleNames: [role], mustChangePassword: false });
     expect(made.status).toBe(201);
     return { api: client(server.port, await login(server.port, email, password)), id: made.body.id };
   }

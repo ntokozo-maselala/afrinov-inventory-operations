@@ -11,6 +11,8 @@ vi.mock('../api/client', () => ({
 }));
 // Procurement is a build-time switch; on here so the test reads the same everywhere.
 vi.mock('../config/features', () => ({ PROCUREMENT_ENABLED: true }));
+// Signed in as the store controller listed below, so their own row is the one without account actions.
+vi.mock('../auth', () => ({ useAuth: () => ({ user: { id: 'u-st', name: 'Store Controller', roles: ['ADMIN'] } }) }));
 
 const { SettingsUsers, approvalLine } = await import('./SettingsSections');
 const { ToastProvider } = await import('../components/Toast');
@@ -48,13 +50,49 @@ describe('signing roles', () => {
     expect(screen.queryByLabelText(/Approval limit/)).not.toBeInTheDocument();
   });
 
+  // ADR-036 and system audit F2: your own password is changed from the header, and nobody deactivates themselves.
+  it('offers a temporary password and deactivation on other rows, not your own', async () => {
+    page();
+    await screen.findByText('Ona Moloane');
+    expect(within(row('Ona Moloane')).getByRole('button', { name: 'Temporary password' })).toBeInTheDocument();
+    expect(within(row('Ona Moloane')).getByRole('button', { name: 'Deactivate' })).toBeInTheDocument();
+    expect(within(row('Store Controller')).getByText('You')).toBeInTheDocument();
+    expect(within(row('Store Controller')).queryByRole('button', { name: 'Temporary password' })).not.toBeInTheDocument();
+    expect(within(row('Store Controller')).queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
+  });
+
+  // ADR-036: the owner keeps two Admins, so one can reset the other's password.
+  it('asks for a second Admin while fewer than two hold the role', async () => {
+    page();
+    expect(await screen.findByText('Give a second person the Admin role')).toBeInTheDocument();
+  });
+
+  it('says nothing about Admins once two hold the role', async () => {
+    mockGet.mockImplementation(async (path: string) => (path === '/users'
+      ? [...USERS, user('u-a1', 'First Admin', 'ADMIN'), user('u-a2', 'Second Admin', 'ADMIN')]
+      : []));
+    page();
+    await screen.findByText('First Admin');
+    expect(screen.queryByText('Give a second person the Admin role')).not.toBeInTheDocument();
+  });
+
+  it('sets a temporary password for someone else', async () => {
+    page();
+    await screen.findByText('Ona Moloane');
+    fireEvent.click(within(row('Ona Moloane')).getByRole('button', { name: 'Temporary password' }));
+    fireEvent.change(document.getElementById('tmp-pw')!, { target: { value: 'Temp-pass-2026' } });
+    fireEvent.change(document.getElementById('tmp-pw2')!, { target: { value: 'Temp-pass-2026' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set temporary password' }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/users/u-ona/password', { temporaryPassword: 'Temp-pass-2026' }));
+  });
+
   it('assigns a signing role to a new user', async () => {
     page();
     await screen.findByText('Ona Moloane');
     fireEvent.click(screen.getAllByRole('button', { name: 'Add user' })[0]!);
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'New Director' } });
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'new@afrinov.local' } });
-    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText(/^Starting password/), { target: { value: 'secret123' } });
     fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: 'secret123' } });
     const drawer = screen.getByRole('dialog');
     fireEvent.click(within(drawer).getByRole('checkbox', { name: /^Director/ }));

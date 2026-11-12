@@ -278,7 +278,7 @@ describe('stock movements over real HTTP', () => {
 
     const email = `it-viewer-${run}@example.com`;
     const password = `viewer-${run}-pass`;
-    const created = await api('POST', '/users', { email, name: `IT viewer ${run}`, password, roleNames: ['VIEWER'] });
+    const created = await api('POST', '/users', { email, name: `IT viewer ${run}`, password, roleNames: ['VIEWER'], mustChangePassword: false });
     expect(created.status).toBe(201);
 
     const viewer = client(server.port, await login(server.port, email, password));

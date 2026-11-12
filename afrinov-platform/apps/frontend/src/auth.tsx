@@ -20,7 +20,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api, FRONTEND_ONLY, getToken, isApiError, setToken, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api/client';
-import { login as serviceLogin, type AuthUser } from './api/authService';
+import { changePassword as serviceChangePassword, login as serviceLogin, type AuthUser } from './api/authService';
 
 export type { AuthUser } from './api/authService';
 export { landingPathFor } from './api/landingPath';
@@ -72,6 +72,8 @@ export interface AuthContextValue {
   sessionExpired: boolean;
   login: (email: string, password: string) => Promise<{ user: AuthUser; landingPath: string }>;
   logout: () => void;
+  /** Change your own password; the session carries on with the new token (ADR-036). */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<AuthUser>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -173,9 +175,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setSessionExpired(false);
   }, []);
 
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const next = await serviceChangePassword(currentPassword, newPassword);
+    setUser(next);
+    writePersistedSession(next);
+    return next;
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, sessionExpired, login, logout }),
-    [user, loading, sessionExpired, login, logout],
+    () => ({ user, loading, sessionExpired, login, logout, changePassword }),
+    [user, loading, sessionExpired, login, logout, changePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

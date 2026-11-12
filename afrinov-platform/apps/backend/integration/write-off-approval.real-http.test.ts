@@ -33,7 +33,7 @@ describe('write-off approval over real HTTP', () => {
   async function newUser(role: string) {
     const email = `it-wo-${role.toLowerCase()}-${++users}-${run}@afrinov.local`;
     const password = `It-${run}-${role.toLowerCase()}`;
-    expect((await api('POST', '/users', { email, name: `IT WO ${role} ${users} ${run}`, password, roleNames: [role] })).status).toBe(201);
+    expect((await api('POST', '/users', { email, name: `IT WO ${role} ${users} ${run}`, password, roleNames: [role], mustChangePassword: false })).status).toBe(201);
     return client(server.port, await login(server.port, email, password));
   }
 

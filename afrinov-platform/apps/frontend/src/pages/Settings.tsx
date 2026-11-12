@@ -22,7 +22,7 @@ const SECTIONS: Section[] = [
   { to: '/settings/users', label: 'Users & permissions', description: 'Accounts and the roles they hold.', category: 'users', adminOnly: true },
   { to: '/settings/security', label: 'Security', description: 'When a sign-in ends after a time without activity.', category: 'security', adminOnly: true },
   { to: '/settings/system', label: 'System', description: 'Version, environment, and status.', category: 'system' },
-  { to: '/settings/data', label: 'Data & backup', description: 'Export, retention, and restore.', category: 'data', adminOnly: true },
+  { to: '/settings/data', label: 'Data & backup', description: 'Backups, restore tests and exports.', category: 'data', adminOnly: true },
   { to: '/settings/history', label: 'Change history', description: 'Audit log of administrative changes.' },
 ];
 

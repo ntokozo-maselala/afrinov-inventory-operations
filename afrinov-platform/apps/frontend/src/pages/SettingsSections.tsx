@@ -17,6 +17,10 @@ import { Icon } from '../components/Icon';
 import { Input, Select, Field } from '../components/Field';
 import { Drawer } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { TemporaryPasswordForm } from '../components/PasswordForms';
+import { useAuth } from '../auth';
+import { activeAdminCount, MIN_ADMINS } from '../lib/admins';
+import { backupNotice, formatSize, restoreTestNotice, type BackupHealth } from '../lib/backups';
 import { api, FRONTEND_ONLY, isSafeServerMessage, type ApiError } from '../api/client';
 import type { ReportResult } from '../api/reportTypes';
 import { useReportExporter } from '../api/exportReport';
@@ -520,6 +524,8 @@ interface AdminUser {
   email: string;
   name: string;
   active: boolean;
+  /** Still on an Admin's temporary password (ADR-036). */
+  mustChangePassword?: boolean;
   createdAt: string;
   roles: { role: { name: RoleName } }[];
 }
@@ -602,6 +608,9 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
           setFieldErrors(flat);
         }
         setValidation('Please correct the highlighted fields.');
+      } else if (e.code === 'INVALID_STATE') {
+        // Keeping an Admin (system audit F2): the server says what is in the way.
+        setValidation(e.message);
       } else if (e.code === 'FORBIDDEN') {
         setValidation("You don't have permission to manage users.");
       } else {
@@ -625,7 +634,7 @@ function UserForm({ initial, onCancel, onSaved, onError }: UserFormProps) {
       </div>
       {!isEdit && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Password" htmlFor="usr-pw" required help="At least 8 characters." error={fieldErrors.password}>
+          <Field label="Starting password" htmlFor="usr-pw" required help="At least 8 characters. They sign in with it once, then choose their own." error={fieldErrors.password}>
             <Input id="usr-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} invalid={!!fieldErrors.password} autoComplete="new-password" />
           </Field>
           <Field label="Confirm password" htmlFor="usr-pw2" required error={fieldErrors.confirm}>
@@ -665,7 +674,8 @@ export function SettingsUsers() {
   const usersApi = useApi<AdminUser[]>('/users');
   const users = usersApi.data ?? [];
   const reload = usersApi.reload;
-  const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | null>(null);
+  const [drawer, setDrawer] = useState<{ mode: 'add' } | { mode: 'edit'; user: AdminUser } | { mode: 'password'; user: AdminUser } | null>(null);
+  const me = useAuth().user;
   const [pendingToggle, setPendingToggle] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState(false);
   const toast = useToast();
@@ -697,6 +707,11 @@ export function SettingsUsers() {
       </div>
 
       {usersApi.error && <Alert tone="danger" title="Couldn't load users">{usersApi.error.message}</Alert>}
+      {usersApi.data && activeAdminCount(users) < MIN_ADMINS && (
+        <Alert tone="warning" title={`Give a second person the Admin role`}>
+          Only {activeAdminCount(users)} active account holds the Admin role. If its password is forgotten, nobody can set a temporary one. Once {MIN_ADMINS} Admins exist, the system keeps {MIN_ADMINS}.
+        </Alert>
+      )}
 
       {usersApi.loading ? (
         <div className="space-y-2"><Skeleton h={32} /><Skeleton h={32} /><Skeleton h={32} /></div>
@@ -710,6 +725,8 @@ export function SettingsUsers() {
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-surface-900">{u.name}</span>
                   {!u.active && <Badge tone="neutral" dot>Inactive</Badge>}
+                  {u.mustChangePassword && <Badge tone="warning">Temporary password</Badge>}
+                  {u.id === me?.id && <Badge tone="neutral">You</Badge>}
                 </div>
                 <div className="text-xs text-surface-500 mt-0.5">{u.email}</div>
                 <div className="flex flex-wrap gap-1 mt-1">
@@ -722,9 +739,15 @@ export function SettingsUsers() {
               </div>
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="secondary" leadingIcon={<Icon.Edit size={12} />} onClick={() => setDrawer({ mode: 'edit', user: u })}>Edit</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPendingToggle(u)}>
-                  {u.active ? 'Deactivate' : 'Activate'}
-                </Button>
+                {/* Your own password is changed from the header, and nobody deactivates themselves (ADR-036, system audit F2). */}
+                {u.id !== me?.id && (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => setDrawer({ mode: 'password', user: u })}>Temporary password</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setPendingToggle(u)}>
+                      {u.active ? 'Deactivate' : 'Activate'}
+                    </Button>
+                  </>
+                )}
               </div>
             </li>
           ))}
@@ -735,16 +758,25 @@ export function SettingsUsers() {
         <Drawer
           open
           onClose={() => setDrawer(null)}
-          title={drawer.mode === 'edit' ? `Edit ${drawer.user.name}` : 'Add user'}
-          description={drawer.mode === 'edit' ? 'Update user details, roles, and access.' : 'Create a new user account. The user will be able to sign in immediately.'}
+          title={drawer.mode === 'edit' ? `Edit ${drawer.user.name}` : drawer.mode === 'password' ? `Temporary password for ${drawer.user.name}` : 'Add user'}
+          description={drawer.mode === 'edit' ? 'Update user details, roles, and access.' : drawer.mode === 'password' ? 'For someone who has forgotten theirs or is locked out.' : 'Create an account. The person signs in with the starting password once, then chooses their own.'}
           width="md"
         >
-          <UserForm
-            initial={drawer.mode === 'edit' ? drawer.user : undefined}
-            onCancel={() => setDrawer(null)}
-            onSaved={(msg) => { setDrawer(null); reload(); toast.success(msg); }}
-            onError={(err) => toast.error('Could not save user', err.message)}
-          />
+          {drawer.mode === 'password' ? (
+            <TemporaryPasswordForm
+              user={drawer.user}
+              onCancel={() => setDrawer(null)}
+              onSaved={() => { const name = drawer.user.name; setDrawer(null); reload(); toast.success(`Temporary password set for ${name}.`, 'They choose their own when they next sign in.'); }}
+              onError={(err) => toast.error('Could not set the password', err.message)}
+            />
+          ) : (
+            <UserForm
+              initial={drawer.mode === 'edit' ? drawer.user : undefined}
+              onCancel={() => setDrawer(null)}
+              onSaved={(msg) => { setDrawer(null); reload(); toast.success(msg); }}
+              onError={(err) => toast.error('Could not save user', err.message)}
+            />
+          )}
         </Drawer>
       )}
 
@@ -881,6 +913,48 @@ async function downloadReport(format: 'xlsx' | 'pdf', filename: string, exporter
   }
 }
 
+/** Whether backups ran, left the server and were restored lately (ADR-037). */
+function BackupStatus() {
+  const status = useApi<BackupHealth>('/backups/status');
+  const h = status.data;
+  if (status.loading && !h) return <Skeleton h={64} />;
+  if (status.error || !h?.backup) return <Alert tone="warning" title="Couldn't load backup status">{status.error?.message ?? 'Try again shortly.'}</Alert>;
+  const b = backupNotice(h.backup);
+  const r = restoreTestNotice(h.restoreTest);
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Alert tone={b.tone} title={b.title}>{b.text}</Alert>
+        <Alert tone={r.tone} title={r.title}>{r.text}</Alert>
+      </div>
+      <p className="text-xs text-surface-500">
+        The backup service takes one each evening, encrypts it, keeps a week on the server&apos;s backup disk and copies it off site. A restore test is run every three months on the server: <code className="font-mono">docker compose run --rm --entrypoint /opt/afrinov-backup/restore.sh backup latest --drill</code>. See the backup and recovery guide.
+      </p>
+      {h.recent.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <caption className="sr-only">Latest backups and restore tests</caption>
+            <thead><tr className="text-left text-xs text-surface-500"><th className="py-1 pr-3 font-medium">When</th><th className="py-1 pr-3 font-medium">What</th><th className="py-1 pr-3 font-medium">Result</th><th className="py-1 pr-3 font-medium text-right">Size</th><th className="py-1 font-medium">Note</th></tr></thead>
+            <tbody>
+              {h.recent.map((run) => (
+                <tr key={run.kind + run.finishedAt} className="border-t border-surface-200 align-top">
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{formatDateTime(run.finishedAt)}</td>
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{run.kind === 'BACKUP' ? 'Backup' : 'Restore test'}</td>
+                  <td className="py-1.5 pr-3 whitespace-nowrap">
+                    {run.status === 'FAILED' ? <Badge tone="danger">Failed</Badge> : run.kind === 'BACKUP' && !run.offsite ? <Badge tone="warning">Server only</Badge> : <Badge tone="success">{run.kind === 'BACKUP' ? 'Off site' : 'Passed'}</Badge>}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums whitespace-nowrap">{formatSize(run.sizeBytes)}</td>
+                  <td className="py-1.5 text-xs text-surface-600">{run.status === 'FAILED' ? run.detail : run.fileName}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsData() {
   const toast = useToast();
   const [busy, setBusy] = useState<null | 'xlsx' | 'pdf' | 'reset'>(null);
@@ -902,7 +976,8 @@ export function SettingsData() {
     }
   }
   return (
-    <SectionPanel title="Data & backup" description="Export operational data, or reset your local session. Destructive operations require explicit confirmation.">
+    <SectionPanel title="Data & backup" description="Whether backups are working, data exports, and your local session.">
+      <BackupStatus />
       <div className="p-3 rounded border border-surface-200 bg-surface-0 flex flex-wrap items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-surface-900">Export inventory report (XLSX)</div>
