@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-13 | `09-frontend/page-inventory.md` | The project form asks for the user list only for an Admin: Sales, the store controller and Procurement see the manager read-only ("An Admin assigns the project manager") instead of "Couldn't load users" | Engineering |
 | 2026-11-13 | `13-project-management/roadmaps/project-tracking-roadmap.md` | The Procurement step no longer has its own Orders link and list; the project's Orders button lists them | Engineering |
 | 2026-11-13 | `13-project-management/roadmaps/project-tracking-roadmap.md` | A schedule's steps show Plan and Actual side by side, as the workbook's grey and blue columns, with each step's variance (late as negative); dates not final yet are in light italics, and "Expected" is no longer used on the project page, the step form, the board or the chart | Engineering |
 | 2026-11-12 | `00-governance/decision-log.md`, `04-processes/goods-receiving.md`, `07-data/audit-model.md`, `08-api/authorization.md`, `08-api/resource-model.md` | ADR-039 (system audit P3, controls): unit cost by Procurement and Admin with a reason and history, write-offs added up over 7 days, changed order terms re-signed, receive-all and stock-items retired, closing a project by Admin or its manager, a sign-in log, self-issued slips flagged, the ledger behind view:reports, a reason to switch off a two-person check, and resetting one settings section | Engineering |

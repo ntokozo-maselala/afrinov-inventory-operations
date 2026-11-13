@@ -13,7 +13,7 @@ import { ClearFirstDialog } from '../components/ClearFirstDialog';
 import { useToast } from '../components/Toast';
 import { Icon } from '../components/Icon';
 import { Alert } from '../components/Alert';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, useCanManageUsers } from '../hooks/usePermissions';
 import { api, type ApiError } from '../api/client';
 import { formatDate } from '../lib/format';
 import { today } from '../lib/dates';
@@ -72,7 +72,11 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
   const [endDate, setEndDate] = useState(initial?.endDate?.slice(0, 10) ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
 
-  const users = useApi<UserOpt[]>('/users');
+  // Only an Admin may read the user list (manage:users), so only an Admin is
+  // offered the managers to choose from. Anyone else who sets up projects sees
+  // the manager as it stands, rather than a list that fails to load.
+  const canChooseManager = useCanManageUsers();
+  const users = useApi<UserOpt[]>(canChooseManager ? '/users' : null);
   // Completing, cancelling and handing it to another manager take an Admin or
   // its manager (system audit E3); a new project is anyone's to set up.
   const { user } = useAuth();
@@ -167,12 +171,20 @@ function ProjectForm({ initial, onCancel, onSaved, onError }: ProjectFormProps) 
             {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value} disabled={!mayClose && isClosedProjectStatus(o.value) && o.value !== initial?.status}>{o.label}</option>)}
           </Select>
         </Field>
-        <Field label="Project manager" htmlFor="pj-mgr" help={mayClose ? 'Optional. The user responsible for the project.' : 'Only an Admin or the project’s manager hands it to another manager.'} error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
-          <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)} disabled={!mayClose}>
-            <option value="">Unassigned</option>
-            {(users.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </Select>
-        </Field>
+        {canChooseManager ? (
+          <Field label="Project manager" htmlFor="pj-mgr" help={mayClose ? 'Optional. The user responsible for the project.' : 'Only an Admin or the project’s manager hands it to another manager.'} error={users.error ? "Couldn't load users. Close and reopen to try again." : null}>
+            <Select id="pj-mgr" value={managerId ?? ''} onChange={(e) => setManagerId(e.target.value)} disabled={!mayClose}>
+              <option value="">Unassigned</option>
+              {(users.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Project manager" htmlFor="pj-mgr" help="An Admin assigns the project manager.">
+            <Select id="pj-mgr" value={managerId ?? ''} disabled>
+              <option value={managerId ?? ''}>{initial?.manager?.name ?? 'Unassigned'}</option>
+            </Select>
+          </Field>
+        )}
       </div>
 
       <ClosingProjectTools projectNumber={initial?.projectNumber} status={status} />
