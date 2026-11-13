@@ -138,9 +138,10 @@ export async function buildQuotation(r: SalesRfq, company: QuotationCompany, gen
   // The logo top right, the date under it.
   drawLogo(doc, LOGO_BOX.centre, LOGO_BOX.top, LOGO_BOX.height);
   const date = quotationDate(r.issuedAt ?? generatedAt.toISOString());
-  text(`DATE: ${date}`, pageWidth - SIDE, TOP + 32, { align: 'right' });
+  // Under the logo, where the template has the date (51.5 mm) and references (59.6 mm).
+  text(`DATE: ${date}`, pageWidth - SIDE, TOP + 38, { align: 'right' });
 
-  let y = TOP + 40;
+  let y = TOP + 46;
   text(`Our Reference: ${r.quoteReference ?? r.number}`, SIDE, y, { italic: true, size: 8 });
   text(`Your Reference: ${r.clientReference?.trim() || 'N/A'}`, pageWidth - SIDE, y, { italic: true, size: 8, align: 'right' });
 
