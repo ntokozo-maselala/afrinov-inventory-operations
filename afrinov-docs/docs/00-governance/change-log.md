@@ -4,6 +4,7 @@
 
 | Date | Document(s) | Change | Author |
 |---|---|---|---|
+| 2026-11-13 | `07-data/database-schema.md`, `09-frontend/page-inventory.md` | Each Sales RFQ equipment line can have its own markup, as the costing sheet marks each line up on its own (AFRI-0413: the maintenance × 1.3 × 1.2 = 56%, the spares × 1.35 × 1.2 = 62%); a line without one takes the job's, now labelled Job markup %. Migration 61; every price kept so far is unchanged | Engineering |
 | 2026-11-13 | `07-data/database-schema.md`, `09-frontend/page-inventory.md` | Sales RFQs price a line at quantity 0 for the client to see, not charged: the quotation prints its unit price and "R -", as AFRI-0413 Rev 2 prints the flexibles the client supplies; at least one line is charged to submit. A quotation has its own Notes, printed under the company's, e.g. "All Flexibles to be free issued by client" (migration 60) | Engineering |
 | 2026-11-13 | — (screens only) | The system is called Afrinov OMS on screen: the sidebar, mobile menu, sign-in page, footer, browser tab, Not found, Settings > System and the "temporarily unavailable" message; the "Inventory & Operations" subtitle is gone. Report files and the API title still say Afrinov IMS | Engineering |
 | 2026-11-13 | `09-frontend/page-inventory.md` | The project form asks for the user list only for an Admin: Sales, the store controller and Procurement see the manager read-only ("An Admin assigns the project manager") instead of "Couldn't load users" | Engineering |

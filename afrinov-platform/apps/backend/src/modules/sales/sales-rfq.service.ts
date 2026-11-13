@@ -8,8 +8,8 @@
 // selling rate, labour-rate.service.ts), the material (on each of the project's
 // Procurement RFQs Sales picks, one supplier's whole quote, the one Procurement
 // recommends unless Sales picks another; each RFQ counted on one line only), and
-// other costs Sales types (accommodation, LOA). The job's markup goes on each
-// line, and the line's price is times its quantity; delivery is priced on its
+// other costs Sales types (accommodation, LOA). Each line is marked up at its own markup, or the job's when it has none,
+// and the line's price is times its quantity; delivery is priced on its
 // own. sales-costing.ts does the sums.
 //
 // State machine: DRAFT → PENDING_APPROVAL → APPROVED, with CANCELLED from any of
@@ -41,6 +41,8 @@ export interface SalesEquipmentLineInput {
   details?: string | null;
   /** 1 when left out. 0 prints it with its unit price and "R -", charging nothing. */
   quantity?: number;
+  /** Its own markup, %; null or left out: the job's. */
+  markupPercent?: number | null;
   labour?: SalesLabourInput[];
   /** One per Procurement RFQ; an RFQ is counted on one line only. */
   materials?: SalesMaterialInput[];
@@ -140,10 +142,12 @@ const notCostable = (projectNumber: string) => `That isn't a request for quotati
 const costable = (status: string) => (COSTED_RFQ_STATUSES as readonly string[]).includes(status);
 const twoPlaces = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) <= 1e-6;
 
-function checkedMarkup(markup: number | null): number | null {
+/** A markup, the job's or a line's (`on` names the line, as "Equipment line 2: "). */
+function checkedMarkup(markup: number | null, on = ''): number | null {
   if (markup === null) return null;
-  if (!Number.isFinite(markup) || markup < 0 || markup > 1000) throw Errors.validation('The markup is a percentage from 0 to 1000');
-  if (!twoPlaces(markup)) throw Errors.validation('The markup has at most 2 decimal places');
+  const the = on ? 'its markup' : 'The markup';
+  if (!Number.isFinite(markup) || markup < 0 || markup > 1000) throw Errors.validation(`${on}${the} is a percentage from 0 to 1000`);
+  if (!twoPlaces(markup)) throw Errors.validation(`${on}${the} has at most 2 decimal places`);
   return markup;
 }
 
@@ -246,6 +250,7 @@ async function checkedLines(lines: SalesEquipmentLineInput[], had: KeptLabour[],
       equipment: cleanText(line.equipment),
       details: cleanLines(line.details),
       quantity,
+      markupPercent: checkedMarkup(line.markupPercent ?? null, on || 'The equipment line: '),
       labour: await checkedLabour(line.labour ?? [], had, tx, on),
       materials: materials.slice(taken, taken + count),
       otherCosts: checkedOtherCosts(line.otherCosts ?? [], on),
@@ -264,7 +269,7 @@ async function writeLines(salesRfqId: string, lines: CheckedLine[], tx: Prisma.T
   let added = Date.now();
   for (const [i, line] of lines.entries()) {
     const kept = await tx.salesRfqEquipmentLine.create({
-      data: { salesRfqId, lineNo: i + 1, equipment: line.equipment, details: line.details, quantity: line.quantity },
+      data: { salesRfqId, lineNo: i + 1, equipment: line.equipment, details: line.details, quantity: line.quantity, markupPercent: line.markupPercent },
     });
     if (line.labour.length) {
       await tx.salesRfqLabourLine.createMany({ data: line.labour.map((l) => ({ ...l, rfqId: salesRfqId, equipmentLineId: kept.id, lineNo: ++labourNo })) });
@@ -293,10 +298,11 @@ const otherCostsForLog = (costs: Array<{ description: string; quantity: Prisma.D
 
 /** The lines as the Activity keeps them: what each is, how many, and what it costs. */
 const linesForLog = (lines: Array<{
-  equipment: string | null; details: string | null; quantity: number;
+  equipment: string | null; details: string | null; quantity: number; markupPercent: Prisma.Decimal | number | null;
   labour: Parameters<typeof labourForLog>[0]; materials: Parameters<typeof materialsForLog>[0]; otherCosts: Parameters<typeof otherCostsForLog>[0];
 }>) => lines.map((l) => ({
   equipment: l.equipment, details: l.details, quantity: l.quantity,
+  markupPercent: l.markupPercent === null ? null : D(l.markupPercent).toString(),
   labour: labourForLog(l.labour), materials: materialsForLog(l.materials), otherCosts: otherCostsForLog(l.otherCosts),
 }));
 
@@ -320,6 +326,8 @@ function withCosting(rfq: Detail, vatSetting: number, rates: Record<string, numb
   const draft = rfq.status === 'DRAFT';
   const lines = rfq.equipmentLines.map((line) => ({
     id: line.id, lineNo: line.lineNo, equipment: line.equipment, details: line.details, quantity: line.quantity,
+    /** Its own markup; null: it takes the job's (totals.markupPercent says which it is priced at). */
+    markupPercent: line.markupPercent,
     labour: line.labour.map((l) => ({ ...l, total: labourLineTotal(l) })),
     materials: line.materials.map((m) => {
       const live = valueOf(m.rfq, m.supplierId, rates);
@@ -343,7 +351,7 @@ function withCosting(rfq: Detail, vatSetting: number, rates: Record<string, numb
   }));
   const vatRate = rfq.vatRate ?? vatSetting;
   const totals = costingTotals({
-    lines: lines.map((l) => ({ quantity: l.quantity, labour: l.labour, materials: l.materials.map((m) => m.amount), otherCosts: l.otherCosts })),
+    lines: lines.map((l) => ({ quantity: l.quantity, markupPercent: l.markupPercent, labour: l.labour, materials: l.materials.map((m) => m.amount), otherCosts: l.otherCosts })),
     markupPercent: rfq.markupPercent, deliveryPrice: rfq.deliveryPrice, vatRate,
   });
   const { lines: lineTotals, ...overall } = totals;
@@ -380,7 +388,11 @@ function stillNeeded(rfq: Detail): string[] {
     // Lines at quantity 0 are priced but not charged; the quotation charges for something.
     lines.length > 0 && lines.every((l) => l.quantity === 0) && (one ? 'a quantity of 1 or more' : 'a quantity of 1 or more on at least one line'),
     !rfq.clientName && "the client's name",
-    rfq.markupPercent === null && 'the markup',
+    // Every line needs a markup: its own, or the job's for those without one.
+    rfq.markupPercent === null && lines.some((l) => l.markupPercent === null)
+      && (one || lines.every((l) => l.markupPercent === null)
+        ? 'the markup'
+        : `the markup (the job's, or one on line ${lines.filter((l) => l.markupPercent === null).map((l) => l.lineNo).join(', ')})`),
   ].filter((m): m is string => !!m);
 }
 
@@ -568,7 +580,7 @@ export const SalesRfqService = {
 
   /**
    * Sends a draft to the Director. Each equipment line needs its name and
-   * something to price it; the Sales RFQ needs the client and a markup. Each
+   * something to price it; the Sales RFQ needs the client and a markup on every line (its own or the job's). Each
    * quote is valued again and that amount kept, and the VAT rate of the day is
    * fixed on it.
    *
@@ -597,7 +609,7 @@ export const SalesRfqService = {
         data: { status: 'PENDING_APPROVAL', vatRate, submittedAt: now, submittedById: actorId, returnedAt: null, returnedById: null, returnReason: null },
       });
       const totals = costingTotals({
-        lines: rfq.equipmentLines.map((l) => ({ quantity: l.quantity, labour: l.labour, materials: l.materials.map((m) => amountOf.get(m.rfqId)!.amount), otherCosts: l.otherCosts })),
+        lines: rfq.equipmentLines.map((l) => ({ quantity: l.quantity, markupPercent: l.markupPercent, labour: l.labour, materials: l.materials.map((m) => amountOf.get(m.rfqId)!.amount), otherCosts: l.otherCosts })),
         markupPercent: rfq.markupPercent, deliveryPrice: rfq.deliveryPrice, vatRate,
       });
       await tx.auditLogEntry.create({

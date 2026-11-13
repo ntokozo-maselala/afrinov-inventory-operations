@@ -361,7 +361,7 @@ function Totals({ r }: { r: SalesRfq }) {
       {row('Material', t.material)}
       {Number(t.other) > 0 && row('Other costs', t.other)}
       {row('Cost', t.cost, { strong: true })}
-      {row('Markup', t.markup, { muted: r.markupPercent !== null ? `${formatNumber(Number(r.markupPercent))}%` : 'not set' })}
+      {row('Markup', t.markup, { muted: markupWords(r) })}
       {row(r.equipmentLines.length === 1 ? (r.equipment ?? 'Equipment') : `${r.equipmentLines.length} equipment lines`, t.equipment, { strong: true })}
       {row('Delivery', t.delivery)}
       {row('Total excl. VAT', t.totalExVat, { strong: true })}
@@ -369,6 +369,14 @@ function Totals({ r }: { r: SalesRfq }) {
       {row('Total incl. VAT', t.totalIncVat, { strong: true })}
     </dl>
   );
+}
+
+/** The markup beside the price: one figure when every line is priced at it, "by line" when they differ, "not set" before. */
+function markupWords(r: SalesRfq): string {
+  const used = [...new Set(r.equipmentLines.map((l) => l.totals.markupPercent))];
+  if (used.length === 1 && used[0] !== null && used[0] !== undefined) return `${formatNumber(Number(used[0]))}%`;
+  if (used.length > 1 && !used.includes(null)) return 'by line';
+  return r.markupPercent !== null ? `${formatNumber(Number(r.markupPercent))}%` : 'not set';
 }
 
 /**
@@ -416,7 +424,7 @@ function EquipmentLineSection({ line, r, canEdit, linked }: { line: SalesEquipme
       {!nothing && (
         <dl className="text-sm surface-card p-3 grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label={`Price of line ${line.lineNo}`}>
           <div><dt className="text-meta">Cost a unit</dt><dd className="font-mono">{formatMoney(t.unitCost)}</dd></div>
-          <div><dt className="text-meta">Markup a unit</dt><dd className="font-mono">{formatMoney(t.unitMarkup)}</dd></div>
+          <div><dt className="text-meta">Markup a unit{t.markupPercent !== null ? ` (${formatNumber(Number(t.markupPercent))}%${line.markupPercent === null ? ', the job’s' : ''})` : ''}</dt><dd className="font-mono">{formatMoney(t.unitMarkup)}</dd></div>
           <div><dt className="text-meta">Unit price</dt><dd className="font-mono">{formatMoney(t.unitPrice)}</dd></div>
           <div><dt className="text-meta">Total ({formatNumber(line.quantity)})</dt><dd className="font-mono font-semibold">{charged ? formatMoney(t.total) : 'Not charged'}</dd></div>
         </dl>

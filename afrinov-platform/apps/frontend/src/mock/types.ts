@@ -344,6 +344,8 @@ export interface MockSalesEquipmentLine {
   equipment: string | null;
   details: string | null;
   quantity: number;
+  /** Its own markup; null: the job's. */
+  markupPercent: string | null;
   labour: Array<{ id: string; lineNo: number; labourRateId: string; role: string; hours: string; hourlyRate: string }>;
   /** One supplier's quote per Procurement RFQ, valued as it was when last saved or submitted. */
   materials: Array<{ rfqId: string; supplierId: string; quoteTotal: string; currency: string; amount: string }>;

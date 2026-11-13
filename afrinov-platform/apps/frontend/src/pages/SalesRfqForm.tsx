@@ -46,6 +46,8 @@ interface DraftLine {
   equipment: string;
   details: string;
   quantity: string;
+  /** Its own markup as typed; blank: the job's. */
+  markup: string;
   labour: DraftLabour[];
   /** The quote counted on each Procurement RFQ ticked on this line: its supplier, by RFQ. */
   picks: Record<string, string>;
@@ -55,7 +57,7 @@ interface DraftLine {
 let nextKey = 1;
 const blankLabour = (): DraftLabour => ({ key: nextKey++, labourRateId: '', hours: '' });
 const blankOther = (): DraftOther => ({ key: nextKey++, description: '', quantity: '1', unitCost: '' });
-const blankLine = (): DraftLine => ({ key: nextKey++, equipment: '', details: '', quantity: '1', labour: [blankLabour()], picks: {}, other: [] });
+const blankLine = (): DraftLine => ({ key: nextKey++, equipment: '', details: '', quantity: '1', markup: '', labour: [blankLabour()], picks: {}, other: [] });
 
 /** The quotes a saved line counts, by Procurement RFQ. */
 const keptPicks = (line?: Pick<SalesEquipmentLine, 'materials'>): Record<string, string> => Object.fromEntries((line?.materials ?? []).map((m) => [m.rfqId, m.supplierId]));
@@ -65,6 +67,7 @@ const fromSaved = (l: SalesEquipmentLine): DraftLine => ({
   equipment: l.equipment ?? '',
   details: l.details ?? '',
   quantity: String(l.quantity),
+  markup: l.markupPercent === null || l.markupPercent === undefined ? '' : String(Number(l.markupPercent)),
   labour: l.labour.length ? l.labour.map((x) => ({ key: nextKey++, labourRateId: x.labourRateId, hours: String(Number(x.hours)) })) : [blankLabour()],
   picks: keptPicks(l),
   other: l.otherCosts.map((c) => ({ key: nextKey++, description: c.description, quantity: String(Number(c.quantity)), unitCost: String(Number(c.unitCost)) })),
@@ -177,6 +180,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
   const missingOn = (line: DraftLine) => (rfq?.equipmentLines.flatMap((l) => l.materials) ?? []).filter((m) => line.picks[m.rfqId] && !options.some((o) => o.id === m.rfqId));
   const previewLine = (l: DraftLine): PreviewLine => ({
     quantity: wholeQuantity(l.quantity) ?? 1,
+    markupPercent: l.markup.trim() ? parseAmount(l.markup) : null,
     labour: typedLabourOf(l).flatMap((x) => {
       const hours = parseAmount(x.hours);
       const hourly = hourlyOf(x.labourRateId);
@@ -202,6 +206,10 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
     for (const [i, l] of lines.entries()) {
       const on = lines.length > 1 ? `Equipment line ${i + 1}: ` : '';
       if (wholeQuantity(l.quantity) === null) return `${on}the quantity is a whole number, 0 or more (0 prices it without charging it).`;
+      if (l.markup.trim()) {
+        const m = parseAmount(l.markup);
+        if (m === null || m > 1000 || decimals(l.markup) > 2) return `${on || 'the equipment line: '}its markup is a percentage from 0 to 1000, to at most 2 decimal places.`;
+      }
       const badLabour = typedLabourOf(l).findIndex((x) => {
         const h = parseAmount(x.hours);
         return !x.labourRateId || h === null || h <= 0 || decimals(x.hours) > 2;
@@ -240,6 +248,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
         equipment: text(l.equipment),
         details: text(l.details),
         quantity: wholeQuantity(l.quantity)!,
+        markupPercent: l.markup.trim() ? parseAmount(l.markup)! : null,
         labour: typedLabourOf(l).map((x) => ({ labourRateId: x.labourRateId, hours: parseAmount(x.hours)! })),
         materials: Object.entries(l.picks).map(([rfqId, supplierId]) => ({ rfqId, supplierId })),
         otherCosts: typedOtherOf(l).map((c) => ({ description: c.description.trim(), quantity: parseAmount(c.quantity)!, unitCost: parseAmount(c.unitCost)! })),
@@ -322,6 +331,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
                 otherSalesRfqId={rfq?.id}
                 hourlyOf={hourlyOf}
                 lineCounting={lineCounting}
+                jobMarkup={markup}
                 priced={preview.lines[i]!}
                 onChange={(patch) => updateLine(line.key, patch)}
                 onMove={(by) => moveLine(line.key, by)}
@@ -337,7 +347,7 @@ function SalesRfqFormPage({ rfq }: { rfq?: SalesRfq }) {
           <fieldset className="space-y-3">
             <legend className="text-eyebrow mb-1">Price</legend>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Markup %" htmlFor="srfq-markup" help="On every equipment line, e.g. 40 for × 1.4. Needed to submit.">
+              <Field label="Job markup %" htmlFor="srfq-markup" help="On every equipment line without its own, e.g. 40 for × 1.4. Needed to submit unless every line has its own.">
                 <Input id="srfq-markup" inputMode="decimal" autoComplete="off" className="font-mono" value={markup} onChange={(e) => setMarkup(e.target.value)} />
               </Field>
               <Field label="Delivery (R, excl. VAT)" htmlFor="srfq-delivery" help="Its own line on the quotation, with no markup. Left at R0, the quotation has no Delivery line.">
@@ -449,6 +459,8 @@ interface CardProps {
   otherSalesRfqId?: string;
   hourlyOf: (labourRateId: string) => number | null;
   lineCounting: (rfqId: string) => number;
+  /** The job's markup as typed, which the line takes when it has none of its own. */
+  jobMarkup: string;
   priced: { unitCost: number; unitPrice: number | null; total: number | null };
   onChange: (patch: (l: DraftLine) => Partial<DraftLine>) => void;
   onMove: (by: -1 | 1) => void;
@@ -458,7 +470,7 @@ interface CardProps {
 /** One equipment line: what the quotation prints for it, and what it costs for one unit. */
 function EquipmentLineCard({
   line, index, count, project, rates, ratesLoading, options, optionsLoading, optionsError, missing, otherSalesRfqId,
-  hourlyOf, lineCounting, priced, onChange, onMove, onRemove,
+  hourlyOf, lineCounting, jobMarkup, priced, onChange, onMove, onRemove,
 }: CardProps) {
   const n = index + 1;
   const name = count > 1 ? `equipment line ${n}` : 'the equipment line';
@@ -496,14 +508,17 @@ function EquipmentLineCard({
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_7rem] gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_6rem_7rem] gap-3">
         <Field label="Equipment" htmlFor={id('equipment')} help="The line on the quotation, e.g. Main Piston Pump or Installation. Needed to submit.">
           <Input id={id('equipment')} maxLength={200} value={line.equipment} onChange={(e) => onChange(() => ({ equipment: e.target.value }))} />
         </Field>
         <Field label="Qty" htmlFor={id('quantity')} help="Whole number. 0: priced, not charged.">
           <Input id={id('quantity')} inputMode="numeric" autoComplete="off" className="font-mono" value={line.quantity} onChange={(e) => onChange(() => ({ quantity: e.target.value }))} />
         </Field>
-        <div className="sm:col-span-2">
+        <Field label="Markup %" htmlFor={id('markup')} help={jobMarkup.trim() ? `Blank: the job's ${jobMarkup.trim()}%.` : "Blank: the job's."}>
+          <Input id={id('markup')} inputMode="decimal" autoComplete="off" className="font-mono" placeholder={jobMarkup.trim() || undefined} value={line.markup} onChange={(e) => onChange(() => ({ markup: e.target.value }))} />
+        </Field>
+        <div className="sm:col-span-3">
           <Field label="What it covers" htmlFor={id('details')} help="Printed under it on the quotation, one per line, e.g. Accommodation & LOA.">
             <Textarea id={id('details')} rows={3} maxLength={2000} value={line.details} onChange={(e) => onChange(() => ({ details: e.target.value }))} />
           </Field>

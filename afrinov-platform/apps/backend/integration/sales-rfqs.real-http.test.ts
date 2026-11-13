@@ -36,11 +36,11 @@ interface SalesRfq {
   clientAddress: string | null;
   quoteNotes: string | null;
   equipmentLines: Array<{
-    lineNo: number; equipment: string | null; details: string | null; quantity: number;
+    lineNo: number; equipment: string | null; details: string | null; quantity: number; markupPercent: string | null;
     labour: Array<{ lineNo: number; role: string; hours: string; hourlyRate: string; total: string }>;
     materials: Array<{ rfqId: string; supplierId: string; amount: string; recommended: boolean; recommendedSupplier: { id: string } | null; unusable: boolean }>;
     otherCosts: Array<{ lineNo: number; description: string; quantity: string; unitCost: string; total: string }>;
-    totals: { quantity: number; labour: string; material: string; other: string; unitCost: string; unitMarkup: string | null; unitPrice: string | null; total: string | null };
+    totals: { quantity: number; markupPercent: string | null; labour: string; material: string; other: string; unitCost: string; unitMarkup: string | null; unitPrice: string | null; total: string | null };
   }>;
   totals: Totals;
 }
@@ -365,6 +365,52 @@ describe('Sales requests for quotation over real HTTP', () => {
       expect(cleared.body.quoteNotes).toBeNull();
       const history = await sales<Array<{ after: { quoteNotes?: string | null } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
       expect(history.body.some((h) => 'quoteNotes' in h.after && h.after.quoteNotes === null)).toBe(true);
+    });
+
+    // AFRI-0413's costing sheet marks each line up on its own: the maintenance
+    // × 1.3 × 1.2 (56%), the spares × 1.35 × 1.2 (62%).
+    it('marks each line up at its own markup, or the job\'s when it has none, as AFRI-0413 Rev 2', async () => {
+      const sales = await as('SALES');
+      const res = await sales<SalesRfq>('POST', '/sales-rfqs', {
+        projectNumber, markupPercent: 56, deliveryPrice: 0, clientName: 'Samancor TC Smelters (Pty)',
+        equipmentLines: [
+          { equipment: 'Maintenance', otherCosts: [{ description: 'Labour and costs', quantity: 1, unitCost: 255600 }] },
+          { equipment: 'Anticipated Spares', markupPercent: 62, otherCosts: [{ description: 'Spares allowance', quantity: 1, unitCost: 45000 }] },
+        ],
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.equipmentLines.map((l) => [l.markupPercent, l.totals.markupPercent, l.totals.total])).toEqual([[null, '56', '398736.00'], ['62', '62', '72900.00']]);
+      expect(res.body.totals).toMatchObject({ cost: '300600.00', markup: '171036.00', totalExVat: '471636.00', vat: '70745.40', totalIncVat: '542381.40' });
+
+      // A line's markup is checked like the job's, naming the line.
+      const bad = await sales<ApiErrorBody>('PATCH', `/sales-rfqs/${res.body.id}`, { equipmentLines: [{ equipment: 'X', markupPercent: 12.345, otherCosts: [{ description: 'Y', quantity: 1, unitCost: 1 }] }] });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error.message).toMatch(/^The equipment line: its markup has at most 2 decimal places/);
+
+      // Without the job's markup, the line with none of its own holds up submitting.
+      await sales('PATCH', `/sales-rfqs/${res.body.id}`, {
+        markupPercent: null,
+        equipmentLines: [
+          { equipment: 'Maintenance', otherCosts: [{ description: 'Labour and costs', quantity: 1, unitCost: 255600 }] },
+          { equipment: 'Anticipated Spares', markupPercent: 62, otherCosts: [{ description: 'Spares allowance', quantity: 1, unitCost: 45000 }] },
+        ],
+      });
+      const held = await sales<ApiErrorBody>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(held.status).toBe(400);
+      expect(held.body.error.message).toMatch(/the markup \(the job's, or one on line 1\)/);
+
+      // With its own markup on every line, no job markup is needed; the Activity keeps each line's.
+      const own = await sales<SalesRfq>('PATCH', `/sales-rfqs/${res.body.id}`, {
+        equipmentLines: [
+          { equipment: 'Maintenance', markupPercent: 56, otherCosts: [{ description: 'Labour and costs', quantity: 1, unitCost: 255600 }] },
+          { equipment: 'Anticipated Spares', markupPercent: 62, otherCosts: [{ description: 'Spares allowance', quantity: 1, unitCost: 45000 }] },
+        ],
+      });
+      expect(own.body.totals.totalExVat).toBe('471636.00');
+      const history = await sales<Array<{ after: { equipmentLines?: Array<{ markupPercent: string | null }> } }>>('GET', `/sales-rfqs/${res.body.id}/history`);
+      expect(history.body[0]!.after.equipmentLines?.map((l) => l.markupPercent)).toEqual(['56', '62']);
+      const submitted = await sales<SalesRfq>('POST', `/sales-rfqs/${res.body.id}/submit`);
+      expect(submitted.body).toMatchObject({ status: 'PENDING_APPROVAL', totals: { totalExVat: '471636.00' } });
     });
 
     it('starts a new one with one empty equipment line, and moving it to another project takes its quotes off its lines', async () => {
